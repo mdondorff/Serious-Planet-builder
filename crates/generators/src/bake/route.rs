@@ -1,6 +1,6 @@
 //! Routing: the jittered D8 receivers on the filled surface, the order from the receivers (the donor stack of Braun and Willett) and the drainage area, which is multiple-flow-direction (Freeman) over the filled surface: the receivers stay D8 for the implicit carve, the area that drives it does not follow the grid's eight directions (GEN-100).
 
-use super::flood::priority_flood;
+use super::flood::priority_flood_with;
 use super::Grid;
 
 /// `u32::MAX` marks a cell without a receiver (an outlet).
@@ -27,6 +27,44 @@ pub fn jitter(seed: u64, id: u64, d: usize) -> f64 {
     (x >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0
 }
 
+/// How the multiple-flow-direction area treats a lower neighbour in another D8 catchment (GEN-141, A3 section 6.3).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MfdClip {
+    /// Today's rule: a cell shares its area among all its lower neighbours.
+    #[default]
+    Off,
+    /// The weights stay over all lower neighbours, and the weight of a neighbour in another catchment goes to the cell's own receiver. The area stays in the catchment, but a member's area still
+    /// depends on the levels of the foreign neighbours (they are in the denominator). Kept to compare with `Local`.
+    ToReceiver,
+    /// Lower neighbours in another catchment are dropped from the weights and from their sum: the cell shares among its own catchment's lower neighbours (its receiver is one). A catchment's
+    /// area depends on its own cells only.
+    Local,
+}
+
+/// The two kernel changes that make a catchment's round a function of its inputs (GEN-141, A3 section 6.4). Off by default: today's kernels.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RoundRules {
+    pub clip_mfd: MfdClip,
+    /// The flood visits by (level, cell id) with no FIFO queue ([`priority_flood_with`]).
+    pub canonical_flood: bool,
+}
+
+impl RoundRules {
+    /// The rules of the round solver: the local clip and the canonical flood.
+    pub const ROUND: RoundRules = RoundRules { clip_mfd: MfdClip::Local, canonical_flood: true };
+
+    pub fn is_default(&self) -> bool {
+        *self == RoundRules::default()
+    }
+}
+
+/// The catchment of each cell and the receivers, for the clipped area.
+struct Clip<'a> {
+    root: &'a [u32],
+    receiver: &'a [u32],
+    mode: MfdClip,
+}
+
 /// The exponent of Freeman's multiple-flow-direction split of a cell's area among its lower neighbours.
 pub const MFD_EXPONENT: f64 = 1.1;
 
@@ -41,21 +79,66 @@ pub fn route(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64, seed: u64, m
 /// [`route`] with the runoff weight of each cell (GEN-129): every cell starts with the area `w dx^2`, so the returned `area` is the discharge `Q = sum(w dA)` (the area for weights of 1).
 /// The cap applies to `Q`.
 pub fn route_weighted(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64, seed: u64, max_area: f64, weights: Option<&[f32]>) -> Routing {
+    route_rules(grid, z, outlet, epsilon, seed, max_area, weights, RoundRules::default())
+}
+
+/// [`route_weighted`] under the given [`RoundRules`].
+#[allow(clippy::too_many_arguments)]
+pub fn route_rules(
+    grid: &Grid,
+    z: &[f64],
+    outlet: &[bool],
+    epsilon: f64,
+    seed: u64,
+    max_area: f64,
+    weights: Option<&[f32]>,
+    rules: RoundRules,
+) -> Routing {
     if let Some(w) = weights {
         assert_eq!(w.len(), grid.len(), "one runoff weight per cell");
         assert!(w.iter().all(|v| v.is_finite() && *v > 0.0), "the runoff weights are finite and positive");
     }
-    let n = grid.len();
-    let filled = priority_flood(grid, z, outlet, epsilon);
+    let filled = priority_flood_with(grid, z, outlet, epsilon, rules.canonical_flood);
     let receiver = receivers(grid, &filled, outlet, seed);
-    // The area comes first so that the filled surface (8 bytes a cell) is dropped before the donor lists and the order are built: a face at 12,288 cells has 1.6e8 cells.
-    let mut area = mfd_area(grid, &filled, outlet, weights);
-    drop(filled);
-    // The donors in compressed form, then the stack from the outlets: each cell comes after its receiver.
+    let (area, order);
+    if rules.clip_mfd == MfdClip::Off {
+        // The area comes first so that the filled surface (8 bytes a cell) is dropped before the donor lists and the order are built: a face at 12,288 cells has 1.6e8 cells.
+        area = mfd_area(grid, &filled, outlet, weights, None);
+        drop(filled);
+        order = topological_order(&receiver);
+    } else {
+        // The clip needs the catchments, hence the order, before the area.
+        order = topological_order(&receiver);
+        let root = catchment_roots(&receiver, &order);
+        area = mfd_area(grid, &filled, outlet, weights, Some(Clip { root: &root, receiver: &receiver, mode: rules.clip_mfd }));
+    }
+    let mut area = area;
+    if max_area > 0.0 {
+        for a in &mut area {
+            *a = a.min(max_area);
+        }
+    }
+    Routing { receiver, order, area }
+}
+
+/// The root (outlet) of the D8 tree each cell drains to: the catchment label.
+pub fn catchment_roots(receiver: &[u32], order: &[u32]) -> Vec<u32> {
+    let mut root = vec![NONE; receiver.len()];
+    for &c in order {
+        let r = receiver[c as usize];
+        root[c as usize] = if r == NONE { c } else { root[r as usize] };
+    }
+    root
+}
+
+/// The cells in a fixed topological order: each cell after its receiver (a depth-first walk of the donors from the roots in index order).
+fn topological_order(receiver: &[u32]) -> Vec<u32> {
+    let n = receiver.len();
+    // The donors in compressed form, then the stack from the roots: each cell comes after its receiver.
     let mut order = Vec::with_capacity(n);
     {
         let mut start = vec![0u32; n + 1];
-        for &r in &receiver {
+        for &r in receiver {
             if r != NONE {
                 start[r as usize + 1] += 1;
             }
@@ -80,19 +163,14 @@ pub fn route_weighted(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64, see
         }
     }
     assert_eq!(order.len(), n, "the order does not reach every cell: a cell drains in a cycle");
-    if max_area > 0.0 {
-        for a in &mut area {
-            *a = a.min(max_area);
-        }
-    }
-    Routing { receiver, order, area }
+    order
 }
 
 /// The receiver of every cell on the filled surface: [`NONE`] for an outlet.
 fn receivers(grid: &Grid, filled: &[f64], outlet: &[bool], seed: u64) -> Vec<u32> {
     let mut receiver = vec![NONE; grid.len()];
     for p in 0..grid.len() {
-        if outlet[p] {
+        if outlet[p] || !grid.is_active(p) {
             continue;
         }
         let mut best = (0.0f64, NONE);
@@ -118,7 +196,7 @@ fn receivers(grid: &Grid, filled: &[f64], outlet: &[bool], seed: u64) -> Vec<u32
 /// Freeman's multiple flow direction (exponent [`MFD_EXPONENT`]): every cell starts with its own area and, from the highest cell down (ties by the cell index), shares what it holds
 /// among its lower neighbours in proportion to `(drop / distance)^1.1`. An outlet keeps what it receives (it passes nothing on, as in the D8 tree), and so does a cell with no lower
 /// neighbour.
-fn mfd_area(grid: &Grid, filled: &[f64], outlet: &[bool], weights: Option<&[f32]>) -> Vec<f64> {
+fn mfd_area(grid: &Grid, filled: &[f64], outlet: &[bool], weights: Option<&[f32]>, clip: Option<Clip>) -> Vec<f64> {
     let n = grid.len();
     let mut by_height: Vec<u32> = (0..n as u32).collect();
     by_height.sort_unstable_by(|&a, &b| filled[b as usize].total_cmp(&filled[a as usize]).then(a.cmp(&b)));
@@ -137,6 +215,11 @@ fn mfd_area(grid: &Grid, filled: &[f64], outlet: &[bool], weights: Option<&[f32]
             if let Some(q) = grid.neighbour(p, d) {
                 let slope = (filled[p] - filled[q]) / grid.distance_at(p, d);
                 if slope > 0.0 {
+                    if let Some(c) = &clip {
+                        if c.mode == MfdClip::Local && c.root[q] != c.root[p] {
+                            continue;
+                        }
+                    }
                     *w = libm::pow(slope, MFD_EXPONENT);
                     sum += *w;
                 }
@@ -144,6 +227,26 @@ fn mfd_area(grid: &Grid, filled: &[f64], outlet: &[bool], weights: Option<&[f32]
         }
         if sum > 0.0 {
             let held = area[p];
+            if let Some(c) = clip.as_ref().filter(|c| c.mode == MfdClip::ToReceiver) {
+                // The weight of a neighbour in another catchment goes to the cell's own receiver (a lower neighbour of its own tree, so its weight is positive).
+                let mut redirect = 0.0;
+                let mut own = usize::MAX;
+                for (d, w) in weight.iter_mut().enumerate() {
+                    if *w > 0.0 {
+                        let q = grid.neighbour(p, d).expect("a weighted neighbour exists");
+                        if q as u32 == c.receiver[p] {
+                            own = d;
+                        } else if c.root[q] != c.root[p] {
+                            redirect += *w;
+                            *w = 0.0;
+                        }
+                    }
+                }
+                assert!(own != usize::MAX || redirect == 0.0, "cell {p}: its receiver is not a lower neighbour");
+                if own != usize::MAX {
+                    weight[own] += redirect;
+                }
+            }
             for (d, w) in weight.iter().enumerate() {
                 if *w > 0.0 {
                     let q = grid.neighbour(p, d).expect("a weighted neighbour exists");

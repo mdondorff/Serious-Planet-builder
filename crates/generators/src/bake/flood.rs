@@ -20,6 +20,13 @@ fn key(v: f64) -> u64 {
 /// Ties of the heap break by the cell index, so the result does not depend on anything but the input. Refused: a height that is not finite, no outlet at all, and an `epsilon`
 /// that is not positive.
 pub fn priority_flood(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64) -> Vec<f64> {
+    priority_flood_with(grid, z, outlet, epsilon, false)
+}
+
+/// [`priority_flood`] with the canonical tie rule when `canonical` (GEN-141, A3 section 6.4): there is no FIFO queue for the flats, every cell enters the heap at its filled level and cells are
+/// visited by (level, cell id), so a cell's level comes from its lowest visited neighbour by a total order that no other cell's presence changes. The id order of the cells of a rectangular grid
+/// is the global id order (row-major), so it is the same in every window.
+pub fn priority_flood_with(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64, canonical: bool) -> Vec<f64> {
     let n = grid.len();
     assert!(z.len() == n && outlet.len() == n, "one height and one outlet flag per cell");
     assert!(epsilon > 0.0 && epsilon.is_finite(), "the epsilon is finite and positive (a flat could not drain), not {epsilon}");
@@ -37,7 +44,7 @@ pub fn priority_flood(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64) -> 
     }
     // Only an outlet with a neighbour that is not one expands anything: the others are seen and finished (the same filled surface, a far smaller heap on a sea face).
     for p in 0..n {
-        if outlet[p] && (0..8).filter_map(|d| grid.neighbour(p, d)).any(|q| !outlet[q]) {
+        if outlet[p] && grid.is_active(p) && (0..8).filter_map(|d| grid.neighbour(p, d)).any(|q| !outlet[q]) {
             heap.push(Reverse((key(z[p]), p as u32)));
         }
     }
@@ -57,12 +64,12 @@ pub fn priority_flood(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64) -> 
             seen[q] = true;
             let lowest = filled[p] + epsilon;
             assert!(lowest > filled[p], "the epsilon {epsilon} is below the spacing of the heights near {}", filled[p]);
-            if z[q] <= lowest {
+            if !canonical && z[q] <= lowest {
                 filled[q] = lowest;
                 flat.push_back(q as u32);
             } else {
-                filled[q] = z[q];
-                heap.push(Reverse((key(z[q]), q as u32)));
+                filled[q] = z[q].max(lowest);
+                heap.push(Reverse((key(filled[q]), q as u32)));
             }
         }
     }

@@ -1,7 +1,7 @@
 //! The transient carve of pass 1 (GEN-100, SPIKE-65, SPIKE-66, SPIKE-70): implicit stream power with uplift (Braun and Willett 2013), with a breach before each re-route.
 //! Not run to steady state: a fixed number of steps, `u_over_k * k_dt` of uplift in each.
 
-use super::route::{route_weighted, Routing, NONE};
+use super::route::{catchment_roots, route_rules, RoundRules, Routing, NONE};
 use super::{assert_finite, Grid};
 use planet_core::par::{self, Par};
 
@@ -38,6 +38,20 @@ pub struct CarveParams {
     pub keep_pits: bool,
     /// The physical cell metric of the face grid (GEN-138, SPIKE-105 F5): true cell areas and neighbour distances instead of the uniform `dx^2`; off (today's metric) by default.
     pub cell_metric: bool,
+    /// The round kernels (GEN-141): the clipped MFD area and the canonical flood tie rule; off (today's kernels) by default.
+    pub round_rules: RoundRules,
+    /// How a round visits the cells (GEN-141): execution only, the result is the same bits (a sweep reads a cell and its receiver, which share a catchment); not part of any key.
+    pub schedule: Schedule,
+}
+
+/// The order in which a round's breach and sweeps visit the cells.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Schedule {
+    /// The region's topological order, one pass over all catchments.
+    #[default]
+    Region,
+    /// One catchment after the other (each in the region order, catchments by the id of their outlet, ascending or descending): the round solver's per-catchment carve, run in sequence.
+    Catchments { descending: bool },
 }
 
 /// The breach limit of a cell at the sea level when the limit scales with height (the former default).
@@ -60,6 +74,8 @@ impl Default for CarveParams {
             uplift_taper_m: 60.0,
             keep_pits: true,
             cell_metric: false,
+            round_rules: RoundRules { clip_mfd: super::route::MfdClip::Off, canonical_flood: false },
+            schedule: Schedule::Region,
         }
     }
 }
@@ -150,12 +166,25 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
     let mut k: Vec<f32> = if rock.k.is_some() { vec![1.0; z.len()] } else { Vec::new() };
     let mut room: Vec<u16> = if rock.k.is_some() { vec![ROOM_NONE; z.len()] } else { Vec::new() };
     let mut routing: Option<Routing> = None;
+    // The cells grouped by catchment when the schedule asks for it (empty: the region order).
+    let mut grouped: Vec<u32> = Vec::new();
     for step in 0..p.steps {
         if step % p.reroute_every == 0 {
             // The previous routing is dropped before the next is built: two live routings of a face would not fit its memory budget.
             drop(routing.take());
-            let r = route_weighted(grid, z, outlet, p.epsilon, seed, p.max_area, rock.runoff);
-            for &c in r.order.iter().rev() {
+            let r = route_rules(grid, z, outlet, p.epsilon, seed, p.max_area, rock.runoff, p.round_rules);
+            grouped.clear();
+            if let Schedule::Catchments { descending } = p.schedule {
+                let root = catchment_roots(&r.receiver, &r.order);
+                grouped = r.order.clone();
+                if descending {
+                    grouped.sort_by_key(|&c| std::cmp::Reverse(root[c as usize]));
+                } else {
+                    grouped.sort_by_key(|&c| root[c as usize]);
+                }
+            }
+            let visit: &[u32] = if grouped.is_empty() { &r.order } else { &grouped };
+            for &c in visit.iter().rev() {
                 let c = c as usize;
                 let rec = r.receiver[c];
                 if rec == NONE || outlet[rec as usize] {
@@ -200,7 +229,8 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
             }
             assert!(k.iter().all(|v| v.is_finite() && *v >= 0.0), "the erodibilities are finite and not negative");
         }
-        for &c in &r.order {
+        let visit: &[u32] = if grouped.is_empty() { &r.order } else { &grouped };
+        for &c in visit {
             let c = c as usize;
             let rec = r.receiver[c];
             if rec == NONE {
