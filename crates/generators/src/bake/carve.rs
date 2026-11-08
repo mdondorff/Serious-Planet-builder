@@ -1,6 +1,7 @@
 //! The transient carve of pass 1 (GEN-100, SPIKE-65, SPIKE-66, SPIKE-70): implicit stream power with uplift (Braun and Willett 2013), with a breach before each re-route.
 //! Not run to steady state: a fixed number of steps, `u_over_k * k_dt` of uplift in each.
 
+use super::deposit::DepositReport;
 use super::route::{route_weighted, Routing, NONE};
 use super::{assert_finite, Grid};
 use planet_core::par::{self, Par};
@@ -36,6 +37,9 @@ pub struct CarveParams {
     /// Keep the pits (GEN-120): the route runs over the filled copy, but a cell that stands below its receiver (a pit of the unfilled surface) is not raised to it; it only gains its uplift,
     /// so the donors above it carve toward its floor and the basin keeps the relief the fill would have eaten. An incise-only carve never raises, so it ignores the flag.
     pub keep_pits: bool,
+    /// The deposition coefficient `G` of Yuan et al. 2019 (GEN-131, ADR 0105): a cell gains `G Qs / Q` metres a step from the sediment flux `Qs` it carries (cubic metres a step) over its discharge `Q`.
+    /// 0 (the default) switches deposition off and the carve is the one without a sediment term; an incise-only carve ignores it.
+    pub deposit_g: f64,
 }
 
 /// The breach limit of a cell at the sea level when the limit scales with height (the former default).
@@ -57,6 +61,7 @@ impl Default for CarveParams {
             incise_only: false,
             uplift_taper_m: 60.0,
             keep_pits: true,
+            deposit_g: 0.0,
         }
     }
 }
@@ -128,6 +133,37 @@ impl Rock<'static> {
 
 /// [`carve`] with a [`Rock`]: K at each cell's current height multiplies the carve factor in each step, and the uplift array replaces `u_over_k`.
 pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, factor: Option<&[f64]>, rock: &Rock, seed: u64) -> Routing {
+    carve_core(grid, z, outlet, p, factor, rock, seed, false).0
+}
+
+/// [`carve_rock`] and the sediment account of its deposition steps in cubic metres over all steps (GEN-131): `eroded` is the net lowering of the cells that were lowered relative to their
+/// uplift, `deposited` the net raising, `exported` what reached an outlet. `eroded - deposited = exported` up to rounding. All zero when `deposit_g` is 0.
+pub fn carve_rock_report(
+    grid: &Grid,
+    z: &mut [f64],
+    outlet: &[bool],
+    p: &CarveParams,
+    factor: Option<&[f64]>,
+    rock: &Rock,
+    seed: u64,
+) -> (Routing, DepositReport) {
+    carve_core(grid, z, outlet, p, factor, rock, seed, true)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn carve_core(
+    grid: &Grid,
+    z: &mut [f64],
+    outlet: &[bool],
+    p: &CarveParams,
+    factor: Option<&[f64]>,
+    rock: &Rock,
+    seed: u64,
+    want_report: bool,
+) -> (Routing, DepositReport) {
+    let mut report = DepositReport { eroded: 0.0, deposited: 0.0, exported: 0.0 };
+    assert!(p.deposit_g >= 0.0 && p.deposit_g.is_finite(), "the deposition coefficient is finite and not negative, not {}", p.deposit_g);
+    let deposit = p.deposit_g > 0.0 && !p.incise_only;
     assert!(p.steps > 0 && p.reroute_every > 0, "a carve has steps and a re-route interval");
     assert!(p.max_area >= 0.0 && p.max_area.is_finite(), "the area cap is finite and not negative, not {}", p.max_area);
     assert_finite("the heights", z);
@@ -197,6 +233,11 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
             }
             assert!(k.iter().all(|v| v.is_finite() && *v >= 0.0), "the erodibilities are finite and not negative");
         }
+        if deposit {
+            let sweep = Sweep { grid, r, p, factor, rock, k: &k, room: &room, taper: taper.as_deref(), uplift, floor };
+            sweep.run(z, want_report.then_some(&mut report));
+            continue;
+        }
         for &c in &r.order {
             let c = c as usize;
             let rec = r.receiver[c];
@@ -228,7 +269,7 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
             z[c] = if p.incise_only { new.min(z[c]) } else { new };
         }
     }
-    routing.expect("a carve has at least one step")
+    (routing.expect("a carve has at least one step"), report)
 }
 
 /// The distance between two neighbouring cells.
@@ -238,5 +279,133 @@ fn distance(grid: &Grid, a: usize, b: usize) -> f64 {
         grid.dx()
     } else {
         grid.dx() * core::f64::consts::SQRT_2
+    }
+}
+
+/// One step of the carve with deposition (GEN-131, Yuan et al. 2019), over a routing: the same implicit stream power as the sweep without deposition, plus the sediment term.
+///
+/// With `d` the change of a cell in the step, `f` the stream-power number, `up` the uplift, `Qs` the flux through the cell and `g = G / Q`:
+/// `d = up - f (h - h_r) + f d_r + g Qs`, `Qs = sum of the donors' Qs + dx^2 (up - d)`. The flux of a donor is affine in the change of its receiver, so a sweep from the leaves gives every cell
+/// `d = a + b d_r` with `b = f / (1 + f + g (dx^2 - D))`, `D` the sum of the donors' slopes `d Qs / d d_r` (not positive, so the denominator is at least `1 + f`: the step is as stable as the one
+/// without a sediment term); a sweep from the outlets solves the changes; a last sweep from the leaves adds the flux of the final heights, so that what the clamps hold back moves on and mass is kept.
+struct Sweep<'a, 'b> {
+    grid: &'a Grid,
+    r: &'a Routing,
+    p: &'a CarveParams,
+    factor: Option<&'a [f64]>,
+    rock: &'a Rock<'b>,
+    k: &'a [f32],
+    room: &'a [u16],
+    taper: Option<&'a [f32]>,
+    uplift: f64,
+    floor: f64,
+}
+
+impl Sweep<'_, '_> {
+    /// The stream-power number and the uplift of a cell with a receiver (both of the heights at the start of the step, and not of the class when the uplift field is given).
+    fn cell(&self, c: usize, rec: usize) -> (f64, f64) {
+        let class = self.factor.map_or(1.0, |f| f[c]);
+        let scale = class * if self.rock.k.is_some() { f64::from(self.k[c]) } else { 1.0 };
+        let f = self.p.k_dt * scale * libm::sqrt(self.r.area[c]) / distance(self.grid, c, rec);
+        let t = self.taper.map_or(1.0, |t| f64::from(t[c]));
+        let up = match self.rock.uplift {
+            Some(u) => self.p.k_dt * f64::from(u[c]) * t,
+            None => self.uplift * class * t,
+        };
+        (f, up)
+    }
+
+    fn run(&self, z: &mut [f64], report: Option<&mut DepositReport>) {
+        let (n, r, p) = (z.len(), self.r, self.p);
+        let dx2 = self.grid.dx() * self.grid.dx();
+        // A pit of the unfilled surface keeps its height: no stream power, only uplift and the sediment that reaches it.
+        let pit: Vec<bool> = (0..n)
+            .map(|c| {
+                let rec = r.receiver[c];
+                p.keep_pits && rec != NONE && z[c] < z[rec as usize]
+            })
+            .collect();
+        // The land that takes sediment: not the sea's cells.
+        let g_of = |c: usize, z: &[f64]| if z[c] > self.floor && r.area[c] > 0.0 { p.deposit_g / r.area[c] } else { 0.0 };
+        // Three arrays of 4 bytes a cell (1.9 GB with the pit flags on a face of 1.56e8 cells): the relation's constant (later the change), the donors' flux constant and their slope.
+        let mut a = vec![0.0f32; n];
+        let mut flux_c = vec![0.0f32; n];
+        let mut slope_d = vec![0.0f32; n];
+        // Leaves to outlets: the affine relation of every cell to its receiver's change, and the flux it hands on.
+        for &c in r.order.iter().rev() {
+            let c = c as usize;
+            let rec = r.receiver[c];
+            if rec == NONE {
+                continue;
+            }
+            let rec = rec as usize;
+            let (f, up) = self.cell(c, rec);
+            let f = if pit[c] { 0.0 } else { f };
+            let g = g_of(c, z);
+            let (cc, dd) = (f64::from(flux_c[c]), f64::from(slope_d[c]));
+            let denom = 1.0 + f + g * (dx2 - dd);
+            let drop = if pit[c] { 0.0 } else { z[c] - z[rec] };
+            let ac = (up * (1.0 + g * dx2) - f * drop + g * cc) / denom;
+            a[c] = ac as f32;
+            let ac = f64::from(a[c]);
+            let b = f / denom;
+            flux_c[rec] += (cc + dx2 * up + (dd - dx2) * ac) as f32;
+            slope_d[rec] += ((dd - dx2) * b) as f32;
+        }
+        // Outlets to leaves: solve the changes, then the clamps of the sweep without deposition. A cell deposits no higher than its receiver's new height plus the drop it had above it.
+        // The change is applied as the f32 that is kept, so that the account below sums what the heights took.
+        let mut delta = a;
+        for &c in &r.order {
+            let c = c as usize;
+            let rec = r.receiver[c];
+            if rec == NONE {
+                continue;
+            }
+            let rec = rec as usize;
+            let (f, up) = self.cell(c, rec);
+            let dr = f64::from(delta[rec]);
+            let b = if pit[c] { 0.0 } else { f / (1.0 + f + g_of(c, z) * (dx2 - f64::from(slope_d[c]))) };
+            let hr_new = z[rec];
+            let hr_old = hr_new - dr;
+            let start = z[c];
+            let mut new = start + f64::from(delta[c]) + b * dr;
+            let ceiling = (hr_new + (start - hr_old).max(0.0) + p.epsilon).max(start + up);
+            new = new.min(ceiling);
+            if pit[c] {
+                new = new.max(start + up).max(self.floor);
+            } else {
+                new = new.max(hr_new + p.epsilon).max(self.floor);
+            }
+            if self.rock.k.is_some() && new < start && self.room[c] != ROOM_NONE {
+                new = new.max(start - f64::from(self.room[c]) * ROOM_STEP_M);
+            }
+            delta[c] = (new - start) as f32;
+            z[c] = start + f64::from(delta[c]);
+        }
+        let Some(report) = report else { return };
+        // Leaves to outlets with the final changes: the flux every cell hands on, and the account (a test and preview aid: the heights do not depend on it).
+        drop(flux_c);
+        drop(slope_d);
+        let mut flux = vec![0.0f64; n];
+        for &c in r.order.iter().rev() {
+            let c = c as usize;
+            let rec = r.receiver[c];
+            if rec == NONE {
+                continue;
+            }
+            let rec = rec as usize;
+            let (_, up) = self.cell(c, rec);
+            let net = dx2 * (up - f64::from(delta[c]));
+            if net > 0.0 {
+                report.eroded += net;
+            } else {
+                report.deposited -= net;
+            }
+            let out = flux[c] + net;
+            flux[rec] += out;
+            if r.receiver[rec] == NONE {
+                report.exported += out;
+            }
+        }
     }
 }
