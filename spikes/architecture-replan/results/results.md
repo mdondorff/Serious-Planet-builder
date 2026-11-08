@@ -1113,4 +1113,4 @@ Crusader (no action now): the coherent `commit_id` (A3 §7.4) is new for items 1
 
 No, for the same reason as §17. The review asks for targeted contracts and reopens no architectural choice; they are now written. Its own conclusion puts the next review on whether the promised properties hold, and that depends on numbers that do not yet exist (G-LOCAL, G-PART with weights, G-EQ on E1-E7, G-SCALE, G-STORE, G-DET).
 
-The next round belongs at the A/B gate, with the kernels attached (`flood.rs`, `route.rs`, `partition.rs`, `round.rs`, `hydro.rs`) and the gate results. This round's reviewer saw neither A3 nor the code; four of its P0 points were answered by reading them.
+The next round belongs at the A/B gate, with the kernels attached (`flood.rs`, `route.rs`, `partition.rs`, `round.rs`, `hydro.rs`) and the gate results. This round's reviewer saw neither A3 nor the code; three of its P0 rows (area semantics, off-channel runoff, tile invalidation) were answered by reading them.

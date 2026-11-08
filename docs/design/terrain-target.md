@@ -34,8 +34,8 @@ Dependency direction follows the list; §6 defines the one feedback loop (K5, K6
 | K1 | Planetary state | WorldDefinition: seed, body parameters, preset (ADR 0108), target cell sizes (§4), `SimulationProfile` (§8), authored items (§7.1) | - | **X** | WorldDefinition (CON-05), items (ADR 0007, 0066) |
 | K2 | Drivers | plate provinces, lithology K(x, z), uplift U, class weights, wind (analytic); precipitation and temperature (field-baked) | K1 and driver items | **X** | GEN-094 to 098, 116, 117, 123, 128 |
 | K3 | Base field | base elevation on the store's lattice | K1, K2, height items below erosion (§7.1) | **X** | field bake (ADR 0026), C1 read (GEN-107) |
-| K4 | H0 coarse hydrology | planet-wide drainage regions at the coarse grid across cube edges | K3 | **N** | F6's probe; the coupled run of ADR 0077 was a predecessor |
-| K5 | Regional geomorphology | per domain: the erosion carve at the regional grid (§6) | K2, K3, K4, K6 of the previous round | **X** | pass 1 (ADR 0088, 0099, 0102-0104); the kernels stay |
+| K4 | H0 coarse hydrology | planet-wide trunk drainage and watersheds at the coarse grid across cube edges (a preview, §5.1) | K3 | **N** | F6's probe; the coupled run of ADR 0077 was a predecessor |
+| K5 | Regional geomorphology | per region: the erosion carve at the regional grid (§6) | K2, K3, K6 of the previous round | **X** | pass 1 (ADR 0088, 0099, 0102-0104); the kernels stay |
 | K6 | H1 regional hydrology | the channel graph, the diffuse-area field, basins, lakes (§5) | the K5 surface | **N** (graph, lakes); **X** (basins from the filled surface of the routing) | GEN-110, GEN-145, ADR 0101 (GEN-121: the tile-seam minimax only) |
 | K7 | Local refinement | per tile, the local grid: breach, incise, thermal, deposition, channels burned in (§3.3) | K3, K5, K6 | **X** | pass 2 (GEN-101) |
 | K8 | Authoritative surface | the composition and the sampler (§3) | K3, K5, K7, creases | **X** | runtime field (GEN-099, 112) |
@@ -165,7 +165,7 @@ Two levels and two representations. The levels are H0 (planet-wide, coarse) and 
 | Representation | What | Grid | Stored | Mark |
 |---|---|---|---|---|
 | **Diffuse field** | `A_d`, the effective area accumulated by MFD (Freeman, exponent 1.1); the magnitude at every land cell | regional grid | f64 scratch of a round; a one-way byte for materials (below) | **X** |
-| **Channel graph** | one D8 receiver per channel cell (the routing of the filled surface, jitter from the global cell id); channel cells are defined below | regional grid | as segments only (§5.4), each vertex with its discharge `Q` | **N** |
+| **Channel graph** | one D8 receiver per channel cell (the routing of the filled surface, jitter from the global cell id); channel cells are defined below | regional grid | as segments only (§5.4), each vertex with its routed discharge `Q_w` | **N** |
 | Receivers elsewhere (hillslopes) | scratch of a solve | regional grid | not stored; recomputed by a re-solve | - |
 
 Rules. The quantities, kept apart (`a` the true cell area in m^2):
@@ -591,7 +591,7 @@ These are S105 §13.3's table, renamed, with the changes the round solver brings
 
 ### 12.2 Fixtures
 
-Named landscape fixtures (the first review's suite), the prototype region and the edit cases E1-E6 are defined in `spikes/prototype-region/results/` (S105 §13.3).
+Named landscape fixtures (the first review's suite), the prototype region and the edit cases E1-E6 are defined in `spikes/prototype-region/results/` (S105 §13.3); E7 in §12.1.
 
 ### 12.3 Who judges
 
