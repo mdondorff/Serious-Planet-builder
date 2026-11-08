@@ -1,0 +1,1 @@
+- 2026-11-08 partitioned-route: the region's route computed in tiles with memoised tile floods, equal to the resident route bit for bit, E2 edits flood 4.6 % of the tile floods in the example measurement (GEN-143, PR pending).

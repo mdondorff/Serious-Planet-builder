@@ -283,11 +283,11 @@ The problem: the new catchments are not known before a routing, yet routing is 8
 
 1. The region is cut into fixed tiles of the regional grid (256 cells at Earth: 208 km).
 2. A tile's flood is a pure function of the tile's heights (`bake/spill.rs`, `flood_labelled`: from outlets and all border cells). Only tiles whose round-start surface changed are re-flooded. The round's changed tiles are known without routing: round 1, the edit's footprint; later rounds, the cells of the previous round's recomputed catchments.
-3. The border graph (`SpillGraph`) is solved for the whole region, every time. It discovers the new divides and levels: there is nothing to predict. F9: 146,881 nodes, 17 ms for 3,072^2 cells; about 0.3 s for the largest landmass (estimate).
+3. The borders are solved for the whole region, every time: the tiles are swept, each flooded from the values its neighbours offer, until no offer changes (GEN-143; 5 sweeps, 65 tile floods for 35 tiles on the prototype window). It discovers the new divides and levels: there is nothing to predict. The minimax border graph of F9 (`SpillGraph`: 146,881 nodes, 17 ms for 3,072^2 cells) gives the spill level but not the epsilon-filled surface: epsilon steps do not compose across a tile in floating point, so the graph does not reproduce the resident bits.
 4. Receivers and `A_d` are recomputed on tiles whose inputs changed: levels, or the area flowing in across a tile border. Propagation downstream ends where a tile's outgoing border values are bit-equal to the stored ones.
 5. Catchments are read from the receivers; a catchment-round is recomputed if its key (below) is new; otherwise its stored round result is used.
 
-F9 (E2-type edit on 144 tiles): the flood output differs in exactly the tiles whose heights changed (2, then 4 after one round); levels, receivers and area change in 2 to 4 tiles (2.8 %, under 0.25 % of cells), and tiles plus graph reproduce the whole-window flood exactly (0 cells differ). The work per round is therefore of the order of the changed tiles and one graph solve, with no prediction of the dirty set. **[gate G-INC, on E2]**
+F9 (E2-type edit on 144 tiles): the flood output differs in exactly the tiles whose heights changed (2, then 4 after one round); levels, receivers and area change in 2 to 4 tiles (2.8 %, under 0.25 % of cells), and tiles plus graph reproduce the whole-window flood exactly (0 cells differ). The work per round is therefore of the order of the changed tiles and the tile sweeps, with no prediction of the dirty set. GEN-143 measures the tile floods only (E2: 3 of 65, 4.6 %); the offers, receivers, roots, order and area sweep are recomputed whole (1.58 s an edit against 0.71 s for the resident route on 1.6e6 cells). **[gate G-INC, on E2]**
 
 **The catchment-round key** is the hash, in canonical order, of:
 - the member cell ids;
@@ -308,10 +308,10 @@ With clipped MFD and the canonical flood a catchment has no other border conditi
 |---|---|---|
 | One routing of the largest landmass, resident (the simplest, used by the prototype and the first world build) | z f32, filled f64, receiver u32, order u32, area f64, id map u32: 32 bytes a cell | F8: 1.49e8 cells at H1 (a landmass of 8.4e7 km^2), 4.5 GiB, 5.1 GiB peak |
 | One round of that landmass, resident | routing plus the carve's arrays | about 10 GB by pass 1's 64 bytes a cell (F2 measured the route inside that figure; not measured on a landmass) |
-| Partitioned route | one tile's arrays at a time, the border graph (estimate: about 2e6 nodes, 200 MB for the largest landmass) and per-tile border summaries | F9 |
+| Partitioned route | one tile's arrays at a time and the offers across tile borders (the bound is not measured: GEN-143 keeps the arrays resident and proves equality only) | GEN-143 |
 | Level-2 re-solve in the editor | the changed tiles and the catchments dirty in that round, within terrain's 4 GB (BUDG-005) | gate G-INC |
 
-- A landmass routing does **not** have to be resident. The partitioned route produces the same result (F9: levels equal, 0 cells differ); the tile flood and border graph exist (`bake/spill.rs`, GEN-121). Accumulation is a topological sweep across tiles with border values, also partitioned.
+- A landmass routing does **not** have to be resident. The partitioned route produces the same result (F9: levels equal, 0 cells differ); the tile flood is swept to a fixed point from the neighbours' offers and the accumulation is a topological sweep across tiles with border shares (`bake/partition.rs`, GEN-143).
 - The world build may run resident or partitioned; both give the same bits (gate G-PART). Editor jobs are partitioned.
 - World-build memory is a separate budget from CON-21 (a runtime rule): proposed in ADR 0115 and stated by G-SCALE.
 - **H0-region split at artificial borders** (the earlier fallback) is kept only as a tested fallback for a landmass over the budget even partitioned; G-SCALE measures its divide migration across the split. The design no longer relies on it.
@@ -465,7 +465,7 @@ These are S105 §13.3's table, renamed, with the changes the round solver brings
 | G-SCALE | a resident routing and round of the largest landmass (memory, time, flat-area cost); a partitioned route of it; the H0-split fallback, measuring divide migration and flow across its artificial borders; H0 at 2x radius | resident within the world-build budget (ADR 0115); partitioned equals resident (G-PART); the split measured; F6 x 4 within 1.5x |
 | G-RT | the region's flight | no held-back tiles; frame within BUDG-001/002 |
 | G-DET | 1 and 8 threads; Windows and Linux; edit replay | bit-equal |
-| G-PART | a partitioned route (tiles, border graph, cross-tile accumulation) against a resident route of the same region; this is where routing locality is gated (receivers, filled levels, `A_d`) | bit-equal, also on the edited surfaces |
+| G-PART | a partitioned route (tile floods from the neighbours' offers, cross-tile accumulation) against a resident route of the same region; this is where routing locality is gated (receivers, filled levels, `A_d`) | bit-equal, also on the edited surfaces |
 
 - Correctness is structural (D10): connectivity, conservation, seams, locality, relief. Closeness to one reference run is not a criterion (F4).
 - **Every structural gate runs after each edit E1-E6 as well as on the fresh build.** A gate passed only on a generated world is not passed.

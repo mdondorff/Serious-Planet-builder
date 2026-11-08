@@ -20,6 +20,7 @@ pub mod h0;
 pub mod inputs;
 pub mod map;
 pub mod metric;
+pub mod partition;
 pub mod round;
 pub mod route;
 pub mod spill;
