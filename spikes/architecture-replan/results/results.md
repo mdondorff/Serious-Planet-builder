@@ -315,3 +315,96 @@ Two lessons from history bound every option:
 | M9.1 gate | redefined: T1 + T2 shown on the preview, connectivity measures (X14) beside the Earth comparisons | replaced by B2's prototype pass/fail (§7) and then B10 | as planned, plus A1 |
 | M9.1 items | D2 (pass-1 deposition) dropped; D3, D4 (coastal, glacial) after A4; C3 (constants) folds into A11 | D2-D4 re-housed in B5; C3 into B9 | as planned |
 | Work done on M9 so far | kept: drivers, kernels, store, runtime read; the tuning stays valid | drivers and kernels kept; tuning redone | kept |
+
+## 6. The target architecture in our terms
+
+Marks: **E** existing on main as needed; **X** existing, extended; **N** new. The target is the same for A and B; they differ in how it is reached (§5).
+
+### 6.1 Components and the data each owns
+
+| # | Component | Owns (authoritative data) | Today | Mark |
+|---|---|---|---|---|
+| K1 | Planetary state | the WorldDefinition: seed, radius, sea level, the preset (ADR 0108) with geometric, physical and procedural parameters, per-body grid sizes; authored items | WorldDefinition (CON-05, CON-10), items (ADR 0007, ADR 0066), Earth preset in progress (SPIKE-103) | **X**: per-body cell sizes (ADR 0045 point 2), gravity and rotation as preset values |
+| K2 | Geology and climate drivers | analytic fields: plate provinces, lithology K(x, z), uplift U, class weights, wind; stored: orographic precipitation and temperature | GEN-094 to GEN-098, GEN-116, GEN-117, GEN-123, GEN-128 (all CPU, analytic or field-baked) | **X**: driver edits by region (ADR 0076 point 7 made real), re-keying by footprint |
+| K3 | Base field | the base elevation on one authoritative lattice (the store's), read by one interpolant everywhere (bake and runtime) | field bake `global16384`, C1 read (GEN-107) | **X**: one lattice for pass 2 and runtime (A1), turned noise (A2), height items enter here (A7) |
+| K4 | Coarse hydrology H0 | a planet-wide drainage graph at a coarse grid (about 3 km at Earth): receivers, area, watersheds and divides, trunk rivers and their levels | none (the coupled run of ADR 0077 was a version of it, removed by ADR 0086) | **N** |
+| K5 | Regional geomorphology | per watershed domain (a set of catchments of H0, cut at confluences when too large): the implicit stream-power carve with K, U and runoff at the regional grid (814 m at Earth), breach and keep-pits, outlet levels from H0 as boundary conditions | pass 1 per cube face (ADR 0088, ADR 0099-0104) | **X**: the domain replaces the face as the unit; the kernels stay |
+| K6 | Fine hydrology H1 | per domain, from K5's last routing: the drainage graph at 814 m (receivers 3 bits, area code), basins (floor, spill level, outlet, type, area curve), river segments (centreline, width, depth, discharge, profile) above a runoff-weighted area threshold, lakes (water level, kind) | drainage area byte (GEN-110), spill graph (GEN-121), fill depth (ADR 0101) | **N** (graph, segments, lakes), **X** (spill graph -> basin objects) |
+| K7 | Local refinement | per pass-2 tile at the local grid (102 m at Earth): breach, incise, thermal, deposition, with the domain's channel positions and levels as boundary conditions | pass 2 (GEN-101) | **X**: breach (A1), channel boundary conditions from K6 |
+| K8 | Multiresolution surface | `base (K3) + regional change (K5) + local change (K7) + channel geometry (K6 segments) + creases`, each term keyed to the identity of the base lattice it was taken on; one sampler for CPU systems and tiles | runtime field (GEN-099, GEN-112), `HeightField` | **X**: base identity in every layer key, channel geometry term, fill add-back removed |
+| K9 | Simulation and versions | the dependency graph (stage keys + drainage reach), dirty sets per kind, background jobs, snapshot by key, preview and full quality as separate fields | stage keys (ADR 0006, ADR 0066), stale pre-emption (ADR 0072) | **X**: reach along the graph (A9), preview overlay fields (A10) |
+| K10 | Editor | items as commands (heights, drivers, later lakes and rivers), undo, previews | items, session undo, edit latency (ADR 0072) | **X**: driver items, preview display, "stale" indication |
+| K11 | Runtime | streaming, LOD, render, materials, water | `streaming`, `frame`, `render` (CON-03, CON-22) | **X**: river and lake water from K6, materials from K6 and K7 channels |
+
+### 6.2 What feeds what
+
+```
+K1 definition + items
+  -> K2 drivers (analytic; precipitation and temperature field-baked)
+  -> K3 base field (height items applied here)
+  -> K4 H0: coarse routing, watersheds, trunk levels           [global, coarse]
+  -> K5 regional carve per watershed domain, outlet levels from K4   [per domain]
+  -> K6 H1: graph, basins, rivers, lakes per domain                 [per domain]
+  -> K7 local refinement per tile, channels from K6                 [per tile]
+  -> K8 surface = K3 + K5 + K7 + channel geometry (K6) + creases
+  -> K11 runtime; K10 editor writes K1 items
+```
+- The first world build runs exactly this chain over every domain and tile, so an edited and re-solved world equals a from-scratch build of the edited definition, bit for bit (X5).
+- K4 is the only stage that is global at runtime cost; at about 3 km cells it is about 5.7e7 cells at Earth (6 x 3072^2): seconds to minutes (to be measured, §8).
+
+### 6.3 Versioning and dirty-region propagation along the drainage graph
+
+| Step after an edit | What is dirty | Rule | Mark |
+|---|---|---|---|
+| 1 | base tiles and driver tiles under the item's footprint | stage keys by footprint (ADR 0066) | E |
+| 2 | K4 (planet-wide coarse graph) | re-routed in full (it is cheap); its outputs are compared per watershed | N |
+| 3 | watershed domains | a domain is dirty when its base, drivers or its H0 entries (divides, receivers, outlet level, inflow area) changed; a moved divide dirties both sides | N |
+| 4 | downstream domains | the outflow (area, discharge, sediment if coupled) of a dirty domain enters its downstream neighbour's boundary; propagate downstream until the change quantises to zero | N |
+| 5 | K6 per dirty domain, K7 tiles inside dirty domains | stage keys chain through the domain's key | X |
+| 6 | runtime tiles | re-keyed tiles refresh, drawn first, stale results dropped (ADR 0072) | E |
+
+- Each derived product carries the keys of its inputs (ADR 0006); a version is a set of keys, so a snapshot is the key set at a commit point and a background result for an older key set is dropped (ADR 0072 point 3).
+- A transaction is per domain: K5, K6 and K7 of one domain become visible together (the renderer keeps the older domain until all three are ready).
+
+### 6.4 Preview levels per edit kind (R2)
+
+| Edit kind | Level 0 (frames) | Level 1 (seconds) | Level 2 (minutes, background) | Level 3 (on demand, longer) |
+|---|---|---|---|---|
+| Height sculpt, stamp, raise or lower a range | the height edit drawn over the current surface (ADR 0072) | K4 re-route: watersheds, trunk rivers move; shown as an overlay | K5-K7 of the dirty domains | domains downstream beyond a limit, or the whole chain for a continent-wide edit |
+| Lithology or uplift region | the driver map in the region (existing preview maps, GEN-122, GEN-125) | - (no routing change) | K5-K7 of the domains under the region | as above |
+| Climate region (rain, temperature) | the climate preview map (GEN-130) of the region | K4 re-route with new runoff weights (rivers' discharge, arid sinks) | K5-K7 of the domains whose runoff changed | the planet's climate sweep if the edit changes the wind field's input (orography) far away |
+| Class paint | weights preview (exists) | - | as height edit | as height edit |
+| Lake or river authoring (post-MVP) | the object drawn | K6 objects edited; K4 constraint | K5-K7 conditioned on the object | - |
+
+- Level 0 and 1 are previews (their own fields, X6); level 2 and 3 are the authoritative chain.
+- A "too global" edit (R1b, game mode) is one whose level-2 domain set exceeds a budget; the game can refuse it, the editor runs it at level 3.
+
+### 6.5 Scale as a parameter (R5)
+
+| Element | Today | Target |
+|---|---|---|
+| Grid sizes | counts per face (`BakeShape::production`: 12,288 / 98,304) | target cell sizes in metres per body (K1), counts derived (ADR 0045 point 2) |
+| Domains | the cube face | watershed domains of H0: their count grows with land area, their size is bounded by the memory budget, not by the planet |
+| Constants | Earth literals in kernels (SPIKE-103) | preset parameters (ADR 0108), gravity and rotation included |
+| Moons and dry bodies | - | a body without a sea or runoff skips K4-K7 (no hydrology); craters and the base only (R5b) |
+| Larger planets | 4x store at 2x radius | coarser target cells for the local level (C-f style) on large bodies; the store plan per body (R7) |
+
+### 6.6 Store budget (R7), Earth, estimates
+
+| Item | Today | Target (estimate) | Note |
+|---|---|---|---|
+| Field bake (4 x f32, 16384) | 11.7 GB (measured, ADR 0045) | 5-8 GB | narrower channels for temperature and precipitation (ADR 0045 point 4, open) |
+| Regional change (814 m, i16) | folded into kind 13 | about 0.5 GB | 6 x 12,288^2 x 0.29 land x 2 bytes |
+| Local change and channels (102 m) | about 24 GB (owner, 2026-11-04) | 16-24 GB, or about 6-8 GB at 200 m (C-f) | kind 13 plus area, deposit and fill bytes |
+| H0 graph (3 km) | - | under 0.1 GB | |
+| H1 graph (814 m): receivers 3 bits, area 1 byte | area byte only | about 0.4 GB | |
+| Rivers (segments, centrelines) | - | 0.5-2 GB | depends on the threshold; feasibility check §8 |
+| Basins and lakes | fill depth u16 in kind 13 | under 0.1 GB for objects; the fill channel can go | |
+| **Total** | **about 36 GB** | **about 23-35 GB** (about 13-17 GB with C-f) | inside 40 GB if the field bake is narrowed or C-f is taken |
+
+### 6.7 Realtime on Rasierklinge (R3)
+
+- The frame never waits for simulation: every re-solve is a background job on terrain's core share (BUDG-003: 60 % of B, at most 10 threads), stored and swapped by key; a valid older version is always drawn (CON-22, ADR 0072).
+- Memory: a level-2 job must fit beside streaming in terrain's 4.0 GB (BUDG-005). At pass 1's measured 64 bytes a cell (10.0 GB / 1.56e8 cells), a 1.5 GB job is about 2.3e7 cells at 814 m, about 1.5e7 km^2: larger than every catchment but the largest few, which are cut at confluences (§5.1 risk). Local tiles (3,072^2 + halo) already fit (under 2 GB).
+- Rivers and lakes are tile data (segments rasterised into the tile's channel block, water levels per body as today's sea), not per-frame work; their GPU cost is a budget line measured before A6 (BUDG-002).
+- The chunk stage's failure mode (solves on the critical path, ADR 0086) is excluded by construction: no solve is requested by the plan; the plan requests tiles whose keys exist.
