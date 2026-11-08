@@ -1,0 +1,1 @@
+- 2026-11-08 edit-cases: the memoised re-solve of an edit (tile floods and catchment rounds by key), drivers in the round solver, intentional basins and the continuity map; E1-E6 on the prototype region at 12,288 cells (GEN-146).
