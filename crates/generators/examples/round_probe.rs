@@ -1,3 +1,4 @@
+#![allow(clippy::needless_range_loop)]
 //! GEN-141 probe: how many cells of a catchment routed alone differ from the same catchment inside the region, per rule set; and the bits of the round solver against the region carve.
 use planet_generators::bake::carve::{carve, CarveParams, Schedule};
 use planet_generators::bake::route::{catchment_roots, route_rules, MfdClip, RoundRules};
@@ -54,7 +55,7 @@ fn main() {
                 let outlet = g.outlets(&z, 0.0);
                 let r = route_rules(&g, &z, &outlet, 1e-3, salt, 0.0, None, rules);
                 let root = catchment_roots(&r.receiver, &r.order);
-                let mut roots: Vec<u32> = root.iter().copied().collect();
+                let mut roots: Vec<u32> = root.to_vec();
                 roots.sort_unstable();
                 roots.dedup();
                 for &rt in roots.iter().filter(|&&rt| root.iter().filter(|&&x| x == rt).count() > 8) {
