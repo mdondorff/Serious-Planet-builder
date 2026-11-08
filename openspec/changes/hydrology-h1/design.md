@@ -8,7 +8,12 @@
 4. Basins: the 8-neighbour components of the cells whose filled surface stands more than `pit_min_m` above the ground, found on the filled surface of the routing. This is the spill graph's level at the working resolution (the canonical flood is the minimax level plus the epsilon ramp); `bake/spill.rs` is not used here. Spill point: the rim cell of the lowest filled level, ties by cell id. Floor: the lowest cell, ties by id.
 5. Class and level (section 5.5): `A(h) E_net = Q_in` on the 16-step curve; overflow (`A(spill) E_net < Q_in`) is a lake with the spill point as active outlet and `Q_in - A(spill) E_net` continuing; otherwise endorheic with the level interpolated on the curve. `Q_in` is the sum of `Q` over the basin's cells whose receiver is outside it. Net evaporation is an input (`None`: 0, every basin overflows).
 6. Identity: `basin_id = hash(body, global id of the floor cell)`. Nothing else enters, so an edit elsewhere or deeper in the same cell keeps it and a new lowest cell moves it.
-7. Presets used (ADR 0108): `T` 75 km^2 (A3 range 50 to 100), `pit_min_m` 0.5, `min_area` 1 km^2, `min_depth` 2 m. At the prototype's 10.6 km^2 cell the artefact criterion (below 1 km^2 and shallower than 2 m) cannot be met: no basin is an artefact (0 of 202,388). A preset in cells or in the scale of the grid is open for the planner.
+7. `Q` is the potential discharge before basin losses: it is not reduced at an endorheic basin or a lake (A3 section 5.2 requires the sum at the outlets to equal the sum of `a r`). The basin's `q_out` is the discharge that continues below the spill point; an endorheic basin passes none. No channel ends at an endorheic terminal cell here; the mouths are the outlet cells.
+8. Departures from A3 section 5.3, recorded for the planner: (a) the basins come from the filled surface of the routing, not `bake/spill.rs` (that module is the tile-seam minimax and returns no spill points or basin objects); (b) two nested basins with different spill levels that touch are one component with one floor and one spill (the lowest rim). Not tested against `spill.rs`.
+9. `q_in` includes the runoff of the basin's own cells; the net evaporation `max(PET - P, 0)` already nets the rain, so the balance is approximate.
+10. The pit limit and the flood epsilon couple: a flat of 500 cells drained over the epsilon ramp (1 mm a cell) stands 0.5 m above the ground and counts as a pit. The example reports the kept basins shallower than 1 m.
+11. Segment and basin ids carry a kind word, so they never collide.
+12. Presets used (ADR 0108): `T` 75 km^2 (A3 range 50 to 100), `pit_min_m` 0.5, `min_area` 1 km^2, `min_depth` 2 m. At the prototype's 10.6 km^2 cell the artefact criterion (below 1 km^2 and shallower than 2 m) cannot be met: no basin is an artefact (0 of 202,388). A preset in cells or in the scale of the grid is open for the planner.
 
 ## Measurements (`examples/hydro_landmass`, release, 8 threads, the prototype landmass of GEN-144: 9,308,154 land cells, runoff of the orographic climate, seed 14)
 | Value | Result |
@@ -31,15 +36,18 @@
 | Set-up (heights f64, active, outlet) | 653 MiB | 600 MiB |
 | One resident route, kept | 2,328 MiB | 1,464 MiB |
 | 4 rounds on 8 threads (91.7 s), heights copy held | 2,981 MiB | 1,037 MiB |
+- The resident route is dropped before the rounds, so route and round are not resident together; the H1 pass is not in this run. One run; the Windows working set, not the commit charge; read by PowerShell, so Windows only. The 12 GB is ADR 0115 (proposed).
 - 55 bytes a cell of the sphere at the peak (the example's arrays included: two f64 height copies, the masks). Against the proposed 12 GB: 25 %.
 - The mask does not shrink the arrays; a compacted landmass layout would hold 9.4e6 cells.
 
 ## Earth-specific values (ADR 0108 point 4)
-| Value | Earth | Parameter |
+| Value | Earth | Parameter (source) |
 |---|---|---|
 | Initiation `T` | 75 km^2 of runoff-weighted area | `HydroParams::initiation_m2` |
 | Pit limit | 0.5 m | `HydroParams::pit_min_m` (A3 section 5.3) |
 | Artefact limits | 1 km^2, 2 m | `HydroParams::min_area_m2`, `min_depth_m` |
-| Reference runoff | 300 mm a year (weight 1) | `runoff::RUNOFF_REF_MM` |
+| Reference runoff | 300 mm a year (weight 1) | `runoff::RUNOFF_REF_MM` (Earth's mean continental runoff) |
+| Flood epsilon | 1 mm | `CarveParams::epsilon` (calibration; couples to the pit limit) |
+| Body word | 0 | `HydroParams::body` |
 | Seconds a year | 31,557,600 | the example's `SECONDS_PER_YEAR` (the library reads m/s) |
 | Curve steps | 16 | `CURVE_STEPS` (A3 section 5.3) |

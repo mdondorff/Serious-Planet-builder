@@ -3,7 +3,8 @@
 //! - **Channel cells.** An initiated cell (`A_d >= T`, the diffuse area of the clipped MFD, runoff weighted) starts a channel; the channel continues downstream along the D8 receivers to its outlet, even where
 //!   `A_d` falls below `T` (no restart). The outlet cell where it ends (the mouth) is a channel cell.
 //! - **Channel discharge `Q`.** Accumulated along the D8 tree from the local term `a r` (true cell area times the runoff; zero in an outlet cell, which is the sea): `Q(c) = a(c) r(c) + sum of Q over the D8 donors`.
-//!   It is conserved at confluences by construction, and the sum of `Q` at the outlets is the sum of `a r` over the land.
+//!   It is conserved at confluences by construction, and the sum of `Q` at the outlets is the sum of `a r` over the land. `Q` is the potential discharge before the losses of basins: a basin's `q_out` is the
+//!   lake-adjusted discharge that continues below its spill point, and an endorheic basin passes none (A3 section 5.5).
 //! - **Segments.** A segment runs from a head (an initiated cell with no channel donor) or a confluence (two or more channel donors) downstream to the next confluence or the mouth. Its end cell is the start of
 //!   the next segment (a confluence) or the mouth, which belongs to no segment. `segment_id = hash(body, downstream end cell, upstream end cell)`.
 //! - **Basins.** A basin is a connected set (8 neighbours) of cells whose filled surface stands more than `pit_min_m` above the ground. Floor, spill point and level come from the filled surface of the routing
@@ -107,6 +108,20 @@ pub struct Hydro {
     pub stats: HydroStats,
 }
 
+/// The kind words of the identities: a segment id and a basin id never collide.
+const SEGMENT_KIND: u64 = 0x5E61;
+const BASIN_KIND: u64 = 0xBA51;
+
+/// The id of a segment from its body, downstream end cell and upstream end cell (global cell ids).
+pub fn segment_id(body: u64, down: u64, up: u64) -> u64 {
+    id_hash(body ^ SEGMENT_KIND, down, up)
+}
+
+/// The id of a basin from its body and its lowest cell (global cell id).
+pub fn basin_id(body: u64, floor: u64) -> u64 {
+    id_hash(body ^ BASIN_KIND, floor, 0)
+}
+
 /// A 64-bit identity of three words (SplitMix64 finaliser steps).
 pub fn id_hash(body: u64, a: u64, b: u64) -> u64 {
     let mut h = 0x9E37_79B9_7F4A_7C15u64;
@@ -204,7 +219,7 @@ pub fn hydrology(
             }
         }
         segments.push(Segment {
-            id: id_hash(params.body, grid.global_id(cur), grid.global_id(s as usize)),
+            id: segment_id(params.body, grid.global_id(cur), grid.global_id(s as usize)),
             up: s,
             down: cur as u32,
             cells,
@@ -299,6 +314,9 @@ pub fn hydrology(
             let mut level = floor_m;
             let mut prev = (floor_m, 0.0);
             for k in 0..CURVE_STEPS {
+                if q_in <= 0.0 {
+                    break;
+                }
                 let h = floor_m + (spill_m - floor_m) * (k + 1) as f64 / CURVE_STEPS as f64;
                 let w = curve_a[k] * e_net;
                 if w >= q_in {
@@ -311,7 +329,7 @@ pub fn hydrology(
             (BasinClass::Endorheic, level, 0.0)
         };
         basins.push(Basin {
-            id: id_hash(params.body, grid.global_id(floor), 0),
+            id: basin_id(params.body, grid.global_id(floor)),
             floor_cell: floor as u32,
             floor_m,
             spill_cell: spill as u32,

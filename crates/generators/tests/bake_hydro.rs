@@ -3,7 +3,7 @@
 
 #![allow(clippy::needless_range_loop)]
 use planet_generators::bake::flood::priority_flood_with;
-use planet_generators::bake::hydro::{hydrology, id_hash, verify, BasinClass, HydroParams};
+use planet_generators::bake::hydro::{basin_id, hydrology, segment_id, verify, BasinClass, HydroParams};
 use planet_generators::bake::route::{route_rules, RoundRules, NONE};
 use planet_generators::bake::Grid;
 
@@ -64,17 +64,19 @@ fn the_channel_graph_is_connected_downhill_and_conserves_discharge() {
                     assert!(h.channel[p], "an initiated cell {p} is a channel cell");
                 }
             }
-            let mut continues = 0;
-            for p in 0..z.len() {
-                if h.channel[p] && routing.receiver[p] != NONE && routing.area[p] < params.initiation_m2 {
-                    continues += 1;
-                }
-            }
+            // A channel continues where the diffuse area falls below the threshold, and every head is an initiated cell.
+            let continues =
+                (0..z.len()).filter(|&p| h.channel[p] && routing.receiver[p] != NONE && routing.area[p] < params.initiation_m2).count();
+            assert!(continues > 0, "a channel continues below the threshold ({ctx})");
             for s in &h.segments {
                 assert!(s.q_down >= s.q_up, "Q does not fall along a segment");
+                let head = (0..z.len()).filter(|&p| p == s.up as usize).all(|p| routing.area[p] >= params.initiation_m2 || h.q[p] > 0.0);
+                assert!(head);
             }
-            // A cell that starts a channel upstream keeps it going where the diffuse area falls: the count is reported, a channel never restarts.
-            let _ = continues;
+            let heads = (0..z.len()).filter(|&p| h.channel[p] && routing.area[p] >= params.initiation_m2).count();
+            assert!(heads >= h.stats.heads, "every head is an initiated cell ({ctx})");
+            let again = hydrology(&g, &z, &filled, &routing, &outlet, rr, None, &params);
+            assert_eq!(again.segments, h.segments, "the ids and the graph are the same on a second run ({ctx})");
         }
     }
 }
@@ -143,6 +145,12 @@ fn a_basin_has_floor_spill_curve_class_and_an_identity_of_its_lowest_cell() {
     assert_eq!(b.floor_m, 280.0);
     assert!((b.spill_m - 590.0).abs() < 0.5, "the spill level is the lowest cell of the rim: {}", b.spill_m);
     assert_eq!(b.cells, 36);
+    let rim = [(9usize, 9usize), (9, 10), (9, 11), (9, 12), (9, 13), (9, 14), (9, 15), (9, 16)];
+    assert!(
+        rim.iter().any(|&(i, j)| b.spill_cell as usize == j * w + i),
+        "the spill point is a cell of the west rim, cell {}",
+        b.spill_cell
+    );
     assert!(b.area_m2.windows(2).all(|p| p[0] <= p[1]) && b.volume_m3.windows(2).all(|p| p[0] < p[1]), "the curve rises");
     assert!((b.area_m2[15] - 36.0 * g.cell_area(0)).abs() < 1.0, "the area at the spill is the bowl");
     assert_eq!(b.class, BasinClass::Lake, "no evaporation: it overflows");
@@ -165,7 +173,8 @@ fn a_basin_has_floor_spill_curve_class_and_an_identity_of_its_lowest_cell() {
     moved[11 * w + 11] = 270.0;
     let m = run(&moved, None);
     assert_ne!(m.basins[0].id, b.id);
-    assert_eq!(m.basins[0].id, id_hash(0, g.global_id(11 * w + 11), 0));
+    assert_eq!(m.basins[0].id, basin_id(0, g.global_id(11 * w + 11)));
+    assert_ne!(basin_id(0, 5), segment_id(0, 5, 0), "the kinds of identity are apart");
     // A one-cell dent of a metre is an artefact: no object, counted.
     let mut dent = bowl_land();
     dent[30 * w + 30] = 789.0;

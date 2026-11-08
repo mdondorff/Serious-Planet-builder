@@ -168,6 +168,8 @@ fn main() {
         (best % (N * N)) / N,
         best_q
     );
+    let ramps = h.basins.iter().filter(|b| b.spill_m - b.floor_m < 1.0).count();
+    println!("kept basins shallower than 1 m (the epsilon ramp couples to the pit limit): {ramps}");
     let lakes = h.basins.iter().filter(|b| b.class == BasinClass::Lake).count();
     let largest = h.basins.iter().max_by(|a, b| a.area_m2[15].total_cmp(&b.area_m2[15]));
     println!(
