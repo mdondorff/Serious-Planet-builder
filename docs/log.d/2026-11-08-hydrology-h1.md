@@ -1,0 +1,1 @@
+- 2026-11-08 hydrology-h1: H1 on a routing: the channel graph (initiation, continuation, segments, Q conserved) and the basins (floor, spill, curve, class, identity); G-CON and the area conservation exact on the prototype landmass; resident round peak 2.9 GiB (GEN-145).

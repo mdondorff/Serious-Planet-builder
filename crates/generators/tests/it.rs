@@ -8,6 +8,8 @@ mod bake_face;
 mod bake_fillgeom;
 #[path = "bake_h0.rs"]
 mod bake_h0;
+#[path = "bake_hydro.rs"]
+mod bake_hydro;
 #[path = "bake_kernels.rs"]
 mod bake_kernels;
 #[path = "bake_metric.rs"]

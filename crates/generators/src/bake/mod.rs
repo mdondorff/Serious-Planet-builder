@@ -18,6 +18,7 @@ pub mod face;
 pub mod fillgeom;
 pub mod flood;
 pub mod h0;
+pub mod hydro;
 pub mod inputs;
 pub mod map;
 pub mod metric;
