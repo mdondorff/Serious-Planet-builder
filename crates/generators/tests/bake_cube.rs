@@ -106,7 +106,15 @@ fn a_landmass_of_the_cube_is_routed_alone_with_its_coast_as_outlets() {
     let g = Grid::cube(N, R).with_active(active.clone());
     let outlet: Vec<bool> = (0..z.len()).map(|p| active[p] && z[p] <= 0.0).collect();
     let want = route_rules(&g, &z, &outlet, EPS, 5, 0.0, None, RoundRules::ROUND);
-    for tile in [6usize, 12] {
+    let (mut held, mut cells) = (0.0, 0.0);
+    for p in (0..z.len()).filter(|&p| active[p]) {
+        cells += g.cell_area(p);
+        if outlet[p] {
+            held += want.area[p];
+        }
+    }
+    assert!((held - cells).abs() <= 1e-9 * cells, "the outlets hold the area of the active cells: {held} against {cells}");
+    for tile in [6usize, 8, 12] {
         let got = partitioned_route(&g, &z, &outlet, EPS, 5, tile, RoundRules::ROUND, &mut PartCache::default());
         for p in (0..z.len()).filter(|&p| active[p]) {
             assert_eq!(got.routing.receiver[p], want.receiver[p], "receiver {p} (tile {tile})");
@@ -119,4 +127,47 @@ fn a_landmass_of_the_cube_is_routed_alone_with_its_coast_as_outlets() {
     let mut b = z.clone();
     solve_rounds(&g, &mut b, &outlet, &p, 2, &3usize, 5);
     assert!((0..z.len()).all(|c| a[c].to_bits() == b[c].to_bits()), "G-ROUND on a masked cube");
+}
+
+// spec: GEN-144
+#[test]
+fn the_cube_grid_is_the_h0_graph() {
+    let g = Grid::cube(N, R);
+    let h0 = planet_generators::bake::h0::GlobalGrid::new(N, R);
+    for p in 0..g.len() {
+        let mut ids = [0u32; 8];
+        h0.neighbour_ids(p as u32, &mut ids);
+        let with_d = h0.neighbours(p as u32);
+        for d in 0..4 {
+            assert_eq!(g.neighbour(p, d), Some(ids[d] as usize), "axis neighbour {d} of {p}");
+            assert_eq!(g.distance_at(p, d).to_bits(), with_d[d].1.to_bits(), "distance {d} of {p}");
+        }
+        assert_eq!(g.cell_area(p).to_bits(), h0.area(p as u32).to_bits(), "area of {p}");
+    }
+}
+
+// spec: GEN-144
+#[test]
+#[should_panic(expected = "divide a face edge")]
+fn tiles_of_a_cube_grid_divide_a_face_edge() {
+    let g = Grid::cube(N, R);
+    let z = globe(&g);
+    let outlet = g.outlets(&z, 0.0);
+    partitioned_route(&g, &z, &outlet, EPS, 5, 7, RoundRules::ROUND, &mut PartCache::default());
+}
+
+// spec: GEN-144
+#[test]
+fn a_cache_is_not_shared_between_a_plane_and_a_cube_of_the_same_size() {
+    let cube = Grid::cube(8, R);
+    let plane = Grid::new(8, 48, 800.0);
+    let z: Vec<f64> = (0..cube.len()).map(|p| 50.0 + (p % 37) as f64 * 3.0 - (p / 64) as f64).collect();
+    let mut cache = PartCache::default();
+    for g in [&cube, &plane, &cube] {
+        let outlet: Vec<bool> = (0..z.len()).map(|p| z[p] <= 52.0 || (g.neighbour(p, 3).is_none() && !g.is_cube())).collect();
+        let want = route_rules(g, &z, &outlet, EPS, 5, 0.0, None, RoundRules::ROUND);
+        let got = partitioned_route(g, &z, &outlet, EPS, 5, 4, RoundRules::ROUND, &mut cache);
+        assert_eq!(got.routing.receiver, want.receiver);
+        assert!(got.routing.area.iter().zip(&want.area).all(|(a, b)| a.to_bits() == b.to_bits()));
+    }
 }

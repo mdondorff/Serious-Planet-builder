@@ -91,7 +91,7 @@ impl Grid {
         self.active.as_ref().is_none_or(|a| a[p])
     }
 
-    /// Whether the grid carries a physical metric.
+    /// Whether the grid has the sphere's metric: the cube metric of GEN-138 or the cube grid of GEN-144.
     pub fn has_metric(&self) -> bool {
         self.metric.is_some() || self.cube.is_some()
     }

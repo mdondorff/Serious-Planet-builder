@@ -52,6 +52,7 @@ pub struct PartCache {
 struct Previous {
     tile: usize,
     size: (usize, usize),
+    cube: bool,
     filled: Vec<f64>,
     receiver: Vec<u32>,
     area: Vec<f64>,
@@ -243,6 +244,8 @@ pub fn partitioned_route(
                 continue;
             }
             let mut h = z_hash[t];
+            h.word(u64::from(grid.is_cube()));
+            h.word(grid.cell_area(0).to_bits());
             h.word(epsilon.to_bits());
             for v in [grid.w(), grid.h(), r.x0, r.y0, r.w, r.h] {
                 h.word(v as u64);
@@ -386,8 +389,8 @@ pub fn partitioned_route(
     }
 
     // ---- what changed against the previous call
-    if let Some(Previous { tile: tl, size, filled: pf, receiver: pr, area: pa }) = &cache.previous {
-        if *tl == tile && *size == (grid.w(), grid.h()) {
+    if let Some(Previous { tile: tl, size, cube, filled: pf, receiver: pr, area: pa }) = &cache.previous {
+        if *tl == tile && *size == (grid.w(), grid.h()) && *cube == grid.is_cube() {
             for r in &tiles {
                 let (mut f, mut rc, mut ar) = (false, false, false);
                 for y in r.y0..r.y0 + r.h {
@@ -404,7 +407,13 @@ pub fn partitioned_route(
             }
         }
     }
-    cache.previous =
-        Some(Previous { tile, size: (grid.w(), grid.h()), filled: filled.clone(), receiver: receiver.clone(), area: area.clone() });
+    cache.previous = Some(Previous {
+        tile,
+        size: (grid.w(), grid.h()),
+        cube: grid.is_cube(),
+        filled: filled.clone(),
+        receiver: receiver.clone(),
+        area: area.clone(),
+    });
     PartRoute { routing: Routing { receiver, order, area }, filled, stats }
 }

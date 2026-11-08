@@ -10,6 +10,7 @@ use super::NEIGHBOURS;
 #[derive(Clone, Debug)]
 pub struct Cube {
     n: usize,
+    radius_m: f64,
     g: GlobalGrid,
     /// The neighbour across an edge: `[face][side][k]`, side 0 = `i = 0` (k = j), 1 = `i = n - 1` (k = j), 2 = `j = 0` (k = i), 3 = `j = n - 1` (k = i).
     links: Vec<u32>,
@@ -17,7 +18,7 @@ pub struct Cube {
 
 impl PartialEq for Cube {
     fn eq(&self, other: &Cube) -> bool {
-        self.n == other.n && self.links == other.links
+        self.n == other.n && self.radius_m.to_bits() == other.radius_m.to_bits() && self.links == other.links
     }
 }
 
@@ -38,7 +39,7 @@ impl Cube {
                 }
             }
         }
-        Cube { n, g, links }
+        Cube { n, radius_m, g, links }
     }
 
     pub fn n(&self) -> usize {
