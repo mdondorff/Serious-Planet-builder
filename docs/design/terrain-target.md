@@ -294,4 +294,141 @@ A catchment-round is recomputed exactly when its key changes. There is no tolera
 - Game mode (R1b): an edit whose dirty set exceeds a budget is refused or deferred to a batch.
 - Undo removes the item: its keys are the earlier ones, so the earlier results are read back; no reverse simulation.
 
-<!-- next -->
+## 8. The simulation profile
+
+A `SimulationProfile` belongs to K1 and is part of every derived key. It is the only source of simulation time and quality.
+
+| Field | Meaning | Earth default today |
+|---|---|---|
+| `rounds` | re-route rounds per run | 4 |
+| `steps_per_round` | implicit steps per round | 5 |
+| `k_dt` | stream-power `K dt` per step | 0.05 |
+| `quality` | the level of a run: `preview` (the H0 route and overlays, §11) or `full` | full |
+| process parameters | breach limits, thermal, deposition, thresholds | presets (ADR 0108) |
+
+- Simulated duration is `rounds x steps_per_round x k_dt` in carve units, not years and not editor time.
+- **Every solve starts from the definition.** An edit or a re-run never advances a previous surface. A different duration is a different profile, hence different keys; two histories are compared by running two profiles.
+
+## 9. Determinism and canonical forms
+
+Hard constraints (CON-07, CON-14, ADR 0010): same authoritative output across runs, thread counts, Windows and Linux on x86_64. ARM and macOS are not supported targets until they are added to CI (CON-26). No GPU result enters any authoritative value. `libm`, integer hashing and fixed-order reductions as today.
+
+| Contract | Rule |
+|---|---|
+| Graph topology and basin class | f64 comparisons as today (deterministic on the supported targets, no fast-math); ties by global cell id |
+| Flood order | canonical (level, global cell id) (§6.4) |
+| Canonical form | every value one stage hands to a later one has **one stored form**, and the later stage reads that form, in a fresh run as in a re-solve (below) |
+| Reproducibility against correctness | bit equality of a re-solve and a fresh build is a test of determinism, not of correctness; correctness has its own gates (§12) |
+| Edit replay | the same item list and the same order give the same key set on any run (ADR 0007, §7) |
+
+| Interface value | Canonical form | Read by |
+|---|---|---|
+| Base `B` | f32 lattice node, C1 read to f64 | all |
+| Round surface (a stage output) | f32 height on the regional grid (0.25 m steps would flatten plains' slopes of 1e-4 at 814 m into false flats) | the next round, K6, K7 |
+| Regional change into K7 | last round minus `B`, read C1 | K7 |
+| Local change `L` | i16 in steps of 0.25 m (kind 13) | K8 |
+| Channel levels, basin levels | f32 metres | K7, K11 |
+| Diffuse area | u8 code (GEN-110) for consumers; the routing's f64 is scratch within a round | materials, K6 |
+
+- A round reads the previous round's **stored** form (f32), not an in-memory f64. Today's bake holds the carve in f64 and stores f32 heights for the post-pass only (`bake/tile.rs:322`); under this contract a fresh build and a re-solve pass through the same form.
+- The effect of the f32 form on the carve against a run in f64 is measured **[gate G-EQ]**.
+
+## 10. Store and budget
+
+R7: about 40 GB at most at Earth. **Hard gate G-STORE:** measured on real serialized data, including pack layout, indexes, keys, graph metadata and edit overrides; steady state and peak temporary (a planet build and a level-2 re-solve) are reported separately.
+
+| Item | Today | Target (estimate, Earth) | Status |
+|---|---|---|---|
+| Field bake | 11.7 GB measured | 5-8 GB (narrow channels, ADR 0045 point 4) | to measure |
+| Round records (4 rounds, regional grid, land, f32) | - | about 4 GB | a cache, evictable once the final is built and when no edit needs it |
+| Local change `L` and channels (kind 13) | about 24 GB with fill and channels | 16-24 GB; fill channel removed | to measure |
+| Diffuse area byte | present | 0.1 GB | |
+| H0 | - | under 0.1 GB | |
+| Channel graph | - | 0.8-1.1 GB at a 50-100 km^2 threshold, vertices on the regional grid (F3, extrapolated) | to measure |
+| Basins, lakes | - | under 0.1 GB | |
+| Catchment-round key table | - | to measure | |
+| Edit overrides | - | to measure | |
+| **Total** | about 36 GB | about 26-38 GB with the round records; about 22-34 GB without | gate |
+
+Fallback if the gate fails with field narrowing done: the local grid at about 200 m (C-f). It is not an assumption of this design.
+
+## 11. Runtime and previews
+
+### 11.1 Preview levels per edit kind (R2)
+
+| Level | What | Time | Authoritative? |
+|---|---|---|---|
+| 0 | the item drawn over the current surface (ADR 0072) or its driver map | frames | no: a preview field with its own id (CON-07) |
+| 1 | H0 re-route (planet-wide; heights resident), the trunk rivers and watersheds as an overlay | seconds (F6: 7 s) | no |
+| 2 | the re-solve of the dirty set (§6.5), then K6, K7 | minutes, background | yes |
+| 3 | a planet or continent re-run, on demand | hours | yes |
+
+| Edit kind | L0 | L1 | L2 scope | L3 when |
+|---|---|---|---|---|
+| Height, landform stamp | the item over the surface | H0 re-route | dirty catchments | continental edits |
+| Lithology or uplift region | the driver map (GEN-122, GEN-125) | none | catchments under the region | as above |
+| Rainfall or temperature region | the climate map (GEN-130) | H0 with the runoff change | catchments whose runoff changed | climate reach beyond the region |
+| Class paint | weights preview | none | as height edit | as above |
+| Lake, river (post-MVP) | the object | H0 with the constraint | conditioned solves | - |
+
+### 11.2 What the runtime reads
+
+The runtime reads `S` (§3.1), river segments and lake levels from K6 (tile data, not per-frame work). The plan never requests a solve (CON-03, ADR 0086's lesson).
+
+### 11.3 Realtime (R3)
+
+- Solves run on terrain's core share (BUDG-003) and within terrain's 4.0 GB (BUDG-005).
+- A level-2 job is bounded by its catchment union (§6.5); a landmass-wide run is level 3.
+- A frame draws the last committed set (§7.4); the commit swaps by key (ADR 0072).
+
+## 12. Validation
+
+### 12.1 Gates
+
+These are S105 §13.3's table, renamed, with the changes the round solver brings.
+
+| Gate | Measure | Pass |
+|---|---|---|
+| G-SURF | runtime minus bake surface at lattice nodes | 0 before quantisation; at most 0.25 m after |
+| G-CON | segments and channel cells at every sampling; drainage area at the outlets against the sum of true cell areas, across cube edges | 0 disconnected; every channel cell has a downhill path; relative error at most 1e-9 |
+| G-LOCAL | a catchment's round alone against its round inside the region, with clipped MFD and the canonical flood | 0 cells differ |
+| G-ROUND | the round solver against a whole-region carve | 0 cells differ (the exactness of F7, kept under §6.4) |
+| G-EQ | a re-solve against a fresh build of the edited definition, E1-E6; the f32 round form against a run in f64 | bit-equal; effect on relief within 2 % |
+| G-INC | the dirty set of each edit | grows only through the routing; report sizes, target a level-2 job within §11.3 |
+| G-BASIN | E3's merge, split, spill and outlet migration | ids and continuity maps follow §5.4 |
+| G-SED | per catchment and per round | eroded = deposited + exported to 1e-9 relative |
+| G-LAND | relief p50 and hypsometry against the whole-region carve; sinks | within the seed noise floor; unclassified sinks at most 1 % of land (reported, not the main gate) |
+| G-STORE | §10 | 35 GB target, 40 GB hard |
+| G-SCALE | a landmass as one region: memory and time; flat-area cost of the flood; H0 at 2x radius | fits a world build within budget (CON-21 applies to runtime; the bake budget is proposed in ADR 0115); F6 x 4 within 1.5x |
+| G-RT | the region's flight | no held-back tiles; frame within BUDG-001/002 |
+| G-DET | 1 and 8 threads; Windows and Linux; edit replay | bit-equal |
+
+- Correctness is structural (D10): connectivity, conservation, seams, locality, relief. Closeness to one reference run is not a criterion (F4).
+- The Earth comparisons (SPIKE-102, SPIKE-104) stay reported values, not gates (R6).
+
+### 12.2 Fixtures
+
+Named landscape fixtures (the first review's suite), the prototype region and the edit cases E1-E6 are defined in `spikes/prototype-region/results/` (S105 §13.3).
+
+### 12.3 Who judges
+
+The planner judges numeric gates. A failure of an architecture or requirement gate (G-LOCAL, G-ROUND, G-EQ, G-STORE, G-SCALE) and the A/B gate go to the owner (D8).
+
+## 13. ADRs (proposed, numbers reserved)
+
+| ADR | Subject | Amends |
+|---|---|---|
+| 0110 | The authoritative surface | 0088 points 2 and 5, 0099 point 3, 0100, 0101 point 3 |
+| 0111 | Hydrology model and identity | 0041 (producers), 0101 |
+| 0112 | The erosion solver: regions, rounds, catchments | 0088 point 4, 0099 |
+| 0113 | Edit ordering and dependencies | 0007, 0066 points 1 and 4, CON-08 reading |
+| 0114 | Simulation profile, cell metric, canonical forms | 0010 (forms), 0003 (metric use) |
+| 0115 | Scale as a parameter and the store budget | 0045 point 2 |
+
+ADR 0109 (infill), ADR 0105 point 1 (pass-1 deposition for pits) are superseded by 0112 if the gate passes; the kernel-level changes (MFD clip, canonical flood) are within 0112.
+
+Open items for the review:
+1. Whether clipped MFD changes the look (the kernels' area at divides).
+2. The cost of the canonical flood on large flats.
+3. Whether a landmass as a region fits a world build; the split fallback's error.
+4. The f32 canonical form of round surfaces against a run in f64.
