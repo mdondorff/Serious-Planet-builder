@@ -77,6 +77,8 @@ impl Grid {
     /// by cube id; neighbours, areas, distances and the global ids are the cube grid's, so a solve gives the bits of the same solve on the masked cube grid with `6 n^2` cells.
     pub fn compact_cube(n: usize, radius_m: f64, bits: Vec<u64>) -> Grid {
         assert!(bits.len() == (6 * n * n).div_ceil(64), "one bit per cube cell");
+        let tail = (6 * n * n) % 64;
+        assert!(tail == 0 || bits[bits.len() - 1] >> tail == 0, "a bit is set past the last cube cell");
         let index = compact::ActiveIndex::new(bits);
         let len = index.len();
         assert!(len >= 3 && len < u32::MAX as usize, "a compact grid has at least 3 cells and fewer than 2^32");
@@ -116,6 +118,7 @@ impl Grid {
 
     /// The same grid restricted to the `active` cells (one flag per cell): the others do not exist for the kernels. Used to route a catchment alone (G-LOCAL).
     pub fn with_active(mut self, active: Vec<bool>) -> Grid {
+        assert!(self.compact.is_none(), "a compact grid has only its cells: no mask");
         assert_eq!(active.len(), self.len(), "one flag per cell");
         self.active = Some(active.into());
         self

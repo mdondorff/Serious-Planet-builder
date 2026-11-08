@@ -154,6 +154,7 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
         assert_eq!(f.len(), grid.len(), "one carve factor per cell");
         assert!(f.iter().all(|v| v.is_finite() && *v >= 0.0), "the carve factors are finite and not negative");
     }
+    assert!(rock.k.is_none() || !grid.is_compact(), "a layered rock reads the erodibility by cell and row: not for a compact grid");
     let floor = p.sea_level + p.epsilon;
     if let Some(u) = rock.uplift {
         assert_eq!(u.len(), grid.len(), "one uplift per cell");

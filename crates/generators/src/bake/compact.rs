@@ -3,7 +3,6 @@
 //! masked cube grid, and the results are the same bits. A lookup is a bitset rank (a popcount and a table of counts a word); the inverse is a table of cube ids.
 
 /// The active cells of a cube grid of `6 n^2` cells.
-#[derive(Debug)]
 pub struct ActiveIndex {
     bits: Vec<u64>,
     /// The number of set bits before each word.
@@ -12,6 +11,13 @@ pub struct ActiveIndex {
     pos: Vec<u32>,
 }
 
+impl std::fmt::Debug for ActiveIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ActiveIndex {{ cells: {} }}", self.pos.len())
+    }
+}
+
+/// Two indexes are equal when their bitsets are (the rank table and the ids are derived from them).
 impl PartialEq for ActiveIndex {
     fn eq(&self, other: &ActiveIndex) -> bool {
         self.bits == other.bits

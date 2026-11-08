@@ -22,6 +22,12 @@ const SEED_CELL: (usize, usize, usize) = (1, 2090, 267);
 const REGION: (usize, usize, usize, usize) = (2014, 2168, 190, 344);
 
 fn memory_mb() -> (f64, f64) {
+    let (peak, now, _) = memory3();
+    (peak, now)
+}
+
+/// The peak and current working set and the peak commit (paged memory) of this process in MiB.
+fn memory3() -> (f64, f64, f64) {
     let ps = |field: &str| -> f64 {
         let out = std::process::Command::new("powershell")
             .args(["-NoProfile", "-Command", &format!("(Get-Process -Id {}).{field}", std::process::id())])
@@ -29,7 +35,7 @@ fn memory_mb() -> (f64, f64) {
             .expect("powershell");
         String::from_utf8_lossy(&out.stdout).trim().parse::<f64>().unwrap_or(f64::NAN) / 1048576.0
     };
-    (ps("PeakWorkingSet64"), ps("WorkingSet64"))
+    (ps("PeakWorkingSet64"), ps("WorkingSet64"), ps("PeakPagedMemorySize64"))
 }
 
 fn set(bits: &mut [u64], g: usize) {
@@ -81,7 +87,8 @@ fn main() {
             }
         }
     }
-    drop((coarse, stack, land_c));
+    drop((coarse, stack, land_c, cz));
+    drop(bytes);
     let coarse_cand: usize = cand_c.iter().map(|w| w.count_ones() as usize).sum();
     println!("coarse candidates {coarse_cand} ({:.1} s)", t0.elapsed().as_secs_f64());
 
@@ -167,6 +174,21 @@ fn main() {
         }
     }
     drop(stack);
+    // The fine land must not reach the border of the candidates (the coarse landmass and two rings): a land cell with a cube neighbour outside them would be cut off from its outlets.
+    {
+        let full = Grid::cube(n, R);
+        let mut border = 0usize;
+        for p in 0..count {
+            if get(&land, p) {
+                let g = cand.cube_id_of(p);
+                if (0..8).any(|d| full.neighbour(g, d).is_some_and(|q| cand.compact_index_of(q).is_none())) {
+                    border += 1;
+                }
+            }
+        }
+        println!("fine land cells at the border of the candidates: {border}");
+        assert_eq!(border, 0, "the fine landmass reaches the border of the candidates: more rings are needed");
+    }
     let mut fin = vec![0u64; (6 * nn).div_ceil(64)];
     let mut land_cells = 0usize;
     for p in 0..count {
