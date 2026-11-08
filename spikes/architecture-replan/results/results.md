@@ -1023,3 +1023,53 @@ Tiles plus border graph reproduce the whole-window flood exactly (0 cells differ
 | Divide migration across an H0 split, if that fallback is ever used | G-SCALE |
 
 **Another external round before the prototype?** No. The third review asks for no broad redesign, and the three amendments are specific. Further value lies in code and numbers, so the next round belongs at the A/B gate, with the kernels attached (they were named in the brief but not supplied) and the gate tables.
+
+# Phase 5 (inbox #102, 2026-11-08): the external review of ADRs 0110-0115
+
+Input: a fourth external review (owner refs, 2026-11-08, outside git; "the ADR review"), of the six proposed ADRs. Verdict of the review: a coherent architecture and the basis for the next phase; not all six as frozen decisions. It names five contracts to resolve before acceptance. The reviewer saw the ADRs only, neither A3 nor the code; each point is checked against both here (main at 0cfc5589).
+
+## 18. Verdict on each point
+
+| § of the review | Point | Verdict | Reason, references |
+|---|---|---|---|
+| 2A | Base identity: lattice, C1 read, mapping, body, below-erosion edits, sea level, numeric form | **adopt** | A real inconsistency: A3 §3.2 set `base_id` to the lattice's bake key, while §7.1 adds below-erosion items to `B` at read time, so two different `B` had one id. A3 §3.2 lists the identity |
+| 2B | Is `C` stored or procedural? | **adopt with change** | Read-time, CPU f64, stores nothing. It is not purely analytic: with the relief switch on, the amplitude is the baked `k` (GEN-099, GEN-109). "`L` is the only baked **elevation** term"; band, parameters and the channel hash are in the identity |
+| 2C | Channel tests after the complete sampling path | **adopt with change** | New gate G-PROFILE. At local-grid nodes along a segment a dam is a defect (limit: the 0.25 m step). Between nodes a C1 read cannot be dam-free on a diagonal link (SPIKE-104 §3), so midpoints are reported, not gated |
+| 2D | Fill-depth removal conditional on the basin model | **adopt** | ADR 0110 point 5 waits for G-BASIN and the lake producer (prototype item 15); behind a switch until then |
+| 3 | What does H1 inherit from H0? | **adopt with change** | A3 §5.1 said it; the ADR did not. Correction: GEN-144 finds the landmass at the working resolution, and rightly (an isthmus under 3 km is invisible at H0). The region comes from the H1 land mask; H0 gives previews and trunk connectivity only (A3 §5.1, §6.1) |
+| 3A, P0 | MFD: geometric area against runoff-weighted area against rate; byte encoding | **adopt** | The ADRs were wrong, the code is right: `mfd_area` accumulates `a w`, `w` the dimensionless `discharge_weight` (0.02 to 8), and `hydro::verify` closes `sum a w`. "Sum of true areas" holds only for `w` = 1. The byte (`round(8 log2(area / cell area))`, GEN-110 as amended by GEN-129) is one-way, for materials: no simulation stage reads it, so "stored as a byte drives the carve" was false. A3 §5.2 |
+| 3B, P0 | Off-channel runoff into the channel graph | **already covered**, ADR wording fixed | `hydro.rs` accumulates `a r` over every active cell along the D8 tree, not only channel cells: runoff enters the channel at the first channel cell of its D8 path. The ADR's "local term" hid this. Tests 1 to 4: 2 and 4 exist (`verify`); 1 and 3 need `Q_w` (§19 N1) |
+| 3C | Initiation threshold units | **adopt** | `T` is an effective area in m^2 of reference runoff (300 mm a year, `RUNOFF_REF_MM`); it is a calibrated preset parameter |
+| 3D, P0 | Basin balance at spill and for endorheic basins | **adopt**, and more than asked | The reviewer's form `Q_in = A(h) E + q_out(h)` replaces the equation. All cases stated (A3 §5.5). The check found two defects (§19 N1, N2). Active outlet: a hydrological state; spill point: topographic (A3 §5.3 had this) |
+| 4A, P0 | Invalidation across tiles | **adopt with change** | The wording was wrong, the code is as the reviewer asks: the flood memo key holds heights, outlet flags **and incoming offers**, so a tile whose offers changed re-floods. A3 §6.8 gives the dependency table. Receivers and area are recomputed whole today (GEN-143), so only floods are memoised; the full region route is the contract and the memo an optimisation, as the reviewer wants |
+| 4B, P0 | "Same bits" needs a reference | **adopt** | A3 §6.8: the reference is a definition (the flood's unique fixed point, the receiver rule, the area's donor order), with the termination bound. Equal offers do not matter: the operator is a `min`. Monotone IEEE rounding makes the argument hold in f64. G-PART gets adversarial fixtures |
+| 4C | MFD fallback when no eligible neighbour | **already covered** by construction, now stated | The receiver is always lower (`receiver_of` asserts it) and is in the cell's own catchment by definition, so a non-outlet cell always has a positive weight. The fallback is unreachable (A3 §6.3) |
+| 4D | Every value read is in the key | **adopt** | Stated as the rule (A3 §6.5). `CatchmentInputs` is the read set; G-LOCAL enforces it. The distance is added (the metric) |
+| 4E | Sediment across catchments | **adopt** | D8-routed sediment stays in its catchment. Thermal and one-cell pit spreading read 8 neighbours, so they cross divides and are not catchment-round steps (A3 §6.7; §21). "Independent" is not a permanent limit: a new coupling is added to §6.3's table |
+| 4F | F7 does not validate the new kernels | **already covered** | G-ROUND runs with the same rules in the reference (`bake_rounds.rs`, GEN-142). Passing on prototype fixtures is not passing the gates at scale |
+| 5A, P0 | Edits that change landmass connectivity | **adopt with change** | No region id is in the tile or catchment keys, so the memo survives a merge or split. Regions are re-derived per commit from the H1 land mask. New edit case E7 (A3 §7.2) |
+| 5B | "Exact equality" means canonical forms | **adopt** | ADR 0113 point 4, A3 §7.3 |
+| 5C | Atomic commit across dependent state | **adopt with change** | A3 §7.4 claimed more than exists: ADR 0072 refreshes tile by tile. A `commit_id` names one coherent set; a frame reads one commit. New work (prototype items 15, 16). Per-tile refresh stays for items above erosion |
+| 5D | CON-08 | **already covered** | The owner's call; remains on 0113's status line |
+| 6A | Profile identity | **adopt** | A3 §8; the tile size is deliberately not in it (G-PART) |
+| 6B, P0 | f64 composition against f32 rounds | **adopt** | A3 §9: persistent form, stage computation and conversion point per value. Code gap: `solve_rounds` carries f64 across rounds (§21) |
+| 6C, P0 | Controls for cross-platform determinism | **adopt** | A3 §9 controls table. Two gaps: the toolchain is unpinned (`dtolnay/rust-toolchain@stable`, no `rust-toolchain` file), and the CI determinism manifest covers tiles, not the rounds or H1 |
+| 6D | Determinism and correctness separate | **already covered** | ADR 0114 point 5 |
+| 7A | No sea / no runoff | **adopt** | Hydrology runs on a runoff switch of the body. Runoff without a sea has no outlet for the flood and is refused in the MVP (ADR 0115 point 3) |
+| 7B | Body against preset | **adopt** | No conflict with ADR 0108 (accepted): it says named parameters of the world definition, not that a preset owns them |
+| 7C | Store measurement | **already covered**; two items added | Replacement-commit space and retained versions (A3 §10, G-STORE) |
+| 7D | 12 GB needs a measured margin | **adopt** | Stronger today: #1245 bounds the resident landmass at 11-13.5 GB, not measured. The resident route has no margin; the partitioned one is the normal path, and its non-resident form is not built. G-SCALE reports process peak including allocator overhead |
+| 7E | Scaling model | **adopt** | A3 §4.3 |
+| 8, last line | F8 not in the ADR | **already covered** | §16 here; the ADR states an estimate as an estimate |
+| 9 | Prototype scenarios | **adopt** | E7; whole-world G-EQ (hydrology, basins, channels, sampled surface); a small and a large body; runtime memory separate (BUDG-005) |
+
+## 19. Found while checking (not in the review)
+
+| # | Finding | Evidence | Resolution |
+|---|---|---|---|
+| N1 | A basin's inflow ignores the losses of basins upstream: `q_in += q[e]` reads the potential `Q`; `q_out` feeds nothing. A basin below an endorheic basin receives water that never arrives, and may be classed a lake | `hydro.rs`, the inflow loop | `Q_w`, the discharge after basins, resolved in descending filled level (A3 §5.5). Rivers report `Q_w`; `Q` stays the conservation check |
+| N2 | The lake balance counts rain on flooded cells twice: `Q_in` holds `a r` of the basin's cells, and `E_net = max(PET - P, 0)` is charged on top; with `P > PET` a lake always overflows | `hydro.rs`, A3 §5.5 | `E_open = PET - (P - r)`, the excess of open-water evaporation over the land's. It is non-negative without a clamp (Budyko: `E <= min(P, PET)`) |
+| N3 | The partitioned route has no runoff weight (`partitioned_route` adds `grid.cell_area(q)`), and `solve_rounds` passes `None`. G-PART and G-ROUND hold for `w` = 1 only, and a rainfall edit (E5) cannot change the surface | `partition.rs`, `round.rs` | §21 |
+| N4 | "Artefact: breached in K5/K7" is not a rule of the code: the breach is class-blind and classes exist only after the final round; an artefact keeps its pit without an object | `round.rs`, `hydro.rs` | A3 §5.3: no object, no fill; sinks are counted by G-LAND. Protecting an intentional basin from the breach is open |
+| N5 | The carve's `A_d` runs through every basin to the sea: ADR 0105 point 2 (arid basins as sinks) is not in the round solver, so `A_d` below an endorheic basin is overstated | `round.rs` | Named in A3 §6.2 as open, reported at G-LAND; a fix would read the previous round's classes |
+| N6 | Inflow counts an exit whose flow re-enters only within 256 steps (a magic bound; beyond it water is counted twice) | `hydro.rs` | Replace by a linear next-basin sweep (§21) |
