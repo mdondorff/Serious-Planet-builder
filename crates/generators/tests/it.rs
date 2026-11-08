@@ -4,6 +4,8 @@ mod arid;
 mod bake_face;
 #[path = "bake_fillgeom.rs"]
 mod bake_fillgeom;
+#[path = "bake_h0.rs"]
+mod bake_h0;
 #[path = "bake_kernels.rs"]
 mod bake_kernels;
 #[path = "bake_metric.rs"]
