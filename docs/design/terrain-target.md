@@ -311,6 +311,7 @@ With clipped MFD and the canonical flood a catchment has no other border conditi
 | Partitioned route | one tile's arrays at a time and the offers across tile borders (the bound is not measured: GEN-143 keeps the arrays resident and proves equality only) | GEN-143 |
 | Level-2 re-solve in the editor | the changed tiles and the catchments dirty in that round, within terrain's 4 GB (BUDG-005) | gate G-INC |
 
+- Measured at the erosion grid (12,288 cells, `examples/region_scale`, windows of the prototype region of 1.0e6 to 44e6 cells): the resident rounds peak at about 90 bytes a cell (74 without the example's height copies) and about 2 microseconds a cell on 8 threads; the whole prototype landmass (about 150e6 cells) is bounded at 11 to 13.5 GB, not measured. The 2.98 GiB and the 39.5 % channel share of the GEN-144 and GEN-145 runs are at 3,072 cells (3.26 km); at 12,288 cells 7 % of land cells are channel cells.
 - A landmass routing does **not** have to be resident. The partitioned route produces the same result (F9: levels equal, 0 cells differ); the tile flood is swept to a fixed point from the neighbours' offers and the accumulation is a topological sweep across tiles with border shares (`bake/partition.rs`, GEN-143).
 - The world build may run resident or partitioned; both give the same bits (gate G-PART). Editor jobs are partitioned.
 - World-build memory is a separate budget from CON-21 (a runtime rule): proposed in ADR 0115 and stated by G-SCALE.
