@@ -8,7 +8,7 @@
 3. Flood and routing as GEN-100's, D8 receivers, on the graph: priority flood from the outlets with `epsilon` over flats, pop order by height then id, the receiver the steepest descent on the filled surface by true distance, the area summed down the reversed flood order. Single-threaded and fixed-order (CON-14).
 4. The area is the true area (GEN-138's `Metric` per face), so the area at the outlets is the area of the sphere (tested to 1e-9).
 5. Not in this PR: reading the stored field into the heights (a lattice read, SPIKE-105 F6's 130 s decode), multiple-flow-direction accumulation (H0 stays D8: 3 km cells and trunk rivers), joining kept pits across tiles (the spill graph of GEN-121 at H0's scale), watershed domains (prototype step).
-6. Cost, measured (`examples/h0_cost`, release, one thread, synthetic surface): 1.4 s at 512 cells a face edge, 6.0 s at 1,024: about 1 us a cell, so about 55 s at 3,072 (F6's prototype: 7 s). The neighbour table is rebuilt on demand (an `atan` and `asin` per neighbour); caching it (24 bytes a cell) is the first speed-up if H0 is re-routed on every edit (L1 target 10 s).
+6. Cost, measured (`examples/h0_cost`, release, one thread, synthetic surface): 1.4 s at 1,024 cells a face edge and 16.2 s at 3,072 (6.0 s and an extrapolated 55 s before the speed-up; F6's prototype: 7 s). The speed-up: directions from per-axis tangent tables and per-face frames (no trigonometry per call), neighbour ids without distances in the flood, and the distance only for lower neighbours in the receiver pass. A cached neighbour table (24 bytes a cell) is the next step if H0 is re-routed on every edit (L1 target 10 s).
 
 ## Earth-specific values (ADR 0108 point 4)
 | Name | Value | Unit | Kind | Parameter |

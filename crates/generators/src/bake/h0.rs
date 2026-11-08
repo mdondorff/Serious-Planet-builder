@@ -17,6 +17,9 @@ pub struct GlobalGrid {
     n: usize,
     radius_m: f64,
     metric: Metric,
+    /// The tangent coordinate of each cell centre along an axis, and the face frames `(n, u, v)`: a direction is `(n + x u + y v)` normalised, no trigonometry per call.
+    tan_c: Vec<f64>,
+    frames: [[[f64; 3]; 3]; 6],
 }
 
 /// The routing of the whole planet.
@@ -35,7 +38,20 @@ pub const NONE: u32 = u32::MAX;
 impl GlobalGrid {
     pub fn new(n: usize, radius_m: f64) -> GlobalGrid {
         assert!(n >= 2, "a face has at least 2 cells an edge");
-        GlobalGrid { n, radius_m, metric: Metric::cube_face(n, radius_m, (0, 0), n, n) }
+        let tan_c =
+            (0..n).map(|k| planet_core::cube::FaceMapping::face_to_plane(&TangentWarp, 2.0 * (k as f64 + 0.5) / n as f64 - 1.0)).collect();
+        // The face frame from the mapping itself: the direction at the plane point (0, 0) is the normal `n`, and at `x = 1` (resp. `y = 1`) it is `(n + u) / sqrt 2` (resp. `v`).
+        let frames = std::array::from_fn(|f| {
+            let face = Face(f as u8);
+            let (c, a, b) = (
+                face_to_direction(&TangentWarp, face, 0.0, 0.0),
+                face_to_direction(&TangentWarp, face, 1.0, 0.0),
+                face_to_direction(&TangentWarp, face, 0.0, 1.0),
+            );
+            let r = core::f64::consts::SQRT_2;
+            [[c.x, c.y, c.z], [r * a.x - c.x, r * a.y - c.y, r * a.z - c.z], [r * b.x - c.x, r * b.y - c.y, r * b.z - c.z]]
+        });
+        GlobalGrid { n, radius_m, metric: Metric::cube_face(n, radius_m, (0, 0), n, n), tan_c, frames }
     }
 
     pub fn n(&self) -> usize {
@@ -67,7 +83,11 @@ impl GlobalGrid {
     /// The unit direction of the centre of cell `id`.
     pub fn direction(&self, id: u32) -> Vec3 {
         let (f, i, j) = self.split(id);
-        face_to_direction(&TangentWarp, Face(f), self.centre(i), self.centre(j))
+        let [n, u, v] = self.frames[usize::from(f)];
+        let (x, y) = (self.tan_c[i], self.tan_c[j]);
+        let (a, b, c) = (n[0] + x * u[0] + y * v[0], n[1] + x * u[1] + y * v[1], n[2] + x * u[2] + y * v[2]);
+        let s = 1.0 / libm::sqrt(a * a + b * b + c * c);
+        Vec3::new(a * s, b * s, c * s)
     }
 
     /// The area of cell `id` in square metres.
@@ -105,27 +125,38 @@ impl GlobalGrid {
         self.id(f2.0, a, b)
     }
 
-    /// The neighbours of `id` with the distance to each (great circle between the centres): the 8 of a cell inside a face, the axis ones across an edge.
-    pub fn neighbours(&self, id: u32) -> Vec<(u32, f64)> {
+    /// The neighbours of `id` (no distances): the 8 of a cell inside a face, the axis ones across an edge. Returns how many are in `out`.
+    pub fn neighbour_ids(&self, id: u32, out: &mut [u32; 8]) -> usize {
         let (f, i, j) = self.split(id);
-        let mut out = Vec::with_capacity(8);
-        let here = self.direction(id);
-        let dist = |q: u32| {
-            let d = self.direction(q);
-            let (dx, dy, dz) = (here.x - d.x, here.y - d.y, here.z - d.z);
-            let chord = libm::sqrt(dx * dx + dy * dy + dz * dz);
-            self.radius_m * 2.0 * libm::asin((0.5 * chord).min(1.0))
-        };
+        let mut k = 0;
         for (di, dj) in [(-1i64, 0i64), (1, 0), (0, -1), (0, 1)] {
-            out.push(self.axis_neighbour(id, di, dj));
+            out[k] = self.axis_neighbour(id, di, dj);
+            k += 1;
         }
         for (di, dj) in [(-1i64, -1i64), (1, -1), (-1, 1), (1, 1)] {
             let (ni, nj) = (i as i64 + di, j as i64 + dj);
             if ni >= 0 && nj >= 0 && (ni as usize) < self.n && (nj as usize) < self.n {
-                out.push(self.id(f, ni as usize, nj as usize));
+                out[k] = self.id(f, ni as usize, nj as usize);
+                k += 1;
             }
         }
-        out.into_iter().map(|q| (q, dist(q))).collect()
+        k
+    }
+
+    /// The great-circle distance from the direction `here` to the centre of cell `q`.
+    fn arc(&self, here: Vec3, q: u32) -> f64 {
+        let d = self.direction(q);
+        let (dx, dy, dz) = (here.x - d.x, here.y - d.y, here.z - d.z);
+        let chord = libm::sqrt(dx * dx + dy * dy + dz * dz);
+        self.radius_m * 2.0 * libm::asin((0.5 * chord).min(1.0))
+    }
+
+    /// The neighbours of `id` with the distance to each (great circle between the centres).
+    pub fn neighbours(&self, id: u32) -> Vec<(u32, f64)> {
+        let mut ids = [0u32; 8];
+        let k = self.neighbour_ids(id, &mut ids);
+        let here = self.direction(id);
+        ids[..k].iter().map(|&q| (q, self.arc(here, q))).collect()
     }
 
     /// Routes the whole planet: the priority flood from the `outlet` cells (the sea; `epsilon` over flats), the steepest receiver on the filled surface, and the true area accumulated in
@@ -159,7 +190,9 @@ impl GlobalGrid {
             }
             done[c as usize] = true;
             order.push(c);
-            for (q, _) in self.neighbours(c) {
+            let mut ids = [0u32; 8];
+            let k = self.neighbour_ids(c, &mut ids);
+            for &q in &ids[..k] {
                 if !done[q as usize] && filled[q as usize].is_infinite() {
                     filled[q as usize] = z[q as usize].max(filled[c as usize] + epsilon);
                     heap.push(Reverse((key(filled[q as usize]), q)));
@@ -174,7 +207,13 @@ impl GlobalGrid {
                 continue;
             }
             let mut best = (0.0f64, NONE);
-            for (q, d) in self.neighbours(c as u32) {
+            let (mut ids, here) = ([0u32; 8], self.direction(c as u32));
+            let k = self.neighbour_ids(c as u32, &mut ids);
+            for &q in &ids[..k] {
+                if filled[q as usize] >= filled[c] {
+                    continue;
+                }
+                let d = self.arc(here, q);
                 let s = (filled[c] - filled[q as usize]) / d;
                 if s > best.0 {
                     best = (s, q);
