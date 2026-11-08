@@ -6,8 +6,8 @@
 //! lattice's geometry and is the one interface consumers read (ADR 0089 decision 1).
 
 use crate::coast::CoastLattice;
-use crate::global::{fbm, hill_octaves, ridge_at, terrain, Terrain, MAX_ELEVATION_M, MIN_ELEVATION_M, SEA_LEVEL_C};
-use crate::height::layer_noise;
+use crate::global::{fbm, hill_octaves_with, ridge_at, terrain, Terrain, MAX_ELEVATION_M, MIN_ELEVATION_M, SEA_LEVEL_C};
+use crate::height::{layer_noise_t, turned_noise};
 use crate::shelf::ShelfProfile;
 use planet_core::cube::{direction_to_face, face_to_direction, TangentWarp};
 use planet_core::par::{self, Par};
@@ -557,7 +557,9 @@ impl ClassSource {
         } else {
             // On the mountain classes (blended by their weight) the band is x4.5 as high, ridged, and centred on its mean (GEN-098, SPIKE-101).
             let amp = hill_amplitude_for_k(k) * (1.0 + (MOUNTAIN_BAND_SCALE - 1.0) * wm);
-            let noise = wm * ridged_octaves(self.seed, &t) + (1.0 - wm) * hill_octaves(self.seed, &t) - MOUNTAIN_BAND_CENTRE * wm;
+            let turned = turned_noise();
+            let noise = wm * ridged_octaves(self.seed, &t, turned) + (1.0 - wm) * hill_octaves_with(self.seed, &t, turned)
+                - MOUNTAIN_BAND_CENTRE * wm;
             amp * noise * smoothstep(0.0, 0.1, t.land_depth)
         };
         // The centred band can be negative: land stays land (the shore of the continent stage is kept), at least 1 m above the sea where the base is.
@@ -587,10 +589,10 @@ pub const MOUNTAIN_BAND_CENTRE: f64 = 0.45;
 
 /// The mountain band's noise in `[0, 1]`: a ridged multifractal of five octaves at 16, 8, 4, 2 and 1 km on the warped direction, each octave weighted by the
 /// previous one's ridge so that the ridges stay connected (Musgrave).
-fn ridged_octaves(seed: u64, t: &Terrain) -> f64 {
+fn ridged_octaves(seed: u64, t: &Terrain, turned: bool) -> f64 {
     let (mut sum, mut amp, mut norm, mut freq, mut weight) = (0.0, 1.0, 0.0, 398.0, 1.0);
     for o in 0..5u32 {
-        let n = layer_noise(seed, LAYER_RIDGED, o, t.warped * freq);
+        let n = layer_noise_t(turned, seed, LAYER_RIDGED, o, t.warped * freq);
         let r = (1.0 - libm::fabs(n)).max(0.0);
         let sig = r * r * weight;
         sum += amp * sig;
@@ -600,6 +602,11 @@ fn ridged_octaves(seed: u64, t: &Terrain) -> f64 {
         freq *= 2.0;
     }
     sum / norm
+}
+
+/// The mountain band's noise in `[0, 1]` at the unit direction `d`, on the lattices turned per octave when `turned` (GEN-140).
+pub fn ridged_octaves_at(seed: u64, d: Vec3, turned: bool) -> f64 {
+    ridged_octaves(seed, &terrain(seed, d), turned)
 }
 
 /// The hill band's amplitude in metres for the untapered blended `k` (GEN-098).

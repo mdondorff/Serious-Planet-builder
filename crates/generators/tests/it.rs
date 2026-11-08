@@ -118,6 +118,8 @@ mod steep;
 mod terrain;
 #[path = "tile_min_height.rs"]
 mod tile_min_height;
+#[path = "turned_noise.rs"]
+mod turned_noise;
 #[path = "uplift.rs"]
 mod uplift;
 #[path = "water.rs"]

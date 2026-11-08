@@ -22,7 +22,9 @@ use crate::global::{
     read_direction, read_elevation_c1, read_elevation_c1_cached, LatticeSource, StencilCache, GLOBAL_VERSION, MAX_ELEVATION_M,
     MIN_ELEVATION_M, READER_C1_VERSION,
 };
-use crate::height::{layer_noise, layer_noise_bounds, HeightField};
+#[cfg(test)]
+use crate::height::layer_noise;
+use crate::height::{layer_noise_bounds_t, layer_noise_t, turned_noise, HeightField};
 use crate::terrain::scan_base;
 
 thread_local! {
@@ -155,6 +157,7 @@ fn crease_parts(seed: u64, dir: Vec3) -> (f64, f64) {
 /// [`crease_parts`] with an optional weight per octave (the crease band, GEN-109): an octave of weight 0 is not evaluated, one of weight `w` adds `w` times its term, and the
 /// normaliser stays the sum of every octave's amplitude, so a kept octave keeps its own amplitude. With `None`, or all weights 1, the bits are those of the plain sum.
 fn crease_parts_weighted(seed: u64, dir: Vec3, weights: Option<&[f64; OCTAVES as usize]>) -> (f64, f64) {
+    let turned = turned_noise();
     let (mut coarse, mut fine, mut amp, mut norm, mut freq) = (0.0, 0.0, 1.0, 0.0, BASE_FREQUENCY);
     for o in 0..OCTAVES {
         let w = weights.map_or(1.0, |w| w[o as usize]);
@@ -165,9 +168,9 @@ fn crease_parts_weighted(seed: u64, dir: Vec3, weights: Option<&[f64; OCTAVES as
             continue;
         }
         let term = if w == 1.0 {
-            amp * crease(layer_noise(seed, LAYER_CREASE, o, dir * freq))
+            amp * crease(layer_noise_t(turned, seed, LAYER_CREASE, o, dir * freq))
         } else {
-            w * amp * crease(layer_noise(seed, LAYER_CREASE, o, dir * freq))
+            w * amp * crease(layer_noise_t(turned, seed, LAYER_CREASE, o, dir * freq))
         };
         if o < CREASE_SPLIT {
             coarse += term;
@@ -583,10 +586,11 @@ impl HeightField for ErosionField<'_> {
     }
 
     fn climate_version_word(&self) -> u64 {
-        match &self.channels {
+        // The turned lattices of the creases (GEN-140) enter the word only while they are on.
+        crate::height::turned_noise_word(match &self.channels {
             Some(c) => planet_core::hash::mix64(crate::climate::climate_version_word() ^ crate::drivers::channel_word(c.identity())),
             None => crate::climate::climate_version_word(),
-        }
+        })
     }
 
     fn driver_channels(&self, dirs: &[Vec3]) -> Option<Vec<crate::drivers::ChannelSample>> {
@@ -753,13 +757,14 @@ impl HeightField for ErosionField<'_> {
         let (a_lo, a_hi) = (amplitude_m(blo, carve_lo), amplitude_m(bhi, carve_hi));
         let (fa_lo, fa_hi) = (amplitude_m(blo, f_lo), amplitude_m(bhi, f_hi));
         // The two parts of the crease sum, each from its octaves' noise bounds (over the band's octaves and weights when the band applies).
+        let turned = turned_noise();
         let crease_bounds = |weights: Option<&[f64; OCTAVES as usize]>| {
             let (mut clo_sum, mut chi_sum, mut flo_sum, mut fhi_sum, mut amp, mut norm, mut freq) =
                 (0.0, 0.0, 0.0, 0.0, 1.0, 0.0, BASE_FREQUENCY);
             for o in 0..OCTAVES {
                 let w = weights.map_or(1.0, |w| w[o as usize]);
                 if w != 0.0 {
-                    let (nlo, nhi) = layer_noise_bounds(self.seed, LAYER_CREASE, o, centre, angular_radius, freq);
+                    let (nlo, nhi) = layer_noise_bounds_t(turned, self.seed, LAYER_CREASE, o, centre, angular_radius, freq);
                     let (clo, chi) = crease_range(nlo.max(-1.0), nhi.min(1.0));
                     if o < CREASE_SPLIT {
                         clo_sum += w * amp * clo;

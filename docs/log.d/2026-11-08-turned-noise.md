@@ -1,0 +1,1 @@
+- 2026-11-08 turned-noise: the hill band, ridged mountain band and the crease noise can turn their lattice per octave behind a process switch (default off, no key moves); bounds in the turned frame (GEN-140, A2)
