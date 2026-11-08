@@ -1,7 +1,7 @@
 # SPIKE-105: architecture re-plan of terrain and hydrology (phase 1)
 
 Opened: 2026-11-08 (planner inbox #96; owner go for phase 1 only). Run on Opus.
-Status: closed 2026-11-08 (phase 2, inbox #97 and #98). Answer: option A, prototype first, no requirement cut; owner decisions D1-D8 in §9.1.
+Status: closed 2026-11-08 (phases 2 and 3, inbox #97 to #99). Answer: option A, conditional, prototype first against a written target with switch-to-B criteria (§13.1); owner decisions D1-D10 in §13.5 supersede §9.1.
 Question: how far are today's ADRs, constitution and M9 bake from the owner's firm requirements of 2026-11-07, and which of three routes closes the gap with the least patchwork: (A) evolve step by step, (B) fork or re-implement the core, (C) cut requirements?
 Why it matters: the erosion and basin chain was amended five times without a whole-chain design (SPIKE-104), and an external review recommends a hydrology-first, editable, hierarchical architecture. The planet bake (M9.2) would freeze the current design.
 Time box: phase 1 is one night, docs only (no sub-agents, no probes, no builds). Phase 2 (costs, risks, the vertical prototype, recommendation) starts on the planner's next entry.
@@ -913,3 +913,19 @@ Draft contracts, the questions the reviewers asked:
 | 2 | prototype: domains from an erosion-grid routing within H0 regions, continued rounds, border gates | prototype: sampler composition (K8), lakes on the water field | measuring the gates as they land; edit-case fixtures E1-E6 |
 
 Owner attention: D1-D10 once; the A3 ADRs; nothing else unless an architecture gate fails.
+
+## 14. Another external review round?
+
+**Recommendation: yes, one more round, on the A3 target document, before the prototype is built against it. A further round only if the A/B gate is close.**
+
+| Round | Value | Cost | Advice |
+|---|---|---|---|
+| On A3 (the target and data contracts) | high: both reviews found design gaps that the code mapping did not (the F2 reading, basin identity, channel geometry as a second elevation source). A3 is where such gaps are cheapest to fix, before lanes build on it | the owner forwards one document and pastes one answer; the planner folds it in; about half a day, no lane stops | **do it** |
+| On the prototype results at the A/B gate | moderate: the gates are numeric and the reviewer lacks the code; useful if the result sits on a switch criterion | as above, plus the measurement tables | **only if close** |
+| Now, on this phase 3 | low: the same points would return; nothing new is built yet | | **no** |
+
+What to give the reviewer for A3: the A3 document itself; §8 and §12 of this file (the measurements, with the noise-floor controls); the current code of `bake/carve.rs` and `bake/route.rs` as excerpts, so the review of the solver can be checked against the real kernels (the two reviews so far did not see code). Questions to ask:
+1. Is the outer iteration's contract (continued rounds, fixed count, a wall between domains) sound for a chaotic carve, or is another domain strategy better?
+2. Are the basin and segment identity rules stable enough for gameplay references and for undo?
+3. Are the gates of §13.3 sufficient to distinguish a sound domain solver from a reproducible but wrong one?
+4. Is anything in the sampler's composition or the canonical forms inconsistent with deterministic re-solves?
