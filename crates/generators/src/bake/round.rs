@@ -3,10 +3,9 @@
 //! Behind a switch: nothing in pass 1 or pass 2 calls it.
 
 use super::carve::{distance, CarveParams, BREACH_MIN_M};
-use super::route::{catchment_roots, route_rules, RoundRules, Routing, NONE};
-use super::Grid;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Instant;
+use super::route::{catchment_roots, route_rules, Routing, NONE};
+use super::{assert_finite, Grid};
+use planet_core::par::{self, Par};
 
 /// What a catchment's round reads (A3 section 6.5, the catchment-round key): its members in the region's topological order (outlet first), the receiver of every member as a
 /// position in that list, `A_d`, the distance to the receiver, the taper of the uplift, whether the receiver is an outlet of the region, and the surface at the start of the round.
@@ -125,9 +124,6 @@ pub struct RoundReport {
 
 #[derive(Clone, Debug, Default)]
 pub struct RoundStats {
-    pub route_s: f64,
-    pub cut_s: f64,
-    pub carve_s: f64,
     pub catchments: usize,
     pub largest: usize,
     /// Cells in catchments of at least 1,000 cells.
@@ -143,70 +139,36 @@ fn taper_of(z: &[f64], p: &CarveParams) -> Vec<f32> {
     }
 }
 
-/// `rounds` rounds of `p.reroute_every` steps on `z`: each round one region-wide routing under `rules`, then every catchment's round from its inputs on `threads` threads
-/// (the largest first, a shared queue). `p.steps` is ignored; `p.reroute_every` is the steps of a round. Equal to `carve` with `rules`, `steps = rounds * reroute_every` and the
-/// region schedule, bit for bit. Not for a grid with a rock layer, a class factor or a runoff weight (the prototype's solver has none yet).
+/// `rounds` rounds of `p.reroute_every` steps on `z` (`p.steps` is `rounds * p.reroute_every`): each round one region-wide routing under `p.round_rules`, then every catchment's round
+/// from its inputs on `par` (the largest first; CON-04). Equal to `carve` with the same `p`, bit for bit. The taper of the uplift is taken from the heights at the start of the call:
+/// one call is one carve. Not for a grid with a rock layer, a class factor or a runoff weight (the prototype's solver has none yet).
 #[allow(clippy::too_many_arguments)]
-pub fn solve_rounds(
-    grid: &Grid,
-    z: &mut [f64],
-    outlet: &[bool],
-    p: &CarveParams,
-    rules: RoundRules,
-    rounds: usize,
-    threads: usize,
-    seed: u64,
-) -> RoundReport {
-    assert!(threads >= 1 && p.reroute_every > 0 && rounds > 0, "a solve has threads, steps per round and rounds");
+pub fn solve_rounds(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, rounds: usize, par: &dyn Par, seed: u64) -> RoundReport {
+    assert!(p.reroute_every > 0 && rounds > 0, "a solve has steps per round and rounds");
+    assert_eq!(p.steps, rounds * p.reroute_every, "the steps of the carve are the rounds times the steps of a round");
     assert_eq!(z.len(), grid.len(), "one height per cell");
     assert!(p.max_area == 0.0, "the round solver does not cap the area");
+    assert_finite("the heights", z);
     let taper = taper_of(z, p);
     let mut report = RoundReport::default();
     for _ in 0..rounds {
-        let t0 = Instant::now();
-        let r = route_rules(grid, z, outlet, p.epsilon, seed, p.max_area, None, rules);
-        let route_s = t0.elapsed().as_secs_f64();
-        let t1 = Instant::now();
+        let r = route_rules(grid, z, outlet, p.epsilon, seed, p.max_area, None, p.round_rules);
         let cuts = cut(&r);
-        let cut_s = t1.elapsed().as_secs_f64();
-        let t2 = Instant::now();
-        let mut queue: Vec<usize> = (0..cuts.members.len()).collect();
+        // A lone outlet keeps its height, so it is not queued.
+        let mut queue: Vec<usize> = (0..cuts.members.len()).filter(|&k| cuts.members[k].len() > 1).collect();
         queue.sort_by_key(|&k| (std::cmp::Reverse(cuts.members[k].len()), k));
-        let next = AtomicUsize::new(0);
         let zr: &[f64] = z;
-        let done: Vec<Vec<(usize, Vec<f64>)>> = std::thread::scope(|s| {
-            let hs: Vec<_> = (0..threads)
-                .map(|_| {
-                    s.spawn(|| {
-                        let mut out = Vec::new();
-                        loop {
-                            let q = next.fetch_add(1, Ordering::Relaxed);
-                            if q >= queue.len() {
-                                break;
-                            }
-                            let k = queue[q];
-                            if cuts.members[k].len() == 1 {
-                                continue; // a lone outlet keeps its height
-                            }
-                            let mut inp = gather(grid, zr, outlet, &r, &cuts, &taper, k);
-                            catchment_round(&mut inp, p, p.reroute_every);
-                            out.push((k, inp.z));
-                        }
-                        out
-                    })
-                })
-                .collect();
-            hs.into_iter().map(|h| h.join().expect("a catchment worker")).collect()
+        let done = par::map(par, queue.len(), &|q| {
+            let mut inp = gather(grid, zr, outlet, &r, &cuts, &taper, queue[q]);
+            catchment_round(&mut inp, p, p.reroute_every);
+            inp.z
         });
-        for (k, zk) in done.into_iter().flatten() {
+        for (&k, zk) in queue.iter().zip(done) {
             for (&c, v) in cuts.members[k].iter().zip(zk) {
                 z[c as usize] = v;
             }
         }
         report.rounds.push(RoundStats {
-            route_s,
-            cut_s,
-            carve_s: t2.elapsed().as_secs_f64(),
             catchments: cuts.members.len(),
             largest: cuts.members.iter().map(Vec::len).max().unwrap_or(0),
             in_large: cuts.members.iter().filter(|m| m.len() >= 1000).map(Vec::len).sum(),

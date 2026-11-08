@@ -41,6 +41,18 @@ fn params(rounds: usize) -> CarveParams {
     CarveParams { steps: rounds * 5, reroute_every: 5, round_rules: RoundRules::ROUND, ..CarveParams::default() }
 }
 
+fn variants() -> Vec<(&'static str, CarveParams)> {
+    let base = params(4);
+    vec![
+        ("defaults", base),
+        ("pits filled", CarveParams { keep_pits: false, ..base }),
+        ("incise only", CarveParams { incise_only: true, keep_pits: false, ..base }),
+        ("height-scaled breach", CarveParams { breach_height_scale_m: 400.0, breach_max_m: 300.0, ..base }),
+        ("no taper", CarveParams { uplift_taper_m: 0.0, ..base }),
+        ("no uplift", CarveParams { u_over_k: 0.0, ..base }),
+    ]
+}
+
 // spec: GEN-142
 #[test]
 fn the_round_solver_is_the_whole_region_carve_on_any_thread_count() {
@@ -48,15 +60,20 @@ fn the_round_solver_is_the_whole_region_carve_on_any_thread_count() {
         for terraced in [false, true] {
             let z0 = terrain(3, terraced);
             let outlet = g.outlets(&z0, 0.0);
-            let p = params(4);
-            let mut want = z0.clone();
-            carve(&g, &mut want, &outlet, &p, None, 3);
-            for threads in [1usize, 3, 8] {
-                let mut got = z0.clone();
-                let rep = solve_rounds(&g, &mut got, &outlet, &p, RoundRules::ROUND, 4, threads, 3);
-                assert_eq!(rep.rounds.len(), 4);
-                let differ = got.iter().zip(&want).filter(|(a, b)| a.to_bits() != b.to_bits()).count();
-                assert_eq!(differ, 0, "G-ROUND: {differ} cells differ ({name}, terraced {terraced}, {threads} threads)");
+            for (vname, p) in variants() {
+                let mut want = z0.clone();
+                carve(&g, &mut want, &outlet, &p, None, 3);
+                if vname == "defaults" {
+                    let moved = want.iter().zip(&z0).filter(|(a, b)| a != b).count();
+                    assert!(moved > N * N / 4, "the fixture carve moves the land ({moved} cells)");
+                }
+                for threads in [1usize, 3, 8] {
+                    let mut got = z0.clone();
+                    let rep = solve_rounds(&g, &mut got, &outlet, &p, 4, &threads, 3);
+                    assert_eq!(rep.rounds.len(), 4);
+                    let differ = got.iter().zip(&want).filter(|(a, b)| a.to_bits() != b.to_bits()).count();
+                    assert_eq!(differ, 0, "G-ROUND: {differ} cells differ ({name}, {vname}, terraced {terraced}, {threads} threads)");
+                }
             }
         }
     }
@@ -72,22 +89,30 @@ fn a_catchment_round_reads_only_its_key_inputs() {
         let r = route_rules(&g, &z0, &outlet, p.epsilon, 5, 0.0, None, RoundRules::ROUND);
         let cuts = cut(&r);
         let taper: Vec<f32> = z0.iter().map(|h| planet_core::smoothstep(0.0, p.uplift_taper_m, h - p.sea_level) as f32).collect();
-        // The region round, the whole-window loops of carve on this one routing.
+        // The region round: carve on the same surface (one round, the same routing).
         let mut want = z0.clone();
         carve(&g, &mut want, &outlet, &p, None, 5);
+        // The catchments in the reverse of the region order, each from inputs gathered from a surface in which every cell of another catchment is replaced by garbage.
+        let mut got = z0.clone();
         let mut checked = 0;
-        for k in 0..cuts.members.len() {
-            let mut inp = gather(&g, &z0, &outlet, &r, &cuts, &taper, k);
-            // The inputs hold nothing else: a copy built from them alone, in a fresh value, gives the same bits.
-            let mut copy = inp.clone();
+        for k in (0..cuts.members.len()).rev() {
+            let mut own = vec![false; z0.len()];
+            cuts.members[k].iter().for_each(|&c| own[c as usize] = true);
+            let poisoned: Vec<f64> = z0.iter().enumerate().map(|(c, &v)| if own[c] { v } else { v * -7.5 + 1234.5 }).collect();
+            let mut inp = gather(&g, &poisoned, &outlet, &r, &cuts, &taper, k);
+            assert_eq!(
+                inp,
+                gather(&g, &z0, &outlet, &r, &cuts, &taper, k),
+                "the inputs of catchment {k} hold nothing outside its members ({name})"
+            );
             catchment_round(&mut inp, &p, 5);
-            catchment_round(&mut copy, &p, 5);
-            assert_eq!(inp, copy);
             for (&c, v) in cuts.members[k].iter().zip(&inp.z) {
-                assert_eq!(v.to_bits(), want[c as usize].to_bits(), "G-LOCAL: cell {c} of catchment {k} ({name})");
+                got[c as usize] = *v;
             }
             checked += cuts.members[k].len();
         }
         assert_eq!(checked, N * N, "every cell is in one catchment");
+        let differ = got.iter().zip(&want).filter(|(a, b)| a.to_bits() != b.to_bits()).count();
+        assert_eq!(differ, 0, "G-LOCAL: {differ} cells differ ({name})");
     }
 }

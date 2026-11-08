@@ -6,8 +6,8 @@ use planet_generators::bake::carve::{carve, CarveParams};
 use planet_generators::bake::face::FaceSpec;
 use planet_generators::bake::inputs::BakeInputs;
 use planet_generators::bake::metric::Metric;
-use planet_generators::bake::round::solve_rounds;
-use planet_generators::bake::route::RoundRules;
+use planet_generators::bake::round::{cut, solve_rounds};
+use planet_generators::bake::route::{route_rules, RoundRules};
 use planet_generators::bake::Grid;
 use std::time::Instant;
 
@@ -57,28 +57,28 @@ fn main() {
 
     let mut one = z0.clone();
     let t = Instant::now();
-    let rep = solve_rounds(&grid, &mut one, &outlet, &p, RoundRules::ROUND, 4, 1, stream);
+    let rep = solve_rounds(&grid, &mut one, &outlet, &p, 4, &1usize, stream);
     println!("solver, 1 thread: {:.2} s", t.elapsed().as_secs_f64());
     for (r, s) in rep.rounds.iter().enumerate() {
         println!(
-            "  round {}: route {:.2} s, cut {:.2} s, carve {:.2} s; {} catchments, largest {} cells, {} cells in catchments of 1,000 or more",
+            "  round {}: {} catchments, largest {} cells, {} cells in catchments of 1,000 or more",
             r + 1,
-            s.route_s,
-            s.cut_s,
-            s.carve_s,
             s.catchments,
             s.largest,
             s.in_large
         );
     }
+    // The cost split of the first round: the routing and the cut.
+    let t = Instant::now();
+    let r = route_rules(&grid, &z0, &outlet, p.epsilon, stream, 0.0, None, RoundRules::ROUND);
+    let route_s = t.elapsed().as_secs_f64();
+    let t = Instant::now();
+    let _ = cut(&r);
+    println!("  first round: routing {route_s:.2} s, cut {:.2} s", t.elapsed().as_secs_f64());
     let mut many = z0.clone();
     let t = Instant::now();
-    let rep8 = solve_rounds(&grid, &mut many, &outlet, &p, RoundRules::ROUND, 4, threads, stream);
-    println!(
-        "solver, {threads} threads: {:.2} s (carve {:.2} s)",
-        t.elapsed().as_secs_f64(),
-        rep8.rounds.iter().map(|s| s.carve_s).sum::<f64>()
-    );
+    let _ = solve_rounds(&grid, &mut many, &outlet, &p, 4, &threads, stream);
+    println!("solver, {threads} threads: {:.2} s", t.elapsed().as_secs_f64());
     let det = one.iter().zip(&many).filter(|(a, b)| a.to_bits() != b.to_bits()).count();
     println!("G-DET: 1 thread against {threads} threads, {det} cells differ");
     if !skip_ref {
