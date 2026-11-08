@@ -193,4 +193,105 @@ Identities are **pure functions of the current surface**, so a from-scratch buil
 
 A later item kind sets constraints on K6's input (a basin of class intentional, a fixed channel), keyed like any item below erosion (§7.1).
 
+## 6. The erosion solver: regions, catchments and rounds
+
+The reviewers asked for the outer iteration's contract. Evidence: S105 F2 and F4 (a catchment carved with its own routing differs by 12.8 m rms at best) and F7 below. The contract replaces "watershed domains" as first proposed (S105 §6, §13.4).
+
+### 6.1 Scopes
+
+| Unit | Definition | Lifetime |
+|---|---|---|
+| **Region** | a connected landmass with its sea outlets, from H0. Border = the sea: no artificial cut. A landmass larger than the solver's memory is split at H0 divides, as a fallback **[gate G-SCALE]** | the world build's scope of one routing |
+| **Round** | one routing of the region's surface and the carve steps that follow on it; today's re-route interval (5 steps) | a fixed part of the `SimulationProfile` (§8) |
+| **Catchment** | one D8 tree of the round's routing (all cells that drain through one outlet) | one round |
+
+### 6.2 One round (the solver's contract)
+
+Given the region's surface at the start of the round:
+1. **Route once, region-wide:** flood, jittered D8 receivers, MFD area over the true cell metric (§4.2), runoff weighted, with the §6.4 rules. Cost: about 85-90 % of a round (F7).
+2. Partition the cells into catchments by the receiver chains.
+3. **Per catchment, in any order and on any thread:** the breach and the implicit sweeps of the round's steps, on the shared routing.
+4. Assemble. The next round routes the new surface.
+
+**Exactness (F7, measured):** a round computed this way is bit-identical to the whole-window carve (0 cells differ, forward, reverse and 4-thread catchment orders, F2's window): inside a round a sweep touches a cell and its receiver only, and the area is computed once globally.
+
+Answers to the reviewers' five questions:
+| Question | Answer |
+|---|---|
+| What is iterated? | A continued surface: each round starts from the previous round's result. A round is the carve's re-route interval. There is no fresh restart (F4: no better than one round) |
+| Stopping rule? | A fixed round count in the profile (§8), part of the keys. There is no fixed-point iteration to converge: the carve is a transient of fixed length (ADR 0103 amendment) |
+| If it does not stabilise? | Nothing to stabilise: the rounds reproduce the whole-region carve exactly (F7). Whether the transient looks right is a separate question for the gates (§12) |
+| How are boundaries treated? | Catchment borders are re-derived from the routing every round, so divides move between rounds, as in the whole-region carve. Inside a round they are exact separators. The region's border is the sea |
+| What does a border guarantee? | Inside a round no cell of a catchment reads or writes another catchment (exact, F7). Across rounds, nothing is frozen |
+
+- F2 and F4 tested a **different** solver: each catchment with its own routing and walls. F4's error came from MFD area crossing catchment borders and from the flood order (below). The carve itself is chaotic, so a pointwise comparison across seeds is meaningless (F4: 72 m rms between jitter seeds), but the round solver has no such error against the whole-region carve at all.
+
+### 6.3 Where the coupling sits
+
+F7 measured what couples catchments in a routing, and the contract removes each coupling or names it:
+
+| Coupling | Measured (F7, catchment alone against the window routing) | Contract |
+|---|---|---|
+| **MFD area crosses D8 borders** (a cell shares its area with a lower neighbour in another catchment) | 24k-52k cells of a catchment differ in area, max ratio up to 20 and more | clipped: a catchment's MFD shares only among its own cells; a share towards a lower neighbour in another catchment goes to the cell's own receiver. A small change to the kernel (§6.4). Catchments become closed for area |
+| **The flood's tie order** (FIFO `flat` queue, global heap order on equal levels) | after round 1: 3 to 182 cells of different receivers, up to 3,191 filled cells differing, by up to 0.245 m | canonical: the flood orders its visits by (level, global cell id), so a catchment's flood does not depend on other catchments' cells **[gate G-LOCAL]** |
+| **Region border** | none for a landmass (the border is the sea) | fallback only (§6.1) |
+
+### 6.4 The two kernel changes
+
+Both change the bake's output slightly and carry a kernel version bump:
+1. MFD clipped to the D8 catchment (`route.rs`).
+2. Flood tie rule by (level, global cell id) (`flood.rs`), replacing the FIFO order; the cost on flats is measured **[gate G-SCALE]**.
+
+Result: for any set of catchments closed under the routing, its round depends only on its own cells' surface at the round start and its drivers. **[gate G-LOCAL]** verifies it.
+
+### 6.5 Re-solve of an edit (the incremental path)
+
+- The world build and an edit re-solve run the same rounds; the difference is memoisation.
+- Each catchment-round is a pure function: `result = f(catchment's cells at round start, drivers on them, profile, kernel versions)`. Its key is a hash of those inputs.
+- **The re-solve is memoisation by that key:** a catchment-round whose key exists is read back; one whose key is new is computed. An edit changes keys only where its inputs changed.
+- Each round's surface is kept as a bake record (§10), so a clean catchment's start-of-round state is readable.
+- Divide movement enlarges the set by itself: a cell that joins another catchment changes that catchment's inputs at the next round. The closure grows only where the routing actually changes **[gate G-INC]**.
+- A round's region-wide routing is the cost that remains (F7: 85-90 %). In a re-solve it runs only over the union of the dirty catchments (closed under drainage), which equals the region-wide routing there by §6.3 **[gate G-LOCAL]**. A level-2 job's memory is that union's, at about 64 bytes a cell: the largest catchment (5.9e6 km^2, F6) is about 0.6 GB.
+- **The equality that matters:** a re-solve equals a from-scratch build of the edited definition, because both are the same memoised function.
+
+### 6.6 Downstream regions and K7
+
+- K6 (H1) reads the final round's routing of the region. K7's tile refinement reads K5 and K6 of its region and is keyed per tile as today.
+- K7 stays per tile with its halo (GEN-101): it does not route globally; it reads the channel levels as boundary conditions (§3.3).
+
+## 7. Edits, order and dependencies
+
+### 7.1 The layer order
+
+| Position | Items | Effect |
+|---|---|---|
+| Below erosion | height items that are landforms (sculpt, raise, lower, landform stamps); driver items (lithology, uplift, rainfall and temperature regions, class paint) | applied at K2 and K3, before H0, K5, K6 and K7; erosion and hydrology respond |
+| Above erosion | constructed features: roads, flattened plots, cuttings, built objects | `A(d)` in §3.1; applied after the surface, as ADR 0007's stack does today; exact, never eroded (ADR 0089 point 11's override stage) |
+
+- D4 of S105. Amends ADR 0007 and ADR 0066 point 4: "authored layers are stages after the base" holds for the above-erosion layers only.
+- `B` stays one function: `B(d) = C1(lattice) + sum of below-erosion height items at d` (a read-time term; the lattice is not re-baked). The item's footprint re-keys what reads `B`.
+
+### 7.2 Keys and dependencies
+
+- Stage keys (ADR 0006) carry everything. New keys:
+  - a catchment-round key (§6.5);
+  - a K6 key per region, from its final round;
+  - a K7 tile key folding the local inputs of its window.
+- **Reach follows the routing, not a radius:** the dirty set of an edit is what §6.5 finds by keys. ADR 0066 point 1's radius bound applies to above-erosion items only.
+- Invalidation of the runtime tiles: K7 tiles whose window intersects a changed catchment, and K8 tiles above them (ADR 0072's refresh path).
+
+### 7.3 Propagation end
+
+A catchment-round is recomputed exactly when its key changes. There is no tolerance test ("quantised to zero" is not a stopping rule). The inputs are the canonical stored forms (§9). A threshold crossing or a spill inside a catchment is a change of its output and flows into the next round's keys. Downstream catchments are affected through their inputs only (divide movement, and the routing's area via §6.3's clipped MFD).
+
+### 7.4 Transactions
+
+- A commit is a set of keys: the K5 rounds, K6, K7 and materials of the dirty set. The runtime keeps drawing the previous commit until the new one's tiles are ready (CON-22, ADR 0072).
+- A background result for a superseded commit is dropped by key (ADR 0072 point 3).
+
+### 7.5 Limits
+
+- Game mode (R1b): an edit whose dirty set exceeds a budget is refused or deferred to a batch.
+- Undo removes the item: its keys are the earlier ones, so the earlier results are read back; no reverse simulation.
+
 <!-- next -->
