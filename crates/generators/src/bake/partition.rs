@@ -16,7 +16,7 @@ use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
 use std::sync::Arc;
 
-/// The opposite of each neighbour direction (`NEIGHBOURS`).
+/// The opposite of each neighbour direction (`NEIGHBOURS`) on a plane grid.
 const OPPOSITE: [usize; 8] = [1, 0, 3, 2, 7, 6, 5, 4];
 
 /// What the partitioned route did.
@@ -302,6 +302,15 @@ pub fn partitioned_route(
         let slope = (filled[p] - filled[q]) / grid.distance_at(p, d);
         (slope > 0.0 && !(clip && root[q] != root[p])).then(|| libm::pow(slope, MFD_EXPONENT))
     };
+    // The direction in which `p` reaches `q`, given that `q` reaches `p` in `d`: the opposite one on a plane; across a cube edge the faces are turned, so it is looked up.
+    let cube = grid.is_cube();
+    let slot = |p: usize, q: usize, d: usize| -> usize {
+        if cube {
+            (0..8).find(|&e| grid.neighbour(p, e) == Some(q)).expect("a neighbour reaches back")
+        } else {
+            OPPOSITE[d]
+        }
+    };
     let mut sum = vec![0.0f64; n];
     for p in 0..n {
         if outlet[p] {
@@ -321,7 +330,7 @@ pub fn partitioned_route(
     for q in 0..n {
         for d in 0..8 {
             if let Some(p) = grid.neighbour(q, d) {
-                if !outlet[p] && sum[p] > 0.0 && passes(p, OPPOSITE[d], q).is_some() {
+                if !outlet[p] && sum[p] > 0.0 && passes(p, slot(p, q, d), q).is_some() {
                     pending[q] += 1;
                 }
             }
@@ -346,7 +355,7 @@ pub fn partitioned_route(
                 for d in 0..8 {
                     if let Some(p) = grid.neighbour(q, d) {
                         if !outlet[p] && sum[p] > 0.0 {
-                            if let Some(w) = passes(p, OPPOSITE[d], q) {
+                            if let Some(w) = passes(p, slot(p, q, d), q) {
                                 donors.push((p, w));
                             }
                         }

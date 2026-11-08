@@ -103,7 +103,7 @@ impl GlobalGrid {
     }
 
     /// The axis neighbour of `id` in direction `(di, dj)`, across a cube edge when it leaves the face.
-    fn axis_neighbour(&self, id: u32, di: i64, dj: i64) -> u32 {
+    pub(super) fn axis_neighbour(&self, id: u32, di: i64, dj: i64) -> u32 {
         let (f, i, j) = self.split(id);
         let (ni, nj) = (i as i64 + di, j as i64 + dj);
         if ni >= 0 && nj >= 0 && (ni as usize) < self.n && (nj as usize) < self.n {
@@ -145,7 +145,7 @@ impl GlobalGrid {
     }
 
     /// The great-circle distance from the direction `here` to the centre of cell `q`.
-    fn arc(&self, here: Vec3, q: u32) -> f64 {
+    pub(super) fn arc(&self, here: Vec3, q: u32) -> f64 {
         let d = self.direction(q);
         let (dx, dy, dz) = (here.x - d.x, here.y - d.y, here.z - d.z);
         let chord = libm::sqrt(dx * dx + dy * dy + dz * dz);
