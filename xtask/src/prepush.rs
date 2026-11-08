@@ -194,6 +194,7 @@ pub fn require_committed(root: &Path) -> Res {
 
 pub fn run(root: &Path) -> Res {
     require_committed(root)?;
+    crate::worktrees::warn_if_crowded(root);
     let changed = testcmd::changed_paths(root);
     let triggers = golden_triggers(&changed);
     let with_gpu = !triggers.is_empty();

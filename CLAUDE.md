@@ -15,27 +15,27 @@ Working files: `docs/status.md` (forward state only: waiting for the owner, the 
 - `cargo xtask test fast`: tier A for changed crates (<= 20 s; owner, 2026-10-16)
 - `cargo xtask test`: tiers A + B on the software adapter
 - `cargo xtask test gpu`: tier C goldens and debug views
-- `cargo xtask test gpu --real`: the same on the discrete GPU. Run it yourself whenever real-GPU evidence is useful; it needs no owner confirmation (owner, 2026-10-12), but never during an architect's perf window. Golden candidates it produces go through `golden-review` (ADR 0017) like any other.
+- `cargo xtask test gpu --real`: the same on the discrete GPU. Run it yourself when real-GPU evidence helps, no owner confirmation (owner, 2026-10-12), never during an architect's perf window. Its golden candidates go through `golden-review` (ADR 0017).
 - `cargo xtask spec-lint`: trace IDs, tiers, requirement coverage
 - `cargo xtask accept <milestone>`: milestone acceptance
 - `cargo xtask repro <bundle>`: replay a repro bundle
 - `cargo xtask golden-review [--proposal <file>] [--extra <dir>]... [--apply]`: classify golden candidates under ADR 0017 (the `golden-review` skill)
-- `cargo xtask perf`: Rasierklinge only. The harness's readiness gate (ADR 0020) measures the machine and refuses when it is not ready; perf runs need the architect's authorization: the architect coordinates the window, and a coder session started in the native Claude UI runs it on the architect's go (owner, 2026-10-16; the architect's VS Code-terminal session measures about 1.4x slower per thread). Coders never start one on their own. `--machine-ready` is the owner's override of a failed gate
+- `cargo xtask perf`: Rasierklinge only. The readiness gate (ADR 0020) refuses when the machine is not ready; perf runs need the architect's authorization: the architect coordinates the window, and a coder session started in the native Claude UI runs it on the architect's go (owner, 2026-10-16; the architect's VS Code-terminal session measures about 1.4x slower per thread). Coders never start one on their own. `--machine-ready` is the owner's override of a failed gate
 
-Until an xtask command exists, create it in `xtask/` rather than writing a script. The shell is Git Bash on Windows; keep commands portable and never add `.sh` or `.ps1` files to the repo.
+Until an xtask command exists, create it in `xtask/`, not a script. The shell is Git Bash on Windows; keep commands portable, never add `.sh` or `.ps1` files.
 
 ## How to work
-1. Pick up work as an OpenSpec change (`openspec/changes/<id>/`): proposal, design, tasks, spec deltas. Keep changes small (one subsystem, one milestone step).
+1. Pick up work as an OpenSpec change (`openspec/changes/<id>/`): proposal, design, tasks, spec deltas. Keep changes small (one subsystem, one step).
 2. For each task: write the failing test at the cheapest tier that can falsify it, then implement. Every test cites its requirement ID (`// spec: COORD-003`).
 3. Run the `numerics-reviewer` agent for changes in `core`, `generators` or shaders, and the `spec-guardian` agent before archiving a change.
-4. Run the `verifier` agent before declaring any task done. Fix what it finds; don't argue with it.
+4. Run the `verifier` agent before declaring any task done. Fix what it finds.
 5. Archive the change in OpenSpec when all its requirements pass; in the same PR delete the archived change's `design.md` and `tasks.md` (keep `proposal.md` and the spec deltas; ADR 0055). Then add a log fragment `docs/log.d/<YYYY-MM-DD>-<id>.md` holding one line (never edit `docs/log.md`; `cargo xtask log` prints both).
 6. A new decision → `/adr`. A time-boxed experiment → `/spike`. A surprise or a corrected assumption → `/learning`. How a decision was built goes in the change's design notes, not in a new ADR; write an ADR only for a new decision or a departure from an accepted one (ADR 0055).
 
 ## Writing (ADR 0055)
 Specs, ADRs and working files are read by agents and the owner. Write definitions, not narration:
 - one statement per line or bullet; numbers in tables;
-- no conversational asides, no "we" or "I"; who decided goes on the status line, not in the prose;
+- no asides, no "we" or "I"; who decided goes on the status line;
 - an ADR is at most about one page (Context up to 5 bullets, Decision as numbered one- or two-line points, Consequences); the current value of a number lives in the spec, not the ADR.
 
 ## Rules that are easy to break
@@ -43,22 +43,24 @@ Specs, ADRs and working files are read by agents and the owner. Write definition
 - f64 on the CPU, tile-local or camera-relative f32 on the GPU; no planet-radius values in shaders (CON-11).
 - `libm` for transcendentals in generator code; no thread-count-dependent results (CON-14).
 - Failure output must be actionable: numeric deltas, tile IDs, diff images in `target/review/`.
-- Bless goldens only through the `golden-review` skill's policy (ADR 0017): it auto-blesses rounding noise (also on lit, sky and water, ADR 0096) and declared changes, per adapter (ADR 0061), and escalates everything else to the owner's `/bless`. Never copy a candidate into `tests/goldens/` by hand.
+- Bless goldens only through the `golden-review` skill's policy (ADR 0017): it auto-blesses rounding noise (also on lit, sky and water, ADR 0096) and declared changes per adapter (ADR 0061), and escalates the rest to the owner's `/bless`. Never copy a candidate into `tests/goldens/` by hand.
 - Never weaken, skip or delete a test to make a build green. Quarantine only with a tracking entry in `docs/status.md`.
 
 ## Git
-- One branch per OpenSpec change (`change/<id>`). Small commits with clear messages.
-- Push the branch, open a PR with `gh pr create`. Merge it yourself (squash) only when CI is green on Windows and Linux and the verifier passed. A docs-only PR (only docs/, openspec/, .claude/, root `*.md`, `spikes/**/results/**`, `spikes/README.md`) runs the light `docs` check (spec-lint) instead and needs only it green (owner, 2026-10-16).
+- One branch per OpenSpec change (`change/<id>`). Small commits.
+- Push the branch, open a PR with `gh pr create`. Merge it yourself (squash) only when CI is green on Windows and Linux and the verifier passed. A docs-only PR (only docs/, openspec/, .claude/, root `*.md`, `spikes/**/results/**`, `spikes/README.md`) runs the light `docs` check (spec-lint) and needs only it green (owner, 2026-10-16).
 - Before every push to a PR branch run `cargo xtask prepush` (check, test fast, and test gpu when the diff touches render, shaders or another golden-producing crate), while waiting is cheap. Lavapipe-only golden differences stay CI's job (owner, 2026-10-19).
-- After every push to a PR, start `gh pr checks <n> --watch` as a background command and act on its result (fix a failure, or verify and merge). Never end a turn with CI pending and no such watch running (owner, 2026-10-18).
-- Never force-push, never rewrite `main`'s history, never commit secrets or large binaries (goldens are small PNGs; anything over 1 MB needs an ADR).
+- After every push to a PR, start `gh pr checks <n> --watch` as a background command and act on its result (fix a failure, or verify and merge). Never end a turn with CI pending and no watch running (owner, 2026-10-18).
+- Worktrees only under `.claude/worktrees/`, never inside `target/` or a scratchpad. Remove yours once its PR is merged (`cargo xtask worktrees --prune`).
+- Temp output only under `target/` (xtask sets `TMP` there). Prepush and bake refuse below 20 GB free (owner, 2026-11-08).
+- Never force-push, never rewrite `main`'s history, never commit secrets or large binaries (goldens are small PNGs; over 1 MB needs an ADR).
 
 ## When to stop and report
 Write a stop report in `docs/status.md` (what was done, what is blocked, what you need) and stop when:
 - a test can't be made deterministic;
-- a decision is needed that no ADR or spec covers **and** it is hard to reverse (draft the ADR as "proposed" first). Easy-to-reverse decisions: draft a "proposed" ADR and keep going on it. Proposed ADRs from the background report's "decide now" list may be built on before the owner accepts them;
+- a decision is needed that no ADR or spec covers **and** it is hard to reverse (draft the ADR as "proposed" first). Easy-to-reverse decisions: draft a "proposed" ADR and keep going. Proposed ADRs from the background report's "decide now" list may be built on before acceptance;
 - golden images are waiting for blessing and further work depends on them;
-- a performance measurement is needed on Rasierklinge: ask the architect session for a perf window (it authorizes the window and names who runs it; the harness's gate decides); do not run `cargo xtask perf` without that authorization (correctness runs with `test gpu --real` do not count as measurements);
+- a performance measurement is needed on Rasierklinge: ask the architect session for a perf window (it authorizes it and names who runs it); never run `cargo xtask perf` without that (`test gpu --real` correctness runs are not measurements);
 - a milestone go/no-go gate is reached (after M2 and after M5);
 - the constitution would have to change.
 Otherwise, keep going.
