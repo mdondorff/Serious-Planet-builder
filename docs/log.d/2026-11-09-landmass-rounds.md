@@ -1,0 +1,1 @@
+- 2026-11-09 landmass-rounds: the prototype landmass at the erosion grid as a compact grid: 4 resident rounds peak at 7.7 GiB (55 bytes a cell, 29 min); the H1 pass at 87 bytes a cell is over the 12 GB budget as built (GEN-147).

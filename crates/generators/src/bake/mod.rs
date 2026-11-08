@@ -87,6 +87,16 @@ impl Grid {
         g
     }
 
+    /// The compact index of the cube cell `g` on a compact grid, if it is one of its cells.
+    pub fn compact_index_of(&self, g: usize) -> Option<usize> {
+        self.compact.as_ref().expect("a compact grid").rank(g)
+    }
+
+    /// The cube id of compact cell `p`.
+    pub fn cube_id_of(&self, p: usize) -> usize {
+        self.compact.as_ref().expect("a compact grid").cube_id(p)
+    }
+
     /// Whether this is the cube grid of [`Grid::cube`].
     pub fn is_cube(&self) -> bool {
         self.cube.is_some()
