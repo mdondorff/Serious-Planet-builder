@@ -12,6 +12,7 @@ pub const BAKE_KERNEL_VERSION: u32 = 5;
 pub const PASS2_KERNEL_VERSION: u32 = 5;
 
 pub mod carve;
+pub mod compact;
 pub mod cube;
 pub mod deposit;
 pub mod face;
@@ -42,6 +43,8 @@ pub struct Grid {
     active: Option<std::sync::Arc<[bool]>>,
     /// The six cube faces as one grid (GEN-144): the neighbours across the cube edges, the sphere's areas and distances.
     cube: Option<std::sync::Arc<cube::Cube>>,
+    /// With `cube`: only the active cells, indexed by rank (GEN-147); `w` is their number and `h` is 1.
+    compact: Option<std::sync::Arc<compact::ActiveIndex>>,
 }
 
 /// The 8 neighbours as `(di, dj)`: the four axis neighbours first, then the diagonals.
@@ -52,7 +55,7 @@ impl Grid {
         assert!(w >= 3 && h >= 3, "a grid is at least 3 x 3 cells, not {w} x {h}");
         assert!(dx.is_finite() && dx > 0.0, "the cell size is finite and positive, not {dx}");
         assert!(w.checked_mul(h).is_some_and(|n| n < u32::MAX as usize), "the cell index is a u32: {w} x {h} cells are too many");
-        Grid { w, h, dx, origin: (0, 0), metric: None, active: None, cube: None }
+        Grid { w, h, dx, origin: (0, 0), metric: None, active: None, cube: None, compact: None }
     }
 
     /// The same grid with its cell `(0, 0)` at the global cell `origin` (a window of a larger grid: the jitter of a cell follows its global position).
@@ -67,6 +70,20 @@ impl Grid {
     pub fn cube(n: usize, radius_m: f64) -> Grid {
         let mut g = Grid::new(n, 6 * n, radius_m * core::f64::consts::FRAC_PI_2 / n as f64);
         g.cube = Some(std::sync::Arc::new(cube::Cube::new(n, radius_m)));
+        g
+    }
+
+    /// The landmass of a cube sphere of `n` cells an edge as a compact grid (GEN-147): `bits` is the bitset of the active cube ids (bit `g % 64` of word `g / 64`). Cell `p` is the `p`-th active cell
+    /// by cube id; neighbours, areas, distances and the global ids are the cube grid's, so a solve gives the bits of the same solve on the masked cube grid with `6 n^2` cells.
+    pub fn compact_cube(n: usize, radius_m: f64, bits: Vec<u64>) -> Grid {
+        assert!(bits.len() == (6 * n * n).div_ceil(64), "one bit per cube cell");
+        let index = compact::ActiveIndex::new(bits);
+        let len = index.len();
+        assert!(len >= 3 && len < u32::MAX as usize, "a compact grid has at least 3 cells and fewer than 2^32");
+        let mut g = Grid::cube(n, radius_m);
+        g.w = len;
+        g.h = 1;
+        g.compact = Some(std::sync::Arc::new(index));
         g
     }
 
@@ -102,7 +119,7 @@ impl Grid {
     /// The area of cell `p` in square metres: `dx^2` on the uniform metric.
     pub fn cell_area(&self, p: usize) -> f64 {
         if let Some(c) = &self.cube {
-            return c.area(p);
+            return c.area(self.compact.as_ref().map_or(p, |k| k.cube_id(p)));
         }
         match &self.metric {
             Some(m) => m.area(p % self.w, p / self.w),
@@ -113,7 +130,11 @@ impl Grid {
     /// The distance from cell `p` to its neighbour `d`: [`Grid::distance`] on the uniform metric.
     pub fn distance_at(&self, p: usize, d: usize) -> f64 {
         if let Some(c) = &self.cube {
-            return c.distance(p, self.neighbour(p, d).expect("a distance to a neighbour on the grid"));
+            let q = self.neighbour(p, d).expect("a distance to a neighbour on the grid");
+            return match &self.compact {
+                Some(k) => c.distance(k.cube_id(p), k.cube_id(q)),
+                None => c.distance(p, q),
+            };
         }
         match &self.metric {
             Some(m) => {
@@ -146,12 +167,19 @@ impl Grid {
 
     /// The global cell id of cell `p`: the row of the global cell in the high half, its column in the low half.
     pub fn global_id(&self, p: usize) -> u64 {
+        if let Some(k) = &self.compact {
+            let (g, n) = (k.cube_id(p) as u64, self.cube.as_ref().expect("a compact grid is a cube").n() as u64);
+            return (g / n) << 32 | (g % n);
+        }
         (u64::from(self.origin.1) + (p / self.w) as u64) << 32 | (u64::from(self.origin.0) + (p % self.w) as u64)
     }
 
     /// The neighbour `d` of cell `p`, if it is on the grid.
     pub fn neighbour(&self, p: usize, d: usize) -> Option<usize> {
         if let Some(c) = &self.cube {
+            if let Some(k) = &self.compact {
+                return k.rank(c.neighbour(k.cube_id(p), d)?);
+            }
             let q = c.neighbour(p, d)?;
             return match &self.active {
                 Some(a) if !a[p] || !a[q] => None,
