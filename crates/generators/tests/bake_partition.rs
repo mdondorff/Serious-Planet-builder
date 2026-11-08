@@ -105,3 +105,19 @@ fn an_edit_reuses_the_untouched_tiles_and_is_again_the_resident_route() {
         assert!(edited.stats.tiles_filled_changed >= 1 && edited.stats.tiles_filled_changed < edited.stats.tiles);
     }
 }
+
+// spec: GEN-143
+#[test]
+fn a_cache_never_answers_with_a_flood_of_other_inputs() {
+    let (_, g) = grids().remove(0);
+    let z = terrain(7, true);
+    let outlet = g.outlets(&z, 0.0);
+    let mut cache = PartCache::default();
+    for (eps, tile) in [(1e-3, 12usize), (5e-3, 12), (5e-3, 17), (1e-3, 17)] {
+        let got = partitioned_route(&g, &z, &outlet, eps, 7, tile, RoundRules::ROUND, &mut cache);
+        let want = route_rules(&g, &z, &outlet, eps, 7, 0.0, None, RoundRules::ROUND);
+        assert_eq!(differ(&got.routing.receiver, &want.receiver), 0, "receivers (epsilon {eps}, tile {tile})");
+        let bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        assert_eq!(differ(&bits(&got.routing.area), &bits(&want.area)), 0, "A_d (epsilon {eps}, tile {tile})");
+    }
+}

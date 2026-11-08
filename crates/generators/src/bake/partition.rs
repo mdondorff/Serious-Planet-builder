@@ -1,8 +1,7 @@
 //! The partitioned route (GEN-143, A3 sections 6.5 and 6.6): the region's routing under the round rules computed tile by tile, equal bit for bit to the resident route (`route_rules`, G-PART).
 //!
 //! - **Filled surface.** The canonical flood's level is the unique fixed point of `F(c) = max(z(c), min over neighbours q of F(q) + epsilon)` (an outlet is `z`): a shortest path under a monotone
-//!   step. Each tile is flooded from its outlets and from the values its neighbours offer across the tile border; a tile whose inputs were seen before is not flooded again (the memo is a pure function
-//!   of the inputs, so it cannot change a bit). Tiles are swept until no input changes; the values only fall, so the sweeps end.
+//!   step. Each tile is flooded from its outlets and from the values its neighbours offer across the tile border; a tile whose inputs were seen before is not flooded again (the memo key holds every input of the flood, so a hit cannot change a bit short of a 128-bit hash collision). Tiles are swept until no input changes; the values only fall, so the sweeps end.
 //! - **Receivers** read a cell and its neighbours on the filled surface: per tile, no border problem.
 //! - **Area.** The resident accumulation adds into a cell, in order of the donors' (level descending, id), what each donor passes on. A cell's area is therefore its own plus its donors' shares added in that
 //!   order, whatever order the cells are finished in: the cells are finished by a topological sweep (a cell when all its donors are), tile by tile, with the shares crossing tile borders.
@@ -241,6 +240,14 @@ pub fn partitioned_route(
                 continue;
             }
             let mut h = z_hash[t];
+            h.word(epsilon.to_bits());
+            h.word(
+                (((grid.w() as u64) << 32) | grid.h() as u64)
+                    ^ ((r.x0 as u64) << 48)
+                    ^ ((r.y0 as u64) << 24)
+                    ^ ((r.w as u64) << 12)
+                    ^ r.h as u64,
+            );
             for &(p, e) in &ext {
                 h.word(p as u64);
                 h.word(e.to_bits());

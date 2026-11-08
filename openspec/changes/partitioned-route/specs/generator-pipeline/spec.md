@@ -3,6 +3,7 @@
 The partitioned route SHALL cut the region into tiles and compute, under the round rules (GEN-141), the filled levels, the receivers and `A_d` such that they are the bits of the resident route (`route_rules`), for any tile size.
 - A tile's flood SHALL be a function of the tile's heights and outlets and of the values its neighbours offer across the tile border; a tile evaluated with inputs seen before SHALL be answered by the memo.
 - The area SHALL be the cell's own plus its donors' shares added in the order of the donors' (level descending, cell id), whatever order the cells are finished in.
+- The partitioned route SHALL refuse a grid with a mask, the clip to the receiver, and a tile under 3 cells; runoff weights and the area cap are not supported.
 - An edited surface SHALL give the resident route of the edited surface (G-PART), and SHALL flood only the tiles whose inputs changed.
 
 Verify: A
