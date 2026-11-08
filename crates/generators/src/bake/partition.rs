@@ -51,6 +51,7 @@ pub struct PartCache {
 /// The last result of a cache: the tile size, the filled surface, the receivers and the area.
 struct Previous {
     tile: usize,
+    size: (usize, usize),
     filled: Vec<f64>,
     receiver: Vec<u32>,
     area: Vec<f64>,
@@ -139,6 +140,7 @@ fn flood_tile(grid: &Grid, r: Rect, z: &[f64], outlet: &[bool], ext: &[(usize, f
         }
         done[l] = true;
         let p = global(l);
+        assert!(dist[l] + epsilon > dist[l], "the epsilon {epsilon} is below the spacing of the heights near {}", dist[l]);
         for d in 0..8 {
             let Some(q) = grid.neighbour(p, d) else { continue };
             if !in_rect(grid, r, q) {
@@ -218,7 +220,8 @@ pub fn partitioned_route(
         for y in r.y0..r.y0 + r.h {
             for x in r.x0..r.x0 + r.w {
                 let p = y * grid.w() + x;
-                h.word(z[p].to_bits() ^ (u64::from(outlet[p]) << 63));
+                h.word(z[p].to_bits());
+                h.word(u64::from(outlet[p]));
             }
         }
         z_hash.push(h);
@@ -241,13 +244,9 @@ pub fn partitioned_route(
             }
             let mut h = z_hash[t];
             h.word(epsilon.to_bits());
-            h.word(
-                (((grid.w() as u64) << 32) | grid.h() as u64)
-                    ^ ((r.x0 as u64) << 48)
-                    ^ ((r.y0 as u64) << 24)
-                    ^ ((r.w as u64) << 12)
-                    ^ r.h as u64,
-            );
+            for v in [grid.w(), grid.h(), r.x0, r.y0, r.w, r.h] {
+                h.word(v as u64);
+            }
             for &(p, e) in &ext {
                 h.word(p as u64);
                 h.word(e.to_bits());
@@ -378,8 +377,8 @@ pub fn partitioned_route(
     }
 
     // ---- what changed against the previous call
-    if let Some(Previous { tile: tl, filled: pf, receiver: pr, area: pa }) = &cache.previous {
-        if *tl == tile {
+    if let Some(Previous { tile: tl, size, filled: pf, receiver: pr, area: pa }) = &cache.previous {
+        if *tl == tile && *size == (grid.w(), grid.h()) {
             for r in &tiles {
                 let (mut f, mut rc, mut ar) = (false, false, false);
                 for y in r.y0..r.y0 + r.h {
@@ -396,6 +395,7 @@ pub fn partitioned_route(
             }
         }
     }
-    cache.previous = Some(Previous { tile, filled: filled.clone(), receiver: receiver.clone(), area: area.clone() });
+    cache.previous =
+        Some(Previous { tile, size: (grid.w(), grid.h()), filled: filled.clone(), receiver: receiver.clone(), area: area.clone() });
     PartRoute { routing: Routing { receiver, order, area }, filled, stats }
 }

@@ -121,3 +121,39 @@ fn a_cache_never_answers_with_a_flood_of_other_inputs() {
         assert_eq!(differ(&bits(&got.routing.area), &bits(&want.area)), 0, "A_d (epsilon {eps}, tile {tile})");
     }
 }
+
+/// The land of `terrain` with a lake of sea cells (z = -3) inside it.
+fn with_sea(salt: u64, h: usize) -> Vec<f64> {
+    let mut z = terrain(salt, true);
+    z.truncate(N * h);
+    for j in 30..36.min(h - 2) {
+        for i in 28..34 {
+            z[j * N + i] = -3.0;
+        }
+    }
+    z
+}
+
+// spec: GEN-143
+#[test]
+fn interior_sea_other_grid_shapes_and_a_changed_outlet_mask_are_the_resident_route() {
+    let bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+    // One cache across a square and a wide grid, interior sea, and a sea cell turned to land with the outlets recomputed.
+    let mut cache = PartCache::default();
+    for h in [N, N - 9, N] {
+        let g = Grid::new(N, h, 800.0);
+        let mut z = with_sea(8, h);
+        for step in 0..2 {
+            if step == 1 {
+                z[32 * N + 30] = 3.0; // a sea cell raised to land (the mirror of its height)
+            }
+            let outlet = g.outlets(&z, 0.0);
+            let want = route_rules(&g, &z, &outlet, EPS, 8, 0.0, None, RoundRules::ROUND);
+            let got = partitioned_route(&g, &z, &outlet, EPS, 8, 8, RoundRules::ROUND, &mut cache);
+            let ctx = format!("height {h}, step {step}");
+            assert_eq!(differ(&got.routing.receiver, &want.receiver), 0, "receivers ({ctx})");
+            assert_eq!(differ(&bits(&got.routing.area), &bits(&want.area)), 0, "A_d ({ctx})");
+            assert!(got.stats.sweeps > 1 || got.stats.floods == 0, "offers across tile borders were used ({ctx})");
+        }
+    }
+}
