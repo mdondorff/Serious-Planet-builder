@@ -945,3 +945,32 @@ What to give the reviewer for A3: the A3 document itself; §8 and §12 of this f
 2. Are the basin and segment identity rules stable enough for gameplay references and for undo?
 3. Are the gates of §13.3 sufficient to distinguish a sound domain solver from a reproducible but wrong one?
 4. Is anything in the sampler's composition or the canonical forms inconsistent with deterministic re-solves?
+
+# Phase 4 (inbox #101, 2026-11-08): the external review of A3
+
+Input: a third external review (owner refs, 2026-11-08, outside git; "the third review"), of `docs/design/terrain-target.md`. Verdict of the review: the feedback is incorporated; A3 is ready for a constrained prototype after three amendments; it is not an approved production architecture. The reviewer did not receive the kernels (the brief named them; they were not attached), so the points are checked against the code here.
+
+## 15. Verdict on each point
+
+| Point | Verdict | Reason, references |
+|---|---|---|
+| The incremental routing contract is circular: the new catchments are needed to know what to re-route (§6.5) | **adopt** | Correct. §6.5's "runs only over the union of dirty catchments" named the union without saying how it is found. Amended in A3 §6.5 (four approaches compared, one chosen) and the catchment-round key defined exactly |
+| Routing is 85-90 % of a round, so the main cost of an edit stays global | **adopt** | F7's measure. The design must either accept region-wide routing or give a method that is not an assumption; A3 §6.5 and F9 |
+| H1 memory: 0.6 GB is a catchment; the round routes a landmass (tens of GB at 64 B a cell) | **adopt** | Correct; §6.2 and §6.5 mixed the two. F8 measures the landmass route. A3 §6.6 states the memory model |
+| The H0-split fallback reintroduces the boundary problem | **adopt** | H0 divides are not H1 divides. Replaced by a partitioned route of the same landmass (no artificial border); the split stays as a tested fallback in G-SCALE |
+| MFD area as channel discharge; a running maximum is not conservation; a downstream receiver can have a lower MFD value | **adopt** | Correct. A3 §5.2 is rewritten: diffuse area, initiation and channel discharge are separate; the running maximum is dropped; discharge accumulates along the explicit graph |
+| F7 did not test the clipped MFD and the canonical flood | **already covered** | They are gates (A3 §6.4, G-LOCAL, G-ROUND); wording tightened: the reference uses the same rules |
+| Kernels not reviewed | **note** | The brief pointed at files the reviewer was not given. A later round must attach them; this round's code claims are checked here |
+| Endorheic water level: "water balance" hides a model | **adopt** | A3 §5.5 states the steady water-balance model |
+| Topographic spill point against an active outlet | **adopt** | A3 §5.3 separates them |
+| Channel continues downstream after initiation | **adopt** | A3 §5.2 |
+| Which H0 outputs constrain H1 | **adopt** | A3 §5.1 lists them |
+| Supported platforms | **already covered**, stated plainly | A3 §9: Windows and Linux x86-64 |
+| Store: key table, edit overrides, temporary re-bake space | **adopt** | A3 §10 |
+| Preview usefulness for lithology and uplift | **adopt** | A3 §11.1 adds a coarse carve as their level 1 |
+| G-EQ must look beyond relief (flood topology, initiation) | **adopt** | A3 §12 |
+| G-CON (downstream continuation, confluence discharge) | **adopt** | A3 §12 |
+| G-LOCAL, G-ROUND on the new kernels | **adopt** | A3 §12 |
+| G-INC: routing work and dirty-set discovery | **adopt** | A3 §12, on E2 |
+| G-SCALE: landmass memory and the split test | **adopt** | A3 §12 |
+| All structural checks after the edits | **adopt** | A3 §12: stated as a hard rule |
