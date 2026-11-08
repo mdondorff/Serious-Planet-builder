@@ -1,7 +1,7 @@
 # 0112 The erosion solver: regions, rounds and catchments
-Status: proposed (spikes session for opus-planner, 2026-11-08, inbox #100); the owner accepts after the external review and the D2-D10 pass; a production decision follows the prototype's gates (D3)
+Status: proposed (spikes session for opus-planner, 2026-11-08, inbox #100; amended after the ADR review, inbox #102). Acceptable as the prototype's architecture after the owner's D2-D10 pass; not approved for production before G-LOCAL, G-ROUND, G-PART, G-EQ and G-INC pass on the actual kernels (A/B gate, D3)
 Date: 2026-11-08
-Source: `docs/design/terrain-target.md` §6; SPIKE-105 F2, F4, F7; ADR 0088 point 4, 0099
+Source: `docs/design/terrain-target.md` §6; SPIKE-105 F2, F4, F7, §18; ADR 0088 point 4, 0099
 
 ## Context
 - A catchment carved with its own routing differs from the same catchment in a larger carve (F2: rms 5 m; F4: 12.8 m at best); the carve is chaotic (72 m rms between jitter seeds).
@@ -11,13 +11,14 @@ Source: `docs/design/terrain-target.md` §6; SPIKE-105 F2, F4, F7; ADR 0088 poin
 - The smallest erosion unit today is a whole face (10 GB, ADR 0099); it cannot run in the editor (S105 X7, X8).
 
 ## Decision
-1. The scope of one routing is a **region**: a connected landmass, bounded by the sea. It is routed whole, resident or partitioned (tiles flooded from the neighbours' offers, cross-tile accumulation), with the same bits. A split at H0 divides is a tested fallback only.
-2. A **round** is one region-wide routing and the steps that follow; rounds continue the surface. The round count is fixed in the `SimulationProfile`.
-3. A **catchment** is a D8 tree of a round's routing. The breach and sweeps run per catchment, any order, on the shared routing.
-4. MFD is clipped to the catchment (a lower neighbour in another catchment is dropped from the weights and from their sum: the area at an outlet is the sum of its members' true areas, A3 section 6.4); the flood orders visits by (level, global cell id).
-5. A re-solve is a full region re-route executed with memoised work: only tiles whose round-start surface changed are re-flooded, the tile borders are solved for the whole region (sweeps to a fixed point), and receivers and area are recomputed where their inputs changed. No dirty region is predicted (F9).
-6. A catchment-round is keyed by its member cells, outlet and base level, the receivers and diffuse area on its members, their round-start surface, drivers, the profile and the kernel versions; the same function makes a fresh build.
+1. The scope of one routing is a **region**: a connected component of the land mask at the regional grid, bounded by the sea, re-derived at every commit. It is routed whole, resident or partitioned. A split at H0 divides is a tested fallback only.
+2. The routing's reference is a definition (A3 §6.8): the flood's unique fixed point, the receiver rule, the area's donor order. Resident and partitioned routes must compute it bit for bit; G-PART proves it.
+3. A **round** is one region-wide routing and the steps that follow; rounds continue the surface. The round count is fixed in the `SimulationProfile`.
+4. A **catchment** is a D8 tree of a round's routing. The breach, the sweeps and D8-routed sediment run per catchment, any order, on the shared routing. Thermal and pit spreading cross divides and run per tile after the last round. A later coupling is added to the contract; "independent" is not a permanent limit.
+5. MFD is clipped to the catchment (a lower neighbour in another catchment is dropped from the weights and from their sum; the D8 receiver always remains, so no fallback is needed; `A_d` at an outlet is the sum of `a w`). The flood orders visits by (level, global cell id).
+6. A re-solve's result is by definition a full region re-route; a full recomputation is always an allowed fallback. Reuse is an optimisation: each step is reused only if all its inputs are bit-equal, including a tile's incoming offers (dependency table, A3 §6.8). No dirty region is predicted (F9).
+7. Every value a catchment-round reads is in its key, directly or through an immutable upstream key, in canonical form (A3 §6.5). The same function makes a fresh build.
 
 ## Consequences
 - Supersedes ADR 0109 and ADR 0105 point 1 on the gate; amends ADR 0088 point 4.1 and ADR 0099 points 1 and 2.
-- Gates G-ROUND, G-LOCAL, G-EQ, G-INC, G-SCALE, G-PART. A failure of G-LOCAL or G-EQ is switch criterion S1 or S2 of S105 §13.1.
+- Gates G-ROUND, G-LOCAL, G-EQ, G-INC, G-SCALE, G-PART. A failure of G-LOCAL or G-EQ is switch criterion S1 or S2 of S105 §13.1. F7 did not test these kernels; passing on prototype fixtures is not passing a gate at scale.
