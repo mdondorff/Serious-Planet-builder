@@ -4,7 +4,8 @@ The deposition sweep, the one-cell pit spreading and the thermal pass SHALL run 
 - The deposition SHALL satisfy eroded = deposited + exported to 1e-9 relative.
 - The pit spreading and the thermal pass SHALL keep the sum of height times cell area to 1e-9 relative.
 - The thermal pass over the active set SHALL give the bits of the pass over every cell, on any thread count.
-- A plane grid SHALL give the bits it gave before.
+- A plane grid SHALL give the bits it gave before (the existing plane tests of `bake_thermal` and the oracle tests are the check).
+- Gate G-SED (per catchment and per round, on the prototype region) is not closed by this requirement; the tier-A test is a synthetic landmass.
 
 Verify: A
 Status: planned
