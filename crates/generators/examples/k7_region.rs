@@ -206,8 +206,15 @@ fn main() {
         );
         let gate = surface_gate(&g, id, &base, &r, 6);
         println!(
-            "  G-SURF at {} lattice nodes: runtime minus bake max {:.4} m unquantised, {:.4} m with L in steps of 0.25 m; at the core's cell centres {:.1e} m and {:.4} m",
-            gate.nodes, gate.max_unquantised_m, gate.max_quantised_m, gate.max_centres_unquantised_m, gate.max_centres_quantised_m
+            "  G-SURF at {} lattice nodes: runtime minus bake max {:.4} m unquantised, {:.4} m with L in steps of 0.25 m (of which B re-read from the local cells: {:.4} m); at the core's cell centres {:.1e} m and {:.4} m",
+            gate.nodes, gate.max_unquantised_m, gate.max_quantised_m, gate.max_base_resample_m, gate.max_centres_unquantised_m, gate.max_centres_quantised_m
+        );
+        println!(
+            "  quantised difference at the nodes: p50 {:.4} m, p99 {:.4} m, {} nodes over 0.25 m ({:.2} %)",
+            gate.p50_quantised_m,
+            gate.p99_quantised_m,
+            gate.over_bound,
+            100.0 * gate.over_bound as f64 / gate.nodes as f64
         );
     }
     let _ = spec_l;

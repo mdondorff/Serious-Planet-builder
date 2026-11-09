@@ -59,6 +59,7 @@ The surface at a direction `d` is one function, evaluated in this order. Every c
 | 4 | `A(d)` | items above erosion (§7.1): constructed features | item stages (ADR 0066) | as today |
 
 - Surface: `S = B + L + C + A`, composed in f64, rounded to f32 only at the mesh (CON-13).
+- **G-SURF measured (GEN-148, a tile of the prototype region at 102 m):** at the centres of the local cells the runtime's `B + L` is the bake's surface (5.7e-14 m before quantisation, half a step after); at the lattice nodes 0.13 % of 28,900 nodes differ by more than 0.25 m (p99 0.12 m, maximum 1.9 m after quantisation): the clamp of the C1 read to the four cells around the point is not linear, so `B + C1(L)` is not `C1(B + L)` beside a valley floor or a ridge. "0 before quantisation" holds at the centres, not at the nodes.
 - **One elevation source:** nothing else adds height. `L` is the only baked elevation term the runtime reads (`k` is an amplitude, not a height). The regional change, the channels and the fill depth are inputs of the bake, not runtime terms (§3.3).
 - Step 2 replaces today's `change + fill depth` (GEN-112, ADR 0101 point 3): the runtime no longer adds the fill depth back. A basin shows its floor and the water field draws its lake (§5.5). The switch to this form waits for G-BASIN and the lake producer (K11), since until then a basin would show a dry hole.
 - Presentation data (ground detail, normals) follows CON-14 and adds no height.

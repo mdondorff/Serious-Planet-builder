@@ -225,6 +225,12 @@ pub struct SurfaceGate {
     /// The largest `|runtime - bake|` before quantisation and with `L` quantised to steps of `QUANT_STEP_M`, over the nodes.
     pub max_unquantised_m: f64,
     pub max_quantised_m: f64,
+    /// The 50th and 99th percentile of the quantised difference over the nodes, and the number of nodes over the quantised bound of A3 (0.25 m).
+    pub p50_quantised_m: f64,
+    pub p99_quantised_m: f64,
+    pub over_bound: usize,
+    /// The largest `|B(node) - C1(B at the cells)(node)|`: what re-reading `B` from its values at the local cells' centres loses against `B` itself (part of the two above).
+    pub max_base_resample_m: f64,
     /// The same at the centres of the core's cells (where the C1 read returns the stored value).
     pub max_centres_unquantised_m: f64,
     pub max_centres_quantised_m: f64,
@@ -242,7 +248,7 @@ fn read_c1(v: &[f64], w: usize, x: f64, y: f64) -> f64 {
     r.clamp(around.iter().copied().fold(f64::INFINITY, f64::min), around.iter().copied().fold(f64::NEG_INFINITY, f64::max))
 }
 
-/// G-SURF on a tile: the runtime's surface `B + C1(L)` against the bake's `C1(z)` at the lattice nodes (every `lattice_step` local cells, on the cell corners) inside the core, two cells in from its
+/// G-SURF on a tile: the runtime's surface `B + C1(L)` against the bake's `C1(z)` at the lattice nodes (every `lattice_step` local cells, at the corner `lattice_step / 2` cells past a multiple: the centre of a lattice cell) inside the core, two cells in from its
 /// edge (the read needs its neighbours), with `L = z - B` as stored (quantised to `QUANT_STEP_M`) and unquantised; and at the centres of the same region's cells.
 pub fn surface_gate(g: &TileGrid, id: TileId, base: &(dyn Fn(Vec3) -> f64 + Sync), r: &K7Result, lattice_step: usize) -> SurfaceGate {
     let (w, t, h) = (g.window(), g.tile as i64, g.halo as i64);
@@ -251,24 +257,35 @@ pub fn surface_gate(g: &TileGrid, id: TileId, base: &(dyn Fn(Vec3) -> f64 + Sync
     let step = f64::from(QUANT_STEP_M);
     let lq: Vec<f64> = l.iter().map(|v| (libm::round(v / step).clamp(f64::from(i16::MIN), f64::from(i16::MAX))) * step).collect();
     let mut out = SurfaceGate::default();
-    // Nodes: the corners E = lattice_step * a of the face's cells; the node is at the cell-index coordinate E - 0.5.
+    let mut diffs: Vec<f64> = Vec::new();
+    // Nodes: the centres of the lattice's cells, at the corner E = lattice_step * a + lattice_step / 2 of the local cells; the node is at the cell-index coordinate E - 0.5.
+    let half = lattice_step as f64 / 2.0;
     let (lo, hi) = (h + 2, h + t - 3);
     let n = g.cells as f64;
-    let e_first = ((i0 + lo) as f64 / lattice_step as f64).ceil() as i64;
-    let e_last = ((i0 + hi) as f64 / lattice_step as f64).floor() as i64;
-    let f_first = ((j0 + lo) as f64 / lattice_step as f64).ceil() as i64;
-    let f_last = ((j0 + hi) as f64 / lattice_step as f64).floor() as i64;
+    let e_first = (((i0 + lo) as f64 - half) / lattice_step as f64).ceil() as i64;
+    let e_last = (((i0 + hi) as f64 - half) / lattice_step as f64).floor() as i64;
+    let f_first = (((j0 + lo) as f64 - half) / lattice_step as f64).ceil() as i64;
+    let f_last = (((j0 + hi) as f64 - half) / lattice_step as f64).floor() as i64;
     for fb in f_first..=f_last {
         for ea in e_first..=e_last {
-            let (ex, ey) = ((ea * lattice_step as i64) as f64, (fb * lattice_step as i64) as f64);
+            let (ex, ey) = ((ea * lattice_step as i64) as f64 + half, (fb * lattice_step as i64) as f64 + half);
             let (x, y) = (ex - 0.5 - i0 as f64, ey - 0.5 - j0 as f64);
             let d = face_to_direction(&TangentWarp, id.face, 2.0 * ex / n - 1.0, 2.0 * ey / n - 1.0);
             let b_node = base(d);
             let bake = read_c1(&r.z, w, x, y);
             out.nodes += 1;
+            out.max_base_resample_m = out.max_base_resample_m.max(libm::fabs(b_node - read_c1(&r.b, w, x, y)));
             out.max_unquantised_m = out.max_unquantised_m.max(libm::fabs(b_node + read_c1(&l, w, x, y) - bake));
-            out.max_quantised_m = out.max_quantised_m.max(libm::fabs(b_node + read_c1(&lq, w, x, y) - bake));
+            let dq = libm::fabs(b_node + read_c1(&lq, w, x, y) - bake);
+            out.max_quantised_m = out.max_quantised_m.max(dq);
+            diffs.push(dq);
         }
+    }
+    diffs.sort_by(|a, b| a.total_cmp(b));
+    if !diffs.is_empty() {
+        out.p50_quantised_m = diffs[diffs.len() / 2];
+        out.p99_quantised_m = diffs[(diffs.len() - 1) * 99 / 100];
+        out.over_bound = diffs.iter().filter(|d| **d > 0.25).count();
     }
     for j in lo..=hi {
         for i in lo..=hi {
