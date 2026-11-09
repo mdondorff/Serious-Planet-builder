@@ -15,6 +15,7 @@ mod perfab;
 mod perfwindow;
 mod prepush;
 mod preview;
+mod process;
 mod repocheck;
 mod retired;
 mod scratch;
