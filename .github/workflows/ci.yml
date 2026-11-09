@@ -55,6 +55,9 @@ jobs:
             part: 3
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Part 2 runs spec-lint, whose checks read the diff against origin/main (BUILD-040, BUILD-041).
+          fetch-depth: ${{ matrix.part == 2 && 0 || 1 }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt

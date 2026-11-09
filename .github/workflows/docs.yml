@@ -19,6 +19,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          # spec-lint reads the diff against origin/main and the commits of the gate ledger (BUILD-040, BUILD-041).
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: spec-lint
