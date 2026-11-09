@@ -12,6 +12,9 @@ use planet_world_def::footprint::FootprintItem;
 /// The version of the preview's definition, folded into every id.
 pub const PREVIEW_VERSION: u64 = 1;
 
+/// The radius of the planet the class-source base is sampled on, metres (the reference body).
+pub const PLANET_RADIUS_M: f64 = 6_371_000.0;
+
 /// The domain tag of a preview id: no authoritative key carries it (CON-07).
 const PREVIEW_DOMAIN: u64 = 0x7072_6576_6965_7731; // "preview1"
 
@@ -169,6 +172,40 @@ impl PreviewBase {
         let w0 = |c: usize| discharge_weight(runoff_mm(f64::from(p_mm[c]), f64::from(t_c[c])));
         let discharge0 = discharge(&grid, &routing0, w0);
         PreviewBase { grid, radius_m, sea_level, epsilon, z0, p_mm, t_c, word, routing0, discharge0 }
+    }
+
+    /// The base of a session from the default class source (GEN-115): the height, rainfall and temperature of every H0 cell of `n` cells a face edge (`class_sample` at the cell centres, rows dealt to
+    /// `threads` threads; each cell is its own sample, so the result does not depend on the thread count), the sea at 0 m. The base word is the seed's, so another seed is another preview id.
+    pub fn from_class_source(n: usize, seed: u64, threads: usize) -> PreviewBase {
+        let grid = GlobalGrid::new(n, PLANET_RADIUS_M);
+        let inputs = crate::bake::inputs::BakeInputs::new(seed, threads);
+        let len = grid.len();
+        let (mut z0, mut p, mut t) = (vec![0f64; len], vec![0f32; len], vec![0f32; len]);
+        let chunk = len.div_ceil(threads.max(1));
+        std::thread::scope(|s| {
+            for (k, ((zc, pc), tc)) in z0.chunks_mut(chunk).zip(p.chunks_mut(chunk)).zip(t.chunks_mut(chunk)).enumerate() {
+                let (grid, inputs) = (&grid, &inputs);
+                s.spawn(move || {
+                    for (i, ((z, pp), tt)) in zc.iter_mut().zip(pc.iter_mut()).zip(tc.iter_mut()).enumerate() {
+                        let sample = crate::global::class_sample(seed, grid.direction((k * chunk + i) as u32), inputs);
+                        *z = f64::from(sample.elevation_m);
+                        *pp = sample.precipitation_mm;
+                        *tt = sample.temperature_c;
+                    }
+                });
+            }
+        });
+        PreviewBase::new(grid, PLANET_RADIUS_M, 0.0, 1e-3, BaseFields { z0, p_mm: p, t_c: t }, PREVIEW_DOMAIN ^ seed)
+    }
+
+    /// The base height of every cell, metres.
+    pub fn heights(&self) -> &[f64] {
+        &self.z0
+    }
+
+    /// The base annual rainfall of every cell, millimetres.
+    pub fn rainfall(&self) -> &[f32] {
+        &self.p_mm
     }
 
     pub fn grid(&self) -> &GlobalGrid {

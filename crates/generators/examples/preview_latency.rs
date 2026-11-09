@@ -6,15 +6,11 @@
 //! measurement. A timing read needs a quiet machine and a perf window: this file only measures.
 
 use planet_core::Vec3;
-use planet_generators::bake::h0::GlobalGrid;
-use planet_generators::bake::inputs::BakeInputs;
-use planet_generators::bake::preview::{BaseFields, ClimateRegion, PreviewBase, PreviewEdit};
-use planet_generators::global::class_sample;
+use planet_generators::bake::preview::{ClimateRegion, PreviewBase, PreviewEdit};
 use planet_world_def::footprint::FootprintItem;
 use planet_world_def::stamp::{Stamp, StampKind};
 use std::time::Instant;
 
-const R: f64 = 6_371_000.0;
 const SEA_LEVEL: f64 = 0.0;
 const RUNS: usize = 3;
 
@@ -34,28 +30,6 @@ fn memory_mb() -> (f64, f64) {
             .map_or(f64::NAN, |b| b / 1_048_576.0)
     };
     (ps("PeakWorkingSet64"), ps("WorkingSet64"))
-}
-
-/// The base fields of every cell, rows dealt to `threads` threads (the result does not depend on the thread count: each cell is its own sample).
-fn base_fields(grid: &GlobalGrid, inputs: &BakeInputs, seed: u64, threads: usize) -> BaseFields {
-    let len = grid.len();
-    let mut z0 = vec![0f64; len];
-    let mut p = vec![0f32; len];
-    let mut t = vec![0f32; len];
-    let chunk = len.div_ceil(threads.max(1));
-    std::thread::scope(|s| {
-        for (k, ((zc, pc), tc)) in z0.chunks_mut(chunk).zip(p.chunks_mut(chunk)).zip(t.chunks_mut(chunk)).enumerate() {
-            s.spawn(move || {
-                for (i, ((z, pp), tt)) in zc.iter_mut().zip(pc.iter_mut()).zip(tc.iter_mut()).enumerate() {
-                    let sample = class_sample(seed, grid.direction((k * chunk + i) as u32), inputs);
-                    *z = f64::from(sample.elevation_m);
-                    *pp = sample.precipitation_mm;
-                    *tt = sample.temperature_c;
-                }
-            });
-        }
-    });
-    BaseFields { z0, p_mm: p, t_c: t }
 }
 
 /// A hill of `amount` metres reaching `reach_m` at `dir`.
@@ -124,28 +98,21 @@ fn main() {
     println!("preview_latency: n {n} ({} cells), {threads} threads, seed {seed}; {label}", 6 * n * n);
 
     let t0 = Instant::now();
-    let grid = GlobalGrid::new(n, R);
-    let inputs = BakeInputs::new(seed, threads);
-    let fields = base_fields(&grid, &inputs, seed, threads);
-    let sampled_s = t0.elapsed().as_secs_f64();
-    let land = fields.z0.iter().filter(|z| **z > SEA_LEVEL).count();
+    let base = PreviewBase::from_class_source(n, seed, threads);
+    let base_s = t0.elapsed().as_secs_f64();
+    let (z0, p_mm) = (base.heights(), base.rainfall());
+    let land = z0.iter().filter(|z| **z > SEA_LEVEL).count();
     // The anchors: the highest land cell for the hill, the wettest land cell's neighbourhood for the rain.
-    let top = (0..fields.z0.len())
-        .filter(|&c| fields.z0[c] > SEA_LEVEL)
-        .max_by(|a, b| fields.z0[*a].total_cmp(&fields.z0[*b]))
+    let top = (0..z0.len())
+        .filter(|&c| z0[c] > SEA_LEVEL)
+        .max_by(|a, b| z0[*a].total_cmp(&z0[*b]))
         .unwrap_or_else(|| fail("the base has no land"));
-    let wet = (0..fields.p_mm.len())
-        .filter(|&c| fields.z0[c] > SEA_LEVEL)
-        .max_by(|a, b| fields.p_mm[*a].total_cmp(&fields.p_mm[*b]))
-        .unwrap_or(top);
-    let (top_dir, wet_dir) = (grid.direction(top as u32), grid.direction(wet as u32));
-    let t1 = Instant::now();
-    let base = PreviewBase::new(grid, R, SEA_LEVEL, 1e-3, fields, 0x70_7265_7669_6577 ^ seed);
-    let base_s = sampled_s + t1.elapsed().as_secs_f64();
+    let wet = (0..p_mm.len()).filter(|&c| z0[c] > SEA_LEVEL).max_by(|a, b| p_mm[*a].total_cmp(&p_mm[*b])).unwrap_or(top);
+    let (top_dir, wet_dir) = (base.grid().direction(top as u32), base.grid().direction(wet as u32));
     let (peak_base, now_base) = memory_mb();
     let cells = base.grid().len();
     let resident_mb = (cells * (8 + 4 + 4)) as f64 / 1_048_576.0 + (cells * (4 + 8 + 4 + 8)) as f64 / 1_048_576.0;
-    println!("base: {base_s:.1} s once (sampling {sampled_s:.1} s), {land} land cells ({:.1} %), peak {peak_base:.0} MiB, now {now_base:.0} MiB, session about {resident_mb:.0} MiB", 100.0 * land as f64 / cells as f64);
+    println!("base: {base_s:.1} s once (sampling and the baseline route), {land} land cells ({:.1} %), peak {peak_base:.0} MiB, now {now_base:.0} MiB, session about {resident_mb:.0} MiB", 100.0 * land as f64 / cells as f64);
 
     let reach = if smoke { 800_000.0 } else { 400_000.0 };
     let stamp = vec![hill(top_dir, reach, 300.0)];
