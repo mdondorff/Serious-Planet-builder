@@ -23,6 +23,7 @@ pub mod hydro;
 pub mod inputs;
 pub mod k7;
 pub mod map;
+pub mod memo;
 pub mod metric;
 pub mod partition;
 pub mod preview;
