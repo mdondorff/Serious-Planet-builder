@@ -282,6 +282,13 @@ fn deposition_and_the_pit_spreading_on_a_cube_grid_keep_the_volume_and_are_the_m
     let pits: Vec<usize> =
         (0..ids.len()).filter(|&p| p % 5 == 0 && zc[p] > 900.0 && (0..8).all(|d| compact.neighbour(p, d).is_some())).collect();
     assert!(pits.len() > 5);
+    // Pits on the cube's edges and corner: fewer than 8 neighbours, as many as the cube gives them.
+    let full = Grid::cube(n, R);
+    let count = |g: &Grid, p: usize| (0..8).filter(|&d| g.neighbour(p, d).is_some()).count();
+    let edge: Vec<usize> =
+        (0..ids.len()).filter(|&p| zc[p] > 900.0 && count(&compact, p) < 8 && count(&compact, p) == count(&full, ids[p])).collect();
+    assert!(!edge.is_empty(), "pits on a cube edge");
+    let pits: Vec<usize> = pits.into_iter().chain(edge.iter().copied()).collect();
     for &p in &pits {
         zc[p] -= 500.0;
         zm[ids[p]] -= 500.0;
@@ -291,6 +298,8 @@ fn deposition_and_the_pit_spreading_on_a_cube_grid_keep_the_volume_and_are_the_m
     let passes = spread_pits(&compact, &mut zc, 0.0, 0.5, 32);
     assert!(passes > 0 && zc.iter().zip(&before).any(|(a, b)| a != b), "the pits were spread: {passes} passes, {} pits", pits.len());
     assert!((volume(&compact, &zc) - v0).abs() < 1e-9 * v0.abs().max(1.0), "the volume is kept");
+    let moved = edge.iter().filter(|&&p| zc[p] > before[p]).count();
+    assert!(moved > 0, "a pit on a cube edge was spread: {moved} of {}", edge.len());
     assert_eq!(spread_pits(&masked, &mut zm, 0.0, 0.5, 32), passes);
     for (p, &g) in ids.iter().enumerate() {
         assert_eq!(zc[p].to_bits(), zm[g].to_bits(), "pit spreading at {g}");

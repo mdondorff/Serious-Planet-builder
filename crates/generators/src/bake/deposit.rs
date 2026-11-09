@@ -190,6 +190,8 @@ fn spread_pits_cube(grid: &Grid, z: &mut [f64], sea_level: f64, min_depth_m: f64
     assert_eq!(z.len(), grid.len(), "one height per cell");
     super::assert_finite("the heights", z);
     let mut ring = [(0usize, 0.0f64); 8];
+    let cube = grid.cube.as_ref().expect("a cube grid");
+    let id_of = |p: usize| if grid.is_compact() { grid.cube_id_of(p) } else { p };
     for pass in 0..max_passes {
         let mut moved = false;
         for p in 0..grid.len() {
@@ -197,18 +199,20 @@ fn spread_pits_cube(grid: &Grid, z: &mut [f64], sea_level: f64, min_depth_m: f64
                 continue;
             }
             let mut lowest = f64::INFINITY;
-            let mut whole = true;
-            for (d, slot) in ring.iter_mut().enumerate() {
-                let Some(q) = grid.neighbour(p, d) else {
-                    whole = false;
-                    break;
-                };
-                *slot = (q, grid.cell_area(q));
-                lowest = lowest.min(z[q]);
+            // The neighbours the cell has on the cube (a cell on a cube edge has 6, a corner 5: the diagonals across the seam are not in the graph) against those on this grid.
+            let full = (0..8).filter(|&d| cube.neighbour(id_of(p), d).is_some()).count();
+            let mut k = 0;
+            for d in 0..8 {
+                if let Some(q) = grid.neighbour(p, d) {
+                    ring[k] = (q, grid.cell_area(q));
+                    lowest = lowest.min(z[q]);
+                    k += 1;
+                }
             }
-            if !whole {
+            if k < full || k == 0 {
                 continue;
             }
+            let ring = &ring[..k];
             let depth = lowest - z[p];
             let rise = 0.8 * depth;
             if depth <= min_depth_m {
@@ -216,12 +220,12 @@ fn spread_pits_cube(grid: &Grid, z: &mut [f64], sea_level: f64, min_depth_m: f64
             }
             let ca = grid.cell_area(p);
             // The fall of a neighbour keeps the volume: rise * ca / 8 over its own area.
-            let fall = |area: f64| rise * ca / (8.0 * area);
+            let fall = |area: f64| rise * ca / (k as f64 * area);
             if ring.iter().any(|&(q, area)| z[q] - fall(area) <= sea_level) {
                 continue;
             }
             z[p] += rise;
-            for &(q, area) in &ring {
+            for &(q, area) in ring {
                 z[q] -= fall(area);
             }
             moved = true;

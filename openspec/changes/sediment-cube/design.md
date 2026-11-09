@@ -4,7 +4,7 @@
 - Pit spreading on a cube grid has its own function; a cell with a neighbour off the grid is left; each neighbour falls by `rise * area(p) / (8 * area(q))`.
 - Thermal: the giver loses `k * excess` of height; the receiver gains it times `area(giver) / area(receiver)`. The factor is 1 on a plane grid and is not applied there, so plane bits are unchanged.
 
-- The pit spreading on a cube grid is not the plane rule: it is area-weighted, it leaves a cell with any of its 8 neighbours off the grid (a cube-corner cell has 7 neighbours and is never spread), and it skips a cell when any neighbour would fall to or below the sea level (the plane rule tests the lowest neighbour).
+- The pit spreading on a cube grid is not the plane rule: it is area-weighted, it spreads over the `k` neighbours the cell has (8; 6 on a cube edge and 5 at a corner, the diagonals across the seam are not in the graph) and leaves a cell with fewer neighbours on this grid than on the cube (the edge of the landmass), and it skips a cell when any neighbour would fall to or below the sea level (the plane rule tests the lowest neighbour).
 - Thermal on a cube grid has no border sink (`is_edge` is false): a cell at the landmass edge gives and receives like any other; nothing leaves the grid. The volume argument needs `distance_at(p, d)` equal to `distance_at(q, d')` for the pair and `pair_u` symmetric.
 
 ## Measurements
