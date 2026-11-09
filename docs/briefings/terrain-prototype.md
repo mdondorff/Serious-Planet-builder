@@ -32,6 +32,12 @@ Scope: the region of `spikes/prototype-region/results/results.md`. Everything st
 | Memory | compact resident route is the normal path; cache eviction required; the complete build measured against 12 GB; tile-wise route only if needed |
 | Sediment | post-round pass for the prototype, defined in A3 §6.7; G-SED kept, with a partition test; within-round transport revisited at the A/B gate on evidence |
 
+## Contract changes
+A change of a gate row of A3 12.1 or of the table above needs a line here (BUILD-040): `- YYYY-MM-DD | gate or section | what changed | who decided`.
+- 2026-11-09 | G-SURF | gate at the cell centres; the lattice vertices reported as G-SURF-I; the clamp stays | owner
+- 2026-11-09 | Memory | compact resident route is the normal path; cache eviction required; tile-wise route only if needed | owner
+- 2026-11-09 | Sediment | post-round pass for the prototype (A3 6.7); G-SED kept with a partition test | owner
+
 ## Exit list (the A/B gate)
 - Every gate of A3 section 12.1 passes on the fresh build and after each edit, or its failure is reported against S1-S5.
 - Measured: landmass memory against 12 GB, store against 40 GB, latency of the preview levels.
