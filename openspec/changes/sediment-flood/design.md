@@ -21,7 +21,7 @@
 | not a pit before the pass (created by it) | 52 cells (0.21 %) | 8,538 cells (6.52 %) |
 | deposition: eroded / deposited / exported (m3) | 1.5686e16 / 4.3553e15 / 1.1331e16 | 1.1865e16 / 3.0566e15 / 8.8083e15 |
 | hash of z after the pass, before and after the change | 2c5d03cbb983063b, e0a14921fa9a77e0 | not run before; 73eee20e40602255 |
-| sediment pass wall time | 80 s | 462 s (the machine shared) |
+| sediment pass wall time | 80 s | 419 s (the machine shared) |
 | peak working set / commit, whole build | 793 / 822 MiB | 2,766 / 2,886 MiB |
 - At k = 1 the totals and the pit counts equal the plain flood's to the digits printed; the surface hash moves (the deposition's route is canonical now).
 - G-SED at k = 1 (`sedround`): the identity holds in 4 rounds; largest error of a catchment 4.25e-14, of the region 1.21e-14.
