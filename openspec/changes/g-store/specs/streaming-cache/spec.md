@@ -6,6 +6,7 @@ The G-STORE measurement SHALL encode a build's state as pack records in tiles of
 - Gate G-STORE is not closed by this requirement.
 
 Verify: D
+Review: the measurement table of `openspec/changes/g-store/design.md`, judged by the planner (the gate is a numeric gate, A3 section 12.1)
 Status: planned
 Source: A3 section 10 (G-STORE)
 
