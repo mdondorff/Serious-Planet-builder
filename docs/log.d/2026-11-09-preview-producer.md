@@ -1,0 +1,1 @@
+- 2026-11-09 preview-producer: the editor's level-1 preview behind --preview-l1: a worker thread builds the base once and answers the newest ask, a held handle asks with the stamps, the preview is drawn through the egui path as a debug view and is gone when the edit is committed; tier-C pixel assertion (VIEW-068)

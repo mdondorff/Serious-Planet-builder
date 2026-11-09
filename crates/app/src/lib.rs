@@ -12,6 +12,9 @@ pub mod gate;
 pub mod globalperf;
 pub mod horizonstep;
 pub mod horizonworld;
+/// The default cells a face edge of the level-1 preview's H0 grid (`--preview-l1`): about a second a preview.
+pub const PREVIEW_GRID_DEFAULT: usize = 768;
+
 pub mod hoverpick;
 pub mod litperf;
 pub mod lookload;
@@ -22,6 +25,7 @@ pub mod pipelined;
 mod plancheck;
 pub mod prefill;
 pub mod preflightperf;
+pub mod previewjob;
 pub mod reproworld;
 pub mod reserveload;
 pub mod shadowrig;
@@ -267,6 +271,8 @@ pub struct Options {
     pub erosion: bool,
     /// `editor --channels on|off` (VIEW-066, GEN-119): fill the tiles' driver block from the layer's baked channels; off by default, needs `--erosion on`.
     pub channels: bool,
+    /// `editor --preview-l1 [--preview-grid N]` (VIEW-068): the level-1 preview of the edit being made, drawn over the planet as a debug view (CON-18); the cells a face edge of its H0 grid. Off by default.
+    pub preview_l1: Option<usize>,
     /// `editor --erosion-store DIR`: the folder of the layer (`bake_layer`'s output folder or its `tiles/`); the world's `--store` when not given.
     pub erosion_store: Option<PathBuf>,
     /// `editor --erosion-face-res N` and `--erosion-res N`: the bake's `--face-res` and `--planet-res` (the layer's keys follow them; GEN-100's 12,288 and 98,304 by default).
@@ -451,6 +457,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         erosion_res: None,
         erosion_unchecked: false,
         channels: false,
+        preview_l1: None,
         no_window: false,
         given: Default::default(),
     };
@@ -487,6 +494,14 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
                     Some("off") => false,
                     other => return Err(format!("--channels needs on or off, got {}", other.unwrap_or("nothing"))),
                 }
+            }
+            "--preview-l1" => o.preview_l1 = Some(o.preview_l1.unwrap_or(PREVIEW_GRID_DEFAULT)),
+            "--preview-grid" => {
+                let n: usize = it.next().and_then(|v| v.parse().ok()).ok_or("--preview-grid needs a number of cells a face edge")?;
+                if !(8..=3072).contains(&n) {
+                    return Err(format!("--preview-grid is 8 to 3072 cells a face edge, got {n}"));
+                }
+                o.preview_l1 = Some(n);
             }
             "--no-window" => o.no_window = true,
             "--perf" => o.perf = true,
@@ -876,6 +891,9 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
     }
     // The erosion layer is drawn by the viewer over a stored bake (VIEW-062); no other mode reads it, and its options mean nothing without `--erosion on`.
     const EROSION_OPTIONS: [&str; 4] = ["--erosion-store", "--erosion-face-res", "--erosion-res", "--erosion-unchecked"];
+    if o.preview_l1.is_some() && !matches!(o.mode, Mode::Editor) {
+        return Err("--preview-l1 and --preview-grid only apply to `editor` (the level-1 preview is drawn over the editor's planet)".into());
+    }
     let capture_stills = matches!(o.mode, Mode::TestRender) && o.scene == "capture-stills";
     if o.given.contains("--erosion") && o.erosion && !matches!(o.mode, Mode::Editor) && !capture_stills {
         return Err(
@@ -1832,6 +1850,20 @@ mod tests {
         assert!(e.contains("--ice-preview excludes") && e.contains("--global-dir"), "{e}");
         let e = run_str(&["generate", "--ice-preview", &dir, "--seed", "3", "--world", "w.toml"]).unwrap_err();
         assert!(e.contains("--world and --seed"), "{e}");
+    }
+
+    // spec: VIEW-068
+    #[test]
+    fn the_preview_flag_is_an_editor_option_with_a_bounded_grid_and_off_by_default() {
+        let parse = |a: &[&str]| parse_args(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        assert_eq!(parse(&["editor"]).unwrap().preview_l1, None, "off by default: nothing runs");
+        assert_eq!(parse(&["editor", "--preview-l1"]).unwrap().preview_l1, Some(PREVIEW_GRID_DEFAULT));
+        assert_eq!(parse(&["editor", "--preview-l1", "--preview-grid", "384"]).unwrap().preview_l1, Some(384));
+        assert_eq!(parse(&["editor", "--preview-grid", "96"]).unwrap().preview_l1, Some(96));
+        assert!(parse(&["editor", "--preview-grid", "4"]).unwrap_err().contains("8 to 3072"));
+        assert!(parse(&["editor", "--preview-grid", "9999"]).unwrap_err().contains("8 to 3072"));
+        assert!(parse(&["editor", "--preview-grid"]).unwrap_err().contains("--preview-grid needs"));
+        assert!(run_str(&["test-render", "--preview-l1"]).unwrap_err().contains("only apply to `editor`"));
     }
 
     // spec: VIEW-066
