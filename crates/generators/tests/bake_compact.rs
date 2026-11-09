@@ -578,7 +578,7 @@ fn the_phase_plan_is_the_steps_in_order_releases_what_it_should_and_does_not_mov
     assert_eq!(off.hydro.channel, hy.channel);
     assert_eq!(off.hydro.segments.len(), hy.segments.len());
     assert_eq!(off.hydro.basins, hy.basins);
-    let mut q = params.sediment.clone();
+    let mut q = params.sediment;
     q.carve.breach_max_m = CarveParams::default().breach_max_m;
     sediment_pass(&grid, &mut z, &z0, &q, 3);
     let bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
