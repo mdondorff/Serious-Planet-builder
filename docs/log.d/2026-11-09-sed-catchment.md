@@ -1,0 +1,1 @@
+- 2026-11-09 sed-catchment (GEN-152): the deposition balances per catchment and per round from the heights, 3e-14 to 4e-14 at 9.4e6 cells over 4 rounds; the round's carve tracks no sediment (contract gap); thermal's 610 m pits look like dams of infilled one-cell canyons (cell examples), no fix built; G-SED stays open (round-internal sediment, the round's own catchments).

@@ -42,6 +42,33 @@ pub struct DepositReport {
 /// the eroded column of a cell is `original - z` where positive. `area` is the routing's drainage area. Refused: arrays of another length, a `zeta` outside [0, 1], a `kc` that is
 /// negative or not finite, a height that is not finite.
 pub fn deposit(grid: &Grid, z: &mut [f64], original: &[f64], filled: &[f64], routing: &Routing, params: &DepositParams) -> DepositReport {
+    deposit_core(grid, z, original, filled, routing, params, None)
+}
+
+/// [`deposit`] that also writes, for the cell where a route leaves (a cell with no receiver), the load that leaves there in cubic metres (`exports`, one entry per cell, set to 0 first): the per-catchment export of G-SED (GEN-152).
+pub fn deposit_exports(
+    grid: &Grid,
+    z: &mut [f64],
+    original: &[f64],
+    filled: &[f64],
+    routing: &Routing,
+    params: &DepositParams,
+    exports: &mut [f64],
+) -> DepositReport {
+    assert_eq!(exports.len(), grid.len(), "one export per cell");
+    exports.fill(0.0);
+    deposit_core(grid, z, original, filled, routing, params, Some(exports))
+}
+
+fn deposit_core(
+    grid: &Grid,
+    z: &mut [f64],
+    original: &[f64],
+    filled: &[f64],
+    routing: &Routing,
+    params: &DepositParams,
+    mut exports: Option<&mut [f64]>,
+) -> DepositReport {
     let n = grid.len();
     assert!(z.len() == n && original.len() == n && filled.len() == n && routing.receiver.len() == n, "one value per cell");
     assert!((0.0..=1.0).contains(&params.zeta), "zeta is a share in [0, 1], not {}", params.zeta);
@@ -69,6 +96,9 @@ pub fn deposit(grid: &Grid, z: &mut [f64], original: &[f64], filled: &[f64], rou
         let r = routing.receiver[p];
         if r == NONE {
             report.exported += load;
+            if let Some(e) = exports.as_deref_mut() {
+                e[p] += load;
+            }
             continue;
         }
         let r = r as usize;

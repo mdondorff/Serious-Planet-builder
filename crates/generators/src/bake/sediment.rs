@@ -39,7 +39,7 @@ pub fn boundary(grid: &Grid) -> Vec<bool> {
 }
 
 /// The outlets of the sediment steps: the sea, the grid's border and the landmass's boundary cells (water leaves a coast ring cell towards the sea that is not in the grid, also where thermal lifted it above the sea).
-fn outlets(grid: &Grid, z: &[f64], sea_level: f64) -> Vec<bool> {
+pub fn outlets(grid: &Grid, z: &[f64], sea_level: f64) -> Vec<bool> {
     let b = boundary(grid);
     grid.outlets(z, sea_level).into_iter().zip(b).map(|(o, b)| o || b).collect()
 }
@@ -154,4 +154,72 @@ pub fn breach_lowered_m3(grid: &Grid, z: &[f64], outlet: &[bool], carve: &super:
         .filter(|&p| z[p] > carve.sea_level)
         .map(|p| (z[p] - b[p]).max(0.0) * if cube { grid.cell_area(p) } else { grid.dx() * grid.dx() })
         .sum()
+}
+
+/// G-SED per catchment (GEN-152): the deposition sweep on `z` (in place) with `original`, and for every catchment of the sweep's own route the balance of its heights against its flow.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CatchmentBalance {
+    /// Catchments with an eroded column or a deposit.
+    pub catchments: usize,
+    pub eroded_m3: f64,
+    /// The volume the heights rose by (from the heights, not from the sweep's report).
+    pub raised_m3: f64,
+    pub exported_m3: f64,
+    /// The largest `|eroded - raised - exported|` of a catchment over the largest of the three terms of that catchment.
+    pub max_relative_error: f64,
+    /// The same over the whole region.
+    pub total_relative_error: f64,
+    /// The largest catchment's eroded column and its share of the total.
+    pub largest_eroded_m3: f64,
+}
+
+/// Runs the deposition on `z` and balances it per catchment (a catchment is the cells whose route ends at the same outlet cell): eroded column = the heights' rise + the load exported at the outlet. The rise is read from the heights, the export from the sweep's carried load, so the identity checks the sweep's accounting against the heights and against the catchment border (no load crosses it).
+pub fn catchment_balance(grid: &Grid, z: &mut [f64], original: &[f64], p: &Pass2Params) -> CatchmentBalance {
+    let n = grid.len();
+    let outlet = outlets(grid, z, p.sea_level);
+    let filled = priority_flood(grid, z, &outlet, p.carve.epsilon);
+    let routing = route(grid, z, &outlet, p.carve.epsilon, p.seed, 0.0);
+    let before = z.to_vec();
+    let mut exports = vec![0.0f64; n];
+    let params = DepositParams { kc: Kc::Uniform(p.kc), zeta: p.zeta, sea_level: p.sea_level };
+    super::deposit::deposit_exports(grid, z, original, &filled, &routing, &params, &mut exports);
+    // The outlet cell of every cell's route: the order lists a receiver before its donors.
+    let mut root = vec![u32::MAX; n];
+    for &c in &routing.order {
+        let c = c as usize;
+        let r = routing.receiver[c];
+        root[c] = if r == super::route::NONE { c as u32 } else { root[r as usize] };
+    }
+    let cube = grid.is_cube();
+    let area = |c: usize| if cube { grid.cell_area(c) } else { grid.dx() * grid.dx() };
+    let grid_area = (0..n).map(&area).fold(0.0f64, f64::max);
+    let (mut eroded, mut raised) = (vec![0.0f64; n], vec![0.0f64; n]);
+    let mut cells = vec![0u32; n];
+    let zmax = z.iter().chain(original).fold(0.0f64, |m, v| m.max(v.abs()));
+    for c in 0..n {
+        let r = root[c] as usize;
+        cells[r] += 1;
+        if before[c] > p.sea_level {
+            eroded[r] += (original[c] - before[c]).max(0.0) * area(c);
+        }
+        raised[r] += (z[c] - before[c]) * area(c);
+    }
+    let mut out = CatchmentBalance::default();
+    for r in 0..n {
+        let (e, d, x) = (eroded[r], raised[r], exports[r]);
+        if e == 0.0 && d == 0.0 && x == 0.0 {
+            continue;
+        }
+        out.catchments += 1;
+        out.eroded_m3 += e;
+        out.raised_m3 += d;
+        out.exported_m3 += x;
+        out.largest_eroded_m3 = out.largest_eroded_m3.max(e);
+        // The rounding of `z + rise - z` is absolute, about one ulp of the height times the cell area per cell: a floor under the scale, so a sub-ulp deposit is not read as a balance error.
+        let floor = f64::EPSILON * zmax * grid_area * f64::from(cells[r]);
+        let scale = e.max(d.abs()).max(x).max(floor);
+        out.max_relative_error = out.max_relative_error.max((e - d - x).abs() / scale.max(f64::MIN_POSITIVE));
+    }
+    out.total_relative_error = (out.eroded_m3 - out.raised_m3 - out.exported_m3).abs() / out.eroded_m3.max(f64::MIN_POSITIVE);
+    out
 }

@@ -421,3 +421,58 @@ fn the_breach_alone_lowers_a_ridge_to_the_spill_and_nothing_on_a_surface_without
     // With no breach allowed nothing is lowered.
     assert_eq!(breach_lowered_m3(&g, &bowl, &outlet, &CarveParams { breach_max_m: 0.0, ..carve }, 5), 0.0);
 }
+
+// spec: GEN-152
+#[test]
+fn the_deposition_balances_per_catchment_and_per_round_on_a_compact_landmass() {
+    use planet_generators::bake::round::solve_rounds;
+    use planet_generators::bake::sediment::catchment_balance;
+    use planet_generators::bake::tile::Pass2Params;
+    let n = 24;
+    let small = 4000.0;
+    let (active, bits) = corner_cap(n, 0.2);
+    let compact = Grid::compact_cube(n, small, bits);
+    let masked = Grid::cube(n, small).with_active(active.clone());
+    let ids: Vec<usize> = (0..active.len()).filter(|&g| active[g]).collect();
+    let cube = planet_generators::bake::h0::GlobalGrid::new(n, R);
+    let z_all: Vec<f64> = (0..active.len())
+        .map(|g| {
+            let d = cube.direction(g as u32);
+            900.0 * (d.x + d.y + d.z)
+                + 90.0 * libm::sin(11.0 * d.x + 5.0 * d.y) * libm::cos(8.0 * d.z)
+                + 2.0 * planet_generators::bake::route::jitter(5, g as u64, 0)
+                - 500.0
+        })
+        .collect();
+    let z0: Vec<f64> = ids.iter().map(|&g| z_all[g]).collect();
+    let outlet: Vec<bool> = z0.iter().map(|&h| h <= 0.0).collect();
+    let outlet_m: Vec<bool> = (0..active.len()).map(|g| active[g] && z_all[g] <= 0.0).collect();
+    let mut q = Pass2Params::standard(5, 0.0);
+    q.carve.breach_max_m = CarveParams::default().breach_max_m;
+    let mut checked = 0;
+    for rounds in 1..=3usize {
+        let p = CarveParams { steps: 5 * rounds, reroute_every: 5, round_rules: RoundRules::ROUND, ..CarveParams::default() };
+        let prev = CarveParams { steps: 5 * (rounds - 1).max(1), ..p };
+        let (mut zr, mut zp) = (z0.clone(), z0.clone());
+        solve_rounds(&compact, &mut zr, &outlet, &p, rounds, &3usize, 5);
+        if rounds > 1 {
+            solve_rounds(&compact, &mut zp, &outlet, &prev, rounds - 1, &3usize, 5);
+        }
+        let (mut zm, mut zpm) = (z_all.clone(), z_all.clone());
+        solve_rounds(&masked, &mut zm, &outlet_m, &p, rounds, &1usize, 5);
+        if rounds > 1 {
+            solve_rounds(&masked, &mut zpm, &outlet_m, &prev, rounds - 1, &1usize, 5);
+        }
+        let b = catchment_balance(&compact, &mut zr, &zp, &q);
+        let bm = catchment_balance(&masked, &mut zm, &zpm, &q);
+        assert!(b.catchments > 1 && b.eroded_m3 > 0.0, "round {rounds}: {b:?}");
+        assert!(b.max_relative_error < 1e-9 && b.total_relative_error < 1e-9, "round {rounds}: {b:?}");
+        assert_eq!(b.eroded_m3.to_bits(), bm.eroded_m3.to_bits(), "compact against masked, round {rounds}");
+        assert_eq!(b.catchments, bm.catchments);
+        assert!(bm.max_relative_error < 1e-9 && bm.total_relative_error < 1e-9, "masked, round {rounds}: {bm:?}");
+        assert_eq!(b.raised_m3.to_bits(), bm.raised_m3.to_bits(), "raised, round {rounds}");
+        assert_eq!(b.exported_m3.to_bits(), bm.exported_m3.to_bits(), "exported, round {rounds}");
+        checked += 1;
+    }
+    assert_eq!(checked, 3);
+}
