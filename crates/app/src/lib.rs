@@ -1863,7 +1863,7 @@ mod tests {
         assert!(parse(&["editor", "--preview-grid", "4"]).unwrap_err().contains("8 to 3072"));
         assert!(parse(&["editor", "--preview-grid", "9999"]).unwrap_err().contains("8 to 3072"));
         assert!(parse(&["editor", "--preview-grid"]).unwrap_err().contains("--preview-grid needs"));
-        assert!(parse(&["viewer", "--preview-l1"]).unwrap_err().contains("only apply to `editor`"));
+        assert!(run_str(&["test-render", "--preview-l1"]).unwrap_err().contains("only apply to `editor`"));
     }
 
     // spec: VIEW-066
