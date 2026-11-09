@@ -20,3 +20,10 @@ No. Level 1 takes the resident base heights as an input array `z0`, one `f64` pe
 
 ## Findings for the architect
 - No item kind for rainfall or temperature regions exists (`world-def` has stamps and regions that clip a height layer). Level 1 for the climate edit is therefore a function over a `ClimateRegion`; the item kind belongs to the editor path (item 16's later steps).
+
+## Limits of the preview (numerics review, 2026-11-09)
+- A smooth brush stroke reads the procedural base on a ring (GEN-030); the preview passes a constant base, so smooth strokes change nothing in it. The authoritative stage is exact; level 2 shows it.
+- The id covers the footprint hash of every stamp (layer, priority, content, anchor, reach, height bound), the climate regions' bits, the grid radius, the sea level, the flood epsilon and the base's identity word. The caller's word must hold what the base heights and climate are made from.
+- The overlay's trunk threshold is not in the id: the id names the field, the overlay is read from it.
+- An invalid edit (a climate region with a non-finite or non-positive number, a height that is not finite, no sea left) is an `Err`, so a drag drops it instead of panicking.
+- The cap prefilter before `apply_stamps` takes a cosine with an absolute slack of 1e-12 (about 9 m at a small reach), and every cell for a reach of the whole sphere.

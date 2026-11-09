@@ -83,11 +83,26 @@ fn mix(h: u64, v: u64) -> u64 {
 }
 
 impl PreviewEdit {
+    /// The edit's own validity: every climate region has a finite direction, a positive finite reach and finite factors.
+    pub fn validate(&self) -> Result<(), String> {
+        for (i, r) in self.climate.iter().enumerate() {
+            let finite = [r.dir.x, r.dir.y, r.dir.z, r.reach_m, r.rain_factor, r.temp_offset_c].iter().all(|v| v.is_finite());
+            if !finite || r.reach_m <= 0.0 || r.rain_factor < 0.0 {
+                return Err(format!(
+                    "climate region {i} is not valid: its numbers are finite, its reach positive and its rainfall factor not negative"
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// The content words of the edit: the stamps' content hashes in order and the regions' bits.
     fn words(&self) -> Vec<u64> {
         let mut w = vec![self.stamps.len() as u64, self.climate.len() as u64];
         for s in &self.stamps {
-            w.extend([s.content as u64, (s.content >> 64) as u64, s.priority as u64]);
+            // The footprint hash of the item: layer, priority, content, anchor, reach and height bound (a stamp's own content hash holds none of the last three).
+            let h = planet_world_def::footprint::item_hash128(s);
+            w.extend([u64::from_le_bytes(h[..8].try_into().expect("8 bytes")), u64::from_le_bytes(h[8..].try_into().expect("8 bytes"))]);
         }
         for c in &self.climate {
             w.extend([
@@ -159,6 +174,9 @@ impl PreviewBase {
     pub fn id_of(&self, edit: &PreviewEdit) -> u64 {
         let mut h = mix(PREVIEW_DOMAIN, PREVIEW_VERSION);
         h = mix(h, self.word);
+        for v in [self.radius_m.to_bits(), self.sea_level.to_bits(), self.epsilon.to_bits()] {
+            h = mix(h, v);
+        }
         for w in edit.words() {
             h = mix(h, w);
         }
@@ -177,8 +195,9 @@ impl PreviewBase {
             .iter()
             .map(|s| {
                 let a = Vec3::new(f64::from_bits(s.dir[0]), f64::from_bits(s.dir[1]), f64::from_bits(s.dir[2]));
-                let angle = (f64::from_bits(s.reach_bits) / self.radius_m * 1.001 + 1e-9).min(core::f64::consts::PI);
-                (a, libm::cos(angle))
+                let angle = f64::from_bits(s.reach_bits) / self.radius_m * 1.001 + 1e-9;
+                // A cosine with an absolute slack far above the rounding of a dot product of unit vectors (a few ulp of 1), so no cell the exact test would take is skipped; a reach of the whole sphere takes every cell.
+                (a, if angle >= core::f64::consts::PI { -2.0 } else { libm::cos(angle) - 1e-12 })
             })
             .collect();
         for (c, h) in z.iter_mut().enumerate() {
@@ -213,13 +232,26 @@ impl PreviewBase {
             .collect()
     }
 
-    /// The level-1 preview of `edit`: the H0 route over the edited heights (the base routing when no height changes), the discharge, and the overlay with the trunk threshold `trunk_discharge`.
-    pub fn preview(&self, edit: &PreviewEdit, trunk_discharge: f64) -> Preview {
+    /// The level-1 preview of `edit`: the H0 route over the edited heights (the base routing when no height changes), the discharge, and the overlay with the trunk threshold `trunk_discharge`. An edit that is not valid (a climate region with a non-finite or non-positive number, a stamp that makes a height not finite) or that leaves no sea is an error, never a panic: a drag drops it.
+    pub fn preview(&self, edit: &PreviewEdit, trunk_discharge: f64) -> Result<Preview, String> {
+        edit.validate()?;
         let heights_change = !edit.stamps.is_empty();
         let routing = if heights_change {
             let z = self.edited_heights(edit);
+            if z.iter().any(|v| !v.is_finite()) {
+                return Err("the stamps make a height that is not finite".into());
+            }
             let outlet: Vec<bool> = z.iter().map(|v| *v <= self.sea_level).collect();
-            assert!(outlet.iter().any(|o| *o), "the edit leaves no sea: a planet needs an outlet");
+            if !outlet.iter().any(|o| *o) {
+                return Err("the edit leaves no sea: a planet needs an outlet".into());
+            }
+            let top = z.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            if top + self.epsilon <= top {
+                return Err(format!(
+                    "the highest height {top} m is beyond the flood epsilon {}: the route could not slope over a flat",
+                    self.epsilon
+                ));
+            }
             self.grid.route(&z, &outlet, self.epsilon)
         } else {
             self.routing0.clone()
@@ -234,7 +266,7 @@ impl PreviewBase {
             })
             .collect();
         let watershed = routing.outlet_of.clone();
-        Preview { id: self.id_of(edit), routing, discharge: q, overlay: Overlay { trunk, watershed, changed } }
+        Ok(Preview { id: self.id_of(edit), routing, discharge: q, overlay: Overlay { trunk, watershed, changed } })
     }
 
     /// The base's own discharge (the reference the climate preview is compared to).
@@ -294,7 +326,8 @@ mod tests {
         FootprintItem {
             id: u128::from(cell),
             priority: 0,
-            content: 0xAB00 + u128::from(cell) + amount.to_bits() as u128,
+            // One content hash for every hill: a moved or longer stamp must change the id through the anchor and the reach alone.
+            content: 0xAB00,
             dir: [d.x.to_bits(), d.y.to_bits(), d.z.to_bits()],
             reach_bits: reach_m.to_bits(),
             max_delta_bits: amount.to_bits(),
@@ -330,6 +363,11 @@ mod tests {
         sorted.sort();
         sorted.dedup();
         assert_eq!(sorted.len(), 4, "the other ids differ from each other");
+        // The same stamp content at another cell, with another reach, and with another height bound: each is another id.
+        let c2 = (0..b.grid().len() as u32).find(|&k| k != c && b.z0[k as usize] > 150.0).unwrap();
+        let moved = PreviewEdit { stamps: vec![hill_at(&b, c2, 600_000.0, 800.0)], climate: vec![] };
+        let longer = PreviewEdit { stamps: vec![hill_at(&b, c, 700_000.0, 800.0)], climate: vec![] };
+        assert!(b.id_of(&moved) != ids[0] && b.id_of(&longer) != ids[0] && b.id_of(&moved) != b.id_of(&longer));
         // The domain tag is mixed first: the id of the empty edit is not a function of the base word alone.
         assert!(ids[5] != mix(0, b.word) && ids[5] != b.word);
     }
@@ -352,7 +390,17 @@ mod tests {
             }
         }
         assert!(changed > 0, "the hill changes the heights inside its reach");
-        let p = b.preview(&edit, f64::INFINITY);
+        // Not circular: every cell is what `apply_stamps` gives there, for stamps of a normal reach and of a metre or a few centimetres anchored on a cell centre.
+        for (reach, amount) in [(900_000.0, 1500.0), (3.0, 40.0), (1.0, 40.0), (0.05, 40.0)] {
+            let e = PreviewEdit { stamps: vec![hill_at(&b, c, reach, amount)], climate: vec![] };
+            let zz = b.edited_heights(&e);
+            for (k, h) in zz.iter().enumerate() {
+                let want = apply_stamps(&e.stamps, R, b.grid().direction(k as u32), b.z0[k]);
+                assert_eq!(h.to_bits(), want.to_bits(), "reach {reach} m, cell {k}");
+            }
+            assert!(zz[c as usize] > b.z0[c as usize], "the stamp's own cell is raised at reach {reach} m");
+        }
+        let p = b.preview(&edit, f64::INFINITY).unwrap();
         let outlet: Vec<bool> = z.iter().map(|v| *v <= 0.0).collect();
         let fresh = b.grid().route(&z, &outlet, 1e-3);
         assert_eq!(p.routing, fresh, "the preview's route is a route of the edited heights, bit for bit");
@@ -365,7 +413,7 @@ mod tests {
         let b = base(16);
         let c = land_cell(&b);
         let hill = PreviewEdit { stamps: vec![hill_at(&b, c, 700_000.0, 2500.0)], climate: vec![] };
-        let p = b.preview(&hill, f64::INFINITY);
+        let p = b.preview(&hill, f64::INFINITY).unwrap();
         assert!(!p.overlay.changed.is_empty(), "the hill changes receivers or watersheds");
         let anchor = b.grid().direction(c);
         let far = p.overlay.changed.iter().filter(|&&k| arc(b.grid().direction(k), anchor) > 700_000.0 * 3.0);
@@ -376,7 +424,7 @@ mod tests {
             stamps: vec![],
             climate: vec![ClimateRegion { dir: b.grid().direction(c), reach_m: 2_000_000.0, rain_factor: 3.0, temp_offset_c: 0.0 }],
         };
-        let q = b.preview(&rain, f64::INFINITY);
+        let q = b.preview(&rain, f64::INFINITY).unwrap();
         assert!(q.overlay.changed.is_empty(), "no height changed: the routing is the base's");
         assert_eq!(q.routing, *b.base_routing());
         let raised = (0..q.discharge.len()).filter(|&i| q.discharge[i] > b.base_discharge()[i] * 1.0000001).count();
@@ -391,15 +439,35 @@ mod tests {
     #[test]
     fn the_trunk_cells_are_those_over_the_threshold_and_a_discharge_sums_the_weighted_areas_at_the_outlets() {
         let b = base(12);
-        let p = b.preview(&PreviewEdit::default(), 0.0);
+        let p = b.preview(&PreviewEdit::default(), 0.0).unwrap();
         assert_eq!(p.overlay.trunk.len(), b.grid().len(), "a threshold of 0 takes every cell");
         let top = p.discharge.iter().cloned().fold(0.0, f64::max);
-        let p2 = b.preview(&PreviewEdit::default(), top);
+        let p2 = b.preview(&PreviewEdit::default(), top).unwrap();
         assert!(!p2.overlay.trunk.is_empty() && p2.overlay.trunk.len() < p.overlay.trunk.len());
         // Conservation: the sum of the discharge at the outlets is the sum of area times weight over every cell.
         let total: f64 = (0..b.grid().len()).map(|c| b.grid().area(c as u32) * discharge_weight(runoff_mm(800.0, 12.0))).sum();
         let at_outlets: f64 = (0..b.grid().len()).filter(|&c| p.routing.receiver[c] == NONE).map(|c| p.discharge[c]).sum();
         assert!((at_outlets - total).abs() <= 1e-9 * total, "{at_outlets} against {total}");
+    }
+
+    // spec: AUTH-008
+    #[test]
+    fn an_invalid_climate_region_and_an_edit_that_leaves_no_sea_are_errors_not_panics() {
+        let b = base(12);
+        let c = land_cell(&b);
+        let region = |reach: f64, rain: f64| PreviewEdit {
+            stamps: vec![],
+            climate: vec![ClimateRegion { dir: b.grid().direction(c), reach_m: reach, rain_factor: rain, temp_offset_c: 0.0 }],
+        };
+        for (reach, rain) in [(0.0, 2.0), (-5.0, 2.0), (1e6, f64::NAN), (f64::INFINITY, 2.0), (1e6, -1.0)] {
+            assert!(b.preview(&region(reach, rain), 0.0).is_err(), "reach {reach}, rain {rain}");
+        }
+        assert!(b.preview(&region(1e6, 2.0), 0.0).is_ok());
+        // A plateau at 5,000 m over the whole sphere's reach lifts every cell above the sea: no outlet.
+        let mut all = hill_at(&b, c, 40_000_000.0, 9000.0);
+        all.stamp = Some(Stamp::new(StampKind::Plateau, [5000.0, 0.0, 0.0]));
+        let e = b.preview(&PreviewEdit { stamps: vec![all], climate: vec![] }, 0.0);
+        assert!(e.is_err(), "no sea: {:?}", e.map(|p| p.id));
     }
 
     // spec: AUTH-010
