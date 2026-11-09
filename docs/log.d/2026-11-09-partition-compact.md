@@ -1,0 +1,1 @@
+- 2026-11-09 partition-compact (GEN-149): the partitioned route runs on a compact landmass, bit-equal to the resident route; 4 rounds without memo caches peak at 62 bytes a cell (8.65 GiB at 149.3e6 cells, 2,974 s); the arrays stay resident, item 9 stays open.

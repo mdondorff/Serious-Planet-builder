@@ -2,7 +2,7 @@
 //! refined by `k` (k = 4 is the erosion grid, 12,288 cells, 814 m): the base is sampled only in the fine cells whose coarse parent is in the coarse landmass or within a ring of it, the fine land is the cells
 //! above the sea connected to the region's centre, its coast ring the outlets, and the landmass is a compact grid (`Grid::compact_cube`: only its cells, indexed by rank). Then 4 rounds of 5 steps on
 //! the resident route, with the process's peak working set after each phase (PowerShell, Windows).
-//! Usage: landmass_scale [k] [threads] [h1]: with `h1` the hydrology pass follows (runoff of the orographic climate, weighted route, filled surface, H1) with the peak after it. Needs `target/landmass_base_3072.f32` (made by `landmass_region`).
+//! Usage: landmass_scale [k] [threads] [h1|part|both]: `part` routes each round with the partitioned route on the compact grid (GEN-149, tiles of 256 cells; `both` also runs the resident rounds and compares the bits, small k only); with `h1` the hydrology pass follows (runoff of the orographic climate, weighted route, filled surface, H1) with the peak after it. Needs `target/landmass_base_3072.f32` (made by `landmass_region`).
 #![allow(clippy::needless_range_loop, clippy::chunks_exact_to_as_chunks)]
 use planet_core::{Face, Vec3};
 use planet_generators::bake::carve::CarveParams;
@@ -10,7 +10,7 @@ use planet_generators::bake::face::FaceSpec;
 use planet_generators::bake::flood::priority_flood_with;
 use planet_generators::bake::hydro::{hydrology, HydroParams};
 use planet_generators::bake::inputs::BakeInputs;
-use planet_generators::bake::round::solve_rounds;
+use planet_generators::bake::round::{solve_rounds, solve_rounds_memo, Drivers, RoundCache};
 use planet_generators::bake::route::{route_rules, RoundRules};
 use planet_generators::bake::Grid;
 use planet_generators::runoff::{discharge_weight, pet_mm, runoff_mm};
@@ -231,8 +231,39 @@ fn main() {
     // ---- the rounds, resident
     let p = CarveParams { steps: 20, reroute_every: 5, round_rules: RoundRules::ROUND, ..CarveParams::default() };
     let t = Instant::now();
-    let rep = solve_rounds(&grid, &mut z, &outlet, &p, 4, &threads, seed);
-    println!("4 rounds, {threads} threads: {:.1} s", t.elapsed().as_secs_f64());
+    let mode = a.get(3).map_or("", |x| x.as_str());
+    let rep = if mode == "part" || mode == "both" {
+        // `part` keeps nothing between rounds (the memory of one solve); `both` keeps the memos like an edited build.
+        let mut cache = if mode == "part" { RoundCache::without_memory() } else { RoundCache::default() };
+        let mut zp = if mode == "both" { z.clone() } else { Vec::new() };
+        let (rep, work) = if mode == "both" {
+            solve_rounds_memo(&grid, &mut zp, &outlet, &p, 4, &threads, seed, &Drivers::default(), 256, &mut cache)
+        } else {
+            solve_rounds_memo(&grid, &mut z, &outlet, &p, 4, &threads, seed, &Drivers::default(), 256, &mut cache)
+        };
+        for (r, w) in work.iter().enumerate() {
+            println!("  round {}: {} tiles, {} tile floods, {} memo hits", r + 1, w.tiles, w.tile_floods, w.tile_memo_hits);
+        }
+        println!("partitioned rounds, {threads} threads: {:.1} s", t.elapsed().as_secs_f64());
+        let (peak, now) = memory_mb();
+        println!(
+            "memory after the partitioned rounds: peak {peak:.0} MiB, now {now:.0} MiB; bytes a cell at the peak {:.0}",
+            peak * 1048576.0 / active as f64
+        );
+        if mode == "both" {
+            let t = Instant::now();
+            let _ = solve_rounds(&grid, &mut z, &outlet, &p, 4, &threads, seed);
+            println!("resident rounds: {:.1} s", t.elapsed().as_secs_f64());
+            let differ = z.iter().zip(&zp).filter(|(a, b)| a.to_bits() != b.to_bits()).count();
+            println!("cells whose height differs, partitioned against resident: {differ}");
+            assert_eq!(differ, 0);
+        }
+        rep
+    } else {
+        let rep = solve_rounds(&grid, &mut z, &outlet, &p, 4, &threads, seed);
+        println!("4 rounds, {threads} threads: {:.1} s", t.elapsed().as_secs_f64());
+        rep
+    };
     for (r, s) in rep.rounds.iter().enumerate() {
         println!(
             "  round {}: {} catchments, largest {} cells, {} cells in catchments of 1,000 or more",

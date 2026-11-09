@@ -7,6 +7,8 @@
 //!   order, whatever order the cells are finished in: the cells are finished by a topological sweep (a cell when all its donors are), tile by tile, with the shares crossing tile borders.
 //!
 //! The arrays are resident (this change gates the equality, not the memory); the tiles bound what each step touches.
+//!
+//! A compact cube grid (GEN-149) is tiled in the layout of its six faces stacked (`Grid::layout`): a tile is a square of a face, holds the active cells inside it, and a cell outside the landmass is skipped.
 
 #![allow(clippy::needless_range_loop)]
 
@@ -42,6 +44,11 @@ pub struct PartRoute {
 }
 
 impl PartCache {
+    /// A cache that keeps nothing: the memo of floods and the previous result are not stored (a solve that is not edited again needs neither; GEN-149).
+    pub fn without_memory() -> PartCache {
+        PartCache { forget: true, ..PartCache::default() }
+    }
+
     /// Compares the next results with the last of slot `k`: a series of routings of one surface in rounds uses a slot a round, so that "the tiles changed" reads against the same round of the previous solve.
     pub fn use_slot(&mut self, k: usize) {
         self.slot = k;
@@ -51,6 +58,8 @@ impl PartCache {
 /// What a series of calls keeps: the memo of tile floods by their inputs and the previous result (for the change counts).
 #[derive(Default)]
 pub struct PartCache {
+    /// Set by [`PartCache::without_memory`]: nothing is kept between calls.
+    forget: bool,
     floods: HashMap<(u64, u64), Arc<Vec<f64>>>,
     /// The last result of each slot (slot 0 unless [`PartCache::use_slot`] says otherwise).
     previous: Vec<Option<Previous>>,
@@ -62,6 +71,8 @@ struct Previous {
     tile: usize,
     size: (usize, usize),
     cube: bool,
+    len: usize,
+    compact: bool,
     filled: Vec<f64>,
     receiver: Vec<u32>,
     area: Vec<f64>,
@@ -93,27 +104,32 @@ impl Hash {
 }
 
 fn rects(grid: &Grid, tile: usize) -> (usize, usize, Vec<Rect>) {
-    let (tx, ty) = (grid.w().div_ceil(tile), grid.h().div_ceil(tile));
+    let (lw, lh) = grid.layout();
+    let (tx, ty) = (lw.div_ceil(tile), lh.div_ceil(tile));
     let mut v = Vec::with_capacity(tx * ty);
     for j in 0..ty {
         for i in 0..tx {
             let (x0, y0) = (i * tile, j * tile);
-            v.push(Rect { x0, y0, w: tile.min(grid.w() - x0), h: tile.min(grid.h() - y0) });
+            v.push(Rect { x0, y0, w: tile.min(lw - x0), h: tile.min(lh - y0) });
         }
     }
     (tx, ty, v)
 }
 
 fn in_rect(grid: &Grid, r: Rect, q: usize) -> bool {
-    let (x, y) = (q % grid.w(), q / grid.w());
+    let (x, y) = grid.xy(q);
     x >= r.x0 && x < r.x0 + r.w && y >= r.y0 && y < r.y0 + r.h
 }
 
 /// One tile's flood: from its outlets and from the values offered across its border (`ext`: cell, the lowest value of a neighbour outside the tile). The filled value of the tile's cells (`f64::INFINITY`
 /// for a cell nothing reaches yet), row-major in the tile.
 fn flood_tile(grid: &Grid, r: Rect, z: &[f64], outlet: &[bool], ext: &[(usize, f64)], epsilon: f64) -> Vec<f64> {
-    let local = |q: usize| (q / grid.w() - r.y0) * r.w + (q % grid.w() - r.x0);
-    let global = |l: usize| (r.y0 + l / r.w) * grid.w() + r.x0 + l % r.w;
+    let local = |q: usize| {
+        let (x, y) = grid.xy(q);
+        (y - r.y0) * r.w + (x - r.x0)
+    };
+    // The cell of a local slot: `None` for a slot off a compact grid's landmass.
+    let global = |l: usize| grid.at_xy(r.x0 + l % r.w, r.y0 + l / r.w);
     let key = |v: f64| {
         let b = v.to_bits();
         if b & (1 << 63) != 0 {
@@ -126,7 +142,7 @@ fn flood_tile(grid: &Grid, r: Rect, z: &[f64], outlet: &[bool], ext: &[(usize, f
     let mut done = vec![false; r.w * r.h];
     let mut heap: BinaryHeap<Reverse<(u64, u32)>> = BinaryHeap::new();
     for l in 0..dist.len() {
-        let p = global(l);
+        let Some(p) = global(l) else { continue };
         if outlet[p] && grid.is_active(p) {
             dist[l] = z[p];
             heap.push(Reverse((key(z[p]), l as u32)));
@@ -149,7 +165,7 @@ fn flood_tile(grid: &Grid, r: Rect, z: &[f64], outlet: &[bool], ext: &[(usize, f
             continue;
         }
         done[l] = true;
-        let p = global(l);
+        let p = global(l).expect("a reached slot is a cell");
         assert!(dist[l] + epsilon > dist[l], "the epsilon {epsilon} is below the spacing of the heights near {}", dist[l]);
         for d in 0..8 {
             let Some(q) = grid.neighbour(p, d) else { continue };
@@ -178,7 +194,7 @@ fn offers(grid: &Grid, r: Rect, filled: &[f64]) -> Vec<(usize, f64)> {
             if x != r.x0 && x != r.x0 + r.w - 1 && y != r.y0 && y != r.y0 + r.h - 1 {
                 continue;
             }
-            let p = y * grid.w() + x;
+            let Some(p) = grid.at_xy(x, y) else { continue };
             let mut best = f64::INFINITY;
             for d in 0..8 {
                 if let Some(q) = grid.neighbour(p, d) {
@@ -240,8 +256,7 @@ pub fn partitioned_route_weighted(
     assert_eq!(outlet.len(), n, "one outlet flag per cell");
     assert_finite("the heights", z);
     assert!((0..n).any(|p| outlet[p] && grid.is_active(p)), "a flood needs an outlet on the grid");
-    assert!(!grid.is_compact(), "the partitioned route cuts the rectangles of a face: not for a compact grid");
-    assert!(!grid.is_cube() || grid.w().is_multiple_of(tile), "the tiles of a cube grid divide a face edge");
+    assert!(!grid.is_cube() || grid.layout().0.is_multiple_of(tile), "the tiles of a cube grid divide a face edge");
     let (_, _, tiles) = rects(grid, tile);
     let mut stats = PartStats { tiles: tiles.len(), ..PartStats::default() };
 
@@ -251,7 +266,10 @@ pub fn partitioned_route_weighted(
         let mut h = Hash::new();
         for y in r.y0..r.y0 + r.h {
             for x in r.x0..r.x0 + r.w {
-                let p = y * grid.w() + x;
+                let Some(p) = grid.at_xy(x, y) else {
+                    h.word(u64::MAX);
+                    continue;
+                };
                 h.word(z[p].to_bits());
                 h.word(u64::from(outlet[p]) | (u64::from(grid.is_active(p)) << 1));
             }
@@ -271,19 +289,21 @@ pub fn partitioned_route_weighted(
         for (t, &r) in tiles.iter().enumerate() {
             let ext = offers(grid, r, &filled);
             let has_outlet =
-                (r.y0..r.y0 + r.h).any(|y| (r.x0..r.x0 + r.w).any(|x| outlet[y * grid.w() + x] && grid.is_active(y * grid.w() + x)));
+                (r.y0..r.y0 + r.h).any(|y| (r.x0..r.x0 + r.w).any(|x| grid.at_xy(x, y).is_some_and(|p| outlet[p] && grid.is_active(p))));
             if ext.is_empty() && !has_outlet {
                 continue;
             }
             let mut h = z_hash[t];
-            h.word(u64::from(grid.is_cube()));
+            h.word(u64::from(grid.is_cube()) | (u64::from(grid.is_compact()) << 1));
             h.word(grid.cell_area(0).to_bits());
             h.word(epsilon.to_bits());
-            for v in [grid.w(), grid.h(), r.x0, r.y0, r.w, r.h] {
+            for v in [grid.layout().0, grid.layout().1, r.x0, r.y0, r.w, r.h] {
                 h.word(v as u64);
             }
             for &(p, e) in &ext {
-                h.word(p as u64);
+                // The slot in the tile, not the cell index: a compact rank depends on cells outside the tile.
+                let (x, y) = grid.xy(p);
+                h.word(((y - r.y0) * r.w + (x - r.x0)) as u64);
                 h.word(e.to_bits());
             }
             let k = h.key();
@@ -300,13 +320,17 @@ pub fn partitioned_route_weighted(
                 None => {
                     stats.floods += 1;
                     let v = Arc::new(flood_tile(grid, r, z, outlet, &ext, epsilon));
-                    cache.floods.insert(k, Arc::clone(&v));
+                    if !cache.forget {
+                        cache.floods.insert(k, Arc::clone(&v));
+                    }
                     v
                 }
             };
             for y in 0..r.h {
                 for x in 0..r.w {
-                    filled[(r.y0 + y) * grid.w() + r.x0 + x] = result[y * r.w + x];
+                    if let Some(p) = grid.at_xy(r.x0 + x, r.y0 + y) {
+                        filled[p] = result[y * r.w + x];
+                    }
                 }
             }
         }
@@ -328,7 +352,7 @@ pub fn partitioned_route_weighted(
     for r in &tiles {
         for y in r.y0..r.y0 + r.h {
             for x in r.x0..r.x0 + r.w {
-                let p = y * grid.w() + x;
+                let Some(p) = grid.at_xy(x, y) else { continue };
                 if !outlet[p] && grid.is_active(p) {
                     receiver[p] = receiver_of(grid, &filled, p, seed);
                 }
@@ -347,7 +371,7 @@ pub fn partitioned_route_weighted(
     // The direction in which `p` reaches `q`, given that `q` reaches `p` in `d`: the opposite one on a plane; across a cube edge the faces are turned, so it is looked up.
     let cube = grid.is_cube();
     let slot = |p: usize, q: usize, d: usize| -> usize {
-        if cube && p / (grid.w() * grid.w()) != q / (grid.w() * grid.w()) {
+        if cube && grid.xy(p).1 / grid.layout().0 != grid.xy(q).1 / grid.layout().0 {
             (0..8).find(|&e| grid.neighbour(p, e) == Some(q)).expect("a neighbour reaches back")
         } else {
             OPPOSITE[d]
@@ -378,7 +402,10 @@ pub fn partitioned_route_weighted(
             }
         }
     }
-    let tile_of = |p: usize| (p / grid.w() / tile) * grid.w().div_ceil(tile) + (p % grid.w()) / tile;
+    let tile_of = |p: usize| {
+        let (x, y) = grid.xy(p);
+        (y / tile) * grid.layout().0.div_ceil(tile) + x / tile
+    };
     let mut ready: Vec<Vec<u32>> = vec![Vec::new(); tiles.len()];
     for p in 0..n {
         if pending[p] == 0 {
@@ -431,13 +458,14 @@ pub fn partitioned_route_weighted(
     }
 
     // ---- what changed against the previous call
-    if let Some(Some(Previous { tile: tl, size, cube, filled: pf, receiver: pr, area: pa })) = cache.previous.get(cache.slot) {
-        if *tl == tile && *size == (grid.w(), grid.h()) && *cube == grid.is_cube() {
+    if let Some(Some(Previous { tile: tl, size, cube, len, compact, filled: pf, receiver: pr, area: pa })) = cache.previous.get(cache.slot)
+    {
+        if *tl == tile && *size == grid.layout() && *cube == grid.is_cube() && *len == grid.len() && *compact == grid.is_compact() {
             for r in &tiles {
                 let (mut f, mut rc, mut ar) = (false, false, false);
                 for y in r.y0..r.y0 + r.h {
                     for x in r.x0..r.x0 + r.w {
-                        let p = y * grid.w() + x;
+                        let Some(p) = grid.at_xy(x, y) else { continue };
                         f |= filled[p].to_bits() != pf[p].to_bits();
                         rc |= receiver[p] != pr[p];
                         ar |= area[p].to_bits() != pa[p].to_bits();
@@ -449,9 +477,14 @@ pub fn partitioned_route_weighted(
             }
         }
     }
+    if cache.forget {
+        return PartRoute { routing: Routing { receiver, order, area }, filled, stats };
+    }
     let last = Some(Previous {
         tile,
-        size: (grid.w(), grid.h()),
+        size: grid.layout(),
+        len: grid.len(),
+        compact: grid.is_compact(),
         cube: grid.is_cube(),
         filled: filled.clone(),
         receiver: receiver.clone(),

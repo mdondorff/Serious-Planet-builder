@@ -269,10 +269,16 @@ pub fn solve_rounds_with(
 #[derive(Default)]
 pub struct RoundCache {
     pub part: PartCache,
+    forget: bool,
     catchments: HashMap<(u64, u64), Arc<Vec<f64>>>,
 }
 
 impl RoundCache {
+    /// A cache that keeps nothing between solves (GEN-149): the partitioned rounds of a build that is not edited again, at the memory of one solve.
+    pub fn without_memory() -> RoundCache {
+        RoundCache { part: PartCache::without_memory(), forget: true, ..RoundCache::default() }
+    }
+
     /// Catchment rounds held.
     pub fn len(&self) -> usize {
         self.catchments.len()
@@ -380,7 +386,9 @@ pub fn solve_rounds_memo(
             } else {
                 w.carved += 1;
                 w.cells_carved += cuts.members[k].len();
-                cache.catchments.insert(key, zk);
+                if !cache.forget {
+                    cache.catchments.insert(key, zk);
+                }
             }
         }
         work.push(w);

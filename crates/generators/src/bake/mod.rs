@@ -164,6 +164,36 @@ impl Grid {
         }
     }
 
+    /// The rectangle the cells are laid out in: `(w, h)`, and for a compact cube grid the six faces stacked, `(n, 6 n)` (GEN-149).
+    pub fn layout(&self) -> (usize, usize) {
+        match &self.compact {
+            Some(_) => {
+                let n = self.cube.as_ref().expect("a compact grid is a cube").n();
+                (n, 6 * n)
+            }
+            None => (self.w, self.h),
+        }
+    }
+
+    /// The column and row of cell `p` in [`Grid::layout`].
+    pub fn xy(&self, p: usize) -> (usize, usize) {
+        match &self.compact {
+            Some(k) => {
+                let (g, n) = (k.cube_id(p), self.cube.as_ref().expect("a compact grid is a cube").n());
+                (g % n, g / n)
+            }
+            None => (p % self.w, p / self.w),
+        }
+    }
+
+    /// The cell at column `x`, row `y` of [`Grid::layout`]; on a compact grid `None` when it is not one of its cells.
+    pub fn at_xy(&self, x: usize, y: usize) -> Option<usize> {
+        match &self.compact {
+            Some(k) => k.rank(y * self.cube.as_ref().expect("a compact grid is a cube").n() + x),
+            None => Some(y * self.w + x),
+        }
+    }
+
     pub fn w(&self) -> usize {
         self.w
     }
