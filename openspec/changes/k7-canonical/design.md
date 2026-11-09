@@ -10,7 +10,7 @@
 | largest change of L | 0.948 m | 0.271 m |
 | cells over 0.25 m | 113 (0.0108 %) | 2 (0.0002 %) |
 | pits after the whole pass, canonical and plain | 205 (0.0197 %, max 20.3 m) both | 456 (0.0438 %, max 27.5 m) both |
-| G-SURF at the cell centres | 5.7e-14 m unquantised, 0.125 m quantised | the same |
+| G-SURF at the cell centres (canonical K7; the plain K7's figures are those of l-store's design note) | 5.7e-14 m unquantised, 0.125 m quantised | the same |
 | G-SURF-I at the vertices (over 0.25 m, p99, max) | 192 (0.66 %), 0.225 m, 2.554 m | 209 (0.72 %), 0.228 m, 2.554 m |
 - Every pit count at every stage is the same under both floods; only the deposition and the incision's routes move L.
 - The plain-flood K7 digests (z and change bits, smooth tile): 68e2e76ffed7d2b7 with a channel, 7700012a670c5e69 without, taken on origin/main at 3d3ad99a before the change.
