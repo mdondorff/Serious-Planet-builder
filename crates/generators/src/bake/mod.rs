@@ -27,6 +27,7 @@ pub mod metric;
 pub mod partition;
 pub mod round;
 pub mod route;
+pub mod sediment;
 pub mod spill;
 pub mod thermal;
 pub mod tile;

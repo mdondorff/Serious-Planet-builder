@@ -1,0 +1,1 @@
+- 2026-11-09 sediment-wiring (GEN-151): sediment_pass (thermal, deposition, pit spreading) on a compact landmass after the rounds; G-SED holds to 3.5e-14 at 9.4e6 cells; the breach is 10.7 % of the eroded column; thermal makes pits to 610 m that the deposition fills to 5 m.

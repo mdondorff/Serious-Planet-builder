@@ -334,3 +334,52 @@ fn thermal_on_a_cube_grid_keeps_the_volume_and_is_the_masked_cube_on_a_compact_o
         assert_eq!(zc[p].to_bits(), zm[g].to_bits(), "the compact grid against the masked cube at {g}");
     }
 }
+
+// spec: GEN-151
+#[test]
+fn the_sediment_pass_on_a_compact_landmass_after_the_rounds_conserves_and_is_the_masked_cube() {
+    use planet_generators::bake::round::solve_rounds;
+    use planet_generators::bake::sediment::{breach_lowered_m3, sediment_pass};
+    use planet_generators::bake::tile::Pass2Params;
+    let n = 24;
+    let small = 4000.0; // a small body: cells of about 260 m, steep enough for thermal
+    let (active, bits) = corner_cap(n, 0.2);
+    let compact = Grid::compact_cube(n, small, bits);
+    let masked = Grid::cube(n, small).with_active(active.clone());
+    let ids: Vec<usize> = (0..active.len()).filter(|&g| active[g]).collect();
+    let cube = planet_generators::bake::h0::GlobalGrid::new(n, R);
+    let z_all: Vec<f64> = (0..active.len())
+        .map(|g| {
+            let d = cube.direction(g as u32);
+            900.0 * (d.x + d.y + d.z)
+                + 90.0 * libm::sin(11.0 * d.x + 5.0 * d.y) * libm::cos(8.0 * d.z)
+                + 2.0 * planet_generators::bake::route::jitter(5, g as u64, 0)
+                - 500.0
+        })
+        .collect();
+    let z0: Vec<f64> = ids.iter().map(|&g| z_all[g]).collect();
+    let outlet: Vec<bool> = z0.iter().map(|&h| h <= 0.0).collect();
+    let outlet_m: Vec<bool> = (0..active.len()).map(|g| active[g] && z_all[g] <= 0.0).collect();
+    let rounds = CarveParams { steps: 10, reroute_every: 5, round_rules: RoundRules::ROUND, ..CarveParams::default() };
+    let (mut zc, mut zm) = (z0.clone(), z_all.clone());
+    solve_rounds(&compact, &mut zc, &outlet, &rounds, 2, &3usize, 5);
+    solve_rounds(&masked, &mut zm, &outlet_m, &rounds, 2, &3usize, 5);
+    let (start_c, start_m) = (z0.clone(), z_all.clone());
+    let mut q = Pass2Params::standard(5, 0.0);
+    q.carve.breach_max_m = CarveParams::default().breach_max_m;
+    let rc = sediment_pass(&compact, &mut zc, &start_c, &q, 3);
+    let rm = sediment_pass(&masked, &mut zm, &start_m, &q, 1);
+    // G-SED: what was eroded is deposited or leaves; thermal and the pit spreading keep the volume.
+    let d = rc.deposit;
+    assert!(d.eroded > 0.0 && (d.eroded - d.deposited - d.exported).abs() < 1e-9 * d.eroded, "{d:?}");
+    assert!(rc.thermal_volume_change.abs() < 1e-9 && rc.spread_volume_change.abs() < 1e-9, "{rc:?}");
+    assert_eq!(rc.pits.len(), 4);
+    for (p, &g) in ids.iter().enumerate() {
+        assert_eq!(zc[p].to_bits(), zm[g].to_bits(), "the sediment pass at {g}");
+    }
+    assert_eq!(rc.deposit.eroded.to_bits(), rm.deposit.eroded.to_bits());
+    assert!(rc.thermal.moved_volume_first > 0.0, "thermal moved nothing");
+    // The breach alone is a finite, non-negative volume (its share of the eroded column is measured by `landmass_scale sed`).
+    let b = breach_lowered_m3(&compact, &start_c, &outlet, &CarveParams { max_area: 0.0, ..q.carve }, 5);
+    assert!(b >= 0.0 && b.is_finite());
+}
