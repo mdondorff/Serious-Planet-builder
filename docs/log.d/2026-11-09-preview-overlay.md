@@ -1,0 +1,1 @@
+- 2026-11-09 preview-overlay: the level-1 preview as editor overlay data and egui lines coloured by watershed, replaced by a newer preview, dropped when stale, removed on commit or undo (VIEW-067); the job that produces it is the next change

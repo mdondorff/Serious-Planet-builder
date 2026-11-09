@@ -17,6 +17,7 @@ pub mod lists;
 pub mod overlay;
 pub mod params;
 pub mod polyline;
+pub mod preview_overlay;
 pub mod problems;
 pub mod relevance;
 pub mod session;

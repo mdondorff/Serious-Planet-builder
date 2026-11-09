@@ -11,6 +11,7 @@ use planet_editor::layout::Layout;
 use planet_editor::lists::{LayerGroup, Row};
 use planet_editor::overlay::{self, BrushOverlay, DraftOverlay, OverlayItem};
 use planet_editor::params::{kind_title, Inspector, STAMP_KINDS};
+use planet_editor::preview_overlay::{self, PreviewData, PreviewOverlay, PreviewState};
 use planet_editor::relevance::ViewState;
 use planet_editor::session::{Session, SessionError, Tool, LINE_KINDS};
 use planet_editor::shape::{self, Handle};
@@ -152,6 +153,9 @@ pub struct EditRuntime {
     /// costs a millisecond, and the outlines of an unchanged world are asked for every frame, VIEW-051).
     ground: std::cell::RefCell<(u64, std::collections::HashMap<[u64; 3], f64>)>,
     overlay: Vec<OverlayItem>,
+    /// The level-1 preview of the edit being made (VIEW-067): the accepted one and the tickets of a drag, and what the frame draws of it.
+    preview: PreviewState,
+    preview_overlay: Option<PreviewOverlay>,
     /// The line or region being drawn, on the screen.
     draft: DraftOverlay,
     /// The brush tool on the screen: the stroke being painted and the ring under the cursor.
@@ -283,6 +287,8 @@ impl EditRuntime {
             shown: Vec::new(),
             ground: std::cell::RefCell::new((0, std::collections::HashMap::new())),
             overlay: Vec::new(),
+            preview: PreviewState::default(),
+            preview_overlay: None,
             draft: DraftOverlay::default(),
             brush: BrushOverlay::default(),
             transient_shown: false,
@@ -365,7 +371,26 @@ impl EditRuntime {
 
     /// The places the commands since the last call changed.
     pub fn take_affected(&mut self) -> Vec<Affected> {
+        // An edit was committed, undone or redone: the preview of the edit in the making is gone (VIEW-067).
+        if !self.affected.is_empty() {
+            self.preview.clear();
+        }
         std::mem::take(&mut self.affected)
+    }
+
+    /// An edit asks for a level-1 preview: the ticket of its result (VIEW-067).
+    pub fn submit_preview(&mut self) -> u64 {
+        self.preview.submit()
+    }
+
+    /// A preview result arrives: shown when its ticket is the newest, dropped otherwise (VIEW-067). Returns whether it was taken.
+    pub fn accept_preview(&mut self, ticket: u64, data: PreviewData) -> bool {
+        self.preview.accept(ticket, data)
+    }
+
+    /// The preview the frame draws, if any.
+    pub fn preview_overlay(&self) -> Option<&PreviewOverlay> {
+        self.preview_overlay.as_ref()
     }
 
     /// Draw the outlines, names and handles over the planet and the panels; returns what the panels asked for. `scale` is window pixels per
@@ -374,6 +399,9 @@ impl EditRuntime {
         let ppp = f64::from(ui.ctx().pixels_per_point());
         let to_points = |p: [f64; 2]| egui::pos2((p[0] * scale[0] / ppp) as f32, (p[1] * scale[1] / ppp) as f32);
         crate::panels::draw_overlay(ui, &self.overlay, to_points);
+        if let Some(p) = &self.preview_overlay {
+            crate::panels::draw_preview_overlay(ui, p, to_points);
+        }
         crate::panels::draw_draft(ui, &self.draft, to_points);
         crate::panels::draw_brush(ui, &self.brush, to_points);
         // The panels read the lists and write their own state: take the state out for the call.
@@ -573,6 +601,7 @@ impl EditRuntime {
             *cache.1.entry(key).or_insert_with(|| field.height(d))
         };
         self.overlay = overlay::build(&self.session, &self.shown, &view, &ground);
+        self.preview_overlay = self.preview.current().map(|d| preview_overlay::build(d, &view, &ground, preview_overlay::MAX_LINES));
         self.handles = overlay::handle_pixels(&self.overlay);
         self.draft = overlay::draft(&self.session, &view, &|d| field.height(d), (!over_ui).then_some(cursor));
         // The hover pick finds the ground along the whole ray: its first read of a bake block nobody has touched decodes it, so with a source it runs on its own
@@ -1223,6 +1252,39 @@ mod tests {
         fn item_revision(&self) -> u64 {
             self.revision.load(std::sync::atomic::Ordering::Relaxed)
         }
+    }
+
+    // spec: VIEW-067
+    #[test]
+    fn the_level_1_preview_is_replaced_by_a_newer_one_dropped_when_stale_and_gone_when_an_edit_is_committed_or_undone() {
+        use planet_editor::preview_overlay::PreviewData;
+        let at = unit(47.2, 8.55);
+        let cam = above(at, 3_000.0);
+        let mut e = runtime(None);
+        e.toggle();
+        let data = |id: u64| PreviewData { id, lines: Vec::new(), trunk_cells: 0, changed_cells: 0 };
+        let (t1, t2) = (e.submit_preview(), e.submit_preview());
+        assert!(!e.accept_preview(t1, data(1)), "the result of the first ask arrives after the second: dropped");
+        assert!(e.accept_preview(t2, data(2)));
+        frame(&mut e, &cam, false);
+        assert_eq!(e.preview_overlay().map(|p| p.id), Some(2), "the frame draws the accepted preview");
+        // A brush stroke is committed: its places are to refresh, and the preview is gone.
+        e.key(EditKey::Tool(8));
+        e.press(&cam, VIEWPORT, CENTRE, &limits(), &Flat);
+        e.moved(&cam, VIEWPORT, [CENTRE[0] + 60.0, CENTRE[1]], &limits(), &Flat);
+        e.moved(&cam, VIEWPORT, [CENTRE[0] + 120.0, CENTRE[1]], &limits(), &Flat);
+        e.release();
+        assert!(!e.take_affected().is_empty());
+        frame(&mut e, &cam, false);
+        assert!(e.preview_overlay().is_none(), "committed: no preview over the ground any more");
+        // A preview of the next edit, then an undo of the stroke.
+        let t3 = e.submit_preview();
+        assert!(e.accept_preview(t3, data(3)));
+        e.key(EditKey::Undo);
+        assert!(!e.take_affected().is_empty());
+        frame(&mut e, &cam, false);
+        assert!(e.preview_overlay().is_none(), "undone: the preview is gone too");
+        assert!(!e.accept_preview(t3, data(3)), "and a result of an earlier ask no longer lands");
     }
 
     // spec: STRM-036
