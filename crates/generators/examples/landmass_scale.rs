@@ -624,7 +624,9 @@ fn main() {
                 (0..z.len()).filter(|&p| outlet[p] && outl_s[p]).count(),
                 q.carve.epsilon
             );
-            let mask = |fill: &[f64], o: &[bool]| -> Vec<bool> { (0..z.len()).map(|p| grid.is_active(p) && !o[p] && fill[p] - z[p] > 0.5).collect() };
+            let mask = |fill: &[f64], o: &[bool]| -> Vec<bool> {
+                (0..z.len()).map(|p| grid.is_active(p) && !o[p] && fill[p] - z[p] > 0.5).collect()
+            };
             let count = |m: &[bool]| m.iter().filter(|&&b| b).count();
             let h = mask(&filled, &outlet);
             let f_s = priority_flood(&grid, &z, &outl_s, q.carve.epsilon);
@@ -693,7 +695,13 @@ fn main() {
             let mut run = 0usize;
             for c in comps.iter().take(10) {
                 run += c.0;
-                println!("  {} cells, deepest {:.1} m, {} of its cells touch an outlet cell or the grid's edge; cumulative share {:.1} %", c.0, c.1, c.2, 100.0 * run as f64 / total as f64);
+                println!(
+                    "  {} cells, deepest {:.1} m, {} of its cells touch an outlet cell or the grid's edge; cumulative share {:.1} %",
+                    c.0,
+                    c.1,
+                    c.2,
+                    100.0 * run as f64 / total as f64
+                );
             }
             let in_h1 = (0..z.len()).filter(|&p| sd[p] && hy.label[p] != u32::MAX).count();
             println!(

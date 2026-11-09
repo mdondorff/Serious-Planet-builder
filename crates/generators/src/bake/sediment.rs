@@ -228,3 +228,32 @@ pub fn catchment_balance(grid: &Grid, z: &mut [f64], original: &[f64], p: &Pass2
     out.total_relative_error = (out.eroded_m3 - out.raised_m3 - out.exported_m3).abs() / out.eroded_m3.max(f64::MIN_POSITIVE);
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bake::route::route;
+
+    // spec: GEN-159
+    #[test]
+    fn the_sweeps_surface_and_route_are_the_canonical_flood_s() {
+        // A flat chain (columns 3 to 9 of row 4, 0.01 m) between two sea cells (columns 2 and 11), walls rising inwards: on the canonical surface the chain's last cell drains to the cell beside the second sea cell;
+        // on the plain flood it drains back along the chain.
+        let g = Grid::new(16, 9, 100.0);
+        let mut z: Vec<f64> = (0..16 * 9).map(|p| 100.0 + (p % 16).min(p / 16).min(15 - p % 16).min(8 - p / 16) as f64).collect();
+        let at = |x: usize| 4 * 16 + x;
+        z[at(2)] = 0.0;
+        z[at(11)] = 0.0;
+        for x in 3..=10 {
+            z[at(x)] = 0.01;
+        }
+        let outlet = g.outlets(&z, 0.0);
+        let (filled, routing) = canonical_surface(&g, &z, &outlet, 0.02, 7);
+        assert_eq!(filled, priority_flood_with(&g, &z, &outlet, 0.02, true));
+        let canonical = route_rules(&g, &z, &outlet, 0.02, 7, 0.0, None, RoundRules { clip_mfd: MfdClip::Off, canonical_flood: true });
+        assert_eq!(routing.receiver, canonical.receiver);
+        assert_eq!(routing.receiver[at(9)] as usize, at(10), "column 9 drains towards the second sea cell");
+        let plain = route(&g, &z, &outlet, 0.02, 7, 0.0);
+        assert_eq!(plain.receiver[at(9)] as usize, at(8), "the plain flood drains it back along the chain");
+    }
+}

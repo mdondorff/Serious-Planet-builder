@@ -182,7 +182,8 @@ fn a_masked_grid_shows_the_kernels_only_its_cells() {
 /// the cell `q` at column 10, the sea cell B at column 11.
 fn chain_beside_two_outlets() -> (Grid, Vec<f64>, usize) {
     let g = Grid::new(16, 9, 100.0);
-    let mut z = vec![100.0; 16 * 9];
+    // The walls rise inwards from the border (1 m a cell): no flat of walls for a FIFO to ramp across, so only the chain falsifies the plain flood.
+    let mut z: Vec<f64> = (0..16 * 9).map(|p| 100.0 + (p % 16).min(p / 16).min(15 - p % 16).min(8 - p / 16) as f64).collect();
     let at = |x: usize| 4 * 16 + x;
     z[at(2)] = 0.0;
     z[at(11)] = 0.0;
@@ -205,17 +206,17 @@ fn the_canonical_flood_does_not_lift_a_cell_above_a_lower_outlet_beside_it() {
     // The mechanism: the plain flood lifts it by the length of the chain, 8 epsilons (0.16 m), while B is still in its heap.
     let plain = priority_flood(&g, &z, &outlet, eps);
     assert!((plain[q] - 8.0 * eps).abs() < 1e-12, "the plain flood's FIFO runs the chain first: {}", plain[q]);
-    // The ramp from both ends: no chain cell stands above the lower of its two ramps (+ one epsilon of the tie).
+    // The ramp from both ends: each chain cell stands one epsilon a step from the nearer outlet (A at column 2, B at column 11).
     for x in 3..=10usize {
-        let ramp = eps * (x as f64 - 2.0).min(12.0 - x as f64);
-        assert!(canonical[4 * 16 + x] <= ramp + eps + 1e-12, "column {x}: {} above its ramp {ramp}", canonical[4 * 16 + x]);
+        let want = eps * (x as f64 - 2.0).min(11.0 - x as f64);
+        assert!((canonical[4 * 16 + x] - want).abs() < 1e-12, "column {x}: {} against {want}", canonical[4 * 16 + x]);
     }
 }
 
 // spec: GEN-159
 #[test]
 fn the_pits_of_the_sediment_pass_are_the_canonical_flood_s_pits() {
-    // On the surface above no cell is a depression of 0.1 m: the pit count the sediment pass reports must not count the plain flood's lift of the chain (the cells of columns 8 to 10).
+    // On the surface above no cell is a depression of 0.1 m: the pit count the sediment pass reports must not count the plain flood's lift of the chain (the cells of columns 8 to 10 stand 0.11, 0.13 and 0.15 m deep on it).
     let (g, z, _) = chain_beside_two_outlets();
     let s = planet_generators::bake::sediment::pit_cells(&g, &z, 0.0, 0.02, 0.1);
     assert_eq!(s.pit_cells, 0, "no depression: {s:?}");
