@@ -20,14 +20,14 @@ Dormant (no near trigger; not asked now):
 - **Global authoring preview** (owner, 2026-10-31): a coarse whole-planet preview of relief and landforms from the inputs, before the bake, as the step before detailed editing; not runtime. SPIKE-69 rates its k-sources for this. Trigger: after M9's bake, or when SPIKE-69 shows a pre-bake source.
 - **Coarse-first refinement of an edit** (owner, 2026-10-20): parked. Trigger: a brush case of the edit-latency scene that misses its budget.
 
-## Queue (2026-11-05 evening)
+## Queue (2026-11-09)
 | # | Step | Lane |
 |---|---|---|
-| NR | Real-GPU window checks NOT RUN on a locked desktop (TEST-073) | crusader |
-| Prototype | `docs/briefings/terrain-prototype.md`: items 14, 9, 11, 10 | explorer |
+| NR | One `test gpu --real` in the unlocked-display window (TEST-073), after the k=4 run | crusader |
+| Prototype | `docs/briefings/terrain-prototype.md`: k=4 phase plan (GEN-158), items 9, 10, 11, 14 | explorer |
 | Prototype checks | ADR review pass; independent gate measurement; second region and seed | spikes |
-| Ground | Disk guardrails (BUILD-038/039); runtime items after the hydrology and local pass are on main; #1137 waits for the owner | crusader |
-| Perf | Machine ready again (preflight OK 2026-11-07, parallel 74-76k us of 112k): REND-052 verdicts, ground-detail cost, channel-read cost; no store opens on main since GLOBAL_VERSION 9: a current store first (MESH_VERSION 11) | planner |
+| Prototype 16 | Preview level 1 (#1270 merged); TEST-099 latency waits for a perf authorisation; item 15 waits for item 11; #1137 waits for the owner | crusader |
+| Perf | Machine ready again (preflight OK 2026-11-07, parallel 74-76k us of 112k): REND-052 verdicts, ground-detail cost, channel-read cost; no store opens on main since GLOBAL_VERSION 9: a current store first (MESH_VERSION 11) | bulldozer |
 | Store | All stores on disk refused by keys since #1218/#1225 (read-only references); in-memory `--world` runs only until a new store | all |
 
 ## Tracked
