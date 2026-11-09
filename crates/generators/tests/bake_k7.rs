@@ -1,0 +1,172 @@
+//! Tier A, GEN-148 (A3 sections 3.1 to 3.3, gate G-SURF): K7, the local pass in the new chain: the base read at every cell, the regional change read C1, the channels burned in, the breach of pass 1 at the
+//! local grid, then pass 2's carve, thermal, deposition and pit spreading; the stored change against `B` and the runtime's `B + L` against the bake at the lattice nodes. Small tiles; no store read.
+
+use planet_core::cube::{face_to_direction, TangentWarp};
+use planet_core::{Face, Vec3};
+use planet_generators::bake::k7::{burn_channels, k7_tile, pit_stats, surface_gate, Channel, K7Params, RegionField};
+use planet_generators::bake::tile::{TileGrid, TileId};
+
+/// A tiny planet: 384 cells a face edge of about 100 m.
+fn tile_grid() -> TileGrid {
+    TileGrid { cells: 384, tile: 48, halo: 8, radius_m: 100.0 * 384.0 * 2.0 / core::f64::consts::PI }
+}
+
+fn id() -> TileId {
+    TileId { face: Face(1), ti: 3, tj: 4 }
+}
+
+/// The face cell-index coordinates of a direction on the tile's face.
+fn face_xy(g: &TileGrid, d: Vec3) -> (f64, f64) {
+    let n = g.cells as f64;
+    let face = id().face;
+    let w = d.dot(face.normal());
+    let plane = |u: f64| libm::atan(u) / core::f64::consts::FRAC_PI_4;
+    let (s, t) = (plane(d.dot(face.u_axis()) / w), plane(d.dot(face.v_axis()) / w));
+    ((s + 1.0) * 0.5 * n - 0.5, (t + 1.0) * 0.5 * n - 0.5)
+}
+
+/// A valley falling 0.8 m a cell to the east, its axis the face cell row 212, with walls rising 0.05 m a cell squared and a long swell.
+fn base(d: Vec3) -> f64 {
+    let (x, y) = face_xy(&tile_grid(), d);
+    400.0 - 0.8 * (x - 150.0) + 0.05 * (y - 212.0) * (y - 212.0) + 3.0 * libm::sin(0.03 * x)
+}
+
+/// The face cell-index coordinates of the window's cell `(a, b)`.
+fn cell(g: &TileGrid, a: i64, b: i64) -> (f64, f64) {
+    let (t, h) = (g.tile as i64, g.halo as i64);
+    ((i64::from(id().ti) * t - h + a) as f64, (i64::from(id().tj) * t - h + b) as f64)
+}
+
+/// A dam across the channel's course: the regional change as a function of the direction, 40 m over a ridge of a few cells at the face cell column `ix`.
+fn dam_at(g: &TileGrid, ix: f64, j_lo: f64, j_hi: f64) -> impl Fn(Vec3) -> f64 + Sync {
+    let g = *g;
+    move |d: Vec3| {
+        let (x, y) = face_xy(&g, d);
+        if y >= j_lo && y <= j_hi && libm::fabs(x - ix) <= 2.5 {
+            40.0
+        } else {
+            0.0
+        }
+    }
+}
+
+/// A channel along a row of the tile from its west to its east end, the bed 60 m under the base and falling by 0.05 m a cell.
+fn channel(g: &TileGrid, row: i64) -> Channel {
+    let (h, t) = (g.halo as i64, g.tile as i64);
+    // The whole window, to its border (the next tile's channel continues it): a trench that ends inside the window would be a sink.
+    let w = t + 2 * h;
+    let mut points: Vec<(f64, f64)> = (0..w).step_by(4).map(|a| cell(g, a, row)).collect();
+    points.push(cell(g, w - 1, row));
+    let levels: Vec<f64> = points
+        .iter()
+        .enumerate()
+        .map(|(k, &(x, y))| {
+            let d =
+                face_to_direction(&TangentWarp, id().face, 2.0 * (x + 0.5) / g.cells as f64 - 1.0, 2.0 * (y + 0.5) / g.cells as f64 - 1.0);
+            base(d) - 60.0 - 0.2 * k as f64
+        })
+        .collect();
+    Channel { points, levels }
+}
+
+// spec: GEN-148
+#[test]
+fn the_burn_in_only_lowers_and_reaches_the_profile_along_the_segment() {
+    let w = 40;
+    let mut z: Vec<f64> = (0..w * w).map(|p| 100.0 + ((p * 37) % 11) as f64).collect();
+    let before = z.clone();
+    let ch = Channel { points: vec![(3.0, 5.0), (12.0, 9.0), (30.0, 9.0)], levels: vec![90.0, 80.0, 70.0] };
+    let lowered = burn_channels(&mut z, w, (0, 0), std::slice::from_ref(&ch));
+    assert!(lowered > 20);
+    assert!(z.iter().zip(&before).all(|(a, b)| a <= b), "only lowers");
+    // The cells at the points are at their levels, and the line is 8-connected: no gap between consecutive cells of the line.
+    for (&(x, y), &l) in ch.points.iter().zip(&ch.levels) {
+        assert!(z[y as usize * w + x as usize] <= l + 1e-9, "the point at ({x}, {y}) is at its level");
+    }
+    let burnt: Vec<usize> = (0..w * w).filter(|&c| z[c] != before[c]).collect();
+    for &c in &burnt {
+        let (cx, cy) = ((c % w) as i64, (c / w) as i64);
+        let near = burnt.iter().any(|&o| o != c && ((o % w) as i64 - cx).abs() <= 1 && ((o / w) as i64 - cy).abs() <= 1);
+        assert!(near, "a burnt cell has a burnt neighbour");
+    }
+    // A cell already lower than the profile is not raised.
+    let mut low = vec![10.0; w * w];
+    assert_eq!(burn_channels(&mut low, w, (0, 0), &[ch]), 0);
+    assert!(low.iter().all(|&v| v == 10.0));
+}
+
+// spec: GEN-148
+#[test]
+fn a_dam_across_a_channel_is_a_pit_before_the_burn_in_and_none_after() {
+    let g = tile_grid();
+    let row = g.halo as i64 + 20;
+    let (_, y) = cell(&g, 0, row);
+    let (x_dam, _) = cell(&g, g.halo as i64 + 24, 0);
+    let regional = dam_at(&g, x_dam, y - 100.0, y + 100.0);
+    let ch = channel(&g, row);
+    let p = K7Params::standard(5, 0.0);
+    let with = k7_tile(&g, id(), &base, &regional, std::slice::from_ref(&ch), &p, 2);
+    let without = k7_tile(&g, id(), &base, &regional, &[], &p, 2);
+    let start = with.pits[0].1;
+    assert_eq!(with.pits[0].0, "base + regional change");
+    assert!(start.pit_cells > 0 && start.max_m > 10.0, "the dam holds a lake before the burn-in: {start:?}");
+    assert!(with.burned > 20, "the channel is burned in");
+    assert!(with.pits[1].1.max_m < start.max_m / 2.0, "the burn-in drains the lake: {:?} against {start:?}", with.pits[1].1);
+    assert!(with.pits[4].1.max_m <= with.pits[1].1.max_m + 1.0, "the whole pass leaves no deeper pit than the burn-in: {:?}", with.pits);
+    assert_eq!(without.burned, 0);
+    // Without the burn-in the pits stay (the breach of pass 1 at the local grid is reported, not asserted to drain a dam of 40 m: its first pass can deepen the floor it cuts from).
+    assert!(without.pits[4].1.pit_cells > 0, "without the channel the dam still holds water after the whole pass: {:?}", without.pits);
+    // The result is the same bits on any thread count.
+    let again = k7_tile(&g, id(), &base, &regional, std::slice::from_ref(&ch), &p, 1);
+    assert_eq!(with.z.iter().map(|v| v.to_bits()).collect::<Vec<_>>(), again.z.iter().map(|v| v.to_bits()).collect::<Vec<_>>());
+    assert_eq!(with.change, again.change);
+}
+
+// spec: GEN-148
+#[test]
+fn the_runtime_surface_is_the_bake_surface_at_the_centres_and_within_a_step_at_the_lattice_nodes() {
+    let g = tile_grid();
+    let p = K7Params::standard(5, 0.0);
+    // A smooth regional change and no channel: C1 of the bake is B plus C1 of the stored change, so the runtime reads the bake's surface at the nodes (before quantisation) to rounding.
+    let smooth = |d: Vec3| 6.0 * libm::sin(0.5 * d.x) - 4.0 * libm::cos(0.7 * d.y);
+    let r = k7_tile(&g, id(), &base, &smooth, &[], &p, 2);
+    let gate = surface_gate(&g, id(), &base, &r, 6);
+    assert!(gate.nodes > 20, "lattice nodes read: {gate:?}");
+    assert!(gate.max_centres_unquantised_m < 1e-9, "at the cells' centres the C1 read returns the stored value: {gate:?}");
+    assert!(gate.max_centres_quantised_m <= 0.125 + 1e-9, "quantisation at the centres is at most half a step: {gate:?}");
+    // The clamp of the C1 read (to the four cells around the point) is not linear: where the surface has an extremum (the valley's axis) the runtime's B + C1(L) differs from C1 of the bake by a few centimetres, not 0.
+    assert!(gate.max_unquantised_m < 0.1, "G-SURF before quantisation on a smooth tile: {gate:?}");
+    assert!(gate.max_quantised_m <= 0.25, "G-SURF after quantisation on a smooth tile, A3's bound of 0.25 m: {gate:?}");
+    // With a burnt channel the clamp of the C1 read (to the four cells around the point) is not linear, so the runtime's read of B plus L can differ from the read of the bake near the channel: reported, bounded.
+    let with = k7_tile(&g, id(), &base, &smooth, &[channel(&g, g.halo as i64 + 20)], &p, 2);
+    let gate_c = surface_gate(&g, id(), &base, &with, 6);
+    assert!(gate_c.max_centres_unquantised_m < 1e-9, "{gate_c:?}");
+    assert!(gate_c.max_quantised_m < 5.0, "{gate_c:?}");
+}
+
+// spec: GEN-148
+#[test]
+fn a_regional_field_is_read_c1_and_clamped() {
+    let (w, h) = (12, 10);
+    let data: Vec<f32> = (0..w * h).map(|p| (p % w) as f32 * 2.0 + (p / w) as f32 * 3.0).collect();
+    let n = 384;
+    let f = RegionField::new(Face(1), n, (100, 200), w, h, data.clone());
+    // At a cell's centre the read returns the cell's value.
+    for (a, b) in [(3usize, 4usize), (5, 5), (8, 2)] {
+        let d = face_to_direction(
+            &TangentWarp,
+            Face(1),
+            2.0 * ((100 + a) as f64 + 0.5) / n as f64 - 1.0,
+            2.0 * ((200 + b) as f64 + 0.5) / n as f64 - 1.0,
+        );
+        assert!((f.at(d) - f64::from(data[b * w + a])).abs() < 1e-3, "cell ({a}, {b})");
+    }
+    // Far outside the window the read is clamped to the window's edge, within the range of its values.
+    let far = face_to_direction(&TangentWarp, Face(1), 0.9, 0.9);
+    let v = f.at(far);
+    assert!((0.0..=f64::from(*data.iter().max_by(|a, b| a.total_cmp(b)).unwrap())).contains(&v));
+    // The pits of a plane are none.
+    let grid = planet_generators::bake::Grid::new(16, 16, 100.0);
+    let z: Vec<f64> = (0..256).map(|p| 100.0 + (p % 16) as f64).collect();
+    assert_eq!(pit_stats(&grid, &z, 0.0, 1e-3, 0.5).pit_cells, 0);
+}

@@ -21,6 +21,7 @@ pub mod flood;
 pub mod h0;
 pub mod hydro;
 pub mod inputs;
+pub mod k7;
 pub mod map;
 pub mod metric;
 pub mod partition;

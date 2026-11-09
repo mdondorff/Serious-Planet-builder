@@ -186,7 +186,7 @@ pub fn depth_m(code: u8) -> f32 {
 }
 
 /// A field evaluated on every cell of the tile's window, row-major, on `threads` threads (a value per cell: the same bits for any count).
-fn sample_window(g: &TileGrid, id: TileId, field: &(dyn Fn(Vec3) -> f64 + Sync), threads: usize) -> Vec<f64> {
+pub(super) fn sample_window(g: &TileGrid, id: TileId, field: &(dyn Fn(Vec3) -> f64 + Sync), threads: usize) -> Vec<f64> {
     let par: &dyn Par = &threads;
     let (w, t, h) = (g.window(), g.tile as i64, g.halo as i64);
     let (i0, j0) = (i64::from(id.ti) * t - h, i64::from(id.tj) * t - h);
@@ -232,7 +232,7 @@ pub fn sample_window_coarse(g: &TileGrid, id: TileId, field: &(dyn Fn(Vec3) -> f
 }
 
 /// The window's grid: cell `(0, 0)` is the global cell `(i0 + offset, j0 + offset)` of the face's grid, so a cell hashes alike in every window.
-fn window_grid(g: &TileGrid, id: TileId) -> Grid {
+pub(super) fn window_grid(g: &TileGrid, id: TileId) -> Grid {
     let (t, h) = (g.tile as i64, g.halo as i64);
     let origin = |a: u32| (i64::from(a) * t - h + ID_OFFSET) as u32;
     Grid::new(g.window(), g.window(), g.dx()).with_origin((origin(id.ti), origin(id.tj)))
