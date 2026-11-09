@@ -233,7 +233,8 @@ fn main() {
     let t = Instant::now();
     let mode = a.get(3).map_or("", |x| x.as_str());
     let rep = if mode == "part" || mode == "both" {
-        let mut cache = RoundCache::default();
+        // `part` keeps nothing between rounds (the memory of one solve); `both` keeps the memos like an edited build.
+        let mut cache = if mode == "part" { RoundCache::without_memory() } else { RoundCache::default() };
         let mut zp = if mode == "both" { z.clone() } else { Vec::new() };
         let (rep, work) = if mode == "both" {
             solve_rounds_memo(&grid, &mut zp, &outlet, &p, 4, &threads, seed, &Drivers::default(), 256, &mut cache)
@@ -248,7 +249,7 @@ fn main() {
         println!("memory after the partitioned rounds: peak {peak:.0} MiB, now {now:.0} MiB; bytes a cell at the peak {:.0}", peak * 1048576.0 / active as f64);
         if mode == "both" {
             let t = Instant::now();
-            let rep = solve_rounds(&grid, &mut z, &outlet, &p, 4, &threads, seed);
+            let _ = solve_rounds(&grid, &mut z, &outlet, &p, 4, &threads, seed);
             println!("resident rounds: {:.1} s", t.elapsed().as_secs_f64());
             let differ = z.iter().zip(&zp).filter(|(a, b)| a.to_bits() != b.to_bits()).count();
             println!("cells whose height differs, partitioned against resident: {differ}");

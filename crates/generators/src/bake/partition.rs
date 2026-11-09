@@ -44,6 +44,11 @@ pub struct PartRoute {
 }
 
 impl PartCache {
+    /// A cache that keeps nothing: the memo of floods and the previous result are not stored (a solve that is not edited again needs neither; GEN-149).
+    pub fn without_memory() -> PartCache {
+        PartCache { forget: true, ..PartCache::default() }
+    }
+
     /// Compares the next results with the last of slot `k`: a series of routings of one surface in rounds uses a slot a round, so that "the tiles changed" reads against the same round of the previous solve.
     pub fn use_slot(&mut self, k: usize) {
         self.slot = k;
@@ -53,6 +58,8 @@ impl PartCache {
 /// What a series of calls keeps: the memo of tile floods by their inputs and the previous result (for the change counts).
 #[derive(Default)]
 pub struct PartCache {
+    /// Set by [`PartCache::without_memory`]: nothing is kept between calls.
+    forget: bool,
     floods: HashMap<(u64, u64), Arc<Vec<f64>>>,
     /// The last result of each slot (slot 0 unless [`PartCache::use_slot`] says otherwise).
     previous: Vec<Option<Previous>>,
@@ -309,7 +316,9 @@ pub fn partitioned_route_weighted(
                 None => {
                     stats.floods += 1;
                     let v = Arc::new(flood_tile(grid, r, z, outlet, &ext, epsilon));
-                    cache.floods.insert(k, Arc::clone(&v));
+                    if !cache.forget {
+                        cache.floods.insert(k, Arc::clone(&v));
+                    }
                     v
                 }
             };
@@ -462,6 +471,9 @@ pub fn partitioned_route_weighted(
                 stats.tiles_area_changed += usize::from(ar);
             }
         }
+    }
+    if cache.forget {
+        return PartRoute { routing: Routing { receiver, order, area }, filled, stats };
     }
     let last = Some(Previous {
         tile,

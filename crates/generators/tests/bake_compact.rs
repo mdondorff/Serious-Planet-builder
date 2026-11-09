@@ -192,6 +192,12 @@ fn the_partitioned_route_on_a_compact_landmass_is_the_resident_route_and_the_mas
     let (_, work) = solve_rounds_memo(&compact, &mut again, &outlet, &params, 2, &3usize, 5, &Drivers::default(), 8, &mut cache);
     assert!(again.iter().zip(&memo).all(|(a, b)| a.to_bits() == b.to_bits()));
     assert!(work.iter().all(|w| w.tile_floods == 0), "the same surface again floods no tile");
+    // A cache without memory keeps nothing and gives the same bits.
+    let mut forgetful = RoundCache::without_memory();
+    let mut none = z.clone();
+    solve_rounds_memo(&compact, &mut none, &outlet, &params, 2, &3usize, 5, &Drivers::default(), 8, &mut forgetful);
+    assert!(none.iter().zip(&memo).all(|(a, b)| a.to_bits() == b.to_bits()), "a cache without memory");
+    assert!(forgetful.is_empty(), "no catchment is kept");
 }
 
 // spec: GEN-147
