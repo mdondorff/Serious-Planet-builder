@@ -5,7 +5,8 @@
 use crate::util::{capture, Res};
 use std::path::Path;
 
-/// The paths `ci.yml` ignores (`paths-ignore`); a PR whose every changed path matches one is docs-only.
+/// The paths `ci.yml` ignores (`paths-ignore`); a PR whose every changed path matches one is docs-only. A test keeps this list equal to the workflow's.
+#[cfg(test)]
 pub const DOCS_PATTERNS: [&str; 6] = ["docs/**", "openspec/**", ".claude/**", "*.md", "spikes/**/results/**", "spikes/README.md"];
 
 /// True when `path` matches one of [`DOCS_PATTERNS`].
