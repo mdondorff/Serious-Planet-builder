@@ -226,12 +226,16 @@ fn k7_with_the_plain_flood_is_the_k7_of_before_and_the_canonical_k7_is_thread_in
     // The digests were taken on the code before GEN-160 (origin/main at 3d3ad99a).
     assert_eq!(k7_digest(&with), 0x68e2e76ffed7d2b7, "the plain-flood K7 with a channel is what it was");
     assert_eq!(k7_digest(&without), 0x7700012a670c5e69, "the plain-flood K7 without a channel is what it was");
-    // The canonical flood is the default of the new chain and gives the same bits on 1 and 2 threads.
+    // The canonical flood is the default of the new chain. The valley above has no flat, so both floods agree on it; a surface cut flat at 380 m (a plain of the base) tells them apart.
     let canonical = K7Params::standard(5, 0.0);
     assert!(canonical.canonical_flood);
-    let a = k7_tile(&g, id(), &base, &smooth, &[channel(&g, g.halo as i64 + 20)], &canonical, 1);
-    let b = k7_tile(&g, id(), &base, &smooth, &[channel(&g, g.halo as i64 + 20)], &canonical, 2);
-    assert_eq!(k7_digest(&a), k7_digest(&b));
+    let flat = |d: Vec3| (380.0 - base(d)).min(0.0);
+    let ch = [channel(&g, g.halo as i64 + 20)];
+    let on1 = k7_tile(&g, id(), &base, &flat, &ch, &canonical, 1);
+    let on2 = k7_tile(&g, id(), &base, &flat, &ch, &canonical, 2);
+    let off = k7_tile(&g, id(), &base, &flat, &ch, &plain, 2);
+    assert_eq!(k7_digest(&on1), k7_digest(&on2), "the canonical K7 is the same bits on 1 and 2 threads");
+    assert_ne!(k7_digest(&on2), k7_digest(&off), "on a flat the canonical flood and the plain one give another L");
 }
 
 // spec: GEN-160
@@ -256,12 +260,27 @@ fn the_pit_statistics_and_the_sweep_follow_the_flood_parameter_and_the_plain_swe
     // The sweep: the plain case is bit for bit `deposit_on_own_route` (pass 2's call).
     let original: Vec<f64> = z.iter().map(|v| v + 0.5).collect();
     let params = DepositParams { kc: Kc::Uniform(1e5), zeta: 0.5, sea_level: 0.0 };
-    let (mut a, mut b) = (z.clone(), z.clone());
+    let (mut a, mut b, mut old) = (z.clone(), z.clone(), z.clone());
     let ra = deposit_on_own_route(&g, &mut a, &original, 0.02, 7, &params);
     let rb = deposit_on_own_route_flood(&g, &mut b, &original, 0.02, 7, &params, false);
-    assert_eq!(a.iter().map(|v| v.to_bits()).collect::<Vec<_>>(), b.iter().map(|v| v.to_bits()).collect::<Vec<_>>());
-    assert_eq!(ra.deposited.to_bits(), rb.deposited.to_bits());
+    // The old body of `deposit_on_own_route`, written out: the plain flood and the plain route.
+    let outlet = g.outlets(&z, 0.0);
+    let ro = planet_generators::bake::deposit::deposit(
+        &g,
+        &mut old,
+        &original,
+        &planet_generators::bake::flood::priority_flood(&g, &z, &outlet, 0.02),
+        &planet_generators::bake::route::route(&g, &z, &outlet, 0.02, 7, 0.0),
+        &params,
+    );
+    let bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+    assert_eq!(bits(&a), bits(&old), "pass 2's call is the old body");
+    assert_eq!(bits(&a), bits(&b));
+    assert_eq!(ra.deposited.to_bits(), ro.deposited.to_bits());
+    assert_eq!(rb.deposited.to_bits(), ro.deposited.to_bits());
+    // The canonical sweep fills the chain from both sea cells: symmetric about the middle of columns 3 to 10, which the plain sweep's one-sided ramp is not.
     let mut c = z.clone();
     deposit_on_own_route_flood(&g, &mut c, &original, 0.02, 7, &params, true);
-    assert!(c.iter().all(|v| v.is_finite()));
+    assert!((3..=10).all(|x| c[at(x)].to_bits() == c[at(13 - x)].to_bits()), "the canonical sweep fills the chain from both sea cells");
+    assert!(!(3..=10).all(|x| a[at(x)].to_bits() == a[at(13 - x)].to_bits()), "the plain sweep fills it from one end");
 }
