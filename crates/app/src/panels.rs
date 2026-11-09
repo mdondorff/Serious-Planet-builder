@@ -792,6 +792,24 @@ pub fn draw_brush(ui: &egui::Ui, brush: &planet_editor::overlay::BrushOverlay, t
     }
 }
 
+/// The level-1 preview over the planet (VIEW-067): the trunk rivers as lines coloured by the watershed they drain to (the lines the edit changed thicker and brighter, the big rivers thicker),
+/// and a label marking it as a preview that is not committed.
+pub fn draw_preview_overlay(ui: &egui::Ui, p: &planet_editor::preview_overlay::PreviewOverlay, to_points: impl Fn([f64; 2]) -> egui::Pos2) {
+    let painter = ui.painter();
+    let heavy = p.lines.len() / 10;
+    for (k, l) in p.lines.iter().enumerate() {
+        let hue = planet_editor::preview_overlay::watershed_hue(l.watershed) / 360.0;
+        let colour: egui::Color32 = egui::ecolor::Hsva::new(hue, 0.65, 0.95, 1.0).into();
+        let width = if k < heavy { 2.4 } else { 1.1 };
+        let (width, strength) = if l.changed { (width + 0.8, 1.0) } else { (width, 0.7) };
+        painter.line_segment([to_points(l.a), to_points(l.b)], egui::Stroke::new(width, colour.gamma_multiply(strength)));
+    }
+    let at = ui.max_rect().left_top() + egui::vec2(14.0, 52.0);
+    let text = painter.text(at, egui::Align2::LEFT_TOP, &p.label, egui::FontId::proportional(13.0), LIGHT);
+    painter.rect_filled(text.expand(3.0), 3.0, egui::Color32::from_black_alpha(190));
+    painter.text(at, egui::Align2::LEFT_TOP, &p.label, egui::FontId::proportional(13.0), LIGHT);
+}
+
 /// Draw the outlines, the names and the handles over the planet. `to_points` turns the overlay's pixels into points (the window's scale).
 pub fn draw_overlay(ui: &egui::Ui, items: &[OverlayItem], to_points: impl Fn([f64; 2]) -> egui::Pos2) {
     let painter = ui.painter();
@@ -1576,6 +1594,39 @@ mod tests {
         assert!(count(&items, 1.0) >= 8, "outlines, names, handles");
         assert_eq!(count(&items[3..], 1.0), 0, "an edit with nothing on the screen draws nothing");
         assert!(count(&items[..1], 1.0) > 0 && count(&items, 1.5) >= 8, "at another scale too");
+    }
+
+    // spec: VIEW-067
+    #[test]
+    fn the_level_1_preview_draws_its_lines_and_its_label_and_nothing_when_there_is_none() {
+        use planet_editor::preview_overlay::{DrawnLine, PreviewOverlay};
+        let lines: Vec<DrawnLine> = (0..20)
+            .map(|k| DrawnLine {
+                a: [100.0 + 10.0 * k as f64, 200.0],
+                b: [110.0 + 10.0 * k as f64, 260.0],
+                watershed: k % 3,
+                changed: k % 5 == 0,
+                weight: 100.0 - k as f64,
+            })
+            .collect();
+        let p = PreviewOverlay { id: 9, label: "preview (not committed): 20 trunk cells, 4 changed".into(), lines, dropped: 0 };
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::ui::fonts());
+        let count = |p: &PreviewOverlay, ppp: f32| {
+            ctx.set_pixels_per_point(ppp);
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(1920.0 / ppp, 1080.0 / ppp))),
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(input, |ui| draw_preview_overlay(ui, p, |q| Pos2::new(q[0] as f32 / ppp, q[1] as f32 / ppp)));
+            let n = out.shapes.len();
+            out.textures_delta.clear();
+            n
+        };
+        assert!(count(&p, 1.0) > 20, "a line for each trunk line and the label");
+        let empty = PreviewOverlay { lines: Vec::new(), ..p.clone() };
+        assert!(count(&empty, 1.0) >= 1 && count(&empty, 1.0) < count(&p, 1.0), "no lines: the label only");
+        assert!(count(&p, 1.5) > 20, "at another scale too");
     }
 
     // spec: VIEW-021
