@@ -39,7 +39,7 @@ pub fn boundary(grid: &Grid) -> Vec<bool> {
 }
 
 /// The outlets of the sediment steps: the sea, the grid's border and the landmass's boundary cells (water leaves a coast ring cell towards the sea that is not in the grid, also where thermal lifted it above the sea).
-fn outlets(grid: &Grid, z: &[f64], sea_level: f64) -> Vec<bool> {
+pub fn outlets(grid: &Grid, z: &[f64], sea_level: f64) -> Vec<bool> {
     let b = boundary(grid);
     grid.outlets(z, sea_level).into_iter().zip(b).map(|(o, b)| o || b).collect()
 }
@@ -192,9 +192,13 @@ pub fn catchment_balance(grid: &Grid, z: &mut [f64], original: &[f64], p: &Pass2
     }
     let cube = grid.is_cube();
     let area = |c: usize| if cube { grid.cell_area(c) } else { grid.dx() * grid.dx() };
+    let grid_area = (0..n).map(&area).fold(0.0f64, f64::max);
     let (mut eroded, mut raised) = (vec![0.0f64; n], vec![0.0f64; n]);
+    let mut cells = vec![0u32; n];
+    let zmax = z.iter().chain(original).fold(0.0f64, |m, v| m.max(v.abs()));
     for c in 0..n {
         let r = root[c] as usize;
+        cells[r] += 1;
         if before[c] > p.sea_level {
             eroded[r] += (original[c] - before[c]).max(0.0) * area(c);
         }
@@ -211,7 +215,9 @@ pub fn catchment_balance(grid: &Grid, z: &mut [f64], original: &[f64], p: &Pass2
         out.raised_m3 += d;
         out.exported_m3 += x;
         out.largest_eroded_m3 = out.largest_eroded_m3.max(e);
-        let scale = e.max(d.abs()).max(x);
+        // The rounding of `z + rise - z` is absolute, about one ulp of the height times the cell area per cell: a floor under the scale, so a sub-ulp deposit is not read as a balance error.
+        let floor = f64::EPSILON * zmax * grid_area * f64::from(cells[r]);
+        let scale = e.max(d.abs()).max(x).max(floor);
         out.max_relative_error = out.max_relative_error.max((e - d - x).abs() / scale.max(f64::MIN_POSITIVE));
     }
     out.total_relative_error = (out.eroded_m3 - out.raised_m3 - out.exported_m3).abs() / out.eroded_m3.max(f64::MIN_POSITIVE);

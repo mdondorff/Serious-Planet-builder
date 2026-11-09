@@ -318,9 +318,10 @@ fn main() {
         let mut zt = z.clone();
         let th = planet_generators::bake::thermal::thermal(&grid, &mut zt, &q.thermal, threads);
         println!("thermal: {} passes", th.passes_run);
-        let outlet: Vec<bool> = zt.iter().map(|&h| h <= 0.0).collect();
+        // The same outlets as the sediment steps: the sea and the landmass's boundary cells.
+        let outlet = planet_generators::bake::sediment::outlets(&grid, &zt, 0.0);
         let filled = priority_flood(&grid, &zt, &outlet, q.carve.epsilon);
-        let before_out: Vec<bool> = z.iter().map(|&h| h <= 0.0).collect();
+        let before_out = planet_generators::bake::sediment::outlets(&grid, &z, 0.0);
         let filled0 = priority_flood(&grid, &z, &before_out, q.carve.epsilon);
         let mut deep: Vec<(f64, usize)> =
             (0..z.len()).filter(|&p| zt[p] > 0.0 && !outlet[p]).map(|p| (filled[p] - zt[p], p)).filter(|d| d.0 >= 0.5).collect();
@@ -340,7 +341,7 @@ fn main() {
                 all_pre += 1;
             }
         }
-        // How steep the surface was before thermal: land cells with a neighbour whose drop exceeds the critical slope, and the deep pits' share of them.
+        // How steep the surface was before thermal: land cells with a neighbour whose height difference exceeds the critical slope, and the deep pits' share of them.
         let tan = libm::tan(q.thermal.theta_deg.to_radians());
         let steep = |p: usize| (0..8).any(|k| grid.neighbour(p, k).is_some_and(|nb| (z[p] - z[nb]).abs() > tan * grid.distance_at(p, k)));
         let land: Vec<usize> = (0..z.len()).filter(|&p| z[p] > 0.0).collect();
