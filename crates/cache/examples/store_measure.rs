@@ -6,6 +6,8 @@
 //! The encodings are measurement encodings (byte-shuffled f32 or columns, brotli quality 5, as the kind 13 records), not the store format: the layouts are the proposal the bytes are counted for.
 //! Items with no builder (continuity maps, edit overrides) are estimated from counts and labelled so.
 
+#![allow(clippy::chunks_exact_to_as_chunks)]
+
 use planet_cache::key::CacheKey;
 use planet_cache::pack::{encode_record, PackWriter, Record, StoreParams, DEFAULT_MAX_PACK_BYTES};
 use planet_core::{Face, TileId};
@@ -198,7 +200,7 @@ fn main() {
         put(K_SEGMENTS, *t, 0, columns(ss, SEGMENT_BYTES), (ss.len() * SEGMENT_BYTES) as u64);
     }
     let bas = read(&dir, "basins.bin");
-    assert!(bas.len() % BASIN_BYTES == 0, "a basins file is a whole number of basins");
+    assert!(bas.len().is_multiple_of(BASIN_BYTES), "a basins file is a whole number of basins");
     let mut bt: BTreeMap<Tile, Vec<&[u8]>> = BTreeMap::new();
     for b in bas.chunks_exact(BASIN_BYTES) {
         bt.entry(tile_of(u32::from_le_bytes([b[8], b[9], b[10], b[11]]) as usize)).or_default().push(b);
