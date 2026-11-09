@@ -1,0 +1,1 @@
+- 2026-11-09 k7-canonical (GEN-160): K7 floods with the canonical flood by a parameter (on in standard; off keeps the plain K7 bit for bit, pass 2 untouched); on the prototype tile the stored L moves in 0.99 % of cells (10,395 of 1,048,576), at most 0.95 m, 113 cells over 0.25 m; pit counts and G-SURF unchanged; K7 has no kernel version to bump.
