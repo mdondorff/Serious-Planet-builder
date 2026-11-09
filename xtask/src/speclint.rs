@@ -713,6 +713,12 @@ pub fn run(root: &Path) -> Res {
     report.errors.extend(hot_file_errors(&sizes));
     // BUILD-025: a changed accepted ADR gains a Maintained line (ADR 0078).
     report.errors.extend(adr_maintenance_errors(&adr_changes_against_base(root)));
+    // BUILD-040: a change of a gate or an owner decision leaves a line in the briefing's contract changes.
+    report.errors.extend(crate::process::contract_errors_against_base(root));
+    // BUILD-042: an item that becomes done moves the briefing's re-estimate date.
+    report.errors.extend(crate::process::reestimate_errors_against_base(root));
+    // BUILD-041: every gate of A3 12.1 has a ledger row and every measured row a commit.
+    report.errors.extend(crate::gates::ledger_errors_in(root));
     // BUILD-010: every log fragment is one well-formed entry.
     report.errors.extend(crate::logcmd::fragment_errors(&crate::logcmd::read_fragments(root)?));
     // BUILD-028: the retired terms of docs/domain.md section 8 stay out of the current specs and working docs.

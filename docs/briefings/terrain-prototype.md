@@ -2,6 +2,8 @@
 
 Status: active since 2026-11-08 (owner: D1 = option A, conditional). Replaces the M9.1 gate of `docs/briefings/m9-plan.md`; the M9 planet bake is frozen until this block closes. Contract: `docs/design/terrain-target.md` (A3), ADRs 0110-0115 (proposed). Plan: `spikes/architecture-replan/results/results.md` sections 13 and 17. Target date: mid-December 2026 (estimate).
 
+Re-estimate: 2026-11-09 (remaining work: items 9 to 17 open; target date as above). An item that becomes done moves this date (BUILD-042).
+
 Scope: the region of `spikes/prototype-region/results/results.md`. Everything stays behind switches, off the default bake path.
 
 ## Items
@@ -31,6 +33,12 @@ Scope: the region of `spikes/prototype-region/results/results.md`. Everything st
 | G-SURF | gate at the cell centres; vertices reported as G-SURF-I; the clamp stays |
 | Memory | compact resident route is the normal path; cache eviction required; the complete build measured against 12 GB; tile-wise route only if needed |
 | Sediment | post-round pass for the prototype, defined in A3 §6.7; G-SED kept, with a partition test; within-round transport revisited at the A/B gate on evidence |
+
+## Contract changes
+A change of a gate row of A3 12.1 or of the table above needs a line here (BUILD-040): `- YYYY-MM-DD | gate or section | what changed | who decided`.
+- 2026-11-09 | G-SURF | gate at the cell centres; the lattice vertices reported as G-SURF-I; the clamp stays | owner
+- 2026-11-09 | Memory | compact resident route is the normal path; cache eviction required; tile-wise route only if needed | owner
+- 2026-11-09 | Sediment | post-round pass for the prototype (A3 6.7); G-SED kept with a partition test | owner
 
 ## Exit list (the A/B gate)
 - Every gate of A3 section 12.1 passes on the fresh build and after each edit, or its failure is reported against S1-S5.
