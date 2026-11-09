@@ -11,7 +11,7 @@ Source: Architect order 2026-11-09 (inbox #95), BUILD-003
 - **THEN** none builds a grid over 32 cells a face edge
 
 ### Requirement: TEST-099 The latency of level 1 is measured at the H0 grid
-`cargo xtask perf` SHALL have a scene that measures, at the H0 grid (3,072 cells a face edge, 3.26 km), the seconds from an edit to its trunk rivers and watersheds for a height stamp and for a rainfall region, the process peak and the resident bytes, reported per edit kind. The result SHALL be the number the briefing's exit list needs.
+`cargo xtask perf preview` SHALL run the `preview_latency` example in release: at the H0 grid (3,072 cells a face edge, 3.26 km) it SHALL time, after a warm run and over three runs, the level-1 preview of a height stamp, of a rainfall region and of both, and report per edit kind the median and maximum seconds, the phases (stamps, route, discharge, overlay), the process peak and the resident bytes, and once the base's build time. `--smoke` SHALL run at 96 cells a face edge and label the table as no measurement. The height-stamp median is the number the briefing's exit list needs; a timing read needs a quiet machine and an authorised perf window.
 
 Verify: D
 Review: the perf window's report for the scene, `target/perf-window/<time>/` (the seconds and the peak per edit kind), read by the planner against the briefing's exit list

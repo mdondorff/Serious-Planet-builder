@@ -64,6 +64,15 @@ pub struct Overlay {
     pub changed: Vec<u32>,
 }
 
+/// The seconds of each phase of a preview (TEST-099).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Phases {
+    pub stamps_s: f64,
+    pub route_s: f64,
+    pub discharge_s: f64,
+    pub overlay_s: f64,
+}
+
 /// A level-1 preview.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Preview {
@@ -234,10 +243,18 @@ impl PreviewBase {
 
     /// The level-1 preview of `edit`: the H0 route over the edited heights (the base routing when no height changes), the discharge, and the overlay with the trunk threshold `trunk_discharge`. An edit that is not valid (a climate region with a non-finite or non-positive number, a stamp that makes a height not finite) or that leaves no sea is an error, never a panic: a drag drops it.
     pub fn preview(&self, edit: &PreviewEdit, trunk_discharge: f64) -> Result<Preview, String> {
+        self.preview_timed(edit, trunk_discharge).map(|(p, _)| p)
+    }
+
+    /// [`PreviewBase::preview`] with the seconds of each phase (TEST-099): the stamp pass, the flood and routing, the discharge, the overlay. The clock reads nothing that enters the result.
+    pub fn preview_timed(&self, edit: &PreviewEdit, trunk_discharge: f64) -> Result<(Preview, Phases), String> {
         edit.validate()?;
+        let mut phases = Phases::default();
+        let t = std::time::Instant::now();
         let heights_change = !edit.stamps.is_empty();
         let routing = if heights_change {
             let z = self.edited_heights(edit);
+            phases.stamps_s = t.elapsed().as_secs_f64();
             if z.iter().any(|v| !v.is_finite()) {
                 return Err("the stamps make a height that is not finite".into());
             }
@@ -252,12 +269,18 @@ impl PreviewBase {
                     self.epsilon
                 ));
             }
-            self.grid.route(&z, &outlet, self.epsilon)
+            let t = std::time::Instant::now();
+            let r = self.grid.route(&z, &outlet, self.epsilon);
+            phases.route_s = t.elapsed().as_secs_f64();
+            r
         } else {
             self.routing0.clone()
         };
+        let t = std::time::Instant::now();
         let w = self.weights(edit);
         let q = discharge(&self.grid, &routing, |c| w[c]);
+        phases.discharge_s = t.elapsed().as_secs_f64();
+        let t = std::time::Instant::now();
         let trunk: Vec<u32> = (0..q.len() as u32).filter(|&c| q[c as usize] >= trunk_discharge).collect();
         let changed: Vec<u32> = (0..q.len() as u32)
             .filter(|&c| {
@@ -266,7 +289,8 @@ impl PreviewBase {
             })
             .collect();
         let watershed = routing.outlet_of.clone();
-        Ok(Preview { id: self.id_of(edit), routing, discharge: q, overlay: Overlay { trunk, watershed, changed } })
+        phases.overlay_s = t.elapsed().as_secs_f64();
+        Ok((Preview { id: self.id_of(edit), routing, discharge: q, overlay: Overlay { trunk, watershed, changed } }, phases))
     }
 
     /// The base's own discharge (the reference the climate preview is compared to).
@@ -468,6 +492,23 @@ mod tests {
         all.stamp = Some(Stamp::new(StampKind::Plateau, [5000.0, 0.0, 0.0]));
         let e = b.preview(&PreviewEdit { stamps: vec![all], climate: vec![] }, 0.0);
         assert!(e.is_err(), "no sea: {:?}", e.map(|p| p.id));
+    }
+
+    // spec: TEST-099
+    #[test]
+    fn the_timed_preview_is_the_preview_and_times_only_the_phases_that_ran() {
+        let b = base(12);
+        let c = land_cell(&b);
+        let hill = PreviewEdit { stamps: vec![hill_at(&b, c, 700_000.0, 2500.0)], climate: vec![] };
+        let (p, ph) = b.preview_timed(&hill, 1.0e12).unwrap();
+        assert_eq!(p, b.preview(&hill, 1.0e12).unwrap(), "the same result as the untimed call");
+        assert!([ph.stamps_s, ph.route_s, ph.discharge_s, ph.overlay_s].iter().all(|v| v.is_finite() && *v >= 0.0));
+        let rain = PreviewEdit {
+            stamps: vec![],
+            climate: vec![ClimateRegion { dir: b.grid().direction(c), reach_m: 1_000_000.0, rain_factor: 2.0, temp_offset_c: 0.0 }],
+        };
+        let (_, ph) = b.preview_timed(&rain, 1.0e12).unwrap();
+        assert_eq!((ph.stamps_s, ph.route_s), (0.0, 0.0), "a climate edit runs no stamp pass and no route");
     }
 
     // spec: AUTH-010

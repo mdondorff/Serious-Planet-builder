@@ -17,4 +17,7 @@ F6 measured 7 s and 2.2 GB for the route alone (A3 5.1). The preview adds the st
 The report is a table per edit kind: median and maximum seconds, the phases, the peak and the resident bytes, with the machine's readiness state. The briefing's exit list asks for "the latency of the preview levels": the number is `edit_s` of edit A at n = 3,072 (a seconds-scale target; F6's 7 s is the reference, not a pass bound until the architect sets one).
 
 ## Gate
-`cargo xtask perf preview` runs under the readiness gate and the heavy-run lock like the other perf scenes; a perf window needs the architect's authorisation. `--smoke` runs at n = 96 on any machine and prints the table with the label NOT A MEASUREMENT.
+`cargo xtask perf preview` runs the example in release under the heavy-run lock like every xtask command that builds or runs. It has no readiness gate of its own (the gate lives in the `test-render` harness this example does not use): a timing read is taken in a perf window that sonnet-bulldozer authorises, on a quiet machine, after `cargo xtask perf preflight`. `--smoke` runs at n = 96 on any machine and prints the table labelled NOT A MEASUREMENT. A run before the window is labelled untimed.
+
+## Phases in the library
+`PreviewBase::preview_timed` returns the seconds of the stamp pass, the route, the discharge and the overlay beside the preview (`Phases`); `preview` calls it. The clock reads nothing that enters the result (a tier-A test compares both calls).
