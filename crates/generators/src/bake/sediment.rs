@@ -4,8 +4,8 @@
 //! later wiring cuts them into is that wiring's decision. Nothing in the default bake calls it.
 
 use super::deposit::{deposit, spread_pits, DepositParams, DepositReport, Kc};
-use super::flood::priority_flood;
-use super::route::route;
+use super::flood::priority_flood_with;
+use super::route::{route_rules, MfdClip, RoundRules, Routing};
 use super::thermal::{thermal, ThermalReport};
 use super::tile::Pass2Params;
 use super::Grid;
@@ -53,10 +53,17 @@ pub fn eroded_m3(grid: &Grid, z: &[f64], original: &[f64], sea_level: f64) -> f6
         .sum()
 }
 
+/// The filled surface and the routing of `z` with the canonical flood (cells visited by level, then cell id; GEN-141, GEN-159): the surface the rounds and H1 read, so the pits and the sweep's route are those of H1. Outlets as given.
+fn canonical_surface(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64, seed: u64) -> (Vec<f64>, Routing) {
+    let filled = priority_flood_with(grid, z, outlet, epsilon, true);
+    let routing = route_rules(grid, z, outlet, epsilon, seed, 0.0, None, RoundRules { clip_mfd: MfdClip::Off, canonical_flood: true });
+    (filled, routing)
+}
+
 /// The pits of `z` on any grid (outlets: the sea, the grid's border and a landmass's boundary cells) at depth `min_m`.
 pub fn pit_cells(grid: &Grid, z: &[f64], sea_level: f64, epsilon: f64, min_m: f64) -> PitCells {
     let outlet = outlets(grid, z, sea_level);
-    let filled = priority_flood(grid, z, &outlet, epsilon);
+    let filled = priority_flood_with(grid, z, &outlet, epsilon, true);
     let mut depths: Vec<f64> = Vec::new();
     let mut land = 0usize;
     for p in 0..z.len() {
@@ -121,8 +128,7 @@ pub fn sediment_pass(grid: &Grid, z: &mut [f64], original: &[f64], p: &Pass2Para
     let v1b = volume_m3(grid, z);
     // The deposition on the surface's own route, with the boundary cells as outlets.
     let outlet = outlets(grid, z, p.sea_level);
-    let filled = priority_flood(grid, z, &outlet, eps);
-    let routing = route(grid, z, &outlet, eps, p.seed, 0.0);
+    let (filled, routing) = canonical_surface(grid, z, &outlet, eps, p.seed);
     let deposit =
         deposit(grid, z, original, &filled, &routing, &DepositParams { kc: Kc::Uniform(p.kc), zeta: p.zeta, sea_level: p.sea_level });
     pits.push(("after deposition", stats(z)));
@@ -177,8 +183,7 @@ pub struct CatchmentBalance {
 pub fn catchment_balance(grid: &Grid, z: &mut [f64], original: &[f64], p: &Pass2Params) -> CatchmentBalance {
     let n = grid.len();
     let outlet = outlets(grid, z, p.sea_level);
-    let filled = priority_flood(grid, z, &outlet, p.carve.epsilon);
-    let routing = route(grid, z, &outlet, p.carve.epsilon, p.seed, 0.0);
+    let (filled, routing) = canonical_surface(grid, z, &outlet, p.carve.epsilon, p.seed);
     let before = z.to_vec();
     let mut exports = vec![0.0f64; n];
     let params = DepositParams { kc: Kc::Uniform(p.kc), zeta: p.zeta, sea_level: p.sea_level };
@@ -222,4 +227,33 @@ pub fn catchment_balance(grid: &Grid, z: &mut [f64], original: &[f64], p: &Pass2
     }
     out.total_relative_error = (out.eroded_m3 - out.raised_m3 - out.exported_m3).abs() / out.eroded_m3.max(f64::MIN_POSITIVE);
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bake::route::route;
+
+    // spec: GEN-159
+    #[test]
+    fn the_sweeps_surface_and_route_are_the_canonical_flood_s() {
+        // A flat chain (columns 3 to 9 of row 4, 0.01 m) between two sea cells (columns 2 and 11), walls rising inwards: on the canonical surface the chain's last cell drains to the cell beside the second sea cell;
+        // on the plain flood it drains back along the chain.
+        let g = Grid::new(16, 9, 100.0);
+        let mut z: Vec<f64> = (0..16 * 9).map(|p| 100.0 + (p % 16).min(p / 16).min(15 - p % 16).min(8 - p / 16) as f64).collect();
+        let at = |x: usize| 4 * 16 + x;
+        z[at(2)] = 0.0;
+        z[at(11)] = 0.0;
+        for x in 3..=10 {
+            z[at(x)] = 0.01;
+        }
+        let outlet = g.outlets(&z, 0.0);
+        let (filled, routing) = canonical_surface(&g, &z, &outlet, 0.02, 7);
+        assert_eq!(filled, priority_flood_with(&g, &z, &outlet, 0.02, true));
+        let canonical = route_rules(&g, &z, &outlet, 0.02, 7, 0.0, None, RoundRules { clip_mfd: MfdClip::Off, canonical_flood: true });
+        assert_eq!(routing.receiver, canonical.receiver);
+        assert_eq!(routing.receiver[at(9)] as usize, at(10), "column 9 drains towards the second sea cell");
+        let plain = route(&g, &z, &outlet, 0.02, 7, 0.0);
+        assert_eq!(plain.receiver[at(9)] as usize, at(8), "the plain flood drains it back along the chain");
+    }
 }
