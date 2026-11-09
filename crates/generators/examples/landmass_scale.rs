@@ -246,7 +246,10 @@ fn main() {
         }
         println!("partitioned rounds, {threads} threads: {:.1} s", t.elapsed().as_secs_f64());
         let (peak, now) = memory_mb();
-        println!("memory after the partitioned rounds: peak {peak:.0} MiB, now {now:.0} MiB; bytes a cell at the peak {:.0}", peak * 1048576.0 / active as f64);
+        println!(
+            "memory after the partitioned rounds: peak {peak:.0} MiB, now {now:.0} MiB; bytes a cell at the peak {:.0}",
+            peak * 1048576.0 / active as f64
+        );
         if mode == "both" {
             let t = Instant::now();
             let _ = solve_rounds(&grid, &mut z, &outlet, &p, 4, &threads, seed);

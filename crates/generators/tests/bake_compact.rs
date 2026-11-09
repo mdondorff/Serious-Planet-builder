@@ -163,7 +163,10 @@ fn the_partitioned_route_on_a_compact_landmass_is_the_resident_route_and_the_mas
     let z_all: Vec<f64> = (0..active.len())
         .map(|g| {
             let d = cube.direction(g as u32);
-            900.0 * (d.x + d.y + d.z) + 90.0 * libm::sin(11.0 * d.x + 5.0 * d.y) * libm::cos(8.0 * d.z) + 2.0 * planet_generators::bake::route::jitter(5, g as u64, 0) - 500.0
+            900.0 * (d.x + d.y + d.z)
+                + 90.0 * libm::sin(11.0 * d.x + 5.0 * d.y) * libm::cos(8.0 * d.z)
+                + 2.0 * planet_generators::bake::route::jitter(5, g as u64, 0)
+                - 500.0
         })
         .collect();
     let z: Vec<f64> = ids.iter().map(|&g| z_all[g]).collect();
@@ -201,6 +204,34 @@ fn the_partitioned_route_on_a_compact_landmass_is_the_resident_route_and_the_mas
     solve_rounds_memo(&compact, &mut none, &outlet, &params, 2, &3usize, 5, &Drivers::default(), 8, &mut forgetful);
     assert!(none.iter().zip(&memo).all(|(a, b)| a.to_bits() == b.to_bits()), "a cache without memory");
     assert!(forgetful.is_empty(), "no catchment is kept");
+}
+
+// spec: GEN-149
+#[test]
+fn one_partition_cache_across_landmasses_of_one_face_edge_gives_the_fresh_bits() {
+    use planet_generators::bake::partition::{partitioned_route, PartCache};
+    let n = 24;
+    let cube = planet_generators::bake::h0::GlobalGrid::new(n, R);
+    let mut cache = PartCache::default();
+    for cos in [0.2, 0.5, 0.1, 0.2] {
+        let (active, bits) = corner_cap(n, cos);
+        let grid = Grid::compact_cube(n, R, bits);
+        let ids: Vec<usize> = (0..active.len()).filter(|&g| active[g]).collect();
+        let z: Vec<f64> = ids
+            .iter()
+            .map(|&g| {
+                let d = cube.direction(g as u32);
+                900.0 * (d.x + d.y + d.z) + 2.0 * planet_generators::bake::route::jitter(5, g as u64, 0) - 500.0
+            })
+            .collect();
+        let lo = z.iter().cloned().fold(f64::INFINITY, f64::min);
+        let outlet: Vec<bool> = z.iter().map(|&h| h <= 0.0 || h == lo).collect();
+        let fresh = partitioned_route(&grid, &z, &outlet, 1e-3, 5, 8, RoundRules::ROUND, &mut PartCache::default());
+        let shared = partitioned_route(&grid, &z, &outlet, 1e-3, 5, 8, RoundRules::ROUND, &mut cache);
+        assert_eq!(shared.routing.receiver, fresh.routing.receiver, "cap {cos}");
+        assert!(shared.routing.area.iter().zip(&fresh.routing.area).all(|(a, b)| a.to_bits() == b.to_bits()), "cap {cos}");
+        assert_eq!(shared.stats.tiles_filled_changed, fresh.stats.tiles_filled_changed, "cap {cos}");
+    }
 }
 
 // spec: GEN-147

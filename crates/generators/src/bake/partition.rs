@@ -71,6 +71,8 @@ struct Previous {
     tile: usize,
     size: (usize, usize),
     cube: bool,
+    len: usize,
+    compact: bool,
     filled: Vec<f64>,
     receiver: Vec<u32>,
     area: Vec<f64>,
@@ -286,8 +288,8 @@ pub fn partitioned_route_weighted(
         let mut changed = false;
         for (t, &r) in tiles.iter().enumerate() {
             let ext = offers(grid, r, &filled);
-            let has_outlet = (r.y0..r.y0 + r.h)
-                .any(|y| (r.x0..r.x0 + r.w).any(|x| grid.at_xy(x, y).is_some_and(|p| outlet[p] && grid.is_active(p))));
+            let has_outlet =
+                (r.y0..r.y0 + r.h).any(|y| (r.x0..r.x0 + r.w).any(|x| grid.at_xy(x, y).is_some_and(|p| outlet[p] && grid.is_active(p))));
             if ext.is_empty() && !has_outlet {
                 continue;
             }
@@ -299,7 +301,9 @@ pub fn partitioned_route_weighted(
                 h.word(v as u64);
             }
             for &(p, e) in &ext {
-                h.word(p as u64);
+                // The slot in the tile, not the cell index: a compact rank depends on cells outside the tile.
+                let (x, y) = grid.xy(p);
+                h.word(((y - r.y0) * r.w + (x - r.x0)) as u64);
                 h.word(e.to_bits());
             }
             let k = h.key();
@@ -454,8 +458,9 @@ pub fn partitioned_route_weighted(
     }
 
     // ---- what changed against the previous call
-    if let Some(Some(Previous { tile: tl, size, cube, filled: pf, receiver: pr, area: pa })) = cache.previous.get(cache.slot) {
-        if *tl == tile && *size == grid.layout() && *cube == grid.is_cube() {
+    if let Some(Some(Previous { tile: tl, size, cube, len, compact, filled: pf, receiver: pr, area: pa })) = cache.previous.get(cache.slot)
+    {
+        if *tl == tile && *size == grid.layout() && *cube == grid.is_cube() && *len == grid.len() && *compact == grid.is_compact() {
             for r in &tiles {
                 let (mut f, mut rc, mut ar) = (false, false, false);
                 for y in r.y0..r.y0 + r.h {
@@ -478,6 +483,8 @@ pub fn partitioned_route_weighted(
     let last = Some(Previous {
         tile,
         size: grid.layout(),
+        len: grid.len(),
+        compact: grid.is_compact(),
         cube: grid.is_cube(),
         filled: filled.clone(),
         receiver: receiver.clone(),
