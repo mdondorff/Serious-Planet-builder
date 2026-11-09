@@ -15,9 +15,10 @@ Source: `docs/design/terrain-target.md` §4, §10, §12; SPIKE-105 §3 (X11-X13)
 4. The 40 GB limit is a hard gate at Earth on real serialized data, including indexes, keys, graph metadata and edit overrides; peak temporary storage, replacement-commit space and retained versions are reported separately.
 5. Field narrowing comes first; a coarser local grid (about 200 m) is a fallback only.
 6. Larger planets take coarser cells at the same counts (2x Earth at `k` = 14, 204 m), unless given a store budget of their own. A scaling model in `k` and radius estimates cells, store and build memory (A3 §4.3).
-7. A world build has its own memory budget, separate from CON-21's runtime 8 GB: 12 GB peak on the reference machine (owner, 2026-11-08), measured as the process's peak. The partitioned route is the normal path for large landmasses and must pass the same gates; the resident route is an optimisation for a landmass that fits the budget, its threshold measured (G-SCALE).
+7. A world build has its own memory budget, separate from CON-21's runtime 8 GB: 12 GB peak on the reference machine (owner, 2026-11-08), measured as the process's peak of the complete build. The compact resident route is the normal path (owner, 2026-11-09); the partitioned route stays a tested equal. A tile-wise route is prototyped only if the unavoidable working set exceeds the budget after retention and caches are removed.
+8. Caches are evictable; eviction never changes a result or breaks undo and replay (owner, 2026-11-09; A3 §6.6).
 
 ## Consequences
 - ADR 0045 point 2 becomes normative. Gates G-STORE, G-SCALE (one large and one small body).
 - Point 7 is a new budget; the owner decides it with this ADR.
-- The resident rounds of the largest landmass are measured (7.7 GiB, 55 bytes a cell, on a compact grid of the landmass, A3 §6.6); the H1 pass is extrapolated at 12 GB (81 bytes a cell at a quarter of the cells); the partitioned route's non-resident form is not built.
+- The resident rounds of the largest landmass are measured (7.7 GiB, 55 bytes a cell, on a compact grid of the landmass, A3 §6.6); the H1 pass is extrapolated at 12 GB (81 bytes a cell at a quarter of the cells); the partitioned route measured more memory and time as built (8,854 MiB, 2,974 s against 7,858 MiB, 1,716 s), so the 2026-11-08 choice of it as the normal path, made on the assumption that it bounds memory, is replaced.
