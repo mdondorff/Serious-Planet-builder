@@ -2,7 +2,7 @@
 //! (`read_elevation_c1`) of a lattice sampled from `BakeInputs::base` at the nodes (611 m, k = 14; stored as f32); the regional solve (12,288 cells, 814 m, 4 rounds) starts from the same read; the
 //! channels of H1 on the solved surface are burned into a 1,024-cell tile of the local grid (102 m, 98,304 cells a face edge, 8 local cells to a regional cell); then the breach, the incision, thermal,
 //! the deposition and the pit spreading. Reports the pit share and depth at 102 m after each stage, with and without the channels, and G-SURF at the lattice nodes.
-//! Usage: k7_region [margin_regional_cells] [threads] [store]: `store` runs K7 with the channels over every 1,024-cell tile that meets the prototype region and writes each tile's stored change L (f32 metres, core cells) and its land mask to `target/k7_l/` for `cache/examples/l_measure` (G-STORE, kind 13 on the new chain).
+//! Usage: k7_region [margin_regional_cells] [threads] [store|compare]: `compare` runs K7 with the canonical and with the plain flood (GEN-160) on the tile and reports how much the stored change L moves (cells changed, largest change, share over 0.25 m, pits); `store` runs K7 with the channels over every 1,024-cell tile that meets the prototype region and writes each tile's stored change L (f32 metres, core cells) and its land mask to `target/k7_l/` for `cache/examples/l_measure` (G-STORE, kind 13 on the new chain).
 #![allow(clippy::needless_range_loop)]
 use planet_core::cube::{face_to_direction, TangentWarp};
 use planet_core::{Face, Vec3};
@@ -144,6 +144,7 @@ fn main() {
     // ---- the tile
     let g = TileGrid { cells: LOCAL, tile: 1024, halo: 64, radius_m: R };
     let store = a.get(3).is_some_and(|s| s == "store");
+    let compare = a.get(3).is_some_and(|s| s == "compare");
     let ids: Vec<TileId> = if store {
         let (i0, i1, j0, j1) = (REGION.0 * 8 / 1024, (REGION.1 * 8 + 7) / 1024, REGION.2 * 8 / 1024, (REGION.3 * 8 + 7) / 1024);
         (j0..=j1).flat_map(|tj| (i0..=i1).map(move |ti| TileId { face, ti: ti as u32, tj: tj as u32 })).collect()
@@ -203,6 +204,32 @@ fn main() {
             let t = Instant::now();
             let r: K7Result = k7_tile(&g, id, &base, &regional, ch, &params, threads);
             println!("K7 {label}: {:.1} s, {} cells burned", t.elapsed().as_secs_f64(), r.burned);
+            if compare {
+                let plain = K7Params { canonical_flood: false, ..params };
+                let r0: K7Result = k7_tile(&g, id, &base, &regional, ch, &plain, threads);
+                let d: Vec<f64> = r.change.iter().zip(&r0.change).map(|(a, b)| f64::from(*a) - f64::from(*b)).collect();
+                let changed = d.iter().filter(|v| **v != 0.0).count();
+                let over = d.iter().filter(|v| v.abs() > 0.25).count();
+                let max = d.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+                let n = d.len();
+                println!(
+                "  stored change L, canonical against plain flood ({label}): {changed} of {n} core cells differ ({:.3} %), largest {max:.3} m, {over} over 0.25 m ({:.4} %)",
+                100.0 * changed as f64 / n as f64,
+                100.0 * over as f64 / n as f64
+            );
+                for (name, pc, p0) in r.pits.iter().zip(&r0.pits).map(|(c, p)| (c.0, c.1, p.1)) {
+                    println!(
+                        "    pits after {name}: canonical {} ({:.4} %, max {:.1} m), plain {} ({:.4} %, max {:.1} m)",
+                        pc.pit_cells,
+                        100.0 * pc.share(),
+                        pc.max_m,
+                        p0.pit_cells,
+                        100.0 * p0.share(),
+                        p0.max_m
+                    );
+                }
+                continue;
+            }
             for (stage, s) in &r.pits {
                 println!(
                     "  pits at 102 m after {stage}: {} of {} land cells ({:.3} %), depth p50 {:.1} m, p99 {:.1} m, max {:.1} m",

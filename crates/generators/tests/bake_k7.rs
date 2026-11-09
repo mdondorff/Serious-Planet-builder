@@ -3,6 +3,7 @@
 
 use planet_core::cube::{face_to_direction, TangentWarp};
 use planet_core::{Face, Vec3};
+use planet_generators::bake::deposit::{DepositParams, Kc};
 use planet_generators::bake::k7::{burn_channels, k7_tile, pit_stats, surface_gate, Channel, K7Params, RegionField};
 use planet_generators::bake::tile::{TileGrid, TileId};
 
@@ -205,4 +206,62 @@ fn the_vertex_report_is_a_consistent_partition_of_the_nodes() {
         );
         assert!(gate.max_error_over_step.is_finite() && gate.max_error_over_step >= 0.0, "{gate:?}");
     }
+}
+
+/// FNV-1a over the bits of the window's heights and the stored change: the digest the plain-flood K7 must keep (GEN-160).
+fn k7_digest(r: &planet_generators::bake::k7::K7Result) -> u64 {
+    let words = r.z.iter().map(|v| v.to_bits()).chain(r.change.iter().map(|v| u64::from(v.to_bits())));
+    words.fold(0xcbf2_9ce4_8422_2325u64, |h, w| (h ^ w).wrapping_mul(0x0100_0000_01b3))
+}
+
+// spec: GEN-160
+#[test]
+fn k7_with_the_plain_flood_is_the_k7_of_before_and_the_canonical_k7_is_thread_independent() {
+    let g = tile_grid();
+    let smooth = |d: Vec3| 6.0 * libm::sin(0.5 * d.x) - 4.0 * libm::cos(0.7 * d.y);
+    let mut plain = K7Params::standard(5, 0.0);
+    plain.canonical_flood = false;
+    let with = k7_tile(&g, id(), &base, &smooth, &[channel(&g, g.halo as i64 + 20)], &plain, 2);
+    let without = k7_tile(&g, id(), &base, &smooth, &[], &plain, 2);
+    // The digests were taken on the code before GEN-160 (origin/main at 3d3ad99a).
+    assert_eq!(k7_digest(&with), 0x68e2e76ffed7d2b7, "the plain-flood K7 with a channel is what it was");
+    assert_eq!(k7_digest(&without), 0x7700012a670c5e69, "the plain-flood K7 without a channel is what it was");
+    // The canonical flood is the default of the new chain and gives the same bits on 1 and 2 threads.
+    let canonical = K7Params::standard(5, 0.0);
+    assert!(canonical.canonical_flood);
+    let a = k7_tile(&g, id(), &base, &smooth, &[channel(&g, g.halo as i64 + 20)], &canonical, 1);
+    let b = k7_tile(&g, id(), &base, &smooth, &[channel(&g, g.halo as i64 + 20)], &canonical, 2);
+    assert_eq!(k7_digest(&a), k7_digest(&b));
+}
+
+// spec: GEN-160
+#[test]
+fn the_pit_statistics_and_the_sweep_follow_the_flood_parameter_and_the_plain_sweep_is_unchanged() {
+    use planet_generators::bake::deposit::{deposit_on_own_route, deposit_on_own_route_flood};
+    use planet_generators::bake::k7::pit_stats_with;
+    // A flat chain between two sea cells, walls rising inwards (the fixture of bake_round's GEN-159 tests, on a square window).
+    let g = planet_generators::bake::Grid::new(16, 16, 100.0);
+    let mut z: Vec<f64> = (0..16 * 16).map(|p| 100.0 + (p % 16).min(p / 16).min(15 - p % 16).min(15 - p / 16) as f64).collect();
+    let at = |x: usize| 8 * 16 + x;
+    z[at(2)] = 0.0;
+    z[at(11)] = 0.0;
+    for x in 3..=10 {
+        z[at(x)] = 0.01;
+    }
+    let plain = pit_stats_with(&g, &z, 0.0, 0.02, 0.1, 0, false);
+    let canonical = pit_stats_with(&g, &z, 0.0, 0.02, 0.1, 0, true);
+    assert_eq!(plain.pit_cells, 3, "the plain flood lifts the chain's last cells: {plain:?}");
+    assert_eq!(canonical.pit_cells, 0, "{canonical:?}");
+    assert_eq!(pit_stats(&g, &z, 0.0, 0.02, 0.1, 0).pit_cells, plain.pit_cells, "pit_stats is the plain case");
+    // The sweep: the plain case is bit for bit `deposit_on_own_route` (pass 2's call).
+    let original: Vec<f64> = z.iter().map(|v| v + 0.5).collect();
+    let params = DepositParams { kc: Kc::Uniform(1e5), zeta: 0.5, sea_level: 0.0 };
+    let (mut a, mut b) = (z.clone(), z.clone());
+    let ra = deposit_on_own_route(&g, &mut a, &original, 0.02, 7, &params);
+    let rb = deposit_on_own_route_flood(&g, &mut b, &original, 0.02, 7, &params, false);
+    assert_eq!(a.iter().map(|v| v.to_bits()).collect::<Vec<_>>(), b.iter().map(|v| v.to_bits()).collect::<Vec<_>>());
+    assert_eq!(ra.deposited.to_bits(), rb.deposited.to_bits());
+    let mut c = z.clone();
+    deposit_on_own_route_flood(&g, &mut c, &original, 0.02, 7, &params, true);
+    assert!(c.iter().all(|v| v.is_finite()));
 }
