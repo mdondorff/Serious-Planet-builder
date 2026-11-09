@@ -9,6 +9,7 @@ mod disk;
 mod gate;
 mod gates;
 mod heavy;
+mod lanes;
 mod layering;
 mod logcmd;
 mod package;
@@ -70,6 +71,7 @@ const USAGE: &str = "cargo xtask <command>
   bake layer [--face-res N] [--planet-res N] [--tile N] [--halo N] [--region FILE] [--keep-pass1] [--seed N] [--out DIR] [--threads N] [--map-width W]   (m9-bake PR 5, GEN-101) pass 1 then pass 2 of the erosion layer: every land tile of the --planet-res grid (default 3072 cells a face edge, tiles of 3072) or the tiles of a region file (`face tile_i tile_j` a line, at most 64), checkpointed per face and per tile (a killed run resumes), the maps and tiles.txt in DIR; pass 1 is dropped after a complete planet pass unless --keep-pass1; above 12,288 only with a region
   bake pass1 [--planet-res N] [--seed N] [--out DIR] [--threads N] [--faces LIST] [--map-width W]   (m9-bake, GEN-100) pass 1 of the erosion layer at a reduced resolution (default 768 cells per face edge; above 4096 refused: a full bake needs the planner's go), one face at a time into a layer store in DIR/layer (a killed run resumes), then the maps of the carved base; prints the wall time and the peak memory of each face
   terrain-score [--store DIR] [--dem DIR] [--sites FILE] [--out DIR] [--maps]   the terrain scorecard (TEST-079, BUILD-029): seven descriptors on nine GLO-30 tiles and the generator's two matched sites each (world.field() of the store, read only), distances and a phone-readable report.md and report.json in target/review/terrain-score/<date>/ with the Copernicus notice; CPU only, about 1 minute; --maps adds one 512 px PNG per descriptor per raster
+  lanes                per lane of docs/lanes.txt the last commit and its age, the open PR, the latest inbox number and the running cargo or example processes (BUILD-043)
   gates                the gate ledger (BUILD-041): per gate of A3 12.1 the newest verdict, rows and lanes from docs/gates/ledger.md; spec-lint rejects a gate with no row
   worktrees [--prune] [--no-size]   every git worktree with size, branch, uncommitted count, last commit and merged PR (BUILD-039); --prune removes with `git worktree remove` (never --force) only the clean ones whose PR is merged or that are detached at an ancestor of origin/main, never the current one or the root; prepush warns above 12 worktrees; prepush, store and bake refuse below 20 GB free on the drive and warn below 50 GB
   quiet on|off|status   the owner's flag file: while it is up every heavy command (test, prepush, perf, capture, accept, store, heavy) waits (BUILD-026)
@@ -107,6 +109,7 @@ fn main() -> ExitCode {
             disk::check(&root, "bake").and_then(|_| bakecmd::run_cmd(&root, &args[1..]))
         }),
         Some("terrain-score") => heavy::with("terrain-score", || terrainscore::run_cmd(&root, &args[1..])),
+        Some("lanes") => lanes::run(&root),
         Some("gates") => gates::run(&root),
         Some("worktrees") => worktrees::run(&root, &args[1..]),
         Some("heavy") => heavy::run_wrapped(&root, &args[1..]),
