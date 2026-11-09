@@ -17,14 +17,14 @@ Scope: the region of `spikes/prototype-region/results/results.md`. Everything st
 | 6 | Landmass across cube edges (GEN-144) | explorer | done (#1243) |
 | 7 | Hydrology H1: channels, basins (GEN-145) | explorer | done at 3.26 km (#1244), gates at 814 m (#1245) |
 | 8 | Edit cases E1-E6, G-EQ, G-INC, G-BASIN (GEN-146) | explorer | done for the gates that exist |
-| 9 | Complete resident build against 12 GB (G-SCALE, A3 §6.6 scenarios); cache eviction | explorer | open; partitioned rounds measured (GEN-149), tile-wise route only under A3 §6.6's rule |
+| 9 | Complete resident build against 12 GB (G-SCALE, A3 §6.6 scenarios); cache eviction | explorer | open; partitioned rounds measured (GEN-149). Complete build in the example, with rule (1): 11,329 MiB peak commit against 11,444 MiB (2026-11-09, run 3; runs 2 and 3 differ by 193 MiB). Row closes on the production phase plan, worst of two runs; tile-wise route not triggered; other §6.6 scenarios not run |
 | 10 | Deposition, one-cell pit spreading and thermal on the cube grid; G-SED | explorer | kernels and balance done (GEN-150 to GEN-152); partition test open |
 | 11 | Local 102 m pass in the new chain on the base read (G-SURF) | explorer | pass done (GEN-148); gate and G-SURF-I report open |
 | 12 | Independent measurement of the gates by another lane | spikes | partly done (SPIKE-106); repeated at the gate |
 | 13 | Hills and plains: the structural gates on a second region and seed | spikes | open |
 | 14 | Store: real serialized data (G-STORE) | explorer | in progress |
 | 15 | Runtime: sampler composition, lakes, rivers; flight (G-RT) | crusader | open; starts when items 7 and 11 are on main |
-| 16 | Editor path and preview levels (E1-E6 from the editor) | crusader | open |
+| 16 | Editor path and preview levels (E1-E6 from the editor) | crusader | in progress: level 1 first (height, stamp and climate rows of A3 §11.1), no dependency on item 15; coarse-carve rows and level 2's display wait for item 15 and GEN-153; a climate item kind in `world-def` comes to the architect first (CON-10) |
 | 17 | Noise of the base bands: gradient noise, crease filter or turned lattice on eroded terrain | crusader, owner | open; decided at the gate |
 
 ## Owner decisions, 2026-11-09 (A3 §3.1, §6.6, §6.7, §12.1)
