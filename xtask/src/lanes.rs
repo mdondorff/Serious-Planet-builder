@@ -64,6 +64,7 @@ pub struct Proc {
     pub mem_mb: u64,
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 /// A line of CSV with quoted fields, split into its fields.
 pub fn csv_fields(line: &str) -> Vec<String> {
     let mut out = Vec::new();
@@ -79,6 +80,7 @@ pub fn csv_fields(line: &str) -> Vec<String> {
     out
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 /// The processes of `Get-CimInstance Win32_Process | Select Name,ProcessId,ExecutablePath,WorkingSetSize | ConvertTo-Csv`.
 pub fn parse_cim_csv(text: &str) -> Vec<Proc> {
     text.lines()
