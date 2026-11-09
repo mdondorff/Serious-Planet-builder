@@ -16,6 +16,104 @@ use planet_generators::bake::Grid;
 use planet_generators::runoff::{discharge_weight, pet_mm, runoff_mm};
 use std::time::Instant;
 
+/// Pit report (A3 6.7, #107 and #108): the cells deeper than `pit_min_m` on the flooded surface, their depth percentiles, the separate depressions, the cells inside the basins `hy` kept by class (a cell in none is an
+/// artefact of A3 5.3), and how many were not pits in `pre`. Returns the pit mask.
+fn pit_report(
+    tag: &str,
+    grid: &Grid,
+    z: &[f64],
+    q: &planet_generators::bake::tile::Pass2Params,
+    hy: Option<&planet_generators::bake::hydro::Hydro>,
+    pre: Option<&[bool]>,
+) -> Vec<bool> {
+    use planet_generators::bake::flood::priority_flood;
+    use planet_generators::bake::hydro::BasinClass;
+    use planet_generators::bake::sediment::outlets;
+    let outl = outlets(grid, z, q.sea_level);
+    let filled = priority_flood(grid, z, &outl, q.carve.epsilon);
+    let pit: Vec<bool> = (0..z.len()).map(|p| z[p] > q.sea_level && !outl[p] && filled[p] - z[p] >= q.pit_min_m).collect();
+    let land = (0..z.len()).filter(|&p| z[p] > q.sea_level && !outl[p]).count();
+    let mut depth: Vec<f64> = (0..z.len()).filter(|&p| pit[p]).map(|p| filled[p] - z[p]).collect();
+    drop(filled);
+    drop(outl);
+    depth.sort_by(|a, b| a.total_cmp(b));
+    if depth.is_empty() {
+        println!("PITS {tag}: none");
+        return pit;
+    }
+    let at = |f: f64| depth[((depth.len() - 1) as f64 * f) as usize];
+    // classes: 0 none (artefact), 1 lake, 2 endorheic, 3 intentional
+    let class: Vec<u8> = hy.map_or(Vec::new(), |h| {
+        h.basins
+            .iter()
+            .map(|b| match b.class {
+                BasinClass::Lake => 1,
+                BasinClass::Endorheic => 2,
+                BasinClass::Intentional => 3,
+            })
+            .collect()
+    });
+    let (mut seen, mut comps, mut by, mut fresh) = (vec![false; z.len()], 0usize, [0usize; 4], 0usize);
+    for p0 in 0..z.len() {
+        if !pit[p0] || seen[p0] {
+            continue;
+        }
+        comps += 1;
+        seen[p0] = true;
+        let mut stack = vec![p0];
+        while let Some(p) = stack.pop() {
+            if let Some(h) = hy {
+                let l = h.label[p];
+                by[if l == u32::MAX { 0 } else { class[l as usize] as usize }] += 1;
+            }
+            if pre.is_some_and(|m| !m[p]) {
+                fresh += 1;
+            }
+            for d in 0..8 {
+                if let Some(nb) = grid.neighbour(p, d) {
+                    if pit[nb] && !seen[nb] {
+                        seen[nb] = true;
+                        stack.push(nb);
+                    }
+                }
+            }
+        }
+    }
+    let pc = |v: usize| 100.0 * v as f64 / depth.len() as f64;
+    println!(
+        "PITS {tag}: threshold {} m; {} cells ({:.4} % of {land} land); p50 {:.2} m, p99 {:.2} m, max {:.1} m; {comps} separate depressions",
+        q.pit_min_m,
+        depth.len(),
+        100.0 * depth.len() as f64 / land as f64,
+        at(0.5),
+        at(0.99),
+        depth[depth.len() - 1]
+    );
+    if hy.is_some() {
+        println!(
+            "  by class of the basin H1 kept: lake {:.2} %, endorheic {:.2} %, intentional {:.2} %, in none (artefact) {:.2} % of the pit cells",
+            pc(by[1]),
+            pc(by[2]),
+            pc(by[3]),
+            pc(by[0])
+        );
+    }
+    if pre.is_some() {
+        println!(
+            "  not a pit before the sediment pass (created by it): {} cells, {:.2} % of the pit cells; inherited {:.2} %",
+            fresh,
+            pc(fresh),
+            100.0 - pc(fresh)
+        );
+    }
+    pit
+}
+
+/// FNV-1a over a word stream: the result hashes the retention changes must not move.
+fn fnv(words: impl Iterator<Item = u64>) -> u64 {
+    words.fold(0xcbf2_9ce4_8422_2325, |h, w| (h ^ w).wrapping_mul(0x0100_0000_01b3))
+}
+
 const R: f64 = 6_371_000.0;
 const COARSE: usize = 3072;
 const SEED_CELL: (usize, usize, usize) = (1, 2090, 267);
@@ -38,6 +136,25 @@ fn memory3() -> (f64, f64, f64) {
     (ps("PeakWorkingSet64"), ps("WorkingSet64"), ps("PeakPagedMemorySize64"))
 }
 
+/// CPU seconds of this process against wall seconds since the last call (#110: cores used per phase). Report only.
+fn cpu_phase(tag: &str) {
+    use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+    use std::sync::OnceLock;
+    static LAST: AtomicU64 = AtomicU64::new(0);
+    static START: OnceLock<Instant> = OnceLock::new();
+    static WALL: AtomicU64 = AtomicU64::new(0);
+    let start = START.get_or_init(Instant::now);
+    let out = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-Command", &format!("(Get-Process -Id {}).TotalProcessorTime.TotalSeconds", std::process::id())])
+        .output()
+        .expect("powershell");
+    let cpu: f64 = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap_or(f64::NAN);
+    let wall = start.elapsed().as_secs_f64();
+    let (c0, w0) = (f64::from_bits(LAST.swap(cpu.to_bits(), Relaxed)), f64::from_bits(WALL.swap(wall.to_bits(), Relaxed)));
+    let (dc, dw) = (cpu - c0, wall - w0);
+    println!("CPU {tag}: {dc:.0} CPU s in {dw:.0} wall s ({:.2} cores busy)", dc / dw.max(1e-9));
+}
+
 fn set(bits: &mut [u64], g: usize) {
     bits[g >> 6] |= 1 << (g & 63);
 }
@@ -53,6 +170,7 @@ fn main() {
     let n = COARSE * k;
     let nn = n * n;
     let t0 = Instant::now();
+    cpu_phase("start");
     let seed = 14u64;
 
     // ---- the coarse landmass and its ring, from the 3,072-cell base cache
@@ -222,6 +340,7 @@ fn main() {
         .filter_map(|(g, _)| grid.compact_index_of(g).filter(|&p| z[p] > 0.0).map(|p| (p, z[p])))
         .collect();
     drop((cand, zf, land));
+    cpu_phase("the landmass (sampling, ring, outlets)");
     let (peak, now) = memory_mb();
     println!(
         "memory after the landmass is built (heights f64, outlets): peak {peak:.0} MiB, now {now:.0} MiB; {:.1} s",
@@ -229,7 +348,8 @@ fn main() {
     );
 
     // ---- the rounds, resident
-    let z_start = if a.get(3).is_some_and(|x| x == "sed" || x == "sedround" || x == "dump") { z.clone() } else { Vec::new() };
+    let mut z_start =
+        if a.get(3).is_some_and(|x| x == "sed" || x == "sedround" || x == "dump" || x == "full") { z.clone() } else { Vec::new() };
     let p = CarveParams { steps: 20, reroute_every: 5, round_rules: RoundRules::ROUND, ..CarveParams::default() };
     let t = Instant::now();
     let mode = a.get(3).map_or("", |x| x.as_str());
@@ -274,11 +394,15 @@ fn main() {
             s.in_large
         );
     }
+    cpu_phase("the 4 rounds");
     let (peak, now) = memory_mb();
     println!(
         "memory after the 4 rounds: peak {peak:.0} MiB, now {now:.0} MiB; cells {active}, bytes a cell at the peak {:.0}",
         peak * 1048576.0 / active as f64
     );
+    if mode == "full" {
+        println!("hash z after the rounds {:016x}", fnv(z.iter().map(|v| v.to_bits())));
+    }
     if a.get(3).is_some_and(|x| x == "sedround") {
         // GEN-152: the deposition's balance per catchment after each round (the surface after round r against the surface after round r - 1).
         use planet_generators::bake::sediment::catchment_balance;
@@ -426,7 +550,22 @@ fn main() {
         let (peak, now) = memory_mb();
         println!("memory after the sediment steps: peak {peak:.0} MiB, now {now:.0} MiB");
     }
-    if a.get(3).is_some_and(|x| x == "h1" || x == "dump") {
+    let mut hy_keep: Option<planet_generators::bake::hydro::Hydro> = None;
+    let diag = a.get(4).is_some_and(|x| x == "diag");
+    let mut pre_pits: Option<Vec<bool>> = None;
+    if a.get(3).is_some_and(|x| x == "h1" || x == "dump" || x == "full" || x == "reconcile") {
+        // `full`: the pre-carve surface is read again only by the sediment pass; it waits on disk while H1 holds its drivers, routing and filled surface (A3 6.6 rule 1).
+        let spill = format!("target/full_zstart_k{k}.f64");
+        let keep = a.get(5).is_some_and(|x| x == "keep"); // the old shape, to compare the hashes against
+        if mode == "full" && !keep {
+            use std::io::Write;
+            let mut f = std::io::BufWriter::new(std::fs::File::create(&spill).expect("the spill file"));
+            for v in &z_start {
+                f.write_all(&v.to_le_bytes()).expect("the spill write");
+            }
+            f.flush().expect("the spill flush");
+            z_start = Vec::new();
+        }
         let o = inputs.orography();
         let mut weight = vec![1.0f32; active];
         let mut runoff = vec![0.0f32; active];
@@ -459,11 +598,110 @@ fn main() {
         let routing = route_rules(&grid, &z, &outlet, 1e-3, seed, 0.0, Some(&weight), RoundRules::ROUND);
         let filled = priority_flood_with(&grid, &z, &outlet, 1e-3, true);
         println!("weighted route and filled surface: {:.1} s", t.elapsed().as_secs_f64());
+        let weight_keep = if mode == "reconcile" {
+            Some(weight)
+        } else {
+            drop(weight);
+            None
+        };
         let t = Instant::now();
         let hy = hydrology(&grid, &z, &filled, &routing, &outlet, Some(&runoff), Some(&evap), &HydroParams::default());
         println!("H1: {:.1} s; {:?}", t.elapsed().as_secs_f64(), hy.stats);
         let (peak, now) = memory_mb();
+        cpu_phase("H1 (drivers, weighted route, filled surface, hydrology)");
         println!("memory after H1: peak {peak:.0} MiB, now {now:.0} MiB; bytes a cell at the peak {:.0}", peak * 1048576.0 / active as f64);
+        if mode == "reconcile" {
+            // #111 (architect): the pit definition of the sediment pass against H1's basins on the same surface (the surface after the rounds), cell by cell.
+            use planet_generators::bake::flood::priority_flood;
+            use planet_generators::bake::sediment::outlets;
+            let v = planet_generators::bake::hydro::verify(&grid, &hy, &routing, &filled, &outlet, Some(&runoff), weight_keep.as_deref());
+            println!("G-CON (hydro::verify): {v:?}");
+            let q = planet_generators::bake::tile::Pass2Params::standard(seed, 0.0);
+            let outl_s = outlets(&grid, &z, q.sea_level);
+            println!(
+                "outlet sets: H1's {} cells, the sediment pass's {} cells, in both {}; sediment epsilon {}, H1 epsilon 1e-3",
+                outlet.iter().filter(|&&o| o).count(),
+                outl_s.iter().filter(|&&o| o).count(),
+                (0..z.len()).filter(|&p| outlet[p] && outl_s[p]).count(),
+                q.carve.epsilon
+            );
+            let mask = |fill: &[f64], o: &[bool]| -> Vec<bool> { (0..z.len()).map(|p| grid.is_active(p) && !o[p] && fill[p] - z[p] > 0.5).collect() };
+            let count = |m: &[bool]| m.iter().filter(|&&b| b).count();
+            let h = mask(&filled, &outlet);
+            let f_s = priority_flood(&grid, &z, &outl_s, q.carve.epsilon);
+            let sd = mask(&f_s, &outl_s);
+            let f_x1 = priority_flood(&grid, &z, &outlet, 1e-3);
+            let x1 = mask(&f_x1, &outlet);
+            drop(f_x1);
+            let f_x2 = priority_flood_with(&grid, &z, &outl_s, 1e-3, true);
+            let x2 = mask(&f_x2, &outl_s);
+            drop(f_x2);
+            println!(
+                "pit cells (filled minus ground over 0.5 m, active, not an outlet of the set): H1's flood and outlets {} ; the sediment pass's flood, epsilon and outlets {} ; both in both {} ; H1 outlets with the plain flood at 1e-3 {} ; sediment outlets with H1's canonical flood {} ; H1 basin_cells {}",
+                count(&h),
+                count(&sd),
+                (0..z.len()).filter(|&p| h[p] && sd[p]).count(),
+                count(&x1),
+                count(&x2),
+                hy.stats.basin_cells
+            );
+            let (mut differ, mut maxd, mut maxd_at) = (0usize, 0.0f64, 0usize);
+            for p in 0..z.len() {
+                if outlet[p] == outl_s[p] {
+                    let d = libm::fabs(filled[p] - f_s[p]);
+                    if d > 1e-6 {
+                        differ += 1;
+                    }
+                    if d > maxd {
+                        (maxd, maxd_at) = (d, p);
+                    }
+                }
+            }
+            println!("filled surfaces (H1's against the sediment pass's) on cells with the same outlet flag: {differ} differ by over 1e-6 m, the largest {maxd:.3} m at cell {maxd_at}");
+            // H1's components of its pit cells and its rules: ramps (rise under pit_min), artefacts (few cells and shallow), kept.
+            let (mut seen, mut comps) = (vec![false; z.len()], Vec::<(usize, f64, usize)>::new());
+            for p0 in 0..z.len() {
+                if !sd[p0] || seen[p0] {
+                    continue;
+                }
+                seen[p0] = true;
+                let (mut st, mut cells, mut deepest, mut edge) = (vec![p0], 0usize, 0.0f64, 0usize);
+                while let Some(p) = st.pop() {
+                    cells += 1;
+                    deepest = deepest.max(f_s[p] - z[p]);
+                    let mut touches = false;
+                    for d in 0..8 {
+                        match grid.neighbour(p, d) {
+                            Some(nb) => {
+                                if outl_s[nb] {
+                                    touches = true;
+                                }
+                                if sd[nb] && !seen[nb] {
+                                    seen[nb] = true;
+                                    st.push(nb);
+                                }
+                            }
+                            None => touches = true,
+                        }
+                    }
+                    edge += usize::from(touches);
+                }
+                comps.push((cells, deepest, edge));
+            }
+            comps.sort_by(|a, b| b.0.cmp(&a.0));
+            let total: usize = comps.iter().map(|c| c.0).sum();
+            println!("components of the sediment pass's pit cells: {} with {total} cells; the largest ten:", comps.len());
+            let mut run = 0usize;
+            for c in comps.iter().take(10) {
+                run += c.0;
+                println!("  {} cells, deepest {:.1} m, {} of its cells touch an outlet cell or the grid's edge; cumulative share {:.1} %", c.0, c.1, c.2, 100.0 * run as f64 / total as f64);
+            }
+            let in_h1 = (0..z.len()).filter(|&p| sd[p] && hy.label[p] != u32::MAX).count();
+            println!(
+                "sediment-pass pit cells that H1 labels as a kept basin: {in_h1}; H1 labelled cells in all: {}",
+                hy.label.iter().filter(|&&l| l != u32::MAX).count()
+            );
+        }
         if a.get(3).is_some_and(|x| x == "dump") {
             // GEN: G-STORE (STRM-078): the raw state of the build, for `cache/examples/store_measure`, which encodes it as store records.
             use std::io::Write;
@@ -531,6 +769,113 @@ face_cells {n}
             w("channel.bits", bits);
             w("label.u32", hy.label.iter().flat_map(|x| x.to_le_bytes()).collect());
             println!("dump written to {dir}: {} segments, {} basins", hy.segments.len(), hy.basins.len());
+        }
+        if a.get(3).is_some_and(|x| x == "full") {
+            // The build keeps H1's result (channel graph, basins, labels); the routing, filled surface and drivers are temporaries released here.
+            println!(
+                "hash H1: label {:016x}, channel {:016x}, segments {:016x}",
+                fnv(hy.label.iter().map(|&v| u64::from(v))),
+                fnv(hy.channel.iter().map(|&c| u64::from(c))),
+                fnv(hy.segments.iter().flat_map(|g| [g.id, g.q_up.to_bits(), g.q_down.to_bits(), u64::from(g.cells)]))
+            );
+            // The kept result is the channel graph, basins, labels and channel flags; the per-cell potential and routed discharge (two f64 a cell) are derivable and segments hold Q_w, so they are released.
+            let mut hy = hy;
+            println!(
+                "G-CON sums before the release: sum Q {:.6e} m3/s, sum Q_w {:.6e} m3/s",
+                hy.q.iter().sum::<f64>(),
+                hy.qw.iter().sum::<f64>()
+            );
+            if !keep {
+                hy.q = Vec::new();
+                hy.qw = Vec::new();
+            }
+            hy_keep = Some(hy);
+        }
+    }
+    if a.get(3).is_some_and(|x| x == "full") {
+        // The complete resident build in one process: rounds, H1 (above) and the sediment pass, against 12 GB (A3 6.6). H1's result stays resident.
+        use planet_generators::bake::sediment::sediment_pass;
+        use planet_generators::bake::tile::Pass2Params;
+        if z_start.is_empty() {
+            let bytes = std::fs::read(format!("target/full_zstart_k{k}.f64")).expect("the spill file");
+            z_start = bytes.chunks_exact(8).map(|c| f64::from_le_bytes(c.try_into().unwrap())).collect();
+            drop(bytes);
+            std::fs::remove_file(format!("target/full_zstart_k{k}.f64")).expect("the spill file is deleted after the read-back");
+        }
+        let (peak, now, commit) = memory3();
+        println!("memory before the sediment pass: peak working set {peak:.0} MiB, now {now:.0} MiB, peak commit {commit:.0} MiB");
+        let mut q = Pass2Params::standard(seed, 0.0);
+        q.carve.breach_max_m = CarveParams::default().breach_max_m;
+        if diag {
+            pre_pits = Some(pit_report("after the last round, before the sediment pass", &grid, &z, &q, None, None));
+        }
+        let t = Instant::now();
+        let r = sediment_pass(&grid, &mut z, &z_start, &q, threads);
+        println!("sediment pass: {:.1} s", t.elapsed().as_secs_f64());
+        cpu_phase("the sediment pass");
+        for (name, s) in &r.pits {
+            println!("pits {name}: {} of {} land cells ({:.4} %), max {:.1} m", s.pit_cells, s.land_cells, 100.0 * s.share(), s.max_m);
+        }
+        let d = r.deposit;
+        println!("deposition: eroded {:.4e} m3, deposited {:.4e}, exported {:.4e}", d.eroded, d.deposited, d.exported);
+        let (peak, now, commit) = memory3();
+        println!(
+            "THE COMPLETE BUILD: peak working set {peak:.0} MiB ({:.0} bytes a cell), now {now:.0} MiB, peak commit {commit:.0} MiB ({:.2} GB of the 12 GB budget); H1 result kept: {}",
+            peak * 1048576.0 / active as f64,
+            peak.max(commit) * 1048576.0 / 1e9,
+            hy_keep.as_ref().map_or(0, |h| h.segments.len())
+        );
+    }
+    if mode == "full" {
+        println!("hash z after the sediment pass {:016x}", fnv(z.iter().map(|v| v.to_bits())));
+        // The pits left (A3 6.7 report, planner #107): H1 ran on the surface before the sediment pass.
+        let mut q = planet_generators::bake::tile::Pass2Params::standard(seed, 0.0);
+        q.carve.breach_max_m = CarveParams::default().breach_max_m;
+        let after = pit_report(
+            "after the sediment pass, classes of H1 on the surface before it",
+            &grid,
+            &z,
+            &q,
+            hy_keep.as_ref(),
+            pre_pits.as_deref(),
+        );
+        if diag {
+            // #108 (c): the post-sediment surface classed as if K6 had read it: H1 again on the final surface (the kept result and the pre-carve surface are released first).
+            drop(hy_keep.take());
+            drop(after);
+            let o = inputs.orography();
+            let mut weight = vec![1.0f32; active];
+            let mut runoff = vec![0.0f32; active];
+            let mut evap = vec![0.0f32; active];
+            let per = active.div_ceil(threads);
+            std::thread::scope(|s| {
+                for (((wc, rc), ec), t) in weight.chunks_mut(per).zip(runoff.chunks_mut(per)).zip(evap.chunks_mut(per)).zip(0..) {
+                    let (grid, z, o) = (&grid, &z, o);
+                    s.spawn(move || {
+                        for c in 0..wc.len() {
+                            let p = t * per + c;
+                            if z[p] <= 0.0 {
+                                continue;
+                            }
+                            let g = grid.cube_id_of(p);
+                            let spec = FaceSpec { face: Face((g / nn) as u8), cells: n, radius_m: R, sea_level: 0.0, seed, halo: 0 };
+                            let d: Vec3 = spec.halo_direction(((g % nn) % n) as i64, ((g % nn) / n) as i64);
+                            let (pm, tc) = (o.precipitation_mm(d), o.temperature_c(d));
+                            let ro = runoff_mm(pm, tc);
+                            wc[c] = discharge_weight(ro) as f32;
+                            rc[c] = (ro / 1000.0 / 31_557_600.0) as f32;
+                            ec[c] = ((pet_mm(tc) - (pm - ro)).max(0.0) / 1000.0 / 31_557_600.0) as f32;
+                        }
+                    });
+                }
+            });
+            let routing = route_rules(&grid, &z, &outlet, 1e-3, seed, 0.0, Some(&weight), RoundRules::ROUND);
+            drop(weight);
+            let filled = priority_flood_with(&grid, &z, &outlet, 1e-3, true);
+            let hy2 = hydrology(&grid, &z, &filled, &routing, &outlet, Some(&runoff), Some(&evap), &HydroParams::default());
+            println!("H1 on the final surface: {:?}", hy2.stats);
+            drop((routing, filled, runoff, evap));
+            let _ = pit_report("after the sediment pass, classes of H1 on that surface", &grid, &z, &q, Some(&hy2), pre_pits.as_deref());
         }
     }
     let mut dz: Vec<f64> = region.iter().map(|&(p, z0)| z[p] - z0).collect();
