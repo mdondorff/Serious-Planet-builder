@@ -473,10 +473,16 @@ fn main() {
                 std::fs::File::create(format!("{dir}/{name}")).and_then(|mut f| f.write_all(&bytes)).expect("a dump file");
             };
             let f32s = |v: &[f64]| v.iter().flat_map(|x| (*x as f32).to_le_bytes()).collect::<Vec<u8>>();
-            w("meta.txt", format!("k {k}
+            w(
+                "meta.txt",
+                format!(
+                    "k {k}
 cells {active}
 face_cells {n}
-").into_bytes());
+"
+                )
+                .into_bytes(),
+            );
             w("heights_r4.f32", f32s(&z));
             w("heights_r0.f32", f32s(&z_start));
             for r in 1..4usize {

@@ -135,7 +135,8 @@ fn main() {
     let mut put = |kind: u8, t: Tile, seed: u64, payload: Vec<u8>, raw: u64| {
         let mut key = [0u8; 16];
         key.copy_from_slice(&blake3::hash(&[&seed.to_le_bytes()[..], &sub_of(t).to_le_bytes()[..], &[kind]].concat()).as_bytes()[..16]);
-        let rec = Record { key: CacheKey(key), kind, tile: tile_id(t), generator_version: 1, hash_version: 1, node_set_id: [0; 16], payload };
+        let rec =
+            Record { key: CacheKey(key), kind, tile: tile_id(t), generator_version: 1, hash_version: 1, node_set_id: [0; 16], payload };
         let len = encode_record(&rec).expect("a record").len() as u64;
         writer.append(&rec).expect("appending");
         let it = items.entry(kind).or_default();
@@ -303,9 +304,24 @@ fn main() {
     for (kind, name) in names {
         if let Some(it) = items.get(&kind) {
             total += it.on_disk;
-            println!("{name:<42} {:>8} {:>13} {:>13} {:>13} {:>10.3}", it.records, it.raw, it.payload, it.on_disk, it.on_disk as f64 / land_cells as f64);
+            println!(
+                "{name:<42} {:>8} {:>13} {:>13} {:>13} {:>10.3}",
+                it.records,
+                it.raw,
+                it.payload,
+                it.on_disk,
+                it.on_disk as f64 / land_cells as f64
+            );
         }
     }
-    println!("{:<42} {:>8} {:>13} {:>13} {:>13} {:>10.3}", "total (records with headers + index entries)", "", "", "", total, total as f64 / land_cells as f64);
+    println!(
+        "{:<42} {:>8} {:>13} {:>13} {:>13} {:>10.3}",
+        "total (records with headers + index entries)",
+        "",
+        "",
+        "",
+        total,
+        total as f64 / land_cells as f64
+    );
     println!("files written: packs {packs} B, indexes {idx} B ({out})");
 }
