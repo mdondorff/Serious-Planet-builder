@@ -244,3 +244,93 @@ fn a_compact_grid_takes_no_mask() {
     let len = g.len();
     g.with_active(vec![true; len]);
 }
+
+// spec: GEN-150
+#[test]
+fn deposition_and_the_pit_spreading_on_a_cube_grid_keep_the_volume_and_are_the_masked_cube_on_a_compact_one() {
+    use planet_generators::bake::deposit::{deposit_on_own_route, spread_pits, DepositParams, Kc};
+    let n = 24;
+    let (active, bits) = corner_cap(n, 0.2);
+    let compact = Grid::compact_cube(n, R, bits);
+    let masked = Grid::cube(n, R).with_active(active.clone());
+    let ids: Vec<usize> = (0..active.len()).filter(|&g| active[g]).collect();
+    let cube = planet_generators::bake::h0::GlobalGrid::new(n, R);
+    let z_all: Vec<f64> = (0..active.len())
+        .map(|g| {
+            let d = cube.direction(g as u32);
+            900.0 * (d.x + d.y + d.z)
+                + 90.0 * libm::sin(11.0 * d.x + 5.0 * d.y) * libm::cos(8.0 * d.z)
+                + 2.0 * planet_generators::bake::route::jitter(5, g as u64, 0)
+                - 500.0
+        })
+        .collect();
+    // The ground before the carve: up to 12 m above `z` on land.
+    let original_all: Vec<f64> =
+        (0..active.len()).map(|g| z_all[g] + 12.0 * (0.5 + 0.5 * planet_generators::bake::route::jitter(9, g as u64, 1))).collect();
+    let params = DepositParams { kc: Kc::Uniform(1e3), zeta: 0.5, sea_level: 0.0 };
+    let (mut zm, mut zc) = (z_all.clone(), ids.iter().map(|&g| z_all[g]).collect::<Vec<f64>>());
+    let orig_c: Vec<f64> = ids.iter().map(|&g| original_all[g]).collect();
+    let rm = deposit_on_own_route(&masked, &mut zm, &original_all, 1e-3, 5, &params);
+    let rc = deposit_on_own_route(&compact, &mut zc, &orig_c, 1e-3, 5, &params);
+    assert!(rc.eroded > 0.0 && rc.deposited > 0.0, "{rc:?}");
+    assert!((rc.eroded - (rc.deposited + rc.exported)).abs() < 1e-9 * rc.eroded, "eroded = deposited + exported: {rc:?}");
+    assert_eq!(rc.eroded.to_bits(), rm.eroded.to_bits());
+    for (p, &g) in ids.iter().enumerate() {
+        assert_eq!(zc[p].to_bits(), zm[g].to_bits(), "deposition at {g}");
+    }
+    // The pits: land cells dug 500 m below their ring.
+    let pits: Vec<usize> =
+        (0..ids.len()).filter(|&p| p % 5 == 0 && zc[p] > 900.0 && (0..8).all(|d| compact.neighbour(p, d).is_some())).collect();
+    assert!(pits.len() > 5);
+    // Pits on the cube's edges and corner: fewer than 8 neighbours, as many as the cube gives them.
+    let full = Grid::cube(n, R);
+    let count = |g: &Grid, p: usize| (0..8).filter(|&d| g.neighbour(p, d).is_some()).count();
+    let edge: Vec<usize> =
+        (0..ids.len()).filter(|&p| zc[p] > 900.0 && count(&compact, p) < 8 && count(&compact, p) == count(&full, ids[p])).collect();
+    assert!(!edge.is_empty(), "pits on a cube edge");
+    let pits: Vec<usize> = pits.into_iter().chain(edge.iter().copied()).collect();
+    for &p in &pits {
+        zc[p] -= 500.0;
+        zm[ids[p]] -= 500.0;
+    }
+    let volume = |g: &Grid, z: &[f64]| (0..g.len()).map(|p| z[p] * g.cell_area(p)).sum::<f64>();
+    let (v0, before) = (volume(&compact, &zc), zc.clone());
+    let passes = spread_pits(&compact, &mut zc, 0.0, 0.5, 32);
+    assert!(passes > 0 && zc.iter().zip(&before).any(|(a, b)| a != b), "the pits were spread: {passes} passes, {} pits", pits.len());
+    assert!((volume(&compact, &zc) - v0).abs() < 1e-9 * v0.abs().max(1.0), "the volume is kept");
+    let moved = edge.iter().filter(|&&p| zc[p] > before[p]).count();
+    assert!(moved > 0, "a pit on a cube edge was spread: {moved} of {}", edge.len());
+    assert_eq!(spread_pits(&masked, &mut zm, 0.0, 0.5, 32), passes);
+    for (p, &g) in ids.iter().enumerate() {
+        assert_eq!(zc[p].to_bits(), zm[g].to_bits(), "pit spreading at {g}");
+    }
+}
+
+// spec: GEN-150
+#[test]
+fn thermal_on_a_cube_grid_keeps_the_volume_and_is_the_masked_cube_on_a_compact_one() {
+    use planet_generators::bake::thermal::{thermal, thermal_all_cells, ThermalParams};
+    let n = 24;
+    let small = 4000.0; // a small body: cells of about 260 m, so towers of tens of metres are steep
+    let (active, bits) = corner_cap(n, 0.2);
+    let compact = Grid::compact_cube(n, small, bits);
+    let masked = Grid::cube(n, small).with_active(active.clone());
+    let ids: Vec<usize> = (0..active.len()).filter(|&g| active[g]).collect();
+    let z_all: Vec<f64> = (0..active.len())
+        .map(|g| 50.0 + 40.0 * planet_generators::bake::route::jitter(3, g as u64, 0) + if g % 29 == 0 { 400.0 } else { 0.0 })
+        .collect();
+    let z0: Vec<f64> = ids.iter().map(|&g| z_all[g]).collect();
+    let params = ThermalParams { passes: 40, ..ThermalParams::default() };
+    let volume = |g: &Grid, z: &[f64]| (0..g.len()).map(|p| z[p] * g.cell_area(p)).sum::<f64>();
+    let (mut zc, mut za, mut zm) = (z0.clone(), z0.clone(), z_all.clone());
+    let rc = thermal(&compact, &mut zc, &params, 3);
+    thermal_all_cells(&compact, &mut za, &params, 1);
+    thermal(&masked, &mut zm, &params, 5);
+    assert!(rc.moved_volume_first > 0.0 && zc.iter().zip(&z0).any(|(a, b)| a != b), "thermal moved nothing: {rc:?}");
+    let (v0, v1) = (volume(&compact, &z0), volume(&compact, &zc));
+    assert!((v1 - v0).abs() < 1e-9 * v0.abs(), "the volume is kept: {v0} against {v1}");
+    for (p, &g) in ids.iter().enumerate() {
+        assert_eq!(zc[p].to_bits(), za[p].to_bits(), "the active set against every cell at {g}");
+        assert_eq!(zc[p].to_bits(), zm[g].to_bits(), "the compact grid against the masked cube at {g}");
+    }
+}

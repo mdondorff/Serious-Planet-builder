@@ -6,6 +6,8 @@
 //! an outlet (the sea or the grid's border) leaves. A cell never ends above the lowest final height of its donors (so a settled cell stays below the cells that drain into it); what
 //! the ceiling holds back moves on. Mass is kept: what was eroded is deposited or leaves. The eroded column is counted on land only (`z` above the sea level): a carve that
 //! lowers land below the sea would lose that volume here, as the carve of this crate does not.
+//!
+//! On a cube grid (GEN-150) the cell area and the distance to the receiver are the sphere's, per cell.
 
 use super::flood::priority_flood;
 use super::route::{route, Routing, NONE};
@@ -40,10 +42,6 @@ pub struct DepositReport {
 /// the eroded column of a cell is `original - z` where positive. `area` is the routing's drainage area. Refused: arrays of another length, a `zeta` outside [0, 1], a `kc` that is
 /// negative or not finite, a height that is not finite.
 pub fn deposit(grid: &Grid, z: &mut [f64], original: &[f64], filled: &[f64], routing: &Routing, params: &DepositParams) -> DepositReport {
-    assert!(
-        !grid.is_cube(),
-        "the deposition sweep assume a plane grid (uniform cell size, row and column neighbours): not for a cube grid yet (GEN-144)"
-    );
     let n = grid.len();
     assert!(z.len() == n && original.len() == n && filled.len() == n && routing.receiver.len() == n, "one value per cell");
     assert!((0.0..=1.0).contains(&params.zeta), "zeta is a share in [0, 1], not {}", params.zeta);
@@ -52,7 +50,9 @@ pub fn deposit(grid: &Grid, z: &mut [f64], original: &[f64], filled: &[f64], rou
     if let Kc::PerCell(k) = params.kc {
         assert_eq!(k.len(), n, "one kc per cell");
     }
-    let ca = grid.dx() * grid.dx();
+    // The cell area and the distance to the receiver: the sphere's metric on a cube grid (GEN-150), the uniform `dx` on a plane grid.
+    let cube = grid.is_cube();
+    let area_of = |p: usize| if cube { grid.cell_area(p) } else { grid.dx() * grid.dx() };
     super::assert_finite("the filled heights", filled);
     assert!(routing.area.len() == n && routing.order.len() == n, "one drainage area and one order entry per cell");
     assert!(routing.area.iter().all(|a| a.is_finite() && *a >= 0.0), "the drainage areas are finite and not negative");
@@ -62,6 +62,7 @@ pub fn deposit(grid: &Grid, z: &mut [f64], original: &[f64], filled: &[f64], rou
     for &p in routing.order.iter().rev() {
         let p = p as usize;
         let land = z[p] > params.sea_level;
+        let ca = area_of(p);
         let eroded = if land { (original[p] - z[p]).max(0.0) * ca } else { 0.0 };
         report.eroded += eroded;
         let mut load = carried[p] + eroded;
@@ -79,8 +80,17 @@ pub fn deposit(grid: &Grid, z: &mut [f64], original: &[f64], filled: &[f64], rou
         let mut rise = pit / ca;
         load -= pit;
         // Then the excess over the capacity, up to half the drop to the receiver above the filled level.
-        let (di, dj) = ((p % grid.w()).abs_diff(r % grid.w()), (p / grid.w()).abs_diff(r / grid.w()));
-        let dist = if di == 0 || dj == 0 { grid.dx() } else { grid.dx() * core::f64::consts::SQRT_2 };
+        let dist = if cube {
+            let d = (0..8).find(|&d| grid.neighbour(p, d) == Some(r)).expect("a receiver is a neighbour");
+            grid.distance_at(p, d)
+        } else {
+            let (di, dj) = ((p % grid.w()).abs_diff(r % grid.w()), (p / grid.w()).abs_diff(r / grid.w()));
+            if di == 0 || dj == 0 {
+                grid.dx()
+            } else {
+                grid.dx() * core::f64::consts::SQRT_2
+            }
+        };
         let slope = ((fp - fr) / dist).max(0.0);
         let kc = match params.kc {
             Kc::Uniform(k) => k,
@@ -128,10 +138,9 @@ pub fn deposit_on_own_route(
 /// heights' sum is unchanged. The pits are taken in cell order and the pass repeats (the neighbours' fall can make a smaller pit) up to `max_passes` times, until no pit is deeper than
 /// `min_depth_m`. Returns the passes run. Deterministic: serial, fixed order, no hash or thread.
 pub fn spread_pits(grid: &Grid, z: &mut [f64], sea_level: f64, min_depth_m: f64, max_passes: usize) -> usize {
-    assert!(
-        !grid.is_cube(),
-        "spreading the pits assume a plane grid (uniform cell size, row and column neighbours): not for a cube grid yet (GEN-144)"
-    );
+    if grid.is_cube() {
+        return spread_pits_cube(grid, z, sea_level, min_depth_m, max_passes);
+    }
     let w = grid.w();
     assert!(w > 0 && z.len().is_multiple_of(w), "one height per cell");
     let h = z.len() / w;
@@ -166,6 +175,60 @@ pub fn spread_pits(grid: &Grid, z: &mut [f64], sea_level: f64, min_depth_m: f64,
                     moved = true;
                 }
             }
+        }
+        if !moved {
+            return pass;
+        }
+    }
+    max_passes
+}
+
+/// [`spread_pits`] on a cube grid (GEN-150): a land cell with all 8 neighbours on the grid that is lower than all of them by more than `min_depth_m` rises by 0.8 of its depth below the lowest
+/// neighbour; each neighbour falls by the rise's volume over 8 and its own area, so the volume (height times cell area) is kept. Cells in cell order (the cube-id order of a compact grid), passes
+/// as on the plane; a cell at the edge of the landmass (a neighbour off the grid) is left. Deterministic: serial, fixed order.
+fn spread_pits_cube(grid: &Grid, z: &mut [f64], sea_level: f64, min_depth_m: f64, max_passes: usize) -> usize {
+    assert_eq!(z.len(), grid.len(), "one height per cell");
+    super::assert_finite("the heights", z);
+    let mut ring = [(0usize, 0.0f64); 8];
+    let cube = grid.cube.as_ref().expect("a cube grid");
+    let id_of = |p: usize| if grid.is_compact() { grid.cube_id_of(p) } else { p };
+    for pass in 0..max_passes {
+        let mut moved = false;
+        for p in 0..grid.len() {
+            if z[p] <= sea_level {
+                continue;
+            }
+            let mut lowest = f64::INFINITY;
+            // The neighbours the cell has on the cube (a cell on a cube edge has 6, a corner 5: the diagonals across the seam are not in the graph) against those on this grid.
+            let full = (0..8).filter(|&d| cube.neighbour(id_of(p), d).is_some()).count();
+            let mut k = 0;
+            for d in 0..8 {
+                if let Some(q) = grid.neighbour(p, d) {
+                    ring[k] = (q, grid.cell_area(q));
+                    lowest = lowest.min(z[q]);
+                    k += 1;
+                }
+            }
+            if k < full || k == 0 {
+                continue;
+            }
+            let ring = &ring[..k];
+            let depth = lowest - z[p];
+            let rise = 0.8 * depth;
+            if depth <= min_depth_m {
+                continue;
+            }
+            let ca = grid.cell_area(p);
+            // The fall of a neighbour keeps the volume: rise * ca / 8 over its own area.
+            let fall = |area: f64| rise * ca / (k as f64 * area);
+            if ring.iter().any(|&(q, area)| z[q] - fall(area) <= sea_level) {
+                continue;
+            }
+            z[p] += rise;
+            for &(q, area) in ring {
+                z[q] -= fall(area);
+            }
+            moved = true;
         }
         if !moved {
             return pass;
