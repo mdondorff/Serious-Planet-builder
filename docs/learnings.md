@@ -174,3 +174,9 @@ Scope: project (GEN-120, STRM-075)
 What happened: the stored change (kind 13) keeps the pits and the runtime adds kind 17 back, so `removed_depth_m` on the stored change counts a pit as erosion; `erosion_depth_m` adds the pit depth first.
 Assumption it changes: that kind 13 is the change the viewer draws.
 Obsolete when: lake water replaces the filled look.
+
+## 2026-11-09 The plain flood's FIFO inflates pits with scale
+Scope: project (GEN-159, GEN-141, A3 6.4)
+What happened: the sediment pass flooded with the plain `priority_flood` (FIFO for flats) while the rounds and H1 use the canonical flood; its pit count was 1.0 times H1's at 3,072 cells, 2.2 times at 6,144 and 18.5 times at 12,288 on one surface. A fixture shows the FIFO overtaking a lower heap entry on a flat chain; that it captures a whole valley is inferred from the scale trend. With the canonical flood the definitions agree (0.26 % and 0.35 % pits after the pass at k = 1 and 2).
+Assumption it changes: that the two floods differ only by tie order at epsilon scale; a statistic or sweep on the plain flood (K7, `deposit_on_own_route`, `fill_depth`) can be inflated on large flats.
+Obsolete when: the plain flood has no caller.
