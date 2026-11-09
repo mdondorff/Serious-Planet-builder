@@ -8,6 +8,7 @@
 use super::carve::{distance, CarveParams, BREACH_MIN_M};
 use super::memo::Memo;
 use super::partition::{partitioned_route_weighted, Hash, PartCache};
+use super::probe;
 use super::route::{catchment_roots, route_rules, Routing, NONE};
 use super::{assert_finite, Grid};
 use planet_core::par::{self, Par};
@@ -239,7 +240,7 @@ pub fn solve_rounds_with(
     check(grid, z, p, rounds, drivers);
     let taper = taper_of(z, p, drivers);
     let mut report = RoundReport::default();
-    for _ in 0..rounds {
+    for round in 0..rounds {
         let r = route_rules(grid, z, outlet, p.epsilon, seed, p.max_area, drivers.runoff, p.round_rules);
         let cuts = cut_in(Some(grid), &r);
         // A lone outlet keeps its height, so it is not queued.
@@ -260,6 +261,16 @@ pub fn solve_rounds_with(
             catchments: cuts.members.len(),
             largest: cuts.members.iter().map(Vec::len).max().unwrap_or(0),
             in_large: cuts.members.iter().filter(|m| m.len() >= 1000).map(Vec::len).sum(),
+        });
+        // The stage probe (BUILD-046, GEN-161): the heights after the round and the area of the routing it ran on; read only.
+        let (zz, areas, n_catch, largest): (&[f64], &[f64], usize, usize) =
+            (z, &r.area, cuts.members.len(), report.rounds.last().map_or(0, |x| x.largest));
+        probe::emit(probe::Stage::Round(round as u32), |s| {
+            probe::StageView::new(s, grid)
+                .f64("z", probe::FieldKind::Height, zz)
+                .f64("area", probe::FieldKind::Area, areas)
+                .number("catchments", n_catch as f64)
+                .number("largest", largest as f64)
         });
     }
     report
@@ -439,6 +450,16 @@ pub fn solve_rounds_memo(
             catchments: cuts.members.len(),
             largest: cuts.members.iter().map(Vec::len).max().unwrap_or(0),
             in_large: cuts.members.iter().filter(|m| m.len() >= 1000).map(Vec::len).sum(),
+        });
+        // The stage probe (BUILD-046, GEN-161): the heights after the round and the area of its routing; read only.
+        let (zz, areas, n_catch, largest): (&[f64], &[f64], usize, usize) =
+            (z, &r.area, cuts.members.len(), report.rounds.last().map_or(0, |x| x.largest));
+        probe::emit(probe::Stage::Round(round as u32), |s| {
+            probe::StageView::new(s, grid)
+                .f64("z", probe::FieldKind::Height, zz)
+                .f64("area", probe::FieldKind::Area, areas)
+                .number("catchments", n_catch as f64)
+                .number("largest", largest as f64)
         });
     }
     cache.part.use_slot(0);

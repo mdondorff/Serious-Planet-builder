@@ -24,6 +24,8 @@ mod bake_kernels;
 mod bake_metric;
 #[path = "bake_partition.rs"]
 mod bake_partition;
+#[path = "bake_probe.rs"]
+mod bake_probe;
 #[path = "bake_rock.rs"]
 mod bake_rock;
 #[path = "bake_round.rs"]
