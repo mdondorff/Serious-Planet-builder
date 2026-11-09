@@ -372,14 +372,52 @@ fn the_sediment_pass_on_a_compact_landmass_after_the_rounds_conserves_and_is_the
     // G-SED: what was eroded is deposited or leaves; thermal and the pit spreading keep the volume.
     let d = rc.deposit;
     assert!(d.eroded > 0.0 && (d.eroded - d.deposited - d.exported).abs() < 1e-9 * d.eroded, "{d:?}");
+    // The heights moved by what the sweep reports (not only its bookkeeping).
+    assert!(
+        (rc.deposit_height_volume_m3 - d.deposited).abs() < 1e-9 * d.deposited,
+        "{} against {}",
+        rc.deposit_height_volume_m3,
+        d.deposited
+    );
     assert!(rc.thermal_volume_change.abs() < 1e-9 && rc.spread_volume_change.abs() < 1e-9, "{rc:?}");
-    assert_eq!(rc.pits.len(), 4);
+    let names: Vec<&str> = rc.pits.iter().map(|(n, _)| *n).collect();
+    assert_eq!(names, ["start", "after thermal", "after deposition", "after pit spreading"]);
     for (p, &g) in ids.iter().enumerate() {
         assert_eq!(zc[p].to_bits(), zm[g].to_bits(), "the sediment pass at {g}");
     }
     assert_eq!(rc.deposit.eroded.to_bits(), rm.deposit.eroded.to_bits());
     assert!(rc.thermal.moved_volume_first > 0.0, "thermal moved nothing");
     // The breach alone is a finite, non-negative volume (its share of the eroded column is measured by `landmass_scale sed`).
-    let b = breach_lowered_m3(&compact, &start_c, &outlet, &CarveParams { max_area: 0.0, ..q.carve }, 5);
-    assert!(b >= 0.0 && b.is_finite());
+    // The boundary of the landmass is outlets for the steps: the coast ring.
+    let boundary = planet_generators::bake::sediment::boundary(&compact);
+    assert!(boundary.iter().any(|&b| b) && boundary.iter().any(|&b| !b));
+    // The deposition reads the eroded column after thermal: thermal's moves count as load where the receiver is above `original` (K7 does the same).
+    let flat: Vec<f64> = zc.clone();
+    let mut steep = flat.clone();
+    let r0 = sediment_pass(&compact, &mut steep, &flat, &q, 1);
+    assert_eq!(r0.eroded_before_thermal_m3, 0.0);
+    assert!(r0.eroded_after_thermal_m3 > 0.0, "thermal's moves are counted as eroded load: {r0:?}");
+}
+
+// spec: GEN-151
+#[test]
+fn the_breach_alone_lowers_a_ridge_to_the_spill_and_nothing_on_a_surface_without_pits() {
+    use planet_generators::bake::sediment::breach_lowered_m3;
+    let (n, dx) = (16usize, 100.0);
+    let g = Grid::new(n, n, dx);
+    // A slope falling to the column x = 0 (the outlets), 5 m a cell.
+    let slope: Vec<f64> = (0..n * n).map(|p| 10.0 + (p % n) as f64 * 5.0).collect();
+    let outlet = g.outlets(&slope, 0.0);
+    let carve = CarveParams { steps: 1, reroute_every: 1, sea_level: 0.0, ..CarveParams::default() };
+    assert_eq!(breach_lowered_m3(&g, &slope, &outlet, &carve, 5), 0.0, "no pit, no breach");
+    // A bowl: the cell (8, 8) is 30 m under its slope and ringed by a ridge 40 m over it.
+    let mut bowl = slope.clone();
+    bowl[8 * n + 8] -= 30.0;
+    for (di, dj) in [(-1i64, 0i64), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)] {
+        bowl[((8 + dj) as usize) * n + (8 + di) as usize] += 40.0;
+    }
+    let lowered = breach_lowered_m3(&g, &bowl, &outlet, &carve, 5);
+    assert!(lowered > 0.0 && lowered < 40.0 * 8.0 * dx * dx, "the breach lowers part of the ridge: {lowered}");
+    // With no breach allowed nothing is lowered.
+    assert_eq!(breach_lowered_m3(&g, &bowl, &outlet, &CarveParams { breach_max_m: 0.0, ..carve }, 5), 0.0);
 }

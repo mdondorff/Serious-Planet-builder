@@ -3,8 +3,9 @@
 //! They read 8 neighbours and cross divides, so they are not catchment-round steps. This function runs them on a whole grid, a cube grid (compact landmass) included; which tile and halo a
 //! later wiring cuts them into is that wiring's decision. Nothing in the default bake calls it.
 
-use super::deposit::{deposit_on_own_route, spread_pits, DepositParams, DepositReport, Kc};
+use super::deposit::{deposit, spread_pits, DepositParams, DepositReport, Kc};
 use super::flood::priority_flood;
+use super::route::route;
 use super::thermal::{thermal, ThermalReport};
 use super::tile::Pass2Params;
 use super::Grid;
@@ -26,9 +27,35 @@ impl PitCells {
     }
 }
 
-/// The pits of `z` on any grid (outlets: the sea and the grid's border) at depth `min_m`.
+/// The cells of a cube grid that have fewer neighbours than on the whole cube: the edge of a compact or masked landmass (its coast ring borders the sea that is not in the grid). Empty on a plane grid and on the full cube.
+pub fn boundary(grid: &Grid) -> Vec<bool> {
+    let Some(cube) = grid.cube.as_ref() else { return vec![false; grid.len()] };
+    (0..grid.len())
+        .map(|p| {
+            let id = if grid.is_compact() { grid.cube_id_of(p) } else { p };
+            (0..8).filter(|&d| grid.neighbour(p, d).is_some()).count() < (0..8).filter(|&d| cube.neighbour(id, d).is_some()).count()
+        })
+        .collect()
+}
+
+/// The outlets of the sediment steps: the sea, the grid's border and the landmass's boundary cells (water leaves a coast ring cell towards the sea that is not in the grid, also where thermal lifted it above the sea).
+fn outlets(grid: &Grid, z: &[f64], sea_level: f64) -> Vec<bool> {
+    let b = boundary(grid);
+    grid.outlets(z, sea_level).into_iter().zip(b).map(|(o, b)| o || b).collect()
+}
+
+/// The eroded column in cubic metres: `original - z` where positive, on land.
+pub fn eroded_m3(grid: &Grid, z: &[f64], original: &[f64], sea_level: f64) -> f64 {
+    let cube = grid.is_cube();
+    (0..grid.len())
+        .filter(|&p| z[p] > sea_level)
+        .map(|p| (original[p] - z[p]).max(0.0) * if cube { grid.cell_area(p) } else { grid.dx() * grid.dx() })
+        .sum()
+}
+
+/// The pits of `z` on any grid (outlets: the sea, the grid's border and a landmass's boundary cells) at depth `min_m`.
 pub fn pit_cells(grid: &Grid, z: &[f64], sea_level: f64, epsilon: f64, min_m: f64) -> PitCells {
-    let outlet = grid.outlets(z, sea_level);
+    let outlet = outlets(grid, z, sea_level);
     let filled = priority_flood(grid, z, &outlet, epsilon);
     let mut depths: Vec<f64> = Vec::new();
     let mut land = 0usize;
@@ -52,6 +79,12 @@ pub fn volume_m3(grid: &Grid, z: &[f64]) -> f64 {
     (0..grid.len()).map(|p| z[p] * if cube { grid.cell_area(p) } else { grid.dx() * grid.dx() }).sum()
 }
 
+/// The sum of `|z|` times the cell area in cubic metres: the scale a relative change of the volume is taken against.
+pub fn abs_volume_m3(grid: &Grid, z: &[f64]) -> f64 {
+    let cube = grid.is_cube();
+    (0..grid.len()).map(|p| z[p].abs() * if cube { grid.cell_area(p) } else { grid.dx() * grid.dx() }).sum()
+}
+
 /// What the sediment steps did.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SedimentReport {
@@ -60,7 +93,12 @@ pub struct SedimentReport {
     pub thermal: ThermalReport,
     pub deposit: DepositReport,
     pub spread_passes: usize,
-    /// The relative change of the volume over thermal and over the pit spreading (both keep it).
+    /// The change of the height volume over the deposition in cubic metres: it equals `deposit.deposited` (the heights moved by what the sweep reports).
+    pub deposit_height_volume_m3: f64,
+    /// The eroded column (`original - z` on land) before thermal and after it, in cubic metres: the deposition reads the column after thermal, so thermal's moves onto cells above `original` or onto the sea count as load (K7 does the same).
+    pub eroded_before_thermal_m3: f64,
+    pub eroded_after_thermal_m3: f64,
+    /// The relative change of the volume (against the sum of `|z|` times the area) over thermal and over the pit spreading (both keep it).
     pub thermal_volume_change: f64,
     pub spread_volume_change: f64,
 }
@@ -72,25 +110,38 @@ pub fn sediment_pass(grid: &Grid, z: &mut [f64], original: &[f64], p: &Pass2Para
     let eps = p.carve.epsilon;
     let stats = |z: &[f64]| pit_cells(grid, z, p.sea_level, eps, p.pit_min_m);
     let mut pits = vec![("start", stats(z))];
-    let rel = |a: f64, b: f64| (b - a) / a.abs().max(1.0);
+    let scale = abs_volume_m3(grid, z).max(1.0);
+    let rel = |a: f64, b: f64| (b - a) / scale;
+    let eroded_before_thermal_m3 = eroded_m3(grid, z, original, p.sea_level);
     let v0 = volume_m3(grid, z);
     let th = thermal(grid, z, &p.thermal, threads);
     let v1 = volume_m3(grid, z);
+    let eroded_after_thermal_m3 = eroded_m3(grid, z, original, p.sea_level);
     pits.push(("after thermal", stats(z)));
-    let deposit = deposit_on_own_route(
-        grid,
-        z,
-        original,
-        eps,
-        p.seed,
-        &DepositParams { kc: Kc::Uniform(p.kc), zeta: p.zeta, sea_level: p.sea_level },
-    );
+    let v1b = volume_m3(grid, z);
+    // The deposition on the surface's own route, with the boundary cells as outlets.
+    let outlet = outlets(grid, z, p.sea_level);
+    let filled = priority_flood(grid, z, &outlet, eps);
+    let routing = route(grid, z, &outlet, eps, p.seed, 0.0);
+    let deposit =
+        deposit(grid, z, original, &filled, &routing, &DepositParams { kc: Kc::Uniform(p.kc), zeta: p.zeta, sea_level: p.sea_level });
     pits.push(("after deposition", stats(z)));
     let v2 = volume_m3(grid, z);
+    let deposit_height_volume_m3 = v2 - v1b;
     let spread_passes = spread_pits(grid, z, p.sea_level, p.pit_min_m, p.pit_passes);
     let v3 = volume_m3(grid, z);
     pits.push(("after pit spreading", stats(z)));
-    SedimentReport { pits, thermal: th, deposit, spread_passes, thermal_volume_change: rel(v0, v1), spread_volume_change: rel(v2, v3) }
+    SedimentReport {
+        pits,
+        thermal: th,
+        deposit,
+        spread_passes,
+        deposit_height_volume_m3,
+        eroded_before_thermal_m3,
+        eroded_after_thermal_m3,
+        thermal_volume_change: rel(v0, v1),
+        spread_volume_change: rel(v2, v3),
+    }
 }
 
 /// The volume the breach alone lowers on `z` (a carve with no incision, as K7 measures it: pass 1's breach rule at the grid's own resolution), in cubic metres, land only. The deposition counts

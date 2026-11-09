@@ -315,7 +315,12 @@ fn main() {
             (d.eroded - d.deposited - d.exported) / d.eroded
         );
         println!(
-            "pit spreading: {} passes, volume change {:.2e}; breach alone is {:.1} % of the eroded column",
+            "eroded column before thermal {:.4e} m3, after thermal {:.4e} (the deposition reads the latter)",
+            r.eroded_before_thermal_m3, r.eroded_after_thermal_m3
+        );
+        println!("deposition, change of the height volume: {:.4e} m3 (deposited {:.4e})", r.deposit_height_volume_m3, d.deposited);
+        println!(
+            "pit spreading: {} passes, volume change {:.2e}; first-round breach alone is {:.1} % of the eroded column (a lower bound)",
             r.spread_passes,
             r.spread_volume_change,
             100.0 * breach / d.eroded
