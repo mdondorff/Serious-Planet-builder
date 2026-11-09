@@ -1306,7 +1306,7 @@ Source: planner inbox #65 (2026-11-05), ground-channels-2b, VIEW-062, GEN-119
 - **THEN** the first two are refused naming the option, the third naming the folder, and the last opens with the note in the log and the title, the field's version word changed, its heights those of the layer, and the tile builder handed the channels
 
 ### Requirement: VIEW-067 The level-1 preview is drawn as an overlay
-The editor SHALL turn the level-1 preview into plain data for the egui layer (`planet_editor::preview_overlay`, GPU-free, the camera's f64 projection): the trunk lines (a cell to its receiver) with the watershed each drains to, whether the edit changed it and its discharge; only lines with both ends on the visible side and inside the viewport, the heaviest 20,000 with the rest counted; and a label marking the preview as not committed. A newer preview SHALL replace the shown one, the result of an older ask SHALL be dropped, and a committed or undone edit SHALL remove the preview. The window SHALL draw the lines coloured by watershed (`panels::draw_preview_overlay`).
+The editor SHALL turn the level-1 preview into plain data for the egui layer (`planet_editor::preview_overlay`, GPU-free, the camera's f64 projection): the trunk lines (a cell to its receiver) with their watershed, changed flag and discharge; only lines with both ends on the visible side and inside the viewport, the heaviest 20,000 with the rest counted; and a label marking the preview as not committed. A newer preview SHALL replace the shown one, the result of an older ask SHALL be dropped, and a committed or undone edit SHALL remove the preview. The window's draw function (`panels::draw_preview_overlay`) SHALL turn that data into egui lines coloured by watershed; this requirement does not show the overlay on a screen (VIEW-068).
 
 Verify: A
 Status: active
@@ -1315,3 +1315,14 @@ Source: Architect order 2026-11-09 (inbox #95, #99), A3 11.1, VIEW-020
 #### Scenario: The overlay
 - **WHEN** a line lies 400 m either side of the point below a camera 2 km up, another has an end on the far side, and ten lines compete for four places
 - **THEN** the near line is at the pixels of the projection, the far one is not drawn, the four heaviest are kept with six counted, a newer preview replaces an older, a stale result is dropped, and a committed or undone edit removes the preview
+
+### Requirement: VIEW-068 The level-1 preview is produced by the editor and drawn through the egui path
+The editor window SHALL, behind a flag, produce the level-1 preview of the edit being made (a job that builds the resident base once and runs `PreviewBase::preview` on each edit, the latest ask winning, VIEW-067) and the preview SHALL be drawn through the existing egui path over the planet. With the flag on, a frame with an accepted preview SHALL differ from the same frame with it off in the overlay's pixels only. The overlay SHALL be a debug view (CON-18).
+
+Verify: A, C
+Status: planned
+Source: Architect order 2026-11-09 (inbox #99), A3 11.1, CON-18, VIEW-067; the tier-C test is a pixel assertion through the egui path (the form of `crates/render/tests/gpu_ui.rs`), not a golden
+
+#### Scenario: Overlay on against off
+- **WHEN** the same frame is drawn with a preview accepted and with the overlay off
+- **THEN** the pixels differ only where the overlay's lines and label are, and the frame with it off is the frame without a preview
