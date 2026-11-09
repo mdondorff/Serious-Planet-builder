@@ -687,7 +687,6 @@ Source: Owner 2026-11-09 (management rules become checks), planner inbox #94
 #### Scenario: A gate changes
 - **WHEN** a branch changes the G-SURF row and adds no line, adds a line naming G-CON, adds a malformed line, or adds a dated line naming G-SURF
 - **THEN** the first three are refused naming G-SURF and the last passes; a line already on the base covers no new change
-<<<<<<< HEAD
 
 ### Requirement: BUILD-041 A gate ledger holds every measurement of a gate
 `docs/gates/ledger.md` SHALL hold one row per measurement of a gate of `docs/design/terrain-target.md` 12.1: gate, seed, region, resolution, commit, value, verdict (`pass`, `fail`, `partial`, `reported`, `not run`) and the lane that measured it. Spec-lint SHALL fail a gate of 12.1 with no row, a row of a gate not in 12.1, a bad verdict or an empty cell, and a measured row whose commit does not resolve; a `not run` row SHALL have `-` as commit. `cargo xtask gates` SHALL print per gate the newest verdict, the rows and the lanes, and name the gates measured by one lane only. CI SHALL check out the history spec-lint reads (BUILD-040).
@@ -699,5 +698,3 @@ Source: Owner 2026-11-09 (management rules become checks), planner inbox #94 (#1
 #### Scenario: The ledger
 - **WHEN** a gate has no row, a row names an unknown gate, a measured row has a commit that does not resolve, or all gates have rows including `not run`
 - **THEN** the first three are refused naming the gate or commit and the last passes; the summary names the gates measured by one lane
-=======
->>>>>>> origin/main
