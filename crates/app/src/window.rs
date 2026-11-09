@@ -200,6 +200,8 @@ struct Config {
     items: Option<PathBuf>,
     /// The panel layout (`--editor-layout`, VIEW-018).
     layout: Layout,
+    /// `--preview-l1`: the cells a face edge of the level-1 preview's grid (VIEW-068).
+    preview_l1: Option<usize>,
     /// Frames a smoke run drives before it closes the window (`--frames`, default [`SMOKE_FRAMES`]).
     smoke_frames: u64,
     vsync: bool,
@@ -549,6 +551,10 @@ impl App<'_> {
             let mut e = EditRuntime::new(self.world.definition().as_ref().clone(), cfg.radius_m, cfg.items.as_ref(), cfg.layout.clone())?;
             // A smoke run turns the mode on itself, at the frame its script says, after the overview phases.
             e.on = cfg.edit && !cfg.smoke && !cfg.site_descent;
+            // The level-1 preview of the edit being made, on a thread of its own, only behind its flag (VIEW-068, CON-18).
+            if let Some(n) = cfg.preview_l1 {
+                e.enable_preview(n, cfg.seed);
+            }
             if std::env::var_os("PLANET_GATE").is_some() {
                 e.set_gate();
             }
@@ -2038,6 +2044,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         lod,
         seed: field.seed(),
         smoke: o.smoke,
+        preview_l1: o.preview_l1,
         ui: !o.no_ui,
         edit: o.edit,
         site_descent: site_descent_wanted(o.edit, o.site.is_some(), o.smoke),

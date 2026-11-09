@@ -14,6 +14,8 @@ mod gpu_lit_stream_flicker;
 mod gpu_modes;
 #[path = "gpu_preflight.rs"]
 mod gpu_preflight;
+#[path = "gpu_preview_overlay.rs"]
+mod gpu_preview_overlay;
 #[path = "gpu_skeleton.rs"]
 mod gpu_skeleton;
 #[path = "gpu_still_flicker.rs"]

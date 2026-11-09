@@ -2,7 +2,7 @@
 
 Status: active since 2026-11-08 (owner: D1 = option A, conditional). Replaces the M9.1 gate of `docs/briefings/m9-plan.md`; the M9 planet bake is frozen until this block closes. Contract: `docs/design/terrain-target.md` (A3), ADRs 0110-0115 (proposed). Plan: `spikes/architecture-replan/results/results.md` sections 13 and 17. Target date: mid-December 2026 (estimate).
 
-Re-estimate: 2026-11-09 (remaining work: items 9 to 17 open; target date as above). An item that becomes done moves this date (BUILD-042).
+Re-estimate: 2026-11-09 (remaining work: items 9 to 18 open; target date as above). An item that becomes done moves this date (BUILD-042).
 
 Scope: the region of `spikes/prototype-region/results/results.md`. Everything stays behind switches, off the default bake path.
 
@@ -26,6 +26,7 @@ Scope: the region of `spikes/prototype-region/results/results.md`. Everything st
 | 15 | Runtime: sampler composition, lakes, rivers; flight (G-RT) | crusader | open; starts when items 7 and 11 are on main |
 | 16 | Editor path and preview levels (E1-E6 from the editor) | crusader | in progress: level 1 first (height, stamp and climate rows of A3 §11.1), no dependency on item 15; coarse-carve rows and level 2's display wait for item 15 and GEN-153; a climate item kind in `world-def` comes to the architect first (CON-10) |
 | 17 | Noise of the base bands: gradient noise, crease filter or turned lattice on eroded terrain | crusader, owner | open; decided at the gate |
+| 18 | Stage previews: a read-only probe at each new-chain stage, sheets in `target/review/stages/` (BUILD-046, GEN-161); committed manifest of data hashes and numbers on a small fixture, required up to date by CI (BUILD-047, TEST-103, TEST-104); advisory reviewer agent and sheet size cap (BUILD-048) | crusader | open; the probe lands before the k=4 runs of the phase-plan item; probe on and off give identical hashes; it must not raise H1's peak |
 
 ## Owner decisions, 2026-11-09 (A3 §3.1, §6.6, §6.7, §12.1)
 | Topic | Decision |
@@ -33,12 +34,14 @@ Scope: the region of `spikes/prototype-region/results/results.md`. Everything st
 | G-SURF | gate at the cell centres; vertices reported as G-SURF-I; the clamp stays |
 | Memory | compact resident route is the normal path; cache eviction required; the complete build measured against 12 GB; tile-wise route only if needed |
 | Sediment | post-round pass for the prototype, defined in A3 §6.7; G-SED kept, with a partition test; within-round transport revisited at the A/B gate on evidence |
+| Stage previews | committed text manifest (data hash and key numbers per stage, small fixture); images in `target/` and as CI artifacts; sheets committed only at gates, under a size cap; the reviewer agent advises and does not gate |
 
 ## Contract changes
 A change of a gate row of A3 12.1 or of the table above needs a line here (BUILD-040): `- YYYY-MM-DD | gate or section | what changed | who decided`.
 - 2026-11-09 | G-SURF | gate at the cell centres; the lattice vertices reported as G-SURF-I; the clamp stays | owner
 - 2026-11-09 | Memory | compact resident route is the normal path; cache eviction required; tile-wise route only if needed | owner
 - 2026-11-09 | Sediment | post-round pass for the prototype (A3 6.7); G-SED kept with a partition test | owner
+- 2026-11-09 | Stage previews | committed manifest; images in target/ and CI; sheets committed only at gates; item 18 added | owner
 
 ## Exit list (the A/B gate)
 - Every gate of A3 section 12.1 passes on the fresh build and after each edit, or its failure is reported against S1-S5.

@@ -134,13 +134,6 @@ Scope: generators (continent stage GEN-104, class source GEN-094, landform drive
 - The class source's coast distances and coastal arcs read the smooth value (4 octaves, no islands), the landform driver the coarse value (3 octaves); both are the full value without its detail terms (the octave series is normalised by its full weight sum, or the low octaves would be rescaled). A driver on the full value fails the lattice's closeness test (0.05 to 0.33 against 0.03).
 - Obsolete when the bake replaces the landform driver (m9-bake) and the class lattice's cell is finer than the roughest octave.
 
-## 2026-11-02 A Git Bash loop survives TaskStop
-Scope: project (agent tooling; perf windows)
-What happened: SPIKE-90 window 2 ran its runs from a Git Bash script started as a background command. TaskStop at 09:51 reported success, but the `bash.exe` running the script kept launching perf runs until its process was stopped at 09:58, so the planned cooling pause had no idle.
-Assumption it changes: that TaskStop ends a background command's whole process tree (perf-window practice; the quiet-machine rule of CLAUDE.md).
-Proposed follow-up: after TaskStop on a script runner, find it by its command line (`Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*<script>*' }`) and `Stop-Process` it; check `tasklist` for `planet.exe`/`xtask.exe` before declaring a pause. A run already started is better left to finish than killed mid-measurement.
-Obsolete when: TaskStop ends Git Bash children, or perf runners become an xtask command (no shell loop).
-
 ## 2026-11-02 The coast gate on the rough depth sets the largest steps of k
 Scope: generators (class source GEN-094, GEN-097's step limit)
 - The coast gate switched at the full continent value's coast, which is rough at the lattice's scale: the gate went from 0 to 0.6 over one 40 km cell (largest `k` step 6.0).
@@ -155,12 +148,12 @@ Assumption it changes: STRM-026's "the footprint find of the edit" named residen
 Proposed follow-up: none; `ManagedLoop::edit_candidates` (resident plus in flight) is the find's input (STRM-071, tier A in `crates/frame/tests/managed.rs`). A request still queued needs no name: a job reads the field when it starts, and one handed to the spawner is already in flight.
 Obsolete when: tile jobs carry the field version they read and the streamer drops a result whose version is older than the current one.
 
-## 2026-11-03 A `find /` outlived its session and failed a perf slot
+## 2026-11-03 Background shell children outlive TaskStop and their session; check for strays before a perf slot
 Scope: project (agent tooling; perf windows)
-What happened: on 2026-11-02 22:09 sonnet-crusader ran `find / -name pp-warp.txt 2>/dev/null | head -2` in a Bash call. Git Bash's `/` walks every drive, nothing matched, so `head` never closed the pipe. The tool's 120 s timeout moved the call to the background; the session later cleared, its shell exited, and `find.exe` kept running orphaned, holding one core for about 10 h. The next morning the owner's perf slot refused 7 of 7 preflights (singles 52.5-64.0 ms against 52.0; parallel fine) until the owner stopped it. The owner reports an earlier occurrence some days before (not traced).
-Assumption it changes: that a background command ends with its session, and that a quiet machine needs only the lanes to be idle.
-Proposed follow-up: standing lane rule (no search from `/` or a drive root; TaskStop any command moved to the background); the planner checks for stray long-running processes before a slot and the owner stops them; a PreToolUse hook refusing `find /` is the owner's call.
-Obsolete when: background commands are ended with their session, or a hook refuses root searches.
+- SPIKE-90 window 2 (11-02): TaskStop reported success but the script's `bash.exe` kept launching perf runs for 7 min. A root-wide `find` moved to the background (11-02 22:09) outlived its session as an orphan, held one core for about 10 h and failed the next perf slot (7 of 7 preflights).
+- Assumption it changes: TaskStop ends the whole process tree; a quiet machine needs only idle lanes.
+- Follow-up: after TaskStop on a script runner, find it by command line and `Stop-Process` it; no search from a drive root; check `tasklist` for stray `find.exe`, `bash.exe`, `planet.exe`, `xtask.exe` before a slot's first step; the owner stops them.
+- Obsolete when: TaskStop ends Git Bash children and background commands end with their session, or perf runners are an xtask command and a hook refuses root searches.
 
 ## 2026-11-03 Count partitions balance test counts, not time
 Scope: project (CI partitions; BUILD-018, BUILD-036)
@@ -181,3 +174,9 @@ Scope: project (GEN-120, STRM-075)
 What happened: the stored change (kind 13) keeps the pits and the runtime adds kind 17 back, so `removed_depth_m` on the stored change counts a pit as erosion; `erosion_depth_m` adds the pit depth first.
 Assumption it changes: that kind 13 is the change the viewer draws.
 Obsolete when: lake water replaces the filled look.
+
+## 2026-11-09 The plain flood's FIFO inflates pits with scale
+Scope: project (GEN-159, GEN-141, A3 6.4)
+What happened: the sediment pass flooded with the plain `priority_flood` (FIFO for flats) while the rounds and H1 use the canonical flood; its pit count was 1.0 times H1's at 3,072 cells, 2.2 times at 6,144 and 18.5 times at 12,288 on one surface. A fixture shows the FIFO overtaking a lower heap entry on a flat chain; that it captures a whole valley is inferred from the scale trend. With the canonical flood the definitions agree (0.26 % and 0.35 % pits after the pass at k = 1 and 2).
+Assumption it changes: that the two floods differ only by tie order at epsilon scale; a statistic or sweep on the plain flood (K7, `deposit_on_own_route`, `fill_depth`) can be inflated on large flats.
+Obsolete when: the plain flood has no caller.

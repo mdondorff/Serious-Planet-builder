@@ -156,6 +156,9 @@ pub struct EditRuntime {
     /// The level-1 preview of the edit being made (VIEW-067): the accepted one and the tickets of a drag, and what the frame draws of it.
     preview: PreviewState,
     preview_overlay: Option<PreviewOverlay>,
+    /// The producer of the previews and the footprint hash of the last edit it was asked for (`--preview-l1`, VIEW-068); none without the flag.
+    preview_worker: Option<crate::previewjob::PreviewWorker>,
+    preview_asked: Option<u64>,
     /// The line or region being drawn, on the screen.
     draft: DraftOverlay,
     /// The brush tool on the screen: the stroke being painted and the ring under the cursor.
@@ -289,6 +292,8 @@ impl EditRuntime {
             overlay: Vec::new(),
             preview: PreviewState::default(),
             preview_overlay: None,
+            preview_worker: None,
+            preview_asked: None,
             draft: DraftOverlay::default(),
             brush: BrushOverlay::default(),
             transient_shown: false,
@@ -376,6 +381,41 @@ impl EditRuntime {
             self.preview.clear();
         }
         std::mem::take(&mut self.affected)
+    }
+
+    /// Turns the level-1 preview on (`--preview-l1`, VIEW-068): a thread builds the base of an H0 grid of `n` cells a face edge from the default class source at its first ask. Off, nothing runs.
+    pub fn enable_preview(&mut self, n: usize, seed: u64) {
+        let threads = std::thread::available_parallelism().map_or(1, |k| k.get());
+        self.enable_preview_with(Box::new(move || planet_generators::bake::preview::PreviewBase::from_class_source(n, seed, threads)));
+    }
+
+    /// [`enable_preview`](EditRuntime::enable_preview) with the base built by `source` (tests).
+    pub fn enable_preview_with(&mut self, source: crate::previewjob::BaseSource) {
+        self.preview_worker = Some(crate::previewjob::PreviewWorker::new(source));
+    }
+
+    /// One frame of the producer: takes the answer that finished, and while a handle is held asks for the preview of the definition's stamps when they changed since the last ask.
+    fn drive_preview(&mut self) {
+        let Some(w) = &self.preview_worker else { return };
+        if let Some((ticket, answer)) = w.poll() {
+            match answer {
+                Ok(data) => {
+                    self.preview.accept(ticket, data);
+                }
+                Err(e) => self.session.set_status(format!("level-1 preview: {e}")),
+            }
+        }
+        if self.session.dragging().is_none() {
+            self.preview_asked = None;
+            return;
+        }
+        let edit = crate::previewjob::edit_of(self.session.editor().definition(), planet_world_def::BodyId::PLANET);
+        let h = planet_world_def::footprint_hash(&edit.stamps);
+        if self.preview_asked != Some(h) {
+            self.preview_asked = Some(h);
+            let ticket = self.preview.submit();
+            w.request(ticket, edit);
+        }
     }
 
     /// An edit asks for a level-1 preview: the ticket of its result (VIEW-067).
@@ -590,6 +630,7 @@ impl EditRuntime {
             }
         };
         self.stats.shown_max = self.stats.shown_max.max(self.shown.len());
+        self.drive_preview();
         // The outlines read the ground at each edit: the heights are kept while the field's items are the same.
         let ground = |d: Vec3| -> f64 {
             let mut cache = self.ground.borrow_mut();
@@ -1252,6 +1293,46 @@ mod tests {
         fn item_revision(&self) -> u64 {
             self.revision.load(std::sync::atomic::Ordering::Relaxed)
         }
+    }
+
+    // spec: VIEW-068
+    #[test]
+    fn a_held_handle_asks_the_worker_for_a_preview_that_is_drawn_and_gone_when_the_edit_is_committed_and_without_the_flag_nothing_runs() {
+        let at = unit(47.2, 8.55);
+        let cam = above(at, 3_000.0);
+        // Without the flag: no worker, no ask, no preview, whatever is dragged.
+        let mut off = runtime(None);
+        off.toggle();
+        off.key(EditKey::Tool(2));
+        off.press(&cam, VIEWPORT, CENTRE, &limits(), &Flat);
+        frame(&mut off, &cam, false);
+        off.press(&cam, VIEWPORT, off.handles[0].1, &limits(), &Flat);
+        frame(&mut off, &cam, false);
+        assert!(off.preview_worker.is_none() && off.preview_asked.is_none() && off.preview_overlay().is_none());
+        // With it: a held handle asks once for the stamps as they are, the answer is accepted, and it is drawn.
+        let mut e = runtime(None);
+        e.enable_preview_with(crate::previewjob::test_source(12));
+        e.toggle();
+        e.key(EditKey::Tool(2));
+        e.press(&cam, VIEWPORT, CENTRE, &limits(), &Flat);
+        frame(&mut e, &cam, false);
+        assert!(e.preview_asked.is_none(), "nothing is held yet: nothing is asked");
+        e.press(&cam, VIEWPORT, e.handles[0].1, &limits(), &Flat);
+        assert!(e.session.dragging().is_some());
+        frame(&mut e, &cam, false);
+        assert!(e.preview_asked.is_some(), "the held handle asked for the stamps' preview");
+        let started = std::time::Instant::now();
+        while e.preview.current().is_none() && started.elapsed() < std::time::Duration::from_secs(30) {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            frame(&mut e, &cam, false);
+        }
+        assert!(e.preview.current().is_some(), "the worker answered within 30 s");
+        assert!(e.preview_overlay().is_some(), "and the frame draws it");
+        // The edit is committed: the preview is gone.
+        e.release();
+        assert!(!e.take_affected().is_empty());
+        frame(&mut e, &cam, false);
+        assert!(e.preview_overlay().is_none() && e.preview_asked.is_none());
     }
 
     // spec: VIEW-067
