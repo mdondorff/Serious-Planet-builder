@@ -11,7 +11,7 @@ use super::Grid;
 use crate::dump::Rgba;
 use std::fmt::Write as _;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 /// A stage of the new chain.
@@ -199,36 +199,71 @@ pub trait StageProbe: Send + Sync {
     fn stage(&self, view: &StageView<'_>);
 }
 
-static ON: AtomicBool = AtomicBool::new(false);
+/// How many sinks are installed (the process-wide one and the thread-local ones): `emit` looks no further when it is 0.
+static INSTALLED: AtomicUsize = AtomicUsize::new(0);
 static SINK: RwLock<Option<Arc<dyn StageProbe>>> = RwLock::new(None);
 
-/// Installs the sink: from now on every [`emit`] reaches it. Off by default.
+thread_local! {
+    static LOCAL: std::cell::RefCell<Option<Arc<dyn StageProbe>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Installs the process-wide sink: from now on every [`emit`] of every thread reaches it. Off by default.
 pub fn install(probe: Arc<dyn StageProbe>) {
-    *SINK.write().unwrap_or_else(|e| e.into_inner()) = Some(probe);
-    ON.store(true, Ordering::SeqCst);
+    let mut g = SINK.write().unwrap_or_else(|e| e.into_inner());
+    if g.replace(probe).is_none() {
+        INSTALLED.fetch_add(1, Ordering::SeqCst);
+    }
 }
 
-/// Removes the sink.
+/// Removes the process-wide sink.
 pub fn uninstall() {
-    ON.store(false, Ordering::SeqCst);
-    *SINK.write().unwrap_or_else(|e| e.into_inner()) = None;
+    let mut g = SINK.write().unwrap_or_else(|e| e.into_inner());
+    if g.take().is_some() {
+        INSTALLED.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
-/// Whether a sink is installed.
+/// Installs a sink for the calling thread only (what the solvers emit from their calling thread reaches it, what other threads emit does not): tests that run beside others.
+pub fn install_local(probe: Arc<dyn StageProbe>) {
+    LOCAL.with(|l| {
+        if l.borrow_mut().replace(probe).is_none() {
+            INSTALLED.fetch_add(1, Ordering::SeqCst);
+        }
+    });
+}
+
+/// Removes the calling thread's sink.
+pub fn uninstall_local() {
+    LOCAL.with(|l| {
+        if l.borrow_mut().take().is_some() {
+            INSTALLED.fetch_sub(1, Ordering::SeqCst);
+        }
+    });
+}
+
+/// Whether any sink is installed.
 pub fn enabled() -> bool {
-    ON.load(Ordering::Relaxed)
+    INSTALLED.load(Ordering::Relaxed) > 0
 }
 
 /// A stage boundary: with a sink installed, `make` (given the stage) builds the view of what the stage produced (it only borrows) and the sink receives it; without one, one atomic load and nothing else.
 #[inline]
 pub fn emit<'a>(stage: Stage, make: impl FnOnce(Stage) -> StageView<'a>) {
-    if !ON.load(Ordering::Relaxed) {
+    if INSTALLED.load(Ordering::Relaxed) == 0 {
         return;
     }
-    let sink = SINK.read().unwrap_or_else(|e| e.into_inner()).clone();
+    let local = LOCAL.with(|l| l.borrow().clone());
+    let sink = local.or_else(|| SINK.read().unwrap_or_else(|e| e.into_inner()).clone());
     if let Some(s) = sink {
         s.stage(&make(stage));
     }
+}
+
+/// A 64-bit word mixed so that every bit of it reaches every bit of the result (a splitmix64 finaliser): the data hash is not linear in any bit of the data.
+fn mix_word(mut x: u64) -> u64 {
+    x = (x ^ (x >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    x = (x ^ (x >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    x ^ (x >> 31)
 }
 
 /// The histogram bins of the percentiles.
@@ -240,7 +275,8 @@ pub const BIN_BYTES: usize = 12;
 pub struct SheetProbe {
     dir: PathBuf,
     max_bins: usize,
-    log: Mutex<String>,
+    /// Whether the numbers file is still to be created (the first line truncates it, later lines append).
+    started: Mutex<bool>,
 }
 
 /// The percentile of a histogram: the value at the first bin whose cumulative count reaches `q` of the total, at the bin's centre.
@@ -259,7 +295,7 @@ fn percentile(hist: &[u32], total: u64, q: f64, lo: f64, hi: f64) -> f64 {
 impl SheetProbe {
     /// A probe writing into `dir` (made if missing), at most `max_bins` bins a sheet.
     pub fn new(dir: impl Into<PathBuf>, max_bins: usize) -> SheetProbe {
-        SheetProbe { dir: dir.into(), max_bins: max_bins.max(4), log: Mutex::new(String::new()) }
+        SheetProbe { dir: dir.into(), max_bins: max_bins.max(4), started: Mutex::new(true) }
     }
 
     /// The numbers file: one line a field.
@@ -270,7 +306,10 @@ impl SheetProbe {
     /// The bins of a sheet for a layout of `w` by `h`: the same aspect, at most `max_bins` of them.
     fn bins(&self, w: usize, h: usize) -> (usize, usize) {
         let scale = ((self.max_bins as f64) / (w as f64 * h as f64)).sqrt().min(1.0);
-        (((w as f64 * scale).floor() as usize).max(1), ((h as f64 * scale).floor() as usize).max(1))
+        let (bw, bh) = (((w as f64 * scale).floor() as usize).max(1), ((h as f64 * scale).floor() as usize).max(1));
+        // An extreme aspect forces a side up to 1 bin: the other gives way, so the product never passes the bound.
+        let bw = bw.min((self.max_bins / bh).max(1));
+        (bw, bh.min((self.max_bins / bw).max(1)))
     }
 
     fn one(&self, view: &StageView<'_>, f: &Field<'_>) -> Result<(), String> {
@@ -280,26 +319,38 @@ impl SheetProbe {
         if f.data.len() != n {
             return Err(format!("{}: {} values for {n} cells", f.name, f.data.len()));
         }
+        if let FieldData::Diff(_, b) = f.data {
+            if b.len() != n {
+                return Err(format!("{}: a reference of {} values for {n} cells", f.name, b.len()));
+            }
+        }
+        if f.mask.is_some_and(|m| m.len() != n) {
+            return Err(format!("{}: a mask of the wrong length for {n} cells", f.name));
+        }
         let (w, h) = grid.layout();
         let (bw, bh) = self.bins(w, h);
         let (lo, hi, _) = f.kind.scale();
         let (mut sum, mut count) = (vec![0f64; bw * bh], vec![0u32; bw * bh]);
         let mut hist = vec![0u32; HIST_BINS];
         let (mut total, mut min, mut max, mut hash) = (0u64, f64::INFINITY, f64::NEG_INFINITY, 0xCBF2_9CE4_8422_2325u64);
+        let (mut below, mut above) = (0u64, 0u64);
         for p in 0..n {
-            hash = (hash ^ f.data.bits(p)).wrapping_mul(0x0000_0100_0000_01B3);
+            hash = (hash ^ mix_word(f.data.bits(p))).wrapping_mul(0x0000_0100_0000_01B3);
             if !grid.is_active(p) || f.mask.is_some_and(|m| !m[p]) {
                 continue;
             }
-            let v = f.kind.read(f.data.at(p));
-            if !v.is_finite() {
+            let raw = f.data.at(p);
+            if !raw.is_finite() {
                 continue;
             }
+            let v = f.kind.read(raw);
             let (x, y) = grid.xy(p);
             let b = (y * bh / h) * bw + x * bw / w;
             sum[b] += v;
             count[b] += 1;
-            hist[(((v - lo) / (hi - lo)).clamp(0.0, 1.0) * (HIST_BINS as f64 - 1.0)) as usize] += 1;
+            hist[(((v - lo) / (hi - lo)).clamp(0.0, 1.0) * HIST_BINS as f64).floor().min(HIST_BINS as f64 - 1.0) as usize] += 1;
+            below += u64::from(v < lo);
+            above += u64::from(v > hi);
             total += 1;
             min = min.min(v);
             max = max.max(v);
@@ -313,15 +364,21 @@ impl SheetProbe {
         Rgba { width: bw as u32, height: bh as u32, data }
             .write_png(&self.dir.join(format!("{name}.png")))
             .map_err(|e| format!("{name}.png: {e}"))?;
-        let q = |q: f64| percentile(&hist, total, q, lo, hi);
-        let mut line = format!(
-            "{} | {} | cells {total} | min {min:.6e} | p5 {:.6e} | p50 {:.6e} | p95 {:.6e} | max {max:.6e} | hash {hash:016x}",
-            view.stage.label(),
-            f.name,
-            q(0.05),
-            q(0.5),
-            q(0.95)
-        );
+        // A percentile is a value of the data: the scale's edge bins hold what is outside the scale, so it is held within the minimum and the maximum.
+        let q = |q: f64| percentile(&hist, total, q, lo, hi).clamp(min, max);
+        let unit = if f.kind == FieldKind::Area { " (log10 m2)" } else { "" };
+        let mut line = if total == 0 {
+            format!("{} | {}{unit} | cells 0 | none | hash {hash:016x}", view.stage.label(), f.name)
+        } else {
+            format!(
+                "{} | {}{unit} | cells {total} | min {min:.6e} | p5 {:.6e} | p50 {:.6e} | p95 {:.6e} | max {max:.6e} | below_scale {below} | above_scale {above} | hash {hash:016x}",
+                view.stage.label(),
+                f.name,
+                q(0.05),
+                q(0.5),
+                q(0.95)
+            )
+        };
         for (k, v) in &view.numbers {
             let _ = write!(line, " | {k} {v:.6e}");
         }
@@ -329,13 +386,20 @@ impl SheetProbe {
             line,
             " | probe_ms {:.1} | probe_bytes {}",
             started.elapsed().as_secs_f64() * 1000.0,
-            bw * bh * BIN_BYTES + HIST_BINS * 4 + bw * bh * 4
+            bw * bh * BIN_BYTES + HIST_BINS * 4 + bw * bh * 4 // the buffers of the probe; the PNG encoder's own state is a constant on top
         );
-        let mut log = self.log.lock().unwrap_or_else(|e| e.into_inner());
-        log.push_str(&line);
-        log.push('\n');
+        // Appended, not kept: the probe holds no text of the run. The file is created fresh by the first line of this probe.
+        let mut first = self.started.lock().unwrap_or_else(|e| e.into_inner());
         std::fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
-        std::fs::write(self.log_path(), log.as_bytes()).map_err(|e| e.to_string())
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .append(!*first)
+            .truncate(*first)
+            .open(self.log_path())
+            .map_err(|e| e.to_string())?;
+        *first = false;
+        std::io::Write::write_all(&mut file, format!("{line}\n").as_bytes()).map_err(|e| e.to_string())
     }
 }
 
@@ -456,7 +520,7 @@ mod tests {
             let mut s = z.clone();
             s.sort_by(f64::total_cmp);
             let exact = s[((q * s.len() as f64).ceil() as usize - 1).min(s.len() - 1)];
-            assert!((get(k) - exact).abs() <= 1.5 * bin, "{k}: {} against {exact}", get(k));
+            assert!((get(k) - exact).abs() <= 0.6 * bin, "{k}: {} against {exact}", get(k));
         }
         let hash_of = |v: &[f64]| {
             let p2 = SheetProbe::new(dir("pct2"), 400);
@@ -467,8 +531,70 @@ mod tests {
         let mut z2 = z.clone();
         z2[5000] = f64::from_bits(z2[5000].to_bits() ^ 1);
         assert_ne!(hash_of(&z), hash_of(&z2), "one bit of one cell changes the data hash");
+        // The sign bit is no longer linear: two sign flips do not cancel, and doubling two values is another hash.
+        let (a, b) = (vec![5.0; 10_000], vec![-5.0; 10_000]);
+        assert_ne!(hash_of(&a), hash_of(&b));
+        let (c, d2) = ([vec![5.0, 7.0, 1.0], vec![0.0; 9_997]].concat(), [vec![-5.0, -7.0, 1.0], vec![0.0; 9_997]].concat());
+        assert_ne!(hash_of(&c), hash_of(&d2), "two sign flips do not cancel");
         assert_eq!(hash_of(&z), hash_of(&z), "and the hash is a function of the data");
         let _ = std::fs::remove_dir_all(&d);
         let _ = std::fs::remove_dir_all(dir("pct2"));
+    }
+
+    // spec: BUILD-046
+    #[test]
+    fn the_numbers_stay_inside_the_data_the_bound_holds_for_a_long_thin_grid_and_a_bad_length_or_a_nan_is_an_error_or_skipped() {
+        let d = dir("edge");
+        let probe = SheetProbe::new(&d, 2_000);
+        let g = Grid::new(20_000, 3, 100.0);
+        probe.stage(&StageView::new(Stage::H1, &g).f64("z", FieldKind::Height, &vec![-5000.0; g.len()]));
+        let dec = png::Decoder::new(std::io::Cursor::new(std::fs::read(d.join("h1-z.png")).unwrap()));
+        let r = dec.read_info().unwrap();
+        assert!(r.info().width as usize * r.info().height as usize <= 2_000, "{}x{}", r.info().width, r.info().height);
+        let log = std::fs::read_to_string(probe.log_path()).unwrap();
+        assert!(
+            log.contains("min -5.000000e3 | p5 -5.000000e3 | p50 -5.000000e3 | p95 -5.000000e3 | max -5.000000e3"),
+            "a percentile is a value of the data: {log}"
+        );
+        assert!(log.contains("below_scale 60000"), "what is under the scale is counted: {log}");
+        // Nothing counted: no numbers instead of an infinity.
+        let g2 = Grid::new(4, 4, 100.0);
+        let none = vec![f64::NAN; 16];
+        probe.stage(&StageView::new(Stage::H1, &g2).f64("n", FieldKind::Area, &none));
+        let log = std::fs::read_to_string(probe.log_path()).unwrap();
+        assert!(log.contains("h1 | n (log10 m2) | cells 0 | none"), "a NaN area is skipped, and an empty field says none: {log}");
+        // A reference or a mask of another length is an error and writes nothing.
+        let short = vec![0.0; 3];
+        assert!(probe
+            .one(
+                &StageView::new(Stage::H1, &g2),
+                &Field { name: "d", kind: FieldKind::Delta, data: FieldData::Diff(&none, &short), mask: None }
+            )
+            .is_err());
+        let mask = vec![true; 3];
+        assert!(probe
+            .one(
+                &StageView::new(Stage::H1, &g2),
+                &Field { name: "m", kind: FieldKind::Height, data: FieldData::F64(&none), mask: Some(&mask) }
+            )
+            .is_err());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: GEN-161
+    #[test]
+    fn a_local_sink_reaches_the_threads_own_emits_only() {
+        let c = Arc::new(Counting(0.into()));
+        let g = Grid::new(4, 4, 100.0);
+        install_local(c.clone());
+        assert!(enabled());
+        emit(Stage::K7, |s| StageView::new(s, &g));
+        let other = std::thread::spawn({
+            let g = Grid::new(4, 4, 100.0);
+            move || emit(Stage::K7, |s| StageView::new(s, &g))
+        });
+        other.join().unwrap();
+        uninstall_local();
+        assert_eq!((c.0.load(Ordering::SeqCst), enabled()), (1, false), "only the installing thread's emit arrived");
     }
 }

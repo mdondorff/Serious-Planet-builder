@@ -8,27 +8,24 @@ use planet_generators::bake::route::RoundRules;
 use planet_generators::bake::sediment::sediment_pass;
 use planet_generators::bake::tile::Pass2Params;
 use planet_generators::bake::Grid;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 const N: usize = 24;
 const R: f64 = 6_371_000.0;
 
-/// The sink is process-wide: one test at a time installs it, and it is removed even when the test fails.
-static SINK: Mutex<()> = Mutex::new(());
-
-struct Installed(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
+/// The sink of this test is installed for its own thread only (the solvers emit from their calling thread): the tests of the binary that run beside it do not reach it, and it is removed even when the test fails.
+struct Installed;
 
 impl Installed {
     fn new(p: Arc<SheetProbe>) -> Installed {
-        let g = SINK.lock().unwrap_or_else(|e| e.into_inner());
-        probe::install(p);
-        Installed(g)
+        probe::install_local(p);
+        Installed
     }
 }
 
 impl Drop for Installed {
     fn drop(&mut self) {
-        probe::uninstall();
+        probe::uninstall_local();
     }
 }
 
@@ -74,10 +71,7 @@ fn run(g: &Grid, z0: &[f64], outlet: &[bool]) -> (Vec<u64>, String, String) {
 #[test]
 fn the_probe_leaves_every_output_bit_alone_and_writes_a_sheet_and_numbers_for_every_stage() {
     let (g, z0, outlet) = landmass();
-    let _lock = SINK.lock().unwrap_or_else(|e| e.into_inner());
-    assert!(!probe::enabled());
     let off = run(&g, &z0, &outlet);
-    drop(_lock);
 
     let dir = std::env::temp_dir().join(format!("planet-stage-probe-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -87,7 +81,6 @@ fn the_probe_leaves_every_output_bit_alone_and_writes_a_sheet_and_numbers_for_ev
         assert!(probe::enabled());
         run(&g, &z0, &outlet)
     };
-    assert!(!probe::enabled());
     assert_eq!(off.0, on.0, "every height bit is the same with the probe on");
     assert_eq!((&off.1, &off.2), (&on.1, &on.2), "and so are the round report and the sediment report");
 
@@ -104,8 +97,34 @@ fn the_probe_leaves_every_output_bit_alone_and_writes_a_sheet_and_numbers_for_ev
     assert_eq!(log.lines().count(), 10, "two fields for each of five stages:\n{log}");
     assert!(log.lines().all(|l| l.contains("| hash ") && l.contains("| p50 ") && l.contains("probe_bytes")), "{log}");
     assert!(
-        log.contains("round-01 | area |") && log.contains("catchments") && log.contains("moved_volume_first_m3") && log.contains("passes"),
+        log.contains("round-01 | area (log10 m2) |")
+            && log.contains("catchments")
+            && log.contains("moved_volume_first_m3")
+            && log.contains("passes"),
         "{log}"
     );
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// spec: GEN-161
+#[test]
+fn the_memoised_rounds_give_the_same_bits_reports_and_work_with_the_probe_on_and_off() {
+    use planet_generators::bake::round::{solve_rounds_memo, Drivers, RoundCache};
+    let (g, z0, outlet) = landmass();
+    let p = CarveParams { steps: 10, reroute_every: 5, round_rules: RoundRules::ROUND, ..CarveParams::default() };
+    let go = |on: bool| {
+        let dir = std::env::temp_dir().join(format!("planet-stage-probe-memo-{}-{on}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let sheet = Arc::new(SheetProbe::new(&dir, 1_000));
+        let _sink = on.then(|| Installed::new(sheet.clone()));
+        let mut z = z0.clone();
+        let mut cache = RoundCache::default();
+        let (rep, work) = solve_rounds_memo(&g, &mut z, &outlet, &p, 2, &1usize, 5, &Drivers::default(), 12, &mut cache);
+        let lines = std::fs::read_to_string(sheet.log_path()).map_or(0, |l| l.lines().count());
+        let _ = std::fs::remove_dir_all(&dir);
+        (z.iter().map(|v| v.to_bits()).collect::<Vec<u64>>(), format!("{rep:?} {work:?}"), lines)
+    };
+    let (off, on) = (go(false), go(true));
+    assert_eq!((&off.0, &off.1), (&on.0, &on.1), "the memoised rounds are the same with the probe on");
+    assert_eq!((off.2, on.2), (0, 4), "two rounds, two fields each, only with the probe");
 }
