@@ -97,6 +97,7 @@ fn spill_write(path: &Path, v: &[f64]) -> std::io::Result<u64> {
     Ok(v.len() as u64 * 8)
 }
 
+#[allow(clippy::chunks_exact_to_as_chunks)]
 /// Reads `n` little-endian f64 from `path`, `SPILL_CHUNK` values at a time (no second copy of the surface).
 fn spill_read(path: &Path, n: usize) -> std::io::Result<Vec<f64>> {
     let mut f = std::io::BufReader::new(std::fs::File::open(path)?);
