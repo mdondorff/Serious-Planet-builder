@@ -898,6 +898,14 @@ pub fn capture_cmd(root: &Path, args: &[String]) -> Res {
     Ok(())
 }
 
+/// The `cargo` arguments of `perf preview` (TEST-099): the `preview_latency` example in release with the user's options (`N`, `--threads N`, `--seed N`, `--smoke`; the example refuses the rest).
+pub fn perf_preview_args(rest: &[String]) -> Vec<String> {
+    let mut v: Vec<String> =
+        ["run", "--release", "-q", "-p", "planet-generators", "--example", "preview_latency", "--"].iter().map(|s| s.to_string()).collect();
+    v.extend(rest.iter().cloned());
+    v
+}
+
 /// The `cargo` arguments of `perf global-bake` (GEN-014): the global-bake scene under the same readiness gate, with the grid
 /// size and thread count as options. The default grid is the 1 km one of GEN-014 (16384 cells per face edge).
 fn perf_global_bake_args(args: &[String]) -> Result<Vec<String>, String> {
@@ -1291,6 +1299,11 @@ pub fn perf(root: &Path, args: &[String]) -> Res {
     }
     if args.first().map(String::as_str) == Some("preflight") {
         let cargo_args = perf_preflight_args(&args[1..])?;
+        let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
+        return run(root, "cargo", &refs, &[]);
+    }
+    if args.first().map(String::as_str) == Some("preview") {
+        let cargo_args = perf_preview_args(&args[1..]);
         let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
         return run(root, "cargo", &refs, &[]);
     }
@@ -2284,5 +2297,18 @@ mod pending_tests {
     #[test]
     fn the_repository_pending_list_is_clean() {
         assert!(stale_pending(&crate::util::repo_root()).is_ok());
+    }
+
+    // spec: TEST-099
+    #[test]
+    fn perf_preview_runs_the_latency_example_in_release_with_the_options() {
+        let s = |v: &[&str]| -> Vec<String> { v.iter().map(|x| x.to_string()).collect() };
+        let c = perf_preview_args(&s(&["--smoke", "--threads", "4"]));
+        assert!(c.windows(2).any(|w| w == ["--example", "preview_latency"]) && c.contains(&"--release".to_string()), "{c:?}");
+        assert!(c.ends_with(&s(&["--smoke", "--threads", "4"])), "{c:?}");
+        assert!(
+            c.iter().position(|a| a == "--").unwrap() < c.iter().position(|a| a == "--smoke").unwrap(),
+            "the options follow `--`: {c:?}"
+        );
     }
 }
