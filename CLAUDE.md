@@ -15,12 +15,12 @@ Working files: `docs/status.md` (forward state only: waiting for the owner, the 
 - `cargo xtask test fast`: tier A for changed crates (<= 20 s; owner, 2026-10-16)
 - `cargo xtask test`: tiers A + B on the software adapter
 - `cargo xtask test gpu`: tier C goldens and debug views
-- `cargo xtask test gpu --real`: the same on the discrete GPU. Run it yourself when real-GPU evidence helps, no owner confirmation (owner, 2026-10-12), never during an architect's perf window. Its golden candidates go through `golden-review` (ADR 0017).
+- `cargo xtask test gpu --real`: the same on the discrete GPU. Run it yourself when real-GPU evidence helps, no owner confirmation (owner, 2026-10-12), never during a perf window. Its golden candidates go through `golden-review` (ADR 0017).
 - `cargo xtask spec-lint`: trace IDs, tiers, requirement coverage
 - `cargo xtask accept <milestone>`: milestone acceptance
 - `cargo xtask repro <bundle>`: replay a repro bundle
 - `cargo xtask golden-review [--proposal <file>] [--extra <dir>]... [--apply]`: classify golden candidates under ADR 0017 (the `golden-review` skill)
-- `cargo xtask perf`: Rasierklinge only. The readiness gate (ADR 0020) refuses when the machine is not ready; perf runs need the architect's authorization: the architect coordinates the window, and a coder session started in the native Claude UI runs it on the architect's go (owner, 2026-10-16; the architect's VS Code-terminal session measures about 1.4x slower per thread). Coders never start one on their own. `--machine-ready` is the owner's override of a failed gate
+- `cargo xtask perf`: Rasierklinge only. The readiness gate (ADR 0020) refuses when the machine is not ready; perf runs need bulldozer's authorization: bulldozer coordinates the window, and a coder session started in the native Claude UI runs it on bulldozer's go (owner, 2026-10-16; the architect's VS Code-terminal session measures about 1.4x slower per thread). Coders never start one on their own. `--machine-ready` is the owner's override of a failed gate
 
 Until an xtask command exists, create it in `xtask/`, not a script. The shell is Git Bash on Windows; keep commands portable, never add `.sh` or `.ps1` files.
 
@@ -46,6 +46,23 @@ Specs, ADRs and working files are read by agents and the owner. Write definition
 - Bless goldens only through the `golden-review` skill's policy (ADR 0017): it auto-blesses rounding noise (also on lit, sky and water, ADR 0096) and declared changes per adapter (ADR 0061), and escalates the rest to the owner's `/bless`. Never copy a candidate into `tests/goldens/` by hand.
 - Never weaken, skip or delete a test to make a build green. Quarantine only with a tracking entry in `docs/status.md`.
 
+## Sessions and routing (owner, 2026-11-09)
+| Session | Owns |
+|---|---|
+| architect (Opus; the owner's main contact) | contract, ADRs, gate verdicts, briefing content and order, external reviews, decision briefs |
+| sonnet-bulldozer | lane orders, merging lane PRs, CI, `docs/status.md`, ID reservations, perf windows, summaries |
+| explorer, crusader | implementation |
+| spikes | one spike at a time; clears itself after its exit list |
+
+| A lane's message | Goes to |
+|---|---|
+| PR ready, CI, merge slot, ID request, idle, perf window, next step the briefing names | bulldozer |
+| Failed gate, departure from an ADR or the contract, a measurement contradicting a contract number, "what next" the briefing doesn't answer | the architect directly, with a one-line note to bulldozer |
+
+- A message that fits both rows, or a doubt, goes to the architect.
+- Only bulldozer writes lane orders; lane orders are in `C:/DEV/planner-inbox/<lane>.md`. An architect's answer that changes the order of work reaches a lane through bulldozer.
+- Bulldozer merges lane PRs under the rules below; the architect first for a PR that departs from an accepted ADR, changes a contract number or claims to close a gate.
+
 ## Git
 - One branch per OpenSpec change (`change/<id>`). Small commits.
 - Push the branch, open a PR with `gh pr create`. Merge it yourself (squash) only when CI is green on Windows and Linux and the verifier passed. A docs-only PR (only docs/, openspec/, .claude/, root `*.md`, `spikes/**/results/**`, `spikes/README.md`) runs the light `docs` check (spec-lint) and needs only it green (owner, 2026-10-16).
@@ -60,7 +77,7 @@ Write a stop report in `docs/status.md` (what was done, what is blocked, what yo
 - a test can't be made deterministic;
 - a decision is needed that no ADR or spec covers **and** it is hard to reverse (draft the ADR as "proposed" first). Easy-to-reverse decisions: draft a "proposed" ADR and keep going. Proposed ADRs from the background report's "decide now" list may be built on before acceptance;
 - golden images are waiting for blessing and further work depends on them;
-- a performance measurement is needed on Rasierklinge: ask the architect session for a perf window (it authorizes it and names who runs it); never run `cargo xtask perf` without that (`test gpu --real` correctness runs are not measurements);
+- a performance measurement is needed on Rasierklinge: ask bulldozer for a perf window (it authorizes it and names who runs it); never run `cargo xtask perf` without that (`test gpu --real` correctness runs are not measurements);
 - a milestone go/no-go gate is reached (after M2 and after M5);
 - the constitution would have to change.
 Otherwise, keep going.
