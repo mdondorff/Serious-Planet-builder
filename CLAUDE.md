@@ -15,14 +15,16 @@ Working files: `docs/status.md` (forward state only: waiting for the owner, the 
 - `cargo xtask test fast`: tier A for changed crates (<= 20 s; owner, 2026-10-16)
 - `cargo xtask test`: tiers A + B on the software adapter
 - `cargo xtask test gpu`: tier C goldens and debug views
-- `cargo xtask test gpu --real`: the same on the discrete GPU. Run it yourself when real-GPU evidence helps, no owner confirmation (owner, 2026-10-12), never during an architect's perf window. Its golden candidates go through `golden-review` (ADR 0017).
+- `cargo xtask test gpu --real`: the same on the discrete GPU. Run it yourself when real-GPU evidence helps, no owner confirmation (owner, 2026-10-12), never during a perf window. Its golden candidates go through `golden-review` (ADR 0017).
 - `cargo xtask spec-lint`: trace IDs, tiers, requirement coverage
 - `cargo xtask accept <milestone>`: milestone acceptance
 - `cargo xtask repro <bundle>`: replay a repro bundle
 - `cargo xtask golden-review [--proposal <file>] [--extra <dir>]... [--apply]`: classify golden candidates under ADR 0017 (the `golden-review` skill)
-- `cargo xtask perf`: Rasierklinge only. The readiness gate (ADR 0020) refuses when the machine is not ready; perf runs need the architect's authorization: the architect coordinates the window, and a coder session started in the native Claude UI runs it on the architect's go (owner, 2026-10-16; the architect's VS Code-terminal session measures about 1.4x slower per thread). Coders never start one on their own. `--machine-ready` is the owner's override of a failed gate
+- `cargo xtask perf`: Rasierklinge only. The readiness gate (ADR 0020) refuses when the machine is not ready; perf runs need bulldozer's authorization: bulldozer coordinates the window, and a coder session started in the native Claude UI runs it on bulldozer's go (owner, 2026-10-16). Coders never start one on their own. `--machine-ready` is the owner's override of a failed gate
 
 Until an xtask command exists, create it in `xtask/`, not a script. The shell is Git Bash on Windows; keep commands portable, never add `.sh` or `.ps1` files.
+
+**Sessions and routing:** read `docs/routing.md` at session start; a lane reports per its table.
 
 ## How to work
 1. Pick up work as an OpenSpec change (`openspec/changes/<id>/`): proposal, design, tasks, spec deltas. Keep changes small (one subsystem, one step).
@@ -60,7 +62,7 @@ Write a stop report in `docs/status.md` (what was done, what is blocked, what yo
 - a test can't be made deterministic;
 - a decision is needed that no ADR or spec covers **and** it is hard to reverse (draft the ADR as "proposed" first). Easy-to-reverse decisions: draft a "proposed" ADR and keep going. Proposed ADRs from the background report's "decide now" list may be built on before acceptance;
 - golden images are waiting for blessing and further work depends on them;
-- a performance measurement is needed on Rasierklinge: ask the architect session for a perf window (it authorizes it and names who runs it); never run `cargo xtask perf` without that (`test gpu --real` correctness runs are not measurements);
+- a performance measurement is needed on Rasierklinge: ask bulldozer for a perf window (it authorizes it and names who runs it); never run `cargo xtask perf` without that (`test gpu --real` correctness runs are not measurements);
 - a milestone go/no-go gate is reached (after M2 and after M5);
 - the constitution would have to change.
 Otherwise, keep going.
