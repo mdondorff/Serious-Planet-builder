@@ -2,7 +2,7 @@
 //! refined by `k` (k = 4 is the erosion grid, 12,288 cells, 814 m): the base is sampled only in the fine cells whose coarse parent is in the coarse landmass or within a ring of it, the fine land is the cells
 //! above the sea connected to the region's centre, its coast ring the outlets, and the landmass is a compact grid (`Grid::compact_cube`: only its cells, indexed by rank). Then 4 rounds of 5 steps on
 //! the resident route, with the process's peak working set after each phase (PowerShell, Windows).
-//! Usage: landmass_scale [k] [threads] [h1|part|both]: `part` routes each round with the partitioned route on the compact grid (GEN-149, tiles of 256 cells; `both` also runs the resident rounds and compares the bits, small k only); with `h1` the hydrology pass follows (runoff of the orographic climate, weighted route, filled surface, H1) with the peak after it. Needs `target/landmass_base_3072.f32` (made by `landmass_region`).
+//! Usage: landmass_scale [k] [threads] [h1|part|both|sed]: `part` routes each round with the partitioned route on the compact grid (GEN-149, tiles of 256 cells; `both` also runs the resident rounds and compares the bits, small k only); with `h1` the hydrology pass follows (runoff of the orographic climate, weighted route, filled surface, H1) with the peak after it. Needs `target/landmass_base_3072.f32` (made by `landmass_region`).
 #![allow(clippy::needless_range_loop, clippy::chunks_exact_to_as_chunks)]
 use planet_core::{Face, Vec3};
 use planet_generators::bake::carve::CarveParams;
@@ -229,6 +229,7 @@ fn main() {
     );
 
     // ---- the rounds, resident
+    let z_start = if a.get(3).is_some_and(|x| x == "sed") { z.clone() } else { Vec::new() };
     let p = CarveParams { steps: 20, reroute_every: 5, round_rules: RoundRules::ROUND, ..CarveParams::default() };
     let t = Instant::now();
     let mode = a.get(3).map_or("", |x| x.as_str());
@@ -278,6 +279,55 @@ fn main() {
         "memory after the 4 rounds: peak {peak:.0} MiB, now {now:.0} MiB; cells {active}, bytes a cell at the peak {:.0}",
         peak * 1048576.0 / active as f64
     );
+    if a.get(3).is_some_and(|x| x == "sed") {
+        // GEN-151: the sediment steps on the whole compact landmass after the rounds (A3 6.7), with the breach-lowering share of the eroded column.
+        use planet_generators::bake::sediment::{breach_lowered_m3, sediment_pass};
+        use planet_generators::bake::tile::Pass2Params;
+        let mut q = Pass2Params::standard(seed, 0.0);
+        q.carve.breach_max_m = CarveParams::default().breach_max_m;
+        let t = Instant::now();
+        let breach = breach_lowered_m3(&grid, &z_start, &outlet, &CarveParams { max_area: 0.0, ..p }, seed);
+        println!("breach alone on the starting surface: {:.3e} m3 ({:.1} s)", breach, t.elapsed().as_secs_f64());
+        let t = Instant::now();
+        let r = sediment_pass(&grid, &mut z, &z_start, &q, threads);
+        println!("sediment steps: {:.1} s", t.elapsed().as_secs_f64());
+        for (name, s) in &r.pits {
+            println!(
+                "pits {name}: {} of {} land cells ({:.4} %), p50 {:.2} m, p99 {:.2} m, max {:.1} m",
+                s.pit_cells,
+                s.land_cells,
+                100.0 * s.share(),
+                s.p50_m,
+                s.p99_m,
+                s.max_m
+            );
+        }
+        println!(
+            "thermal: {} passes, {} cells still gave in the last, volume change {:.2e}",
+            r.thermal.passes_run, r.thermal.moved_last, r.thermal_volume_change
+        );
+        let d = r.deposit;
+        println!(
+            "deposition: eroded {:.4e} m3, deposited {:.4e}, exported {:.4e}; (eroded - deposited - exported) / eroded = {:.2e}",
+            d.eroded,
+            d.deposited,
+            d.exported,
+            (d.eroded - d.deposited - d.exported) / d.eroded
+        );
+        println!(
+            "eroded column before thermal {:.4e} m3, after thermal {:.4e} (the deposition reads the latter)",
+            r.eroded_before_thermal_m3, r.eroded_after_thermal_m3
+        );
+        println!("deposition, change of the height volume: {:.4e} m3 (deposited {:.4e})", r.deposit_height_volume_m3, d.deposited);
+        println!(
+            "pit spreading: {} passes, volume change {:.2e}; first-round breach alone is {:.1} % of the eroded column (a lower bound)",
+            r.spread_passes,
+            r.spread_volume_change,
+            100.0 * breach / d.eroded
+        );
+        let (peak, now) = memory_mb();
+        println!("memory after the sediment steps: peak {peak:.0} MiB, now {now:.0} MiB");
+    }
     if a.get(3).is_some_and(|x| x == "h1") {
         let o = inputs.orography();
         let mut weight = vec![1.0f32; active];
