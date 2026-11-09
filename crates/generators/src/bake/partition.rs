@@ -38,6 +38,8 @@ pub struct PartStats {
     /// Entries and bytes the budget evicted after the call (GEN-153).
     pub evicted: usize,
     pub evicted_bytes: usize,
+    /// Whether a previous result of the slot was there to compare with: without one (the first call, or evicted by the budget) the counts above are 0 and say nothing about what changed.
+    pub baseline: bool,
 }
 
 /// The partitioned route's result: the routing and the filled surface it came from.
@@ -71,7 +73,7 @@ impl PartCache {
         self.previous.iter().flatten().map(|p| p.filled.len() * 8 + p.receiver.len() * 4 + p.area.len() * 8).sum()
     }
 
-    /// Marks the start of a solve: the memo entries used from now on are pinned until [`PartCache::end_solve`].
+    /// Marks the start of a solve: the memo entries used from now on are pinned until [`PartCache::end_solve`]. A solve that panics leaves the pin until the next solve begins (which sets it again).
     pub fn begin_solve(&mut self) {
         self.pin = Some(self.floods.tick() + 1);
     }
@@ -88,7 +90,14 @@ impl PartCache {
     /// change counts then read as on a first call), then the memo's tile floods least recently used first, never one the running solve (or, outside a solve, the call at `call_tick`) used.
     /// Returns the entries and bytes evicted. No budget, nothing evicted. A result is never changed: every evicted entry is recomputed on a miss.
     pub fn evict(&mut self, keep_slot: Option<usize>, call_tick: u64) -> (usize, usize) {
-        let Some(budget) = self.budget else { return (0, 0) };
+        match self.budget {
+            Some(budget) => self.evict_to(budget, keep_slot, call_tick),
+            None => (0, 0),
+        }
+    }
+
+    /// [`PartCache::evict`] to `budget` bytes whatever the cache's own budget is (the round cache's budget covers the part cache too).
+    pub(super) fn evict_to(&mut self, budget: usize, keep_slot: Option<usize>, call_tick: u64) -> (usize, usize) {
         let (mut entries, mut bytes) = (0, 0);
         if self.pin.is_none() {
             for k in 0..self.previous.len() {
@@ -525,6 +534,7 @@ pub fn partitioned_route_weighted(
     if let Some(Some(Previous { tile: tl, size, cube, len, compact, filled: pf, receiver: pr, area: pa })) = cache.previous.get(cache.slot)
     {
         if *tl == tile && *size == grid.layout() && *cube == grid.is_cube() && *len == grid.len() && *compact == grid.is_compact() {
+            stats.baseline = true;
             for r in &tiles {
                 let (mut f, mut rc, mut ar) = (false, false, false);
                 for y in r.y0..r.y0 + r.h {

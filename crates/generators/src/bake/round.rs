@@ -301,12 +301,10 @@ impl RoundCache {
     /// Evicts down to the budget; returns the entries and bytes evicted.
     fn evict(&mut self) -> (usize, usize) {
         let Some(budget) = self.budget else { return (0, 0) };
-        // The part cache gets the budget minus what the catchment memo holds pinned or not: it evicts its own first, then the catchment memo takes what is left over.
-        self.part.set_budget(Some(budget.saturating_sub(self.catchments.bytes())));
-        let (mut e, mut b) = self.part.evict(None, self.part.tick());
+        // The part cache gets the budget minus what the catchment memo holds: it evicts its own first, then the catchment memo takes what is left over.
+        let (mut e, mut b) = self.part.evict_to(budget.saturating_sub(self.catchments.bytes()), None, self.part.tick());
         let rest = budget.saturating_sub(self.part.bytes());
         let (e2, b2) = self.catchments.evict(rest, self.pin.unwrap_or(u64::MAX));
-        self.part.set_budget(None);
         e += e2;
         b += b2;
         (e, b)
@@ -340,6 +338,8 @@ pub struct RoundWork {
     /// Entries and bytes the budget evicted after the round (GEN-153).
     pub evicted: usize,
     pub evicted_bytes: usize,
+    /// Whether the round's routing had a previous result to compare with (see `PartStats::baseline`).
+    pub baseline: bool,
 }
 
 /// The key of a catchment round: the member cell ids, the key inputs and the parameters of the carve that the round reads.
@@ -413,6 +413,7 @@ pub fn solve_rounds_memo(
             tiles_filled_changed: ps.tiles_filled_changed,
             tiles_receiver_changed: ps.tiles_receiver_changed,
             tiles_area_changed: ps.tiles_area_changed,
+            baseline: ps.baseline,
             catchments: queue.len(),
             ..RoundWork::default()
         };

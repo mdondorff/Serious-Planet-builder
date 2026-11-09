@@ -1,6 +1,6 @@
 ## ADDED Requirements
 ### Requirement: GEN-153 The memo caches of the edit path have a budget and eviction never changes a result
-The memo caches of the edit path (`PartCache`, `RoundCache`) SHALL take an optional budget in bytes, a parameter with no machine count in the rule. Over it, after each round and at the end of a solve, a cache SHALL evict previous results first, then tile floods, then catchment rounds, each least recently used first (ties by key), and never data the running solve used. A solve after any eviction, an edit and its undo, and a replay SHALL equal the fresh build bit for bit (G-EQ). No budget SHALL evict nothing and `without_memory` SHALL keep nothing. These caches SHALL hold no user-authored source, definition or edit history.
+The memo caches of the edit path (`PartCache`, `RoundCache`) SHALL take an optional budget in bytes, a parameter with no machine count in the rule. Over it, after each round and at the end of a solve, a cache SHALL evict previous results (at the end only), tile floods and catchment rounds, each least recently used first (ties by key), and never data the running solve used; a count of what changed SHALL say when its previous result is gone. A solve after any eviction, an edit and its undo, and a replay SHALL equal the fresh build bit for bit (G-EQ). No budget SHALL evict nothing and `without_memory` SHALL keep nothing.
 
 Verify: A
 Status: active

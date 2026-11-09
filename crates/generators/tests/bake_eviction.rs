@@ -93,8 +93,12 @@ fn a_solve_after_any_eviction_an_edit_its_undo_and_a_replay_are_the_fresh_build(
             assert!(w.iter().map(|x| x.evicted).sum::<usize>() > 0, "something was evicted ({name}, {label})");
             let e = edited(&z0);
             let want_e = bits(&fresh(&g, &e, &outlet, &p, 4));
-            let (got_e, _) = solve(&g, &e, &outlet, &p, &mut cache);
+            let (got_e, w_e) = solve(&g, &e, &outlet, &p, &mut cache);
             assert_eq!(bits(&got_e), want_e, "G-EQ after an edit under {label} ({name})");
+            // The change counts say whether they had a baseline: the previous results are evicted at the end of every solve under a budget that binds, so no round reads one.
+            if budget <= full / 3 {
+                assert!(w_e.iter().all(|x| !x.baseline && x.tiles_filled_changed == 0), "no baseline, no counts ({name}, {label})");
+            }
             assert!(cache.bytes() <= budget);
             // Undo: the original definition again is the first result.
             let (undone, _) = solve(&g, &z0, &outlet, &p, &mut cache);
@@ -127,6 +131,23 @@ fn a_budget_keeps_the_recent_work_so_a_repeat_solve_does_less_than_a_fresh_build
     let carved_half: usize = w_half.iter().map(|w| w.carved).sum();
     assert!(carved_half > 0 && carved_half < carved_fresh, "half the budget: the repeat carves {carved_half} of {carved_fresh} catchments");
     assert!(half.bytes() <= all.bytes() / 2);
+    // Pinned: the first solve under a budget of nothing answers from the memo exactly where an unlimited cache does (what the running solve used is not evicted).
+    let mut zero = RoundCache::with_budget(0);
+    let mut unlimited = RoundCache::default();
+    let (_, w_zero) = solve(&g, &z0, &outlet, &p, &mut zero);
+    let (_, w_unl) = solve(&g, &z0, &outlet, &p, &mut unlimited);
+    let hits = |w: &[RoundWork]| w.iter().map(|x| (x.memo_hits, x.tile_memo_hits, x.carved)).collect::<Vec<_>>();
+    assert_eq!(hits(&w_zero), hits(&w_unl), "the same hits and carves in a first solve whatever the budget");
+    // With an unlimited cache the baseline is there on the second solve, and the eviction counters are the same for any thread count.
+    let (_, w_again) = solve(&g, &z0, &outlet, &p, &mut unlimited);
+    assert!(w_again.iter().all(|x| x.baseline));
+    let mut c1 = RoundCache::with_budget(all.bytes() / 3);
+    let mut c4 = RoundCache::with_budget(all.bytes() / 3);
+    let (mut z1, mut z4) = (z0.clone(), z0.clone());
+    let (_, w1) = solve_rounds_memo(&g, &mut z1, &outlet, &p, 4, &1usize, 3, &Drivers::default(), 12, &mut c1);
+    let (_, w4) = solve_rounds_memo(&g, &mut z4, &outlet, &p, 4, &4usize, 3, &Drivers::default(), 12, &mut c4);
+    assert_eq!((bits(&z1), w1), (bits(&z4), w4), "results and eviction counters are the same for 1 and 4 threads");
+    assert_eq!(c1.bytes(), c4.bytes());
     let mut none = RoundCache::without_memory();
     solve(&g, &z0, &outlet, &p, &mut none);
     assert_eq!(none.bytes(), 0, "a cache that keeps nothing still keeps nothing");
@@ -147,7 +168,11 @@ fn the_partitioned_route_under_a_budget_is_the_route_without_one_and_the_cache_d
         let z = terrain(salt);
         let got = partitioned_route_weighted(&g, &z, &outlets(&z), 1e-3, 3, 12, rules, None, &mut small);
         let want = partitioned_route_weighted(&g, &z, &outlets(&z), 1e-3, 3, 12, rules, None, &mut PartCache::without_memory());
-        assert_eq!((got.routing.receiver, bits(&got.filled)), (want.routing.receiver, bits(&want.filled)), "salt {salt}");
+        assert_eq!(
+            (got.routing.receiver, bits(&got.filled), bits(&got.routing.area)),
+            (want.routing.receiver, bits(&want.filled), bits(&want.routing.area)),
+            "salt {salt}"
+        );
     }
     // The previous result of the slot just written is kept (one routing's arrays), and the memo stays near the budget: it does not hold six surfaces' floods.
     assert!(small.bytes() < unlimited.bytes() * 2, "{} against {}", small.bytes(), unlimited.bytes());
