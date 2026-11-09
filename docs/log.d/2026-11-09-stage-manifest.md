@@ -1,0 +1,1 @@
+- 2026-11-09 stage-manifest: a committed manifest of the stage probe's fixture (data hash and key numbers per stage and field), a tier-A staleness check naming stage, field and column, `cargo xtask stages [--update]`, number invariants and pit cells = H1 basin cells (BUILD-047, TEST-103, TEST-104)

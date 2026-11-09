@@ -13,4 +13,8 @@ The compact landmass of `bake_probe` (a cap of the cube at 24 cells a face edge,
 TEST-103: invariants the lines must satisfy, asserted on the run: the landmass cell count is the active set; thermal and the pit spreading keep the height volume within 1e-9; the deposition's eroded = deposited + exported within 1e-9; the area's maximum is the landmass area at an outlet. TEST-104: the pit-cell count of the surface at the end of each stage equals the count of H1's basin cells of the same surface (both definitions in the manifest).
 
 ## CI
-The tier-A step already runs the test; the sheets go to `target/review/stages/ci/`, and an `actions/upload-artifact` step of the Linux part-2 job uploads that folder (`stage-sheets`, 14 days). No new job.
+The tier-A step already runs the test; the sheets are written to `target/review/stages/ci/`, and the existing `review-<OS>-ab-N` artifact (`target/review/`, always uploaded) carries them. No new job or step.
+
+## What the fixture found
+- H1 on the rounds' output has no pits: the rounds breach them (pass 1 leaves none); the pits of the fixture are on its own landmass and appear again after thermal, so TEST-104 compares the two definitions on three surfaces and requires pits on at least one.
+- The deposition's `original` is the landmass before the rounds (the eroded column is `z0 - z`).
