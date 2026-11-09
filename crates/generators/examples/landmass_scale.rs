@@ -147,7 +147,7 @@ fn cpu_phase(tag: &str) {
         .args(["-NoProfile", "-Command", &format!("(Get-Process -Id {}).TotalProcessorTime.TotalSeconds", std::process::id())])
         .output()
         .expect("powershell");
-    let cpu: f64 = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap_or(f64::NAN);
+    let cpu: f64 = String::from_utf8_lossy(&out.stdout).trim().replace(',', ".").parse().unwrap_or(f64::NAN);
     let wall = start.elapsed().as_secs_f64();
     let (c0, w0) = (f64::from_bits(LAST.swap(cpu.to_bits(), Relaxed)), f64::from_bits(WALL.swap(wall.to_bits(), Relaxed)));
     let (dc, dw) = (cpu - c0, wall - w0);
