@@ -9,8 +9,8 @@
 //!
 //! On a cube grid (GEN-150) the cell area and the distance to the receiver are the sphere's, per cell.
 
-use super::flood::priority_flood;
-use super::route::{route, Routing, NONE};
+use super::flood::{priority_flood, priority_flood_with};
+use super::route::{route, route_rules, MfdClip, RoundRules, Routing, NONE};
 use super::Grid;
 
 /// The capacity coefficient `kc`: one value, or one per cell (GEN-097's classes blended).
@@ -157,9 +157,28 @@ pub fn deposit_on_own_route(
     seed: u64,
     params: &DepositParams,
 ) -> DepositReport {
+    deposit_on_own_route_flood(grid, z, original, epsilon, seed, params, false)
+}
+
+/// [`deposit_on_own_route`] with the flood of the surface and of the route chosen: `canonical` floods by (level, cell id) with no FIFO queue and routes under the canonical flood (GEN-159, GEN-160, A3 section 6.4);
+/// off it is the plain flood of pass 2, bit for bit.
+pub fn deposit_on_own_route_flood(
+    grid: &Grid,
+    z: &mut [f64],
+    original: &[f64],
+    epsilon: f64,
+    seed: u64,
+    params: &DepositParams,
+    canonical: bool,
+) -> DepositReport {
     let outlet = grid.outlets(z, params.sea_level);
-    let filled = priority_flood(grid, z, &outlet, epsilon);
-    let routing = route(grid, z, &outlet, epsilon, seed, 0.0);
+    let (filled, routing) = if canonical {
+        let filled = priority_flood_with(grid, z, &outlet, epsilon, true);
+        let routing = route_rules(grid, z, &outlet, epsilon, seed, 0.0, None, RoundRules { clip_mfd: MfdClip::Off, canonical_flood: true });
+        (filled, routing)
+    } else {
+        (priority_flood(grid, z, &outlet, epsilon), route(grid, z, &outlet, epsilon, seed, 0.0))
+    };
     deposit(grid, z, original, &filled, &routing, params)
 }
 

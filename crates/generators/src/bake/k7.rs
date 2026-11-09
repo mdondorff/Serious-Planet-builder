@@ -5,9 +5,10 @@
 //! with the bake's surface at the lattice nodes.
 
 use super::carve::{carve, CarveParams};
-use super::deposit::{deposit_on_own_route, spread_pits, DepositParams, Kc};
-use super::flood::priority_flood;
+use super::deposit::{deposit_on_own_route_flood, spread_pits, DepositParams, Kc};
+use super::flood::priority_flood_with;
 use super::map::catmull_rom;
+use super::route::{MfdClip, RoundRules};
 use super::thermal::thermal;
 use super::tile::{sample_window, window_grid, Pass2Params, TileGrid, TileId, QUANT_STEP_M};
 use planet_core::cube::{face_to_direction, TangentWarp};
@@ -111,10 +112,15 @@ impl PitStats {
 
 /// The pits of `z` on `grid` (outlets: the sea and the window's border) at the depth `min_m`; only the cells at least `halo` cells in from the border of the square window are counted (the flood runs on the whole window).
 pub fn pit_stats(grid: &super::Grid, z: &[f64], sea_level: f64, epsilon: f64, min_m: f64, halo: usize) -> PitStats {
+    pit_stats_with(grid, z, sea_level, epsilon, min_m, halo, false)
+}
+
+/// [`pit_stats`] with the flood chosen: `canonical` fills by (level, cell id) (GEN-160), off it is the plain flood.
+pub fn pit_stats_with(grid: &super::Grid, z: &[f64], sea_level: f64, epsilon: f64, min_m: f64, halo: usize, canonical: bool) -> PitStats {
     let w = (z.len() as f64).sqrt().round() as usize;
     assert_eq!(w * w, z.len(), "a square window");
     let outlet = grid.outlets(z, sea_level);
-    let filled = priority_flood(grid, z, &outlet, epsilon);
+    let filled = priority_flood_with(grid, z, &outlet, epsilon, canonical);
     let mut depths: Vec<f64> = Vec::new();
     let mut land = 0usize;
     for p in 0..z.len() {
@@ -138,6 +144,9 @@ pub fn pit_stats(grid: &super::Grid, z: &[f64], sea_level: f64, epsilon: f64, mi
 pub struct K7Params {
     /// Pass 2's parameters; the local carve's breach is pass 1's rule at the local grid (`breach_max_m`, `breach_slope`).
     pub pass2: Pass2Params,
+    /// The flood of K7's pit statistics, its incising carve and its deposition sweep: the canonical flood (cells visited by level, then cell id; A3 section 6.4, GEN-160) when on, the plain flood of pass 2 when off
+    /// (the bits of K7 before GEN-160).
+    pub canonical_flood: bool,
 }
 
 impl K7Params {
@@ -145,7 +154,7 @@ impl K7Params {
     pub fn standard(seed: u64, sea_level: f64) -> K7Params {
         let mut pass2 = Pass2Params::standard(seed, sea_level);
         pass2.carve.breach_max_m = CarveParams::default().breach_max_m;
-        K7Params { pass2 }
+        K7Params { pass2, canonical_flood: true }
     }
 }
 
@@ -184,7 +193,7 @@ pub fn k7_tile(
     let mut z: Vec<f64> = b.iter().zip(&dr).map(|(b, c)| b + c).collect();
     drop(dr);
     let eps = q.carve.epsilon;
-    let stats = |z: &[f64]| pit_stats(&grid, z, q.sea_level, eps, q.pit_min_m, g.halo);
+    let stats = |z: &[f64]| pit_stats_with(&grid, z, q.sea_level, eps, q.pit_min_m, g.halo, p.canonical_flood);
     let mut pits = vec![("base + regional change", stats(&z))];
     let (w, t, h) = (g.window(), g.tile as i64, g.halo as i64);
     let origin = (i64::from(id.ti) * t - h, i64::from(id.tj) * t - h);
@@ -196,7 +205,8 @@ pub fn k7_tile(
     let z_burned = z.clone();
     let outlet = grid.outlets(&z, q.sea_level);
     let stream = super::face::face_stream(q.seed, id.face);
-    let local = CarveParams { max_area: q.local_area_cells * g.dx() * g.dx(), ..q.carve };
+    let rules = RoundRules { clip_mfd: MfdClip::Off, canonical_flood: p.canonical_flood };
+    let local = CarveParams { max_area: q.local_area_cells * g.dx() * g.dx(), round_rules: rules, ..q.carve };
     // The breach alone: the carve with no incision (`k_dt` 0) runs the breach of pass 1 and leaves the rest.
     let mut breach_only = z.clone();
     carve(&grid, &mut breach_only, &outlet, &CarveParams { k_dt: 0.0, steps: 1, reroute_every: 1, ..local }, None, stream);
@@ -205,13 +215,14 @@ pub fn k7_tile(
     let _ = carve(&grid, &mut z, &outlet, &local, None, stream);
     pits.push(("breach and incision", stats(&z)));
     thermal(&grid, &mut z, &q.thermal, threads);
-    deposit_on_own_route(
+    deposit_on_own_route_flood(
         &grid,
         &mut z,
         &z_burned,
         eps,
         stream,
         &DepositParams { kc: Kc::Uniform(q.kc), zeta: q.zeta, sea_level: q.sea_level },
+        p.canonical_flood,
     );
     spread_pits(&grid, &mut z, q.sea_level, q.pit_min_m, q.pit_passes);
     pits.push(("the whole pass", stats(&z)));
