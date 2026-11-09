@@ -1,0 +1,1 @@
+- 2026-11-09 preview-level-1: the H0 re-route over a height or climate edit, planet-wide with resident heights, the trunk rivers and watersheds as overlay data, a preview id of its own, latest wins; tier A on small planets (AUTH-007 to AUTH-010, GEN-157, TEST-098; latency TEST-099 and the overlay VIEW-067 planned)

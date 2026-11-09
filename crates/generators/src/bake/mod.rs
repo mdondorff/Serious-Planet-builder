@@ -25,6 +25,7 @@ pub mod k7;
 pub mod map;
 pub mod metric;
 pub mod partition;
+pub mod preview;
 pub mod round;
 pub mod route;
 pub mod sediment;
