@@ -2,7 +2,7 @@
 //! refined by `k` (k = 4 is the erosion grid, 12,288 cells, 814 m): the base is sampled only in the fine cells whose coarse parent is in the coarse landmass or within a ring of it, the fine land is the cells
 //! above the sea connected to the region's centre, its coast ring the outlets, and the landmass is a compact grid (`Grid::compact_cube`: only its cells, indexed by rank). Then 4 rounds of 5 steps on
 //! the resident route, with the process's peak working set after each phase (PowerShell, Windows).
-//! Usage: landmass_scale [k] [threads] [h1|part|both|sed]: `part` routes each round with the partitioned route on the compact grid (GEN-149, tiles of 256 cells; `both` also runs the resident rounds and compares the bits, small k only); with `h1` the hydrology pass follows (runoff of the orographic climate, weighted route, filled surface, H1) with the peak after it. Needs `target/landmass_base_3072.f32` (made by `landmass_region`).
+//! Usage: landmass_scale [k] [threads] [h1|part|both|sed|sedround|thdiag]: `part` routes each round with the partitioned route on the compact grid (GEN-149, tiles of 256 cells; `both` also runs the resident rounds and compares the bits, small k only); with `h1` the hydrology pass follows (runoff of the orographic climate, weighted route, filled surface, H1) with the peak after it. Needs `target/landmass_base_3072.f32` (made by `landmass_region`).
 #![allow(clippy::needless_range_loop, clippy::chunks_exact_to_as_chunks)]
 use planet_core::{Face, Vec3};
 use planet_generators::bake::carve::CarveParams;
@@ -229,7 +229,7 @@ fn main() {
     );
 
     // ---- the rounds, resident
-    let z_start = if a.get(3).is_some_and(|x| x == "sed") { z.clone() } else { Vec::new() };
+    let z_start = if a.get(3).is_some_and(|x| x == "sed" || x == "sedround") { z.clone() } else { Vec::new() };
     let p = CarveParams { steps: 20, reroute_every: 5, round_rules: RoundRules::ROUND, ..CarveParams::default() };
     let t = Instant::now();
     let mode = a.get(3).map_or("", |x| x.as_str());
@@ -279,6 +279,104 @@ fn main() {
         "memory after the 4 rounds: peak {peak:.0} MiB, now {now:.0} MiB; cells {active}, bytes a cell at the peak {:.0}",
         peak * 1048576.0 / active as f64
     );
+    if a.get(3).is_some_and(|x| x == "sedround") {
+        // GEN-152: the deposition's balance per catchment after each round (the surface after round r against the surface after round r - 1).
+        use planet_generators::bake::sediment::catchment_balance;
+        use planet_generators::bake::tile::Pass2Params;
+        let mut q = Pass2Params::standard(seed, 0.0);
+        q.carve.breach_max_m = CarveParams::default().breach_max_m;
+        let mut prev = z_start.clone();
+        for r in 1..=4usize {
+            let t = Instant::now();
+            let mut zr = if r == 4 { z.clone() } else { z_start.clone() };
+            if r < 4 {
+                let pr = CarveParams { steps: 5 * r, ..p };
+                solve_rounds(&grid, &mut zr, &outlet, &pr, r, &threads, seed);
+            }
+            let mut work = zr.clone();
+            let b = catchment_balance(&grid, &mut work, &prev, &q);
+            println!(
+                "round {r}: {} catchments, eroded {:.4e} m3, raised {:.4e}, exported {:.4e}; max relative error of a catchment {:.2e}, of the region {:.2e}; largest catchment's eroded column {:.1} % ({:.1} s)",
+                b.catchments,
+                b.eroded_m3,
+                b.raised_m3,
+                b.exported_m3,
+                b.max_relative_error,
+                b.total_relative_error,
+                100.0 * b.largest_eroded_m3 / b.eroded_m3,
+                t.elapsed().as_secs_f64()
+            );
+            prev = zr;
+        }
+        return;
+    }
+    if a.get(3).is_some_and(|x| x == "thdiag") {
+        // The deepest pits thermal makes: where they are and what their neighbourhood did.
+        use planet_generators::bake::flood::priority_flood;
+        use planet_generators::bake::tile::Pass2Params;
+        let q = Pass2Params::standard(seed, 0.0);
+        let mut zt = z.clone();
+        let th = planet_generators::bake::thermal::thermal(&grid, &mut zt, &q.thermal, threads);
+        println!("thermal: {} passes", th.passes_run);
+        let outlet: Vec<bool> = zt.iter().map(|&h| h <= 0.0).collect();
+        let filled = priority_flood(&grid, &zt, &outlet, q.carve.epsilon);
+        let before_out: Vec<bool> = z.iter().map(|&h| h <= 0.0).collect();
+        let filled0 = priority_flood(&grid, &z, &before_out, q.carve.epsilon);
+        let mut deep: Vec<(f64, usize)> =
+            (0..z.len()).filter(|&p| zt[p] > 0.0 && !outlet[p]).map(|p| (filled[p] - zt[p], p)).filter(|d| d.0 >= 0.5).collect();
+        deep.sort_by(|a, b| b.0.total_cmp(&a.0));
+        let (mut ring, mut near_sea, mut all_pre) = (0, 0, 0);
+        for &(d, p) in &deep {
+            let nb: Vec<usize> = (0..8).filter_map(|k| grid.neighbour(p, k)).collect();
+            let sea_nb = nb.iter().any(|&q| zt[q] <= 0.0);
+            let was_pit = filled0[p] - z[p] >= 0.5;
+            if nb.len() < 8 {
+                ring += 1;
+            }
+            if sea_nb {
+                near_sea += 1;
+            }
+            if was_pit {
+                all_pre += 1;
+            }
+            let _ = d;
+        }
+        // How steep the surface was before thermal: land cells with a neighbour whose drop exceeds the critical slope, and the deep pits' share of them.
+        let tan = libm::tan(q.thermal.theta_deg.to_radians());
+        let steep = |p: usize| (0..8).any(|k| grid.neighbour(p, k).is_some_and(|nb| (z[p] - z[nb]).abs() > tan * grid.distance_at(p, k)));
+        let land: Vec<usize> = (0..z.len()).filter(|&p| z[p] > 0.0).collect();
+        let steep_cells = land.iter().filter(|&&p| steep(p)).count();
+        let deep50: Vec<usize> = deep.iter().filter(|d| d.0 >= 50.0).map(|d| d.1).collect();
+        let deep_steep = deep50.iter().filter(|&&p| steep(p) || (0..8).filter_map(|k| grid.neighbour(p, k)).any(steep)).count();
+        let deep_pre = deep50.iter().filter(|&&p| filled0[p] - z[p] >= 0.5).count();
+        println!(
+            "before thermal: {steep_cells} of {} land cells have a neighbour steeper than the critical slope ({:.3} %); pits of 50 m or deeper after thermal: {} ({} of them a pit before, {} with a steep cell in their 3x3)",
+            land.len(),
+            100.0 * steep_cells as f64 / land.len() as f64,
+            deep50.len(),
+            deep_pre,
+            deep_steep
+        );
+        println!("{} pits; with fewer than 8 neighbours {ring}; next to sea {near_sea}; already pits before thermal {all_pre}", deep.len());
+        for &(d, p) in deep.iter().take(8) {
+            let g = grid.cube_id_of(p);
+            let nb: Vec<usize> = (0..8).filter_map(|k| grid.neighbour(p, k)).collect();
+            let fmt = |v: &[f64], idx: &[usize]| idx.iter().map(|&q| format!("{:.0}", v[q])).collect::<Vec<_>>().join(" ");
+            println!(
+                "pit {d:.1} m at cell {p} (face {}, i {}, j {}, {} neighbours): z {:.1} -> {:.1}, filled0 {:.1}; neighbours before [{}] after [{}]",
+                g / nn,
+                (g % nn) % n,
+                (g % nn) / n,
+                nb.len(),
+                z[p],
+                zt[p],
+                filled0[p],
+                fmt(&z, &nb),
+                fmt(&zt, &nb)
+            );
+        }
+        return;
+    }
     if a.get(3).is_some_and(|x| x == "sed") {
         // GEN-151: the sediment steps on the whole compact landmass after the rounds (A3 6.7), with the breach-lowering share of the eroded column.
         use planet_generators::bake::sediment::{breach_lowered_m3, sediment_pass};
