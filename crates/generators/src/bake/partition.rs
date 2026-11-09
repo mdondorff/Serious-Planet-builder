@@ -240,6 +240,7 @@ pub fn partitioned_route_weighted(
     assert_eq!(outlet.len(), n, "one outlet flag per cell");
     assert_finite("the heights", z);
     assert!((0..n).any(|p| outlet[p] && grid.is_active(p)), "a flood needs an outlet on the grid");
+    assert!(!grid.is_compact(), "the partitioned route cuts the rectangles of a face: not for a compact grid");
     assert!(!grid.is_cube() || grid.w().is_multiple_of(tile), "the tiles of a cube grid divide a face edge");
     let (_, _, tiles) = rects(grid, tile);
     let mut stats = PartStats { tiles: tiles.len(), ..PartStats::default() };

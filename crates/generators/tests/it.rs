@@ -1,5 +1,7 @@
 #[path = "arid.rs"]
 mod arid;
+#[path = "bake_compact.rs"]
+mod bake_compact;
 #[path = "bake_cube.rs"]
 mod bake_cube;
 #[path = "bake_edits.rs"]
