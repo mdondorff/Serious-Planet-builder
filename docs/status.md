@@ -5,8 +5,7 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 ## Waiting for the owner
 - **For M9 planning** (after the away week): owner test 2026-10-27 groups E (edits on top as default, erosion keeping mass), F and G scope, the 1 m / 500 m exception (`docs/milestones/M8/owner-test-2026-10-27/README.md`); where edits sit relative to M9's erosion (D3, owner 2026-10-26: under the erosion by default).
 - **Sunset shadow look** (ADR 0095 draft, crusader): the sky ambient as a hemisphere average is physically consistent and dark at a 7° sun; options: sky light plus a lift (planner's pick), sky light as is, or the old term. Every lit and sky golden moves with it. SPIKE-96 (sky visibility) follows the choice.
-- **Perf machine state** (2026-11-03): all-core preflight 128-145k us (limit 112k). No restart before Sat 2026-11-07 (owner): no perf windows until then; bake timings as single-thread CPU-s per tile or same-session ratios; local tier C is not evidence.
-- **Architecture re-plan** (owner, 2026-11-08; SPIKE-104, SPIKE-105 `spikes/architecture-replan/results/results.md`): D1 = option A, conditional on a prototype and a switch-to-B gate (S1-S5). The planet bake and tuning on the old representation are frozen; decisions D2-D10 (section 13.5) are working assumptions until the owner confirms them, before A3's ADRs are accepted. Replaces the M9.1 gate; dates are estimates: prototype mid-December, bake late January 2027. One more external review on the A3 target document.
+- **Architecture re-plan** (owner, 2026-11-08; SPIKE-104, SPIKE-105 `spikes/architecture-replan/results/results.md`): D1 = option A, conditional on a prototype and a switch-to-B gate (S1-S5); D2-D10 decided (section 13.5); G-SURF, the memory route and sediment decided 2026-11-09 (`docs/briefings/terrain-prototype.md`). The planet bake and tuning on the old representation are frozen. Open: accept ADRs 0110-0115 as the prototype's contract (0113 needs the CON-08 reading). Dates are estimates: prototype mid-December, bake late January 2027.
 - **Smooth base as default** (GEN-107, `cpu-erosion-v2` on main): removes the 611 m "pyramid" facets; draft #1137 switches the default (no golden moves; two count pins and the water-cut range re-pinned with reasons). Decide with the erosion preview.
 - **World-build share values** (ADR 0097, BUDG-014): terrain 40 %, future content 40 %, margin 20 % of a 24 h day, proposed; confirm or change.
 - **Ocean square at orbit** (owner test 2026-11-03, `docs/dev_screenshots/2026-11-03-ocean-square-*.jpg`): press F9 when it shows again; the bundle lets crusader replay it (Tracked).
@@ -25,7 +24,7 @@ Dormant (no near trigger; not asked now):
 | # | Step | Lane |
 |---|---|---|
 | NR | Real-GPU window checks NOT RUN on a locked desktop (TEST-073) | crusader |
-| Prototype | `docs/briefings/terrain-prototype.md`: items 8-11, 14 | explorer |
+| Prototype | `docs/briefings/terrain-prototype.md`: items 14, 9, 11, 10 | explorer |
 | Prototype checks | ADR review pass; independent gate measurement; second region and seed | spikes |
 | Ground | Disk guardrails (BUILD-038/039); runtime items after the hydrology and local pass are on main; #1137 waits for the owner | crusader |
 | Perf | Machine ready again (preflight OK 2026-11-07, parallel 74-76k us of 112k): REND-052 verdicts, ground-detail cost, channel-read cost; no store opens on main since GLOBAL_VERSION 9: a current store first (MESH_VERSION 11) | planner |
