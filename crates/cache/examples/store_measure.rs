@@ -157,6 +157,7 @@ fn main() {
             }
         }
     }
+    let mut off_graph = 0u64;
     // The routing record: the receiver as a direction (0..7, 255 for none) and the drainage area, land cells.
     let receiver = u32s(&read(&dir, "receiver.u32"));
     let area = f32s(&read(&dir, "area.f32"));
@@ -172,7 +173,13 @@ fn main() {
                 if r == u32::MAX {
                     255
                 } else {
-                    (0..8).find(|&d| grid.neighbour(p, d) == Some(r as usize)).map_or(254, |d| d as u8)
+                    (0..8).find(|&d| grid.neighbour(p, d) == Some(r as usize)).map_or_else(
+                        || {
+                            off_graph += 1;
+                            254
+                        },
+                        |d| d as u8,
+                    )
                 }
             })
             .collect();
@@ -272,7 +279,7 @@ fn main() {
         for b in bs {
             raw.extend(&b[0..8]);
             raw.extend(&b[0..8]);
-            raw.extend(&b[28..32]);
+            raw.extend(&b[32..36]);
         }
         put(K_CONTINUITY, *t, 0, brotli(&raw), raw.len() as u64);
     }
@@ -287,6 +294,7 @@ fn main() {
             packs += len;
         }
     }
+    println!("routing receivers that are not one of the 8 neighbours (code 254): {off_graph}");
     println!("{catchments} catchments of 2 or more cells, {} basins, {} segments", bas.len() / BASIN_BYTES, seg.len() / SEGMENT_BYTES);
     let names = [
         (K_ROUND, "round records (4 rounds, land, f32)"),
