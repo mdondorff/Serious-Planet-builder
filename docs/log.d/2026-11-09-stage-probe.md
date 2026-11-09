@@ -1,0 +1,1 @@
+- 2026-11-09 stage-probe: a read-only stage hook API (off by default, one atomic load) and a sheet probe with fixed colour scales, percentiles, a data hash and a bounded buffer; hooks in the rounds and the sediment pass; hash-identical on and off (BUILD-046, GEN-161)

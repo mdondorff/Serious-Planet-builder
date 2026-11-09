@@ -27,6 +27,7 @@ pub mod memo;
 pub mod metric;
 pub mod partition;
 pub mod preview;
+pub mod probe;
 pub mod round;
 pub mod route;
 pub mod sediment;

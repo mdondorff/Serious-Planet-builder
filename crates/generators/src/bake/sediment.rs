@@ -5,6 +5,7 @@
 
 use super::deposit::{deposit, spread_pits, DepositParams, DepositReport, Kc};
 use super::flood::priority_flood_with;
+use super::probe;
 use super::route::{route_rules, MfdClip, RoundRules, Routing};
 use super::thermal::{thermal, ThermalReport};
 use super::tile::Pass2Params;
@@ -92,6 +93,18 @@ pub fn abs_volume_m3(grid: &Grid, z: &[f64]) -> f64 {
     (0..grid.len()).map(|p| z[p].abs() * if cube { grid.cell_area(p) } else { grid.dx() * grid.dx() }).sum()
 }
 
+/// The stage probe's view of a sediment step (BUILD-046, GEN-161): the heights and their change against `original` (the eroded column's reference), read only; nothing is built when no sink is installed.
+fn probe_stage(grid: &Grid, z: &[f64], original: &[f64], stage: probe::Stage, numbers: &[(&'static str, f64)]) {
+    probe::emit(stage, |s| {
+        let mut v = probe::StageView::new(s, grid);
+        v.fields.push(probe::Field { name: "z", kind: probe::FieldKind::Height, data: probe::FieldData::F64(z), mask: None });
+        // The change against the original surface, evaluated cell by cell: no buffer of its own.
+        v.fields.push(probe::Field { name: "delta", kind: probe::FieldKind::Delta, data: probe::FieldData::Diff(z, original), mask: None });
+        v.numbers.extend_from_slice(numbers);
+        v
+    });
+}
+
 /// What the sediment steps did.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SedimentReport {
@@ -125,6 +138,7 @@ pub fn sediment_pass(grid: &Grid, z: &mut [f64], original: &[f64], p: &Pass2Para
     let v1 = volume_m3(grid, z);
     let eroded_after_thermal_m3 = eroded_m3(grid, z, original, p.sea_level);
     pits.push(("after thermal", stats(z)));
+    probe_stage(grid, z, original, probe::Stage::Thermal, &[("moved_volume_first_m3", th.moved_volume_first)]);
     let v1b = volume_m3(grid, z);
     // The deposition on the surface's own route, with the boundary cells as outlets.
     let outlet = outlets(grid, z, p.sea_level);
@@ -132,11 +146,13 @@ pub fn sediment_pass(grid: &Grid, z: &mut [f64], original: &[f64], p: &Pass2Para
     let deposit =
         deposit(grid, z, original, &filled, &routing, &DepositParams { kc: Kc::Uniform(p.kc), zeta: p.zeta, sea_level: p.sea_level });
     pits.push(("after deposition", stats(z)));
+    probe_stage(grid, z, original, probe::Stage::Deposition, &[("deposited_m3", deposit.deposited)]);
     let v2 = volume_m3(grid, z);
     let deposit_height_volume_m3 = v2 - v1b;
     let spread_passes = spread_pits(grid, z, p.sea_level, p.pit_min_m, p.pit_passes);
     let v3 = volume_m3(grid, z);
     pits.push(("after pit spreading", stats(z)));
+    probe_stage(grid, z, original, probe::Stage::PitSpreading, &[("passes", spread_passes as f64)]);
     SedimentReport {
         pits,
         thermal: th,
