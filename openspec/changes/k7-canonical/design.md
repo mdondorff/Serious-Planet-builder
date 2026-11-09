@@ -14,4 +14,4 @@
 | G-SURF-I at the vertices (over 0.25 m, p99, max) | 192 (0.66 %), 0.225 m, 2.554 m | 209 (0.72 %), 0.228 m, 2.554 m |
 - Every pit count at every stage is the same under both floods; only the deposition and the incision's routes move L.
 - The plain-flood K7 digests (z and change bits, smooth tile): 68e2e76ffed7d2b7 with a channel, 7700012a670c5e69 without, taken on origin/main at 3d3ad99a before the change.
-- The tile is one area; the share of L that moves would be larger on flatter land.
+- The tile is one area of the prototype region.
