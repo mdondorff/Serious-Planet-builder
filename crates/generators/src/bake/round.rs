@@ -6,11 +6,11 @@
 //! Behind a switch: nothing in pass 1 or pass 2 calls it.
 
 use super::carve::{distance, CarveParams, BREACH_MIN_M};
+use super::memo::Memo;
 use super::partition::{partitioned_route_weighted, Hash, PartCache};
 use super::route::{catchment_roots, route_rules, Routing, NONE};
 use super::{assert_finite, Grid};
 use planet_core::par::{self, Par};
-use std::collections::HashMap;
 use std::sync::Arc;
 
 /// What a catchment's round reads (A3 section 6.5, the catchment-round key): its members in the region's topological order (outlet first), the receiver of every member as a
@@ -270,13 +270,46 @@ pub fn solve_rounds_with(
 pub struct RoundCache {
     pub part: PartCache,
     forget: bool,
-    catchments: HashMap<(u64, u64), Arc<Vec<f64>>>,
+    catchments: Memo,
+    /// The budget in bytes of the whole cache, the tile memo and the previous routings included (GEN-153); none is unlimited.
+    budget: Option<usize>,
+    /// While a solve runs: the tick of the catchment memo from which its entries are pinned.
+    pin: Option<u64>,
 }
 
 impl RoundCache {
     /// A cache that keeps nothing between solves (GEN-149): the partitioned rounds of a build that is not edited again, at the memory of one solve.
     pub fn without_memory() -> RoundCache {
         RoundCache { part: PartCache::without_memory(), forget: true, ..RoundCache::default() }
+    }
+
+    /// A cache with a budget of `bytes` for everything it holds (GEN-153, A3 6.6): after every round of a solve and at its end what is over it is evicted, previous results first, then the tile
+    /// floods, then the catchment rounds, each least recently used first, never the data of the running solve. Eviction never changes a result.
+    pub fn with_budget(bytes: usize) -> RoundCache {
+        RoundCache { budget: Some(bytes), ..RoundCache::default() }
+    }
+
+    pub fn set_budget(&mut self, bytes: Option<usize>) {
+        self.budget = bytes;
+    }
+
+    /// The bytes held: the tile floods, the previous routings and the catchment rounds.
+    pub fn bytes(&self) -> usize {
+        self.part.bytes() + self.catchments.bytes()
+    }
+
+    /// Evicts down to the budget; returns the entries and bytes evicted.
+    fn evict(&mut self) -> (usize, usize) {
+        let Some(budget) = self.budget else { return (0, 0) };
+        // The part cache gets the budget minus what the catchment memo holds pinned or not: it evicts its own first, then the catchment memo takes what is left over.
+        self.part.set_budget(Some(budget.saturating_sub(self.catchments.bytes())));
+        let (mut e, mut b) = self.part.evict(None, self.part.tick());
+        let rest = budget.saturating_sub(self.part.bytes());
+        let (e2, b2) = self.catchments.evict(rest, self.pin.unwrap_or(u64::MAX));
+        self.part.set_budget(None);
+        e += e2;
+        b += b2;
+        (e, b)
     }
 
     /// Catchment rounds held.
@@ -304,6 +337,9 @@ pub struct RoundWork {
     pub carved: usize,
     pub memo_hits: usize,
     pub cells_carved: usize,
+    /// Entries and bytes the budget evicted after the round (GEN-153).
+    pub evicted: usize,
+    pub evicted_bytes: usize,
 }
 
 /// The key of a catchment round: the member cell ids, the key inputs and the parameters of the carve that the round reads.
@@ -346,6 +382,9 @@ pub fn solve_rounds_memo(
     assert!(p.round_rules.canonical_flood, "the memoised solve routes in tiles: the canonical flood is required");
     let taper = taper_of(z, p, drivers);
     let (mut report, mut work) = (RoundReport::default(), Vec::new());
+    // The data this solve uses is pinned until it completes (GEN-153).
+    cache.part.begin_solve();
+    cache.pin = Some(cache.catchments.tick() + 1);
     for round in 0..rounds {
         cache.part.use_slot(round);
         let route = partitioned_route_weighted(grid, z, outlet, p.epsilon, seed, tile, p.round_rules, drivers.runoff, &mut cache.part);
@@ -359,7 +398,7 @@ pub fn solve_rounds_memo(
             let k = queue[q];
             let mut inp = gather_with(grid, zr, outlet, &r, &cuts, &taper, drivers, p, k);
             let key = catchment_key(grid, &cuts.members[k], &inp, p);
-            match held.get(&key).filter(|v| v.len() == inp.z.len()) {
+            match held.peek(&key).filter(|v| v.len() == inp.z.len()) {
                 Some(v) => (key, Arc::clone(v), true),
                 None => {
                     catchment_round(&mut inp, p, p.reroute_every);
@@ -383,6 +422,7 @@ pub fn solve_rounds_memo(
             }
             if hit {
                 w.memo_hits += 1;
+                cache.catchments.touch(&key);
             } else {
                 w.carved += 1;
                 w.cells_carved += cuts.members[k].len();
@@ -391,6 +431,8 @@ pub fn solve_rounds_memo(
                 }
             }
         }
+        let (e, b) = cache.evict();
+        (w.evicted, w.evicted_bytes) = (w.evicted + e, w.evicted_bytes + b);
         work.push(w);
         report.rounds.push(RoundStats {
             catchments: cuts.members.len(),
@@ -399,5 +441,12 @@ pub fn solve_rounds_memo(
         });
     }
     cache.part.use_slot(0);
+    // The solve is complete: nothing is pinned, and what is over the budget goes.
+    cache.part.end_solve();
+    cache.pin = None;
+    let (e, b) = cache.evict();
+    if let Some(w) = work.last_mut() {
+        (w.evicted, w.evicted_bytes) = (w.evicted + e, w.evicted_bytes + b);
+    }
     (report, work)
 }

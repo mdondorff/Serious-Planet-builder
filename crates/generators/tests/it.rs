@@ -6,6 +6,8 @@ mod bake_compact;
 mod bake_cube;
 #[path = "bake_edits.rs"]
 mod bake_edits;
+#[path = "bake_eviction.rs"]
+mod bake_eviction;
 #[path = "bake_face.rs"]
 mod bake_face;
 #[path = "bake_fillgeom.rs"]

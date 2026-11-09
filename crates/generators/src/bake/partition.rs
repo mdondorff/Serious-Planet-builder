@@ -12,10 +12,11 @@
 
 #![allow(clippy::needless_range_loop)]
 
+use super::memo::Memo;
 use super::route::{catchment_roots, receiver_of, topological_order, MfdClip, RoundRules, Routing, MFD_EXPONENT, NONE};
 use super::{assert_finite, Grid};
 use std::cmp::Reverse;
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::BinaryHeap;
 use std::sync::Arc;
 
 /// The opposite of each neighbour direction (`NEIGHBOURS`) on a plane grid.
@@ -34,6 +35,9 @@ pub struct PartStats {
     pub tiles_filled_changed: usize,
     pub tiles_receiver_changed: usize,
     pub tiles_area_changed: usize,
+    /// Entries and bytes the budget evicted after the call (GEN-153).
+    pub evicted: usize,
+    pub evicted_bytes: usize,
 }
 
 /// The partitioned route's result: the routing and the filled surface it came from.
@@ -49,6 +53,61 @@ impl PartCache {
         PartCache { forget: true, ..PartCache::default() }
     }
 
+    /// A cache with a budget of `bytes` for the memo and the previous results (GEN-153): after a call, and after a solve, what is over it is evicted (see [`PartCache::evict`]).
+    pub fn with_budget(bytes: usize) -> PartCache {
+        PartCache { budget: Some(bytes), ..PartCache::default() }
+    }
+
+    pub fn set_budget(&mut self, bytes: Option<usize>) {
+        self.budget = bytes;
+    }
+
+    /// The bytes the cache holds: the memo of tile floods and the previous results.
+    pub fn bytes(&self) -> usize {
+        self.floods.bytes() + self.previous_bytes()
+    }
+
+    fn previous_bytes(&self) -> usize {
+        self.previous.iter().flatten().map(|p| p.filled.len() * 8 + p.receiver.len() * 4 + p.area.len() * 8).sum()
+    }
+
+    /// Marks the start of a solve: the memo entries used from now on are pinned until [`PartCache::end_solve`].
+    pub fn begin_solve(&mut self) {
+        self.pin = Some(self.floods.tick() + 1);
+    }
+
+    pub(super) fn tick(&self) -> u64 {
+        self.floods.tick()
+    }
+
+    pub fn end_solve(&mut self) {
+        self.pin = None;
+    }
+
+    /// Evicts down to the budget (GEN-153, A3 6.6's policy table): first the previous results of the slots other than `keep_slot` and not while a solve runs (previous-round intermediates; the
+    /// change counts then read as on a first call), then the memo's tile floods least recently used first, never one the running solve (or, outside a solve, the call at `call_tick`) used.
+    /// Returns the entries and bytes evicted. No budget, nothing evicted. A result is never changed: every evicted entry is recomputed on a miss.
+    pub fn evict(&mut self, keep_slot: Option<usize>, call_tick: u64) -> (usize, usize) {
+        let Some(budget) = self.budget else { return (0, 0) };
+        let (mut entries, mut bytes) = (0, 0);
+        if self.pin.is_none() {
+            for k in 0..self.previous.len() {
+                if self.bytes() <= budget {
+                    break;
+                }
+                if Some(k) != keep_slot {
+                    if let Some(p) = self.previous[k].take() {
+                        entries += 1;
+                        bytes += p.filled.len() * 8 + p.receiver.len() * 4 + p.area.len() * 8;
+                    }
+                }
+            }
+        }
+        let rest = budget.saturating_sub(self.previous_bytes());
+        let (e, b) = self.floods.evict(rest, self.pin.unwrap_or(call_tick + 1));
+        (entries + e, bytes + b)
+    }
+
     /// Compares the next results with the last of slot `k`: a series of routings of one surface in rounds uses a slot a round, so that "the tiles changed" reads against the same round of the previous solve.
     pub fn use_slot(&mut self, k: usize) {
         self.slot = k;
@@ -60,10 +119,14 @@ impl PartCache {
 pub struct PartCache {
     /// Set by [`PartCache::without_memory`]: nothing is kept between calls.
     forget: bool,
-    floods: HashMap<(u64, u64), Arc<Vec<f64>>>,
+    floods: Memo,
     /// The last result of each slot (slot 0 unless [`PartCache::use_slot`] says otherwise).
     previous: Vec<Option<Previous>>,
     slot: usize,
+    /// The budget in bytes of the memo and the previous results (GEN-153); none is unlimited.
+    budget: Option<usize>,
+    /// While a solve runs ([`PartCache::begin_solve`]): the tick from which the memo's entries are the solve's own and pinned.
+    pin: Option<u64>,
 }
 
 /// The last result of a cache: the tile size, the filled surface, the receivers and the area.
@@ -259,6 +322,7 @@ pub fn partitioned_route_weighted(
     assert!(!grid.is_cube() || grid.layout().0.is_multiple_of(tile), "the tiles of a cube grid divide a face edge");
     let (_, _, tiles) = rects(grid, tile);
     let mut stats = PartStats { tiles: tiles.len(), ..PartStats::default() };
+    let call_tick = cache.floods.tick();
 
     // ---- the filled surface
     let mut z_hash = Vec::with_capacity(tiles.len());
@@ -315,7 +379,7 @@ pub fn partitioned_route_weighted(
             let result = match cache.floods.get(&k) {
                 Some(v) => {
                     stats.memo_hits += 1;
-                    Arc::clone(v)
+                    v
                 }
                 None => {
                     stats.floods += 1;
@@ -494,5 +558,8 @@ pub fn partitioned_route_weighted(
         cache.previous.resize_with(cache.slot + 1, || None);
     }
     cache.previous[cache.slot] = last;
+    let (evicted, evicted_bytes) = cache.evict(Some(cache.slot), call_tick);
+    stats.evicted = evicted;
+    stats.evicted_bytes = evicted_bytes;
     PartRoute { routing: Routing { receiver, order, area }, filled, stats }
 }

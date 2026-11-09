@@ -1,0 +1,1 @@
+- 2026-11-09 cache-eviction: the memo caches of the edit path take a byte budget and evict previous results, tile floods and catchment rounds least recently used first, never the running solve's data; undo, replay and the fresh build stay bit-equal (GEN-153)
