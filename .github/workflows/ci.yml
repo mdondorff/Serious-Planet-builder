@@ -55,6 +55,10 @@ jobs:
             part: 3
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Part 2 runs spec-lint, whose checks read the diff against origin/main (BUILD-040, BUILD-041).
+          # `&& 0 ||` would fall back to 1 (0 is falsy in an expression), so a depth beyond the history stands for all of it.
+          fetch-depth: ${{ matrix.part == 2 && 100000 || 1 }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
