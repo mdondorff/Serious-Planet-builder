@@ -339,7 +339,7 @@ fn thermal_on_a_cube_grid_keeps_the_volume_and_is_the_masked_cube_on_a_compact_o
 #[test]
 fn the_sediment_pass_on_a_compact_landmass_after_the_rounds_conserves_and_is_the_masked_cube() {
     use planet_generators::bake::round::solve_rounds;
-    use planet_generators::bake::sediment::{breach_lowered_m3, sediment_pass};
+    use planet_generators::bake::sediment::sediment_pass;
     use planet_generators::bake::tile::Pass2Params;
     let n = 24;
     let small = 4000.0; // a small body: cells of about 260 m, steep enough for thermal
