@@ -2,7 +2,7 @@
 //! (`read_elevation_c1`) of a lattice sampled from `BakeInputs::base` at the nodes (611 m, k = 14; stored as f32); the regional solve (12,288 cells, 814 m, 4 rounds) starts from the same read; the
 //! channels of H1 on the solved surface are burned into a 1,024-cell tile of the local grid (102 m, 98,304 cells a face edge, 8 local cells to a regional cell); then the breach, the incision, thermal,
 //! the deposition and the pit spreading. Reports the pit share and depth at 102 m after each stage, with and without the channels, and G-SURF at the lattice nodes.
-//! Usage: k7_region [margin_regional_cells] [threads]
+//! Usage: k7_region [margin_regional_cells] [threads] [store]: `store` runs K7 with the channels over every 1,024-cell tile that meets the prototype region and writes each tile's stored change L (f32 metres, core cells) and its land mask to `target/k7_l/` for `cache/examples/l_measure` (G-STORE, kind 13 on the new chain).
 #![allow(clippy::needless_range_loop)]
 use planet_core::cube::{face_to_direction, TangentWarp};
 use planet_core::{Face, Vec3};
@@ -143,7 +143,14 @@ fn main() {
 
     // ---- the tile
     let g = TileGrid { cells: LOCAL, tile: 1024, halo: 64, radius_m: R };
-    let id = TileId { face, ti: (8390 * 8 + 4) as u32 / 1024, tj: (958 * 8 + 4) as u32 / 1024 };
+    let store = a.get(3).is_some_and(|s| s == "store");
+    let ids: Vec<TileId> = if store {
+        let (i0, i1, j0, j1) = (REGION.0 * 8 / 1024, (REGION.1 * 8 + 7) / 1024, REGION.2 * 8 / 1024, (REGION.3 * 8 + 7) / 1024);
+        (j0..=j1).flat_map(|tj| (i0..=i1).map(move |ti| TileId { face, ti: ti as u32, tj: tj as u32 })).collect()
+    } else {
+        vec![TileId { face, ti: (8390 * 8 + 4) as u32 / 1024, tj: (958 * 8 + 4) as u32 / 1024 }]
+    };
+    for id in ids {
     let (t, h) = (g.tile as i64, g.halo as i64);
     let (wi0, wj0) = (i64::from(id.ti) * t - h, i64::from(id.tj) * t - h);
     let ww = g.window() as i64;
@@ -187,7 +194,8 @@ fn main() {
     println!("{} channel segments meet the window", channels.len());
 
     let params = K7Params::standard(seed, 0.0);
-    for (label, ch) in [("with the channels burned in", &channels[..]), ("without the channels", &[][..])] {
+    let runs: Vec<(&str, &[Channel])> = if store { vec![("with the channels burned in", &channels[..])] } else { vec![("with the channels burned in", &channels[..]), ("without the channels", &[][..])] };
+    for (label, ch) in runs {
         let t = Instant::now();
         let r: K7Result = k7_tile(&g, id, &base, &regional, ch, &params, threads);
         println!("K7 {label}: {:.1} s, {} cells burned", t.elapsed().as_secs_f64(), r.burned);
@@ -201,6 +209,15 @@ fn main() {
                 s.p99_m,
                 s.max_m
             );
+        }
+        if store {
+            std::fs::create_dir_all("target/k7_l").expect("the output directory");
+            let name = format!("target/k7_l/{}_{}", id.ti, id.tj);
+            let (t, h, w) = (g.tile, g.halo, g.window());
+            let land: Vec<u8> = (0..t * t).map(|c| u8::from(r.z[(c / t + h) * w + c % t + h] > 0.0)).collect();
+            std::fs::write(format!("{name}.l.f32"), r.change.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>()).expect("the change");
+            std::fs::write(format!("{name}.land"), land).expect("the land mask");
+            continue;
         }
         let (lo, hi) = r.change.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(l, u), v| (l.min(*v), u.max(*v)));
         println!(
@@ -221,6 +238,7 @@ fn main() {
             gate.over_bound,
             100.0 * gate.over_bound as f64 / gate.nodes as f64
         );
+    }
     }
     let _ = spec_l;
 }
