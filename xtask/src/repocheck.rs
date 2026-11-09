@@ -286,4 +286,22 @@ mod tests {
         let finished = finished_changes(&changes);
         assert!(finished.is_empty(), "finished but not archived (run the archive step, then add the log line): {finished:?}");
     }
+
+    // spec: BUILD-045
+    #[test]
+    fn the_class_source_store_tests_take_four_slots_and_keep_the_default_limit() {
+        let toml = std::fs::read_to_string(repo_root().join(".config/nextest.toml")).expect(".config/nextest.toml");
+        let filter = "package(=planet-cache) and binary(it) and test(/^class_source_store::/)";
+        let at = toml.find(filter).expect("an override for the class_source_store tests");
+        let block = &toml[at..];
+        let block = &block[..block
+            .find(
+                "
+
+",
+            )
+            .unwrap_or(block.len())];
+        assert!(block.contains("threads-required = 4"), "the override takes 4 slots: {block}");
+        assert!(!block.contains("slow-timeout"), "the limit stays the default's: {block}");
+    }
 }
