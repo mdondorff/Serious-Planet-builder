@@ -151,94 +151,99 @@ fn main() {
         vec![TileId { face, ti: (8390 * 8 + 4) as u32 / 1024, tj: (958 * 8 + 4) as u32 / 1024 }]
     };
     for id in ids {
-    let (t, h) = (g.tile as i64, g.halo as i64);
-    let (wi0, wj0) = (i64::from(id.ti) * t - h, i64::from(id.tj) * t - h);
-    let ww = g.window() as i64;
-    println!(
-        "tile ({}, {}) of face 1: local cells i {}..{}, j {}..{} ({:.1} km a side)",
-        id.ti,
-        id.tj,
-        wi0,
-        wi0 + ww,
-        wj0,
-        wj0 + ww,
-        ww as f64 * g.dx() / 1000.0
-    );
-    let mut channels: Vec<Channel> = Vec::new();
-    for sg in &hy.segments {
-        let mut cells = vec![sg.up as usize];
-        while *cells.last().unwrap() != sg.down as usize {
-            let r = routing.receiver[*cells.last().unwrap()];
-            assert!(r != NONE);
-            cells.push(r as usize);
-        }
-        let to_local = |c: usize| (8.0 * (ri0 + c % rw) as f64 + 3.5, 8.0 * (rj0 + c / rw) as f64 + 3.5);
-        // Only the segments with a point within a regional cell of the window.
-        let near = cells.iter().any(|&c| {
-            let (x, y) = to_local(c);
-            x >= (wi0 - 16) as f64 && x <= (wi0 + ww + 16) as f64 && y >= (wj0 - 16) as f64 && y <= (wj0 + ww + 16) as f64
-        });
-        if !near {
-            continue;
-        }
-        let mut level = f64::INFINITY;
-        let levels: Vec<f64> = cells
-            .iter()
-            .map(|&c| {
-                level = level.min(zs[c]);
-                level
-            })
-            .collect();
-        channels.push(Channel { points: cells.iter().map(|&c| to_local(c)).collect(), levels });
-    }
-    println!("{} channel segments meet the window", channels.len());
-
-    let params = K7Params::standard(seed, 0.0);
-    let runs: Vec<(&str, &[Channel])> = if store { vec![("with the channels burned in", &channels[..])] } else { vec![("with the channels burned in", &channels[..]), ("without the channels", &[][..])] };
-    for (label, ch) in runs {
-        let t = Instant::now();
-        let r: K7Result = k7_tile(&g, id, &base, &regional, ch, &params, threads);
-        println!("K7 {label}: {:.1} s, {} cells burned", t.elapsed().as_secs_f64(), r.burned);
-        for (stage, s) in &r.pits {
-            println!(
-                "  pits at 102 m after {stage}: {} of {} land cells ({:.3} %), depth p50 {:.1} m, p99 {:.1} m, max {:.1} m",
-                s.pit_cells,
-                s.land_cells,
-                100.0 * s.share(),
-                s.p50_m,
-                s.p99_m,
-                s.max_m
-            );
-        }
-        if store {
-            std::fs::create_dir_all("target/k7_l").expect("the output directory");
-            let name = format!("target/k7_l/{}_{}", id.ti, id.tj);
-            let (t, h, w) = (g.tile, g.halo, g.window());
-            let land: Vec<u8> = (0..t * t).map(|c| u8::from(r.z[(c / t + h) * w + c % t + h] > 0.0)).collect();
-            std::fs::write(format!("{name}.l.f32"), r.change.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>()).expect("the change");
-            std::fs::write(format!("{name}.land"), land).expect("the land mask");
-            continue;
-        }
-        let (lo, hi) = r.change.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(l, u), v| (l.min(*v), u.max(*v)));
+        let (t, h) = (g.tile as i64, g.halo as i64);
+        let (wi0, wj0) = (i64::from(id.ti) * t - h, i64::from(id.tj) * t - h);
+        let ww = g.window() as i64;
         println!(
-            "  stored change L against B: from {lo:.1} m to {hi:.1} m; |L| over 8 km: {}",
-            r.change.iter().filter(|v| v.abs() > 8000.0).count()
+            "tile ({}, {}) of face 1: local cells i {}..{}, j {}..{} ({:.1} km a side)",
+            id.ti,
+            id.tj,
+            wi0,
+            wi0 + ww,
+            wj0,
+            wj0 + ww,
+            ww as f64 * g.dx() / 1000.0
         );
-        let gate = surface_gate(&g, id, &base, &r, 6);
-        println!(
+        let mut channels: Vec<Channel> = Vec::new();
+        for sg in &hy.segments {
+            let mut cells = vec![sg.up as usize];
+            while *cells.last().unwrap() != sg.down as usize {
+                let r = routing.receiver[*cells.last().unwrap()];
+                assert!(r != NONE);
+                cells.push(r as usize);
+            }
+            let to_local = |c: usize| (8.0 * (ri0 + c % rw) as f64 + 3.5, 8.0 * (rj0 + c / rw) as f64 + 3.5);
+            // Only the segments with a point within a regional cell of the window.
+            let near = cells.iter().any(|&c| {
+                let (x, y) = to_local(c);
+                x >= (wi0 - 16) as f64 && x <= (wi0 + ww + 16) as f64 && y >= (wj0 - 16) as f64 && y <= (wj0 + ww + 16) as f64
+            });
+            if !near {
+                continue;
+            }
+            let mut level = f64::INFINITY;
+            let levels: Vec<f64> = cells
+                .iter()
+                .map(|&c| {
+                    level = level.min(zs[c]);
+                    level
+                })
+                .collect();
+            channels.push(Channel { points: cells.iter().map(|&c| to_local(c)).collect(), levels });
+        }
+        println!("{} channel segments meet the window", channels.len());
+
+        let params = K7Params::standard(seed, 0.0);
+        let runs: Vec<(&str, &[Channel])> = if store {
+            vec![("with the channels burned in", &channels[..])]
+        } else {
+            vec![("with the channels burned in", &channels[..]), ("without the channels", &[][..])]
+        };
+        for (label, ch) in runs {
+            let t = Instant::now();
+            let r: K7Result = k7_tile(&g, id, &base, &regional, ch, &params, threads);
+            println!("K7 {label}: {:.1} s, {} cells burned", t.elapsed().as_secs_f64(), r.burned);
+            for (stage, s) in &r.pits {
+                println!(
+                    "  pits at 102 m after {stage}: {} of {} land cells ({:.3} %), depth p50 {:.1} m, p99 {:.1} m, max {:.1} m",
+                    s.pit_cells,
+                    s.land_cells,
+                    100.0 * s.share(),
+                    s.p50_m,
+                    s.p99_m,
+                    s.max_m
+                );
+            }
+            if store {
+                std::fs::create_dir_all("target/k7_l").expect("the output directory");
+                let name = format!("target/k7_l/{}_{}", id.ti, id.tj);
+                let (t, h, w) = (g.tile, g.halo, g.window());
+                let land: Vec<u8> = (0..t * t).map(|c| u8::from(r.z[(c / t + h) * w + c % t + h] > 0.0)).collect();
+                std::fs::write(format!("{name}.l.f32"), r.change.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>())
+                    .expect("the change");
+                std::fs::write(format!("{name}.land"), land).expect("the land mask");
+                continue;
+            }
+            let (lo, hi) = r.change.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(l, u), v| (l.min(*v), u.max(*v)));
+            println!(
+                "  stored change L against B: from {lo:.1} m to {hi:.1} m; |L| over 8 km: {}",
+                r.change.iter().filter(|v| v.abs() > 8000.0).count()
+            );
+            let gate = surface_gate(&g, id, &base, &r, 6);
+            println!(
             "  G-SURF at {} lattice nodes: runtime minus bake max {:.4} m unquantised, {:.4} m with L in steps of 0.25 m (of which B re-read from the local cells: {:.4} m); at the core's cell centres {:.1e} m and {:.4} m",
             gate.nodes, gate.max_unquantised_m, gate.max_quantised_m, gate.max_base_resample_m, gate.max_centres_unquantised_m, gate.max_centres_quantised_m
         );
-        println!("  other readings at the nodes (L quantised): B plus the unclamped read of L: max {:.4} m; the clamped read of the composed B + L: max {:.4} m; the unclamped read of L overshoots its clamped read by up to {:.2} m", gate.max_unclamped_l_quantised_m, gate.max_compose_quantised_m, gate.max_l_overshoot_m);
-        spatial(&g, &r, &gate);
-        println!(
-            "  quantised difference at the nodes: p50 {:.4} m, p99 {:.4} m, {} nodes over 0.25 m ({:.2} %)",
-            gate.p50_quantised_m,
-            gate.p99_quantised_m,
-            gate.over_bound,
-            100.0 * gate.over_bound as f64 / gate.nodes as f64
-        );
-    }
+            println!("  other readings at the nodes (L quantised): B plus the unclamped read of L: max {:.4} m; the clamped read of the composed B + L: max {:.4} m; the unclamped read of L overshoots its clamped read by up to {:.2} m", gate.max_unclamped_l_quantised_m, gate.max_compose_quantised_m, gate.max_l_overshoot_m);
+            spatial(&g, &r, &gate);
+            println!(
+                "  quantised difference at the nodes: p50 {:.4} m, p99 {:.4} m, {} nodes over 0.25 m ({:.2} %)",
+                gate.p50_quantised_m,
+                gate.p99_quantised_m,
+                gate.over_bound,
+                100.0 * gate.over_bound as f64 / gate.nodes as f64
+            );
+        }
     }
     let _ = spec_l;
 }
