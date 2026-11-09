@@ -237,6 +237,10 @@ fn main() {
             println!("  other readings at the nodes (L quantised): B plus the unclamped read of L: max {:.4} m; the clamped read of the composed B + L: max {:.4} m; the unclamped read of L overshoots its clamped read by up to {:.2} m", gate.max_unclamped_l_quantised_m, gate.max_compose_quantised_m, gate.max_l_overshoot_m);
             spatial(&g, &r, &gate);
             println!(
+                "  G-SURF-I at the nodes: by the bake's local step height (up to 5 m, to 20 m, over 20 m) nodes {:?}, over 0.25 m {:?}; largest difference over step height {:.3}; the nodes over 0.25 m fall in {} of {} bins of 64 cells with nodes, at most {} in one bin; p95 {:.4} m",
+                gate.nodes_by_step, gate.over_by_step, gate.max_error_over_step, gate.bins_over, gate.bins, gate.busiest_bin_over, gate.p95_quantised_m
+            );
+            println!(
                 "  quantised difference at the nodes: p50 {:.4} m, p99 {:.4} m, {} nodes over 0.25 m ({:.2} %)",
                 gate.p50_quantised_m,
                 gate.p99_quantised_m,

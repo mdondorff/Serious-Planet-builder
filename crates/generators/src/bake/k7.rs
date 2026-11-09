@@ -251,6 +251,16 @@ pub struct SurfaceGate {
     /// The same at the centres of the core's cells (where the C1 read returns the stored value).
     pub max_centres_unquantised_m: f64,
     pub max_centres_quantised_m: f64,
+    /// G-SURF-I (A3 section 12.1): the 95th percentile of the quantised difference at the nodes; the nodes and the nodes over 0.25 m by the local step height of the bake's surface (the largest `|z - z(here)|` within 2 cells:
+    /// up to 5 m, over 5 m up to 20 m, over 20 m); the largest quotient of the difference and the step height over the nodes with a step of at least 1 m; and the spatial concentration: the bins of 64 cells that hold nodes, those that
+    /// hold a node over 0.25 m, and the most such nodes in one bin.
+    pub p95_quantised_m: f64,
+    pub nodes_by_step: [usize; 3],
+    pub over_by_step: [usize; 3],
+    pub max_error_over_step: f64,
+    pub bins: usize,
+    pub bins_over: usize,
+    pub busiest_bin_over: usize,
 }
 
 /// The Catmull-Rom read of `v` at `(x, y)` without the clamp to the four cells (linear in `v`).
@@ -285,6 +295,7 @@ pub fn surface_gate(g: &TileGrid, id: TileId, base: &(dyn Fn(Vec3) -> f64 + Sync
     let lq: Vec<f64> = l.iter().map(|v| (libm::round(v / step).clamp(f64::from(i16::MIN), f64::from(i16::MAX))) * step).collect();
     let mut out = SurfaceGate::default();
     let mut diffs: Vec<f64> = Vec::new();
+    let mut bins: std::collections::BTreeMap<(i64, i64), usize> = std::collections::BTreeMap::new();
     let zq: Vec<f64> = r.b.iter().zip(&lq).map(|(b, l)| b + l).collect();
     // The store lattice is vertex-based: vertex k lies at the local edge coordinate E = lattice_step * k (cell-index coordinate E - 0.5).
     let half = 0.0;
@@ -307,6 +318,31 @@ pub fn surface_gate(g: &TileGrid, id: TileId, base: &(dyn Fn(Vec3) -> f64 + Sync
             let dq = libm::fabs(b_node + read_c1(&lq, w, x, y) - bake);
             out.max_quantised_m = out.max_quantised_m.max(dq);
             diffs.push(dq);
+            let (cx, cy) = ((x as i64).clamp(0, w as i64 - 1), (y as i64).clamp(0, w as i64 - 1));
+            let here = r.z[cy as usize * w + cx as usize];
+            let mut step = 0.0f64;
+            for dy in -2..=2i64 {
+                for dx in -2..=2i64 {
+                    let (a, b) = ((cx + dx).clamp(0, w as i64 - 1) as usize, (cy + dy).clamp(0, w as i64 - 1) as usize);
+                    step = step.max(libm::fabs(r.z[b * w + a] - here));
+                }
+            }
+            let class = if step <= 5.0 {
+                0
+            } else if step <= 20.0 {
+                1
+            } else {
+                2
+            };
+            out.nodes_by_step[class] += 1;
+            if step >= 1.0 {
+                out.max_error_over_step = out.max_error_over_step.max(dq / step);
+            }
+            let bin = bins.entry((cx / 64, cy / 64)).or_insert(0);
+            if dq > f64::from(QUANT_STEP_M) {
+                out.over_by_step[class] += 1;
+                *bin += 1;
+            }
             if dq > f64::from(QUANT_STEP_M) && out.failing.len() < 4096 {
                 out.failing.push((x, y, dq));
             }
@@ -319,8 +355,12 @@ pub fn surface_gate(g: &TileGrid, id: TileId, base: &(dyn Fn(Vec3) -> f64 + Sync
     diffs.sort_by(|a, b| a.total_cmp(b));
     if !diffs.is_empty() {
         out.p50_quantised_m = diffs[diffs.len() / 2];
+        out.p95_quantised_m = diffs[(diffs.len() - 1) * 95 / 100];
         out.p99_quantised_m = diffs[(diffs.len() - 1) * 99 / 100];
         out.over_bound = diffs.iter().filter(|d| **d > f64::from(QUANT_STEP_M)).count();
+        out.bins = bins.len();
+        out.bins_over = bins.values().filter(|c| **c > 0).count();
+        out.busiest_bin_over = bins.values().copied().max().unwrap_or(0);
     }
     for j in lo..=hi {
         for i in lo..=hi {

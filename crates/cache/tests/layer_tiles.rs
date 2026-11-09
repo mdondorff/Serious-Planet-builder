@@ -431,3 +431,19 @@ fn the_bake_specs_of_a_shape_are_the_commands_derivation_and_refuse_a_geometry_t
     assert!(bake_specs(&w, &BakeShape { tile: Some(50), ..shape }).is_err(), "a tile that does not divide the face edge");
     assert!(bake_specs(&w, &BakeShape { face_res: 4, ..shape }).is_err(), "a pass 1 of 4 cells");
 }
+
+// spec: GEN-154
+#[test]
+fn the_stored_change_reads_back_as_the_quantisation_of_the_surface_gate() {
+    // The gate's quantised L is `round(v / step)` clamped to the i16 counts, times the step; the counts stream decodes to the same values (G-SURF on the stored L, not on a model of it).
+    let t = 24usize;
+    let change: Vec<f32> = (0..t * t).map(|p| (((p * 37) % 211) as f32 - 100.0) * 0.173 + (p / t) as f32 * 1.7).collect();
+    let step = f64::from(QUANT_STEP_M);
+    let model: Vec<f64> =
+        change.iter().map(|v| (libm::round(f64::from(*v) / step).clamp(f64::from(i16::MIN), f64::from(i16::MAX))) * step).collect();
+    let back = decode_change_core(&encode_change_core(&change, t), t).expect("the stream decodes");
+    assert_eq!(back.len(), model.len());
+    for (b, m) in back.iter().zip(&model) {
+        assert_eq!(f64::from(*b), *m, "the stored value is the gate's quantised value");
+    }
+}
