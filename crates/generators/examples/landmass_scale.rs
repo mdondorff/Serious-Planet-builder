@@ -689,7 +689,7 @@ fn main() {
                 }
                 comps.push((cells, deepest, edge));
             }
-            comps.sort_by(|a, b| b.0.cmp(&a.0));
+            comps.sort_by_key(|a| std::cmp::Reverse(a.0));
             let total: usize = comps.iter().map(|c| c.0).sum();
             println!("components of the sediment pass's pit cells: {} with {total} cells; the largest ten:", comps.len());
             let mut run = 0usize;
