@@ -698,3 +698,14 @@ Source: Owner 2026-11-09 (management rules become checks), planner inbox #94 (#1
 #### Scenario: The ledger
 - **WHEN** a gate has no row, a row names an unknown gate, a measured row has a commit that does not resolve, or all gates have rows including `not run`
 - **THEN** the first three are refused naming the gate or commit and the last passes; the summary names the gates measured by one lane
+
+### Requirement: BUILD-042 An item that becomes done moves the re-estimate
+Spec-lint SHALL fail a branch that turns an item of the table under `## Items` of `docs/briefings/terrain-prototype.md` to a State starting with `done`, against the merge base with `origin/main`, unless the briefing's `Re-estimate: YYYY-MM-DD (...)` line holds a valid date other than the base's. A briefing without the line SHALL fail. An item already done on the base, or going back from done, SHALL ask for nothing.
+
+Verify: A
+Status: active
+Source: Owner 2026-11-09 (management rules become checks), planner inbox #94 (items were marked done without the remaining work re-estimated)
+
+#### Scenario: An item is done
+- **WHEN** an item becomes done with the re-estimate date unchanged, with no line, or with a new date
+- **THEN** the first two are refused naming the item and the last passes

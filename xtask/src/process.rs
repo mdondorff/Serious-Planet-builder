@@ -133,6 +133,54 @@ pub fn contract_errors_against_base(root: &Path) -> Vec<String> {
     contract_errors((t0.as_deref(), t1.as_deref()), (b0.as_deref(), b1.as_deref()))
 }
 
+const ITEMS_HEADING: &str = "## Items";
+
+/// The items of the briefing's table that are `done` (the State cell, the last, starts with "done"), by number (the first cell).
+pub fn done_items(briefing: &str) -> BTreeSet<String> {
+    table_rows(briefing, ITEMS_HEADING)
+        .iter()
+        .filter_map(|r| {
+            let cells: Vec<&str> = r.trim().trim_matches('|').split('|').map(str::trim).collect();
+            let state = cells.last()?.to_lowercase();
+            (cells.len() >= 2 && state.starts_with("done") && cells[0].chars().all(|c| c.is_ascii_digit()) && !cells[0].is_empty())
+                .then(|| cells[0].to_string())
+        })
+        .collect()
+}
+
+/// The date of the briefing's `Re-estimate: YYYY-MM-DD ...` line.
+pub fn reestimate_date(briefing: &str) -> Option<String> {
+    let rest = briefing.lines().find_map(|l| l.trim().strip_prefix("Re-estimate:"))?;
+    let d = rest.trim().get(..10)?;
+    is_date(d).then(|| d.to_string())
+}
+
+/// BUILD-042: an item that is `done` in `after` and was not in `before` needs a `Re-estimate:` date that is not the one of `before`.
+pub fn reestimate_errors(before: Option<&str>, after: Option<&str>) -> Vec<String> {
+    let Some(after) = after else { return Vec::new() };
+    let was = before.map(done_items).unwrap_or_default();
+    let newly: Vec<String> = done_items(after).into_iter().filter(|i| !was.contains(i)).collect();
+    if newly.is_empty() {
+        return Vec::new();
+    }
+    let (old, new) = (before.and_then(reestimate_date), reestimate_date(after));
+    let shown = format!("item(s) {}", newly.join(", "));
+    match new {
+        None => vec![format!("{BRIEFING}: {shown} became done and the briefing has no `Re-estimate: YYYY-MM-DD (...)` line (BUILD-042)")],
+        Some(n) if Some(&n) == old.as_ref() => {
+            vec![format!("{BRIEFING}: {shown} became done and the re-estimate date {n} is the one of the base: re-estimate the remaining work and date it (BUILD-042)")]
+        }
+        Some(_) => Vec::new(),
+    }
+}
+
+/// BUILD-042 against the merge base with `origin/main`.
+pub fn reestimate_errors_against_base(root: &Path) -> Vec<String> {
+    let Ok(base) = capture(root, "git", &["merge-base", "HEAD", "origin/main"]) else { return Vec::new() };
+    let (b0, b1) = (show(root, base.trim(), BRIEFING), show(root, "HEAD", BRIEFING));
+    reestimate_errors(b0.as_deref(), b1.as_deref())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,5 +271,67 @@ mod tests {
         let e = contract_errors((Some(&t0), Some(&t1)), (Some(&b0), None));
         assert!(e.len() == 1 && e[0].contains("does not exist"), "{e:?}");
         assert!(is_date("2026-11-09") && !is_date("2026-13-09") && !is_date("26-11-09"));
+    }
+
+    fn items(states: &[&str], estimate: Option<&str>) -> String {
+        let rows: Vec<String> = states.iter().enumerate().map(|(i, st)| format!("| {} | Item {} | lane | {st} |", i + 1, i + 1)).collect();
+        format!(
+            "# Block
+
+Target date: mid-December (estimate)
+{}
+## Items
+| # | Item | Lane | State |
+|---|---|---|---|
+{}
+
+## Exit list
+- x
+",
+            estimate
+                .map(|e| format!(
+                    "Re-estimate: {e}
+"
+                ))
+                .unwrap_or_default(),
+            rows.join(
+                "
+"
+            )
+        )
+    }
+
+    // spec: BUILD-042
+    #[test]
+    fn done_items_are_read_from_the_items_table_by_number() {
+        let b = items(&["done (#1235)", "open", "Done at 3.26 km", "in progress; done soon"], None);
+        assert_eq!(done_items(&b).into_iter().collect::<Vec<_>>(), ["1", "3"]);
+        assert_eq!(reestimate_date(&items(&["open"], Some("2026-11-09 (mid-December)"))).as_deref(), Some("2026-11-09"));
+        assert_eq!(reestimate_date(&items(&["open"], Some("soon"))), None);
+    }
+
+    // spec: BUILD-042
+    #[test]
+    fn an_item_that_becomes_done_needs_a_new_reestimate_date() {
+        let (b0, b1) = (items(&["open", "open"], Some("2026-11-09 (x)")), items(&["done", "open"], Some("2026-11-09 (x)")));
+        let e = reestimate_errors(Some(&b0), Some(&b1));
+        assert!(e.len() == 1 && e[0].contains("item(s) 1") && e[0].contains("is the one of the base"), "{e:?}");
+        let b2 = items(&["done", "open"], Some("2026-11-10 (moved)"));
+        assert!(reestimate_errors(Some(&b0), Some(&b2)).is_empty());
+        let b3 = items(&["done", "open"], None);
+        let e = reestimate_errors(Some(&b0), Some(&b3));
+        assert!(e.len() == 1 && e[0].contains("no `Re-estimate:"), "{e:?}");
+    }
+
+    // spec: BUILD-042
+    #[test]
+    fn an_unchanged_table_or_an_item_already_done_asks_for_nothing() {
+        let b = items(&["done", "open"], Some("2026-11-09 (x)"));
+        assert!(reestimate_errors(Some(&b), Some(&b)).is_empty());
+        let b_more_open = items(&["done", "in progress"], Some("2026-11-09 (x)"));
+        assert!(reestimate_errors(Some(&b), Some(&b_more_open)).is_empty(), "an item going back from done is not asked about");
+        assert!(reestimate_errors(None, None).is_empty());
+        // A new briefing with done items and no line is refused: its items became done in this change.
+        assert_eq!(reestimate_errors(None, Some(&items(&["done"], None))).len(), 1);
     }
 }
