@@ -10,4 +10,4 @@ Briefing item 9 (inbox #104, A3 section 6.6, G-SCALE): the partitioned route is 
 
 ## Impact
 - Code: `generators::bake::{mod, partition, round}`, `examples/landmass_scale`, `tests/bake_compact`. No call site in a pass of the bake; nothing in today's output moves.
-- Not in this change: item 9 stays open. The partitioned route keeps its per-cell arrays resident (filled, receivers, area, order and the round's catchment results); it is the partitioned route's tiles that bound what each step touches, not the memory. A form that holds these arrays tile-wise on disk is not built. H1 at 12,288 cells and the whole build's peak are not measured.
+- Not in this change: item 9 stays open. The partitioned route keeps its per-cell arrays resident (filled, receivers, area, order and the round's catchment results); tiles bound what each step touches, not the memory. A form that holds these arrays tile-wise on disk is not built. H1 at 12,288 cells and the whole build's peak are not measured.

@@ -2,7 +2,7 @@
 //! refined by `k` (k = 4 is the erosion grid, 12,288 cells, 814 m): the base is sampled only in the fine cells whose coarse parent is in the coarse landmass or within a ring of it, the fine land is the cells
 //! above the sea connected to the region's centre, its coast ring the outlets, and the landmass is a compact grid (`Grid::compact_cube`: only its cells, indexed by rank). Then 4 rounds of 5 steps on
 //! the resident route, with the process's peak working set after each phase (PowerShell, Windows).
-//! Usage: landmass_scale [k] [threads] [h1|part|both]: `part` routes each round with the partitioned route on the compact grid (GEN-149, tiles of 256 cells; `both` also runs the resident rounds and compares the bits, small k only); with `h1` with `h1` the hydrology pass follows (runoff of the orographic climate, weighted route, filled surface, H1) with the peak after it. Needs `target/landmass_base_3072.f32` (made by `landmass_region`).
+//! Usage: landmass_scale [k] [threads] [h1|part|both]: `part` routes each round with the partitioned route on the compact grid (GEN-149, tiles of 256 cells; `both` also runs the resident rounds and compares the bits, small k only); with `h1` the hydrology pass follows (runoff of the orographic climate, weighted route, filled surface, H1) with the peak after it. Needs `target/landmass_base_3072.f32` (made by `landmass_region`).
 #![allow(clippy::needless_range_loop, clippy::chunks_exact_to_as_chunks)]
 use planet_core::{Face, Vec3};
 use planet_generators::bake::carve::CarveParams;

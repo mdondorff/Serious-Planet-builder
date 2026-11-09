@@ -8,7 +8,7 @@ The partitioned route SHALL run on a compact cube grid and give, for every cell,
 Verify: A
 Status: planned
 Source: A3 section 6.6, inbox #104, briefing item 9
-- The runs of `examples/landmass_scale part` (time and peak memory of the partitioned rounds at 3,072, 6,144 and 12,288 cells) are measurements, not gates; the gate is the tier-A test.
+- The runs of `examples/landmass_scale part` (time and peak memory of the partitioned rounds; examples at 3,072, 6,144 and 12,288 cells a face edge) are measurements, not gates; the gate is the tier-A test.
 
 #### Scenario: a compact landmass, partitioned
 - **WHEN** a landmass of a sphere of 24 cells a face edge is routed in tiles of 4, 6, 8, 12 and 24 cells and carved for 2 rounds with the memoised solve

@@ -156,6 +156,9 @@ fn the_partitioned_route_on_a_compact_landmass_is_the_resident_route_and_the_mas
     let compact = Grid::compact_cube(n, R, bits);
     let masked = Grid::cube(n, R).with_active(active.clone());
     let ids: Vec<usize> = (0..active.len()).filter(|&g| active[g]).collect();
+    // The landmass spans at least 2 faces, so tiles straddle a face seam of the stacked layout.
+    let faces: std::collections::BTreeSet<usize> = (0..compact.len()).map(|p| compact.xy(p).1 / n).collect();
+    assert!(faces.len() >= 2, "the landmass spans {} face(s)", faces.len());
     let cube = planet_generators::bake::h0::GlobalGrid::new(n, R);
     let z_all: Vec<f64> = (0..active.len())
         .map(|g| {
