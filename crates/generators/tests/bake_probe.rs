@@ -155,8 +155,8 @@ fn the_k7_stage_writes_its_sheet_and_the_tile_is_bit_identical_with_the_probe_on
         bits(&k7_tile(&g, id, &base, &regional, &[], &p, 2))
     };
     assert_eq!(off, on, "the K7 tile is the same bits with the probe on");
-    assert!(dir.join("k7-z.png").exists(), "the K7 height sheet is written");
+    assert!(dir.join("k7-f1-t3-4-z.png").exists(), "the K7 height sheet is written under the tile's name");
     let log = std::fs::read_to_string(probe.log_path()).unwrap();
-    assert!(log.starts_with("k7 | z | ") && log.contains("pits_after_pass"), "{log}");
+    assert!(log.starts_with("k7-f1-t3-4 | z | ") && log.contains("pits_after_pass"), "{log}");
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -24,7 +24,12 @@ pub enum Stage {
     Thermal,
     Deposition,
     PitSpreading,
-    K7,
+    /// K7 of one tile (face and tile indices): a run over several tiles writes one sheet set per tile.
+    K7 {
+        face: u8,
+        ti: u32,
+        tj: u32,
+    },
 }
 
 impl Stage {
@@ -37,7 +42,7 @@ impl Stage {
             Stage::Thermal => "thermal".into(),
             Stage::Deposition => "deposition".into(),
             Stage::PitSpreading => "pit-spreading".into(),
-            Stage::K7 => "k7".into(),
+            Stage::K7 { face, ti, tj } => format!("k7-f{face}-t{ti}-{tj}"),
         }
     }
 }
@@ -588,10 +593,10 @@ mod tests {
         let g = Grid::new(4, 4, 100.0);
         install_local(c.clone());
         assert!(enabled());
-        emit(Stage::K7, |s| StageView::new(s, &g));
+        emit(Stage::K7 { face: 0, ti: 0, tj: 0 }, |s| StageView::new(s, &g));
         let other = std::thread::spawn({
             let g = Grid::new(4, 4, 100.0);
-            move || emit(Stage::K7, |s| StageView::new(s, &g))
+            move || emit(Stage::K7 { face: 0, ti: 0, tj: 0 }, |s| StageView::new(s, &g))
         });
         other.join().unwrap();
         uninstall_local();
