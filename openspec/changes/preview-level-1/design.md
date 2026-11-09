@@ -21,6 +21,10 @@ No. Level 1 takes the resident base heights as an input array `z0`, one `f64` pe
 ## Findings for the architect
 - No item kind for rainfall or temperature regions exists (`world-def` has stamps and regions that clip a height layer). Level 1 for the climate edit is therefore a function over a `ClimateRegion`; the item kind belongs to the editor path (item 16's later steps).
 
+## Decisions of the architect (2026-11-09)
+- Level 1 needs no stored-field read.
+- `ClimateRegion` is a preview input only: never persisted, never part of a definition hash or a cache key (CON-05, CON-07; the preview id is its own domain). The item kind for rainfall and temperature regions is a WorldDefinition format change (CON-10): it goes to the architect before it is built, in item 16's later editor-path steps.
+
 ## Limits of the preview (numerics review, 2026-11-09)
 - A smooth brush stroke reads the procedural base on a ring (GEN-030); the preview passes a constant base, so smooth strokes change nothing in it. The authoritative stage is exact; level 2 shows it.
 - The id covers the footprint hash of every stamp (layer, priority, content, anchor, reach, height bound), the climate regions' bits, the grid radius, the sea level, the flood epsilon and the base's identity word. The caller's word must hold what the base heights and climate are made from.

@@ -153,7 +153,7 @@ Source: Architect order 2026-11-09 (inbox #95), A3 11.1
 
 #### Scenario: Two edit kinds
 - **WHEN** a hill is stamped on a drainage divide, and a rainfall region is placed over a catchment without changing any height
-- **THEN** the first changes receivers or watersheds near the hill and none far from it, and the second changes no receiver and raises the discharge below the region
+- **THEN** the first changes receivers or watersheds, most of them near the hill, and the second changes no receiver and raises the discharge below the region
 
 ### Requirement: AUTH-009 The preview is decided outside the renderer
 The level-1 preview SHALL be a GPU-free function of the resident base and the edit, SHALL reach the frame plan as data only, and SHALL never make the plan request a solve (CON-03, A3 11.2).
