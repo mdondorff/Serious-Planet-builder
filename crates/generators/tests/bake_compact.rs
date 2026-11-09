@@ -146,18 +146,52 @@ fn a_bit_past_the_last_cube_cell_is_refused() {
     Grid::compact_cube(n, R, bits);
 }
 
-// spec: GEN-147
+// spec: GEN-149
 #[test]
-#[should_panic(expected = "not for a compact grid")]
-fn the_partitioned_route_and_a_layered_carve_refuse_a_compact_grid() {
+fn the_partitioned_route_on_a_compact_landmass_is_the_resident_route_and_the_masked_cube_for_any_tile_size() {
     use planet_generators::bake::partition::{partitioned_route, PartCache};
-    let n = 8;
-    let (_, bits) = corner_cap(n, 0.2);
-    let g = Grid::compact_cube(n, R, bits);
-    let z: Vec<f64> = (0..g.len()).map(|p| 10.0 + (p % 7) as f64).collect();
-    let mut outlet = vec![false; g.len()];
-    outlet[0] = true;
-    partitioned_route(&g, &z, &outlet, 1e-3, 1, 4, RoundRules::ROUND, &mut PartCache::default());
+    use planet_generators::bake::round::{solve_rounds_memo, Drivers, RoundCache};
+    let n = 24;
+    let (active, bits) = corner_cap(n, 0.2);
+    let compact = Grid::compact_cube(n, R, bits);
+    let masked = Grid::cube(n, R).with_active(active.clone());
+    let ids: Vec<usize> = (0..active.len()).filter(|&g| active[g]).collect();
+    let cube = planet_generators::bake::h0::GlobalGrid::new(n, R);
+    let z_all: Vec<f64> = (0..active.len())
+        .map(|g| {
+            let d = cube.direction(g as u32);
+            900.0 * (d.x + d.y + d.z) + 90.0 * libm::sin(11.0 * d.x + 5.0 * d.y) * libm::cos(8.0 * d.z) + 2.0 * planet_generators::bake::route::jitter(5, g as u64, 0) - 500.0
+        })
+        .collect();
+    let z: Vec<f64> = ids.iter().map(|&g| z_all[g]).collect();
+    let outlet_masked: Vec<bool> = (0..active.len()).map(|g| active[g] && z_all[g] <= 0.0).collect();
+    let outlet: Vec<bool> = ids.iter().map(|&g| outlet_masked[g]).collect();
+    assert!(outlet.iter().any(|&o| o) && outlet.iter().any(|&o| !o));
+    let want = route_rules(&compact, &z, &outlet, 1e-3, 5, 0.0, None, RoundRules::ROUND);
+    let want_masked = route_rules(&masked, &z_all, &outlet_masked, 1e-3, 5, 0.0, None, RoundRules::ROUND);
+    for tile in [4usize, 6, 8, 12, 24] {
+        let got = partitioned_route(&compact, &z, &outlet, 1e-3, 5, tile, RoundRules::ROUND, &mut PartCache::default());
+        assert_eq!(got.routing.receiver, want.receiver, "receivers, tile {tile}");
+        assert!(got.routing.area.iter().zip(&want.area).all(|(a, b)| a.to_bits() == b.to_bits()), "A_d, tile {tile}");
+        // The masked cube: the same bits, by cube id.
+        let masked_part = partitioned_route(&masked, &z_all, &outlet_masked, 1e-3, 5, tile, RoundRules::ROUND, &mut PartCache::default());
+        for (p, &g) in ids.iter().enumerate() {
+            assert_eq!(got.routing.area[p].to_bits(), masked_part.routing.area[g].to_bits(), "tile {tile}, cell {g}");
+            assert_eq!(got.routing.area[p].to_bits(), want_masked.area[g].to_bits(), "tile {tile}, cell {g}");
+        }
+    }
+    // The memoised rounds on the compact grid are the rounds without a cache, and a second solve of the same surface floods nothing.
+    let params = CarveParams { steps: 10, reroute_every: 5, round_rules: RoundRules::ROUND, ..CarveParams::default() };
+    let mut plain = z.clone();
+    solve_rounds(&compact, &mut plain, &outlet, &params, 2, &3usize, 5);
+    let mut cache = RoundCache::default();
+    let mut memo = z.clone();
+    solve_rounds_memo(&compact, &mut memo, &outlet, &params, 2, &3usize, 5, &Drivers::default(), 8, &mut cache);
+    assert!(plain.iter().zip(&memo).all(|(a, b)| a.to_bits() == b.to_bits()), "the memoised rounds on a compact grid");
+    let mut again = z.clone();
+    let (_, work) = solve_rounds_memo(&compact, &mut again, &outlet, &params, 2, &3usize, 5, &Drivers::default(), 8, &mut cache);
+    assert!(again.iter().zip(&memo).all(|(a, b)| a.to_bits() == b.to_bits()));
+    assert!(work.iter().all(|w| w.tile_floods == 0), "the same surface again floods no tile");
 }
 
 // spec: GEN-147
