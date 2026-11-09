@@ -9,4 +9,5 @@ Gate G-SED (A3 section 12.1) reads "per catchment and per round: eroded = deposi
 
 ## Impact
 - Code: `generators::bake::{deposit, sediment}`, `examples/landmass_scale`, `tests/bake_compact`. No call site in a pass of the bake.
+- G-SED stays partly open: closed for the deposition sweep run on a round's result, open for sediment inside a round, the round's own catchments, thermal and the pit spreading.
 - Not in this change: the round solver itself tracks no sediment (its carve removes material without accounting for where it goes); the balance here is the deposition sweep run on each round's result. A sediment step inside the round is not built.

@@ -469,6 +469,9 @@ fn the_deposition_balances_per_catchment_and_per_round_on_a_compact_landmass() {
         assert!(b.max_relative_error < 1e-9 && b.total_relative_error < 1e-9, "round {rounds}: {b:?}");
         assert_eq!(b.eroded_m3.to_bits(), bm.eroded_m3.to_bits(), "compact against masked, round {rounds}");
         assert_eq!(b.catchments, bm.catchments);
+        assert!(bm.max_relative_error < 1e-9 && bm.total_relative_error < 1e-9, "masked, round {rounds}: {bm:?}");
+        assert_eq!(b.raised_m3.to_bits(), bm.raised_m3.to_bits(), "raised, round {rounds}");
+        assert_eq!(b.exported_m3.to_bits(), bm.exported_m3.to_bits(), "exported, round {rounds}");
         checked += 1;
     }
     assert_eq!(checked, 3);

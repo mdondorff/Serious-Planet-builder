@@ -383,6 +383,7 @@ With clipped MFD and the canonical flood a catchment has no other border conditi
 - K7 stays per tile with its halo (GEN-101): it does not route globally; it reads the channel levels as boundary conditions (§3.3).
 - **What is catchment-local.** The breach, the implicit sweeps and D8-routed sediment: inside a round a catchment reads and writes only its members, and its sediment leaves only at its outlet. Across rounds it couples through the surface.
 - **What is not.** Thermal and one-cell pit spreading read 8 neighbours and cross divides. They are not catchment-round steps: they run per tile with a halo, keyed per tile, after the last round (as K7 does today) **[gate G-SED, G-SURF]**.
+- **Gap (2026-11-09):** the round solver's carve has no sediment term, so "D8-routed sediment" above is not built inside a round; G-SED is measured on the deposition sweep run on a round's result (GEN-152).
 - "Independent catchments" is a statement about today's solver, not a limit on later sediment models: a later process that couples catchments is added to §6.3's table with its contract.
 
 ### 6.8 The reference computation and the dependency contract

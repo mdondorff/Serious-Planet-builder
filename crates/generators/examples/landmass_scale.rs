@@ -326,7 +326,7 @@ fn main() {
             (0..z.len()).filter(|&p| zt[p] > 0.0 && !outlet[p]).map(|p| (filled[p] - zt[p], p)).filter(|d| d.0 >= 0.5).collect();
         deep.sort_by(|a, b| b.0.total_cmp(&a.0));
         let (mut ring, mut near_sea, mut all_pre) = (0, 0, 0);
-        for &(d, p) in &deep {
+        for &(_, p) in &deep {
             let nb: Vec<usize> = (0..8).filter_map(|k| grid.neighbour(p, k)).collect();
             let sea_nb = nb.iter().any(|&q| zt[q] <= 0.0);
             let was_pit = filled0[p] - z[p] >= 0.5;
@@ -339,7 +339,6 @@ fn main() {
             if was_pit {
                 all_pre += 1;
             }
-            let _ = d;
         }
         // How steep the surface was before thermal: land cells with a neighbour whose drop exceeds the critical slope, and the deep pits' share of them.
         let tan = libm::tan(q.thermal.theta_deg.to_radians());
