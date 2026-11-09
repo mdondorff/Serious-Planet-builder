@@ -177,3 +177,32 @@ fn a_regional_field_is_read_c1_and_clamped() {
     let z: Vec<f64> = (0..256).map(|p| 100.0 + (p % 16) as f64).collect();
     assert_eq!(pit_stats(&grid, &z, 0.0, 1e-3, 0.5, 0).pit_cells, 0);
 }
+
+// spec: GEN-154
+#[test]
+fn the_vertex_report_is_a_consistent_partition_of_the_nodes() {
+    let g = tile_grid();
+    let p = K7Params::standard(5, 0.0);
+    let smooth = |d: Vec3| 6.0 * libm::sin(0.5 * d.x) - 4.0 * libm::cos(0.7 * d.y);
+    for channels in [vec![], vec![channel(&g, g.halo as i64 + 20)]] {
+        let r = k7_tile(&g, id(), &base, &smooth, &channels, &p, 2);
+        let gate = surface_gate(&g, id(), &base, &r, 6);
+        // The gate is at the centres; the vertices are reported.
+        assert!(gate.max_centres_unquantised_m < 1e-9 && gate.max_centres_quantised_m <= 0.125 + 1e-9, "{gate:?}");
+        // Every node is in one step class, every node over the bound in one too and in one bin.
+        assert_eq!(gate.nodes_by_step.iter().sum::<usize>(), gate.nodes, "{gate:?}");
+        assert_eq!(gate.over_by_step.iter().sum::<usize>(), gate.over_bound, "{gate:?}");
+        for c in 0..3 {
+            assert!(gate.over_by_step[c] <= gate.nodes_by_step[c], "{gate:?}");
+        }
+        assert!(gate.bins >= gate.bins_over && gate.busiest_bin_over <= gate.over_bound, "{gate:?}");
+        assert_eq!(gate.bins_over > 0, gate.over_bound > 0, "{gate:?}");
+        assert!(
+            gate.p50_quantised_m <= gate.p95_quantised_m
+                && gate.p95_quantised_m <= gate.p99_quantised_m
+                && gate.p99_quantised_m <= gate.max_quantised_m,
+            "{gate:?}"
+        );
+        assert!(gate.max_error_over_step.is_finite() && gate.max_error_over_step >= 0.0, "{gate:?}");
+    }
+}

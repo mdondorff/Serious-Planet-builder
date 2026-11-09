@@ -160,6 +160,24 @@ pub fn tile_record(world: &GlobalWorld, res: u32, spec: &TileLayerSpec, r: &Tile
     })
 }
 
+/// The counts stream of a `t x t` core of change in metres, as a layer tile record stores it (quantised to [`planet_generators::bake::tile::QUANT_STEP_M`], row deltas, brotli): the payload after the record's header,
+/// for measuring a store of another chain's change (G-STORE, STRM-078). [`decode_change_core`] is its inverse up to the quantisation.
+pub fn encode_change_core(change: &[f32], t: usize) -> Vec<u8> {
+    assert_eq!(change.len(), t * t, "a core holds tile x tile cells");
+    let raw = pack_counts(&quantise(change), t);
+    let mut out = Vec::with_capacity(raw.len() / 2);
+    {
+        let mut w = brotli::CompressorWriter::new(&mut out, BROTLI_BUFFER, BROTLI_QUALITY, BROTLI_WINDOW_BITS);
+        w.write_all(&raw).expect("writing to a vector");
+    }
+    out
+}
+
+/// The core of change in metres of an [`encode_change_core`] stream; an error text when it is damaged.
+pub fn decode_change_core(stream: &[u8], t: usize) -> Result<Vec<f32>, String> {
+    Ok(dequantise(&unpack_counts(stream, t)?))
+}
+
 /// The stored result of tile `id` under `spec`, its core dequantised: `Ok(None)` when the store holds no record of the tile; an error naming both keys when it holds one made under
 /// another key (another bake, parameters or pass 1); an error naming the tile when the record is damaged.
 pub fn load_tile(
