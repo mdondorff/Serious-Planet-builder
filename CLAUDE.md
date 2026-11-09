@@ -20,9 +20,11 @@ Working files: `docs/status.md` (forward state only: waiting for the owner, the 
 - `cargo xtask accept <milestone>`: milestone acceptance
 - `cargo xtask repro <bundle>`: replay a repro bundle
 - `cargo xtask golden-review [--proposal <file>] [--extra <dir>]... [--apply]`: classify golden candidates under ADR 0017 (the `golden-review` skill)
-- `cargo xtask perf`: Rasierklinge only. The readiness gate (ADR 0020) refuses when the machine is not ready; perf runs need bulldozer's authorization: bulldozer coordinates the window, and a coder session started in the native Claude UI runs it on bulldozer's go (owner, 2026-10-16; the architect's VS Code-terminal session measures about 1.4x slower per thread). Coders never start one on their own. `--machine-ready` is the owner's override of a failed gate
+- `cargo xtask perf`: Rasierklinge only. The readiness gate (ADR 0020) refuses when the machine is not ready; perf runs need bulldozer's authorization: bulldozer coordinates the window, and a coder session started in the native Claude UI runs it on bulldozer's go (owner, 2026-10-16). Coders never start one on their own. `--machine-ready` is the owner's override of a failed gate
 
 Until an xtask command exists, create it in `xtask/`, not a script. The shell is Git Bash on Windows; keep commands portable, never add `.sh` or `.ps1` files.
+
+**Sessions and routing:** read `docs/routing.md` at session start; a lane reports per its table.
 
 ## How to work
 1. Pick up work as an OpenSpec change (`openspec/changes/<id>/`): proposal, design, tasks, spec deltas. Keep changes small (one subsystem, one step).
@@ -45,23 +47,6 @@ Specs, ADRs and working files are read by agents and the owner. Write definition
 - Failure output must be actionable: numeric deltas, tile IDs, diff images in `target/review/`.
 - Bless goldens only through the `golden-review` skill's policy (ADR 0017): it auto-blesses rounding noise (also on lit, sky and water, ADR 0096) and declared changes per adapter (ADR 0061), and escalates the rest to the owner's `/bless`. Never copy a candidate into `tests/goldens/` by hand.
 - Never weaken, skip or delete a test to make a build green. Quarantine only with a tracking entry in `docs/status.md`.
-
-## Sessions and routing (owner, 2026-11-09)
-| Session | Owns |
-|---|---|
-| architect (Opus; the owner's main contact) | contract, ADRs, gate verdicts, briefing content and order, external reviews, decision briefs |
-| sonnet-bulldozer | lane orders, merging lane PRs, CI, `docs/status.md`, ID reservations, perf windows, summaries |
-| explorer, crusader | implementation |
-| spikes | one spike at a time; clears itself after its exit list |
-
-| A lane's message | Goes to |
-|---|---|
-| PR ready, CI, merge slot, ID request, idle, perf window, next step the briefing names | bulldozer |
-| Failed gate, departure from an ADR or the contract, a measurement contradicting a contract number, "what next" the briefing doesn't answer | the architect directly, with a one-line note to bulldozer |
-
-- A message that fits both rows, or a doubt, goes to the architect.
-- Only bulldozer writes lane orders; lane orders are in `C:/DEV/planner-inbox/<lane>.md`. An architect's answer that changes the order of work reaches a lane through bulldozer.
-- Bulldozer merges lane PRs under the rules below; the architect first for a PR that departs from an accepted ADR, changes a contract number or claims to close a gate.
 
 ## Git
 - One branch per OpenSpec change (`change/<id>`). Small commits.

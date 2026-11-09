@@ -30,7 +30,7 @@ your agent memory (confirm it against main) and `C:/DEV/planner-inbox/`. Work in
 The app pauses a session's sends after 10 without an owner message. Orders go in the inbox files, `SendMessage` only for urgent things. Before 22:00 give each lane standing orders: merge order, next two tasks, reserved IDs.
 
 ## Routing
-The lane-message routing table is in `CLAUDE.md`. When a message fits both rows or you are unsure, pass it to the architect
+The lane-message routing table is in `docs/routing.md`. When a message fits both rows or you are unsure, pass it to the architect
 with a note. The briefing's item order counts as "gives the next step"; anything needing a judgement does not.
 Golden candidates: you run `golden-review` and escalate to the owner's `/bless`; the architect only for a design question.
 
