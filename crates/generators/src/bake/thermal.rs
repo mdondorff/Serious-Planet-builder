@@ -61,14 +61,19 @@ fn delta(grid: &Grid, z: &[f64], p: usize, tan_theta: f64, params: &ThermalParam
     let (zp, gp) = (z[p], grid.global_id(p));
     let gives = zp > params.sea_level && !grid.is_edge(p);
     let mut dh = 0.0;
+    // On a cube grid (GEN-150) the distance is the sphere's and a cell takes the giver's volume over its own area, so the volume is kept; on a plane grid both are 1 and `dx`.
+    let cube = grid.is_cube();
+    let ap = if cube { grid.cell_area(p) } else { 1.0 };
     for d in 0..8 {
         let Some(q) = grid.neighbour(p, d) else { continue };
-        let crit = tan_theta * (1.0 + params.perturb * pair_u(gp, grid.global_id(q))) * grid.distance(d);
+        let dist = if cube { grid.distance_at(p, d) } else { grid.distance(d) };
+        let crit = tan_theta * (1.0 + params.perturb * pair_u(gp, grid.global_id(q))) * dist;
         let diff = zp - z[q];
         if diff - crit > params.min_excess && gives {
             dh -= params.k * (diff - crit);
         } else if -diff - crit > params.min_excess && z[q] > params.sea_level && !grid.is_edge(q) {
-            dh += params.k * (-diff - crit);
+            let share = if cube { grid.cell_area(q) / ap } else { 1.0 };
+            dh += params.k * (-diff - crit) * share;
         }
     }
     dh
@@ -103,6 +108,7 @@ fn run(grid: &Grid, z: &mut [f64], params: &ThermalParams, threads: usize, all_c
     let mut active: Vec<u32> = (0..grid.len() as u32).collect();
     let mut report = ThermalReport { passes_run: 0, moved_last: 0, moved_volume_first: 0.0, evaluations: 0 };
     let area = grid.dx() * grid.dx();
+    let cube = grid.is_cube();
     for pass in 0..params.passes {
         if active.is_empty() {
             break;
@@ -129,7 +135,7 @@ fn run(grid: &Grid, z: &mut [f64], params: &ThermalParams, threads: usize, all_c
                         changed.push(p);
                         if dh < 0.0 {
                             moved += 1;
-                            volume -= dh;
+                            volume -= if cube { dh * grid.cell_area(p as usize) } else { dh };
                         }
                     }
                 }
@@ -138,7 +144,7 @@ fn run(grid: &Grid, z: &mut [f64], params: &ThermalParams, threads: usize, all_c
         report.passes_run = pass + 1;
         report.moved_last = moved;
         if pass == 0 {
-            report.moved_volume_first = volume * area;
+            report.moved_volume_first = if cube { volume } else { volume * area };
         }
         if all_cells {
             if changed.is_empty() {
@@ -162,18 +168,10 @@ fn run(grid: &Grid, z: &mut [f64], params: &ThermalParams, threads: usize, all_c
 /// Thermal stabilisation of `z` in place on active cells (see the module): at most `params.passes` passes, fewer when nothing moves. `z` must be finite. Refused: a critical angle
 /// outside (0, 90) degrees, a perturbation of 1 or more, a share `k` over 1/8 or not positive, a negative minimum excess.
 pub fn thermal(grid: &Grid, z: &mut [f64], params: &ThermalParams, threads: usize) -> ThermalReport {
-    assert!(
-        !grid.is_cube(),
-        "thermal erosion assume a plane grid (uniform cell size, row and column neighbours): not for a cube grid yet (GEN-144)"
-    );
     run(grid, z, params, threads, false)
 }
 
 /// The same as [`thermal`] over every cell every pass: the reference the active-cell run is tested against.
 pub fn thermal_all_cells(grid: &Grid, z: &mut [f64], params: &ThermalParams, threads: usize) -> ThermalReport {
-    assert!(
-        !grid.is_cube(),
-        "thermal erosion assume a plane grid (uniform cell size, row and column neighbours): not for a cube grid yet (GEN-144)"
-    );
     run(grid, z, params, threads, true)
 }

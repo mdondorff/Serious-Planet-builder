@@ -1,0 +1,1 @@
+- 2026-11-09 sediment-cube (GEN-150): deposition, one-cell pit spreading and thermal run on a cube grid (full, masked, compact) with the sphere's area and distance, keep the volume, compact = masked bits; no call site yet.
