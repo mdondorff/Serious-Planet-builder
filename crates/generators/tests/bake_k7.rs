@@ -112,6 +112,11 @@ fn a_dam_across_a_channel_is_a_pit_before_the_burn_in_and_none_after() {
     assert!(start.pit_cells > 0 && start.max_m > 10.0, "the dam holds a lake before the burn-in: {start:?}");
     assert!(with.burned > 20, "the channel is burned in");
     assert!(with.pits[1].1.max_m < start.max_m / 2.0, "the burn-in drains the lake: {:?} against {start:?}", with.pits[1].1);
+    assert!(
+        with.pits[4].1.pit_cells * 10 < start.pit_cells,
+        "after the whole pass the dam holds at most a tenth of its pit cells: {:?} against {start:?}",
+        with.pits[4].1
+    );
     assert!(with.pits[4].1.max_m <= with.pits[1].1.max_m + 1.0, "the whole pass leaves no deeper pit than the burn-in: {:?}", with.pits);
     assert_eq!(without.burned, 0);
     // Without the burn-in the pits stay (the breach of pass 1 at the local grid is reported, not asserted to drain a dam of 40 m: its first pass can deepen the floor it cuts from).
@@ -141,7 +146,9 @@ fn the_runtime_surface_is_the_bake_surface_at_the_centres_and_within_a_step_at_t
     let with = k7_tile(&g, id(), &base, &smooth, &[channel(&g, g.halo as i64 + 20)], &p, 2);
     let gate_c = surface_gate(&g, id(), &base, &with, 6);
     assert!(gate_c.max_centres_unquantised_m < 1e-9, "{gate_c:?}");
-    assert!(gate_c.max_quantised_m < 5.0, "{gate_c:?}");
+    assert!(gate_c.max_quantised_m < 1.0, "{gate_c:?}");
+    // Reading the composed heights (B at the four cells plus L, clamped once) agrees with the bake at the nodes to the quantisation and the read of B: the reading that passes G-SURF.
+    assert!(gate_c.max_compose_quantised_m <= 0.25, "{gate_c:?}");
 }
 
 // spec: GEN-148
@@ -168,5 +175,5 @@ fn a_regional_field_is_read_c1_and_clamped() {
     // The pits of a plane are none.
     let grid = planet_generators::bake::Grid::new(16, 16, 100.0);
     let z: Vec<f64> = (0..256).map(|p| 100.0 + (p % 16) as f64).collect();
-    assert_eq!(pit_stats(&grid, &z, 0.0, 1e-3, 0.5).pit_cells, 0);
+    assert_eq!(pit_stats(&grid, &z, 0.0, 1e-3, 0.5, 0).pit_cells, 0);
 }

@@ -4,7 +4,7 @@
 //! the deposition and the pit spreading. Reports the pit share and depth at 102 m after each stage, with and without the channels, and G-SURF at the lattice nodes.
 //! Usage: k7_region [margin_regional_cells] [threads]
 #![allow(clippy::needless_range_loop)]
-use planet_core::cube::TangentWarp;
+use planet_core::cube::{face_to_direction, TangentWarp};
 use planet_core::{Face, Vec3};
 use planet_generators::bake::carve::CarveParams;
 use planet_generators::bake::face::FaceSpec;
@@ -80,7 +80,10 @@ fn main() {
             s.spawn(move || {
                 for (c, v) in chunk.iter_mut().enumerate() {
                     let p = k * rows * nw + c;
-                    *v = inputs.base(spec.halo_direction((ni0 + p % nw) as i64, (nj0 + p / nw) as i64)) as f32;
+                    let (vi, vj) = ((ni0 + p % nw) as f64, (nj0 + p / nw) as f64);
+                    let nn = LATTICE as f64;
+                    // The store lattice is vertex-based: vertex k lies at 2k/res - 1 on the face.
+                    *v = inputs.base(face_to_direction(&TangentWarp, spec.face, 2.0 * vi / nn - 1.0, 2.0 * vj / nn - 1.0)) as f32;
                 }
             });
         }
@@ -209,6 +212,8 @@ fn main() {
             "  G-SURF at {} lattice nodes: runtime minus bake max {:.4} m unquantised, {:.4} m with L in steps of 0.25 m (of which B re-read from the local cells: {:.4} m); at the core's cell centres {:.1e} m and {:.4} m",
             gate.nodes, gate.max_unquantised_m, gate.max_quantised_m, gate.max_base_resample_m, gate.max_centres_unquantised_m, gate.max_centres_quantised_m
         );
+        println!("  other readings at the nodes (L quantised): B plus the unclamped read of L: max {:.4} m; the clamped read of the composed B + L: max {:.4} m; the unclamped read of L overshoots its clamped read by up to {:.2} m", gate.max_unclamped_l_quantised_m, gate.max_compose_quantised_m, gate.max_l_overshoot_m);
+        spatial(&g, &r, &gate);
         println!(
             "  quantised difference at the nodes: p50 {:.4} m, p99 {:.4} m, {} nodes over 0.25 m ({:.2} %)",
             gate.p50_quantised_m,
@@ -218,4 +223,56 @@ fn main() {
         );
     }
     let _ = spec_l;
+}
+
+/// Where the nodes over 0.25 m are: the bounding box, the 64-cell bins they fall in, those near a burnt channel cell or a step in the surface, the worst five.
+fn spatial(g: &TileGrid, r: &K7Result, gate: &planet_generators::bake::k7::SurfaceGate) {
+    let w = g.window();
+    if gate.failing.is_empty() {
+        println!("  no node over 0.25 m");
+        return;
+    }
+    let (mut x0, mut x1, mut y0, mut y1) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+    let mut bins = std::collections::BTreeMap::new();
+    let (mut near_channel, mut near_step) = (0usize, 0usize);
+    for &(x, y, _) in &gate.failing {
+        (x0, x1, y0, y1) = (x0.min(x), x1.max(x), y0.min(y), y1.max(y));
+        *bins.entry(((x / 64.0) as i64, (y / 64.0) as i64)).or_insert(0usize) += 1;
+        let (cx, cy) = (x as i64, y as i64);
+        let cell = |a: i64, b: i64| (a.clamp(0, w as i64 - 1) as usize, b.clamp(0, w as i64 - 1) as usize);
+        if (-3..=3i64).any(|dy| {
+            (-3..=3i64).any(|dx| {
+                r.burn_mask[{
+                    let (a, b) = cell(cx + dx, cy + dy);
+                    b * w + a
+                }]
+            })
+        }) {
+            near_channel += 1;
+        }
+        let here = {
+            let (a, b) = cell(cx, cy);
+            r.z[b * w + a]
+        };
+        let step = (-2..=2i64)
+            .flat_map(|dy| (-2..=2i64).map(move |dx| (dx, dy)))
+            .map(|(dx, dy)| {
+                let (a, b) = cell(cx + dx, cy + dy);
+                libm::fabs(r.z[b * w + a] - here)
+            })
+            .fold(0.0f64, f64::max);
+        if step > 20.0 {
+            near_step += 1;
+        }
+    }
+    println!(
+        "  the {} nodes over 0.25 m: window x {:.0}..{:.0}, y {:.0}..{:.0} of {w}; in {} of {} bins of 64 cells; {near_channel} within 3 cells of a burnt channel cell; {near_step} beside a step of over 20 m within 2 cells",
+        gate.failing.len(), x0, x1, y0, y1, bins.len(), (w / 64 + 1) * (w / 64 + 1)
+    );
+    let mut worst = gate.failing.clone();
+    worst.sort_by(|a, b| b.2.total_cmp(&a.2));
+    for &(x, y, d) in worst.iter().take(5) {
+        let c = (y as usize) * w + x as usize;
+        println!("    worst: x {x:.1}, y {y:.1}: {d:.2} m; z there {:.1} m, B {:.1} m", r.z[c], r.b[c]);
+    }
 }

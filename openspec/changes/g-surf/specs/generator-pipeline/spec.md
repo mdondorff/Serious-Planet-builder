@@ -6,7 +6,7 @@ K7 SHALL start a tile from `B + C1(regional change)`, `B` read at every cell of 
 - A dam across a channel SHALL be a pit before the burn-in and SHALL NOT be one after it.
 - The result SHALL be the same bits on any thread count.
 - The stored change SHALL read back at the centres of the cells as the bake's surface (before quantisation) and within half a step of `QUANT_STEP_M` after.
-- The difference of the runtime's `B + C1(L)` and the bake's `C1(z)` at the lattice nodes SHALL be reported (maximum, 50th and 99th percentile, the nodes over 0.25 m); it is not gated here (the clamp of the C1 read is not linear).
+- The difference of the runtime's `B + C1(L)` and the bake's `C1(z)` at the vertices of the store lattice SHALL be reported (maximum, 50th and 99th percentile, the nodes over 0.25 m, their positions, and the two other readings: `B` plus the unclamped `C1(L)`, and the clamped read of the composed `B + L`). G-SURF (at most 0.25 m at the nodes after quantisation) FAILS on the prototype tile (192 of 28,900 nodes, maximum 2.55 m): this requirement reports it and does not weaken the gate; the owner decides.
 
 Verify: A
 Status: planned

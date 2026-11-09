@@ -10,7 +10,7 @@ use super::flood::priority_flood;
 use super::map::catmull_rom;
 use super::thermal::thermal;
 use super::tile::{sample_window, window_grid, Pass2Params, TileGrid, TileId, QUANT_STEP_M};
-use planet_core::cube::{direction_to_face, face_to_direction, TangentWarp};
+use planet_core::cube::{face_to_direction, TangentWarp};
 use planet_core::{Face, Vec3};
 
 /// A field on a window of a face's grid (the regional grid at 814 m): the Catmull-Rom (C1) read of the cells' values, clamped to the four cells around the point as `map::change_in_face` is, the
@@ -109,14 +109,18 @@ impl PitStats {
     }
 }
 
-/// The pits of `z` on `grid` (outlets: the sea and the window's border) at the depth `min_m`.
-pub fn pit_stats(grid: &super::Grid, z: &[f64], sea_level: f64, epsilon: f64, min_m: f64) -> PitStats {
+/// The pits of `z` on `grid` (outlets: the sea and the window's border) at the depth `min_m`; only the cells at least `halo` cells in from the border of the square window are counted (the flood runs on the whole window).
+pub fn pit_stats(grid: &super::Grid, z: &[f64], sea_level: f64, epsilon: f64, min_m: f64, halo: usize) -> PitStats {
+    let w = (z.len() as f64).sqrt().round() as usize;
+    assert_eq!(w * w, z.len(), "a square window");
     let outlet = grid.outlets(z, sea_level);
     let filled = priority_flood(grid, z, &outlet, epsilon);
     let mut depths: Vec<f64> = Vec::new();
     let mut land = 0usize;
     for p in 0..z.len() {
-        if z[p] > sea_level && !outlet[p] {
+        let (x, y) = (p % w, p / w);
+        let in_core = x >= halo && y >= halo && x < w - halo && y < w - halo;
+        if in_core && z[p] > sea_level && !outlet[p] {
             land += 1;
             let d = filled[p] - z[p];
             if d >= min_m {
@@ -154,6 +158,8 @@ pub struct K7Result {
     pub change: Vec<f32>,
     /// The cells lowered by the burn-in.
     pub burned: usize,
+    /// The window's cells the burn-in lowered.
+    pub burn_mask: Vec<bool>,
     /// The pits (at `pit_min_m`) after each stage: the start, the burn-in, the breach alone, the incising carve, the whole pass.
     pub pits: Vec<(&'static str, PitStats)>,
 }
@@ -178,11 +184,14 @@ pub fn k7_tile(
     let mut z: Vec<f64> = b.iter().zip(&dr).map(|(b, c)| b + c).collect();
     drop(dr);
     let eps = q.carve.epsilon;
-    let stats = |z: &[f64]| pit_stats(&grid, z, q.sea_level, eps, q.pit_min_m.max(0.5));
+    let stats = |z: &[f64]| pit_stats(&grid, z, q.sea_level, eps, q.pit_min_m, g.halo);
     let mut pits = vec![("base + regional change", stats(&z))];
     let (w, t, h) = (g.window(), g.tile as i64, g.halo as i64);
     let origin = (i64::from(id.ti) * t - h, i64::from(id.tj) * t - h);
+    let z_start = z.clone();
     let burned = burn_channels(&mut z, w, origin, channels);
+    let burn_mask: Vec<bool> = z.iter().zip(&z_start).map(|(a, b)| a != b).collect();
+    drop(z_start);
     pits.push(("channels burned in", stats(&z)));
     let z_burned = z.clone();
     let outlet = grid.outlets(&z, q.sea_level);
@@ -214,17 +223,25 @@ pub fn k7_tile(
             change.push((z[c] - b[c]) as f32);
         }
     }
-    K7Result { z, b, change, burned, pits }
+    K7Result { z, b, change, burned, burn_mask, pits }
 }
 
 /// The result of G-SURF at the lattice nodes of a tile.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct SurfaceGate {
     /// Lattice nodes read.
     pub nodes: usize,
     /// The largest `|runtime - bake|` before quantisation and with `L` quantised to steps of `QUANT_STEP_M`, over the nodes.
     pub max_unquantised_m: f64,
     pub max_quantised_m: f64,
+    /// Nodes over 0.25 m after quantisation, at most 4,096 of them: the window coordinates (cell-index space) and the difference.
+    pub failing: Vec<(f64, f64, f64)>,
+    /// The two other ways of reading the surface at a node, against the bake's `C1(z)`, with `L` quantised: `B` plus the unclamped Catmull-Rom read of `L` (largest difference), and the clamped read of
+    /// the composed `B + L` at the four cells around the point (largest difference).
+    pub max_unclamped_l_quantised_m: f64,
+    pub max_compose_quantised_m: f64,
+    /// The largest overshoot of the unclamped read of `L` beyond its clamped read at the nodes.
+    pub max_l_overshoot_m: f64,
     /// The 50th and 99th percentile of the quantised difference over the nodes, and the number of nodes over the quantised bound of A3 (0.25 m).
     pub p50_quantised_m: f64,
     pub p99_quantised_m: f64,
@@ -234,6 +251,16 @@ pub struct SurfaceGate {
     /// The same at the centres of the core's cells (where the C1 read returns the stored value).
     pub max_centres_unquantised_m: f64,
     pub max_centres_quantised_m: f64,
+}
+
+/// The Catmull-Rom read of `v` at `(x, y)` without the clamp to the four cells (linear in `v`).
+fn read_c1_unclamped(v: &[f64], w: usize, x: f64, y: f64) -> f64 {
+    let (i, j) = ((x as usize).min(w - 2), (y as usize).min(w - 2));
+    let (fx, fy) = (x - i as f64, y - j as f64);
+    let at = |a: i64, b: i64| v[b.clamp(0, w as i64 - 1) as usize * w + a.clamp(0, w as i64 - 1) as usize];
+    let (ii, jj) = (i as i64, j as i64);
+    let row = |dj: i64| catmull_rom([at(ii - 1, jj + dj), at(ii, jj + dj), at(ii + 1, jj + dj), at(ii + 2, jj + dj)], fx);
+    catmull_rom([row(-1), row(0), row(1), row(2)], fy)
 }
 
 /// A C1 read of the window field `v` (`w x w`, centres at the integer coordinates) at `(x, y)`, with the clamp of [`RegionField`].
@@ -248,7 +275,7 @@ fn read_c1(v: &[f64], w: usize, x: f64, y: f64) -> f64 {
     r.clamp(around.iter().copied().fold(f64::INFINITY, f64::min), around.iter().copied().fold(f64::NEG_INFINITY, f64::max))
 }
 
-/// G-SURF on a tile: the runtime's surface `B + C1(L)` against the bake's `C1(z)` at the lattice nodes (every `lattice_step` local cells, at the corner `lattice_step / 2` cells past a multiple: the centre of a lattice cell) inside the core, two cells in from its
+/// G-SURF on a tile: the runtime's surface `B + C1(L)` against the bake's `C1(z)` at the lattice nodes (the vertices of the store lattice, every `lattice_step` local cells) inside the core, two cells in from its
 /// edge (the read needs its neighbours), with `L = z - B` as stored (quantised to `QUANT_STEP_M`) and unquantised; and at the centres of the same region's cells.
 pub fn surface_gate(g: &TileGrid, id: TileId, base: &(dyn Fn(Vec3) -> f64 + Sync), r: &K7Result, lattice_step: usize) -> SurfaceGate {
     let (w, t, h) = (g.window(), g.tile as i64, g.halo as i64);
@@ -258,8 +285,9 @@ pub fn surface_gate(g: &TileGrid, id: TileId, base: &(dyn Fn(Vec3) -> f64 + Sync
     let lq: Vec<f64> = l.iter().map(|v| (libm::round(v / step).clamp(f64::from(i16::MIN), f64::from(i16::MAX))) * step).collect();
     let mut out = SurfaceGate::default();
     let mut diffs: Vec<f64> = Vec::new();
-    // Nodes: the centres of the lattice's cells, at the corner E = lattice_step * a + lattice_step / 2 of the local cells; the node is at the cell-index coordinate E - 0.5.
-    let half = lattice_step as f64 / 2.0;
+    let zq: Vec<f64> = r.b.iter().zip(&lq).map(|(b, l)| b + l).collect();
+    // The store lattice is vertex-based: vertex k lies at the local edge coordinate E = lattice_step * k (cell-index coordinate E - 0.5).
+    let half = 0.0;
     let (lo, hi) = (h + 2, h + t - 3);
     let n = g.cells as f64;
     let e_first = (((i0 + lo) as f64 - half) / lattice_step as f64).ceil() as i64;
@@ -279,21 +307,30 @@ pub fn surface_gate(g: &TileGrid, id: TileId, base: &(dyn Fn(Vec3) -> f64 + Sync
             let dq = libm::fabs(b_node + read_c1(&lq, w, x, y) - bake);
             out.max_quantised_m = out.max_quantised_m.max(dq);
             diffs.push(dq);
+            if dq > f64::from(QUANT_STEP_M) && out.failing.len() < 4096 {
+                out.failing.push((x, y, dq));
+            }
+            out.max_unclamped_l_quantised_m =
+                out.max_unclamped_l_quantised_m.max(libm::fabs(b_node + read_c1_unclamped(&lq, w, x, y) - bake));
+            out.max_compose_quantised_m = out.max_compose_quantised_m.max(libm::fabs(read_c1(&zq, w, x, y) - bake));
+            out.max_l_overshoot_m = out.max_l_overshoot_m.max(libm::fabs(read_c1_unclamped(&lq, w, x, y) - read_c1(&lq, w, x, y)));
         }
     }
     diffs.sort_by(|a, b| a.total_cmp(b));
     if !diffs.is_empty() {
         out.p50_quantised_m = diffs[diffs.len() / 2];
         out.p99_quantised_m = diffs[(diffs.len() - 1) * 99 / 100];
-        out.over_bound = diffs.iter().filter(|d| **d > 0.25).count();
+        out.over_bound = diffs.iter().filter(|d| **d > f64::from(QUANT_STEP_M)).count();
     }
     for j in lo..=hi {
         for i in lo..=hi {
             let c = j as usize * w + i as usize;
-            out.max_centres_unquantised_m = out.max_centres_unquantised_m.max(libm::fabs(r.b[c] + l[c] - r.z[c]));
-            out.max_centres_quantised_m = out.max_centres_quantised_m.max(libm::fabs(r.b[c] + lq[c] - r.z[c]));
+            // The C1 reads at a centre (the coordinates are the integer cell indices): the stored value comes back.
+            let (x, y) = (i as f64, j as f64);
+            let bake = read_c1(&r.z, w, x, y);
+            out.max_centres_unquantised_m = out.max_centres_unquantised_m.max(libm::fabs(r.b[c] + read_c1(&l, w, x, y) - bake));
+            out.max_centres_quantised_m = out.max_centres_quantised_m.max(libm::fabs(r.b[c] + read_c1(&lq, w, x, y) - bake));
         }
     }
-    let _ = direction_to_face;
     out
 }
