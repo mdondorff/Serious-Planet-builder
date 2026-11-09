@@ -227,9 +227,13 @@ fn the_numbers_of_every_stage_keep_their_invariants() {
     let st = &r.hydro.stats;
     assert!(st.channel_cells > 0 && st.channel_cells < g.len() && st.segments > 0, "{st:?}");
     assert!(st.basin_cells >= st.basins, "a basin has at least a cell: {st:?}");
-    // The sediment pass ends no lower on land than it started by more than it eroded.
-    let lowered: f64 = r.z_final.iter().zip(&r.z_rounds).filter(|(_, _)| true).map(|(f, s)| (s - f).max(0.0)).sum();
-    assert!(lowered.is_finite());
+    // The height volume the deposition adds equals what it reports as deposited (the heights moved by what the sweep reports).
+    assert!(
+        (s.deposit_height_volume_m3 - d.deposited).abs() <= 1e-9 * d.deposited.abs().max(1.0),
+        "{} against {}",
+        s.deposit_height_volume_m3,
+        d.deposited
+    );
 }
 
 // spec: TEST-104
