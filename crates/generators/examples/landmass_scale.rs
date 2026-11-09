@@ -26,11 +26,10 @@ fn pit_report(
     hy: Option<&planet_generators::bake::hydro::Hydro>,
     pre: Option<&[bool]>,
 ) -> Vec<bool> {
-    use planet_generators::bake::flood::priority_flood;
     use planet_generators::bake::hydro::BasinClass;
     use planet_generators::bake::sediment::outlets;
     let outl = outlets(grid, z, q.sea_level);
-    let filled = priority_flood(grid, z, &outl, q.carve.epsilon);
+    let filled = priority_flood_with(grid, z, &outl, q.carve.epsilon, true);
     let pit: Vec<bool> = (0..z.len()).map(|p| z[p] > q.sea_level && !outl[p] && filled[p] - z[p] >= q.pit_min_m).collect();
     let land = (0..z.len()).filter(|&p| z[p] > q.sea_level && !outl[p]).count();
     let mut depth: Vec<f64> = (0..z.len()).filter(|&p| pit[p]).map(|p| filled[p] - z[p]).collect();
