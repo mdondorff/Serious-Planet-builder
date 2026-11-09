@@ -1304,3 +1304,14 @@ Source: planner inbox #65 (2026-11-05), ground-channels-2b, VIEW-062, GEN-119
 #### Scenario: The option
 - **WHEN** `--channels on` is given without `--erosion on`, with a bad value, with a layer whose folder holds no drainage area, and with the areas copied beside the tiles
 - **THEN** the first two are refused naming the option, the third naming the folder, and the last opens with the note in the log and the title, the field's version word changed, its heights those of the layer, and the tile builder handed the channels
+
+### Requirement: VIEW-067 The level-1 preview is drawn as an overlay
+The viewer and the editor SHALL draw the trunk rivers and the watersheds of the level-1 preview as an overlay over the surface, marked as a preview, replaced when a newer preview is accepted and removed when the edit is committed or undone.
+
+Verify: C
+Status: planned
+Source: Architect order 2026-11-09 (inbox #95), A3 11.1
+
+#### Scenario: The overlay
+- **WHEN** a stamp is dragged over a divide
+- **THEN** the overlay shows the changed trunk rivers and watersheds marked as a preview, and a later preview replaces it

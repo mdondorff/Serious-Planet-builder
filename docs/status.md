@@ -20,14 +20,14 @@ Dormant (no near trigger; not asked now):
 - **Global authoring preview** (owner, 2026-10-31): a coarse whole-planet preview of relief and landforms from the inputs, before the bake, as the step before detailed editing; not runtime. SPIKE-69 rates its k-sources for this. Trigger: after M9's bake, or when SPIKE-69 shows a pre-bake source.
 - **Coarse-first refinement of an edit** (owner, 2026-10-20): parked. Trigger: a brush case of the edit-latency scene that misses its budget.
 
-## Queue (2026-11-05 evening)
+## Queue (2026-11-09)
 | # | Step | Lane |
 |---|---|---|
-| NR | Real-GPU window checks NOT RUN on a locked desktop (TEST-073) | crusader |
-| Prototype | `docs/briefings/terrain-prototype.md`: items 14, 9, 11, 10 | explorer |
+| NR | One `test gpu --real` in the unlocked-display window (TEST-073), after the k=4 run | crusader |
+| Prototype | `docs/briefings/terrain-prototype.md`: k=4 phase plan (GEN-158), items 9, 10, 11, 14 | explorer |
 | Prototype checks | ADR review pass; independent gate measurement; second region and seed | spikes |
-| Ground | Disk guardrails (BUILD-038/039); runtime items after the hydrology and local pass are on main; #1137 waits for the owner | crusader |
-| Perf | Machine ready again (preflight OK 2026-11-07, parallel 74-76k us of 112k): REND-052 verdicts, ground-detail cost, channel-read cost; no store opens on main since GLOBAL_VERSION 9: a current store first (MESH_VERSION 11) | planner |
+| Prototype 16 | Preview level 1 (#1270 merged); TEST-099 latency waits for a perf authorisation; item 15 waits for item 11; #1137 waits for the owner | crusader |
+| Perf | Machine ready again (preflight OK 2026-11-07, parallel 74-76k us of 112k): REND-052 verdicts, ground-detail cost, channel-read cost; no store opens on main since GLOBAL_VERSION 9: a current store first (MESH_VERSION 11) | bulldozer |
 | Store | All stores on disk refused by keys since #1218/#1225 (read-only references); in-memory `--world` runs only until a new store | all |
 
 ## Tracked
@@ -35,6 +35,7 @@ Dormant (no near trigger; not asked now):
 - **Flaky stream smoke** (`oracle_stream_smoke`, main after #1229): `load_running_max` 1, at least 2 expected, once on Windows WARP; re-run passed. A concurrency assertion on a loaded runner; tighten its precondition, never weaken.
 - **Fill depth across a mountain cube edge** (keep-pits-seams, #1201): the seam gate passed on a tile seam; no mountain cube edge was in the stored faces. Blocks the planet bake (I6); run with the integrated-preview re-run.
 - **`test fast` 220-330 s** (BUILD-014, #1202, 2026-11-05): loaded machine; re-measure after the Saturday restart.
+- **`planet-cache` class_source_store timeout under load** (2026-11-09, crusader's `change/preview-level-1`): `class_source_store::the_class_source_is_part_of_every_key_and_the_legacy_keys_are_untouched` exceeds the 180 s limit inside a full `test fast` run (twice, loaded machine; planet-cache and planet-frame tests 110-130 s); alone it passes in 23 s. Neighbour of BUILD-014; its fix is a separate item (architect, 2026-11-09).
 - **Ocean square at orbit** (owner, viewer main 2fdfeb23 over m9r2, 2026-11-03): at 12,767 km over 20 N 30 E after 240 s of flight, a light square in a ring of dark blotches on the sea; not reproduced headless. Hypotheses: the clipmap shadow on water (sea-floor receivers; `--no-shadow-march`, J view), the water-node cut or the never-evicted WaterBook, the shadow's temporal history. Needs the owner's F9 bundle; replay with `cargo xtask repro`.
 - **CI jobs** (BUILD-014, 2026-11-03 after #1133, #1134, #1138): every job under 16 min (A+B parts 10.7-13.6, C build 3.5 + parts 7.8-10.2, Linux 7-9); `gpu_stills` march test keeps its declared 450 s limit; lift under ~200 s.
 - **Reserve test result** (BUDG-012, loaded, 3 rounds, 2026-11-01): dive, look-1m, look-2km, teleport-2km pass; teleport-1m fails by +1 % (frame median 16.75 against 16.60 ms; the spin runs 5-18 % over its 6-9 ms target). Frame p99 over 20 ms includes the spin by construction. A quiet window decides the absolute rows.

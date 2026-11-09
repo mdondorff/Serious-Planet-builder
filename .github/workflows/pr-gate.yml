@@ -6,6 +6,8 @@ name: pr-gate
 # --json name,state`) and check that main has not moved.
 on:
   pull_request:
+    # `edited`: a body that gains the verifier line re-runs the check.
+    types: [opened, synchronize, reopened, edited, ready_for_review]
   workflow_dispatch:
 
 permissions:
@@ -17,7 +19,21 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: print the commits
         run: |
           echo "head: ${{ github.event.pull_request.head.sha || github.sha }}"
           echo "base:  ${{ github.event.pull_request.base.sha || 'n/a (manual run)' }}"
+      - uses: dtolnay/rust-toolchain@stable
+        if: github.event_name == 'pull_request'
+      - uses: Swatinem/rust-cache@v2
+        if: github.event_name == 'pull_request'
+      # BUILD-044: a PR with code in it names the commit the verifier passed. The body goes in through the environment, never a command line.
+      - name: verifier line (BUILD-044)
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: cargo run -q -p xtask -- pr-body-check

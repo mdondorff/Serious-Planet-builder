@@ -1,0 +1,1 @@
+- 2026-11-09 class-source-test-slots: the class_source_store tests take 4 nextest slots each, the 180 s limit and the test bodies unchanged (BUILD-045)

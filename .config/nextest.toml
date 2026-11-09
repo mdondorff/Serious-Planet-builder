@@ -99,6 +99,15 @@ or test(every_standard_view_of_the_default_world_stays_within_its_own_pinned_cou
 '''
 priority = 50
 
+# The class-source store tests take slots in proportion to their work (BUILD-045; the architect's order, 2026-11-09). `planet-cache::it class_source_store::the_class_source_is_part_of_every_key_and_the_legacy_keys_are_untouched`
+# builds a class source to compute keys: 23 s alone, 28 s with its four siblings (12 to 28 s each), 159.2 s in a full `cargo xtask test fast` at 10:20Z, and cut off at the 180 s
+# limit in three full runs on 2026-11-09 (180.1 s at 11:12, 11:17 and 11:23, a quiet machine) while the other class-source tests of that run took 110 to 130 s: a full run starts up to 20
+# test processes, each with a parallel class-source build, and the keys test waits for cores. Every test of the binary section takes 4 of the slots, so at most 5 of them run at once
+# and the build tests do not all start beside the key test. The slow-timeout stays 180 s and no test body is changed; no test is skipped or retried.
+[[profile.default.overrides]]
+filter = 'package(=planet-cache) and binary(it) and test(/^class_source_store::/)'
+threads-required = 4
+
 # The relief-band gate of the class source (TEST-082; `oracle_world_preview::seeds_1_to_5_pass_the_relief_bands_of_spike_93_in_the_gate_form`) computes six
 # whole-planet previews of 1,440 x 720 pixels, 8 threads each, about 117 CPU-seconds (15.5 us a pixel: the class source 8 us, the global stage 4 us; the
 # same per-sample cost on main and on round 3). It is a whole-planet gate that holds every core; WARP, the CPU rasteriser of the Windows runner, shares those cores: beside it the gate took 169 s and starved
