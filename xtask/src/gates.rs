@@ -141,7 +141,9 @@ pub fn ledger_errors_in(root: &Path) -> Vec<String> {
         Ok(x) => x,
         Err(e) => return vec![e],
     };
-    let git = capture(root, "git", &["rev-parse", "--git-dir"]).is_ok();
+    // A shallow checkout (a CI part that does not read history) cannot resolve old commits: they are not checked there.
+    let shallow = capture(root, "git", &["rev-parse", "--is-shallow-repository"]).is_ok_and(|s| s.trim() == "true");
+    let git = capture(root, "git", &["rev-parse", "--git-dir"]).is_ok() && !shallow;
     let resolves = |c: &str| !git || (c.len() >= 7 && capture(root, "git", &["cat-file", "-e", &format!("{c}^{{commit}}")]).is_ok());
     ledger_errors(&keys, &rows, &bad, &resolves)
 }
