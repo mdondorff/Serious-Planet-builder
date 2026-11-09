@@ -2,7 +2,7 @@
 //! refined by `k` (k = 4 is the erosion grid, 12,288 cells, 814 m): the base is sampled only in the fine cells whose coarse parent is in the coarse landmass or within a ring of it, the fine land is the cells
 //! above the sea connected to the region's centre, its coast ring the outlets, and the landmass is a compact grid (`Grid::compact_cube`: only its cells, indexed by rank). Then 4 rounds of 5 steps on
 //! the resident route, with the process's peak working set after each phase (PowerShell, Windows).
-//! Usage: landmass_scale [k] [threads] [h1|part|both|sed|sedround|thdiag]: `part` routes each round with the partitioned route on the compact grid (GEN-149, tiles of 256 cells; `both` also runs the resident rounds and compares the bits, small k only); with `h1` the hydrology pass follows (runoff of the orographic climate, weighted route, filled surface, H1) with the peak after it. Needs `target/landmass_base_3072.f32` (made by `landmass_region`).
+//! Usage: landmass_scale [k] [threads] [h1|part|both|sed|sedround|thdiag|dump]: `part` routes each round with the partitioned route on the compact grid (GEN-149, tiles of 256 cells; `both` also runs the resident rounds and compares the bits, small k only); with `h1` the hydrology pass follows (runoff of the orographic climate, weighted route, filled surface, H1) with the peak after it. Needs `target/landmass_base_3072.f32` (made by `landmass_region`).
 #![allow(clippy::needless_range_loop, clippy::chunks_exact_to_as_chunks)]
 use planet_core::{Face, Vec3};
 use planet_generators::bake::carve::CarveParams;
@@ -229,7 +229,7 @@ fn main() {
     );
 
     // ---- the rounds, resident
-    let z_start = if a.get(3).is_some_and(|x| x == "sed" || x == "sedround") { z.clone() } else { Vec::new() };
+    let z_start = if a.get(3).is_some_and(|x| x == "sed" || x == "sedround" || x == "dump") { z.clone() } else { Vec::new() };
     let p = CarveParams { steps: 20, reroute_every: 5, round_rules: RoundRules::ROUND, ..CarveParams::default() };
     let t = Instant::now();
     let mode = a.get(3).map_or("", |x| x.as_str());
@@ -426,7 +426,7 @@ fn main() {
         let (peak, now) = memory_mb();
         println!("memory after the sediment steps: peak {peak:.0} MiB, now {now:.0} MiB");
     }
-    if a.get(3).is_some_and(|x| x == "h1") {
+    if a.get(3).is_some_and(|x| x == "h1" || x == "dump") {
         let o = inputs.orography();
         let mut weight = vec![1.0f32; active];
         let mut runoff = vec![0.0f32; active];
@@ -464,6 +464,74 @@ fn main() {
         println!("H1: {:.1} s; {:?}", t.elapsed().as_secs_f64(), hy.stats);
         let (peak, now) = memory_mb();
         println!("memory after H1: peak {peak:.0} MiB, now {now:.0} MiB; bytes a cell at the peak {:.0}", peak * 1048576.0 / active as f64);
+        if a.get(3).is_some_and(|x| x == "dump") {
+            // GEN: G-STORE (STRM-078): the raw state of the build, for `cache/examples/store_measure`, which encodes it as store records.
+            use std::io::Write;
+            let dir = format!("target/store_dump_k{k}");
+            std::fs::create_dir_all(&dir).expect("the dump directory");
+            let w = |name: &str, bytes: Vec<u8>| {
+                std::fs::File::create(format!("{dir}/{name}")).and_then(|mut f| f.write_all(&bytes)).expect("a dump file");
+            };
+            let f32s = |v: &[f64]| v.iter().flat_map(|x| (*x as f32).to_le_bytes()).collect::<Vec<u8>>();
+            w(
+                "meta.txt",
+                format!(
+                    "k {k}
+cells {active}
+face_cells {n}
+"
+                )
+                .into_bytes(),
+            );
+            w("heights_r4.f32", f32s(&z));
+            w("heights_r0.f32", f32s(&z_start));
+            for r in 1..4usize {
+                let mut zr = z_start.clone();
+                solve_rounds(&grid, &mut zr, &outlet, &CarveParams { steps: 5 * r, ..p }, r, &threads, seed);
+                w(&format!("heights_r{r}.f32"), f32s(&zr));
+            }
+            w("receiver.u32", routing.receiver.iter().flat_map(|x| x.to_le_bytes()).collect());
+            w("area.f32", f32s(&routing.area));
+            w("filled.f32", f32s(&filled));
+            w("cube_id.u32", (0..z.len()).flat_map(|p| (grid.cube_id_of(p) as u32).to_le_bytes()).collect());
+            w("land.u8", z.iter().map(|&h| u8::from(h > 0.0)).collect());
+            let mut seg = Vec::new();
+            for sg in &hy.segments {
+                seg.extend(sg.id.to_le_bytes());
+                for v in [sg.up, sg.down, sg.cells] {
+                    seg.extend(v.to_le_bytes());
+                }
+                seg.extend(sg.q_up.to_bits().to_le_bytes());
+                seg.extend(sg.q_down.to_bits().to_le_bytes());
+                seg.extend(sg.downstream.to_le_bytes());
+            }
+            w("segments.bin", seg);
+            let mut bas = Vec::new();
+            for b in &hy.basins {
+                bas.extend(b.id.to_le_bytes());
+                bas.extend(b.floor_cell.to_le_bytes());
+                bas.extend(b.floor_m.to_bits().to_le_bytes());
+                bas.extend(b.spill_cell.to_le_bytes());
+                bas.extend(b.spill_m.to_bits().to_le_bytes());
+                bas.extend(b.cells.to_le_bytes());
+                for v in b.area_m2.iter().chain(&b.volume_m3) {
+                    bas.extend(v.to_bits().to_le_bytes());
+                }
+                bas.extend(b.q_in.to_bits().to_le_bytes());
+                bas.push(b.class as u8);
+                bas.push(u8::from(b.overflows));
+                bas.extend(b.water_level_m.to_bits().to_le_bytes());
+                bas.extend(b.q_out.to_bits().to_le_bytes());
+            }
+            w("basins.bin", bas);
+            let mut bits = vec![0u8; hy.channel.len().div_ceil(8)];
+            for (i, &c) in hy.channel.iter().enumerate() {
+                bits[i >> 3] |= u8::from(c) << (i & 7);
+            }
+            w("channel.bits", bits);
+            w("label.u32", hy.label.iter().flat_map(|x| x.to_le_bytes()).collect());
+            println!("dump written to {dir}: {} segments, {} basins", hy.segments.len(), hy.basins.len());
+        }
     }
     let mut dz: Vec<f64> = region.iter().map(|&(p, z0)| z[p] - z0).collect();
     dz.sort_by(|a, b| a.total_cmp(b));
