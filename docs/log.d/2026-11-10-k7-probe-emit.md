@@ -1,0 +1,1 @@
+- 2026-11-10 k7-probe-emit: the stage probe's K7 hook, one read-only emit at the end of k7_tile; hash-identical on and off (GEN-161)

@@ -128,3 +128,35 @@ fn the_memoised_rounds_give_the_same_bits_reports_and_work_with_the_probe_on_and
     assert_eq!((&off.0, &off.1), (&on.0, &on.1), "the memoised rounds are the same with the probe on");
     assert_eq!((off.2, on.2), (0, 4), "two rounds, two fields each, only with the probe");
 }
+
+// spec: GEN-161
+// spec: BUILD-046
+#[test]
+fn the_k7_stage_writes_its_sheet_and_the_tile_is_bit_identical_with_the_probe_on_and_off() {
+    use planet_core::{Face, Vec3};
+    use planet_generators::bake::k7::{k7_tile, K7Params};
+    use planet_generators::bake::tile::{TileGrid, TileId};
+    let g = TileGrid { cells: 384, tile: 48, halo: 8, radius_m: 100.0 * 384.0 * 2.0 / core::f64::consts::PI };
+    let id = TileId { face: Face(1), ti: 3, tj: 4 };
+    // A smooth slope in the direction: a height of the direction only (no cell coordinates).
+    let base = |d: Vec3| 400.0 - 30.0 * d.x + 20.0 * d.y * d.y;
+    let regional = |_: Vec3| 0.0;
+    let p = K7Params::standard(5, 0.0);
+    let bits = |r: &planet_generators::bake::k7::K7Result| {
+        (r.z.iter().map(|v| v.to_bits()).collect::<Vec<_>>(), r.change.iter().map(|v| v.to_bits()).collect::<Vec<_>>())
+    };
+    let off = bits(&k7_tile(&g, id, &base, &regional, &[], &p, 2));
+
+    let dir = std::env::temp_dir().join(format!("planet-stage-probe-k7-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let probe = Arc::new(SheetProbe::new(&dir, 2_000));
+    let on = {
+        let _sink = Installed::new(probe.clone());
+        bits(&k7_tile(&g, id, &base, &regional, &[], &p, 2))
+    };
+    assert_eq!(off, on, "the K7 tile is the same bits with the probe on");
+    assert!(dir.join("k7-z.png").exists(), "the K7 height sheet is written");
+    let log = std::fs::read_to_string(probe.log_path()).unwrap();
+    assert!(log.contains("k7") && log.contains("pits_after_pass"), "{log}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
