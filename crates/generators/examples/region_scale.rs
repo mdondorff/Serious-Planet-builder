@@ -62,8 +62,10 @@ fn main() {
     let run = Instant::now();
     let stages = std::env::var("PLANET_STAGES").map_or(true, |v| v != "0");
     if stages {
+        // One bin a cell (1 cell a pixel) at the window: the sheets are not committed, so the probe's bound is the window's cell count (item 13); the library's own bound is the caller's argument and is not changed.
+        let bins = (region.1 - region.0 + 1 + 2 * margin) * (region.3 - region.2 + 1 + 2 * margin);
         let dir = format!("target/review/stages/region-s{seed}-f{face}-i{}-j{}", region.0, region.2);
-        probe::install(Arc::new(SheetProbe::new(&dir, 20_000)));
+        probe::install(Arc::new(SheetProbe::new(&dir, bins)));
         println!("stage probe ON: sheets and numbers in {dir}/ (its cost is inside the times below; PLANET_STAGES=0 switches it off)");
     }
     let (i0, i1) = (region.0.saturating_sub(margin), (region.1 + margin).min(CELLS - 1));
@@ -308,7 +310,7 @@ fn h1(
         hy.stats.artefacts,
         hy.stats.ramps
     );
-    land_and_sediment(grid, z, &filled, outlet, z0, &hy, region, stream, threads);
+    land_and_sediment(grid, z, &filled, outlet, z0, &hy, region, spec.seed, threads);
 }
 
 /// The plains block (item 13): over the land cells of the region proper, on the carved surface `z` and its canonical filled surface.
@@ -368,7 +370,7 @@ fn land_and_sediment(
     z0: &[f64],
     hy: &planet_generators::bake::hydro::Hydro,
     region: (usize, usize, usize, usize),
-    stream: u64,
+    seed: u64,
     threads: usize,
 ) {
     let w = grid.w();
@@ -402,7 +404,7 @@ fn land_and_sediment(
         hy.stats.ramps,
         100.0 * unclassified as f64 / land.max(1) as f64
     );
-    let mut q2 = Pass2Params::standard(stream, 0.0);
+    let mut q2 = Pass2Params::standard(seed, 0.0);
     q2.carve.breach_max_m = CarveParams::default().breach_max_m;
     let mut zs = z.to_vec();
     let t = Instant::now();

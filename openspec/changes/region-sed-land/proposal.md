@@ -4,6 +4,7 @@ Architect 2026-11-10 (#1295 verdict point 2): G-SED and G-LAND on R3a and R3b; G
 
 ## What
 - `region_scale` prints a G-LAND line (pit cells of the window = cells in kept basins + unclassified; the unclassified are artefacts and ramps; their share of the region's land against the 1 % rule) and a G-SED line (the sediment pass on a copy of the carved surface: eroded = deposited + exported, the heights' volume against deposited, thermal and pit spreading volume change, pits after each step).
+- The probe takes one bin a cell (the window's cell count) so the sheets are 1 cell a pixel (architect, #1295 point 3); the library bound is untouched, the example passes it. The Pass2 seed is the world seed, as production.
 - No requirement text, no library code, no test: an example is a measurement tool.
 
 ## Not in this change
