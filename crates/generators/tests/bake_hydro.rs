@@ -3,7 +3,7 @@
 
 #![allow(clippy::needless_range_loop)]
 use planet_generators::bake::flood::priority_flood_with;
-use planet_generators::bake::hydro::{basin_id, hydrology, segment_id, verify, BasinClass, HydroParams};
+use planet_generators::bake::hydro::{basin_id, hydrology, segment_id, verify, BasinClass, HydroParams, QUnit};
 use planet_generators::bake::route::{route_rules, RoundRules, NONE};
 use planet_generators::bake::Grid;
 
@@ -49,6 +49,8 @@ fn the_channel_graph_is_connected_downhill_and_conserves_discharge() {
             let filled = priority_flood_with(&g, &z, &outlet, EPS, true);
             let params = small_t(&g);
             let h = hydrology(&g, &z, &filled, &routing, &outlet, rr, None, &params);
+            // spec: GEN-165: Q is a discharge exactly when H1 got the runoff, an area otherwise.
+            assert_eq!(h.q_unit, if with_runoff { QUnit::Discharge } else { QUnit::Area });
             let v = verify(&g, &h, &routing, &filled, &outlet, rr, None);
             let ctx = format!("terraced {terraced}, runoff {with_runoff}");
             assert!(h.stats.segments > 3 && h.stats.confluences > 0 && h.stats.heads > 3, "a river network ({ctx}): {:?}", h.stats);

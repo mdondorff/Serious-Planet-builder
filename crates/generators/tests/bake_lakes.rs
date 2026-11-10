@@ -221,6 +221,7 @@ fn the_result_does_not_depend_on_the_order_of_the_basins() {
 
 fn clone_hydro(h: &Hydro) -> Hydro {
     Hydro {
+        q_unit: h.q_unit,
         q: h.q.clone(),
         qw: h.qw.clone(),
         channel: h.channel.clone(),
