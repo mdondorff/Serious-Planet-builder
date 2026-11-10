@@ -775,3 +775,14 @@ Source: Architect 2026-11-10 (briefing item 18: advisory reviewer agent and shee
 #### Scenario: The size check
 - **WHEN** a sheet is one byte over the per-sheet limit, or the sheets of one gate total over the per-gate limit, or all are at or under their limits
 - **THEN** the first two fail naming the file or gate, its size and the limit, and the third passes
+
+### Requirement: BUILD-049 The tests over 60 s on the Windows runner run one at a time
+On Windows the nextest profile SHALL put the `gpu_all` tests that took over 60 s in the Windows CI runner's `C` shards into the `warp-heavy` group (at most one at a time), with the heavy tests that group already holds: the two lit and look smokes of `gpu_stream_perf`, `gpu_stills` (one pose by name), `gpu_still_flicker` (streaming settle), `gpu_ground_look` (hills march shadow), `gpu_indirect`, `gpu_overlay` (inspection images) and `gpu_steep_terrain`. It SHALL NOT change a slow-timeout, a test body, a skip or a retry.
+
+Verify: A
+Status: active
+Source: Architect 2026-11-10 (decision D2: the `look-2km` smoke took 248 s beside nine heavy tests in CI run 42780685812, `C 1/4`), BUILD-003, BUILD-045
+
+#### Scenario: The override
+- **WHEN** `.config/nextest.toml` is read
+- **THEN** one override with `platform = 'cfg(windows)'` names those tests, sets `test-group = "warp-heavy"` and sets no slow-timeout

@@ -180,6 +180,28 @@ test-group = "real-gpu-heavy"
 filter = 'binary(gpu_all) and (test(a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_changes_under_it) or test(/^gpu_window::/) or test(a_lit_view_a_lit_flight_and_a_stream_scene_log_their_cpu_calibration_when_asked_even_in_a_smoke_run) or test(a_streaming_scene_on_the_lit_path_logs_beside_the_debug_path_under_its_own_name) or test(the_lit_coast_view_over_streamed_tiles_draws_the_same_pixels_still_and_after_a_small_turn_and_back) or test(the_draw_flag_selects_the_path_and_every_loop_draws_the_same_frame_on_either))'
 test-group = "warp-heavy"
 
+# The tests over 60 s on the Windows CI runner run one at a time (BUILD-049; architect's decision D2, 2026-11-10). In the failed attempt of CI run 42780685812 (Windows WARP
+# `C 1/4`, 57 tests, 611 s wall) `gpu_stream_perf::an_in_memory_run_is_labelled_not_the_production_source_...` (7 s alone) ran 248 s and was cut off at the 240 s run limit
+# beside `gpu_lit_stream_flicker` (298 s, `warp-heavy`), the lit scene smoke (179 s), `gpu_stills` (97 s), `gpu_still_flicker` (69 s), `gpu_ground_look` (193 s), the window gate (207 s),
+# `gpu_indirect` (90 s), `gpu_overlay` (77 s) and `gpu_steep_terrain` (88 s): each software rasteriser uses every core, and the five of these that sat in no heavy group ran freely (the rest
+# at most 2 at once, `heavy-window`). They join `warp-heavy` (one at a time) on Windows; no timeout, test body, skip or retry changes. The wall time of the four `C` shards before and after is in the
+# PR of the change (BUILD-049). The first matching override sets the group, so this one comes before `heavy-window`.
+[[profile.default.overrides]]
+platform = 'cfg(windows)'
+filter = '''
+binary(gpu_all) and (
+    test(an_in_memory_run_is_labelled_not_the_production_source_and_real_runs_refuse_without_a_store_and_on_software)
+    or test(the_lit_scene_runs_every_view_and_both_flights_with_a_pass_row_each_and_logs_the_metrics_in_smoke_mode)
+    or test(the_stills_scene_draws_one_pose_by_name_and_refuses_a_bad_call)
+    or test(a_still_camera_after_streaming_settles_draws_the_same_pixels_frame_after_frame)
+    or test(the_hills_cast_the_march_shadow_onto_the_ground_at_eye_level_and_from_above_at_ten_and_two_degrees_of_sun_and_match_the_adapters_goldens)
+    or test(the_indirect_path_draws_the_image_of_the_per_draw_loop)
+    or test(the_overlay_inspection_images_are_written_for_a_look)
+    or test(ten_scripted_views_on_steep_terrain_have_no_holes)
+)
+'''
+test-group = "warp-heavy"
+
 # The heavy software-adapter window and scene tests (the tracked tier-C timeouts: `gpu_window`, `gpu_water_coverage`, `gpu_stream_perf`,
 # `gpu_envelope_perf`) are CPU-bound (each software rasteriser uses every core) and their wall time swings 2 to 5 times with how many of them run
 # beside each other: the same sweep took 72 s in one job of one CI run and 215 s in the other (`TIMING` of #881 and #883, Windows WARP, 4 threads).
