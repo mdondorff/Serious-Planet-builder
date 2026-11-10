@@ -41,7 +41,7 @@ fn world() -> GlobalWorld {
 }
 
 fn spec() -> BasinSpec {
-    BasinSpec { hydro: HydroParams::default(), tile_cells: 256, tiles_per_edge: 48, base_id: 7 }
+    BasinSpec { hydro: HydroParams::default(), tile_cells: 256, tiles_per_edge: 48, base_id: 7, inputs_id: 11 }
 }
 
 fn store_of(dir: &Dir, w: &GlobalWorld, records: &[Record]) -> TileStore {
@@ -60,11 +60,11 @@ fn lake(id: u64, class: BasinClass, tiles: &[(u8, u32, u32)]) -> Lake {
         spill_id: id * 3 + 2,
         floor_m: 280.0 + id as f64,
         spill_m: 590.5,
-        level_m: 301.25 + id as f64 * 0.5,
+        level_m: if id % 2 == 1 { 301.25 + id as f64 * 0.5 } else { 280.0 + id as f64 },
         class,
         overflows: class == BasinClass::Lake,
         wet: id % 2 == 1,
-        area_m2: 2.304e7,
+        area_m2: if id % 2 == 1 { 2.304e7 } else { 0.0 },
         cells: 36 + id as u32,
         q_in: 1.5e-3 * id as f64,
         q_out: if class == BasinClass::Lake { 1.25e-3 } else { 0.0 },
@@ -128,6 +128,7 @@ fn a_table_of_another_spec_reads_as_absent_and_the_key_follows_every_input() {
         BasinSpec { tile_cells: 128, ..s },
         BasinSpec { tiles_per_edge: 96, ..s },
         BasinSpec { base_id: 8, ..s },
+        BasinSpec { inputs_id: 12, ..s },
     ];
     for c in &changed {
         assert_ne!(key(c), key(&s), "{c:?} is another key");
@@ -171,7 +172,20 @@ fn a_record_of_another_version_or_grid_or_a_damaged_one_is_refused_naming_what_w
     let first = 38; // the first lake in id order is id 7
     assert!(err(damaged(|p| p[first + 76] = 3)).contains("class code 3"));
     assert!(err(damaged(|p| p[first + 76] |= 0x10)).contains("flag bits"));
-    assert!(err(damaged(|p| p[first + 79 + 1..first + 79 + 5].copy_from_slice(&48u32.to_le_bytes()))).contains("outside the grid"));
+    assert!(err(damaged(|p| p[first + 81 + 1..first + 81 + 5].copy_from_slice(&48u32.to_le_bytes()))).contains("outside the grid"));
+    // A tile out of order (the first two tiles of lake 7 swapped), a face byte of 6, a level that is not a number, a dry lake with a level over its floor.
+    let m = err(damaged(|p| {
+        let t = first + 81;
+        let (a, b) = (p[t..t + 9].to_vec(), p[t + 9..t + 18].to_vec());
+        p[t..t + 9].copy_from_slice(&b);
+        p[t + 9..t + 18].copy_from_slice(&a);
+    }));
+    assert!(m.contains("out of order"), "{m}");
+    assert!(err(damaged(|p| p[first + 81] = 6)).contains("outside the grid"));
+    let m = err(damaged(|p| p[first + 40..first + 48].copy_from_slice(&f64::NAN.to_bits().to_le_bytes())));
+    assert!(m.contains("level is NaN") && m.contains("id 7"), "{m}");
+    let m = err(damaged(|p| p[first + 76] &= !8));
+    assert!(m.contains("it is dry but its level"), "{m}");
     // Lakes out of id order: the id of the first lake raised above the second's.
     assert!(err(damaged(|p| p[first..first + 8].copy_from_slice(&u64::MAX.to_le_bytes()))).contains("out of id order"));
 }
@@ -183,7 +197,7 @@ fn the_size_is_exact_and_a_lake_across_a_tile_border_lists_both_tiles() {
     let lakes = three();
     let tiles: usize = lakes.iter().map(|l| l.tiles.len()).sum();
     let r = basin_table_record(&w, RES, &s, Face(2), &lakes);
-    assert_eq!(r.payload.len(), 38 + lakes.len() * 79 + tiles * 9, "header + 79 bytes a lake + 9 bytes a tile");
+    assert_eq!(r.payload.len(), 38 + lakes.len() * 81 + tiles * 9, "header + 81 bytes a lake + 9 bytes a tile");
     assert_eq!(basin_table_record(&w, RES, &s, Face(2), &[]).payload.len(), 38);
     let d = Dir::new("border");
     let store = store_of(&d, &w, &[r]);
@@ -191,4 +205,28 @@ fn the_size_is_exact_and_a_lake_across_a_tile_border_lists_both_tiles() {
     let across = got.iter().find(|l| l.id == 7).unwrap();
     assert_eq!(across.tiles.len(), 4, "the lake of 2 x 2 tiles lists all four");
     assert!(across.tiles.windows(2).all(|p| p[0] < p[1]), "in tile order");
+}
+
+// spec: STRM-080, TEST-108
+#[test]
+fn the_encoder_refuses_what_the_decoder_would_and_a_lake_may_hold_more_than_65535_tiles() {
+    let (w, s) = (world(), spec());
+    let bad = |f: &dyn Fn(&mut Lake)| {
+        let mut l = lake(7, BasinClass::Lake, &[(2, 5, 6), (2, 5, 7)]);
+        f(&mut l);
+        std::panic::catch_unwind(|| basin_table_record(&world(), RES, &spec(), Face(2), &[l])).is_err()
+    };
+    assert!(bad(&|l| l.tiles = vec![TileRef { face: 0, ti: 1, tj: 1 }, TileRef { face: 0, ti: 0, tj: 0 }]), "tiles out of order");
+    assert!(bad(&|l| l.tiles = vec![TileRef { face: 0, ti: 48, tj: 0 }]), "a tile at tiles_per_edge");
+    assert!(bad(&|l| l.level_m = f64::INFINITY), "a level that is not finite");
+    assert!(bad(&|l| l.wet = false), "a dry lake with a level over its floor");
+    assert!(!bad(&|_| {}), "the unchanged lake is fine");
+    // A lake on a fine grid with 70,000 tiles: more than a 16-bit count holds.
+    let fine = BasinSpec { tiles_per_edge: 256, ..s };
+    let tiles: Vec<TileRef> = (0..70_000u32).map(|k| TileRef { face: (k / 65_536) as u8, ti: (k % 65_536) / 256, tj: k % 256 }).collect();
+    let mut big = lake(3, BasinClass::Lake, &[]);
+    big.tiles = tiles;
+    let d = Dir::new("big");
+    let store = store_of(&d, &w, &[basin_table_record(&w, RES, &fine, Face(0), std::slice::from_ref(&big))]);
+    assert_eq!(load_basin_table(&store, &w, RES, &fine, Face(0)).unwrap().unwrap(), vec![big]);
 }

@@ -6,7 +6,7 @@
 //! The key carries everything the bytes depend on (the table layout version, the producer version, the hydrology parameters, the tile grid, the identity of the base): a changed one is another key and the
 //! table reads as absent, never as wrong. The payload is
 //! `codec (u8) | table version (u32) | producer version (u32) | tile cells (u32) | tiles per edge (u32) | face (u8) | lakes (u32) | key (16) |` the lakes, each
-//! `id, floor id, spill id (u64) | floor, spill, level (f64) | q_in, q_out, area (f64) | cells (u32) | flags (u8: class in bits 0-1, overflows bit 2, wet bit 3) | tiles (u16) |` the tiles, each
+//! `id, floor id, spill id (u64) | floor, spill, level (f64) | q_in, q_out, area (f64) | cells (u32) | flags (u8: class in bits 0-1, overflows bit 2, wet bit 3) | tiles (u32) |` the tiles, each
 //! `face (u8) | ti (u32) | tj (u32)`, all little-endian. A decoder reserves no more than the bytes it was given allow.
 
 use planet_core::Face;
@@ -25,8 +25,8 @@ pub const BASIN_TABLE_VERSION: u32 = 1;
 const CODEC_VERSION: u8 = 1;
 const IMPLEMENTATION_ID: &str = "basin-table";
 const HEADER_LEN: usize = 1 + 4 + 4 + 4 + 4 + 1 + 4 + 16;
-/// The fixed part of a lake: three ids, six f64, the cells, the flags and the tile count.
-const LAKE_FIXED: usize = 8 * 3 + 8 * 6 + 4 + 1 + 2;
+/// The fixed part of a lake: three ids, six f64, the cells, the flags and the tile count (u32: a lake of a fine grid can hold more than 65,535 tiles).
+const LAKE_FIXED: usize = 8 * 3 + 8 * 6 + 4 + 1 + 4;
 const TILE_LEN: usize = 1 + 4 + 4;
 
 /// Why a stored table could not be used. Every message names the record and what was found.
@@ -49,13 +49,15 @@ pub struct BasinSpec {
     pub tiles_per_edge: u32,
     /// The identity of the base the surface was computed on (a changed base is another table).
     pub base_id: u64,
+    /// The identity of the other inputs of the hydrology that the parameters do not name: the climate (runoff and open-water evaporation), the mask of intentional basins and the routing rules.
+    pub inputs_id: u64,
 }
 
 impl BasinSpec {
     fn bytes(&self) -> Vec<u8> {
         let h = &self.hydro;
         assert!(h.initiation_m2.is_finite() && h.pit_min_m.is_finite() && h.min_depth_m.is_finite(), "the hydrology parameters are finite");
-        let mut b = Vec::with_capacity(72);
+        let mut b = Vec::with_capacity(80);
         b.extend(BASIN_TABLE_VERSION.to_le_bytes());
         b.extend(LAKES_VERSION.to_le_bytes());
         b.extend(planet_generators::bake::BAKE_KERNEL_VERSION.to_le_bytes());
@@ -67,6 +69,7 @@ impl BasinSpec {
         b.extend(self.tile_cells.to_le_bytes());
         b.extend(self.tiles_per_edge.to_le_bytes());
         b.extend(self.base_id.to_le_bytes());
+        b.extend(self.inputs_id.to_le_bytes());
         b
     }
 }
@@ -79,6 +82,29 @@ pub fn basin_key(world: &GlobalWorld, res: u32, spec: &BasinSpec, face: Face) ->
     cache_key(&inputs)
 }
 
+/// What is wrong with a lake as a record, if anything: the rules the decoder holds a stored lake to.
+fn lake_problem(l: &Lake, spec: &BasinSpec) -> Option<String> {
+    for (name, v) in
+        [("floor", l.floor_m), ("spill", l.spill_m), ("level", l.level_m), ("q_in", l.q_in), ("q_out", l.q_out), ("area", l.area_m2)]
+    {
+        if !v.is_finite() {
+            return Some(format!("its {name} is {v}, not a finite number"));
+        }
+    }
+    if !l.wet && (l.level_m != l.floor_m || l.area_m2 != 0.0) {
+        return Some(format!("it is dry but its level is {} over a floor of {} and its area {}", l.level_m, l.floor_m, l.area_m2));
+    }
+    for (k, t) in l.tiles.iter().enumerate() {
+        if t.face >= 6 || t.ti >= spec.tiles_per_edge || t.tj >= spec.tiles_per_edge {
+            return Some(format!("it lists tile {t:?} outside the grid of {} tiles a side", spec.tiles_per_edge));
+        }
+        if k > 0 && l.tiles[k - 1] >= *t {
+            return Some("it lists its tiles out of order or twice".into());
+        }
+    }
+    None
+}
+
 fn flags(l: &Lake) -> u8 {
     let class = match l.class {
         BasinClass::Lake => 0u8,
@@ -88,12 +114,16 @@ fn flags(l: &Lake) -> u8 {
     class | (u8::from(l.overflows) << 2) | (u8::from(l.wet) << 3)
 }
 
-/// The record of a face table: `lakes` in any order (the record is sorted by id). Panics on a duplicate id or a lake with more than 65,535 tiles (neither is a bake output).
+/// The record of a face table: `lakes` in any order (the record is sorted by id). Panics on what the decoder refuses and no bake produces: a duplicate id, a non-finite number, a dry lake with a level above the floor
+/// or an area, tiles that are not strictly sorted or lie outside the grid.
 pub fn basin_table_record(world: &GlobalWorld, res: u32, spec: &BasinSpec, face: Face, lakes: &[Lake]) -> Record {
     let key = basin_key(world, res, spec, face);
     let mut order: Vec<&Lake> = lakes.iter().collect();
     order.sort_unstable_by_key(|l| l.id);
     assert!(order.windows(2).all(|w| w[0].id != w[1].id), "a basin id appears once in a table");
+    for l in &order {
+        assert!(lake_problem(l, spec).is_none(), "lake {}: {}", l.id, lake_problem(l, spec).unwrap_or_default());
+    }
     let mut p = Vec::with_capacity(HEADER_LEN + order.len() * (LAKE_FIXED + TILE_LEN));
     p.push(CODEC_VERSION);
     p.extend(BASIN_TABLE_VERSION.to_le_bytes());
@@ -112,7 +142,7 @@ pub fn basin_table_record(world: &GlobalWorld, res: u32, spec: &BasinSpec, face:
         }
         p.extend(l.cells.to_le_bytes());
         p.push(flags(l));
-        let n = u16::try_from(l.tiles.len()).expect("a lake lists at most 65,535 tiles");
+        let n = u32::try_from(l.tiles.len()).expect("a lake lists at most 2^32 tiles");
         p.extend(n.to_le_bytes());
         for t in &l.tiles {
             p.push(t.face);
@@ -139,6 +169,7 @@ pub fn basin_table_records(
     lakes: &[Lake],
     face_of: &dyn Fn(&Lake) -> Face,
 ) -> Vec<Record> {
+    assert!(lakes.iter().all(|l| face_of(l).0 < 6), "every lake belongs to one of the six faces");
     (0..6u8)
         .map(|f| {
             let mine: Vec<Lake> = lakes.iter().filter(|l| face_of(l).0 == f).cloned().collect();
@@ -204,7 +235,7 @@ pub fn load_basin_table(
             return Err(what(format!("lake {k} is cut off")));
         }
         let b = &p[at..];
-        let flag = b[LAKE_FIXED - 3];
+        let flag = b[LAKE_FIXED - 5];
         let class = match flag & 3 {
             0 => BasinClass::Lake,
             1 => BasinClass::Endorheic,
@@ -214,7 +245,10 @@ pub fn load_basin_table(
         if flag >> 4 != 0 {
             return Err(what(format!("lake {k} has flag bits {flag:#x} this version does not know")));
         }
-        let n = u16::from_le_bytes(b[LAKE_FIXED - 2..LAKE_FIXED].try_into().expect("two bytes")) as usize;
+        let n = u32_at(b, LAKE_FIXED - 4) as usize;
+        if n > (p.len() - at - LAKE_FIXED) / TILE_LEN {
+            return Err(what(format!("lake {k} lists {n} tiles that are cut off")));
+        }
         let total = LAKE_FIXED + n * TILE_LEN;
         if at + total > p.len() {
             return Err(what(format!("lake {k} lists {n} tiles that are cut off")));
@@ -247,6 +281,9 @@ pub fn load_basin_table(
             wet: flag & 8 != 0,
             tiles,
         };
+        if let Some(why) = lake_problem(&l, spec) {
+            return Err(what(format!("lake {k} (id {}): {why}", l.id)));
+        }
         if lakes.last().is_some_and(|last| last.id >= l.id) {
             return Err(what(format!("lake {k} (id {}) is out of id order or repeated", l.id)));
         }
@@ -259,4 +296,4 @@ pub fn load_basin_table(
     Ok(Some(lakes))
 }
 
-const _: () = assert!(LAKE_FIXED == 8 * 3 + 8 * 6 + 4 + 1 + 2);
+const _: () = assert!(LAKE_FIXED == 81);

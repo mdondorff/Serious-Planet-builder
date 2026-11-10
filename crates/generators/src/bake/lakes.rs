@@ -280,7 +280,9 @@ fn produce(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &[f64], tile_of: Op
         .collect();
     let water = water_cells(grid, routing, hydro, z);
     if let Some(tile_of) = tile_of {
-        for (lake, tiles) in lakes.iter_mut().zip(water.tiles(tile_of)) {
+        let tiles = water.tiles(tile_of);
+        assert_eq!(lakes.len(), tiles.len(), "one tile list per basin, before the lakes are sorted");
+        for (lake, tiles) in lakes.iter_mut().zip(tiles) {
             lake.tiles = tiles;
         }
     }
