@@ -1,0 +1,1 @@
+- 2026-11-10 probe-hillshade: the sheet probe writes a scale-free hillshade of every height sheet (BUILD-046)

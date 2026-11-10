@@ -271,6 +271,50 @@ fn mix_word(mut x: u64) -> u64 {
     x ^ (x >> 31)
 }
 
+/// A hillshade of the bin means of a height sheet (`bw` by `bh` bins, `sum` and `count` as the sheet's own buffers): light from the north-east, the relief read against the sheet's own rms slope over land
+/// bins, so no scale or exaggeration is chosen; sea bins are one dark blue, bins without a cell one grey. It reads the sheet's buffers and allocates only the RGBA bytes of the image.
+fn shade_bytes(sum: &[f64], count: &[u32], bw: usize, bh: usize) -> Vec<u8> {
+    let mean = |x: usize, y: usize| -> Option<f64> {
+        let b = y * bw + x;
+        (count[b] > 0).then(|| sum[b] / f64::from(count[b]))
+    };
+    let slope = |x: usize, y: usize, c: f64| -> (f64, f64) {
+        let at = |x: usize, y: usize| mean(x, y).unwrap_or(c);
+        let (xl, xr, yu, yd) = (x.saturating_sub(1), (x + 1).min(bw - 1), y.saturating_sub(1), (y + 1).min(bh - 1));
+        ((at(xr, y) - at(xl, y)) / ((xr - xl).max(1) as f64), (at(x, yd) - at(x, yu)) / ((yd - yu).max(1) as f64))
+    };
+    let (mut sq, mut land) = (0.0f64, 0usize);
+    for y in 0..bh {
+        for x in 0..bw {
+            if let Some(c) = mean(x, y).filter(|&c| c > 0.0) {
+                let (gx, gy) = slope(x, y, c);
+                sq += gx * gx + gy * gy;
+                land += 1;
+            }
+        }
+    }
+    let rms = if land > 0 && sq > 0.0 { libm::sqrt(sq / land as f64) } else { 1.0 };
+    let mut data = vec![0u8; bw * bh * 4];
+    for y in 0..bh {
+        for x in 0..bw {
+            let b = y * bw + x;
+            let c = match mean(x, y) {
+                None => [30, 30, 30, 255],
+                Some(c) if c <= 0.0 => [20, 30, 90, 255],
+                Some(c) => {
+                    let (gx, gy) = slope(x, y, c);
+                    // Facing the north-east (x right, y down): the height falls towards +x and -y.
+                    let facing = (-gx + gy) * std::f64::consts::FRAC_1_SQRT_2 / rms;
+                    let v = (60.0 + 170.0 * (0.5 + 0.5 * libm::tanh(1.5 * facing)) + 0.5) as u8;
+                    [v, v, v, 255]
+                }
+            };
+            data[b * 4..b * 4 + 4].copy_from_slice(&c);
+        }
+    }
+    data
+}
+
 /// The histogram bins of the percentiles.
 pub const HIST_BINS: usize = 4096;
 /// The bytes a bin takes: the sum (8) and the count (4).
@@ -369,6 +413,11 @@ impl SheetProbe {
         Rgba { width: bw as u32, height: bh as u32, data }
             .write_png(&self.dir.join(format!("{name}.png")))
             .map_err(|e| format!("{name}.png: {e}"))?;
+        if f.kind == FieldKind::Height {
+            Rgba { width: bw as u32, height: bh as u32, data: shade_bytes(&sum, &count, bw, bh) }
+                .write_png(&self.dir.join(format!("{name}-shade.png")))
+                .map_err(|e| format!("{name}-shade.png: {e}"))?;
+        }
         // A percentile is a value of the data: the scale's edge bins hold what is outside the scale, so it is held within the minimum and the maximum.
         let q = |q: f64| percentile(&hist, total, q, lo, hi).clamp(min, max);
         let unit = if f.kind == FieldKind::Area { " (log10 m2)" } else { "" };
@@ -510,6 +559,41 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: BUILD-046
+    #[test]
+    fn a_height_sheet_has_a_hillshade_that_needs_no_scale_and_is_as_large_as_the_sheet() {
+        let (n, hill): (usize, Box<dyn Fn(f64) -> f64>) = (40, Box::new(|r2| 300.0 * libm::exp(-r2 / 80.0)));
+        let g = Grid::new(n, n, 100.0);
+        let z_of = |k: f64| -> Vec<f64> {
+            (0..g.len()).map(|p| k * hill(((p % n) as f64 - 20.0).powi(2) + ((p / n) as f64 - 20.0).powi(2)) + 5.0).collect()
+        };
+        let load = |d: &std::path::Path, name: &str| {
+            let dec = png::Decoder::new(std::io::Cursor::new(std::fs::read(d.join(name)).unwrap()));
+            let mut r = dec.read_info().unwrap();
+            let mut buf = vec![0; r.output_buffer_size().unwrap()];
+            let info = r.next_frame(&mut buf).unwrap();
+            ((info.width, info.height), buf)
+        };
+        let (d1, d2) = (dir("shade1"), dir("shade2"));
+        SheetProbe::new(&d1, 1_600).stage(&StageView::new(Stage::Thermal, &g).f64("z", FieldKind::Height, &z_of(1.0)));
+        SheetProbe::new(&d2, 1_600).stage(&StageView::new(Stage::Thermal, &g).f64("z", FieldKind::Height, &z_of(10.0)));
+        let ((w1, h1), a) = load(&d1, "thermal-z-shade.png");
+        let ((w2, h2), b) = load(&d2, "thermal-z.png");
+        assert_eq!((w1, h1), (w2, h2), "the shade has the sheet's bins");
+        assert_eq!(w1 as usize * h1 as usize, 1_600, "no more bins than the bound");
+        let (_, b10) = load(&d2, "thermal-z-shade.png");
+        let px = |buf: &[u8], x: usize, y: usize| buf[(y * n + x) * 4];
+        assert!(
+            px(&a, 25, 15) > px(&a, 15, 25),
+            "the north-east flank is lit, the south-west one is dark: {} against {}",
+            px(&a, 25, 15),
+            px(&a, 15, 25)
+        );
+        let diff = a.iter().zip(&b10).filter(|(p, q)| p != q).count();
+        assert!(diff < a.len() / 100, "ten times the relief gives the same shade (rms slope): {diff} bytes differ");
+        assert_ne!(a, b, "and it is another image than the colour sheet");
+        let _ = (std::fs::remove_dir_all(&d1), std::fs::remove_dir_all(&d2));
+    }
     // spec: BUILD-046
     #[test]
     fn the_percentiles_come_from_the_histogram_within_a_bin_and_the_hash_follows_every_bit() {
