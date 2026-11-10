@@ -1,6 +1,6 @@
 ## ADDED Requirements
 ### Requirement: BUILD-046 The sheet probe writes fixed-scale sheets and numbers in a bounded buffer
-The sheet probe SHALL write for each field of a stage a PNG `<run>/<stage>-<field>.png` whose colour scale is fixed by the field's kind (the same value is the same colour in every run and at every scale) and a line in `<run>/stages.txt`: cells, minimum, 5th, 50th and 95th percentile (from a 4,096-bin histogram), maximum, a 64-bit hash of the data, the numbers the stage gave, and the probe's own milliseconds and bytes. A sheet SHALL have at most `max_bins` bins and the probe's buffers SHALL be bounded by them and the histogram, whatever the grid. The sheets are review aids, not goldens.
+The sheet probe SHALL write for each field of a stage a PNG `<run>/<stage>-<field>.png` whose colour scale is fixed by the field's kind (the same value is the same colour in every run and at every scale) and a line in `<run>/stages.txt`: cells, minimum, 5th, 50th and 95th percentile (from a 4,096-bin histogram), maximum, a 64-bit hash of the data, the numbers the stage gave, and the probe's own milliseconds and bytes. A height field SHALL also get `<stage>-<field>-shade.png`, a scale-free hillshade of its bins. A sheet SHALL have at most `max_bins` bins and the probe's buffers SHALL be bounded by them and the histogram, whatever the grid. The sheets are review aids, not goldens.
 
 Verify: A
 Status: active
