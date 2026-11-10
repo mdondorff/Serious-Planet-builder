@@ -177,3 +177,18 @@ Findings of the sheets (architect's review of the 1020 x 1020 sheets, `target/re
 4. **Land under the fill by stage** (cells deeper than 1.5 eps, share of the region's land; the surface of each round re-run from the base): R3b 22.3 % at the base, 1.05 % after round 1, 1.08, 1.14, 1.21 % after round 4 (before the pass), 0.43 % after the pass; R3a 27.4 %, 7.75 %, 8.27, 8.79, 9.27 %, 1.63 %. The rounds remove most base depressions at once and the pass removes most of the rest; the growth over rounds 2 to 4 is small in the region proper.
 
 What this does not settle: the stem is one stem a window; the depth lines count the cells the cut's drainage reaches inside the region (the region's land under the fill after round 4 is 1.21 % against the explorer's 0.05 % at a stricter definition); a window without a land-height cut (a region ringed by sea, or a stored face) would remove it.
+
+### 6c. Correction after GEN-162 (2026-11-10, main 8b673de3; architect D7)
+
+GEN-162 (a breach never cuts below its chain exit, #1307) changed the window's pits and G-SED totals; section 6b's rows above stay as read on 563c0e60. Same windows, margin 200, release, BelowNormal, 8 threads, `region_scale` as of main 8b673de3; raw output `item13-d7-r3a.txt`, `item13-d7-r3b.txt`. Sheets are rewritten in the crusader worktree's `target/review/stages/` (not committed). Relief, hypsometry and precipitation were not re-read.
+
+| Row | R3a before (563c0e60) | R3a now | R3b before | R3b now |
+|---|---|---|---|---|
+| G-LAND: pit cells of the window | 32,962 = 32,704 + 258 | 20,517 = 20,197 + 320 (184 artefacts, 1 ramp) | 32,316 = 32,224 + 92 | 6,418 = 6,313 + 105 (30, 2) |
+| G-LAND: unclassified of the region's land | 191 of 321,971 (0.059 %) | 191 (0.059 %), unchanged | 17 of 343,014 (0.005 %) | 17 (0.005 %), unchanged |
+| G-SED: eroded = deposited + exported (m3) | 8.334e12 = 2.115e12 + 6.219e12 | 7.897e12 = 1.897e12 + 6.000e12, residual 3.6e-15 | 1.0237e13 = 2.471e12 + 7.766e12 | 8.276e12 = 1.389e12 + 6.887e12, residual 4.5e-15 |
+| G-SED: pits at the start, after deposition | not read for this row | 2.83 %, 1.12 % | 3.67 % to 2.56 % | 0.73 %, 0.64 % |
+
+- G-LAND holds unchanged in the region proper; G-SED closes (1e-9 rule: pass) with the new totals.
+- The stem lines of section 6b point 3 are unchanged: R3a mouth number 2 (36 cells) and R3b mouth number 11 (53 cells) give the same deposited thickness per tenth (R3b first tenth max 3.9 m, p50 below 0.4 m elsewhere) and the same depression depth by stage (R3b land under the fill 22.25 % at the base, 1.05 % after round 1, 1.21 % after round 4, 0.43 % after the pass; R3a 27.35 %, 7.75 %, 9.27 %, 1.63 %). The point 3 finding (the first R3b stem's 50 to 190 m deposition was the window cut's) stands.
+- Deposit by place: over the region proper the lakes hold 0.1 % (R3b) and 1.0 % (R3a) of the net change, unchanged; over the window's land R3a lakes hold 1.5 % now (11.4 % in 6b) and R3b 0.1 % (44.0 % in 6b): the margin's lake deposit fell with the pits (R3b window pits 32,316 to 6,418).
