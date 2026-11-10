@@ -310,7 +310,7 @@ fn h1(
         hy.stats.artefacts,
         hy.stats.ramps
     );
-    land_and_sediment(grid, z, &filled, outlet, &routing.receiver, &routing.area, z0, &hy, region, spec.seed, threads);
+    land_and_sediment(grid, z, &filled, outlet, &routing.receiver, &routing.area, z0, &hy, region, spec.seed, stream, threads);
 }
 
 /// The plains block (item 13): over the land cells of the region proper, on the carved surface `z` and its canonical filled surface.
@@ -373,6 +373,7 @@ fn land_and_sediment(
     hy: &planet_generators::bake::hydro::Hydro,
     region: (usize, usize, usize, usize),
     seed: u64,
+    stream: u64,
     threads: usize,
 ) {
     let w = grid.w();
@@ -412,7 +413,8 @@ fn land_and_sediment(
     let t = Instant::now();
     let r = sediment_pass(grid, &mut zs, z0, &q2, threads);
     let rel = |a: f64, b: f64| (a - b).abs() / a.abs().max(1.0);
-    stem(grid, z, &zs, filled, receiver, area, hy);
+    let path = stem(grid, z, &zs, filled, receiver, area, hy);
+    depth_along(grid, z0, z, &zs, outlet, &path, region, stream, threads);
     println!(
         "G-SED: sediment pass {:.1} s; eroded {:.4e} m3 = deposited {:.4e} + exported {:.4e} (residual {:.2e} relative); the heights moved by {:.4e} m3 (against deposited {:.2e}); eroded before thermal {:.4e}, after {:.4e}; volume change thermal {:.2e}, pit spreading {:.2e}; pits {:?}",
         t.elapsed().as_secs_f64(),
@@ -432,7 +434,15 @@ fn land_and_sediment(
 
 /// The deposited thickness along the main stem (item 13, finding 3): from the mouth with the largest discharge among channel cells without a receiver, upstream through the donor of the largest drainage area
 /// to a head; the thickness is the sediment pass's change of height (`after - z`) at each cell; p50 and max per tenth of the stem's cells, from the source (decile 1) to the mouth (decile 10).
-fn stem(grid: &Grid, z: &[f64], after: &[f64], filled: &[f64], receiver: &[u32], area: &[f64], hy: &planet_generators::bake::hydro::Hydro) {
+fn stem(
+    grid: &Grid,
+    z: &[f64],
+    after: &[f64],
+    filled: &[f64],
+    receiver: &[u32],
+    area: &[f64],
+    hy: &planet_generators::bake::hydro::Hydro,
+) -> Vec<usize> {
     let n = grid.len();
     let (w, h) = (grid.w(), grid.len() / grid.w());
     let mut donor_of = vec![usize::MAX; n];
@@ -460,7 +470,7 @@ fn stem(grid: &Grid, z: &[f64], after: &[f64], filled: &[f64], receiver: &[u32],
     }
     if mouth == usize::MAX {
         println!("stem: no stem of 30 cells or more that starts inside the window");
-        return;
+        return Vec::new();
     }
     let best_q = hy.q[mouth];
     path.reverse();
@@ -496,4 +506,61 @@ fn stem(grid: &Grid, z: &[f64], after: &[f64], filled: &[f64], receiver: &[u32],
         }
     }
     println!("deposit by place over the window's land: in lakes (kept basin or filled above z) {vin:.4e} m3 on {cin} cells, outside {vout:.4e} m3 on {cout} cells ({:.1} % of the change in lakes)", 100.0 * vin / (vin + vout));
+    path
+}
+
+/// Where the depressions along the main stem come from (item 13, finding 3): the depression depth (canonical filled surface minus the surface) at the stem's cells, p50 and max per tenth from the source,
+/// on the base (round 0), after 1, 2, 3 and 4 rounds (the surface H1 and the sediment pass start from) and after the sediment pass, and the share of the region's land that is under the fill (deeper than 1.5 eps)
+/// at each. It re-runs the rounds (1, 2, 3 of the 4) on the same inputs, so it adds about 6 rounds to the run.
+#[allow(clippy::too_many_arguments)]
+fn depth_along(
+    grid: &Grid,
+    z0: &[f64],
+    z4: &[f64],
+    after_pass: &[f64],
+    outlet: &[bool],
+    path: &[usize],
+    region: (usize, usize, usize, usize),
+    stream: u64,
+    threads: usize,
+) {
+    if path.is_empty() {
+        return;
+    }
+    let w = grid.w();
+    let (i0, j0) = ((grid.global_id(0) & 0xffff_ffff) as usize, (grid.global_id(0) >> 32) as usize);
+    let p = CarveParams { steps: 20, reroute_every: 5, round_rules: RoundRules::ROUND, cell_metric: true, ..CarveParams::default() };
+    let eps = 1e-3;
+    let mut stages: Vec<(String, Vec<f64>)> = vec![("base".to_string(), z0.to_vec())];
+    for k in 1..=3usize {
+        let mut zk = z0.to_vec();
+        // The carve is the rounds times the steps of a round (5 of the 20 steps of the 4 rounds).
+        solve_rounds(grid, &mut zk, outlet, &CarveParams { steps: 5 * k, ..p }, k, &threads, stream);
+        stages.push((format!("after round {k}"), zk));
+    }
+    stages.push(("after round 4 (before the pass)".to_string(), z4.to_vec()));
+    stages.push(("after the pass".to_string(), after_pass.to_vec()));
+    let len = path.len();
+    for (name, zz) in &stages {
+        let filled = priority_flood_with(grid, zz, outlet, eps, true);
+        let mut out = String::new();
+        for d in 0..10 {
+            let mut v: Vec<f64> = path[d * len / 10..(d + 1) * len / 10].iter().map(|&c| filled[c] - zz[c]).collect();
+            v.sort_by(|a, b| a.total_cmp(b));
+            if !v.is_empty() {
+                out += &format!(" {:.1}/{:.1}", v[v.len() / 2], v[v.len() - 1]);
+            }
+        }
+        let (mut land, mut under) = (0usize, 0usize);
+        for j in region.2..=region.3 {
+            for i in region.0..=region.1 {
+                let c = (j - j0) * w + (i - i0);
+                if zz[c] > 0.0 {
+                    land += 1;
+                    under += usize::from(filled[c] - zz[c] > 1.5 * eps);
+                }
+            }
+        }
+        println!("depth {name}: region land under the fill {under} of {land} ({:.2} %); along the stem p50/max (m) by tenth from the source:{out}", 100.0 * under as f64 / land.max(1) as f64);
+    }
 }
