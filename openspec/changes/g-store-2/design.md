@@ -27,7 +27,7 @@ Space of a replacement, bytes on the real packs (k = 2 landmass; the k = 1 run g
 - `pack::compact` writes the new packs before it removes the old ones: the peak is steady plus the live set (about 2 times steady for any edit, 3 times for a full re-bake with both versions kept). At a steady store of the sum below, the peak is about 37 GB (narrow) to 51 GB (production block).
 - A version retained for undo costs the records it superseded: the added bytes of its footprint (median 2.9 MB of the new chain's items at k = 2, about 12 MB at 12,288, plus the field and `L` records of the same tiles: `L` alone is about 46 MB for 12 tiles at 3.8 MB a land tile (13.1 GB over 3,444 land tiles of 208 km), the field 1 to 8 MB, so an undo step of a median edit is estimated at 55 to 65 MB).
 
-Edit items (canonical file text, brush items of 8-point strokes): 1 stroke 869 B (292 B brotli), 10 strokes 5,949 B (715 B), 64 strokes (the cap) 36,443 B (2,936 B). A thousand items of 10 strokes is 6 MB (0.7 MB brotli); the authored items are part of the definition, not the store.
+Edit items (canonical file text, brush items of 8-point strokes): 1 stroke 870 B (293 B brotli), 10 strokes 5,950 B (713 B), 64 strokes (the cap) 36,443 B (2,936 B). A thousand items of 10 strokes is 6 MB (0.7 MB brotli); the authored items are part of the definition, not the store.
 
 ## What the numbers give (steady state at Earth, GB)
 | Item | Narrow field | Production block |
