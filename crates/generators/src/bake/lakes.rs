@@ -18,6 +18,9 @@ use super::route::{Routing, NONE};
 use super::Grid;
 use std::collections::HashSet;
 
+/// Version of the producer behaviour (the level rule, the water rule, the lake record): part of the key of a stored basin table, bumped with any change of what a lake is.
+pub const LAKES_VERSION: u32 = 1;
+
 /// A tile of a tile grid: the face and the tile's column and row on it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TileRef {

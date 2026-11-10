@@ -1,0 +1,1 @@
+- 2026-11-10 basin-table: the lakes are stored as a basin table, cache kind 19, one record per face sorted by basin id with the tiles of each lake water (STRM-080, GEN-163); kind 13 version 3 is PR 2b.
