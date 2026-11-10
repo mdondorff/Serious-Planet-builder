@@ -9,3 +9,4 @@ Item 15 step 2 (design notes `openspec/changes/runtime-composition/design.md` se
 
 ## Impact
 - Code: `generators::bake::{lakes, build}`, tests as above. No change to H1, K7 or any stored bit; the stage manifest is unchanged.
+- Open (numerics review, for the architect): "inside a lake" is H1's label (cells more than `pit_min_m` under the filled surface), not "under the lake surface". On a gently sloping shore, channel cells under the level but within `pit_min_m` of the fill stay in a piece; for an endorheic lake below its sill, labelled channel cells above the level are dropped, so a river stops at the basin rim and leaves a dry gap to the water. The test fixture has vertical walls and does not show it. A rule on `z < level` needs `z` as an input of the producer and a decision on H1's spill definition.

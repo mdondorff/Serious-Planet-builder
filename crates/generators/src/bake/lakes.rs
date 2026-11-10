@@ -65,6 +65,9 @@ fn area_at(b: &Basin, level: f64) -> f64 {
     if span <= 0.0 || level <= b.floor_m {
         return 0.0;
     }
+    if level >= b.spill_m {
+        return b.area_m2[CURVE_STEPS - 1];
+    }
     let x = ((level - b.floor_m) / span * CURVE_STEPS as f64).min(CURVE_STEPS as f64);
     let k = (x.floor() as usize).min(CURVE_STEPS - 1);
     let (a0, a1) = (if k == 0 { 0.0 } else { b.area_m2[k - 1] }, b.area_m2[k]);
@@ -73,6 +76,8 @@ fn area_at(b: &Basin, level: f64) -> f64 {
 
 /// Produce the lakes and the pieces of the river segments from a hydrology (GEN-163).
 pub fn lakes_from_hydro(grid: &Grid, routing: &Routing, hydro: &Hydro) -> Lakes {
+    assert!(hydro.qw.len() == grid.len(), "the producer needs Q_w: run it before the discharges are released");
+    assert!(routing.receiver.len() == grid.len(), "one receiver per cell");
     let mut lakes: Vec<Lake> = hydro
         .basins
         .iter()
@@ -105,8 +110,8 @@ pub fn lakes_from_hydro(grid: &Grid, routing: &Routing, hydro: &Hydro) -> Lakes 
         let mut part = 0u32;
         let mut run: Vec<u32> = Vec::new();
         let mut cur = s.up as usize;
-        // The cells of a segment: from `up` to the cell before `down`, which starts the next segment (or is the mouth).
-        while cur != s.down as usize {
+        // The cells of a segment: from `up` to the cell before `down`, which starts the next segment (or is the mouth). H1 counted them: the walk is bounded by that count.
+        for _ in 0..s.cells {
             if inside(cur) {
                 dropped_cells += 1;
                 if !run.is_empty() {
@@ -119,6 +124,7 @@ pub fn lakes_from_hydro(grid: &Grid, routing: &Routing, hydro: &Hydro) -> Lakes 
             assert!(next != NONE, "a segment reaches its end cell");
             cur = next as usize;
         }
+        assert_eq!(cur, s.down as usize, "the routing is the one H1 ran on: a segment ends at its end cell");
         if !run.is_empty() {
             pieces.push(piece(hydro, s.id, &mut part, run));
         }

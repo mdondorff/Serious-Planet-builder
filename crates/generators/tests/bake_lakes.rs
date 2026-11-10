@@ -58,6 +58,7 @@ fn the_level_is_the_balance_in_the_three_cases() {
     assert_eq!((l.class, l.overflows, l.wet), (BasinClass::Lake, true, true));
     assert_eq!(l.level_m, l.spill_m, "full to the sill");
     assert!((l.q_out - l.q_in).abs() <= 1e-9 * l.q_in);
+    assert_eq!(l.area_m2, r.hydro.basins[0].area_m2[15], "the surface at the sill is the curve's last step");
     assert!((l.area_m2 - 36.0 * r.g.cell_area(0)).abs() < 1.0, "the surface at the sill is the bowl");
     // Below the sill: evaporation takes all of it; the level is where A(h) E meets the inflow, hand-computed between the 1st and 2nd step.
     let r = run(&z, Some(1.0e-8), Some(1.0e-6), &small_t());
@@ -69,6 +70,8 @@ fn the_level_is_the_balance_in_the_three_cases() {
     assert_eq!((l.class, l.overflows, l.wet, l.q_out), (BasinClass::Endorheic, false, true, 0.0));
     assert!((l.level_m - want).abs() <= 1e-9 * want.abs(), "level {} against {want}", l.level_m);
     let a = l.area_m2;
+    let e_open = f64::from(1.0e-6f32); // the evaporation field is f32
+    assert!((a * e_open - b.q_in).abs() <= 1e-9 * b.q_in, "A(h) E meets the inflow: {} against {}", a * e_open, b.q_in);
     assert!(b.area_m2[0] < a && a <= b.area_m2[1], "the area at the level lies on the curve between the steps: {a}");
     // Q_in = 0: a playa, the floor and no water surface.
     let r = run(&z, Some(0.0), Some(1.0e-6), &small_t());
@@ -197,4 +200,13 @@ fn clone_hydro(h: &Hydro) -> Hydro {
         label: h.label.clone(),
         stats: h.stats.clone(),
     }
+}
+
+// spec: GEN-163
+#[test]
+#[should_panic(expected = "the producer needs Q_w")]
+fn a_released_discharge_is_refused_with_a_clear_message() {
+    let mut r = run(&bowl_land(), None, None, &small_t());
+    r.hydro.qw = Vec::new();
+    lakes(&r);
 }
