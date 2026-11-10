@@ -394,6 +394,7 @@ With clipped MFD and the canonical flood a catchment has no other border conditi
 - K6 (H1) reads the final round's routing of the region. K7's tile refinement reads K5 and K6 of its region and is keyed per tile as today.
 - K7 stays per tile with its halo (GEN-101): it does not route globally; it reads the channel levels as boundary conditions (§3.3).
 - **What is catchment-local.** The breach and the implicit sweeps: inside a round a catchment reads and writes only its members. Across rounds it couples through the surface.
+- **Breach base level (GEN-162, 2026-11-10):** a breach never cuts below its chain's exit. Every cell of the chain is lowered at most to the exit's height (a flat floor), on land and at sea alike. A depression whose exit cannot be lowered (a window's land-height cut, a fixed outlet) is not excavated below it.
 - **What is not.** Thermal and one-cell pit spreading read 8 neighbours and cross divides. They are not catchment-round steps: they run per tile with a halo, keyed per tile, after the last round (as K7 does today) **[gate G-SED, G-SURF]**.
 - **Sediment contract of the prototype (owner, 2026-11-09; describes what is built, GEN-151, GEN-152):**
 
