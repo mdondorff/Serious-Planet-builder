@@ -30,6 +30,9 @@
 - Wall seconds, run 1 / run 2: rounds 2505 / 2422, weighted route and filled surface 661 / 654, hydrology 75 / 74, check 21 / 20, sediment pass 2082 / 2076, drivers 9; plan 5354 / 5257. CPU: 1.05 / 1.06 cores busy over the plan (the landmass sampling before it: 3.8).
 - Pits after the plan (canonical flood): start 1.0016 % of land, after thermal 2.41 % (deepest 1249.1 m), after deposition 0.7355 % (824.0 m), after pit spreading 0.7355 %. The number of one-cell canyon dams was not measured.
 
-## Status
-- G-SCALE's complete-build row: both runs under the gate; the margin is thin and any addition to the H1 phase needs a re-measure.
+## Status (architect verdict, 2026-11-10)
+- G-SCALE's complete-build row passes on its rule, with a thin margin: worst 11,363 MiB against 11,444, margin 81 MiB (0.7 %), smaller than the 232 MiB spread between the runs.
+- The peak sits in hydrology: commit goes from 8,603 to 11,363 MiB there. A change that adds resident state in or before hydrology re-measures this row (two k=4 runs) before it merges. If a re-measure fails, the first lever is rule (1) inside hydrology, before any tile-wise route.
 - Other A3 6.6 scenarios: not run. Not in this change: a tile-wise route, the world build's call site, GEN-155.
+- Pits after the pass grow with k: 0.26 % (k=1), 0.35 % (k=2), 0.7355 % (k=4); thermal maximum 609.7 / 920 / 1,249.1 m. A/B-gate evidence, no fix ordered. The dam count comes with the next k=4 run.
+- The k=4 runs wrote no stage sheets: the probe calls are in `build_resident`, but the example's plan mode installs no probe. The next k=4 run has it on.
