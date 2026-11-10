@@ -1,0 +1,1 @@
+- 2026-11-10 region-scale-window: region_scale takes PLANET_REGION=seed,face,i0,j0,size; the default region is unchanged (briefing item 13)
