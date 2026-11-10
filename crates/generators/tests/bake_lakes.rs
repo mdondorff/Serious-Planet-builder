@@ -3,7 +3,7 @@
 
 #![allow(clippy::needless_range_loop)]
 use planet_generators::bake::flood::priority_flood_with;
-use planet_generators::bake::hydro::{hydrology, BasinClass, Hydro, HydroParams};
+use planet_generators::bake::hydro::{hydrology, BasinClass, Hydro, HydroParams, QUnit};
 use planet_generators::bake::lakes::{cut_segments, lakes_from_hydro, lakes_with_tiles, water_cells, Lakes, TileRef};
 use planet_generators::bake::route::{route_rules, RoundRules, Routing, NONE};
 use planet_generators::bake::Grid;
@@ -37,7 +37,9 @@ fn run(z: &[f64], runoff: Option<f32>, evap: Option<f32>, p: &HydroParams) -> Ru
     let filled = priority_flood_with(&g, z, &outlet, EPS, true);
     let r = runoff.map(|v| vec![v; W * W]);
     let e = evap.map(|v| vec![v; W * W]);
-    let hydro = hydrology(&g, z, &filled, &routing, &outlet, r.as_deref(), e.as_deref(), p);
+    let mut hydro = hydrology(&g, z, &filled, &routing, &outlet, r.as_deref(), e.as_deref(), p);
+    // A fixture without the runoff: its Q is an area, and the lakes of these tests do not depend on the unit; the producer refuses an area, so the unit is set explicitly (D35).
+    hydro.q_unit = QUnit::Discharge;
     Run { z: z.to_vec(), g, routing, hydro }
 }
 
@@ -126,7 +128,8 @@ fn one_lake_per_kept_basin_and_none_for_an_artefact_or_a_ramp() {
     let outlet = g.outlets(&z, 0.0);
     let routing = route_rules(&g, &z, &outlet, EPS, 3, 0.0, None, RoundRules::ROUND);
     let filled = priority_flood_with(&g, &z, &outlet, EPS, true);
-    let hydro = hydrology(&g, &z, &filled, &routing, &outlet, None, None, &HydroParams::default());
+    let mut hydro = hydrology(&g, &z, &filled, &routing, &outlet, None, None, &HydroParams::default());
+    hydro.q_unit = QUnit::Discharge; // a fixture without the runoff (D35)
     assert!(hydro.stats.ramps >= 1);
     assert!(lakes_from_hydro(&g, &routing, &hydro, &z).lakes.is_empty());
 }
@@ -449,4 +452,19 @@ fn the_producer_in_two_steps_around_the_release_gives_the_same_lakes() {
         assert_eq!(split, whole, "the same lakes, pieces and dropped cells, bit for bit");
         assert_eq!(format!("{split:?}"), format!("{whole:?}"));
     }
+}
+
+// spec: GEN-165
+/// The units bug of 2026-11-10 (D35): the producer stores `q_first`, `q_last` and `q_out` as discharges and refuses a hydrology whose `Q` is an area (no runoff).
+#[test]
+#[should_panic(expected = "the producer stores discharges")]
+fn the_producer_refuses_an_area() {
+    let g = Grid::new(W, W, 800.0);
+    let z = vec![10.0; W * W];
+    let outlet = g.outlets(&z, 0.0);
+    let routing = route_rules(&g, &z, &outlet, EPS, 3, 0.0, None, RoundRules::ROUND);
+    let filled = priority_flood_with(&g, &z, &outlet, EPS, true);
+    let hydro = hydrology(&g, &z, &filled, &routing, &outlet, None, None, &small_t());
+    assert_eq!(hydro.q_unit, QUnit::Area);
+    let _ = lakes_from_hydro(&g, &routing, &hydro, &z);
 }
