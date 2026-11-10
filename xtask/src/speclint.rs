@@ -515,7 +515,7 @@ pub const HOT_FILE_CAPS: [(&str, usize); 5] = [
     ("docs/learnings.md", 20 * 1024),
     ("docs/spikes.md", 10 * 1024),
     ("CLAUDE.md", 7_514),
-    ("docs/constitution.md", 8_909),
+    ("docs/constitution.md", 12_817),
 ];
 
 /// BUILD-023: one error per hot file over its cap, naming the file, its size and the cap. `sizes` is `(path, bytes)` with a line end counted
@@ -787,11 +787,11 @@ mod tests {
                 "{errs:?}"
             );
         }
-        // The caps are those of ADR 0075: 15, 20 and 10 KiB, and the two files at the size they had when it was accepted.
+        // The caps are those of ADR 0075: 15, 20 and 10 KiB, and the two files at the size they had when it was accepted; the constitution's as raised by ADR 0116 (ADR 0079).
         let cap = |name: &str| HOT_FILE_CAPS.iter().find(|(p, _)| *p == name).unwrap().1;
         assert_eq!(
             [cap("docs/status.md"), cap("docs/learnings.md"), cap("docs/spikes.md"), cap("CLAUDE.md"), cap("docs/constitution.md")],
-            [15_360, 20_480, 10_240, 7_514, 8_909]
+            [15_360, 20_480, 10_240, 7_514, 12_817]
         );
         // A file that is missing or not capped is no error.
         assert!(hot_file_errors(&[]).is_empty());
