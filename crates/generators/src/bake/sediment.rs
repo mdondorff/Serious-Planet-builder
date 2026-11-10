@@ -213,10 +213,10 @@ pub fn catchment_terms(grid: &Grid, z: &mut [f64], original: &[f64], p: &Pass2Pa
     }
     let cube = grid.is_cube();
     let area = |c: usize| if cube { grid.cell_area(c) } else { grid.dx() * grid.dx() };
-    let grid_area = (0..n).map(&area).fold(0.0f64, f64::max);
+    let grid_area = (0..n).filter(|&c| grid.is_active(c)).map(&area).fold(0.0f64, f64::max);
     let (mut eroded, mut raised) = (vec![0.0f64; n], vec![0.0f64; n]);
     let mut cells = vec![0u32; n];
-    let zmax = z.iter().chain(original).fold(0.0f64, |m, v| m.max(v.abs()));
+    let zmax = (0..n).filter(|&c| grid.is_active(c)).fold(0.0f64, |m, c| m.max(z[c].abs()).max(original[c].abs()));
     for c in 0..n {
         let r = root[c] as usize;
         cells[r] += 1;

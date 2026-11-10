@@ -7,8 +7,8 @@ Inbox #116 (architect, 2026-11-09): G-SED's partition test (GEN-155): the same s
 
 ## The partitions varied
 1. The representation and cell order: the compact cube against the masked cube (catchments keyed by the outlet's cube id).
-2. The thermal step's bands: 1, 3 and 8 threads over the whole sediment pass.
-3. Groups of whole catchments (outlet id modulo 2, 3, 5): the terms of the groups add up to the whole and the identity holds in each.
+2. The thermal step's bands: 1, 3 and 8 threads over the whole sediment pass, on a region of more than two pieces (n = 64).
+3. Groups of whole catchments (outlet id modulo 2, 3, 5): the accounting a cut along the divides would hand to separate domains (the pass itself is not cut); the sums are also checked against the heights and the volume change read another way.
 
 ## Open
 - A spatial cut (tiles or windows) of the sediment pass does not exist: the sweep is one serial pass over the region, and the boundary-as-outlet rule of `sediment::outlets` would turn a cut's border cells into outlets, so a cut needs an outlet closure of its own (not designed).

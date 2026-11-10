@@ -1,1 +1,1 @@
-- 2026-11-10 gsed-partition: G-SED under the partitions the pass has (compact against masked cube, 1/3/8 threads, groups of whole catchments): terms, heights and totals equal, residual per catchment reported; a spatial cut stays open (GEN-155)
+- 2026-11-10 gsed-partition: per-catchment terms of the G-SED balance and its partition test (compact against masked cube, 1/3/8 threads on a region thermal cuts into three pieces, groups of whole catchments); a spatial cut of the pass stays open (GEN-155)
