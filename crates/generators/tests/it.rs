@@ -124,6 +124,8 @@ mod relief_scale;
 mod runtime_layer;
 #[path = "shelf.rs"]
 mod shelf;
+#[path = "stage_manifest.rs"]
+mod stage_manifest;
 #[path = "stages.rs"]
 mod stages;
 #[path = "stamp_stage.rs"]
