@@ -1,0 +1,19 @@
+Item 13 sheet findings: ad hoc diagnostics (temporary code in region_scale, not committed: a "diag" mode and a BOX variable; commit 729df9b3's example plus these two blocks), R3a = PLANET_REGION=15,4,368,4720,620, R3b = 15,2,9968,8304,620, margin 200, 8 threads.
+
+Structure tensor of the gradient of the land cells of the window (coherence 0 isotropic, 1 one direction; ridge direction in degrees from +i, image y down):
+R3a  z0 (base)                coherence 0.901  ridge 47.4
+R3a  z after 4 rounds         coherence 0.217  ridge 49.8
+R3a  hill_band_m              coherence 0.110  ridge 130.1
+R3a  landform x1000           coherence 0.949  ridge 46.3
+R3a  continent depth x1000    coherence 0.942  ridge 46.0
+R3a  z0 with turned noise on  coherence 0.901  ridge 47.4   (z after 4 rounds 0.233)
+R3b  z0 (base)                coherence 0.369  ridge 153.2
+R3b  z after 4 rounds         coherence 0.181  ridge 143.8
+Hillshade of the base (light from the north-east, land grey, sea blue): r3a-z0-hillshade.png (not committed).
+
+Boxes of the h1-area sheets (window pixels x0,y0,x1,y1; land cells; filled above z; channel cells; cells in a kept basin; cells whose drop to the receiver on the filled surface is under 2 eps):
+R3a 560,430,730,590 (centre fan)   27,083; 8,617 (32 %); 7,973; 7,040; 8,695
+R3a whole window                   727,199; 62,935 (8.7 %); 75,691; 32,704; 68,618
+R3b 0,0,250,250 (top left)         62,500; 12,554 (20 %); 10,896; 12,433; 12,554
+R3b 380,0,640,200 (top centre)     52,000; 6,520 (12.5 %); 7,305; 6,349; 6,520
+R3b whole window                   883,645; 40,549 (4.6 %); 78,194; 32,224; 42,486

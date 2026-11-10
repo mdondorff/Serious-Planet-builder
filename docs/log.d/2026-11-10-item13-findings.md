@@ -1,0 +1,1 @@
+- 2026-11-10 item13-findings: region_scale prints the stem, the deposit split and the depression depths; results section 6b has G-LAND, G-SED and the sheet findings (the deep R3b valley was the window's cut)

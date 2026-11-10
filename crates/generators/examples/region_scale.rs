@@ -310,7 +310,7 @@ fn h1(
         hy.stats.artefacts,
         hy.stats.ramps
     );
-    land_and_sediment(grid, z, &filled, outlet, z0, &hy, region, spec.seed, threads);
+    land_and_sediment(grid, z, &filled, outlet, &routing.receiver, &routing.area, z0, &hy, region, spec.seed, stream, threads);
 }
 
 /// The plains block (item 13): over the land cells of the region proper, on the carved surface `z` and its canonical filled surface.
@@ -367,10 +367,13 @@ fn land_and_sediment(
     z: &[f64],
     filled: &[f64],
     outlet: &[bool],
+    receiver: &[u32],
+    area: &[f64],
     z0: &[f64],
     hy: &planet_generators::bake::hydro::Hydro,
     region: (usize, usize, usize, usize),
     seed: u64,
+    stream: u64,
     threads: usize,
 ) {
     let w = grid.w();
@@ -410,6 +413,8 @@ fn land_and_sediment(
     let t = Instant::now();
     let r = sediment_pass(grid, &mut zs, z0, &q2, threads);
     let rel = |a: f64, b: f64| (a - b).abs() / a.abs().max(1.0);
+    let path = stem(grid, z, &zs, filled, outlet, receiver, area, hy, region);
+    depth_along(grid, z0, z, &zs, outlet, &path, region, stream, threads);
     println!(
         "G-SED: sediment pass {:.1} s; eroded {:.4e} m3 = deposited {:.4e} + exported {:.4e} (residual {:.2e} relative); the heights moved by {:.4e} m3 (against deposited {:.2e}); eroded before thermal {:.4e}, after {:.4e}; volume change thermal {:.2e}, pit spreading {:.2e}; pits {:?}",
         t.elapsed().as_secs_f64(),
@@ -425,4 +430,150 @@ fn land_and_sediment(
         r.spread_volume_change,
         r.pits.iter().map(|(n, p)| format!("{n} {} ({:.3} %)", p.pit_cells, 100.0 * p.share())).collect::<Vec<_>>()
     );
+}
+
+/// The deposited thickness along the main stem (item 13, finding 3): from the mouth with the largest discharge among channel cells without a receiver, upstream through the donor of the largest drainage area
+/// to a head; the thickness is the sediment pass's change of height (`after - z`) at each cell; p50 and max per tenth of the stem's cells, from the source (decile 1) to the mouth (decile 10).
+#[allow(clippy::too_many_arguments)]
+fn stem(
+    grid: &Grid,
+    z: &[f64],
+    after: &[f64],
+    filled: &[f64],
+    outlet: &[bool],
+    receiver: &[u32],
+    area: &[f64],
+    hy: &planet_generators::bake::hydro::Hydro,
+    region: (usize, usize, usize, usize),
+) -> Vec<usize> {
+    let n = grid.len();
+    let (w, h) = (grid.w(), grid.len() / grid.w());
+    let mut donor_of = vec![usize::MAX; n];
+    for p in 0..n {
+        let r = receiver[p];
+        if r != NONE && (donor_of[r as usize] == usize::MAX || area[p] > area[donor_of[r as usize]]) {
+            donor_of[r as usize] = p;
+        }
+    }
+    // The mouths by discharge; the first whose stem neither starts nor ends on the window's border (a cut, not a source or a mouth).
+    let mut mouths: Vec<usize> = (0..n).filter(|&p| hy.channel[p] && receiver[p] == NONE).collect();
+    mouths.sort_by(|&a, &b| hy.q[b].total_cmp(&hy.q[a]));
+    let (mut path, mut mouth, mut rank) = (Vec::new(), usize::MAX, 0usize);
+    for (k, &m) in mouths.iter().enumerate() {
+        let mut p = vec![m];
+        while donor_of[*p.last().unwrap()] != usize::MAX {
+            p.push(donor_of[*p.last().unwrap()]);
+        }
+        let head = *p.last().unwrap();
+        let (x, y) = (head % w, head / w);
+        let (mx, my) = (m % w, m / w);
+        // Neither end on the window's border: a river entering from the margin or leaving into the cut is no river of the region.
+        let inside = |x: usize, y: usize| x >= 3 && y >= 3 && x + 3 < w && y + 3 < h;
+        if inside(x, y) && inside(mx, my) && p.len() >= 30 {
+            (path, mouth, rank) = (p, m, k + 1);
+            break;
+        }
+    }
+    if mouth == usize::MAX {
+        println!("stem: no stem of 30 cells or more that starts inside the window");
+        return Vec::new();
+    }
+    let best_q = hy.q[mouth];
+    let (mx, my) = (mouth % w, mouth / w);
+    let border = mx.min(w - 1 - mx).min(my).min(h - 1 - my);
+    path.reverse();
+    let len = path.len();
+    // The split: a cell is in a lake when it is in a kept basin or the fill raised it; the others are open channel and hillslope.
+    let in_lake = |p: usize| hy.label[p] != NONE || filled[p] > z[p];
+    let mut out = String::new();
+    for d in 0..10 {
+        let cells = &path[d * len / 10..(d + 1) * len / 10];
+        let mut part = String::new();
+        for (name, want) in [("lake", true), ("open", false)] {
+            let mut v: Vec<f64> = cells.iter().filter(|&&p| in_lake(p) == want).map(|&p| after[p] - z[p]).collect();
+            v.sort_by(|a, b| a.total_cmp(b));
+            if v.is_empty() {
+                part += &format!(" {name} -");
+            } else {
+                part += &format!(" {name} {:.2}/{:.2} (n {})", v[v.len() / 2], v[v.len() - 1], v.len());
+            }
+        }
+        out += &format!("\n  {}:{part}", d + 1);
+    }
+    let km = len as f64 * grid.dx() / 1000.0;
+    println!("stem (mouth number {rank} by discharge): {len} cells (about {km:.0} km of cells, straight-line steps), mouth discharge {best_q:.0} m3/s, drainage area at the mouth {:.3e} m2, at the source {:.3e} m2; the mouth cell is at {:.0} m, {} cells from the window border, {}; deposited thickness p50/max (m) by tenth from the source, in lakes and outside them:{out}", area[mouth], area[path[0]], z[mouth], border, if outlet[mouth] { "an outlet cell" } else { "no outlet cell" });
+    // The same split over the window's land and over the region proper (the margin's cut, an outlet at land height, is only in the window).
+    let (i0, j0) = ((grid.global_id(0) & 0xffff_ffff) as usize, (grid.global_id(0) >> 32) as usize);
+    for (name, only_region) in [("the window's land", false), ("the region proper", true)] {
+        let (mut vin, mut vout, mut cin, mut cout) = (0.0f64, 0.0f64, 0usize, 0usize);
+        for p in 0..grid.len() {
+            let (i, j) = (i0 + p % w, j0 + p / w);
+            if z[p] > 0.0 && (!only_region || (i >= region.0 && i <= region.1 && j >= region.2 && j <= region.3)) {
+                let dv = (after[p] - z[p]) * grid.cell_area(p);
+                if in_lake(p) {
+                    (vin, cin) = (vin + dv, cin + 1);
+                } else {
+                    (vout, cout) = (vout + dv, cout + 1);
+                }
+            }
+        }
+        println!("deposit by place over {name}: in lakes (kept basin or filled above z) {vin:.4e} m3 on {cin} cells, outside {vout:.4e} m3 on {cout} cells ({:.1} % of the change in lakes)", 100.0 * vin / (vin + vout));
+    }
+    path
+}
+
+/// Where the depressions along the main stem come from (item 13, finding 3): the depression depth (canonical filled surface minus the surface) at the stem's cells, p50 and max per tenth from the source,
+/// on the base (round 0), after 1, 2, 3 and 4 rounds (the surface H1 and the sediment pass start from) and after the sediment pass, and the share of the region's land that is under the fill (deeper than 1.5 eps)
+/// at each. It re-runs the rounds (1, 2, 3 of the 4) on the same inputs, so it adds about 6 rounds to the run.
+#[allow(clippy::too_many_arguments)]
+fn depth_along(
+    grid: &Grid,
+    z0: &[f64],
+    z4: &[f64],
+    after_pass: &[f64],
+    outlet: &[bool],
+    path: &[usize],
+    region: (usize, usize, usize, usize),
+    stream: u64,
+    threads: usize,
+) {
+    if path.is_empty() {
+        return;
+    }
+    let w = grid.w();
+    let (i0, j0) = ((grid.global_id(0) & 0xffff_ffff) as usize, (grid.global_id(0) >> 32) as usize);
+    let p = CarveParams { steps: 20, reroute_every: 5, round_rules: RoundRules::ROUND, cell_metric: true, ..CarveParams::default() };
+    let eps = 1e-3;
+    let mut stages: Vec<(String, Vec<f64>)> = vec![("base".to_string(), z0.to_vec())];
+    for k in 1..=3usize {
+        let mut zk = z0.to_vec();
+        // The carve is the rounds times the steps of a round (5 of the 20 steps of the 4 rounds).
+        solve_rounds(grid, &mut zk, outlet, &CarveParams { steps: 5 * k, ..p }, k, &threads, stream);
+        stages.push((format!("after round {k}"), zk));
+    }
+    stages.push(("after round 4 (before the pass)".to_string(), z4.to_vec()));
+    stages.push(("after the pass".to_string(), after_pass.to_vec()));
+    let len = path.len();
+    for (name, zz) in &stages {
+        let filled = priority_flood_with(grid, zz, outlet, eps, true);
+        let mut out = String::new();
+        for d in 0..10 {
+            let mut v: Vec<f64> = path[d * len / 10..(d + 1) * len / 10].iter().map(|&c| filled[c] - zz[c]).collect();
+            v.sort_by(|a, b| a.total_cmp(b));
+            if !v.is_empty() {
+                out += &format!(" {:.1}/{:.1}", v[v.len() / 2], v[v.len() - 1]);
+            }
+        }
+        let (mut land, mut under) = (0usize, 0usize);
+        for j in region.2..=region.3 {
+            for i in region.0..=region.1 {
+                let c = (j - j0) * w + (i - i0);
+                if zz[c] > 0.0 {
+                    land += 1;
+                    under += usize::from(filled[c] - zz[c] > 1.5 * eps);
+                }
+            }
+        }
+        println!("depth {name}: region land under the fill {under} of {land} ({:.2} %); along the stem p50/max (m) by tenth from the source:{out}", 100.0 * under as f64 / land.max(1) as f64);
+    }
 }
