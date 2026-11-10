@@ -161,6 +161,7 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
         assert!(u.iter().all(|v| v.is_finite() && *v >= 0.0), "the uplifts are finite and not negative");
     }
     let uplift = p.u_over_k * p.k_dt;
+    // GEN-162: under the local clip of the round rules (the round solver's) a breach does not cut below the base level of its chain exit (none when every chain ends at the sea; K7, the sediment pass and the default rules keep today's breach). The array is 8 bytes a cell: the round rules are not used on a face-scale carve (pass 1 of the default bake runs the default rules); a face-scale use would need an f32 or a per-catchment base.
     // The taper of the uplift by the starting height above the sea, kept per cell as an f32 (a face of 1.6e8 cells would not fit another f64 array in its budget).
     let taper: Option<Vec<f32>> = (p.uplift_taper_m > 0.0 && (p.u_over_k != 0.0 || rock.uplift.is_some()))
         .then(|| z.iter().map(|h| planet_core::smoothstep(0.0, p.uplift_taper_m, h - p.sea_level) as f32).collect());
@@ -185,6 +186,11 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
                 }
             }
             let visit: &[u32] = if grouped.is_empty() { &r.order } else { &grouped };
+            let base = if p.round_rules.clip_mfd != super::route::MfdClip::Local {
+                None
+            } else {
+                exit_base(p.sea_level, r.order.iter().map(|&c| c as usize), &r.receiver, z)
+            };
             for &c in visit.iter().rev() {
                 let c = c as usize;
                 let rec = r.receiver[c];
@@ -192,7 +198,10 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
                     continue;
                 }
                 let rec = rec as usize;
-                let want = (z[c] - p.breach_slope * distance(grid, c, rec)).max(floor);
+                let mut want = (z[c] - p.breach_slope * distance(grid, c, rec)).max(floor);
+                if let Some(b) = &base {
+                    want = want.max(b[rec]);
+                }
                 if z[rec] > want {
                     let limit = if p.breach_height_scale_m > 0.0 {
                         p.breach_max_m.min(BREACH_MIN_M)
@@ -277,4 +286,26 @@ pub(super) fn distance(grid: &Grid, a: usize, b: usize) -> f64 {
     } else {
         grid.dx() * core::f64::consts::SQRT_2
     }
+}
+
+/// The level a breach may not cut below (GEN-162, A3 sections 5.3 and 6): along each receiver chain that ends in an outlet above the sea level (a fixed exit: a land cut of the
+/// window, a basin's rim), `base[outlet] = z[outlet]` and `base[c] = base[receiver]` (flat: a slope along the chain left a sill within the slope profile standing over a pit behind it, R3b, D4). A chain that ends at or below the sea level has no base (`None` when no chain
+/// has one, so that a sea-outlet build allocates nothing and moves no bit). `order` lists the receivers before their donors;
+pub(super) fn exit_base(sea_level: f64, order: impl Iterator<Item = usize> + Clone, receiver: &[u32], z: &[f64]) -> Option<Vec<f64>> {
+    if !order.clone().any(|c| receiver[c] == NONE && z[c] > sea_level) {
+        return None;
+    }
+    let mut base = vec![f64::NEG_INFINITY; z.len()];
+    for c in order {
+        base[c] = if receiver[c] == NONE {
+            if z[c] > sea_level {
+                z[c]
+            } else {
+                f64::NEG_INFINITY
+            }
+        } else {
+            base[receiver[c] as usize]
+        };
+    }
+    Some(base)
 }
