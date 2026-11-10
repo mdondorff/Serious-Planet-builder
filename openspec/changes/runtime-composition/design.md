@@ -71,3 +71,21 @@ Split (decision of the lane, reason below): the first PR holds the producer in m
 - Reason: the bump refuses every older store, an effect on all worlds that deserves its own review and its own revert point; the producer's numerics (levels to 1e-9) are reviewed apart from format work.
 - Cost: one more PR; the second is small (encode, decode, key, refusal).
 Order inside the first PR: tests 1-5 red, the function, then the manifest entry (test 9).
+
+## 9. PR 2: the basin table and the version of kind 13 (architect D16, 2026-11-10; inbox #115)
+Facts from the code (`crates/cache/src/layer_tiles.rs`): kind 13 is one record per tile, `TILE_LAYER_VERSION = 2`, payload `codec u8 | tile u32 | stats | key 16 B | brotli(row-delta i16 counts of 0.25 m)`; the layer version is in the key (`TileLayerSpec::bytes`), so a bump changes every key and an older store is refused by key (STRM-065), not read. Item 14 (D11) settled no format of the new chain's `L`.
+Decisions (D16):
+| # | Question | Decision |
+|---|---|---|
+| 1 | `L` | the same kind-13 record, `TILE_LAYER_VERSION = 3`, new codec byte 3 (payload = item 14's measured encoding, GEN-156; stats block = the new chain's K7 stats; key includes `base_id`; version 2 refused naming both versions; the fill channel is gone) |
+| 2 | Lakes | not in kind 13: a basin table per K6 key unit, records sorted by basin id (id, floor, spill level and point, level, class, flags, `q_out`, tile range); a new cache kind `Kind::BasinTable = 19`, requirements STRM-080 |
+| 3 | Reading | the runtime loads a region's table once and indexes by tile; per-tile copies are rejected; the table and kind 13 are read under one `commit_id` (A3 section 7.4, CON-22) |
+| 4 | River pieces | with the channel graph in the rivers PR, not PR 2 |
+Split (lane): PR 2a the basin table (kind 19, encode and decode, key, refusals, tile ranges from the producer); PR 2b kind 13 version 3 with codec 3 and the key with `base_id`; the shared `commit_id` read in whichever merges second.
+Tests, 2a (TEST-108 continues; tier A, cache crate):
+- T6 round-trip: encode then decode a table of 0, 1 and 3 lakes: equal records in id order, whatever the input order.
+- T6b a table of another version, key or commit is refused naming both.
+- T6c the tile range of a lake across a tile border holds both tiles.
+- T6d a decoder never reserves more than the declared count allows: a count larger than the payload is refused.
+- T8 re-key: a change of a producer parameter changes the table's key; the same parameters give the same key.
+- T9 size: `n` lakes take exactly the header plus the fixed record size times `n` plus the tile list entries.
