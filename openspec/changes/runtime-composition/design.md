@@ -66,5 +66,8 @@ Finding in the code: `bake/hydro.rs` `Basin` already holds `water_level_m`, `q_o
 | 7 | Determinism: the same basin set in a shuffled build order gives identical records and bytes (CON-14) | A | order dependence |
 | 8 | Key: a change of the producer's parameters re-keys the layer | A | stale store read as current |
 | 9 | Stage manifest: the fixture bake lists the lake step with its input and output keys | B | step missing from the phase plan |
-Order inside the PR: tests 1-5 against a function `lakes_from_hydro(&Hydro) -> Vec<Lake>` first (red), then the function, then 6-8 with the store field, then 9. The store field and the water pass source follow in the next two PRs of section 6.
-Open for the planner: requirement ids (generator-pipeline) and whether the store field of test 6 belongs in this PR or in item 14's (G-STORE); the plan assumes this PR.
+Ids (planner, inbox #110): GEN-163 the lake producer, TEST-108 its tests.
+Split (decision of the lane, reason below): the first PR holds the producer in memory, tests 1-5, 7 and 9 (`lakes_from_hydro(&Hydro) -> Vec<Lake>` and the segment drop); the second PR holds the store field and the kind-13 version bump, tests 6 and 8.
+- Reason: the bump refuses every older store, an effect on all worlds that deserves its own review and its own revert point; the producer's numerics (levels to 1e-9) are reviewed apart from format work.
+- Cost: one more PR; the second is small (encode, decode, key, refusal).
+Order inside the first PR: tests 1-5 red, the function, then the manifest entry (test 9).
