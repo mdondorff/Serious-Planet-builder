@@ -7,4 +7,4 @@ Decisions D11 and D14 (architect, 2026-11-10; inbox #123): item 3's stored-field
 
 ## Impact
 - Code: a test and its aggregator entry only. No production code changes.
-- The read is an interpolant of the lattice, so against the generator's own sample at the cell centres a 16-cell lattice differs by up to 2,404 m (a coarse fixture); the store adds nothing to it.
+- The read is an interpolant of the lattice, so it differs from the generator's own sample at the cell centres; the store adds nothing to that difference (the two reads in the test are equal bit for bit). Not measured here: that difference.
