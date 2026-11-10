@@ -1,0 +1,1 @@
+- 2026-11-10 h0-stored-read (GEN-164): H0 cell values read from a stored bake equal the in-memory read bit for bit on 864 H0 cells including every cube edge and corner, every edge stencil reaching over the face edge (the stored codec is lossless, step 0); a test only, no preview code (item 3, D11, D14).
