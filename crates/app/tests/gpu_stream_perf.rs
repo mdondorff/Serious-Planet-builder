@@ -369,6 +369,18 @@ fn the_lit_scene_runs_every_view_and_both_flights_with_a_pass_row_each_and_logs_
         assert!(exact > 0, "{view}: the exact minimum cut no node: {line}");
         assert!(line.contains(", 0 kept with no minimum)"), "{view}: tiles without a minimum: {line}");
     }
+    // The progress lines of a smoke run carry the seconds since the run started, and the run marks its views and flights (the CI stall diagnosis of 2026-11-10: a timeout names the view it was in).
+    let stamped =
+        out.lines().filter(|l| l.starts_with("lit/") && (l.contains(" nodes (") || l.contains(" timed frames in "))).collect::<Vec<_>>();
+    assert!(
+        stamped.len() >= 9 && stamped.iter().all(|l| l.contains(" [run +") && l.ends_with(" s]")),
+        "every view and flight line has its run time: {stamped:?}"
+    );
+    let phases = planet::stall::phase_report();
+    assert!(
+        phases.contains("lit/ground-1m start") && phases.contains("lit/coast-descent@filter1 flight end"),
+        "the phase report names the views and flights: {phases}"
+    );
     assert!(!out.contains("terrain pass median") && !out.contains("budget 1 ms"), "a smoke run prints no budget rows: {out}");
     let json = std::fs::read_to_string(&log).unwrap();
     assert!(json.contains("\"valid_for_budgets\":false") && json.contains("smoke run"), "{json}");

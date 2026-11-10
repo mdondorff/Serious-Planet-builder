@@ -1,0 +1,1 @@
+- 2026-11-10 stream-perf-diag: the lit smoke's progress lines carry the run time and the run marks its views and flights for the stall report (output only; inbox #107)

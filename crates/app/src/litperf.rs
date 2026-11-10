@@ -21,6 +21,16 @@ use planet_render::{GpuContext, TerrainRenderer};
 use std::io::Write;
 use std::time::Instant;
 
+thread_local! {
+    /// The start of the lit run on this thread (set by `perf_lit`): the smoke run stamps its progress lines with the time since it (TEST-025, the CI stall diagnosis of 2026-11-10).
+    static RUN_START: std::cell::Cell<Option<Instant>> = const { std::cell::Cell::new(None) };
+}
+
+/// `" [run +12.3 s]"` in a smoke run (the seconds since the run started), `""` otherwise: a run that stops on a CI timeout shows how far it got and how long each view took.
+fn run_stamp(smoke: bool) -> String {
+    RUN_START.with(|s| s.get()).filter(|_| smoke).map_or_else(String::new, |t| format!(" [run +{:.1} s]", t.elapsed().as_secs_f64()))
+}
+
 /// Whether `--scene NAME` names a lit perf scene.
 pub fn is_lit_scene(name: &str) -> bool {
     name == "lit"
@@ -301,10 +311,11 @@ fn measure_static(
     let water_draws = count_water(&lit);
     writeln!(
         out,
-        "{path}: {} nodes ({new} new meshes in {:.1} s), {water_draws} with water ({})",
+        "{path}: {} nodes ({new} new meshes in {:.1} s), {water_draws} with water ({}){}",
         plan.nodes.len(),
         started.elapsed().as_secs_f64(),
-        cut_text(setup.cut_counts())
+        cut_text(setup.cut_counts()),
+        run_stamp(rig.smoke)
     )
     .map_err(err)?;
     let (warm, measured, runs) = if rig.smoke { (1usize, 3usize, 1usize) } else { (60usize, rig.frames.max(10), 3usize) };
@@ -442,10 +453,11 @@ fn measure_flight(
     let load = load_sampler.map_or_else(planet_perf::load::CaseLoad::not_measured, planet_perf::load::LoadSampler::stop);
     writeln!(
         out,
-        "{path}: {} cameras x {reps} timed frames in {:.1} s, up to {nodes_max} nodes, {water_max} with water ({})",
+        "{path}: {} cameras x {reps} timed frames in {:.1} s, up to {nodes_max} nodes, {water_max} with water ({}){}",
         view.cameras.len(),
         started.elapsed().as_secs_f64(),
-        cut_text(cut_total)
+        cut_text(cut_total),
+        run_stamp(rig.smoke)
     )
     .map_err(err)?;
     let totals: Vec<f64> = frames.iter().map(|f| f.total_ms).collect();
@@ -639,18 +651,30 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
     .map_err(err)?;
     let mut results: Vec<ViewResult> = Vec::new();
     let first_camera = views[0].cameras[0];
+    // The run's clock and its phases (the views and flights): a run that stops on a timeout shows, in the output and in `stall::phase_report`, which one it was in.
+    RUN_START.with(|s| s.set(Some(Instant::now())));
+    crate::stall::phase_mark_owned("lit run: renderer".to_string());
     let mut r = new_renderer(&rig, &setup, first_camera)?;
     for view in &views {
         let path = format!("lit/{}", view.name);
         match view.kind {
-            ViewKind::Static => results.push(measure_static(&rig, &mut r, &mut setup, view, &path, out)?),
+            ViewKind::Static => {
+                crate::stall::phase_mark_owned(format!("{path} start"));
+                results.push(measure_static(&rig, &mut r, &mut setup, view, &path, out)?);
+                crate::stall::phase_mark_owned(format!("{path} end"));
+            }
             ViewKind::Flight => {
                 // Both settings of the shore filter, the look's default first (ATMO-017; the inspection of the gate).
                 let default = setup.look.water.shore_filter;
+                crate::stall::phase_mark_owned(format!("{path} flight start"));
                 results.push(measure_flight(&rig, &mut r, &mut setup, view, &path, out)?);
+                crate::stall::phase_mark_owned(format!("{path} flight end"));
                 let other = if default == 0.0 { 1.0 } else { 0.0 };
                 setup.look.water.shore_filter = other;
-                let off = measure_flight(&rig, &mut r, &mut setup, view, &format!("{path}@filter{}", other as u32), out);
+                let off_path = format!("{path}@filter{}", other as u32);
+                crate::stall::phase_mark_owned(format!("{off_path} flight start"));
+                let off = measure_flight(&rig, &mut r, &mut setup, view, &off_path, out);
+                crate::stall::phase_mark_owned(format!("{off_path} flight end"));
                 setup.look.water.shore_filter = default;
                 results.push(off?);
             }
