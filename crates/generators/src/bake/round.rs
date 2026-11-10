@@ -43,7 +43,11 @@ pub struct Drivers<'a> {
 pub fn catchment_round(inp: &mut CatchmentInputs, p: &CarveParams, steps: usize) {
     let floor = p.sea_level + p.epsilon;
     let z = &mut inp.z;
-    let base = if p.round_rules.is_default() { None } else { super::carve::exit_base(p.sea_level, 0..z.len(), &inp.receiver, z) };
+    let base = if p.round_rules.clip_mfd != super::route::MfdClip::Local {
+        None
+    } else {
+        super::carve::exit_base(p.sea_level, 0..z.len(), &inp.receiver, z)
+    };
     for c in (0..z.len()).rev() {
         let rec = inp.receiver[c];
         if rec == NONE || inp.receiver_is_outlet[c] {

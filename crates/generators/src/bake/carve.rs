@@ -161,7 +161,7 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
         assert!(u.iter().all(|v| v.is_finite() && *v >= 0.0), "the uplifts are finite and not negative");
     }
     let uplift = p.u_over_k * p.k_dt;
-    // GEN-162: under the round rules a breach does not cut below the base level of its chain exit (none when every chain ends at the sea; the default rules keep today's breach). The array is 8 bytes a cell: the round rules are not used on a face-scale carve (pass 1 of the default bake runs the default rules); a face-scale use would need an f32 or a per-catchment base.
+    // GEN-162: under the local clip of the round rules (the round solver's) a breach does not cut below the base level of its chain exit (none when every chain ends at the sea; K7, the sediment pass and the default rules keep today's breach). The array is 8 bytes a cell: the round rules are not used on a face-scale carve (pass 1 of the default bake runs the default rules); a face-scale use would need an f32 or a per-catchment base.
     // The taper of the uplift by the starting height above the sea, kept per cell as an f32 (a face of 1.6e8 cells would not fit another f64 array in its budget).
     let taper: Option<Vec<f32>> = (p.uplift_taper_m > 0.0 && (p.u_over_k != 0.0 || rock.uplift.is_some()))
         .then(|| z.iter().map(|h| planet_core::smoothstep(0.0, p.uplift_taper_m, h - p.sea_level) as f32).collect());
@@ -186,8 +186,11 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
                 }
             }
             let visit: &[u32] = if grouped.is_empty() { &r.order } else { &grouped };
-            let base =
-                if p.round_rules.is_default() { None } else { exit_base(p.sea_level, r.order.iter().map(|&c| c as usize), &r.receiver, z) };
+            let base = if p.round_rules.clip_mfd != super::route::MfdClip::Local {
+                None
+            } else {
+                exit_base(p.sea_level, r.order.iter().map(|&c| c as usize), &r.receiver, z)
+            };
             for &c in visit.iter().rev() {
                 let c = c as usize;
                 let rec = r.receiver[c];

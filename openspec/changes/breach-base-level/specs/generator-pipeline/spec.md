@@ -1,6 +1,6 @@
 ## ADDED Requirements
 ### Requirement: GEN-162 A breach does not cut below its chain exit
-Under the round rules a breach SHALL NOT lower a cell below the base level of its chain exit: for a receiver chain that ends in an outlet above the sea level, the base of every cell of the chain is the outlet's height, and the target of a breach is at least that base. A chain that ends at or below the sea level SHALL have no base, and the default rules SHALL keep today's breach.
+Under the local clip of the round rules (the round solver's rules) a breach SHALL NOT lower a cell below the base level of its chain exit: for a receiver chain that ends in an outlet above the sea level, the base of every cell of the chain is the outlet's height, and the target of a breach is at least that base. A chain that ends at or below the sea level SHALL have no base, and every other rule set (the default rules, K7's and the sediment pass's canonical flood without the clip) SHALL keep today's breach.
 - A depression whose exit is fixed (A3 sections 5.3 and 6) SHALL NOT get deeper from round to round through the breach.
 - A build whose outlets are all at or below the sea level SHALL be bit-identical to the build without the rule.
 
