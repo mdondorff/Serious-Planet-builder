@@ -423,3 +423,21 @@ fn a_discharge_that_is_not_finite_is_refused() {
     let ch = Channel { points: vec![(4.0, 4.0), (20.0, 4.0)], levels: vec![50.0, 50.0], q: vec![f64::INFINITY, 5.0] };
     burn_channels_wide(&mut vec![100.0; 32 * 32], 32, (0, 0), &[ch], Some((&WidthLaw::STANDARD, 10.0)));
 }
+
+// spec: GEN-165, TEST-108
+#[test]
+fn the_trench_width_follows_a_q_to_the_b_within_one_cell_at_two_discharges() {
+    use planet_generators::bake::k7::{burn_channels_wide, WidthLaw};
+    let law = WidthLaw::STANDARD;
+    let w = 96;
+    let cell_m = 10.0;
+    for q in [60.0f64, 600.0] {
+        let ch = Channel { points: vec![(2.0, 48.0), (93.0, 48.0)], levels: vec![50.0, 50.0], q: vec![q, q] };
+        let mut z = vec![100.0; w * w];
+        burn_channels_wide(&mut z, w, (0, 0), &[ch], Some((&law, cell_m)));
+        let across = (0..w).filter(|&y| z[y * w + 48] == 50.0).count() as f64;
+        let want = law.a * libm::pow(q, law.b) / cell_m;
+        assert!((across - want).abs() <= 1.0, "Q = {q}: {across} cells across, the law says {want}");
+        assert!(z.iter().all(|&v| v == 50.0 || v == 100.0), "only lowered to the bed");
+    }
+}
