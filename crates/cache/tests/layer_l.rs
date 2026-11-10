@@ -189,7 +189,7 @@ fn the_water_section_is_reserved_empty_carried_opaque_and_bounded() {
     let got = load_l_tile(&store, &w, RES, &s, id()).unwrap().unwrap();
     assert_eq!(got.water, mask);
     let d = Dir::new("water-empty");
-    let store = store_of(&d, &w, &[plain.clone()]);
+    let store = store_of(&d, &w, std::slice::from_ref(&plain));
     let none = load_l_tile(&store, &w, RES, &s, id()).unwrap().unwrap();
     assert!(none.water.is_empty());
     assert_eq!(none.core, got.core, "the counts read the same with and without a section");
