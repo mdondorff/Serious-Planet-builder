@@ -1,13 +1,11 @@
 //! Preview level 1 (A3 11.1, AUTH-007 to AUTH-010, GEN-157): the H0 re-route over an edit, planet-wide with the base heights resident, and the trunk rivers and
 //! watersheds as plain data for an overlay. A height or landform stamp edit changes the heights at the cell centres in the stamps' reach and the sea mask; a rainfall or temperature region edit
 //! changes the discharge weight and keeps the routing. The preview is a non-authoritative field with an id of its own (CON-07), decided outside the renderer (CON-03), and never stored or keyed
-//! as an authoritative field. The preview reads no stored field by itself: the caller hands the resident heights in, or builds the base from a field source ([`PreviewBase::from_field`]).
+//! as an authoritative field. It does not read the stored field: the caller hands the resident heights in.
 
 use super::h0::{GlobalGrid, GlobalRouting, NONE};
-use crate::global::{read_direction, read_elevation_c1_cached, LatticeSource, ReadError, StencilCache};
 use crate::runoff::{discharge_weight, runoff_mm};
 use crate::stamp::apply_stamps;
-use planet_core::cube::FaceMapping;
 use planet_core::Vec3;
 use planet_world_def::footprint::FootprintItem;
 
@@ -200,37 +198,6 @@ impl PreviewBase {
         PreviewBase::new(grid, PLANET_RADIUS_M, 0.0, 1e-3, BaseFields { z0, p_mm: p, t_c: t }, PREVIEW_DOMAIN ^ seed)
     }
 
-    /// The base of a session read from a field source, a stored bake or an in-memory grid (item 3, GEN-164): the height of every H0 cell of `n` cells a face edge is the C1 read of the
-    /// source at the cell's centre ([`read_elevation_c1_cached`]), the rainfall and the temperature the bilinear read ([`read_direction`]); samples beyond a face edge come from the face
-    /// it meets, so a cell on a cube edge or at a corner reads the same field from every side. A source that cannot answer is an error, never a placeholder. The base word is the caller's.
-    pub fn from_field(n: usize, src: &dyn LatticeSource, map: &dyn FaceMapping, word: u64) -> Result<PreviewBase, ReadError> {
-        if !(2..=26_000).contains(&n) {
-            return Err(ReadError::Shape(format!("an H0 base needs between 2 and 26,000 cells a face edge, not {n}")));
-        }
-        if src.records_reads() {
-            return Err(ReadError::Source(
-                "a source that only records the cells asked for answers placeholders: no base is built from it".into(),
-            ));
-        }
-        let grid = GlobalGrid::new(n, PLANET_RADIUS_M);
-        let len = grid.len();
-        let (mut z0, mut p, mut t) = (vec![0f64; len], vec![0f32; len], vec![0f32; len]);
-        let mut cache = StencilCache::new();
-        for id in 0..len {
-            let d = grid.direction(id as u32);
-            z0[id] = f64::from(read_elevation_c1_cached(src, map, d, &mut cache, 0)?);
-            let s = read_direction(src, map, d)?;
-            (p[id], t[id]) = (s.precipitation_mm, s.temperature_c);
-        }
-        if let Some(bad) = z0.iter().position(|v| !v.is_finite()) {
-            return Err(ReadError::Source(format!("the field reads a height that is not a number at H0 cell {bad}")));
-        }
-        if z0.iter().all(|&v| v > 0.0) {
-            return Err(ReadError::Shape("the field has no cell at or below the sea level: H0 needs an outlet".into()));
-        }
-        Ok(PreviewBase::new(grid, PLANET_RADIUS_M, 0.0, 1e-3, BaseFields { z0, p_mm: p, t_c: t }, word))
-    }
-
     /// The base height of every cell, metres.
     pub fn heights(&self) -> &[f64] {
         &self.z0
@@ -239,11 +206,6 @@ impl PreviewBase {
     /// The base annual rainfall of every cell, millimetres.
     pub fn rainfall(&self) -> &[f32] {
         &self.p_mm
-    }
-
-    /// The base temperature of every cell, degrees Celsius.
-    pub fn temperature(&self) -> &[f32] {
-        &self.t_c
     }
 
     pub fn grid(&self) -> &GlobalGrid {
