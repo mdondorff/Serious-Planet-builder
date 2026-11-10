@@ -14,6 +14,8 @@ use planet_generators::bake::partition::{partitioned_route, PartCache};
 use planet_generators::bake::probe::{self, SheetProbe};
 use planet_generators::bake::round::solve_rounds;
 use planet_generators::bake::route::{route_rules, RoundRules, NONE};
+use planet_generators::bake::sediment::sediment_pass;
+use planet_generators::bake::tile::Pass2Params;
 use planet_generators::bake::Grid;
 use planet_generators::runoff::{discharge_weight, pet_mm, runoff_mm};
 use std::sync::Arc;
@@ -306,6 +308,7 @@ fn h1(
         hy.stats.artefacts,
         hy.stats.ramps
     );
+    land_and_sediment(grid, z, &filled, outlet, z0, &hy, region, stream, threads);
 }
 
 /// The plains block (item 13): over the land cells of the region proper, on the carved surface `z` and its canonical filled surface.
@@ -351,5 +354,73 @@ fn plains(grid: &Grid, z: &[f64], filled: &[f64], receiver: &[u32], outlet: &[bo
         pc(raised),
         raise_m / raised.max(1) as f64,
         pc(pits)
+    );
+}
+
+/// G-LAND's unclassified sinks and G-SED's balance on the carved surface of the region (item 13, step 4). The unclassified sinks are the cells of the pits H1 keeps as no basin (artefacts and ramps: its pit cells less the cells of the kept basins), as a share of the land of the region proper;
+/// G-SED is the sediment pass on a copy of `z` with the original ground `z0` (pass 2's parameters, pass 1's breach limit): eroded = deposited + exported as the report states it, thermal and the pit spreading keeping the volume.
+#[allow(clippy::too_many_arguments)]
+fn land_and_sediment(
+    grid: &Grid,
+    z: &[f64],
+    filled: &[f64],
+    outlet: &[bool],
+    z0: &[f64],
+    hy: &planet_generators::bake::hydro::Hydro,
+    region: (usize, usize, usize, usize),
+    stream: u64,
+    threads: usize,
+) {
+    let w = grid.w();
+    let (i0, j0) = ((grid.global_id(0) & 0xffff_ffff) as usize, (grid.global_id(0) >> 32) as usize);
+    let (mut land, mut unclassified, mut kept) = (0usize, 0usize, 0usize);
+    for j in region.2..=region.3 {
+        for i in region.0..=region.1 {
+            let p = (j - j0) * w + (i - i0);
+            if z[p] > 0.0 {
+                land += 1;
+            }
+        }
+    }
+    let in_basins = hy.label.iter().filter(|&&l| l != NONE).count();
+    let unclassified_window = hy.stats.basin_cells - in_basins;
+    for p in 0..grid.len() {
+        let (i, j) = (i0 + p % w, j0 + p / w);
+        if i >= region.0 && i <= region.1 && j >= region.2 && j <= region.3 && z[p] > 0.0 {
+            if hy.label[p] != NONE {
+                kept += 1;
+            } else if !outlet[p] && filled[p] - z[p] > HydroParams::default().pit_min_m {
+                unclassified += 1;
+            }
+        }
+    }
+    println!(
+        "G-LAND: pit cells of the window {} = {} in kept basins + {unclassified_window} unclassified (artefacts and ramps: {} and {}); of the region's {land} land cells {unclassified} unclassified ({:.3} %; rule: at most 1 %), {kept} in kept basins",
+        hy.stats.basin_cells,
+        in_basins,
+        hy.stats.artefacts,
+        hy.stats.ramps,
+        100.0 * unclassified as f64 / land.max(1) as f64
+    );
+    let mut q2 = Pass2Params::standard(stream, 0.0);
+    q2.carve.breach_max_m = CarveParams::default().breach_max_m;
+    let mut zs = z.to_vec();
+    let t = Instant::now();
+    let r = sediment_pass(grid, &mut zs, z0, &q2, threads);
+    let rel = |a: f64, b: f64| (a - b).abs() / a.abs().max(1.0);
+    println!(
+        "G-SED: sediment pass {:.1} s; eroded {:.4e} m3 = deposited {:.4e} + exported {:.4e} (residual {:.2e} relative); the heights moved by {:.4e} m3 (against deposited {:.2e}); eroded before thermal {:.4e}, after {:.4e}; volume change thermal {:.2e}, pit spreading {:.2e}; pits {:?}",
+        t.elapsed().as_secs_f64(),
+        r.deposit.eroded,
+        r.deposit.deposited,
+        r.deposit.exported,
+        rel(r.deposit.eroded, r.deposit.deposited + r.deposit.exported),
+        r.deposit_height_volume_m3,
+        rel(r.deposit.deposited, r.deposit_height_volume_m3),
+        r.eroded_before_thermal_m3,
+        r.eroded_after_thermal_m3,
+        r.thermal_volume_change,
+        r.spread_volume_change,
+        r.pits.iter().map(|(n, p)| format!("{n} {} ({:.3} %)", p.pit_cells, 100.0 * p.share())).collect::<Vec<_>>()
     );
 }
