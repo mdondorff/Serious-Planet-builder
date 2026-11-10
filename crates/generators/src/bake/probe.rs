@@ -565,7 +565,14 @@ mod tests {
         let (n, hill): (usize, Box<dyn Fn(f64) -> f64>) = (40, Box::new(|r2| 300.0 * libm::exp(-r2 / 80.0)));
         let g = Grid::new(n, n, 100.0);
         let z_of = |k: f64| -> Vec<f64> {
-            (0..g.len()).map(|p| k * hill(((p % n) as f64 - 20.0).powi(2) + ((p / n) as f64 - 20.0).powi(2)) + 5.0).collect()
+            (0..g.len())
+                .map(|p| {
+                    k * hill({
+                        let (dx, dy) = ((p % n) as f64 - 20.0, (p / n) as f64 - 20.0);
+                        dx * dx + dy * dy
+                    }) + 5.0
+                })
+                .collect()
         };
         let load = |d: &std::path::Path, name: &str| {
             let dec = png::Decoder::new(std::io::Cursor::new(std::fs::read(d.join(name)).unwrap()));
