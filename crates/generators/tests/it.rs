@@ -20,6 +20,8 @@ mod bake_hydro;
 mod bake_k7;
 #[path = "bake_kernels.rs"]
 mod bake_kernels;
+#[path = "bake_lakes.rs"]
+mod bake_lakes;
 #[path = "bake_metric.rs"]
 mod bake_metric;
 #[path = "bake_partition.rs"]
