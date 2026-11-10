@@ -6,6 +6,8 @@
 //! - A basin with no inflow (`q_in = 0`) has the floor as its level and no water surface (`wet = false`): a playa.
 //! - A channel cell inside a kept basin is dropped: the lake draws as water and a channel passes through it (A3 section 5.2). A segment that crosses a basin is cut into pieces at the basin: the piece
 //!   before ends at the last cell outside it, the piece after starts at the spill cell, whose `Q_w` includes the basin's `q_out`.
+//! - Only the segments that lose a cell have pieces (a piece is its first cell and its cell count; the cells are the receiver chain); the whole segments stay in the hydrology. The producer's memory is the lakes
+//!   and the cut segments, not a second copy of the rivers.
 //! - The result is a pure function of the hydrology: lakes are in the order of their id, pieces in the order of the segments (CON-14).
 
 use super::hydro::{Basin, BasinClass, Hydro, CURVE_STEPS};
@@ -36,14 +38,16 @@ pub struct Lake {
     pub q_out: f64,
 }
 
-/// A run of channel cells of one segment outside every kept basin.
+/// A run of channel cells of one segment outside every kept basin. Only segments that lose a cell to a basin have pieces; every other segment of the hydrology is whole and is not listed (the memory of a
+/// build is the cut segments, not a copy of every river cell, GEN-163).
 #[derive(Clone, Debug, PartialEq)]
 pub struct RiverPiece {
     /// The segment this piece is cut from, and its number among the pieces of that segment (0 first).
     pub segment: u64,
     pub part: u32,
-    /// The cells in downstream order (grid cell indices).
-    pub cells: Vec<u32>,
+    /// The first cell and the number of cells: the cells are the receiver chain from `first`.
+    pub first: u32,
+    pub cells: u32,
     /// `Q_w` at the first and at the last cell.
     pub q_first: f64,
     pub q_last: f64,
@@ -54,8 +58,9 @@ pub struct RiverPiece {
 pub struct Lakes {
     /// One lake per kept basin, by id.
     pub lakes: Vec<Lake>,
+    /// The pieces of the segments that have a channel cell inside a kept basin, in the order of the segments.
     pub pieces: Vec<RiverPiece>,
-    /// The channel cells of the segments that lie inside kept basins and are not in any piece.
+    /// The channel cells of the segments that lie inside kept basins and are in no piece.
     pub dropped_cells: usize,
 }
 
@@ -107,34 +112,43 @@ pub fn lakes_from_hydro(grid: &Grid, routing: &Routing, hydro: &Hydro) -> Lakes 
     let mut pieces: Vec<RiverPiece> = Vec::new();
     let mut dropped_cells = 0usize;
     for s in &hydro.segments {
-        let mut part = 0u32;
-        let mut run: Vec<u32> = Vec::new();
+        // One walk: the runs of cells outside the basins as (first cell, count, last cell); the cells of a segment are `up` to the cell before `down`, which starts the next segment (or is the mouth).
+        // H1 counted them: the walk is bounded by that count.
+        let mut runs: Vec<(u32, u32, u32)> = Vec::new();
+        let mut dropped = 0usize;
+        let mut open = false;
         let mut cur = s.up as usize;
-        // The cells of a segment: from `up` to the cell before `down`, which starts the next segment (or is the mouth). H1 counted them: the walk is bounded by that count.
         for _ in 0..s.cells {
             if inside(cur) {
-                dropped_cells += 1;
-                if !run.is_empty() {
-                    pieces.push(piece(hydro, s.id, &mut part, std::mem::take(&mut run)));
-                }
+                dropped += 1;
+                open = false;
+            } else if open {
+                let r = runs.last_mut().expect("an open run");
+                r.1 += 1;
+                r.2 = cur as u32;
             } else {
-                run.push(cur as u32);
+                runs.push((cur as u32, 1, cur as u32));
+                open = true;
             }
             let next = routing.receiver[cur];
             assert!(next != NONE, "a segment reaches its end cell");
             cur = next as usize;
         }
         assert_eq!(cur, s.down as usize, "the routing is the one H1 ran on: a segment ends at its end cell");
-        if !run.is_empty() {
-            pieces.push(piece(hydro, s.id, &mut part, run));
+        if dropped == 0 {
+            continue;
+        }
+        dropped_cells += dropped;
+        for (part, (first, cells, last)) in runs.into_iter().enumerate() {
+            pieces.push(RiverPiece {
+                segment: s.id,
+                part: part as u32,
+                first,
+                cells,
+                q_first: hydro.qw[first as usize],
+                q_last: hydro.qw[last as usize],
+            });
         }
     }
     Lakes { lakes, pieces, dropped_cells }
-}
-
-fn piece(hydro: &Hydro, segment: u64, part: &mut u32, cells: Vec<u32>) -> RiverPiece {
-    let (q_first, q_last) = (hydro.qw[cells[0] as usize], hydro.qw[*cells.last().expect("a piece has a cell") as usize]);
-    let p = RiverPiece { segment, part: *part, cells, q_first, q_last };
-    *part += 1;
-    p
 }

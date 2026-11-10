@@ -136,22 +136,50 @@ fn no_channel_cell_stays_inside_a_kept_lake_and_the_river_continues_at_the_spill
     let r = run(&bowl_land(), None, None, &small_t());
     let ls = lakes(&r);
     assert!(ls.dropped_cells > 0, "a channel passes through the bowl: {:?}", r.hydro.stats);
-    let total: usize = r.hydro.segments.iter().map(|s| s.cells as usize).sum();
-    let kept: usize = ls.pieces.iter().map(|p| p.cells.len()).sum();
-    assert_eq!(kept + ls.dropped_cells, total, "every segment cell is in a piece or dropped");
+    // Only a segment that loses a cell has pieces (none when all its cells are inside); every other segment is whole.
+    let inside_any = |s: &planet_generators::bake::hydro::Segment| {
+        let mut c = s.up as usize;
+        (0..s.cells).any(|_| {
+            let hit = r.hydro.label[c] != NONE;
+            c = r.routing.receiver[c] as usize;
+            hit
+        })
+    };
+    let whole = r.hydro.segments.iter().filter(|s| !inside_any(s)).count();
+    let touched: usize = r.hydro.segments.iter().filter(|s| inside_any(s)).map(|s| s.cells as usize).sum();
+    let kept: usize = ls.pieces.iter().map(|p| p.cells as usize).sum();
+    assert!(whole > 0 && touched > 0, "some segments are whole and some touch the lake");
+    assert_eq!(kept + ls.dropped_cells, touched, "every cell of a touched segment is in a piece or dropped");
+    let listed: std::collections::HashSet<u64> = ls.pieces.iter().map(|p| p.segment).collect();
+    for s in r.hydro.segments.iter().filter(|s| listed.contains(&s.id)) {
+        assert!(inside_any(s), "a listed segment loses a cell");
+    }
+    let cells = |p: &planet_generators::bake::lakes::RiverPiece| -> Vec<u32> {
+        let mut v = vec![p.first];
+        while v.len() < p.cells as usize {
+            v.push(r.routing.receiver[*v.last().unwrap() as usize]);
+        }
+        v
+    };
     for p in &ls.pieces {
-        for &c in &p.cells {
+        for &c in &cells(p) {
             assert_eq!(r.hydro.label[c as usize], NONE, "piece cell {c} of segment {} is inside a lake", p.segment);
             assert!(r.hydro.channel[c as usize]);
         }
-        assert!(p.cells.windows(2).all(|w| r.routing.receiver[w[0] as usize] == w[1]), "a piece runs down the receivers");
     }
     // The river leaves the lake at its spill cell with the outflow added.
     let b = &r.hydro.basins[0];
-    let after = ls.pieces.iter().find(|p| p.cells[0] == b.spill_cell).expect("a piece starts at the spill cell");
-    assert!(after.q_first >= b.q_out * (1.0 - 1e-9), "Q_w at the spill cell {} carries q_out {}", after.q_first, b.q_out);
+    let sp = b.spill_cell;
+    let continues = ls.pieces.iter().any(|p| p.first == sp) || r.hydro.segments.iter().any(|s| s.up == sp && !inside_any(s));
+    assert!(continues, "a piece or a whole segment starts at the spill cell");
+    assert!(
+        r.hydro.qw[sp as usize] >= b.q_out * (1.0 - 1e-9),
+        "Q_w at the spill cell {} carries q_out {}",
+        r.hydro.qw[sp as usize],
+        b.q_out
+    );
     // The piece before ends at the last cell outside the basin: its receiver is a member.
-    let last = |p: &&planet_generators::bake::lakes::RiverPiece| *p.cells.last().unwrap() as usize;
+    let last = |p: &&planet_generators::bake::lakes::RiverPiece| *cells(p).last().unwrap() as usize;
     let before: Vec<_> = ls.pieces.iter().filter(|p| r.hydro.label[r.routing.receiver[last(p)] as usize] != NONE).collect();
     assert!(!before.is_empty(), "a piece ends where the river enters the lake");
     for p in before {

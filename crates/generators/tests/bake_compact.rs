@@ -529,12 +529,7 @@ fn the_phase_plan_is_the_steps_in_order_releases_what_it_should_and_does_not_mov
     // spec: GEN-163, TEST-108: the lake producer is a phase of the plan and gives one lake per kept basin, without a channel cell inside one.
     assert!(off.report.phases.iter().any(|(name, _)| *name == "lakes"), "the plan lists the lake step: {:?}", off.report.phases);
     assert_eq!(off.lakes.lakes.len(), off.hydro.basins.len());
-    assert!(off
-        .lakes
-        .pieces
-        .iter()
-        .flat_map(|p| p.cells.iter())
-        .all(|&c| off.hydro.label[c as usize] == planet_generators::bake::route::NONE));
+    assert!(off.lakes.pieces.iter().all(|p| p.cells > 0 && off.hydro.label[p.first as usize] == planet_generators::bake::route::NONE));
     for name in [
         "pre-carve surface spilled",
         "after the rounds",
