@@ -4,8 +4,11 @@
 //! - H1 already solves the steady balance of section 5.5 per basin (`Basin::water_level_m`, `q_out`, `overflows`); the producer adds no second balance. It turns each kept basin into a [`Lake`]
 //!   and derives the wet surface at the level from the area curve.
 //! - A basin with no inflow (`q_in = 0`) has the floor as its level and no water surface (`wet = false`): a playa.
-//! - A channel cell inside a kept basin is dropped: the lake draws as water and a channel passes through it (A3 section 5.2). A segment that crosses a basin is cut into pieces at the basin: the piece
-//!   before ends at the last cell outside it, the piece after starts at the spill cell, whose `Q_w` includes the basin's `q_out`.
+//! - A channel cell under the water of a lake is dropped: the lake draws as water and a channel passes through it (A3 section 5.2). The water of a wet lake is the cells of its basin with `z` under the
+//!   level, and the shore cells under the level that drain into it (a receiver chain of cells under the level, joined to the basin's water): a gentle shore under the level is water although H1 did not
+//!   label it, and a labelled cell above the level of an endorheic lake is not water, so the channel continues down to the water's edge (architect D10). A dry lake (a playa) has no water. A segment
+//!   that goes under water is cut into pieces: the piece before ends at the last cell before the water, the piece after starts at the first cell out of it (at the spill cell for an overflowing lake),
+//!   whose `Q_w` includes the basin's `q_out`.
 //! - Only the segments that lose a cell have pieces (a piece is its first cell and its cell count; the cells are the receiver chain); the whole segments stay in the hydrology. The producer's memory is the lakes
 //!   and the cut segments, not a second copy of the rivers.
 //! - The result is a pure function of the hydrology: lakes are in the order of their id, pieces in the order of the segments (CON-14).
@@ -13,6 +16,7 @@
 use super::hydro::{Basin, BasinClass, Hydro, CURVE_STEPS};
 use super::route::{Routing, NONE};
 use super::Grid;
+use std::collections::HashSet;
 
 /// A lake: the record of a kept basin the store keeps and the water pass reads.
 #[derive(Clone, Debug, PartialEq)]
@@ -79,47 +83,96 @@ fn area_at(b: &Basin, level: f64) -> f64 {
     a0 + (x - k as f64) * (a1 - a0)
 }
 
-/// Produce the lakes and the pieces of the river segments from a hydrology (GEN-163).
-pub fn lakes_from_hydro(grid: &Grid, routing: &Routing, hydro: &Hydro) -> Lakes {
-    assert!(hydro.qw.len() == grid.len(), "the producer needs Q_w: run it before the discharges are released");
-    assert!(routing.receiver.len() == grid.len(), "one receiver per cell");
-    let mut lakes: Vec<Lake> = hydro
-        .basins
-        .iter()
-        .map(|b| {
-            let wet = b.q_in > 0.0;
-            let level_m = if wet { b.water_level_m } else { b.floor_m };
-            Lake {
-                id: b.id,
-                floor_id: grid.global_id(b.floor_cell as usize),
-                spill_id: grid.global_id(b.spill_cell as usize),
-                floor_m: b.floor_m,
-                spill_m: b.spill_m,
-                level_m,
-                class: b.class,
-                overflows: b.overflows,
-                wet,
-                area_m2: if wet { area_at(b, level_m) } else { 0.0 },
-                cells: b.cells,
-                q_in: b.q_in,
-                q_out: b.q_out,
-            }
-        })
-        .collect();
-    lakes.sort_unstable_by_key(|l| l.id);
+/// The cells that carry no river because a lake is there (GEN-163, D10): the water, and the dead ground below it inside the basin.
+///
+/// - Water: a cell of a wet lake's basin with `z` under the lake's level (a test on the labels, no storage), and the shore cells under the level that drain into it along receiver chains (stored, sorted).
+/// - Below the water: the routing runs on the filled surface, whose epsilon gradient inside a basin points to the spill, so a channel that reaches an endorheic lake's water would go on over dry
+///   basin cells up to the spill; those labelled cells downstream of the water are not a river (the lake has no outflow there; at an overflowing lake they are water already). Stored, sorted.
+///
+/// The memory is the shore and the dead ground, not the water of the basins.
+pub struct Water<'a> {
+    label: &'a [u32],
+    z: &'a [f64],
+    level: Vec<f64>,
+    extra: Vec<u32>,
+}
 
-    let inside = |c: usize| hydro.label[c] != NONE;
+impl Water<'_> {
+    fn seed(&self, c: usize) -> bool {
+        let l = self.label[c];
+        l != NONE && self.z[c] < self.level[l as usize]
+    }
+
+    /// Whether no river is drawn on cell `c`.
+    pub fn contains(&self, c: usize) -> bool {
+        self.seed(c) || self.extra.binary_search(&(c as u32)).is_ok()
+    }
+
+    /// The cells, in cell order.
+    pub fn cells(&self) -> Vec<u32> {
+        (0..self.z.len() as u32).filter(|&c| self.contains(c as usize)).collect()
+    }
+}
+
+/// The water of the wet lakes and the ground below it, on the surface `z` H1 ran on.
+pub fn water_cells<'a>(grid: &Grid, routing: &Routing, hydro: &'a Hydro, z: &'a [f64]) -> Water<'a> {
+    assert!(z.len() == grid.len(), "one height per cell");
+    let level: Vec<f64> = hydro.basins.iter().map(|b| if b.q_in > 0.0 { b.water_level_m } else { f64::NEG_INFINITY }).collect();
+    let mut w = Water { label: &hydro.label, z, level, extra: Vec::new() };
+    let mut shore: Vec<u32> = Vec::new();
+    let mut stack: Vec<(u32, u32)> = Vec::new();
+    for (c, &l) in hydro.label.iter().enumerate() {
+        if w.seed(c) {
+            stack.push((c as u32, l));
+        }
+        // The donors of a water cell under the level are water too: a shore drains into the lake. Every cell has one receiver, so a donor is reached once. A labelled donor is another basin's cell or
+        // a seed of this one; the spill cell and everything below the sill drain away from the lake and are not reached.
+        while let Some((x, l)) = stack.pop() {
+            for d in 0..8 {
+                let Some(q) = grid.neighbour(x as usize, d) else { continue };
+                if routing.receiver[q] == x && hydro.label[q] == NONE && z[q] < w.level[l as usize] {
+                    shore.push(q as u32);
+                    stack.push((q as u32, l));
+                }
+            }
+        }
+    }
+    shore.sort_unstable();
+    w.extra = shore;
+    // Below the water: from every water cell whose receiver is not water, the labelled cells down the receiver chain to the basin's edge.
+    let mut dead: HashSet<u32> = HashSet::new();
+    let mut walk = |w: &Water, c: usize| {
+        let mut cur = routing.receiver[c];
+        while cur != NONE && hydro.label[cur as usize] != NONE && !w.contains(cur as usize) && dead.insert(cur) {
+            cur = routing.receiver[cur as usize];
+        }
+    };
+    for c in 0..z.len() {
+        if w.seed(c) {
+            walk(&w, c);
+        }
+    }
+    for k in 0..w.extra.len() {
+        walk(&w, w.extra[k] as usize);
+    }
+    w.extra.extend(dead);
+    w.extra.sort_unstable();
+    w
+}
+
+/// Cut the segments of a hydrology at the cells `water` says are under water: the pieces of the segments that lose a cell (first cell, count, `Q_w` at both ends) and the number of cells dropped.
+pub fn cut_segments(hydro: &Hydro, routing: &Routing, water: &dyn Fn(usize) -> bool) -> (Vec<RiverPiece>, usize) {
     let mut pieces: Vec<RiverPiece> = Vec::new();
     let mut dropped_cells = 0usize;
     for s in &hydro.segments {
-        // One walk: the runs of cells outside the basins as (first cell, count, last cell); the cells of a segment are `up` to the cell before `down`, which starts the next segment (or is the mouth).
+        // One walk: the runs of cells out of the water as (first cell, count, last cell); the cells of a segment are `up` to the cell before `down`, which starts the next segment (or is the mouth).
         // H1 counted them: the walk is bounded by that count.
         let mut runs: Vec<(u32, u32, u32)> = Vec::new();
         let mut dropped = 0usize;
         let mut open = false;
         let mut cur = s.up as usize;
         for _ in 0..s.cells {
-            if inside(cur) {
+            if water(cur) {
                 dropped += 1;
                 open = false;
             } else if open {
@@ -150,5 +203,39 @@ pub fn lakes_from_hydro(grid: &Grid, routing: &Routing, hydro: &Hydro) -> Lakes 
             });
         }
     }
+    (pieces, dropped_cells)
+}
+
+/// Produce the lakes and the pieces of the river segments from a hydrology (GEN-163).
+pub fn lakes_from_hydro(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &[f64]) -> Lakes {
+    assert!(hydro.qw.len() == grid.len(), "the producer needs Q_w: run it before the discharges are released");
+    assert!(routing.receiver.len() == grid.len(), "one receiver per cell");
+    let mut lakes: Vec<Lake> = hydro
+        .basins
+        .iter()
+        .map(|b| {
+            let wet = b.q_in > 0.0;
+            let level_m = if wet { b.water_level_m } else { b.floor_m };
+            Lake {
+                id: b.id,
+                floor_id: grid.global_id(b.floor_cell as usize),
+                spill_id: grid.global_id(b.spill_cell as usize),
+                floor_m: b.floor_m,
+                spill_m: b.spill_m,
+                level_m,
+                class: b.class,
+                overflows: b.overflows,
+                wet,
+                area_m2: if wet { area_at(b, level_m) } else { 0.0 },
+                cells: b.cells,
+                q_in: b.q_in,
+                q_out: b.q_out,
+            }
+        })
+        .collect();
+    lakes.sort_unstable_by_key(|l| l.id);
+
+    let water = water_cells(grid, routing, hydro, z);
+    let (pieces, dropped_cells) = cut_segments(hydro, routing, &|c| water.contains(c));
     Lakes { lakes, pieces, dropped_cells }
 }
