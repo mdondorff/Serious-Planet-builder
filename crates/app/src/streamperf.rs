@@ -563,11 +563,14 @@ fn run_case(
     }
     // The calibration's thread count is fixed, not the pool's (TEST-039): a share-sized pool keeps the parallel limits.
     let calib_threads = planet_perf::calibration::calibration_threads();
-    writeln!(out, "{}: rig built in {:.2} s", script.scene.name(), rig_started.elapsed().as_secs_f64()).map_err(err)?;
+    writeln!(out, "{}: rig built in {:.2} s{}", script.scene.name(), rig_started.elapsed().as_secs_f64(), stamp(smoke)).map_err(err)?;
+    crate::stall::phase_mark_owned(format!("{} rig built", script.scene.name()));
     // The start-up load of the roots, before frame 0 (STRM-001): a reading of the cold start (with the pack ignored, `dive-cold`, it is
     // every root generated), recorded under the `load_` prefix like the tile loads.
     let roots = d.rig.roots;
-    writeln!(out, "{}: start-up load of {} root tiles took {:.2} s", script.scene.name(), roots.0, roots.1.as_secs_f64()).map_err(err)?;
+    writeln!(out, "{}: start-up load of {} root tiles took {:.2} s{}", script.scene.name(), roots.0, roots.1.as_secs_f64(), stamp(smoke))
+        .map_err(err)?;
+    crate::stall::phase_mark_owned(format!("{} roots loaded", script.scene.name()));
     // Settle at the prelude camera (unmeasured): R fully resident, nothing queued, in flight or waiting, for one second of script
     // time. A smoke run only runs a few frames.
     let mut settle_s = None;
@@ -593,8 +596,14 @@ fn run_case(
             }
         }
         settle_s = Some(started.elapsed().as_secs_f64());
-        writeln!(out, "{}: settled at the start view after {:.1} s ({frames} frames)", script.scene.name(), settle_s.unwrap_or(0.0))
-            .map_err(err)?;
+        writeln!(
+            out,
+            "{}: settled at the start view after {:.1} s ({frames} frames){}",
+            script.scene.name(),
+            settle_s.unwrap_or(0.0),
+            stamp(smoke)
+        )
+        .map_err(err)?;
     }
     // No cool start and no warm-up (ADR 0094, TEST-037): see `StartSteps`. Window 8's device losses on a hot GPU were most likely the
     // locked desktop (`docs/status.md`); the GPU temperature at the start is in the clock sample below.
@@ -639,7 +648,12 @@ fn run_case(
     let (mut frames, mut blanks) = (Vec::with_capacity(n), Vec::new());
     // What the post-pass needs of each frame, kept as small as the plan actually drawn: the f64 pose and the drawn tile ids.
     let mut draws: Vec<FrameDraw> = Vec::with_capacity(n);
+    crate::stall::phase_mark_owned(format!("{} frame loop start", script.scene.name()));
     for (k, cam) in script.cameras[..n].iter().enumerate() {
+        // A smoke run has a few frames: each is marked, so a hung one is named (the CI run of 2026-11-10 hung in this loop).
+        if smoke {
+            crate::stall::phase_mark_owned(format!("{} frame {k} of {n}", script.scene.name()));
+        }
         let t = d.tick(&req(*cam))?;
         if t.record.blank_nodes > 0 {
             blanks.push((k, Vec::new()));
@@ -647,6 +661,7 @@ fn run_case(
         frames.push(t.record);
         draws.push(FrameDraw { camera: Some(*cam), drawn: t.drawn });
     }
+    crate::stall::phase_mark_owned(format!("{} frame loop end", script.scene.name()));
     // The tile loads of the measured part: the jobs that ran and what the source and the pack did (STRM-022, recorded only).
     let mut load_counts = {
         let jobs: Vec<planet_perf::streaming::LoadJob> = job_log
@@ -730,6 +745,7 @@ fn run_case(
     // The lag post-pass, off the timed path: the loop is gone (queued jobs cancelled, in-flight ones finished), the case is over,
     // and every frame's lag is judged against the plan selected afresh for its own camera (TEST-020).
     let post = Instant::now();
+    crate::stall::phase_mark_owned(format!("{} post-pass start", script.scene.name()));
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
     let lags = lag_post_pass(&draws, req, &|| world.field(), threads)?;
     apply_lags(&mut frames, &lags)?;
@@ -779,6 +795,15 @@ fn blank_failure_lines(
 }
 
 // spec: TEST-019, TEST-018, TEST-012
+/// `" [run +12.3 s]"` in a smoke run (the seconds since the run started), `""` otherwise.
+fn stamp(smoke: bool) -> String {
+    if smoke {
+        crate::stall::run_stamp()
+    } else {
+        String::new()
+    }
+}
+
 /// `test-render --perf --scene dive|dive-fast|teleport-1m|teleport-2km|look-1m|look-2km|streaming`: ADR 0032's cases on the
 /// reference GPU after the readiness gate (ADR 0020), over the stored production bake (`--store DIR`; `--allow-memory-bake` runs
 /// over `--global-res` cells in memory, labelled and not valid for streaming budgets). Per case it prints the verdicts of
@@ -789,6 +814,8 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
     use planet_perf::compare;
     let smoke = o.perf_smoke;
     let smoke_frames = if o.given.contains("--frames") { o.frames } else { SMOKE_FRAMES };
+    crate::stall::run_clock_start();
+    crate::stall::phase_mark_owned("stream run: start".to_string());
     let scenes = scenes_of(&o.scene);
     if scenes.is_empty() {
         return Err(format!("unknown streaming scene '{}'", o.scene));
@@ -802,7 +829,8 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
     // `dive-cold` reads the bake as the others do and ignores the pack's pre-filled coarse tiles (ADR 0045 point 3).
     let world = Arc::new(open(scenes[0] == StreamScene::DiveCold)?);
     let field = world.field()?;
-    writeln!(out, "world opened in {:.1} s", opened.elapsed().as_secs_f64()).map_err(err)?;
+    writeln!(out, "world opened in {:.1} s{}", opened.elapsed().as_secs_f64(), stamp(smoke)).map_err(err)?;
+    crate::stall::phase_mark_owned("stream run: world opened".to_string());
     let radius_m = world.radius_m();
     let measured_field =
         if o.lit { format!("{}; lit path (atmosphere, water), compact tiles", world.describe()) } else { world.describe() };
@@ -922,13 +950,21 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
             if script.prelude.is_some() { ", settled start" } else { ", from an empty cache" }
         )
         .map_err(err)?;
-        writeln!(out, "{}: script built in {:.1} s", scene.name(), built.elapsed().as_secs_f64()).map_err(err)?;
+        writeln!(out, "{}: script built in {:.1} s{}", scene.name(), built.elapsed().as_secs_f64(), stamp(smoke)).map_err(err)?;
+        crate::stall::phase_mark_owned(format!("{} script built", scene.name()));
         let case_started = Instant::now();
         let lit_setup = if o.lit { Some(crate::litperf::LitSetup::new(o, &scene_world, &lod)?) } else { None };
         let run =
             run_case(ctx, &scene_world, &script, &req_of, smoke, o.calibrate, o.reserve, smoke_frames, o.gen_workers(), lit_setup, out)?;
-        writeln!(out, "{}: case ran in {:.1} s (teardown {:.2} s)", scene.name(), case_started.elapsed().as_secs_f64(), run.teardown_s)
-            .map_err(err)?;
+        writeln!(
+            out,
+            "{}: case ran in {:.1} s (teardown {:.2} s){}",
+            scene.name(),
+            case_started.elapsed().as_secs_f64(),
+            run.teardown_s,
+            stamp(smoke)
+        )
+        .map_err(err)?;
         if o.lit {
             writeln!(out, "{}: water of {} tiles computed in the tile jobs (ADR 0056)", scene.name(), scene_world.water_book().filled())
                 .map_err(err)?;

@@ -1,0 +1,1 @@
+- 2026-11-10 stream-look-marks: the streaming perf smoke's progress lines carry the run time and its phases and frames are marked for the stall report (output only; inbox #108 item 3)

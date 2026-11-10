@@ -21,14 +21,13 @@ use planet_render::{GpuContext, TerrainRenderer};
 use std::io::Write;
 use std::time::Instant;
 
-thread_local! {
-    /// The start of the lit run on this thread (set by `perf_lit`): the smoke run stamps its progress lines with the time since it (TEST-025, the CI stall diagnosis of 2026-11-10).
-    static RUN_START: std::cell::Cell<Option<Instant>> = const { std::cell::Cell::new(None) };
-}
-
 /// `" [run +12.3 s]"` in a smoke run (the seconds since the run started), `""` otherwise: a run that stops on a CI timeout shows how far it got and how long each view took.
 fn run_stamp(smoke: bool) -> String {
-    RUN_START.with(|s| s.get()).filter(|_| smoke).map_or_else(String::new, |t| format!(" [run +{:.1} s]", t.elapsed().as_secs_f64()))
+    if smoke {
+        crate::stall::run_stamp()
+    } else {
+        String::new()
+    }
 }
 
 /// Whether `--scene NAME` names a lit perf scene.
@@ -652,7 +651,7 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
     let mut results: Vec<ViewResult> = Vec::new();
     let first_camera = views[0].cameras[0];
     // The run's clock and its phases (the views and flights): a run that stops on a timeout shows, in the output and in `stall::phase_report`, which one it was in.
-    RUN_START.with(|s| s.set(Some(Instant::now())));
+    crate::stall::run_clock_start();
     crate::stall::phase_mark_owned("lit run: renderer".to_string());
     let mut r = new_renderer(&rig, &setup, first_camera)?;
     for view in &views {
