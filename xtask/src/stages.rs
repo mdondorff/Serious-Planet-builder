@@ -146,7 +146,7 @@ mod tests {
     #[test]
     fn the_committed_manifest_exists_with_a_line_for_every_stage() {
         let text = std::fs::read_to_string(crate::util::repo_root().join("docs/stages/manifest.txt")).expect("docs/stages/manifest.txt");
-        for stage in ["landmass", "round-00", "round-01", "h1", "thermal", "deposition", "pit-spreading"] {
+        for stage in ["landmass", "round-00", "round-01", "h1", "thermal", "deposition", "pit-spreading", "k7-f1-t3-4"] {
             assert!(text.lines().any(|l| l.starts_with(&format!("{stage} | "))), "no line for {stage}");
         }
         assert!(text.lines().all(|l| l.contains("| hash ") && !l.contains("probe_ms")), "a hash on every line and no cost field");

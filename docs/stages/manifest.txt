@@ -11,3 +11,4 @@ deposition | z | cells 1408 | min -1.560776e3 | p5 -1.263916e3 | p50 6.762695e1 
 deposition | delta | cells 1408 | min -3.255263e2 | p5 -9.997559e1 | p50 -1.252441e1 | p95 2.441406e-2 | max 9.726278e1 | below_scale 167 | above_scale 0 | hash cba91b4bc1e3ecba | deposited_m3 3.172346e8
 pit-spreading | z | cells 1408 | min -1.560776e3 | p5 -1.263916e3 | p50 6.762695e1 | p95 9.963379e2 | max 1.108706e3 | below_scale 0 | above_scale 0 | hash 8065085e0fa917b1 | passes 0.000000e0
 pit-spreading | delta | cells 1408 | min -3.255263e2 | p5 -9.997559e1 | p50 -1.252441e1 | p95 2.441406e-2 | max 9.726278e1 | below_scale 167 | above_scale 0 | hash cba91b4bc1e3ecba | passes 0.000000e0
+k7-f1-t3-4 | z | cells 4096 | min 4.234407e2 | p5 4.265137e2 | p50 4.294434e2 | p95 4.294434e2 | max 4.302434e2 | below_scale 0 | above_scale 0 | hash c1741ea148cf1a04 | pits_after_pass 9.080000e2
