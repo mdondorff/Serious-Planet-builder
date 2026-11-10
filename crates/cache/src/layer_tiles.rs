@@ -29,8 +29,9 @@ use crate::pack::{PackWriter, Record, TileStore, DEFAULT_MAX_PACK_BYTES};
 
 /// The kind byte of a tile's pass-2 change.
 pub const KIND_LAYER_TILE: u8 = Kind::LayerTile as u8;
-/// Version of the tile record's layout and of the meaning of its key. History: 1 = counts in an lz4 block; 2 = row-delta counts in a brotli stream (codec 2).
-pub const TILE_LAYER_VERSION: u32 = 2;
+/// Version of the tile record's layout and of the meaning of its key. History: 1 = counts in an lz4 block; 2 = row-delta counts in a brotli stream (codec 2); 3 = the new chain's local change L (codec 3,
+/// [`crate::layer_l`]: K7's stats block, a key with the base's identity, no fill channel; architect D16).
+pub const TILE_LAYER_VERSION: u32 = 3;
 const IMPLEMENTATION_ID: &str = "erosion-layer-tile";
 /// The codec byte of the payload: 2 = row-delta `i16` counts, brotli quality 5. (1, an lz4 block, was never a released layer.)
 const CODEC_VERSION: u8 = 2;
@@ -223,7 +224,7 @@ pub fn load_tile(
 }
 
 /// The core's counts as bytes: little-endian, each row of `t` as its first count and the wrapping differences along the row.
-fn pack_counts(counts: &[i16], t: usize) -> Vec<u8> {
+pub(crate) fn pack_counts(counts: &[i16], t: usize) -> Vec<u8> {
     let mut raw = Vec::with_capacity(counts.len() * 2);
     for row in counts.chunks(t) {
         let mut prev = 0i16;
@@ -236,7 +237,7 @@ fn pack_counts(counts: &[i16], t: usize) -> Vec<u8> {
 }
 
 /// The counts of a brotli stream of `t x t` row-delta counts; an error text when the stream is damaged or does not hold exactly that many bytes (reading stops one byte past it).
-fn unpack_counts(stream: &[u8], t: usize) -> Result<Vec<i16>, String> {
+pub(crate) fn unpack_counts(stream: &[u8], t: usize) -> Result<Vec<i16>, String> {
     let want = t * t * 2;
     let mut raw = Vec::with_capacity(want);
     brotli::Decompressor::new(stream, BROTLI_BUFFER)
