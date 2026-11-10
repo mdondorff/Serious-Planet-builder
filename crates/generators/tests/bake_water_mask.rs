@@ -238,3 +238,141 @@ fn m6_the_encoding_round_trips_refuses_what_it_cannot_hold_and_states_its_size()
     labels[..many.len()].copy_from_slice(&many);
     assert!(encode(&labels, 16).unwrap_err().0.contains("lists 256 lakes"));
 }
+
+/// The mask with any surface and status (for the fixtures below).
+fn mask_with(zlf: &dyn Fn(i64, i64) -> f64, st: &dyn Fn(i64, i64) -> Status, ci: i64, cj: i64, core: usize) -> Vec<u64> {
+    let w = core + 2 * HALO;
+    let origin = (ci - HALO as i64, cj - HALO as i64);
+    let z: Vec<f64> = (0..w * w).map(|k| zlf(origin.0 + (k % w) as i64, origin.1 + (k / w) as i64)).collect();
+    lake_mask(&Window { zl: &z, w, origin, ratio: RATIO }, HALO, core, st, &level)
+}
+
+// spec: GEN-167, TEST-109
+#[test]
+fn m4b_every_tile_offset_gives_the_whole_grids_mask() {
+    // One-cell cores at every cell of a box around the lake's ring strips: a reach under 8 or a source outside the region would change a cell.
+    let reference = whole();
+    for cj in 64..128i64 {
+        for ci in 64..128i64 {
+            let m = tile_mask(ci, cj, 1, HALO);
+            assert_eq!(m[0], at(&reference, ci as usize, cj as usize), "the 1 x 1 tile at ({ci}, {cj}) differs from the whole grid");
+        }
+    }
+}
+
+// spec: GEN-167, TEST-109
+#[test]
+fn m4c_the_ring_stops_after_eight_steps_and_tiles_agree_on_it() {
+    // A ring two H1 cells deep around a one-cell block, everything under the level: the wet set is the cells within 8 steps (8-neighbours) of the block, not the whole ring.
+    let st = |i: i64, j: i64| {
+        if (i, j) == (10, 10) {
+            Status::Water(LAKE)
+        } else if (8..=12).contains(&i) && (8..=12).contains(&j) {
+            Status::Ring(LAKE)
+        } else {
+            Status::Dry
+        }
+    };
+    let flat = |_: i64, _: i64| 90.0;
+    let m = mask_with(&flat, &st, 0, 0, N);
+    let wet = |x: i64, y: i64| m[y as usize * N + x as usize] == LAKE;
+    for (x, y, want) in [
+        (72, 84, true),
+        (71, 84, false),
+        (95, 84, true),
+        (96, 84, false),
+        (84, 72, true),
+        (84, 71, false),
+        (72, 72, true),
+        (71, 71, false),
+        (95, 95, true),
+        (96, 96, false),
+    ] {
+        assert_eq!(wet(x, y), want, "cell ({x}, {y})");
+    }
+    for core in [40usize, 64, 160] {
+        for tj in 0..N / core {
+            for ti in 0..N / core {
+                let t = mask_with(&flat, &st, (ti * core) as i64, (tj * core) as i64, core);
+                for y in 0..core {
+                    for x in 0..core {
+                        assert_eq!(t[y * core + x], m[(tj * core + y) * N + ti * core + x], "tile ({ti}, {tj}) of {core}: ({x}, {y})");
+                    }
+                }
+            }
+        }
+    }
+}
+
+// spec: GEN-167, TEST-109
+#[test]
+fn m4d_a_lake_across_the_low_edge_of_the_grid_agrees_in_negative_coordinates() {
+    // The block straddles local x = 0 (H1 cells -2..2): the parents of negative local cells are negative H1 cells (div_euclid), the surface and the status are defined across the edge.
+    let st = |i: i64, j: i64| if (-2..2).contains(&i) && (10..14).contains(&j) { Status::Water(LAKE) } else { Status::Dry };
+    let bowl = |x: i64, y: i64| if sq(x, y - 96) <= 24 * 24 { 95.0 } else { 130.0 };
+    let (lo, side) = (-64i64, 192usize);
+    let m = mask_with(&bowl, &st, lo, 0, side);
+    let cell = |x: i64, y: i64| m[y as usize * side + (x - lo) as usize];
+    assert_eq!(cell(-9, 96), LAKE, "a cell at x = -9 has parent H1 cell -2 (water), not 0 or -1 only");
+    assert_eq!(cell(-17, 96), DRY, "the parent of x = -17 is -3: dry");
+    for core in [64usize, 48] {
+        for tj in 0..(side / core) as i64 {
+            for ti in 0..(side / core) as i64 {
+                let t = mask_with(&bowl, &st, lo + ti * core as i64, tj * core as i64, core);
+                for y in 0..core {
+                    for x in 0..core {
+                        assert_eq!(
+                            t[y * core + x],
+                            cell(lo + ti * core as i64 + x as i64, tj * core as i64 + y as i64),
+                            "tile ({ti}, {tj}) of {core}: ({x}, {y})"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+// spec: GEN-167, TEST-109
+#[test]
+fn m6b_a_section_that_is_not_canonical_or_not_in_the_tile_is_refused() {
+    let core = 8usize;
+    let mut labels = vec![DRY; core * core];
+    labels[8 + 2..8 + 5].fill(LAKE);
+    labels[8 + 6] = LAKE;
+    let b = encode(&labels, core).unwrap();
+    assert_eq!(decode(&b, core).unwrap(), labels);
+    // Layout: 1 count, 8 id, then row 0 (count 0), row 1: count 2, runs of 5 bytes.
+    let row1 = 1 + 8 + 2;
+    let mut t = b.clone();
+    assert_eq!(u16::from_le_bytes([t[row1], t[row1 + 1]]), 2);
+    t[row1 + 2 + 2] = 0;
+    t[row1 + 2 + 3] = 0; // length 0
+    assert!(decode(&t, core).unwrap_err().0.contains("outside"));
+    let mut t = b.clone();
+    t[row1 + 2] = 7; // start 7 with length 3: past the row
+    assert!(decode(&t, core).unwrap_err().0.contains("outside"));
+    let mut t = b.clone();
+    t[row1 + 2 + 5] = 3; // the second run starts at 3, inside the first (2..5)
+    assert!(decode(&t, core).unwrap_err().0.contains("overlap"));
+    // Two adjacent runs of one lake are not canonical (they would be one run).
+    let mut adj = vec![DRY; core * core];
+    adj[..4].fill(LAKE);
+    let mut e = encode(&adj, core).unwrap();
+    // Split the single run (0, 4) into (0, 2) and (2, 2) by hand: row 0 count 2.
+    let row0 = 1 + 8;
+    e.truncate(row0);
+    e.extend([2, 0, 0, 0, 2, 0, 0, 2, 0, 2, 0, 0]);
+    for _ in 1..core {
+        e.extend([0, 0]);
+    }
+    assert!(decode(&e, core).unwrap_err().0.contains("one run"));
+    // A duplicated lake id.
+    let mut dup = vec![2u8];
+    dup.extend(LAKE.to_le_bytes());
+    dup.extend(LAKE.to_le_bytes());
+    for _ in 0..core {
+        dup.extend([0, 0]);
+    }
+    assert!(decode(&dup, core).unwrap_err().0.contains("increasing"));
+}

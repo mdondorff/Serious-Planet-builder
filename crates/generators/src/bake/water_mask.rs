@@ -32,6 +32,8 @@ pub enum Status {
 }
 
 /// The window the rule reads: `zl` is `w x w` heights of the final surface, cell `(0, 0)` is the face's local cell `origin`; `ratio` local cells make one H1 cell.
+/// A window at a face edge holds cells outside the face (negative or past the edge): `zl` there is the surface read across the seam on the neighbouring face, and `status` must answer for the H1 cell
+/// the same way (resolved on the neighbouring face); a window quadrant at a cube corner with no face cells reads as dry. The caller (the writer) owns that contract.
 pub struct Window<'a> {
     pub zl: &'a [f64],
     pub w: usize,
@@ -44,6 +46,7 @@ pub struct Window<'a> {
 pub fn lake_mask(win: &Window, halo: usize, core: usize, status: &dyn Fn(i64, i64) -> Status, level: &dyn Fn(u64) -> f64) -> Vec<u64> {
     let w = win.w;
     assert_eq!(win.zl.len(), w * w, "the window is w x w");
+    assert!(win.ratio > 0, "local cells per H1 cell is positive, it is {}", win.ratio);
     assert!(halo + core + halo == w, "a window is the core with a halo around it");
     assert!(halo >= usize::from(RING_STEPS), "the halo reaches at least the ring depth ({RING_STEPS} cells), it is {halo}");
     let reach = usize::from(RING_STEPS);
@@ -173,6 +176,7 @@ pub fn decode(bytes: &[u8], core: usize) -> Result<Vec<u64>, MaskError> {
     if bytes.is_empty() {
         return Ok(labels);
     }
+    // Canonical form only: the lake ids strictly increasing, the runs of a row in order, apart and not adjacent for one lake, so that a damaged section is not read as another valid mask.
     let bad = |why: String| MaskError(format!("water section of {} bytes: {why}", bytes.len()));
     let n = usize::from(bytes[0]);
     let mut at = 1 + 8 * n;
@@ -180,6 +184,9 @@ pub fn decode(bytes: &[u8], core: usize) -> Result<Vec<u64>, MaskError> {
         return Err(bad(format!("it lists {n} lakes but holds {} bytes", bytes.len())));
     }
     let lakes: Vec<u64> = (0..n).map(|k| u64::from_le_bytes(bytes[1 + 8 * k..9 + 8 * k].try_into().expect("eight bytes"))).collect();
+    if lakes.windows(2).any(|p| p[0] >= p[1]) || lakes.contains(&NO_LAKE) {
+        return Err(bad("its lake list is not strictly increasing or holds the dry label".into()));
+    }
     for y in 0..core {
         if at + 2 > bytes.len() {
             return Err(bad(format!("row {y} has no run count")));
@@ -189,6 +196,7 @@ pub fn decode(bytes: &[u8], core: usize) -> Result<Vec<u64>, MaskError> {
         if at + 5 * runs > bytes.len() {
             return Err(bad(format!("row {y} claims {runs} runs, {} bytes are left", bytes.len() - at)));
         }
+        let mut prev: Option<(usize, usize)> = None; // end and lake of the previous run
         for _ in 0..runs {
             let s = usize::from(u16::from_le_bytes([bytes[at], bytes[at + 1]]));
             let len = usize::from(u16::from_le_bytes([bytes[at + 2], bytes[at + 3]]));
@@ -199,6 +207,10 @@ pub fn decode(bytes: &[u8], core: usize) -> Result<Vec<u64>, MaskError> {
                     "row {y} has a run (start {s}, length {len}, lake {idx}) outside the tile or the list of {n} lakes"
                 )));
             }
+            if prev.is_some_and(|(end, l)| s < end || (s == end && l == idx)) {
+                return Err(bad(format!("row {y} has runs that overlap, are out of order or could be one run (start {s})")));
+            }
+            prev = Some((s + len, idx));
             labels[y * core + s..y * core + s + len].fill(lakes[idx]);
         }
     }

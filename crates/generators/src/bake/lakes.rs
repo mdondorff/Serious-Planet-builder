@@ -79,7 +79,24 @@ pub struct Lakes {
     pub pieces: Vec<RiverPiece>,
     /// The channel cells of the segments that lie inside kept basins and are in no piece.
     pub dropped_cells: usize,
+    /// The water of the lakes as H1 cells with the lake's id, sorted by cell (GEN-167; the mask's water blocks). Empty when the producer ran without them (the records alone).
+    pub water: Vec<(u32, u64)>,
+    /// The ring of each lake: the H1 cells next to its water that drain into it and belong to no other basin, sorted by cell (GEN-167; the mask's ring, D20).
+    pub ring: Vec<(u32, u64)>,
 }
+
+/// What the producer reads the discharges and the routing for (D22, GEN-167): the river pieces and the lists of the water and the ring. Made before the release; the records follow after it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreRelease {
+    pub pieces: Vec<RiverPiece>,
+    pub dropped_cells: usize,
+    pub water: Vec<(u32, u64)>,
+    pub ring: Vec<(u32, u64)>,
+}
+
+/// The longest receiver chain followed from a cell next to a lake's water to see whether it drains into the lake (a cell that drains into it meets its water within a few steps; the bound keeps the cost
+/// of the cells that drain elsewhere constant).
+const RING_WALK: usize = 16;
 
 /// The surface area of a basin at `level`: the area curve's steps are linear in the level, with zero at the floor.
 fn area_at(b: &Basin, level: f64) -> f64 {
@@ -141,6 +158,19 @@ impl Water<'_> {
             v.dedup();
         }
         out
+    }
+
+    /// The water cells with the id of the lake they belong to, sorted by cell: `ids` maps the index of a basin in the hydrology to its id. The dead ground is not water.
+    pub fn lake_cells(&self, ids: &[u64]) -> Vec<(u32, u64)> {
+        let mut v: Vec<(u32, u64)> = Vec::new();
+        for (c, &l) in self.label.iter().enumerate() {
+            if self.seed(c) {
+                v.push((c as u32, ids[l as usize]));
+            }
+        }
+        v.extend(self.extra.iter().filter(|e| e.1 != DEAD).map(|&(c, l)| (c, ids[l as usize])));
+        v.sort_unstable();
+        v
     }
 
     /// The cells, in cell order.
@@ -252,11 +282,52 @@ pub fn lakes_with_tiles(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &[f64]
 }
 
 /// The part of the producer that reads the discharges (`Q_w` at the ends of the pieces): the river pieces and the number of cells dropped. Run it before the discharges are released (D22); it holds nothing back, so the rest ([`lake_records`]) can run after the release.
-pub fn river_pieces(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &[f64]) -> (Vec<RiverPiece>, usize) {
+pub fn river_pieces(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &[f64]) -> PreRelease {
     assert!(hydro.qw.len() == grid.len(), "the producer needs Q_w: run it before the discharges are released");
     assert!(routing.receiver.len() == grid.len(), "one receiver per cell");
     let water = water_cells(grid, routing, hydro, z);
-    cut_segments(hydro, routing, &|c| water.contains(c))
+    let (pieces, dropped_cells) = cut_segments(hydro, routing, &|c| water.contains(c));
+    let ids: Vec<u64> = hydro.basins.iter().map(|b| b.id).collect();
+    let cells = water.lake_cells(&ids);
+    let ring = ring_cells(grid, routing, hydro, &ids, &cells);
+    PreRelease { pieces, dropped_cells, water: cells, ring }
+}
+
+/// The ring of every lake (D20): the H1 cells next to a water cell of the lake that are not water, belong to no other basin and drain into the lake along their receiver chain.
+fn ring_cells(grid: &Grid, routing: &Routing, hydro: &Hydro, ids: &[u64], water: &[(u32, u64)]) -> Vec<(u32, u64)> {
+    let lake_of = |c: usize| water.binary_search_by_key(&(c as u32), |e| e.0).ok().map(|k| water[k].1);
+    let other = |c: usize, id: u64| hydro.label[c] != NONE && ids[hydro.label[c] as usize] != id;
+    let mut out: Vec<(u32, u64)> = Vec::new();
+    for &(c, id) in water {
+        for d in 0..8 {
+            let Some(q) = grid.neighbour(c as usize, d) else { continue };
+            if lake_of(q).is_some() || other(q, id) {
+                continue;
+            }
+            let mut cur = q;
+            let mut drains = false;
+            for _ in 0..RING_WALK {
+                let r = routing.receiver[cur];
+                if r == NONE {
+                    break;
+                }
+                cur = r as usize;
+                if let Some(l) = lake_of(cur) {
+                    drains = l == id;
+                    break;
+                }
+                if other(cur, id) {
+                    break;
+                }
+            }
+            if drains {
+                out.push((q as u32, id));
+            }
+        }
+    }
+    out.sort_unstable();
+    out.dedup();
+    out
 }
 
 /// The lake records of the kept basins, by id (`q_out` is the basin's own, kept by H1; no discharge field is read).
@@ -307,5 +378,8 @@ fn produce(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &[f64], tile_of: Op
     }
     lakes.sort_unstable_by_key(|l| l.id);
     let (pieces, dropped_cells) = cut_segments(hydro, routing, &|c| water.contains(c));
-    Lakes { lakes, pieces, dropped_cells }
+    let ids: Vec<u64> = hydro.basins.iter().map(|b| b.id).collect();
+    let cells = water.lake_cells(&ids);
+    let ring = ring_cells(grid, routing, hydro, &ids, &cells);
+    Lakes { lakes, pieces, dropped_cells, water: cells, ring }
 }
