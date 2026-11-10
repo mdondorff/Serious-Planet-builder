@@ -195,8 +195,8 @@ pub struct CatchmentBalance {
     pub largest_eroded_m3: f64,
 }
 
-/// Runs the deposition on `z` and balances it per catchment (a catchment is the cells whose route ends at the same outlet cell): eroded column = the heights' rise + the load exported at the outlet. The rise is read from the heights, the export from the sweep's carried load, so the identity checks the sweep's accounting against the heights and against the catchment border (no load crosses it).
-pub fn catchment_balance(grid: &Grid, z: &mut [f64], original: &[f64], p: &Pass2Params) -> CatchmentBalance {
+/// Runs the deposition on `z` (in place) and balances it per catchment (a catchment is the cells whose route ends at the same outlet cell): eroded column = the heights' rise + the load exported at the outlet. The rise is read from the heights, the export from the sweep's carried load, so the identity checks the sweep's accounting against the heights and against the catchment border (no load crosses it).
+pub fn catchment_terms(grid: &Grid, z: &mut [f64], original: &[f64], p: &Pass2Params) -> Vec<CatchmentTerm> {
     let n = grid.len();
     let outlet = outlets(grid, z, p.sea_level);
     let (filled, routing) = canonical_surface(grid, z, &outlet, p.carve.epsilon, p.seed);
@@ -213,10 +213,10 @@ pub fn catchment_balance(grid: &Grid, z: &mut [f64], original: &[f64], p: &Pass2
     }
     let cube = grid.is_cube();
     let area = |c: usize| if cube { grid.cell_area(c) } else { grid.dx() * grid.dx() };
-    let grid_area = (0..n).map(&area).fold(0.0f64, f64::max);
+    let grid_area = (0..n).filter(|&c| grid.is_active(c)).map(&area).fold(0.0f64, f64::max);
     let (mut eroded, mut raised) = (vec![0.0f64; n], vec![0.0f64; n]);
     let mut cells = vec![0u32; n];
-    let zmax = z.iter().chain(original).fold(0.0f64, |m, v| m.max(v.abs()));
+    let zmax = (0..n).filter(|&c| grid.is_active(c)).fold(0.0f64, |m, c| m.max(z[c].abs()).max(original[c].abs()));
     for c in 0..n {
         let r = root[c] as usize;
         cells[r] += 1;
@@ -225,21 +225,44 @@ pub fn catchment_balance(grid: &Grid, z: &mut [f64], original: &[f64], p: &Pass2
         }
         raised[r] += (z[c] - before[c]) * area(c);
     }
-    let mut out = CatchmentBalance::default();
+    let mut terms = Vec::new();
     for r in 0..n {
         let (e, d, x) = (eroded[r], raised[r], exports[r]);
         if e == 0.0 && d == 0.0 && x == 0.0 {
             continue;
         }
-        out.catchments += 1;
-        out.eroded_m3 += e;
-        out.raised_m3 += d;
-        out.exported_m3 += x;
-        out.largest_eroded_m3 = out.largest_eroded_m3.max(e);
         // The rounding of `z + rise - z` is absolute, about one ulp of the height times the cell area per cell: a floor under the scale, so a sub-ulp deposit is not read as a balance error.
         let floor = f64::EPSILON * zmax * grid_area * f64::from(cells[r]);
         let scale = e.max(d.abs()).max(x).max(floor);
-        out.max_relative_error = out.max_relative_error.max((e - d - x).abs() / scale.max(f64::MIN_POSITIVE));
+        let relative_error = (e - d - x).abs() / scale.max(f64::MIN_POSITIVE);
+        terms.push(CatchmentTerm { outlet: r, cells: cells[r], eroded_m3: e, raised_m3: d, exported_m3: x, relative_error });
+    }
+    terms
+}
+
+/// The balance of one catchment of the sweep's own route (GEN-155): the terms of the identity and its relative residual.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CatchmentTerm {
+    /// The catchment's outlet cell (an index into the grid).
+    pub outlet: usize,
+    pub cells: u32,
+    pub eroded_m3: f64,
+    pub raised_m3: f64,
+    pub exported_m3: f64,
+    /// `|eroded - raised - exported|` over the largest of the three terms and the rounding floor of the heights.
+    pub relative_error: f64,
+}
+
+/// The totals of the catchments' terms (the identity over the whole region).
+pub fn catchment_balance(grid: &Grid, z: &mut [f64], original: &[f64], p: &Pass2Params) -> CatchmentBalance {
+    let mut out = CatchmentBalance::default();
+    for t in catchment_terms(grid, z, original, p) {
+        out.catchments += 1;
+        out.eroded_m3 += t.eroded_m3;
+        out.raised_m3 += t.raised_m3;
+        out.exported_m3 += t.exported_m3;
+        out.largest_eroded_m3 = out.largest_eroded_m3.max(t.eroded_m3);
+        out.max_relative_error = out.max_relative_error.max(t.relative_error);
     }
     out.total_relative_error = (out.eroded_m3 - out.raised_m3 - out.exported_m3).abs() / out.eroded_m3.max(f64::MIN_POSITIVE);
     out

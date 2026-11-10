@@ -605,3 +605,114 @@ fn the_phase_plan_is_the_steps_in_order_releases_what_it_should_and_does_not_mov
         .map(|s| s.label());
     assert_eq!(seen, want, "every stage of the build is emitted, once, in order");
 }
+
+// spec: GEN-155
+#[test]
+fn the_sediment_balance_is_the_same_under_every_partition_the_pass_has_and_no_load_is_lost_or_counted_twice() {
+    use planet_generators::bake::round::solve_rounds;
+    use planet_generators::bake::sediment::{catchment_terms, sediment_pass};
+    use planet_generators::bake::tile::Pass2Params;
+    let n = 64; // about 9,800 cap cells: three pieces of the thermal step's 4,096
+    let small = 4000.0;
+    let (active, bits) = corner_cap(n, 0.2);
+    let compact = Grid::compact_cube(n, small, bits);
+    let masked = Grid::cube(n, small).with_active(active.clone());
+    let ids: Vec<usize> = (0..active.len()).filter(|&g| active[g]).collect();
+    let cube = planet_generators::bake::h0::GlobalGrid::new(n, R);
+    let z_all: Vec<f64> = (0..active.len())
+        .map(|g| {
+            let d = cube.direction(g as u32);
+            900.0 * (d.x + d.y + d.z)
+                + 90.0 * libm::sin(11.0 * d.x + 5.0 * d.y) * libm::cos(8.0 * d.z)
+                + 2.0 * planet_generators::bake::route::jitter(5, g as u64, 0)
+                - 500.0
+        })
+        .collect();
+    let z0: Vec<f64> = ids.iter().map(|&g| z_all[g]).collect();
+    let outlet: Vec<bool> = z0.iter().map(|&h| h <= 0.0).collect();
+    let outlet_m: Vec<bool> = (0..active.len()).map(|g| active[g] && z_all[g] <= 0.0).collect();
+    let mut q = Pass2Params::standard(5, 0.0);
+    q.carve.breach_max_m = CarveParams::default().breach_max_m;
+    let p = CarveParams { steps: 10, reroute_every: 5, round_rules: RoundRules::ROUND, ..CarveParams::default() };
+    let (mut zr, mut zm) = (z0.clone(), z_all.clone());
+    solve_rounds(&compact, &mut zr, &outlet, &p, 2, &3usize, 5);
+    solve_rounds(&masked, &mut zm, &outlet_m, &p, 2, &3usize, 5);
+    let bits_of = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+
+    // Partition 1, the representation (the cell order is the same, the ranks follow the cube id): the compact grid and the masked cube give the same catchments (keyed by the cube id of the outlet), the same terms bit for bit and the same heights.
+    let (mut zc, mut zmm) = (zr.clone(), zm.clone());
+    let whole = catchment_terms(&compact, &mut zc, &z0, &q);
+    let by_mask = catchment_terms(&masked, &mut zmm, &z_all, &q);
+    assert!(whole.len() > 3, "several catchments: {}", whole.len());
+    assert_eq!(whole.len(), by_mask.len(), "the same catchments");
+    for (a, b) in whole.iter().zip(&by_mask) {
+        assert_eq!(ids[a.outlet], b.outlet, "the same outlet, in the same order");
+        assert_eq!(
+            (a.cells, a.eroded_m3.to_bits(), a.raised_m3.to_bits(), a.exported_m3.to_bits(), a.relative_error.to_bits()),
+            (b.cells, b.eroded_m3.to_bits(), b.raised_m3.to_bits(), b.exported_m3.to_bits(), b.relative_error.to_bits()),
+            "catchment {}",
+            b.outlet
+        );
+    }
+    let on_cap: Vec<f64> = ids.iter().map(|&g| zmm[g]).collect();
+    assert_eq!(bits_of(&zc), bits_of(&on_cap), "the heights after the sweep");
+    for g in (0..active.len()).filter(|&g| !active[g]) {
+        assert_eq!(zmm[g].to_bits(), zm[g].to_bits(), "the masked sweep leaves the inactive cell {g} alone");
+    }
+
+    // Partition 2, the bands of the thermal step (the thread count): the whole sediment pass gives the same bits and report on 1, 3 and 8 threads.
+    let run = |threads: usize| {
+        let mut z = zr.clone();
+        let r = sediment_pass(&compact, &mut z, &z0, &q, threads);
+        (bits_of(&z), format!("{r:?}"))
+    };
+    assert!(compact.len() > 2 * 4096, "more than two pieces of thermal's work: {}", compact.len());
+    let one = run(1);
+    let moved = sediment_pass(&compact, &mut zr.clone(), &z0, &q, 1).thermal;
+    assert!(moved.moved_volume_first > 0.0 && moved.passes_run > 0, "thermal moved something: {moved:?}");
+    for t in [3usize, 8] {
+        assert!(one.0 == run(t).0, "the heights on {t} threads differ from one thread");
+        assert!(one.1 == run(t).1, "the report on {t} threads differs from one thread");
+    }
+
+    // Partition 3, groups of whole catchments (the accounting a cut along the divides would hand to separate domains; the pass itself is not cut): the sums of the terms match the heights, every catchment is in exactly one group, the groups add up to the whole and the identity holds in every group.
+    let (we, wr, wx): (f64, f64, f64) =
+        whole.iter().fold((0.0, 0.0, 0.0), |s, t| (s.0 + t.eroded_m3, s.1 + t.raised_m3, s.2 + t.exported_m3));
+    assert!(we > 0.0 && wx > 0.0, "the scenario erodes and exports: {we} {wx}");
+    // The sums of the terms against the same quantities taken another way: the eroded column read from the heights before the sweep, the rise read from the volume of the heights before and after (not from the sweep's accounting).
+    let eroded_direct = planet_generators::bake::sediment::eroded_m3(&compact, &zr, &z0, q.sea_level);
+    let rise_direct =
+        planet_generators::bake::sediment::volume_m3(&compact, &zc) - planet_generators::bake::sediment::volume_m3(&compact, &zr);
+    assert!((we - eroded_direct).abs() <= 1e-9 * we, "eroded: the terms {we} against the heights {eroded_direct}");
+    assert!((wr - rise_direct).abs() <= 1e-9 * we, "raised: the terms {wr} against the volume change {rise_direct}");
+    let mut worst = (0.0f64, 0usize);
+    for t in &whole {
+        if t.relative_error > worst.0 {
+            worst = (t.relative_error, ids[t.outlet]);
+        }
+    }
+    assert!(worst.0 < 1e-9, "the residual of the worst catchment (cube id {}): {:e}", worst.1, worst.0);
+    for k in [2usize, 3, 5] {
+        let mut groups = vec![(0.0f64, 0.0f64, 0.0f64, 0usize); k];
+        let mut seen = 0usize;
+        for t in &whole {
+            let g = &mut groups[ids[t.outlet] % k];
+            g.0 += t.eroded_m3;
+            g.1 += t.raised_m3;
+            g.2 += t.exported_m3;
+            g.3 += 1;
+            seen += 1;
+        }
+        assert_eq!(groups.iter().map(|g| g.3).sum::<usize>(), whole.len(), "k = {k}: every catchment in one group");
+        assert_eq!(seen, whole.len());
+        let sum = groups.iter().fold((0.0, 0.0, 0.0), |s, g| (s.0 + g.0, s.1 + g.1, s.2 + g.2));
+        for (name, a, b) in [("eroded", sum.0, we), ("raised", sum.1, wr), ("exported", sum.2, wx)] {
+            assert!((a - b).abs() <= 1e-12 * b.abs().max(1.0), "k = {k}: {name} {a} against {b}");
+        }
+        assert!(groups.iter().filter(|g| g.3 > 0).count() >= 2, "k = {k}: the catchments fall into at least two groups");
+        for (i, g) in groups.iter().enumerate().filter(|(_, g)| g.3 > 0) {
+            let scale = g.0.max(g.1.abs()).max(g.2).max(f64::MIN_POSITIVE);
+            assert!((g.0 - g.1 - g.2).abs() / scale < 1e-9, "k = {k}, group {i}: {g:?}");
+        }
+    }
+}

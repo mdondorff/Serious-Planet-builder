@@ -1,0 +1,1 @@
+- 2026-11-10 gsed-partition: per-catchment terms of the G-SED balance and its partition test (compact against masked cube, 1/3/8 threads on a region thermal cuts into three pieces, groups of whole catchments); a spatial cut of the pass stays open (GEN-155)
