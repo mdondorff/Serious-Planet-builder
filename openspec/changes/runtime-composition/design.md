@@ -52,3 +52,19 @@ Each PR carries a requirement or two in `streaming-cache`, `renderer` or `genera
 | 5 | Channels inside kept lakes | dropped at the producer; the renderer draws what is stored | step 2's producer removes the channel cells inside a kept basin from the stored river segments; step 3 draws segments only |
 
 Start: code begins after item 11's rows (explorer, after GEN-162 merges).
+
+## 8. First PR: the lake producer, test plan (on paper, 2026-11-10; ids from the planner)
+Finding in the code: `bake/hydro.rs` `Basin` already holds `water_level_m`, `q_out`, `overflows`, `class`, and the area and volume curves at 16 steps. So the producer is not a new balance; it is the step that turns H1's basins into stored lake records and drops the channel cells inside them.
+| # | Test | Tier | Falsifies |
+|---|---|---|---|
+| 1 | A fixture basin (bowl with a known sill, `Q_in` and `E_open` chosen): level equals the section 5.5 case value to 1e-9 for the three cases (full to the sill, below the sill, `Q_in = 0`) | A | wrong level; shares G-BASIN's fixtures with the explorer |
+| 2 | Level is never above `spill_m` and never below `floor_m`; `q_out = 0` iff the basin does not overflow | A | balance leaking past the sill |
+| 3 | Endorheic and `Q_in = 0`: record flags "no water surface"; level = floor | A | a playa drawn as a lake |
+| 4 | Lake record per kept basin only: count and ids equal `Hydro::basins` ids (`basin_id`); a ramp (pit under the limit) yields none | A | stray or missing lakes |
+| 5 | Segments after the producer: no channel cell with `label` in a kept basin remains (decision 5); segment ends at the lake's inlet and the downstream segment starts at the spill with `q_out` | A | fans inside lakes (item 13 finding 2) |
+| 6 | The record round-trips through the kind-13 store layer (decision 3): encode, decode, equal; an older version is refused naming both versions | A | store format break |
+| 7 | Determinism: the same basin set in a shuffled build order gives identical records and bytes (CON-14) | A | order dependence |
+| 8 | Key: a change of the producer's parameters re-keys the layer | A | stale store read as current |
+| 9 | Stage manifest: the fixture bake lists the lake step with its input and output keys | B | step missing from the phase plan |
+Order inside the PR: tests 1-5 against a function `lakes_from_hydro(&Hydro) -> Vec<Lake>` first (red), then the function, then 6-8 with the store field, then 9. The store field and the water pass source follow in the next two PRs of section 6.
+Open for the planner: requirement ids (generator-pipeline) and whether the store field of test 6 belongs in this PR or in item 14's (G-STORE); the plan assumes this PR.
