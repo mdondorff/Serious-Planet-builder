@@ -299,9 +299,8 @@ fn basin_lakes(grid: &Grid, hydro: &Hydro) -> Vec<Lake> {
         })
         .collect()
 }
-
-    assert_discharge(hydro);
 fn produce(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &[f64], tile_of: Option<&dyn Fn(usize) -> TileRef>) -> Lakes {
+    assert_discharge(hydro);
     assert!(hydro.qw.len() == grid.len(), "the producer needs Q_w: run it before the discharges are released");
     assert!(routing.receiver.len() == grid.len(), "one receiver per cell");
     let mut lakes = basin_lakes(grid, hydro);
