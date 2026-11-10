@@ -11,7 +11,7 @@
 
 use super::carve::CarveParams;
 use super::hydro::{hydrology, verify_with_area, weighted_cell_area, Hydro, HydroParams, HydroStats, Verify};
-use super::lakes::{lakes_from_hydro, Lakes};
+use super::lakes::{lake_records, river_pieces, Lakes};
 use super::probe;
 use super::round::{solve_rounds, RoundReport};
 use super::route::{route_rules_filled, RoundRules};
@@ -209,10 +209,10 @@ pub fn build_resident(
     let mut hy = hydrology(grid, &z, &filled, &routing, outlet, Some(&runoff), Some(&evap), &p.hydro);
     lap("hydrology", &mut phases);
     mark("hydrology");
-    // The lake producer reads H1 and the routing before the routing is released (GEN-163).
-    let lakes = lakes_from_hydro(grid, &routing, &hy, &z);
-    lap("lakes", &mut phases);
-    mark("lakes");
+    // The pieces of the river segments carry `Q_w` at their ends: they are cut now and are the only part of the lake producer that reads the discharges (GEN-163, D22).
+    let (pieces, dropped_cells) = river_pieces(grid, &routing, &hy, &z);
+    lap("river pieces", &mut phases);
+    mark("river pieces");
     // The open-water evaporation is H1's input only.
     drop(evap);
     let g_con = verify_with_area(grid, &hy, &routing, &filled, outlet, Some(&runoff), None, Some(weighted_area));
@@ -231,6 +231,10 @@ pub fn build_resident(
     hy.q = Vec::new();
     hy.qw = Vec::new();
     mark("H1 result kept, discharges released");
+    // The lake records come after the release: they read the basins only, and the working set has its headroom here (D22).
+    let lakes = Lakes { lakes: lake_records(grid, &hy), pieces, dropped_cells };
+    lap("lakes", &mut phases);
+    mark("lakes");
 
     // ---- the sediment pass on the surface read back
     let z_start = spill_read(&p.spill, n)?;
