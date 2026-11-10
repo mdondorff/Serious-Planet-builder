@@ -229,6 +229,18 @@ fn an_in_memory_run_is_labelled_not_the_production_source_and_real_runs_refuse_w
     ])
     .unwrap();
     assert!(out.contains("source: in-memory 8 cells (NOT the production source)"), "{out}");
+    // The smoke run's progress lines carry the seconds since the run started, and its phases are marked (the CI run of 2026-11-10 hung in the frame loop of this scene with 'script built' as its last line): a timeout names the phase and the frame.
+    for what in ["world opened in ", "look-2km: script built in ", "look-2km: rig built in ", "look-2km: case ran in "] {
+        let line = out.lines().find(|l| l.contains(what)).unwrap_or_else(|| panic!("no '{what}' line in {out}"));
+        assert!(line.contains(" [run +") && line.ends_with(" s]"), "{line}");
+    }
+    let phases = planet::stall::phase_report();
+    assert!(
+        phases.contains("look-2km frame loop start")
+            && phases.contains("look-2km frame 0 of ")
+            && phases.contains("look-2km post-pass start"),
+        "{phases}"
+    );
     let json = std::fs::read_to_string(&log).unwrap();
     assert!(json.contains("\"source\":\"in-memory 8 cells (NOT the production source)\""), "{json}");
     let _ = std::fs::remove_file(&log);

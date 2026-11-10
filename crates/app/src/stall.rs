@@ -41,6 +41,21 @@ pub fn phase_mark_owned(label: String) {
     }
 }
 
+thread_local! {
+    /// The start of the perf run on this thread (set by [`run_clock_start`]): the smoke runs of the perf scenes stamp their progress lines with the time since it, so that a CI timeout shows how far a run got.
+    static RUN_START: std::cell::Cell<Option<Instant>> = const { std::cell::Cell::new(None) };
+}
+
+/// The perf run on this thread starts now.
+pub fn run_clock_start() {
+    RUN_START.with(|s| s.set(Some(Instant::now())));
+}
+
+/// `" [run +12.3 s]"`, the seconds since [`run_clock_start`] on this thread, or `""` when no run has started.
+pub fn run_stamp() -> String {
+    RUN_START.with(|s| s.get()).map_or_else(String::new, |t| format!(" [run +{:.1} s]", t.elapsed().as_secs_f64()))
+}
+
 /// The marks as one line, each with the time since the previous one: `world 340 ms, device 1500 ms, ...`.
 pub fn phase_report() -> String {
     let marks = PHASE_MARKS.lock().map(|m| m.clone()).unwrap_or_default();
