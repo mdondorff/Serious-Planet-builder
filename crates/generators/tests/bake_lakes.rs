@@ -4,7 +4,7 @@
 #![allow(clippy::needless_range_loop)]
 use planet_generators::bake::flood::priority_flood_with;
 use planet_generators::bake::hydro::{hydrology, BasinClass, Hydro, HydroParams};
-use planet_generators::bake::lakes::{lakes_from_hydro, Lakes};
+use planet_generators::bake::lakes::{cut_segments, lakes_from_hydro, water_cells, Lakes};
 use planet_generators::bake::route::{route_rules, RoundRules, Routing, NONE};
 use planet_generators::bake::Grid;
 
@@ -24,6 +24,7 @@ fn bowl_land() -> Vec<f64> {
 }
 
 struct Run {
+    z: Vec<f64>,
     g: Grid,
     routing: Routing,
     hydro: Hydro,
@@ -37,7 +38,7 @@ fn run(z: &[f64], runoff: Option<f32>, evap: Option<f32>, p: &HydroParams) -> Ru
     let r = runoff.map(|v| vec![v; W * W]);
     let e = evap.map(|v| vec![v; W * W]);
     let hydro = hydrology(&g, z, &filled, &routing, &outlet, r.as_deref(), e.as_deref(), p);
-    Run { g, routing, hydro }
+    Run { z: z.to_vec(), g, routing, hydro }
 }
 
 fn small_t() -> HydroParams {
@@ -45,7 +46,7 @@ fn small_t() -> HydroParams {
 }
 
 fn lakes(r: &Run) -> Lakes {
-    lakes_from_hydro(&r.g, &r.routing, &r.hydro)
+    lakes_from_hydro(&r.g, &r.routing, &r.hydro, &r.z)
 }
 
 // spec: GEN-163, TEST-108
@@ -127,7 +128,7 @@ fn one_lake_per_kept_basin_and_none_for_an_artefact_or_a_ramp() {
     let filled = priority_flood_with(&g, &z, &outlet, EPS, true);
     let hydro = hydrology(&g, &z, &filled, &routing, &outlet, None, None, &HydroParams::default());
     assert!(hydro.stats.ramps >= 1);
-    assert!(lakes_from_hydro(&g, &routing, &hydro).lakes.is_empty());
+    assert!(lakes_from_hydro(&g, &routing, &hydro, &z).lakes.is_empty());
 }
 
 // spec: GEN-163, TEST-108
@@ -206,7 +207,7 @@ fn the_result_does_not_depend_on_the_order_of_the_basins() {
     let r = run(&z, None, None, &small_t());
     assert_eq!(r.hydro.basins.len(), 2);
     let want = lakes(&r);
-    let mut swapped = Run { g: Grid::new(W, W, 800.0), routing: r.routing.clone(), hydro: clone_hydro(&r.hydro) };
+    let mut swapped = Run { z: r.z.clone(), g: Grid::new(W, W, 800.0), routing: r.routing.clone(), hydro: clone_hydro(&r.hydro) };
     let n = swapped.hydro.basins.len();
     swapped.hydro.basins.reverse();
     for l in &mut swapped.hydro.label {
@@ -253,25 +254,136 @@ fn a_segment_cut_twice_has_numbered_runs_and_one_inside_a_lake_has_none() {
         }
         v
     };
+    // The cells of the chain that are under water, by hand: the cut is `cut_segments` with that predicate.
     let with_labels = |inside: &[usize]| {
-        let mut h = clone_hydro(&r.hydro);
-        h.label = vec![NONE; h.label.len()];
-        for &k in inside {
-            h.label[chain[k] as usize] = 0;
-        }
-        Run { g: Grid::new(W, W, 800.0), routing: r.routing.clone(), hydro: h }
+        let set: std::collections::HashSet<u32> = inside.iter().map(|&k| chain[k]).collect();
+        let (pieces, dropped_cells) = cut_segments(&r.hydro, &r.routing, &|c| set.contains(&(c as u32)));
+        Lakes { lakes: Vec::new(), pieces, dropped_cells }
     };
     let mine = |l: &Lakes| l.pieces.iter().filter(|p| p.segment == s.id).map(|p| (p.part, p.first, p.cells)).collect::<Vec<_>>();
     // Cells 0, 3 and 4 inside: a run at the start is dropped, then a run of 2 (1..=2), then the rest (5..).
     let n = s.cells;
-    let l = lakes(&with_labels(&[0, 3, 4]));
+    let l = with_labels(&[0, 3, 4]);
     assert_eq!(mine(&l), vec![(0, chain[1], 2), (1, chain[5], n - 5)]);
     // A lake at the end: the last cell inside leaves one run from the start.
-    let l = lakes(&with_labels(&[n as usize - 1]));
+    let l = with_labels(&[n as usize - 1]);
     assert_eq!(mine(&l), vec![(0, chain[0], n - 1)]);
     // The whole chain inside: no piece, every cell dropped.
     let all: Vec<usize> = (0..n as usize).collect();
-    let l = lakes(&with_labels(&all));
+    let l = with_labels(&all);
     assert!(mine(&l).is_empty());
     assert!(l.dropped_cells >= n as usize);
+}
+
+/// The cells of a segment, from its first cell to the one before its end cell.
+fn seg_cells(r: &Run, s: &planet_generators::bake::hydro::Segment) -> Vec<u32> {
+    let mut v = vec![s.up];
+    while v.len() < s.cells as usize {
+        v.push(r.routing.receiver[*v.last().unwrap() as usize]);
+    }
+    v
+}
+
+fn piece_cells(r: &Run, ls: &Lakes) -> std::collections::HashSet<u32> {
+    let mut set = std::collections::HashSet::new();
+    for p in &ls.pieces {
+        let mut c = p.first;
+        for k in 0..p.cells {
+            set.insert(c);
+            if k + 1 < p.cells {
+                c = r.routing.receiver[c as usize];
+            }
+        }
+    }
+    set
+}
+
+// spec: GEN-163, TEST-108
+#[test]
+fn a_gentle_shore_under_the_level_is_water_and_a_river_over_it_is_not_drawn() {
+    // The bowl of the other tests with a shelf on its east side 0.2 m under the sill: H1 does not label it (under the 0.5 m pit limit), the lake covers it.
+    let mut z = bowl_land();
+    for j in 10..16 {
+        for i in 16..19 {
+            z[j * W + i] = 589.8;
+        }
+    }
+    let r = run(&z, None, None, &small_t());
+    let ls = lakes(&r);
+    let level = ls.lakes[0].level_m;
+    assert_eq!(level, ls.lakes[0].spill_m, "the lake is full to the sill");
+    let water = water_cells(&r.g, &r.routing, &r.hydro, &r.z);
+    let shelf: Vec<usize> =
+        (0..W * W).filter(|&c| r.hydro.channel[c] && r.hydro.label[c] == NONE && z[c] < level && water.contains(&(c as u32))).collect();
+    assert!(!shelf.is_empty(), "channel cells on the shelf are water though H1 did not label them");
+    assert!(shelf.iter().all(|&c| (16..19).contains(&(c % W)) && (10..16).contains(&(c / W))), "they are the shelf's: {shelf:?}");
+    let kept = piece_cells(&r, &ls);
+    for &c in &shelf {
+        assert!(!kept.contains(&(c as u32)), "shelf cell {c} is in a piece");
+    }
+    // No cell of any piece is under the level of the lake it drains into, apart from the ones below the sill that drain away (west of the rim).
+    assert!(kept.iter().all(|&c| z[c as usize] >= level || (c as usize % W) < 10), "a kept cell under the level and not below the sill");
+    // The water does not climb out over the sill: nothing west of the rim, nothing on the slope above the lake.
+    assert!(water.iter().all(|&c| (10..19).contains(&(c as usize % W))), "the water stays in the basin and its shore");
+}
+
+/// A cone-shaped basin (radius 8 cells round (13, 13), floor 290 m, 25 m a cell) in the slope rising east: a lake of a few cells at the bottom when evaporation limits it.
+fn cone_land() -> Vec<f64> {
+    let mut z: Vec<f64> = (0..W * W).map(|p| 500.0 + 10.0 * (p % W) as f64).collect();
+    for j in 0..W {
+        for i in 0..W {
+            let r = libm::sqrt(((i as f64) - 13.0).powi(2) + ((j as f64) - 13.0).powi(2));
+            if r < 8.0 {
+                z[j * W + i] = 290.0 + 25.0 * r;
+            }
+        }
+    }
+    z
+}
+
+// spec: GEN-163, TEST-108
+#[test]
+fn an_endorheic_lake_below_its_sill_takes_the_river_down_to_the_waters_edge() {
+    let z = cone_land();
+    let r = run(&z, Some(1.0e-8), Some(1.0e-6), &HydroParams { initiation_m2: 2.0 * 800.0 * 800.0, ..HydroParams::default() });
+    let ls = lakes(&r);
+    let l = &ls.lakes[0];
+    assert_eq!((l.class, l.wet, l.overflows), (BasinClass::Endorheic, true, false));
+    assert!(
+        l.level_m < l.spill_m - 100.0 && l.level_m > l.floor_m,
+        "a small lake low in the cone: level {} of [{}, {}]",
+        l.level_m,
+        l.floor_m,
+        l.spill_m
+    );
+    let water = water_cells(&r.g, &r.routing, &r.hydro, &r.z);
+    assert!(!water.is_empty() && water.iter().all(|&c| z[c as usize] < l.level_m), "water is under the level");
+    assert!(
+        water.len() < r.hydro.basins[0].cells as usize / 4,
+        "the lake covers a fraction of the basin: {} of {}",
+        water.len(),
+        r.hydro.basins[0].cells
+    );
+    // The river stays drawn on the dry slope of the basin (labelled cells above the level), down to the water: the label rule dropped all of it.
+    // The drawn river: the cells of every segment out of the water (the whole segments and the pieces of the cut ones).
+    let kept: std::collections::HashSet<u32> =
+        r.hydro.segments.iter().flat_map(|s| seg_cells(&r, s)).filter(|c| !water.contains(c)).collect();
+    assert!(piece_cells(&r, &ls).iter().all(|c| kept.contains(c)));
+    let dry_basin: Vec<u32> = kept.iter().copied().filter(|&c| r.hydro.label[c as usize] != NONE && z[c as usize] >= l.level_m).collect();
+    assert!(dry_basin.len() > 5, "channel cells inside the basin and above the level are kept: {}", dry_basin.len());
+    // The river reaches the water: a drawn cell drains into water (the segment goes under it or ends in it).
+    let reaches = kept.iter().any(|&c| water.contains(&r.routing.receiver[c as usize]));
+    assert!(reaches, "a drawn cell drains into the water");
+    // Every segment cell under the level is dropped: nothing kept is water.
+    assert!(kept.iter().all(|c| !water.contains(c)));
+}
+
+// spec: GEN-163, TEST-108
+#[test]
+fn a_dry_lake_has_no_water_and_cuts_nothing() {
+    let r = run(&cone_land(), Some(0.0), Some(1.0e-6), &small_t());
+    let ls = lakes(&r);
+    assert!(!ls.lakes[0].wet);
+    assert!(water_cells(&r.g, &r.routing, &r.hydro, &r.z).is_empty());
+    assert_eq!((ls.pieces.len(), ls.dropped_cells), (0, 0));
 }
