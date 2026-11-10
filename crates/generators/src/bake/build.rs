@@ -11,6 +11,7 @@
 
 use super::carve::CarveParams;
 use super::hydro::{hydrology, verify_with_area, weighted_cell_area, Hydro, HydroParams, HydroStats, Verify};
+use super::lakes::{lakes_from_hydro, Lakes};
 use super::probe;
 use super::round::{solve_rounds, RoundReport};
 use super::route::{route_rules_filled, RoundRules};
@@ -81,6 +82,8 @@ pub struct PlanReport {
 pub struct Built {
     pub z: Vec<f64>,
     pub hydro: Hydro,
+    /// The lake producer's result on H1 (GEN-163): the lake records and the river pieces outside the lakes.
+    pub lakes: Lakes,
     pub report: PlanReport,
 }
 
@@ -206,6 +209,10 @@ pub fn build_resident(
     let mut hy = hydrology(grid, &z, &filled, &routing, outlet, Some(&runoff), Some(&evap), &p.hydro);
     lap("hydrology", &mut phases);
     mark("hydrology");
+    // The lake producer reads H1 and the routing before the routing is released (GEN-163).
+    let lakes = lakes_from_hydro(grid, &routing, &hy);
+    lap("lakes", &mut phases);
+    mark("lakes");
     // The open-water evaporation is H1's input only.
     drop(evap);
     let g_con = verify_with_area(grid, &hy, &routing, &filled, outlet, Some(&runoff), None, Some(weighted_area));
@@ -233,5 +240,5 @@ pub fn build_resident(
     drop(z_start);
     lap("sediment pass", &mut phases);
     mark("after the sediment pass");
-    Ok(Built { z, hydro: hy, report: PlanReport { rounds, h1, g_con, sum_q, sum_qw, sediment, spill_bytes, phases } })
+    Ok(Built { z, hydro: hy, lakes, report: PlanReport { rounds, h1, g_con, sum_q, sum_qw, sediment, spill_bytes, phases } })
 }

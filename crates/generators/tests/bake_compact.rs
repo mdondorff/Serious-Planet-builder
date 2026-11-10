@@ -526,6 +526,10 @@ fn the_phase_plan_is_the_steps_in_order_releases_what_it_should_and_does_not_mov
     assert_eq!(off.report.spill_bytes, z0.len() as u64 * 8);
     assert!(off.hydro.q.is_empty() && off.hydro.qw.is_empty(), "the per-cell discharges are released");
     assert_eq!(off.hydro.label.len(), z0.len(), "the labels are kept");
+    // spec: GEN-163, TEST-108: the lake producer is a phase of the plan and gives one lake per kept basin, without a channel cell inside one.
+    assert!(off.report.phases.iter().any(|(name, _)| *name == "lakes"), "the plan lists the lake step: {:?}", off.report.phases);
+    assert_eq!(off.lakes.lakes.len(), off.hydro.basins.len());
+    assert!(off.lakes.pieces.iter().all(|p| p.cells > 0 && off.hydro.label[p.first as usize] == planet_generators::bake::route::NONE));
     for name in [
         "pre-carve surface spilled",
         "after the rounds",
@@ -533,6 +537,7 @@ fn the_phase_plan_is_the_steps_in_order_releases_what_it_should_and_does_not_mov
         "routing and filled surface",
         "weight dropped",
         "hydrology",
+        "lakes",
         "H1 result kept, discharges released",
         "pre-carve surface read back",
         "after the sediment pass",
