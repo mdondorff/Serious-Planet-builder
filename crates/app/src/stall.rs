@@ -26,10 +26,15 @@ pub const REPORT_EVERY: Duration = Duration::from_secs(10);
 /// The start of a run's phase clock and its marks (milliseconds since the first mark): where a run spends its startup (the process, the event loop, the world, the device,
 /// the floor tiles, the frames). Recorded always (a few pushes), printed only under `PLANET_TIMING` by [`phase_report`].
 static PHASE_START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
-static PHASE_MARKS: Mutex<Vec<(&'static str, f64)>> = Mutex::new(Vec::new());
+static PHASE_MARKS: Mutex<Vec<(String, f64)>> = Mutex::new(Vec::new());
 
 /// A phase of the run is reached now.
 pub fn phase_mark(label: &'static str) {
+    phase_mark_owned(label.to_string());
+}
+
+/// [`phase_mark`] with a label made at run time (a view or a flight of the lit perf run, which names the phase a stalled run was in).
+pub fn phase_mark_owned(label: String) {
     let ms = PHASE_START.get_or_init(Instant::now).elapsed().as_secs_f64() * 1e3;
     if let Ok(mut m) = PHASE_MARKS.lock() {
         m.push((label, ms));
@@ -299,6 +304,17 @@ mod tests {
         p.began = now - Duration::from_millis(began_ago_ms);
         p.phases = phases.iter().map(|(n, ms)| (*n, Duration::from_millis(*ms))).collect();
         (p, now)
+    }
+
+    // spec: VIEW-056
+    #[test]
+    fn a_phase_made_at_run_time_is_in_the_report_in_order() {
+        phase_mark_owned("lit/test-view start".to_string());
+        phase_mark("a static phase");
+        phase_mark_owned("lit/test-view end".to_string());
+        let r = phase_report();
+        let (a, b, c) = (r.find("lit/test-view start +"), r.find("a static phase +"), r.rfind("lit/test-view end +"));
+        assert!(a.is_some() && b.is_some() && c.is_some() && a < b && b < c, "{r}");
     }
 
     // spec: VIEW-056
