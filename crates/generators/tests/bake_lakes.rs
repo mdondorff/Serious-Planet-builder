@@ -314,7 +314,7 @@ fn a_gentle_shore_under_the_level_is_water_and_a_river_over_it_is_not_drawn() {
     assert_eq!(level, ls.lakes[0].spill_m, "the lake is full to the sill");
     let water = water_cells(&r.g, &r.routing, &r.hydro, &r.z);
     let shelf: Vec<usize> =
-        (0..W * W).filter(|&c| r.hydro.channel[c] && r.hydro.label[c] == NONE && z[c] < level && water.contains(&(c as u32))).collect();
+        (0..W * W).filter(|&c| r.hydro.channel[c] && r.hydro.label[c] == NONE && z[c] < level && water.contains(c)).collect();
     assert!(!shelf.is_empty(), "channel cells on the shelf are water though H1 did not label them");
     assert!(shelf.iter().all(|&c| (16..19).contains(&(c % W)) && (10..16).contains(&(c / W))), "they are the shelf's: {shelf:?}");
     let kept = piece_cells(&r, &ls);
@@ -324,7 +324,7 @@ fn a_gentle_shore_under_the_level_is_water_and_a_river_over_it_is_not_drawn() {
     // No cell of any piece is under the level of the lake it drains into, apart from the ones below the sill that drain away (west of the rim).
     assert!(kept.iter().all(|&c| z[c as usize] >= level || (c as usize % W) < 10), "a kept cell under the level and not below the sill");
     // The water does not climb out over the sill: nothing west of the rim, nothing on the slope above the lake.
-    assert!(water.iter().all(|&c| (10..19).contains(&(c as usize % W))), "the water stays in the basin and its shore");
+    assert!(water.cells().iter().all(|&c| (10..19).contains(&(c as usize % W))), "the water stays in the basin and its shore");
 }
 
 /// A cone-shaped basin (radius 8 cells round (13, 13), floor 290 m, 25 m a cell) in the slope rising east: a lake of a few cells at the bottom when evaporation limits it.
@@ -358,25 +358,37 @@ fn an_endorheic_lake_below_its_sill_takes_the_river_down_to_the_waters_edge() {
         l.spill_m
     );
     let water = water_cells(&r.g, &r.routing, &r.hydro, &r.z);
-    assert!(!water.is_empty() && water.iter().all(|&c| z[c as usize] < l.level_m), "water is under the level");
+    let under: Vec<u32> = water.cells().into_iter().filter(|&c| z[c as usize] < l.level_m).collect();
+    assert!(!under.is_empty(), "there is water");
     assert!(
-        water.len() < r.hydro.basins[0].cells as usize / 4,
+        under.len() < r.hydro.basins[0].cells as usize / 4,
         "the lake covers a fraction of the basin: {} of {}",
-        water.len(),
+        under.len(),
         r.hydro.basins[0].cells
     );
-    // The river stays drawn on the dry slope of the basin (labelled cells above the level), down to the water: the label rule dropped all of it.
-    // The drawn river: the cells of every segment out of the water (the whole segments and the pieces of the cut ones).
+    // The drawn river: the cells of every segment out of the water and the dead ground below it (the whole segments and the pieces of the cut ones).
     let kept: std::collections::HashSet<u32> =
-        r.hydro.segments.iter().flat_map(|s| seg_cells(&r, s)).filter(|c| !water.contains(c)).collect();
+        r.hydro.segments.iter().flat_map(|s| seg_cells(&r, s)).filter(|&c| !water.contains(c as usize)).collect();
     assert!(piece_cells(&r, &ls).iter().all(|c| kept.contains(c)));
+    // The river stays drawn on the dry slope above the water (labelled cells above the level), down to the water: the label rule dropped all of it.
     let dry_basin: Vec<u32> = kept.iter().copied().filter(|&c| r.hydro.label[c as usize] != NONE && z[c as usize] >= l.level_m).collect();
     assert!(dry_basin.len() > 5, "channel cells inside the basin and above the level are kept: {}", dry_basin.len());
     // The river reaches the water: a drawn cell drains into water (the segment goes under it or ends in it).
-    let reaches = kept.iter().any(|&c| water.contains(&r.routing.receiver[c as usize]));
-    assert!(reaches, "a drawn cell drains into the water");
-    // Every segment cell under the level is dropped: nothing kept is water.
-    assert!(kept.iter().all(|c| !water.contains(c)));
+    assert!(kept
+        .iter()
+        .any(|&c| z[r.routing.receiver[c as usize] as usize] < l.level_m && water.contains(r.routing.receiver[c as usize] as usize)));
+    // Nothing is drawn below the water inside the basin: after a segment's first water cell, every drawn cell is out of the basin (the routing climbs to the spill on the filled surface, no river runs there).
+    for s in &r.hydro.segments {
+        let mut under_water = false;
+        for c in seg_cells(&r, s) {
+            if z[c as usize] < l.level_m && water.contains(c as usize) {
+                under_water = true;
+            } else if under_water && r.hydro.label[c as usize] != NONE {
+                assert!(!kept.contains(&c), "cell {c} of segment {} is drawn inside the basin below the water", s.id);
+            }
+        }
+    }
+    assert!(kept.iter().all(|&c| !water.contains(c as usize)));
 }
 
 // spec: GEN-163, TEST-108
@@ -385,6 +397,6 @@ fn a_dry_lake_has_no_water_and_cuts_nothing() {
     let r = run(&cone_land(), Some(0.0), Some(1.0e-6), &small_t());
     let ls = lakes(&r);
     assert!(!ls.lakes[0].wet);
-    assert!(water_cells(&r.g, &r.routing, &r.hydro, &r.z).is_empty());
+    assert!(water_cells(&r.g, &r.routing, &r.hydro, &r.z).cells().is_empty());
     assert_eq!((ls.pieces.len(), ls.dropped_cells), (0, 0));
 }

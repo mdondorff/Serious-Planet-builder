@@ -16,7 +16,7 @@
 use super::hydro::{Basin, BasinClass, Hydro, CURVE_STEPS};
 use super::route::{Routing, NONE};
 use super::Grid;
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 
 /// A lake: the record of a kept basin the store keeps and the water pass reads.
 #[derive(Clone, Debug, PartialEq)]
@@ -83,28 +83,81 @@ fn area_at(b: &Basin, level: f64) -> f64 {
     a0 + (x - k as f64) * (a1 - a0)
 }
 
-/// The cells under the water of the wet lakes (GEN-163, D10): the cells of a basin with `z` under its level and the cells under the level that drain into them. `z` is the surface H1 ran on.
-pub fn water_cells(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &[f64]) -> HashSet<u32> {
+/// The cells that carry no river because a lake is there (GEN-163, D10): the water, and the dead ground below it inside the basin.
+///
+/// - Water: a cell of a wet lake's basin with `z` under the lake's level (a test on the labels, no storage), and the shore cells under the level that drain into it along receiver chains (stored, sorted).
+/// - Below the water: the routing runs on the filled surface, whose epsilon gradient inside a basin points to the spill, so a channel that reaches an endorheic lake's water would go on over dry
+///   basin cells up to the spill; those labelled cells downstream of the water are not a river (the lake has no outflow there; at an overflowing lake they are water already). Stored, sorted.
+///
+/// The memory is the shore and the dead ground, not the water of the basins.
+pub struct Water<'a> {
+    label: &'a [u32],
+    z: &'a [f64],
+    level: Vec<f64>,
+    extra: Vec<u32>,
+}
+
+impl Water<'_> {
+    fn seed(&self, c: usize) -> bool {
+        let l = self.label[c];
+        l != NONE && self.z[c] < self.level[l as usize]
+    }
+
+    /// Whether no river is drawn on cell `c`.
+    pub fn contains(&self, c: usize) -> bool {
+        self.seed(c) || self.extra.binary_search(&(c as u32)).is_ok()
+    }
+
+    /// The cells, in cell order.
+    pub fn cells(&self) -> Vec<u32> {
+        (0..self.z.len() as u32).filter(|&c| self.contains(c as usize)).collect()
+    }
+}
+
+/// The water of the wet lakes and the ground below it, on the surface `z` H1 ran on.
+pub fn water_cells<'a>(grid: &Grid, routing: &Routing, hydro: &'a Hydro, z: &'a [f64]) -> Water<'a> {
     assert!(z.len() == grid.len(), "one height per cell");
     let level: Vec<f64> = hydro.basins.iter().map(|b| if b.q_in > 0.0 { b.water_level_m } else { f64::NEG_INFINITY }).collect();
-    let mut water: HashSet<u32> = HashSet::new();
-    let mut queue: VecDeque<(u32, u32)> = VecDeque::new();
-    for (c, (&l, &zc)) in hydro.label.iter().zip(z).enumerate() {
-        if l != NONE && zc < level[l as usize] {
-            water.insert(c as u32);
-            queue.push_back((c as u32, l));
+    let mut w = Water { label: &hydro.label, z, level, extra: Vec::new() };
+    let mut shore: Vec<u32> = Vec::new();
+    let mut stack: Vec<(u32, u32)> = Vec::new();
+    for (c, &l) in hydro.label.iter().enumerate() {
+        if w.seed(c) {
+            stack.push((c as u32, l));
         }
-    }
-    // The donors of a water cell under the level are water too: a shore drains into the lake. The spill cell and everything below the sill drain away from it and are not reached.
-    while let Some((c, l)) = queue.pop_front() {
-        for d in 0..8 {
-            let Some(q) = grid.neighbour(c as usize, d) else { continue };
-            if routing.receiver[q] == c && z[q] < level[l as usize] && water.insert(q as u32) {
-                queue.push_back((q as u32, l));
+        // The donors of a water cell under the level are water too: a shore drains into the lake. Every cell has one receiver, so a donor is reached once. A labelled donor is another basin's cell or
+        // a seed of this one; the spill cell and everything below the sill drain away from the lake and are not reached.
+        while let Some((x, l)) = stack.pop() {
+            for d in 0..8 {
+                let Some(q) = grid.neighbour(x as usize, d) else { continue };
+                if routing.receiver[q] == x && hydro.label[q] == NONE && z[q] < w.level[l as usize] {
+                    shore.push(q as u32);
+                    stack.push((q as u32, l));
+                }
             }
         }
     }
-    water
+    shore.sort_unstable();
+    w.extra = shore;
+    // Below the water: from every water cell whose receiver is not water, the labelled cells down the receiver chain to the basin's edge.
+    let mut dead: HashSet<u32> = HashSet::new();
+    let mut walk = |w: &Water, c: usize| {
+        let mut cur = routing.receiver[c];
+        while cur != NONE && hydro.label[cur as usize] != NONE && !w.contains(cur as usize) && dead.insert(cur) {
+            cur = routing.receiver[cur as usize];
+        }
+    };
+    for c in 0..z.len() {
+        if w.seed(c) {
+            walk(&w, c);
+        }
+    }
+    for k in 0..w.extra.len() {
+        walk(&w, w.extra[k] as usize);
+    }
+    w.extra.extend(dead);
+    w.extra.sort_unstable();
+    w
 }
 
 /// Cut the segments of a hydrology at the cells `water` says are under water: the pieces of the segments that lose a cell (first cell, count, `Q_w` at both ends) and the number of cells dropped.
@@ -183,6 +236,6 @@ pub fn lakes_from_hydro(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &[f64]
     lakes.sort_unstable_by_key(|l| l.id);
 
     let water = water_cells(grid, routing, hydro, z);
-    let (pieces, dropped_cells) = cut_segments(hydro, routing, &|c| water.contains(&(c as u32)));
+    let (pieces, dropped_cells) = cut_segments(hydro, routing, &|c| water.contains(c));
     Lakes { lakes, pieces, dropped_cells }
 }
