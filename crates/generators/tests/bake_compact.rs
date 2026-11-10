@@ -576,7 +576,8 @@ fn the_phase_plan_is_the_steps_in_order_releases_what_it_should_and_does_not_mov
     );
     assert_eq!(off.hydro.label, hy.label);
     assert_eq!(off.hydro.channel, hy.channel);
-    assert_eq!(off.hydro.segments.len(), hy.segments.len());
+    assert_eq!(off.hydro.segments, hy.segments);
+    assert_eq!(format!("{:?}", off.report.h1), format!("{:?}", hy.stats));
     assert_eq!(off.hydro.basins, hy.basins);
     let mut q = params.sediment;
     q.carve.breach_max_m = CarveParams::default().breach_max_m;
@@ -591,6 +592,13 @@ fn the_phase_plan_is_the_steps_in_order_releases_what_it_should_and_does_not_mov
     let on = build_resident(&grid, z0.clone(), &outlet, &params, &climate_of, &|_| {}).expect("the plan runs with the probe");
     probe::uninstall_local();
     assert_eq!(bits(&on.z), bits(&off.z), "the probe moves no bit");
+    // One thread gives the bits of three: no chunk boundary enters the plan.
+    let mut one_thread = params.clone();
+    one_thread.threads = 1;
+    let one = build_resident(&grid, z0.clone(), &outlet, &one_thread, &climate_of, &|_| {}).expect("the plan runs on one thread");
+    assert_eq!(bits(&one.z), bits(&off.z), "the plan does not depend on the thread count");
+    assert_eq!(one.hydro.label, off.hydro.label);
+    assert_eq!(one.hydro.segments, off.hydro.segments);
     assert_eq!(on.hydro.label, off.hydro.label);
     let seen = sink.0.lock().unwrap().clone();
     let want = [Stage::Landmass, Stage::Round(0), Stage::Round(1), Stage::H1, Stage::Thermal, Stage::Deposition, Stage::PitSpreading]

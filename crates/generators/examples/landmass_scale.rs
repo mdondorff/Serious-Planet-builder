@@ -366,7 +366,7 @@ fn main() {
             let (peak, now, commit) = memory3();
             println!("MARK {name}: working set {now:.0} MiB now, peak {peak:.0} MiB, peak commit {commit:.0} MiB");
         };
-        let params = PlanParams::standard(seed, threads, format!("target/plan_zstart_k{k}.f64").into());
+        let params = PlanParams::standard(seed, threads, format!("target/plan_zstart_k{k}_{}.f64", std::process::id()).into());
         let t = Instant::now();
         let built = build_resident(&grid, z, &outlet, &params, &climate, &mark).expect("the build");
         let r = &built.report;

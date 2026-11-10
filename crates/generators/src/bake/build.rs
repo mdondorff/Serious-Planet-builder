@@ -111,6 +111,19 @@ fn spill_read(path: &Path, n: usize) -> std::io::Result<Vec<f64>> {
     Ok(out)
 }
 
+/// Deletes the spill file when it goes out of scope (also on an error or a panic); a failed removal is a warning, not a lost build.
+struct SpillGuard(PathBuf);
+
+impl Drop for SpillGuard {
+    fn drop(&mut self) {
+        if let Err(e) = std::fs::remove_file(&self.0) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                eprintln!("warning: the spill file {} was not removed: {e}", self.0.display());
+            }
+        }
+    }
+}
+
 /// The climate of a cell: (precipitation in mm a year, temperature in degrees C).
 pub type Climate<'a> = &'a (dyn Fn(usize) -> (f64, f64) + Sync);
 
@@ -168,6 +181,7 @@ pub fn build_resident(
     mark("landmass");
 
     // ---- the pre-carve surface waits on disk
+    let guard = SpillGuard(p.spill.clone());
     let spill_bytes = spill_write(&p.spill, &z)?;
     lap("spill", &mut phases);
     mark("pre-carve surface spilled");
@@ -213,7 +227,7 @@ pub fn build_resident(
 
     // ---- the sediment pass on the surface read back
     let z_start = spill_read(&p.spill, n)?;
-    std::fs::remove_file(&p.spill)?;
+    drop(guard);
     mark("pre-carve surface read back");
     let sediment = sediment_pass(grid, &mut z, &z_start, &p.sediment, p.threads);
     drop(z_start);

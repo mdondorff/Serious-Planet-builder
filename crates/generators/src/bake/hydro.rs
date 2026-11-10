@@ -538,6 +538,7 @@ pub fn verify_with_area(
     weights: Option<&[f32]>,
     weighted_area: Option<f64>,
 ) -> Verify {
+    debug_assert!(weights.is_none() || weighted_area.is_none(), "the weights are read only for the area: give them or their sum, not both");
     let n = grid.len();
     let receiver = &routing.receiver;
     let mut v = Verify::default();
