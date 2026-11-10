@@ -794,7 +794,6 @@ fn blank_failure_lines(
     lines
 }
 
-// spec: TEST-019, TEST-018, TEST-012
 /// `" [run +12.3 s]"` in a smoke run (the seconds since the run started), `""` otherwise.
 fn stamp(smoke: bool) -> String {
     if smoke {
@@ -804,6 +803,7 @@ fn stamp(smoke: bool) -> String {
     }
 }
 
+// spec: TEST-019, TEST-018, TEST-012
 /// `test-render --perf --scene dive|dive-fast|teleport-1m|teleport-2km|look-1m|look-2km|streaming`: ADR 0032's cases on the
 /// reference GPU after the readiness gate (ADR 0020), over the stored production bake (`--store DIR`; `--allow-memory-bake` runs
 /// over `--global-res` cells in memory, labelled and not valid for streaming budgets). Per case it prints the verdicts of
