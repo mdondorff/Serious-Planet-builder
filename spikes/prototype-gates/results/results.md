@@ -121,7 +121,7 @@ The re-run of the structural gates of section 3 on R3a and R3b with the library'
 
 Every number of section 3 is reproduced (same hydrology, same counts); G-SED, G-BASIN, G-LAND and H1's other gates are not in `region_scale` (it runs the round solver and H1 only), so they were not run.
 
-Relief and precipitation of the land of the region proper (620 x 620 cells) from the current base, next to section 3 (whose z is the land of the whole 1.04e6-cell window with its margin: the probe's round-00 `z` max is 747 m for R3a, so the 684 m p95 of section 3 belongs to that larger set):
+Relief and precipitation of the land of the region proper (620 x 620 cells) from the current base, next to section 3 (whose z is evidently a larger set than the region proper: its R3a max of 744 m sits just under the probe's round-00 `z` max of 747 m over the whole window with its margin; the definition is not stated there):
 
 | Window | Land cells | z p5 / p50 / p95 / max (m) | Precipitation p5 / p50 / p95 (mm) | Section 3 z p50 / p95 / max |
 |---|---|---|---|---|
