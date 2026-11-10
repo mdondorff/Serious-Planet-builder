@@ -89,3 +89,17 @@ Tests, 2a (TEST-108 continues; tier A, cache crate):
 - T6d a decoder never reserves more than the declared count allows: a count larger than the payload is refused.
 - T8 re-key: a change of a producer parameter changes the table's key; the same parameters give the same key.
 - T9 size: `n` lakes take exactly the header plus the fixed record size times `n` plus the tile list entries.
+
+## 10. After the stores: the lake water in the frame, then the sampler switch (on paper, 2026-11-10; code read: `frame/src/water.rs`, `cache/src/layer_tiles.rs`)
+State after PR 1, 1b, 2a, 2b: the producer makes lake records and river pieces; the basin table (kind 19) and L (kind 13, layer version 3) have formats and tests; the bake does not write either, the runtime reads neither, and the old layer (codec 2 with the fill channel) is still the one the viewer reads (`StoreLayer`, `with_fill_added` at `layer_tiles.rs:598`).
+| # | PR | What | Gate |
+|---|---|---|---|
+| 3 | bake writer | K7 over the tiles writes the L records and, from `lakes_with_tiles`, the basin tables of the six faces, under one `commit_id` (A3 section 7.4, CON-22; open point for the architect); the manifest gets the L versions | a built fixture reads back; the table's lakes equal the producer's |
+| 4 | lake water source | a `WaterSource` over the basin table beside the sea source: a tile that lists a lake answers with the lake's body, level and liquid | G-BASIN, and the view from 2 km at three lakes (level against the sill) |
+| 5 | sampler switch | the runtime layer source reads L (`load_l_tile`) and adds no fill depth; `with_fill_added`, `fill_depth_m` and the fill channel's readers go (ADR 0101 point 3) | G-SURF at the cell centres, G-PROFILE |
+Order is fixed by the dry hole: PR 5 may not merge before PR 4, or a basin shows as a dry hole (A3 section 3.1).
+The problem PR 4 has to solve (from `water.rs`): a tile has one level, and the pass draws the tile's grid at that level wherever `W - h_morph > 0`. At a lake that floods everything under the level inside the tile: the valley beyond the sill of an overflowing lake (lower than the sill by construction), a second basin, a dry hollow. The module names this limit and the per-vertex mask as its fix. Options:
+- (a) A per-tile water mask, one bit per local cell, run-length coded, only for the tiles that list a lake: computed at bake time on the final surface (`B + L`) as the cells under the level that are the lake's (the connected set from the producer's water cells), stored beside the basin table (a second record kind, or the table's tile entries: a decision for the architect). The pass draws where the mask is set and `W - h_morph > 0` (the mask gives the edge at the 102 m grid, the height refines it). Cost: a few MB planet-wide (lakes are about 1 % of the land), exact, no runtime flood.
+- (b) A bounded flood at plan time per lake tile over the vertex heights under the level, seeded at the cell of the lake's floor point or at the tile edge cells shared with a neighbour: no new store, but a lake spanning several tiles needs seeds per tile and a flood that agrees across tile edges at every LOD; this is the part that has failed before (seams).
+- Recommendation: (a). Needs from the architect: (a) or (b), and where the mask lives (kind 20 or inside kind 19).
+Rivers (PR 6 onwards) come after the switch and use the same pieces: the river's drawn width is the one law of D6 point 2.
