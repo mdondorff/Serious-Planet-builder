@@ -1431,3 +1431,33 @@ Source: Architect order 2026-11-09 (inbox #100, owner decision: stage previews, 
 #### Scenario: On and off
 - **WHEN** the rounds and the sediment pass run on a compact landmass without a sink and with a sheet probe installed
 - **THEN** every height bit, the round report and the sediment report are equal, and with the probe installed each stage has written its fields
+
+### Requirement: GEN-163 The lake producer
+The bake SHALL turn each kept basin of H1 into one lake record and SHALL produce the river segments without the channel cells under water, as a pure function of the hydrology and the surface in a fixed order (CON-14).
+- The record holds the level of the steady balance (A3 section 5.5), class, overflow flag, `q_in`, `q_out` and area at the level; a dry basin has its floor as level and no water.
+- The water of a lake is its basin's cells and the cells draining into them with `z` under the level.
+- A segment under water ends before it and resumes at the first cell out, `Q_w` carrying `q_out` at an overflowing lake's spill.
+
+Verify: A
+Status: planned
+Source: Architect D6 (inbox #109), item 13 finding 2, briefing item 15
+
+#### Scenario: Bowl with a river
+- **WHEN** a bowl with a known sill and a channel through it is produced
+- **THEN** the lake is full to the sill, no channel cell of any piece lies in the bowl, and a piece or a whole segment starts at the spill cell
+
+#### Scenario: Gentle shore and endorheic lake
+- **WHEN** a lake has a shelf 0.2 m under its level that H1 did not label, or an endorheic lake stands far below its sill
+- **THEN** the river is not drawn over the shelf, and in the endorheic basin it is drawn down to the water's edge
+
+### Requirement: GEN-165 One river width law
+The width of a river SHALL be `w = a * Q_w^b` metres for a routed discharge `Q_w` in m3/s, one law for the burn-in and for the drawing, with `a` and `b` bake parameters in the key (standard `a = 7.2`, `b = 0.5`). K7's burn-in SHALL cut a trench of `max(1 cell, w)`: every cell whose centre lies within `w / 2` of the line, lowered to the line's level and never raised; a channel without discharges or narrower than a cell SHALL burn as the one-cell line, bit for bit.
+- The width distribution of the channel cells of a region (p50, p95, maximum, the share wider than one cell) SHALL be reported.
+
+Verify: A
+Status: planned
+Source: Architect D6 point 2, D19/D20 (inbox #117), item 15
+
+#### Scenario: Trench widths
+- **WHEN** a straight channel is burnt with `Q_w` of 100 m3/s into 10 m cells
+- **THEN** the cells within 3.6 cells of the line are at the bed level, none farther is touched, and a smaller discharge burns a subset

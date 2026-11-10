@@ -1,0 +1,1 @@
+- 2026-11-10 archive-crusader-1: archived basin-table, lake-producer, layer-v3, width-law (specs synced: STRM-080, STRM-081, GEN-163, TEST-108, GEN-165) and item13-findings, item13-reruns, probe-hillshade, stream-perf-diag, ci-warp-serial.

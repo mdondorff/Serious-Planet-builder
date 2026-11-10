@@ -1240,3 +1240,30 @@ Source: planner inbox #65 and #67 (2026-11-05), ground-channels-2b PR 4a, STRM-0
 #### Scenario: Windows, caps and the diagnostic
 - **WHEN** windows of a face are read against the whole face, the caches are given a cap of one window, of less than one and of room for both, six threads ask for one window, the sources are searched for the diagnostic decode, and the pit and erosion depths are read at cells of tiles that hold pits, across a tile border and where no record exists
 - **THEN** each window equals the same cells of the whole face and a window outside the face is refused, the one-window cap decodes three times for the reads 0, 1, 0 and holds one window, the smaller cap keeps the entry decoded, the larger decodes twice, the six threads decode once, the trait gives the reader's numbers, only the definition names the diagnostic, the pit depth is the stored cell, the erosion depth is what the carve removed not counting a pit and is the same with and without a pit record of zeros, neither steps at a border (the erosion depth at a border is the mean of the two cells), a tile without a record reads none, the layer's tile is decoded once for the pit and erosion reads of six workers and the viewer's heights, and the default caps are 16 MB of windows and 256 MB of depth tiles, which keep the entry just decoded
+
+### Requirement: STRM-080 The basin table is a stored kind
+The lakes of the lake producer (GEN-163) SHALL be stored as one record of kind 19 per cube face, sorted by basin id, holding per lake the id, the floor and spill ids, the three levels, `q_in`, `q_out`, the area, the cells, the class and flags, and the tiles that hold its water.
+- The key covers the table and producer versions, the hydrology parameters, the tile grid, the base id and the other inputs' identity: a table of another spec reads as absent.
+- A damaged record or one of another version or grid is refused naming what was found; a decoder reserves no more than the payload allows; the encoder refuses what the decoder refuses.
+
+Verify: A
+Status: planned
+Source: Architect D16 (inbox #115), GEN-163, item 15
+
+#### Scenario: Round trip and refusals
+- **WHEN** a table is written, read, and read under another spec, version or grid, and a payload is damaged
+- **THEN** the lakes come back in id order, another spec reads as absent, and every damaged or foreign record is refused with the found value in the message
+
+### Requirement: STRM-081 The local change L is a kind 13 record of layer version 3
+The local change L of the new chain SHALL be stored as one record of kind 13 per tile: layer version 3, codec byte 3, the core's change in 0.25 m counts with K7's stats block, and no fill channel.
+- The key covers the base's identity, K7's other inputs, the tile grid, K7's parameters and the kernel versions.
+- A record of the previous layer version, of another key or damaged is refused naming what was found; a tile of another key is never mixed in.
+- An optional water section (empty for a tile without a lake) is outside the key, returned as stored and capped, for the lake water mask.
+
+Verify: A
+Status: planned
+Source: Architect D16 (inbox #115), item 14 (GEN-156), item 15
+
+#### Scenario: Round trip and refusals
+- **WHEN** a tile of L is written and read, and read under another base, parameters or version, and a payload is damaged
+- **THEN** the core is within half a quantisation step with the stats equal and the clamped cells counted, a previous-layer record is refused with both versions in the message, and every other mismatch is refused or reads as absent as stated
