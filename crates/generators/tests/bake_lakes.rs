@@ -332,7 +332,8 @@ fn cone_land() -> Vec<f64> {
     let mut z: Vec<f64> = (0..W * W).map(|p| 500.0 + 10.0 * (p % W) as f64).collect();
     for j in 0..W {
         for i in 0..W {
-            let r = libm::sqrt(((i as f64) - 13.0).powi(2) + ((j as f64) - 13.0).powi(2));
+            let (dx, dy) = (i as f64 - 13.0, j as f64 - 13.0);
+            let r = libm::sqrt(dx * dx + dy * dy);
             if r < 8.0 {
                 z[j * W + i] = 290.0 + 25.0 * r;
             }

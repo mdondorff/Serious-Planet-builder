@@ -89,9 +89,8 @@ pub fn water_cells(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &[f64]) -> 
     let level: Vec<f64> = hydro.basins.iter().map(|b| if b.q_in > 0.0 { b.water_level_m } else { f64::NEG_INFINITY }).collect();
     let mut water: HashSet<u32> = HashSet::new();
     let mut queue: VecDeque<(u32, u32)> = VecDeque::new();
-    for c in 0..grid.len() {
-        let l = hydro.label[c];
-        if l != NONE && z[c] < level[l as usize] {
+    for (c, (&l, &zc)) in hydro.label.iter().zip(z).enumerate() {
+        if l != NONE && zc < level[l as usize] {
             water.insert(c as u32);
             queue.push_back((c as u32, l));
         }
