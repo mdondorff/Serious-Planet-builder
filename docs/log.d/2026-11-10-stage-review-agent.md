@@ -1,0 +1,1 @@
+- 2026-11-10 stage-review-agent: the advisory stage-reviewer agent and the 1 MB per sheet / 5 MB per gate size check in spec-lint (BUILD-048)

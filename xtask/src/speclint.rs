@@ -711,6 +711,8 @@ pub fn run(root: &Path) -> Res {
     let sizes: Vec<(String, usize)> =
         HOT_FILE_CAPS.iter().filter_map(|(path, _)| Some((path.to_string(), lf_size(&std::fs::read(root.join(path)).ok()?)))).collect();
     report.errors.extend(hot_file_errors(&sizes));
+    // BUILD-048: the committed stage sheets stay within their size limits.
+    report.errors.extend(crate::stages::sheet_size_errors(&crate::stages::committed_sheets(root)));
     // BUILD-025: a changed accepted ADR gains a Maintained line (ADR 0078).
     report.errors.extend(adr_maintenance_errors(&adr_changes_against_base(root)));
     // BUILD-040: a change of a gate or an owner decision leaves a line in the briefing's contract changes.

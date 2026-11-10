@@ -16,4 +16,4 @@ Placement decided by the architect, 2026-11-10: `.claude/agents/stage-reviewer.m
 - The production phase plan's emits (explorer's #109).
 
 ## Next
-- Spec delta (BUILD-048 in the build spec, tier A for the size check), the agent file and the check, after the K7 emit's PR.
+- Done in this change: BUILD-048 in the build-tooling spec, the agent file, and the size check in `xtask/src/stages.rs`, run by `cargo xtask spec-lint` (so a docs-only gate PR is checked too).
