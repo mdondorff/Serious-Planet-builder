@@ -278,6 +278,13 @@ pub struct SurfaceGate {
     pub bins: usize,
     pub bins_over: usize,
     pub busiest_bin_over: usize,
+    /// G-SURF-I, error against the local base slope: the largest and the 99th percentile of `|difference| / rise` over the nodes whose base `B` rises by at least 1 m across one cell (the rise is the largest `|B(neighbour) - B(here)|` of the 8 neighbours of the nearest cell), and their number.
+    pub max_error_over_rise: f64,
+    pub p99_error_over_rise: f64,
+    pub nodes_with_rise: usize,
+    /// G-SURF-I, overshoot: the largest amount by which the runtime read `B(node) + C1(L)(node)` lies outside the range of the composed values `B + L` (quantised) at the four cells around the node, and the nodes over 0.25 m.
+    pub max_runtime_overshoot_m: f64,
+    pub runtime_overshoot_nodes: usize,
 }
 
 /// The Catmull-Rom read of `v` at `(x, y)` without the clamp to the four cells (linear in `v`).
@@ -312,6 +319,7 @@ pub fn surface_gate(g: &TileGrid, id: TileId, base: &(dyn Fn(Vec3) -> f64 + Sync
     let lq: Vec<f64> = l.iter().map(|v| (libm::round(v / step).clamp(f64::from(i16::MIN), f64::from(i16::MAX))) * step).collect();
     let mut out = SurfaceGate::default();
     let mut diffs: Vec<f64> = Vec::new();
+    let mut over_rise: Vec<f64> = Vec::new();
     let mut bins: std::collections::BTreeMap<(i64, i64), usize> = std::collections::BTreeMap::new();
     let zq: Vec<f64> = r.b.iter().zip(&lq).map(|(b, l)| b + l).collect();
     // The store lattice is vertex-based: vertex k lies at the local edge coordinate E = lattice_step * k (cell-index coordinate E - 0.5).
@@ -355,6 +363,26 @@ pub fn surface_gate(g: &TileGrid, id: TileId, base: &(dyn Fn(Vec3) -> f64 + Sync
             if step >= 1.0 {
                 out.max_error_over_step = out.max_error_over_step.max(dq / step);
             }
+            let rise = (-1..=1i64)
+                .flat_map(|dy| (-1..=1i64).map(move |dx| (dx, dy)))
+                .map(|(dx, dy)| {
+                    let (a, b) = ((cx + dx).clamp(0, w as i64 - 1) as usize, (cy + dy).clamp(0, w as i64 - 1) as usize);
+                    libm::fabs(r.b[b * w + a] - r.b[cy as usize * w + cx as usize])
+                })
+                .fold(0.0f64, f64::max);
+            if rise >= 1.0 {
+                over_rise.push(dq / rise);
+            }
+            let (ci, cj) = ((x as usize).min(w - 2), (y as usize).min(w - 2));
+            let around = [zq[cj * w + ci], zq[cj * w + ci + 1], zq[(cj + 1) * w + ci], zq[(cj + 1) * w + ci + 1]];
+            let (alo, ahi) =
+                (around.iter().copied().fold(f64::INFINITY, f64::min), around.iter().copied().fold(f64::NEG_INFINITY, f64::max));
+            let runtime = b_node + read_c1(&lq, w, x, y);
+            let over = (alo - runtime).max(runtime - ahi).max(0.0);
+            out.max_runtime_overshoot_m = out.max_runtime_overshoot_m.max(over);
+            if over > f64::from(QUANT_STEP_M) {
+                out.runtime_overshoot_nodes += 1;
+            }
             let bin = bins.entry((cx / 64, cy / 64)).or_insert(0);
             if dq > f64::from(QUANT_STEP_M) {
                 out.over_by_step[class] += 1;
@@ -378,6 +406,12 @@ pub fn surface_gate(g: &TileGrid, id: TileId, base: &(dyn Fn(Vec3) -> f64 + Sync
         out.bins = bins.len();
         out.bins_over = bins.values().filter(|c| **c > 0).count();
         out.busiest_bin_over = bins.values().copied().max().unwrap_or(0);
+        over_rise.sort_by(|a, b| a.total_cmp(b));
+        out.nodes_with_rise = over_rise.len();
+        if let Some(m) = over_rise.last() {
+            out.max_error_over_rise = *m;
+            out.p99_error_over_rise = over_rise[(over_rise.len() - 1) * 99 / 100];
+        }
     }
     for j in lo..=hi {
         for i in lo..=hi {

@@ -19,6 +19,7 @@ The surface gate SHALL read the runtime's `B + L` against the bake's surface at 
 - The gate at the centres SHALL hold: at most 1e-9 m before quantisation and half a quantisation step after.
 - The stored change SHALL read back as the quantisation the gate uses (`round(L / step)` in `i16` counts times the step).
 - G-SURF-I SHALL report the 50th, 95th and 99th percentile and the maximum of the difference at the vertices, the share over 0.25 m, the vertices and those over 0.25 m by the bake's local step height (up to 5 m, over 5 m up to 20 m, over 20 m), the largest quotient of the difference and the step height, the spatial concentration (the bins of 64 cells with vertices over 0.25 m against the bins with vertices, and the most in one bin) and the overshoot of the unclamped read of `L`.
+- G-SURF-I SHALL also report the error against the local base slope (the difference over the largest rise of `B` across one cell, over the vertices whose rise is at least 1 m: 99th percentile and maximum, and their number) and the overshoot of the runtime read beyond the range of the four composed cells (maximum and the vertices over 0.25 m).
 - The clamp of the C1 read SHALL stay.
 
 Verify: A

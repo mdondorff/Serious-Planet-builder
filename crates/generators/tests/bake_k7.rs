@@ -150,6 +150,21 @@ fn the_runtime_surface_is_the_bake_surface_at_the_centres_and_within_a_step_at_t
     assert!(gate_c.max_quantised_m < 1.0, "{gate_c:?}");
     // Reading the composed heights (B at the four cells plus L, clamped once) agrees with the bake at the nodes to the quantisation and the read of B: the reading that passes G-SURF.
     assert!(gate_c.max_compose_quantised_m <= 0.25, "{gate_c:?}");
+    // G-SURF-I, the error against the local base slope and the overshoot of the runtime read: finite, not negative, and counted over the nodes with a rise.
+    for g in [&gate, &gate_c] {
+        assert!(
+            g.max_error_over_rise.is_finite() && g.p99_error_over_rise >= 0.0 && g.p99_error_over_rise <= g.max_error_over_rise,
+            "{g:?}"
+        );
+        assert!(
+            g.max_runtime_overshoot_m.is_finite()
+                && g.max_runtime_overshoot_m >= 0.0
+                && g.runtime_overshoot_nodes <= g.nodes
+                && g.nodes_with_rise <= g.nodes,
+            "{g:?}"
+        );
+    }
+    assert!(gate.nodes_with_rise > 0, "the smooth tile has a base rise of at least 1 m across a cell somewhere: {gate:?}");
 }
 
 // spec: GEN-148
