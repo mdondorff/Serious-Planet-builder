@@ -1,0 +1,1 @@
+- 2026-11-10 runtime-composition-mask-bound: the lake water mask's ring follows the lake's catchment, M1 gets the valley-sides case, a connectivity diagnostic (architect D19/D20); docs only.
