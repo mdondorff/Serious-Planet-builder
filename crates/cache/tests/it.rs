@@ -1,3 +1,5 @@
+#[path = "basin_table.rs"]
+mod basin_table;
 #[path = "class_inputs.rs"]
 mod class_inputs;
 #[path = "class_source_store.rs"]

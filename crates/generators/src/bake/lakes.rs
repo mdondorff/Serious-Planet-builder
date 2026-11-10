@@ -18,6 +18,17 @@ use super::route::{Routing, NONE};
 use super::Grid;
 use std::collections::HashSet;
 
+/// Version of the producer behaviour (the level rule, the water rule, the lake record): part of the key of a stored basin table, bumped with any change of what a lake is.
+pub const LAKES_VERSION: u32 = 1;
+
+/// A tile of a tile grid: the face and the tile's column and row on it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TileRef {
+    pub face: u8,
+    pub ti: u32,
+    pub tj: u32,
+}
+
 /// A lake: the record of a kept basin the store keeps and the water pass reads.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Lake {
@@ -40,6 +51,8 @@ pub struct Lake {
     pub cells: u32,
     pub q_in: f64,
     pub q_out: f64,
+    /// The tiles that hold a cell of the lake's water, sorted (empty unless the producer was given a tile map: [`lakes_with_tiles`]).
+    pub tiles: Vec<TileRef>,
 }
 
 /// A run of channel cells of one segment outside every kept basin. Only segments that lose a cell to a basin have pieces; every other segment of the hydrology is whole and is not listed (the memory of a
@@ -94,8 +107,12 @@ pub struct Water<'a> {
     label: &'a [u32],
     z: &'a [f64],
     level: Vec<f64>,
-    extra: Vec<u32>,
+    /// Sorted by cell: the shore cells with the index of the lake they drain into, and the dead ground with [`DEAD`].
+    extra: Vec<(u32, u32)>,
 }
+
+/// The tag of a cell of the dead ground in `Water::extra`.
+const DEAD: u32 = u32::MAX;
 
 impl Water<'_> {
     fn seed(&self, c: usize) -> bool {
@@ -105,7 +122,25 @@ impl Water<'_> {
 
     /// Whether no river is drawn on cell `c`.
     pub fn contains(&self, c: usize) -> bool {
-        self.seed(c) || self.extra.binary_search(&(c as u32)).is_ok()
+        self.seed(c) || self.extra.binary_search_by_key(&(c as u32), |e| e.0).is_ok()
+    }
+
+    /// The tiles of every lake's water, by the index of the basin in the hydrology: `tile_of` maps a cell to its tile. Sorted and without repeats.
+    pub fn tiles(&self, tile_of: &dyn Fn(usize) -> TileRef) -> Vec<Vec<TileRef>> {
+        let mut out: Vec<Vec<TileRef>> = vec![Vec::new(); self.level.len()];
+        for (c, &l) in self.label.iter().enumerate() {
+            if self.seed(c) {
+                out[l as usize].push(tile_of(c));
+            }
+        }
+        for &(c, l) in self.extra.iter().filter(|e| e.1 != DEAD) {
+            out[l as usize].push(tile_of(c as usize));
+        }
+        for v in &mut out {
+            v.sort_unstable();
+            v.dedup();
+        }
+        out
     }
 
     /// The cells, in cell order.
@@ -119,7 +154,7 @@ pub fn water_cells<'a>(grid: &Grid, routing: &Routing, hydro: &'a Hydro, z: &'a 
     assert!(z.len() == grid.len(), "one height per cell");
     let level: Vec<f64> = hydro.basins.iter().map(|b| if b.q_in > 0.0 { b.water_level_m } else { f64::NEG_INFINITY }).collect();
     let mut w = Water { label: &hydro.label, z, level, extra: Vec::new() };
-    let mut shore: Vec<u32> = Vec::new();
+    let mut shore: Vec<(u32, u32)> = Vec::new();
     let mut stack: Vec<(u32, u32)> = Vec::new();
     for (c, &l) in hydro.label.iter().enumerate() {
         if w.seed(c) {
@@ -131,7 +166,7 @@ pub fn water_cells<'a>(grid: &Grid, routing: &Routing, hydro: &'a Hydro, z: &'a 
             for d in 0..8 {
                 let Some(q) = grid.neighbour(x as usize, d) else { continue };
                 if routing.receiver[q] == x && hydro.label[q] == NONE && z[q] < w.level[l as usize] {
-                    shore.push(q as u32);
+                    shore.push((q as u32, l));
                     stack.push((q as u32, l));
                 }
             }
@@ -153,9 +188,9 @@ pub fn water_cells<'a>(grid: &Grid, routing: &Routing, hydro: &'a Hydro, z: &'a 
         }
     }
     for k in 0..w.extra.len() {
-        walk(&w, w.extra[k] as usize);
+        walk(&w, w.extra[k].0 as usize);
     }
-    w.extra.extend(dead);
+    w.extra.extend(dead.into_iter().map(|c| (c, DEAD)));
     w.extra.sort_unstable();
     w
 }
@@ -208,6 +243,15 @@ pub fn cut_segments(hydro: &Hydro, routing: &Routing, water: &dyn Fn(usize) -> b
 
 /// Produce the lakes and the pieces of the river segments from a hydrology (GEN-163).
 pub fn lakes_from_hydro(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &[f64]) -> Lakes {
+    produce(grid, routing, hydro, z, None)
+}
+
+/// [`lakes_from_hydro`] with the tiles of each lake's water (`Lake::tiles`) from the tile map `tile_of`: the basin table's tile list (STRM-080).
+pub fn lakes_with_tiles(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &[f64], tile_of: &dyn Fn(usize) -> TileRef) -> Lakes {
+    produce(grid, routing, hydro, z, Some(tile_of))
+}
+
+fn produce(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &[f64], tile_of: Option<&dyn Fn(usize) -> TileRef>) -> Lakes {
     assert!(hydro.qw.len() == grid.len(), "the producer needs Q_w: run it before the discharges are released");
     assert!(routing.receiver.len() == grid.len(), "one receiver per cell");
     let mut lakes: Vec<Lake> = hydro
@@ -230,12 +274,19 @@ pub fn lakes_from_hydro(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &[f64]
                 cells: b.cells,
                 q_in: b.q_in,
                 q_out: b.q_out,
+                tiles: Vec::new(),
             }
         })
         .collect();
-    lakes.sort_unstable_by_key(|l| l.id);
-
     let water = water_cells(grid, routing, hydro, z);
+    if let Some(tile_of) = tile_of {
+        let tiles = water.tiles(tile_of);
+        assert_eq!(lakes.len(), tiles.len(), "one tile list per basin, before the lakes are sorted");
+        for (lake, tiles) in lakes.iter_mut().zip(tiles) {
+            lake.tiles = tiles;
+        }
+    }
+    lakes.sort_unstable_by_key(|l| l.id);
     let (pieces, dropped_cells) = cut_segments(hydro, routing, &|c| water.contains(c));
     Lakes { lakes, pieces, dropped_cells }
 }

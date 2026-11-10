@@ -4,7 +4,7 @@
 #![allow(clippy::needless_range_loop)]
 use planet_generators::bake::flood::priority_flood_with;
 use planet_generators::bake::hydro::{hydrology, BasinClass, Hydro, HydroParams};
-use planet_generators::bake::lakes::{cut_segments, lakes_from_hydro, water_cells, Lakes};
+use planet_generators::bake::lakes::{cut_segments, lakes_from_hydro, lakes_with_tiles, water_cells, Lakes, TileRef};
 use planet_generators::bake::route::{route_rules, RoundRules, Routing, NONE};
 use planet_generators::bake::Grid;
 
@@ -399,4 +399,35 @@ fn a_dry_lake_has_no_water_and_cuts_nothing() {
     assert!(!ls.lakes[0].wet);
     assert!(water_cells(&r.g, &r.routing, &r.hydro, &r.z).cells().is_empty());
     assert_eq!((ls.pieces.len(), ls.dropped_cells), (0, 0));
+}
+
+// spec: GEN-163, STRM-080
+#[test]
+fn each_lake_lists_the_tiles_that_hold_its_water() {
+    // Tiles of 8 cells: the bowl (columns 10..16) and the shelf of the gentle-shore fixture (columns 16..19) lie over two tile columns, rows 10..16 in one tile row.
+    let mut z = bowl_land();
+    for j in 10..16 {
+        for i in 16..19 {
+            z[j * W + i] = 589.8;
+        }
+    }
+    let r = run(&z, None, None, &small_t());
+    let tile_of = |c: usize| TileRef { face: 0, ti: (c % W / 8) as u32, tj: (c / W / 8) as u32 };
+    let with = lakes_with_tiles(&r.g, &r.routing, &r.hydro, &r.z, &tile_of);
+    let without = lakes(&r);
+    assert!(without.lakes[0].tiles.is_empty(), "no tile map, no tiles");
+    let water = water_cells(&r.g, &r.routing, &r.hydro, &r.z);
+    let mut want: Vec<TileRef> =
+        water.cells().iter().filter(|&&c| z[c as usize] < with.lakes[0].level_m).map(|&c| tile_of(c as usize)).collect();
+    want.sort_unstable();
+    want.dedup();
+    assert_eq!(with.lakes[0].tiles, want);
+    assert_eq!(
+        want,
+        vec![TileRef { face: 0, ti: 1, tj: 1 }, TileRef { face: 0, ti: 2, tj: 1 }],
+        "the bowl is in tile column 1 and the shelf crosses into column 2"
+    );
+    let mut stripped = with.clone();
+    stripped.lakes[0].tiles.clear();
+    assert_eq!(stripped, without, "the tile map changes nothing else");
 }
