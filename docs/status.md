@@ -9,8 +9,9 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 - **Smooth base as default** (GEN-107, `cpu-erosion-v2` on main): removes the 611 m "pyramid" facets; draft #1137 switches the default (no golden moves; two count pins and the water-cut range re-pinned with reasons). Decide with the erosion preview.
 - **World-build share values** (ADR 0097, BUDG-014): terrain 40 %, future content 40 %, margin 20 % of a 24 h day, proposed; confirm or change.
 - **Ocean square at orbit** (owner test 2026-11-03, `docs/dev_screenshots/2026-11-03-ocean-square-*.jpg`): press F9 when it shows again; the bundle lets crusader replay it (Tracked).
-- **Cliffs** (SPIKE-94, #1082): asset library or procedural only; the Alps' 4.3 % of area above 45° as the v1 coverage; a coarse collision proxy for now. Trigger: after M9's generator rounds.
-- **Optional, when convenient:** the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); a live check of the flickers (Tracked); excluding the repo's `target` folders from Windows Search indexing.
+- **Cliffs** (SPIKE-94, #1082): asset library or procedural only; the Alps' 4.3 % of area above 45° as the v1 coverage. Trigger: after M9's generator rounds.
+- **ADR 0110 acceptance** gates item 15 PR 5b (it retires ADR 0101 point 3); the CON-08 amendment proposal (architect drafting) gates ADRs 0110-0115 at the A/B gate.
+- **Optional, when convenient:** the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); excluding the repo's `target` folders from Windows Search indexing.
 
 Dormant (no near trigger; not asked now):
 - **Volcanoes** (SPIKE-102 D5; owner, 2026-11-05: after M9): young edifices as an additive layer (no re-bake); old eroded ones in the base with the next pass-1 re-bake. Trigger: terrain round 2.
@@ -20,14 +21,13 @@ Dormant (no near trigger; not asked now):
 - **Global authoring preview** (owner, 2026-10-31): a coarse whole-planet preview of relief and landforms from the inputs, before the bake, as the step before detailed editing; not runtime. SPIKE-69 rates its k-sources for this. Trigger: after M9's bake, or when SPIKE-69 shows a pre-bake source.
 - **Coarse-first refinement of an edit** (owner, 2026-10-20): parked. Trigger: a brush case of the edit-latency scene that misses its budget.
 
-## Queue (2026-11-09)
+## Queue (2026-11-10)
 | # | Step | Lane |
 |---|---|---|
-| NR | One `test gpu --real` in the unlocked-display window (TEST-073), after the k=4 run | crusader |
-| Prototype | `docs/briefings/terrain-prototype.md`: k=4 phase plan (GEN-158), items 9, 10, 11, 14 | explorer |
-| Prototype checks | ADR review pass; independent gate measurement; second region and seed | spikes |
-| Prototype 16 | Preview level 1 (#1270 merged); TEST-099 latency waits for a perf authorisation; item 15 waits for item 11; #1137 waits for the owner | crusader |
-| Perf | Machine ready again (preflight OK 2026-11-07, parallel 74-76k us of 112k): REND-052 verdicts, ground-detail cost, channel-read cost; no store opens on main since GLOBAL_VERSION 9: a current store first (MESH_VERSION 11) | bulldozer |
+| P0 (to 11-13) | Finished work only: each lane archives its finished changes; read-only repo audit (no change before the owner's yes); this refresh and the worktree inventory | all, spikes, bulldozer |
+| CP1 (about 11-20) | G-LOCAL first and the gate re-measure (spikes); item 15: bake writer, then the L read behind `--erosion` (crusader); GEN-166 f32 rounds, then one k=4 pair (explorer) | per lane |
+| CP2 (about 12-01) | Rivers and lakes, G-RT frame time, the dam brief; then the gate (`docs/briefings/terrain-prototype.md`) | per lane |
+| Perf | Machine ready (preflight OK 2026-11-07): REND-052 verdicts, ground-detail and channel-read cost; TEST-099 waits for a perf authorisation; a current store first (MESH_VERSION 11) | bulldozer |
 | Store | All stores on disk refused by keys since #1218/#1225 (read-only references); in-memory `--world` runs only until a new store | all |
 
 ## Tracked
@@ -39,8 +39,8 @@ Dormant (no near trigger; not asked now):
 - **Local `test gpu` worse since the display changes** (2026-11-09; `gpu_burn` and `gpu_skeleton` replay crash under load too): solo on main 956 s (218 of 224, 2 WARP pins (gpu_compact_blocks persistent, gpu_water lit frames since #1085; CI passes them), 3 aborts 0xc0000005, 1 `gpu_skeleton` timeout) and 1,179 s after the EC reset (222 of 225, 2 pins, 0 aborts, 1 timeout); branch runs 897-1,275 s, 0-9 aborts (baseline 222, about 820 s). Aborts are intermittent, not cured by the restart (aborts in all three prepushes of 2026-11-10); log time since boot. A `gpu_skeleton` timeout on CI goes to the architect. CI judges tier C.
 - **Ocean square at orbit** (owner, viewer main 2fdfeb23 over m9r2, 2026-11-03): at 12,767 km over 20 N 30 E after 240 s of flight, a light square in a ring of dark blotches on the sea; not reproduced headless. Hypotheses: the clipmap shadow on water (sea-floor receivers; `--no-shadow-march`, J view), the water-node cut or the never-evicted WaterBook, the shadow's temporal history. Needs the owner's F9 bundle; replay with `cargo xtask repro`.
 - **CI jobs** (BUILD-014, 2026-11-03 after #1133, #1134, #1138): every job under 16 min (A+B parts 10.7-13.6, C build 3.5 + parts 7.8-10.2, Linux 7-9); `gpu_stills` march test keeps its declared 450 s limit; lift under ~200 s.
-- **Reserve test result** (BUDG-012, loaded, 3 rounds, 2026-11-01): dive, look-1m, look-2km, teleport-2km pass; teleport-1m fails by +1 % (frame median 16.75 against 16.60 ms; the spin runs 5-18 % over its 6-9 ms target). Frame p99 over 20 ms includes the spin by construction. A quiet window decides the absolute rows.
-- **teleport-1m reserve marginal** (quiet window, 2026-11-01): reserve verdict pass in 3 of 3; frame medians with loads 14.33/16.31/16.40 ms against 16.60, but 5 of 6 sessions had no frame verdict (ADR 0065 CPU calibration out of limits). Re-check on a calm CPU, after the terrain cap decision.
+- **Reserve test result** (BUDG-012, loaded, 3 rounds, 2026-11-01): dive, look-1m, look-2km, teleport-2km pass; teleport-1m fails by +1 % (frame median 16.75 against 16.60 ms). A quiet window decides the absolute rows.
+- **teleport-1m reserve marginal** (quiet window, 2026-11-01): reserve verdict pass in 3 of 3; frame medians 14.33/16.31/16.40 ms against 16.60, but 5 of 6 sessions had no frame verdict (CPU calibration out of limits). Re-check on a calm CPU.
 - **Shadow resolve cost** (5a probe, 2026-11-01, RTX by hand, not a perf window): resolve 4.2 ms at a 45° sun, 2.3 ms at 2°, against REND-052's 1.5 ms for layer 1; includes per-frame buffer creation. Re-probe after pooling in 5a2; over 2x the budget goes back to ADR 0085 before 5b.
 - **Fine-level bound looseness** (SPIKE-86): below 1 km over steep land 5.5 % of real-store poses cap leaves at levels 16-21; tile bounds are 5-37x the sampled range. Fix with M9 R4's bounds pyramid (SPIKE-83) or a per-octave tile bound, with a tier-A bound-vs-sampled test.
 - **Reserve test gaps** (2026-11-01): terrain GPU is sampled at the last pose only; the share ceilings come from ADR 0092 (BUDG-003). Scaling (P-cores, 3 rounds): tile-ready rises with every worker, throughput saturates at 8-10.
