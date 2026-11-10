@@ -38,10 +38,12 @@ Edit items (canonical file text, brush items of 8-point strokes): 1 stroke 870 B
 | Sum | 18.6 | 25.7 |
 
 - Both sums are under the 35 GB target; the upper bounds (L at its highest tile, items at 4.7) give 23 and 30 GB.
-- `L` and the sea share of the field are the open caveats: `L` was measured on one region, the field's deep ocean was not sampled.
-- The peak temporary space (compaction) is a separate figure: 2 times steady, 37 to 51 GB.
+- Open caveats (architect, 2026-11-10: the row stays open until measured or bounded): `L` was measured on one region (36 tiles), the field's deep ocean was not sampled.
+  - Bound now covering them: the upper bounds above. `L` at its highest measured tile (16.7 GB) covers other regions only if no region has a tile above the 36 measured; the field's deep ocean is covered because the sea share is taken at the coastal sea-tile rate, which smooth deep ocean is expected to be under (not measured).
+- Peak temporary space (compaction): 2 times steady per edit, 3 times per full re-bake, 37 to 51 GB at Earth. A reported item, not a gate failure (architect, 2026-11-10); it goes to the owner at the A/B gate next to R7, as disk the user needs free.
+- Measured against scaled: the 2.9 MB median edit at k = 2, the footprint tile counts, the pack sizes and the brush item sizes are measured; the 12 MB at 12,288, the `L` and field records of an undo step and the Earth totals are scaled estimates.
 
 ## Not done
-- A pack-wise compaction, which would bound the peak by the packs rewritten; not designed, no departure from ADR 0019 or ADR 0024 made.
+- A pack-wise compaction is the lever on the peak (it bounds the extra space by the packs rewritten); not designed, not in this change, no ADR and no departure from ADR 0019 or ADR 0024.
 - Deep-ocean field tiles; `L` over more than one region; edit overrides as a stored record (the measured form is the item file; no per-tile override record exists).
 - A planet build's temporary space on disk (the spill is 1.2 GB at the landmass, measured in `phase-plan`).
