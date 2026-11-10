@@ -1,0 +1,1 @@
+- 2026-11-11 **ledger-spikes-r2**: ledger rows for spikes' independent re-measurement on main 760bf0e7 (SPIKE-106 round 2, #1337): G-ROUND, G-PART, G-CON, G-LOCAL, G-SURF pass; G-DET partial; G-SURF-I reported, D9 criteria re-check pending (architect D30 to D32).
