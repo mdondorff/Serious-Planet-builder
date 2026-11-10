@@ -1,0 +1,1 @@
+- 2026-11-10 runtime-composition-pr2-plan: item 15 PR 2 (lake list in the kind-13 record, version 3) planned in the design notes section 9; docs only.

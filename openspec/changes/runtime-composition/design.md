@@ -71,3 +71,22 @@ Split (decision of the lane, reason below): the first PR holds the producer in m
 - Reason: the bump refuses every older store, an effect on all worlds that deserves its own review and its own revert point; the producer's numerics (levels to 1e-9) are reviewed apart from format work.
 - Cost: one more PR; the second is small (encode, decode, key, refusal).
 Order inside the first PR: tests 1-5 red, the function, then the manifest entry (test 9).
+
+## 9. PR 2: the store field and the kind-13 version bump, plan (on paper, 2026-11-10; after PR 1 #1313 and PR 1b #1318)
+Facts from the code (`crates/cache/src/layer_tiles.rs`): kind 13 is one record per tile, `TILE_LAYER_VERSION = 2`, payload `codec u8 | tile u32 | stats | key 16 B | brotli(row-delta i16 counts of 0.25 m)`; the layer version is in the key (`TileLayerSpec::bytes`), so a bump changes every key and an older store is refused by key (STRM-065), not read. Item 14 (D11) settled no format of the new chain's `L`: PR 2 is the first.
+| # | Question | Plan | Owner of the call |
+|---|---|---|---|
+| 1 | Where the lake list sits | Option A (recommended): in the tile record, between the key and the brotli stream: `lake count u16 | lake records`; codec byte 3, `TILE_LAYER_VERSION = 3`. Option B: one record per basin id with a tile-to-lake index (closer to a new kind: architect) | architect |
+| 2 | Lake record (fixed, little-endian) | `id u64, floor_id u64, spill_id u64, level_m f64, q_in f32, q_out f32, area_m2 f32, flags u8` (class 2 bits, overflows, wet) = 41 B | lane |
+| 3 | Which tiles carry a lake | every tile that holds a cell of the lake's water (the water predicate of PR 1b); the list is repeated in each, identical by construction (the producer is a pure function) | lane |
+| 4 | Size | about 42k lakes at k=4 (PR 1 estimate), mostly in one tile: about 2 MB for the planet against 20 GB of `L` | lane |
+| 5 | Key | the producer's parameters (`HydroParams`, the lake rule's version) join the layer spec bytes: a change re-keys the tile | lane |
+| 6 | Writer | `build_resident`'s `Built::lakes` is the input; the bake's tile writer takes a tile's lakes from it (needs a cell-to-tile map of the water: `Water` gains a tile scan) | lane |
+Tests (TEST-108 continues; tier A, cache crate):
+- T6 round-trip: encode then decode a tile record with 0, 1 and 3 lakes: equal lists, equal counts stream.
+- T6b a version-2 record or store is refused naming both versions (STRM-065): the message holds `2` and `3`.
+- T6c a lake across a tile border: both tiles hold the same record bytes for it.
+- T6d a decoder never reserves more than the declared count allows: a count larger than the payload is refused.
+- T8 re-key: a change of a producer parameter changes the tile key; the same parameters give the same key.
+- T9 size: a fixture with the 41-byte record and N lakes adds exactly `2 + 41 N` bytes before the stream.
+Needs from the architect: #1 (option A or B); everything else is the lane's.
