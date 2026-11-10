@@ -1,0 +1,1 @@
+- 2026-11-10 h0-stored-read (GEN-164): PreviewBase::from_field builds H0 from a field source; read from a stored bake it equals the in-memory read bit for bit on 864 H0 cells including every cube edge and corner (the stored codec is lossless), and the two H0 routings are one routing (item 3, D11).

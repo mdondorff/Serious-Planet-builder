@@ -1,11 +1,13 @@
 //! Preview level 1 (A3 11.1, AUTH-007 to AUTH-010, GEN-157): the H0 re-route over an edit, planet-wide with the base heights resident, and the trunk rivers and
 //! watersheds as plain data for an overlay. A height or landform stamp edit changes the heights at the cell centres in the stamps' reach and the sea mask; a rainfall or temperature region edit
 //! changes the discharge weight and keeps the routing. The preview is a non-authoritative field with an id of its own (CON-07), decided outside the renderer (CON-03), and never stored or keyed
-//! as an authoritative field. It does not read the stored field: the caller hands the resident heights in.
+//! as an authoritative field. The preview reads no stored field by itself: the caller hands the resident heights in, or builds the base from a field source ([`PreviewBase::from_field`]).
 
 use super::h0::{GlobalGrid, GlobalRouting, NONE};
+use crate::global::{read_direction, read_elevation_c1_cached, LatticeSource, ReadError, StencilCache};
 use crate::runoff::{discharge_weight, runoff_mm};
 use crate::stamp::apply_stamps;
+use planet_core::cube::FaceMapping;
 use planet_core::Vec3;
 use planet_world_def::footprint::FootprintItem;
 
@@ -196,6 +198,23 @@ impl PreviewBase {
             }
         });
         PreviewBase::new(grid, PLANET_RADIUS_M, 0.0, 1e-3, BaseFields { z0, p_mm: p, t_c: t }, PREVIEW_DOMAIN ^ seed)
+    }
+
+    /// The base of a session read from a field source, a stored bake or an in-memory grid (item 3, GEN-164): the height of every H0 cell of `n` cells a face edge is the C1 read of the
+    /// source at the cell's centre ([`read_elevation_c1_cached`]), the rainfall and the temperature the bilinear read ([`read_direction`]); samples beyond a face edge come from the face
+    /// it meets, so a cell on a cube edge or at a corner reads the same field from every side. A source that cannot answer is an error, never a placeholder. The base word is the caller's.
+    pub fn from_field(n: usize, src: &dyn LatticeSource, map: &dyn FaceMapping, word: u64) -> Result<PreviewBase, ReadError> {
+        let grid = GlobalGrid::new(n, PLANET_RADIUS_M);
+        let len = grid.len();
+        let (mut z0, mut p, mut t) = (vec![0f64; len], vec![0f32; len], vec![0f32; len]);
+        let mut cache = StencilCache::new();
+        for id in 0..len {
+            let d = grid.direction(id as u32);
+            z0[id] = f64::from(read_elevation_c1_cached(src, map, d, &mut cache, 0)?);
+            let s = read_direction(src, map, d)?;
+            (p[id], t[id]) = (s.precipitation_mm, s.temperature_c);
+        }
+        Ok(PreviewBase::new(grid, PLANET_RADIUS_M, 0.0, 1e-3, BaseFields { z0, p_mm: p, t_c: t }, word))
     }
 
     /// The base height of every cell, metres.
