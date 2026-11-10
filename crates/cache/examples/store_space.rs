@@ -1,6 +1,6 @@
 //! G-STORE remainder (STRM-079; A3 section 10): the field bake on the new chain, the space a replacement version and a compaction take, and the authored edit items.
 //!
-//! Usage: store_space <k> [threads] [field_stride] [field_k]. `field_k` samples the field at 3,072 * field_k cells a face edge over the same tiles (12,288 is the regional grid: field_k 4). Needs `landmass_scale <k> 8 dump` and `store_measure <k>` first (`target/store_dump_k<k>`, `target/store_measure_k<k>`).
+//! Usage: store_space <k> [threads] [field_stride] [field_k] [sphere]. `sphere` samples every field_stride-th tile of every face (the deep ocean too) and ends after the field bake. `field_k` samples the field at 3,072 * field_k cells a face edge over the same tiles (12,288 is the regional grid: field_k 4). Needs `landmass_scale <k> 8 dump` and `store_measure <k>` first (`target/store_dump_k<k>`, `target/store_measure_k<k>`).
 //! - Field bake: every `field_stride`-th tile of 208 km that touches the landmass, the four channels of the production sample (`global::class_sample`, the K3 field) on the block's (T+1)^2 vertices,
 //!   encoded as the production block (byte planes, LZ4) and as a narrow-channel variant (16-bit and 8-bit channels with stated steps, brotli), bytes a vertex by the share of land in the tile.
 //! - Space: the store of `store_measure` is the version 1; an edit writes new records (a new key, the size of the record it replaces) for the tiles of its footprint beside it; `pack::compact`
@@ -101,6 +101,8 @@ fn main() {
     let threads: usize = a.get(2).and_then(|s| s.parse().ok()).unwrap_or(4);
     let stride: usize = a.get(3).and_then(|s| s.parse().ok()).unwrap_or(8);
     let field_k: usize = a.get(4).and_then(|s| s.parse().ok()).unwrap_or(k);
+    // `sphere`: the field bake over tiles of the whole sphere (every `stride`-th tile in both directions of every face), the land share taken from the samples (elevation above the sea): the deep-ocean tiles the landmass window never reaches (G-STORE, item 14).
+    let sphere = a.get(5).is_some_and(|s| s == "sphere");
     let nf = 3072 * field_k;
     let tilef = nf / TILES_PER_EDGE;
     let dir = format!("target/store_dump_k{k}");
@@ -130,12 +132,22 @@ fn main() {
 
     // ---------------------------------------------------------------- the field bake on the new chain
     let inputs = BakeInputs::new(SEED, threads);
-    let picked: Vec<(Tile, usize)> = tiles
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| i % stride == 0)
-        .map(|(_, (t, ps))| (*t, ps.iter().filter(|&&p| land[p] == 1).count()))
-        .collect();
+    let picked: Vec<(Tile, usize)> = if sphere {
+        (0..6u8)
+            .flat_map(|f| {
+                (0..TILES_PER_EDGE)
+                    .step_by(stride)
+                    .flat_map(move |i| (0..TILES_PER_EDGE).step_by(stride).map(move |j| ((f, i as u32, j as u32), usize::MAX)))
+            })
+            .collect()
+    } else {
+        tiles
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| i % stride == 0)
+            .map(|(_, (t, ps))| (*t, ps.iter().filter(|&&p| land[p] == 1).count()))
+            .collect()
+    };
     println!(
         "field bake at {nf} cells a face edge: {} of {} tiles sampled (every {stride}th), {} vertices a block",
         picked.len(),
@@ -172,7 +184,12 @@ fn main() {
                             }
                             let wide = brotli(&wide).len();
                             let (nb, err, clamped) = narrow(&samples);
-                            (landn as f64 / (tile * tile) as f64, prod, wide, nb.len(), err, clamped)
+                            let share = if landn == usize::MAX {
+                                samples.iter().filter(|g| g.elevation_m > 0.0).count() as f64 / samples.len() as f64
+                            } else {
+                                landn as f64 / (tile * tile) as f64
+                            };
+                            (share, prod, wide, nb.len(), err, clamped)
                         })
                         .collect::<Vec<_>>()
                 })
@@ -221,6 +238,15 @@ fn main() {
         earth(3),
         if per_class[2].is_some() { "sea-tile" } else { "land-tile" }
     );
+
+    if sphere {
+        println!(
+            "sphere sample: {} tiles over the six faces; sea tiles with no land vertex: {}",
+            rows.len(),
+            rows.iter().filter(|r| r.0 == 0.0).count()
+        );
+        return;
+    }
 
     // ---------------------------------------------------------------- the space of versions and compaction
     let sdir = format!("target/store_measure_k{k}");

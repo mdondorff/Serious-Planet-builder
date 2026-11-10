@@ -10,8 +10,9 @@ const T: usize = 1024;
 const EARTH_LOCAL_LAND_CELLS: f64 = 1.49e8 / (0.102 * 0.102);
 
 fn main() {
-    let mut tiles: Vec<(String, std::path::PathBuf)> = std::fs::read_dir("target/k7_l")
-        .expect("run `k7_region 200 8 store` first (it writes target/k7_l)")
+    let l_dir = std::env::var("PLANET_L_DIR").unwrap_or_else(|_| "target/k7_l".to_string());
+    let mut tiles: Vec<(String, std::path::PathBuf)> = std::fs::read_dir(&l_dir)
+        .expect("run `k7_region 200 8 store` first (it writes target/k7_l, or PLANET_L_DIR)")
         .filter_map(Result::ok)
         .filter_map(|e| {
             let p = e.path();

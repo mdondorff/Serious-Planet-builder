@@ -26,7 +26,15 @@ const LATTICE: usize = 1 << K; // 16,384 nodes a face edge
 const REGIONAL: usize = 12_288;
 const LOCAL: usize = 6 << K; // 98,304
 const R: f64 = 6_371_000.0;
-const REGION: (usize, usize, usize, usize) = (2014 * 4, 2168 * 4 + 3, 190 * 4, 344 * 4 + 3);
+/// The default region: seed 14, face 1, the prototype region (inclusive cell ranges at 12,288 cells a face edge). `PLANET_REGION=seed,face,i0,j0,size` names another (item 14: L on a second region); `PLANET_L_DIR` names the directory `store` writes (default `target/k7_l`).
+const DEFAULT_REGION: (u64, u8, (usize, usize, usize, usize)) = (14, 1, (2014 * 4, 2168 * 4 + 3, 190 * 4, 344 * 4 + 3));
+
+fn region() -> (u64, u8, (usize, usize, usize, usize)) {
+    let Ok(text) = std::env::var("PLANET_REGION") else { return DEFAULT_REGION };
+    let v: Vec<usize> = text.split(',').map(|s| s.trim().parse().expect("PLANET_REGION=seed,face,i0,j0,size")).collect();
+    assert_eq!(v.len(), 5, "PLANET_REGION=seed,face,i0,j0,size");
+    (v[0] as u64, v[1] as u8, (v[2], v[2] + v[4] - 1, v[3], v[3] + v[4] - 1))
+}
 
 /// The lattice nodes of a rectangle of one face, sampled from the base field (f32, as stored).
 struct Lattice {
@@ -60,13 +68,14 @@ fn main() {
     let a: Vec<String> = std::env::args().collect();
     let margin: usize = a.get(1).map_or(200, |s| s.parse().unwrap());
     let threads: usize = a.get(2).map_or(8, |s| s.parse().unwrap());
-    let seed = 14u64;
-    let face = Face(1);
+    let (seed, face_n, region) = region();
+    let face = Face(face_n);
+    let l_dir = std::env::var("PLANET_L_DIR").unwrap_or_else(|_| "target/k7_l".to_string());
     let t0 = Instant::now();
     let inputs = BakeInputs::new(seed, threads);
     // ---- the regional window and its lattice rectangle (a regional cell is 8 local cells, a node every 6 local cells)
-    let (ri0, ri1) = (REGION.0 - margin, REGION.1 + margin);
-    let (rj0, rj1) = (REGION.2 - margin, REGION.3 + margin);
+    let (ri0, ri1) = (region.0 - margin, region.1 + margin);
+    let (rj0, rj1) = (region.2 - margin, region.3 + margin);
     let (rw, rh) = (ri1 - ri0 + 1, rj1 - rj0 + 1);
     let to_node = |reg: usize| reg * 8 / 6;
     let (ni0, nj0) = (to_node(ri0) - 3, to_node(rj0) - 3);
@@ -146,7 +155,7 @@ fn main() {
     let store = a.get(3).is_some_and(|s| s == "store");
     let compare = a.get(3).is_some_and(|s| s == "compare");
     let ids: Vec<TileId> = if store {
-        let (i0, i1, j0, j1) = (REGION.0 * 8 / 1024, (REGION.1 * 8 + 7) / 1024, REGION.2 * 8 / 1024, (REGION.3 * 8 + 7) / 1024);
+        let (i0, i1, j0, j1) = (region.0 * 8 / 1024, (region.1 * 8 + 7) / 1024, region.2 * 8 / 1024, (region.3 * 8 + 7) / 1024);
         (j0..=j1).flat_map(|tj| (i0..=i1).map(move |ti| TileId { face, ti: ti as u32, tj: tj as u32 })).collect()
     } else {
         vec![TileId { face, ti: (8390 * 8 + 4) as u32 / 1024, tj: (958 * 8 + 4) as u32 / 1024 }]
@@ -156,9 +165,10 @@ fn main() {
         let (wi0, wj0) = (i64::from(id.ti) * t - h, i64::from(id.tj) * t - h);
         let ww = g.window() as i64;
         println!(
-            "tile ({}, {}) of face 1: local cells i {}..{}, j {}..{} ({:.1} km a side)",
+            "tile ({}, {}) of face {}: local cells i {}..{}, j {}..{} ({:.1} km a side)",
             id.ti,
             id.tj,
+            face_n,
             wi0,
             wi0 + ww,
             wj0,
@@ -242,8 +252,8 @@ fn main() {
                 );
             }
             if store {
-                std::fs::create_dir_all("target/k7_l").expect("the output directory");
-                let name = format!("target/k7_l/{}_{}", id.ti, id.tj);
+                std::fs::create_dir_all(&l_dir).expect("the output directory");
+                let name = format!("{l_dir}/{}_{}", id.ti, id.tj);
                 let (t, h, w) = (g.tile, g.halo, g.window());
                 let land: Vec<u8> = (0..t * t).map(|c| u8::from(r.z[(c / t + h) * w + c % t + h] > 0.0)).collect();
                 std::fs::write(format!("{name}.l.f32"), r.change.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>())
