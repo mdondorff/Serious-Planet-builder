@@ -5,7 +5,7 @@ The breach loop excavated chains that end in an outlet it never lowers; the sill
 ## What Changes
 - `carve::exit_base` (new), `round::catchment_round`, `carve::carve_rock`: under the round rules a breach never cuts below the base level of its chain exit (the outlet's height, flat along the chain), for chains that end above the sea level. Chains that end at the sea have no base.
 - GEN-162 added (generator-pipeline).
-- `tests/bake_round`: a closed bowl behind a cut outlet does not deepen round over round (fails without the rule); a bowl open to the sea is opened by round 1.
+- `tests/bake_round`: a closed bowl behind a cut outlet does not deepen round over round (fails without the rule; round 1 grows 6 % from the sweeps' incision, 4.6 % with no breach at all, then it falls); a bowl open to the sea is opened by round 1.
 
 ## Impact
 - Code: `generators::bake::{carve, round}`, `tests/bake_round`. The default rules keep today's breach (the default-rules digest is unchanged); a sea-outlet build is bit-identical (k=1 phase plan: H1, z after the sediment pass and G-CON equal to main).

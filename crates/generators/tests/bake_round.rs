@@ -297,8 +297,10 @@ fn a_lake_behind_a_cut_outlet_does_not_deepen_round_over_round() {
     for round in 1..=4 {
         let z = rounds_from(&grid, &z0, &outlet, round);
         let (p50, cells) = depth_under_fill(&grid, &z, &outlet);
+        // round 1: the incision of the sweeps moves the floor (a bowl without the breach reads 42.2 m against 40.3 m); after it the depth falls (42.7, 41.7, 41.4, 40.9 m)
+        let allowed = if round == 1 { 0.1 * base } else { 0.25 };
         assert!(
-            p50 <= prev + 0.1 * base,
+            p50 <= prev + allowed,
             "round {round}: median depth under the fill {p50:.1} m against {prev:.1} m before it ({cells} cells, base {base:.1} m)"
         );
         prev = p50;

@@ -10,7 +10,7 @@ Source: Architect order inbox #118 and #119 (2026-11-10), decision D3
 
 #### Scenario: Lake behind a cut outlet
 - **WHEN** a closed bowl whose rim is its only outlet runs four rounds
-- **THEN** its median depth under the fill grows by at most 10 % of the starting depth in any round
+- **THEN** its median depth under the fill grows by at most 10 % of the starting depth in round 1 (the incision of the sweeps; a bowl without the breach grows by 4.6 %) and by at most 0.25 m in any later round
 
 #### Scenario: Outlet at the sea
 - **WHEN** a bowl whose rim is at the sea level runs one round
