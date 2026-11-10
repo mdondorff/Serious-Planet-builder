@@ -251,10 +251,23 @@ pub fn lakes_with_tiles(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &[f64]
     produce(grid, routing, hydro, z, Some(tile_of))
 }
 
-fn produce(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &[f64], tile_of: Option<&dyn Fn(usize) -> TileRef>) -> Lakes {
+/// The part of the producer that reads the discharges (`Q_w` at the ends of the pieces): the river pieces and the number of cells dropped. Run it before the discharges are released (D22); it holds nothing back, so the rest ([`lake_records`]) can run after the release.
+pub fn river_pieces(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &[f64]) -> (Vec<RiverPiece>, usize) {
     assert!(hydro.qw.len() == grid.len(), "the producer needs Q_w: run it before the discharges are released");
     assert!(routing.receiver.len() == grid.len(), "one receiver per cell");
-    let mut lakes: Vec<Lake> = hydro
+    let water = water_cells(grid, routing, hydro, z);
+    cut_segments(hydro, routing, &|c| water.contains(c))
+}
+
+/// The lake records of the kept basins, by id (`q_out` is the basin's own, kept by H1; no discharge field is read).
+pub fn lake_records(grid: &Grid, hydro: &Hydro) -> Vec<Lake> {
+    let mut lakes = basin_lakes(grid, hydro);
+    lakes.sort_unstable_by_key(|l| l.id);
+    lakes
+}
+
+fn basin_lakes(grid: &Grid, hydro: &Hydro) -> Vec<Lake> {
+    hydro
         .basins
         .iter()
         .map(|b| {
@@ -277,7 +290,13 @@ fn produce(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &[f64], tile_of: Op
                 tiles: Vec::new(),
             }
         })
-        .collect();
+        .collect()
+}
+
+fn produce(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &[f64], tile_of: Option<&dyn Fn(usize) -> TileRef>) -> Lakes {
+    assert!(hydro.qw.len() == grid.len(), "the producer needs Q_w: run it before the discharges are released");
+    assert!(routing.receiver.len() == grid.len(), "one receiver per cell");
+    let mut lakes = basin_lakes(grid, hydro);
     let water = water_cells(grid, routing, hydro, z);
     if let Some(tile_of) = tile_of {
         let tiles = water.tiles(tile_of);

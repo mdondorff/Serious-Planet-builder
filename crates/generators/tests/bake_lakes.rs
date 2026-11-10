@@ -431,3 +431,21 @@ fn each_lake_lists_the_tiles_that_hold_its_water() {
     stripped.lakes[0].tiles.clear();
     assert_eq!(stripped, without, "the tile map changes nothing else");
 }
+
+// spec: GEN-163, TEST-108
+#[test]
+fn the_producer_in_two_steps_around_the_release_gives_the_same_lakes() {
+    use planet_generators::bake::lakes::{lake_records, river_pieces};
+    let z = bowl_land();
+    for (runoff, evap) in [(None, None), (Some(1.0e-8), Some(1.0e-6)), (Some(0.0), Some(1.0e-6))] {
+        let mut r = run(&z, runoff, evap, &small_t());
+        let whole = lakes(&r);
+        // The plan's order: the pieces while `Q_w` is there, the records after `q` and `qw` are released.
+        let (pieces, dropped_cells) = river_pieces(&r.g, &r.routing, &r.hydro, &r.z);
+        r.hydro.q = Vec::new();
+        r.hydro.qw = Vec::new();
+        let split = Lakes { lakes: lake_records(&r.g, &r.hydro), pieces, dropped_cells };
+        assert_eq!(split, whole, "the same lakes, pieces and dropped cells, bit for bit");
+        assert_eq!(format!("{split:?}"), format!("{whole:?}"));
+    }
+}
