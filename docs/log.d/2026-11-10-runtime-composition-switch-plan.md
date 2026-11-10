@@ -1,0 +1,1 @@
+- 2026-11-10 runtime-composition-switch-plan: item 15 next PRs (bake writer, lake water source with a per-tile mask, sampler switch) in the design notes section 10; docs only.
