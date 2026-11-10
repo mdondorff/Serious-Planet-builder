@@ -400,7 +400,7 @@ fn a_trench_just_over_one_cell_wide_still_burns_the_line_on_half_integer_points_
         let narrow = burn(q_for(0.99));
         let just_over = burn(q_for(1.2));
         let wide = burn(q_for(3.0));
-        assert!(narrow.iter().any(|&v| v == 50.0), "the narrow channel burns its line");
+        assert!(narrow.contains(&50.0), "the narrow channel burns its line");
         assert!(
             (0..w * w).all(|c| narrow[c] != 50.0 || just_over[c] == 50.0),
             "a trench of 1.2 cells contains the line of 0.99 ({a:?} to {b:?})"
