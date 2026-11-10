@@ -271,16 +271,20 @@ fn mix_word(mut x: u64) -> u64 {
     x ^ (x >> 31)
 }
 
-/// A hillshade of the bin means of a height sheet (`bw` by `bh` bins, `sum` and `count` as the sheet's own buffers): light from the north-east, the relief read against the sheet's own rms slope over land
+/// A hillshade of the bin means of a height sheet (`bw` by `bh` bins, `bands` = 6 on a cube grid, else 1; "north-east" is the image's up-right, so another way on the sphere on each face, `sum` and `count` as the sheet's own buffers): light from the north-east, the relief read against the sheet's own rms slope over land
 /// bins, so no scale or exaggeration is chosen; sea bins are one dark blue, bins without a cell one grey. It reads the sheet's buffers and allocates only the RGBA bytes of the image.
-fn shade_bytes(sum: &[f64], count: &[u32], bw: usize, bh: usize) -> Vec<u8> {
+fn shade_bytes(sum: &[f64], count: &[u32], bw: usize, bh: usize, bands: usize) -> Vec<u8> {
+    // The six faces of a cube grid are stacked vertically: a slope never reads across a face band (the neighbour over the seam is another face).
+    let band = |y: usize| y * bands / bh;
     let mean = |x: usize, y: usize| -> Option<f64> {
         let b = y * bw + x;
         (count[b] > 0).then(|| sum[b] / f64::from(count[b]))
     };
     let slope = |x: usize, y: usize, c: f64| -> (f64, f64) {
         let at = |x: usize, y: usize| mean(x, y).unwrap_or(c);
-        let (xl, xr, yu, yd) = (x.saturating_sub(1), (x + 1).min(bw - 1), y.saturating_sub(1), (y + 1).min(bh - 1));
+        let (xl, xr) = (x.saturating_sub(1), (x + 1).min(bw - 1));
+        let yu = if y > 0 && band(y - 1) == band(y) { y - 1 } else { y };
+        let yd = if y + 1 < bh && band(y + 1) == band(y) { y + 1 } else { y };
         ((at(xr, y) - at(xl, y)) / ((xr - xl).max(1) as f64), (at(x, yd) - at(x, yu)) / ((yd - yu).max(1) as f64))
     };
     let (mut sq, mut land) = (0.0f64, 0usize);
@@ -414,7 +418,7 @@ impl SheetProbe {
             .write_png(&self.dir.join(format!("{name}.png")))
             .map_err(|e| format!("{name}.png: {e}"))?;
         if f.kind == FieldKind::Height {
-            Rgba { width: bw as u32, height: bh as u32, data: shade_bytes(&sum, &count, bw, bh) }
+            Rgba { width: bw as u32, height: bh as u32, data: shade_bytes(&sum, &count, bw, bh, if grid.is_cube() { 6 } else { 1 }) }
                 .write_png(&self.dir.join(format!("{name}-shade.png")))
                 .map_err(|e| format!("{name}-shade.png: {e}"))?;
         }
@@ -600,6 +604,19 @@ mod tests {
         assert!(diff < a.len() / 100, "ten times the relief gives the same shade (rms slope): {diff} bytes differ");
         assert_ne!(a, b, "and it is another image than the colour sheet");
         let _ = (std::fs::remove_dir_all(&d1), std::fs::remove_dir_all(&d2));
+    }
+
+    // spec: BUILD-046
+    #[test]
+    fn the_hillshade_of_a_cube_grid_reads_no_slope_across_a_face_seam() {
+        let (bw, bh) = (6usize, 12usize);
+        // Flat land of 100 m on the upper half of the stack and 900 m on the lower half: the seam is the only step.
+        let sum: Vec<f64> = (0..bw * bh).map(|b| if b / bw < bh / 2 { 100.0 } else { 900.0 }).collect();
+        let count = vec![1u32; bw * bh];
+        let flat = |bands: usize| shade_bytes(&sum, &count, bw, bh, bands);
+        let (seamed, cube) = (flat(1), flat(6));
+        assert!(seamed.iter().step_by(4).any(|&v| v != seamed[0]), "without the bands the step shows as a line");
+        assert!(cube.iter().step_by(4).all(|&v| v == cube[0]), "with the six bands every bin of flat land has the same shade");
     }
     // spec: BUILD-046
     #[test]
