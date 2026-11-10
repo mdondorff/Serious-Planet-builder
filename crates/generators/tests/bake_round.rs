@@ -316,3 +316,41 @@ fn a_field_whose_outlets_are_at_the_sea_keeps_the_bits_it_had_before_the_base_le
     z.iter().for_each(|v| d = (d ^ v.to_bits()).wrapping_mul(0x100_0000_01b3));
     assert_eq!(d, 0xb9e6_6858_0505_bf11, "the sea-outlet rounds moved: digest {d:016x}");
 }
+
+// spec: GEN-146
+/// The key of a catchment round holds every parameter `catchment_round` reads (inbox D28): flipping one changes the key, the same inputs keep it.
+#[test]
+fn catchment_key_holds_every_parameter_the_round_reads() {
+    use planet_generators::bake::carve::CarveParams;
+    use planet_generators::bake::round::{catchment_key, CatchmentInputs};
+    let grid = Grid::new(4, 3, 100.0);
+    let cells = [0u32, 1, 2, 3];
+    let inp = CatchmentInputs {
+        z: vec![10.0, 20.0, 30.0, 40.0],
+        receiver: vec![u32::MAX, 0, 1, 2],
+        area: vec![4e4, 3e4, 2e4, 1e4],
+        dist: vec![100.0; 4],
+        taper: vec![1.0; 4],
+        receiver_is_outlet: vec![false; 4],
+        scale: vec![1.0; 4],
+        up_unit: vec![0.0; 4],
+    };
+    let p = CarveParams { round_rules: RoundRules::ROUND, ..CarveParams::default() };
+    let key = catchment_key(&grid, &cells, &inp, &p);
+    assert_eq!(key, catchment_key(&grid, &cells, &inp.clone(), &p.clone()), "identical inputs keep the key");
+    let changed: Vec<(&str, CarveParams)> = vec![
+        ("clip_mfd", CarveParams { round_rules: RoundRules::default(), ..p.clone() }),
+        ("k_dt", CarveParams { k_dt: p.k_dt * 1.5, ..p.clone() }),
+        ("epsilon", CarveParams { epsilon: p.epsilon * 2.0, ..p.clone() }),
+        ("breach_slope", CarveParams { breach_slope: p.breach_slope + 1e-3, ..p.clone() }),
+        ("breach_max_m", CarveParams { breach_max_m: p.breach_max_m + 1.0, ..p.clone() }),
+        ("breach_height_scale_m", CarveParams { breach_height_scale_m: p.breach_height_scale_m + 100.0, ..p.clone() }),
+        ("sea_level", CarveParams { sea_level: p.sea_level + 1.0, ..p.clone() }),
+        ("keep_pits", CarveParams { keep_pits: !p.keep_pits, ..p.clone() }),
+        ("incise_only", CarveParams { incise_only: !p.incise_only, ..p.clone() }),
+        ("reroute_every", CarveParams { reroute_every: p.reroute_every + 1, ..p.clone() }),
+    ];
+    for (name, q) in changed {
+        assert_ne!(key, catchment_key(&grid, &cells, &inp, &q), "flipping {name} must change the catchment key");
+    }
+}

@@ -9,7 +9,7 @@ use super::carve::{distance, CarveParams, BREACH_MIN_M};
 use super::memo::Memo;
 use super::partition::{partitioned_route_weighted, Hash, PartCache};
 use super::probe;
-use super::route::{catchment_roots, route_rules, Routing, NONE};
+use super::route::{catchment_roots, route_rules, MfdClip, Routing, NONE};
 use super::{assert_finite, Grid};
 use planet_core::par::{self, Par};
 use std::sync::Arc;
@@ -361,13 +361,19 @@ pub struct RoundWork {
     pub baseline: bool,
 }
 
-/// The key of a catchment round: the member cell ids, the key inputs and the parameters of the carve that the round reads.
-fn catchment_key(grid: &Grid, cells: &[u32], inp: &CatchmentInputs, p: &CarveParams) -> (u64, u64) {
+/// The key of a catchment round: the member cell ids, the key inputs and every parameter of the carve that `catchment_round` reads: `k_dt`, `epsilon`, `breach_slope`, `breach_max_m`, `breach_height_scale_m`,
+/// `sea_level`, `keep_pits`, `incise_only`, the sweeps per round and whether the round rules clip locally (`clip_mfd`, GEN-162: it changes the breach). The memo is in memory only: no stored key.
+pub fn catchment_key(grid: &Grid, cells: &[u32], inp: &CatchmentInputs, p: &CarveParams) -> (u64, u64) {
     let mut h = Hash::new();
     for v in [p.k_dt, p.u_over_k, p.epsilon, p.breach_slope, p.breach_max_m, p.breach_height_scale_m, p.sea_level] {
         h.word(v.to_bits());
     }
-    h.word(u64::from(p.keep_pits) | (u64::from(p.incise_only) << 1) | ((p.reroute_every as u64) << 2));
+    h.word(
+        u64::from(p.keep_pits)
+            | (u64::from(p.incise_only) << 1)
+            | ((p.reroute_every as u64) << 2)
+            | (u64::from(p.round_rules.clip_mfd == MfdClip::Local) << 63),
+    );
     h.word(cells.len() as u64);
     for (k, &c) in cells.iter().enumerate() {
         h.word(grid.global_id(c as usize));
