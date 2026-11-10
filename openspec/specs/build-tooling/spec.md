@@ -700,15 +700,21 @@ Source: Owner 2026-11-09 (management rules become checks), planner inbox #94 (#1
 - **THEN** the first three are refused naming the gate or commit and the last passes; the summary names the gates measured by one lane
 
 ### Requirement: BUILD-042 An item that becomes done moves the re-estimate
-Spec-lint SHALL fail a branch that turns an item of the table under `## Items` of `docs/briefings/terrain-prototype.md` to a State starting with `done`, against the merge base with `origin/main`, unless the briefing's `Re-estimate: YYYY-MM-DD (...)` line holds a valid date other than the base's. A briefing without the line SHALL fail. An item already done on the base, or going back from done, SHALL ask for nothing.
+Spec-lint SHALL fail a branch that turns an item of the table under `## Items` of `docs/briefings/terrain-prototype.md` to a State starting with `done`, against the merge base with `origin/main`, unless the briefing's `Re-estimate: YYYY-MM-DD[ HH:MM] (...)` line holds a stamp later than the base's.
+- A stamp is a date with an optional `HH:MM`; a date alone reads as 00:00, and an invalid time reads as none.
+- Stamps compare as a whole: the same or an earlier stamp is refused, a later one passes, a later time on the same day included.
 
 Verify: A
 Status: active
-Source: Owner 2026-11-09 (management rules become checks), planner inbox #94 (items were marked done without the remaining work re-estimated)
+Source: Owner 2026-11-09 (management rules become checks), planner inbox #94 (items were marked done without the remaining work re-estimated), inbox #122 (a second re-estimate on one day)
 
 #### Scenario: An item is done
-- **WHEN** an item becomes done with the re-estimate date unchanged, with no line, or with a new date
-- **THEN** the first two are refused naming the item and the last passes
+- **WHEN** an item becomes done with the re-estimate stamp unchanged, earlier, with no line, or later (a later date, or a later time on the same day)
+- **THEN** the first three are refused naming the item and the last passes
+
+#### Scenario: A date alone
+- **WHEN** the base's re-estimate is a date alone and the new line is the same day at 00:00, at 00:01, or the date alone again; or the base has a time and the new line is the date alone
+- **THEN** 00:01 passes and the others are refused (a date alone is 00:00)
 
 ### Requirement: BUILD-043 The lanes are listed with their state
 `cargo xtask lanes` SHALL print, for each lane of `docs/lanes.txt` (a lane name and the prefix of its worktree directory under `.claude/worktrees/`; no machine paths), the last commit of its worktree with its age, the open PR of its branch, the highest `## #N` heading of its inbox file (`PLANET_INBOX_DIR`, else `planner-inbox` beside the main checkout) and the running `cargo`, `rustc`, `nextest` or `target/` executables whose path lies in its worktree; other build processes SHALL be listed as not attributed. A missing piece SHALL print `-` and the command SHALL NOT fail for it.

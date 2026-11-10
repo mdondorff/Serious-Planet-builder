@@ -3,7 +3,7 @@ Inbox #122 (2026-11-10): BUILD-042 compared the re-estimate by date, so a second
 
 ## What Changes
 - `xtask::process::reestimate_stamp` (new) and `reestimate_errors`: the `Re-estimate:` line may carry a time `HH:MM`; stamps compare as a whole (a date alone is 00:00); the same stamp and an earlier stamp are refused.
-- BUILD-042 modified by a spec delta (no new ID).
+- BUILD-042 changed in `openspec/specs/build-tooling` and in its identical copy in `openspec/changes/process-checks` (a second delta of the same ID would be a duplicate, and an ADDED copy that differs from the main spec is refused by spec-lint); no new ID.
 - Tier-A tests for the date-only pair, a later time on the same day, the same time, an earlier time, and a date-only base or line.
 
 ## Impact
