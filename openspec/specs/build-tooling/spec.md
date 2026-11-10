@@ -764,3 +764,14 @@ Source: Owner 2026-11-09 (stage previews: a committed text manifest; images in t
 #### Scenario: A stale manifest
 - **WHEN** a number, a line or a whole stage differs between the file and the run
 - **THEN** the test fails naming the stage, the field and the column, and says to run `cargo xtask stages --update`
+
+### Requirement: BUILD-048 The stage reviewer advises on a manifest change and the committed sheets stay small
+`.claude/agents/stage-reviewer.md` SHALL define a read-only agent (tools Read, Glob, Grep, Bash). When a PR changes `docs/stages/manifest.txt`, the PR's author SHALL run it before the push and paste its report, unedited, into the PR body. No CI step runs it and its report never blocks a merge. It judges the manifest diff and the before and after sheets against the declared intent, never the author's assessment; a sheet it cannot open gives `cannot judge`; `consistent` means matching the intent, not right terrain. Sheets are committed only at a gate, under `docs/stages/sheets/<gate>/`. `cargo xtask spec-lint` SHALL fail when a sheet is over 1,000,000 bytes or one gate's sheets total over 5,000,000 bytes, naming the file or gate, its size and the limit.
+
+Verify: A
+Status: active
+Source: Architect 2026-11-10 (briefing item 18: advisory reviewer agent and sheet size cap), BUILD-046, BUILD-047
+
+#### Scenario: The size check
+- **WHEN** a sheet is one byte over the per-sheet limit, or the sheets of one gate total over the per-gate limit, or all are at or under their limits
+- **THEN** the first two fail naming the file or gate, its size and the limit, and the third passes
