@@ -77,7 +77,7 @@ fn a_tile_of_l_round_trips_within_half_a_step_with_k7s_stats_and_counts_the_clam
     c[3] = 9000.0; // beyond the quantisation range (+-8,191.75 m)
     c[4] = -9000.0;
     let d = Dir::new("round");
-    let store = store_of(&d, &w, &[l_tile_record(&w, RES, &s, id(), &c, &stats()).unwrap()]);
+    let store = store_of(&d, &w, &[l_tile_record(&w, RES, &s, id(), &c, &stats(), &[]).unwrap()]);
     let got = load_l_tile(&store, &w, RES, &s, id()).unwrap().expect("the tile is stored");
     assert_eq!((got.id, got.stats, got.clamped_cells), (id(), stats(), 2));
     assert_eq!(got.core.len(), T * T);
@@ -117,7 +117,7 @@ fn the_key_follows_the_base_every_input_and_the_layer_version_and_a_tile_under_a
     assert_eq!(TILE_LAYER_VERSION, 3, "L is layer version 3");
     // A store that holds the tile under another base is refused, not mixed, naming the found key.
     let d = Dir::new("keys");
-    let store = store_of(&d, &w, &[l_tile_record(&w, RES, &LTileSpec { base_id: 8, ..s }, id(), &core(), &stats()).unwrap()]);
+    let store = store_of(&d, &w, &[l_tile_record(&w, RES, &LTileSpec { base_id: 8, ..s }, id(), &core(), &stats(), &[]).unwrap()]);
     let e = load_l_tile(&store, &w, RES, &s, id()).expect_err("another base is refused").0;
     assert!(
         e.contains("made for another base") && e.contains("codec 3") && e.contains("layer version 3") && e.contains("not mixed"),
@@ -153,7 +153,7 @@ fn a_record_of_the_previous_layer_version_is_refused_naming_both_versions_and_a_
     );
     assert_eq!(Kind::LayerTile as u8, KIND_LAYER_TILE);
 
-    let good = l_tile_record(&w, RES, &s, id(), &core(), &stats()).unwrap();
+    let good = l_tile_record(&w, RES, &s, id(), &core(), &stats(), &[]).unwrap();
     let damaged = |f: &dyn Fn(&mut Vec<u8>)| -> String {
         let mut r = good.clone();
         f(&mut r.payload);
@@ -170,4 +170,36 @@ fn a_record_of_the_previous_layer_version_is_refused_naming_both_versions_and_a_
     let m = damaged(&|p| p.truncate(p.len() - 6));
     assert!(m.contains("do not decompress") || m.contains("bytes of counts"), "{m}");
     let _ = TileId::new(Face(0), 0, 0, 0);
+}
+
+// spec: STRM-081, TEST-108
+#[test]
+fn the_water_section_is_reserved_empty_carried_opaque_and_bounded() {
+    let (w, s) = (world(), spec());
+    // Empty by default: a tile that touches no lake.
+    let plain = l_tile_record(&w, RES, &s, id(), &core(), &stats(), &[]).unwrap();
+    assert_eq!(&plain.payload[77..81], &0u32.to_le_bytes(), "the length of an empty water section is 0");
+    // A filled section is carried as it is; the counts after it are unaffected and so is the key.
+    let mask: Vec<u8> = (0..300u32).map(|k| (k * 7 % 251) as u8).collect();
+    let with = l_tile_record(&w, RES, &s, id(), &core(), &stats(), &mask).unwrap();
+    assert_eq!(with.key, plain.key, "the water section is not part of the key");
+    assert_eq!(with.payload.len(), plain.payload.len() + mask.len());
+    let d = Dir::new("water");
+    let store = store_of(&d, &w, &[with]);
+    let got = load_l_tile(&store, &w, RES, &s, id()).unwrap().unwrap();
+    assert_eq!(got.water, mask);
+    let d = Dir::new("water-empty");
+    let store = store_of(&d, &w, &[plain.clone()]);
+    let none = load_l_tile(&store, &w, RES, &s, id()).unwrap().unwrap();
+    assert!(none.water.is_empty());
+    assert_eq!(none.core, got.core, "the counts read the same with and without a section");
+    // A length that the record cannot hold, and one over the cap, are refused before anything is reserved.
+    for len in [u32::MAX, 1 << 30, plain.payload.len() as u32] {
+        let mut r = plain.clone();
+        r.payload[77..81].copy_from_slice(&len.to_le_bytes());
+        let d = Dir::new("water-bad");
+        let store = store_of(&d, &w, &[r]);
+        let e = load_l_tile(&store, &w, RES, &s, id()).expect_err("refused").0;
+        assert!(e.contains("water section claims"), "{e}");
+    }
 }

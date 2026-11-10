@@ -6,7 +6,9 @@
 //!   tile grid, K7's parameters and the versions of the kernels; the implementation id differs from the previous layer's, so the two never share a key;
 //! - there is no fill channel: the surface is `B + L` and a basin is a lake, not a depth added back.
 //!
-//! The payload is `codec (u8) | tile (u32 LE, core cells a side) | stats (land, burned, clamped, pit cells u64 LE; pit p50, p99, max f64 LE) | key (16 bytes) |` the brotli stream.
+//! The payload is `codec (u8) | tile (u32 LE, core cells a side) | stats (land, burned, clamped, pit cells u64 LE; pit p50, p99, max f64 LE) | key (16 bytes) | water section length (u32 LE) | water section |` the brotli stream.
+//! The water section (architect D17/D18) is optional: empty for a tile that touches no lake, and for every record until the bake writer fills it with the tile's lake water mask (runs of wet cells labelled with an
+//! index into the tile's basin-id list). This version reserves it and carries it as opaque bytes; its inner layout is the writer's to define without a version bump.
 //! A record of the previous version (codec 2) is refused naming both versions. A store written by other parameters, another base or another layer version is refused, never mixed.
 
 use std::io::Write;
@@ -28,7 +30,10 @@ const IMPLEMENTATION_ID: &str = "layer-l-tile";
 const BROTLI_QUALITY: u32 = 5;
 const BROTLI_WINDOW_BITS: u32 = 22;
 const BROTLI_BUFFER: usize = 64 * 1024;
-const HEADER_LEN: usize = 1 + 4 + 7 * 8 + 16;
+/// The fixed part: codec, tile, stats, key and the length of the water section.
+const HEADER_LEN: usize = 1 + 4 + 7 * 8 + 16 + 4;
+/// The most a water section may hold: a run list of a tile of 1,024 cells a side is far below it; a larger length is a damaged record, not a request to reserve memory.
+pub const MAX_WATER_SECTION: usize = 16 << 20;
 
 /// What an L layer is made of besides the bake it is beside.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -81,6 +86,8 @@ pub struct LTile {
     pub core: Vec<f32>,
     pub stats: LTileStats,
     pub clamped_cells: u64,
+    /// The water section as stored: empty, or the tile's lake water mask (opaque here).
+    pub water: Vec<u8>,
 }
 
 /// The key of a tile of L.
@@ -92,7 +99,8 @@ pub fn l_tile_key(world: &GlobalWorld, res: u32, spec: &LTileSpec, id: PassTile)
     Ok(cache_key(&inputs))
 }
 
-/// The record of a tile of L: `core` is the tile's change against `B` in metres (K7Result::change), `stats` K7's. Cells beyond the quantisation range are stored clamped and counted.
+/// The record of a tile of L: `core` is the tile's change against `B` in metres (K7Result::change), `stats` K7's, `water` the water section (empty for a tile that touches no lake). Cells beyond the
+/// quantisation range are stored clamped and counted.
 pub fn l_tile_record(
     world: &GlobalWorld,
     res: u32,
@@ -100,7 +108,9 @@ pub fn l_tile_record(
     id: PassTile,
     core: &[f32],
     stats: &LTileStats,
+    water: &[u8],
 ) -> Result<Record, LayerStoreError> {
+    assert!(water.len() <= MAX_WATER_SECTION, "the water section of a tile is at most {MAX_WATER_SECTION} bytes");
     let t = spec.grid.tile;
     assert_eq!(core.len(), t * t, "a tile of L holds tile x tile cells");
     assert!(core.iter().all(|v| v.is_finite()), "the change of a tile is finite");
@@ -119,6 +129,8 @@ pub fn l_tile_record(
         payload.extend(v.to_bits().to_le_bytes());
     }
     payload.extend(key.0);
+    payload.extend((water.len() as u32).to_le_bytes());
+    payload.extend_from_slice(water);
     {
         let mut w = brotli::CompressorWriter::new(&mut payload, BROTLI_BUFFER, BROTLI_QUALITY, BROTLI_WINDOW_BITS);
         w.write_all(&raw).expect("writing to a vector");
@@ -193,6 +205,14 @@ pub fn load_l_tile(
     {
         return Err(what("its stats block holds a number that is not finite or exceeds the tile's cells".into()));
     }
-    let counts = unpack_counts(&p[HEADER_LEN..], t).map_err(what)?;
-    Ok(Some(LTile { id, core: dequantise(&counts), stats, clamped_cells }))
+    let water_len = u32_at(HEADER_LEN - 4) as usize;
+    if water_len > MAX_WATER_SECTION || water_len > p.len() - HEADER_LEN {
+        return Err(what(format!(
+            "its water section claims {water_len} bytes, the record has {} after the header (at most {MAX_WATER_SECTION})",
+            p.len() - HEADER_LEN
+        )));
+    }
+    let water = p[HEADER_LEN..HEADER_LEN + water_len].to_vec();
+    let counts = unpack_counts(&p[HEADER_LEN + water_len..], t).map_err(what)?;
+    Ok(Some(LTile { id, core: dequantise(&counts), stats, clamped_cells, water }))
 }
