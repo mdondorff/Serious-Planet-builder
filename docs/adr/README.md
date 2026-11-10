@@ -124,3 +124,4 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0113 | [Edit ordering and dependencies: landform and driver edits below erosion](0113-edit-ordering-and-dependencies.md) | proposed (2026-11-08) | A3 target; amends ADR 0007, 0066; settles ADR 0086 point 3 |
 | 0114 | [Simulation profile, cell metric and canonical forms](0114-simulation-profile-cell-metric-and-canonical-forms.md) | proposed (2026-11-08) | A3 target; extends ADR 0010 |
 | 0115 | [Scale as a parameter and the store budget](0115-scale-as-a-parameter-and-the-store-budget.md) | proposed (2026-11-08) | A3 target; ADR 0045 point 2 becomes normative |
+| 0116 | [Constitution v1.7: rules for the simulation architecture](0116-constitution-v1-7-simulation-architecture.md) | accepted (owner, 2026-11-11) | CON-05 to CON-08, CON-14 refined; CON-28 to CON-31 added; constitution cap 12,817 B |
