@@ -131,6 +131,17 @@ fn run(dir: &std::path::Path) -> Run {
     let mut q2 = Pass2Params::standard(5, 0.0);
     q2.carve.breach_max_m = CarveParams::default().breach_max_m;
     let sediment = sediment_pass(&g, &mut z, &z0, &q2, 3);
+    // K7 of one tile (TEST-105): its line is named by the tile, `k7-f<face>-t<ti>-<tj>`, and carries the hash of z and `pits_after_pass`.
+    {
+        use planet_core::{Face, Vec3};
+        use planet_generators::bake::k7::{k7_tile, K7Params};
+        use planet_generators::bake::tile::{TileGrid, TileId};
+        let tg = TileGrid { cells: 384, tile: 48, halo: 8, radius_m: 100.0 * 384.0 * 2.0 / core::f64::consts::PI };
+        let id = TileId { face: Face(1), ti: 3, tj: 4 };
+        let base = |d: Vec3| 400.0 - 30.0 * d.x + 20.0 * d.y * d.y;
+        let regional = |_: Vec3| 0.0;
+        let _ = k7_tile(&tg, id, &base, &regional, &[], &K7Params::standard(5, 0.0), 2);
+    }
     let text = std::fs::read_to_string(sheet.log_path()).unwrap_or_default();
     // The manifest has no cost fields: they vary from run to run.
     let lines = text
@@ -166,6 +177,7 @@ fn first_difference(want: &str, got: &[String]) -> Option<String> {
 }
 
 // spec: BUILD-047
+// spec: TEST-105
 #[test]
 fn the_manifest_is_the_run_of_the_fixture() {
     let dir = fixture_dir();

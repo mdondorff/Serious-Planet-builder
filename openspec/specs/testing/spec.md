@@ -1694,3 +1694,14 @@ Source: Architect order 2026-11-09 (inbox #100: pit cells = H1 basin cells), BUI
 #### Scenario: Pits and basins
 - **WHEN** both are computed on the three surfaces
 - **THEN** the counts are equal on each, and the landmass has pits
+
+### Requirement: TEST-105 The stage manifest fixture runs K7 on one tile
+The stage manifest fixture SHALL run the K7 stage on one tile with the probe on. Its line is named by the tile (`k7-f<face>-t<ti>-<tj>`) and carries the hash of z and `pits_after_pass`. The manifest's up-to-date check covers the line. The fixture's run time stays within the tier it runs in; if one tile does not fit, the change reports the time and comes to the architect.
+
+Verify: A
+Status: active
+Source: Architect 2026-11-10 (inbox #102), BUILD-047, GEN-161
+
+#### Scenario: The K7 line
+- **WHEN** the fixture runs
+- **THEN** the manifest has a line `k7-f1-t3-4 | z | ...` with the hash of z and `pits_after_pass`, and a change of the K7 tile's data fails the up-to-date check naming that stage
