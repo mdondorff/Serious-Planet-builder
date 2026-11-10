@@ -238,3 +238,40 @@ fn a_released_discharge_is_refused_with_a_clear_message() {
     r.hydro.qw = Vec::new();
     lakes(&r);
 }
+
+// spec: GEN-163
+#[test]
+fn a_segment_cut_twice_has_numbered_runs_and_one_inside_a_lake_has_none() {
+    // The labels of a copy of the hydrology are set by hand on the cells of the longest segment: two lakes on its chain, then the whole chain.
+    let r = run(&bowl_land(), None, None, &small_t());
+    let s = r.hydro.segments.iter().max_by_key(|s| s.cells).unwrap().clone();
+    assert!(s.cells >= 8, "a long segment to cut: {}", s.cells);
+    let chain: Vec<u32> = {
+        let mut v = vec![s.up];
+        while v.len() < s.cells as usize {
+            v.push(r.routing.receiver[*v.last().unwrap() as usize]);
+        }
+        v
+    };
+    let with_labels = |inside: &[usize]| {
+        let mut h = clone_hydro(&r.hydro);
+        h.label = vec![NONE; h.label.len()];
+        for &k in inside {
+            h.label[chain[k] as usize] = 0;
+        }
+        Run { g: Grid::new(W, W, 800.0), routing: r.routing.clone(), hydro: h }
+    };
+    let mine = |l: &Lakes| l.pieces.iter().filter(|p| p.segment == s.id).map(|p| (p.part, p.first, p.cells)).collect::<Vec<_>>();
+    // Cells 0, 3 and 4 inside: a run at the start is dropped, then a run of 2 (1..=2), then the rest (5..).
+    let n = s.cells;
+    let l = lakes(&with_labels(&[0, 3, 4]));
+    assert_eq!(mine(&l), vec![(0, chain[1], 2), (1, chain[5], n - 5)]);
+    // A lake at the end: the last cell inside leaves one run from the start.
+    let l = lakes(&with_labels(&[n as usize - 1]));
+    assert_eq!(mine(&l), vec![(0, chain[0], n - 1)]);
+    // The whole chain inside: no piece, every cell dropped.
+    let all: Vec<usize> = (0..n as usize).collect();
+    let l = lakes(&with_labels(&all));
+    assert!(mine(&l).is_empty());
+    assert!(l.dropped_cells >= n as usize);
+}

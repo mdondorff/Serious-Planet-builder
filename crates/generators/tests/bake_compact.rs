@@ -537,6 +537,7 @@ fn the_phase_plan_is_the_steps_in_order_releases_what_it_should_and_does_not_mov
         "routing and filled surface",
         "weight dropped",
         "hydrology",
+        "lakes",
         "H1 result kept, discharges released",
         "pre-carve surface read back",
         "after the sediment pass",

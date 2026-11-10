@@ -212,6 +212,7 @@ pub fn build_resident(
     // The lake producer reads H1 and the routing before the routing is released (GEN-163).
     let lakes = lakes_from_hydro(grid, &routing, &hy);
     lap("lakes", &mut phases);
+    mark("lakes");
     // The open-water evaporation is H1's input only.
     drop(evap);
     let g_con = verify_with_area(grid, &hy, &routing, &filled, outlet, Some(&runoff), None, Some(weighted_area));
