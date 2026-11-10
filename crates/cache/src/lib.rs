@@ -7,6 +7,7 @@ pub mod global_store;
 pub mod hilbert;
 pub mod horizon_store;
 pub mod key;
+pub mod l_writer;
 pub mod layer_channels;
 pub mod layer_fill;
 pub mod layer_fillpass;

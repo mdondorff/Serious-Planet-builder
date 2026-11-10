@@ -503,3 +503,20 @@ fn the_water_and_ring_lists_are_the_lakes_cells_and_the_cells_next_to_them_that_
         assert!(hit, "ring cell {c} drains into the lake's water");
     }
 }
+
+// spec: GEN-167, TEST-109
+#[test]
+fn the_channels_of_a_hydrology_follow_its_segments_with_q_w_and_a_bed_that_does_not_rise() {
+    use planet_generators::bake::k7::channels_from_hydro;
+    let z = bowl_land();
+    let r = run(&z, Some(1.0e-8), None, &small_t());
+    let ch = channels_from_hydro(&r.hydro, &r.routing, &r.z, &|c| ((c % W) as f64 * 8.0 + 3.5, (c / W) as f64 * 8.0 + 3.5));
+    assert_eq!(ch.len(), r.hydro.segments.len());
+    for (c, s) in ch.iter().zip(&r.hydro.segments) {
+        assert_eq!(c.points.len(), s.cells as usize + 1, "the cells from up to down, both included");
+        assert_eq!(c.q.len(), c.points.len());
+        assert!(c.levels.windows(2).all(|w| w[1] <= w[0]), "the bed does not rise downstream");
+        assert_eq!(c.q[0], r.hydro.qw[s.up as usize]);
+        assert_eq!(*c.q.last().unwrap(), r.hydro.qw[s.down as usize]);
+    }
+}
