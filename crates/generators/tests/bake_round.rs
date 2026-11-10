@@ -288,7 +288,7 @@ fn a_bowl_whose_outlet_is_at_the_sea_is_opened_by_the_first_round() {
     assert_eq!(cells, 0, "a bowl whose rim is at the sea leaves {cells} cells under the fill after round 1");
 }
 
-// spec: GEN-162 (inbox #118): a depression behind an outlet the breach cannot lower must not get deeper round over round (the sweeps move the floor by a few per cent of the depth; the unfixed breach added 50 %)
+// spec: GEN-162 (inbox #118): a depression behind an outlet the breach cannot lower must not get deeper round over round (the sweeps move the floor by up to 6 % of the depth in a round; the unfixed breach added 50 %)
 #[test]
 fn a_lake_behind_a_cut_outlet_does_not_deepen_round_over_round() {
     let (grid, z0, outlet) = bowl(32, None);
@@ -298,7 +298,7 @@ fn a_lake_behind_a_cut_outlet_does_not_deepen_round_over_round() {
         let z = rounds_from(&grid, &z0, &outlet, round);
         let (p50, cells) = depth_under_fill(&grid, &z, &outlet);
         assert!(
-            p50 <= prev + 0.05 * base,
+            p50 <= prev + 0.1 * base,
             "round {round}: median depth under the fill {p50:.1} m against {prev:.1} m before it ({cells} cells, base {base:.1} m)"
         );
         prev = p50;

@@ -186,13 +186,8 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
                 }
             }
             let visit: &[u32] = if grouped.is_empty() { &r.order } else { &grouped };
-            let base = if p.round_rules.is_default() {
-                None
-            } else {
-                exit_base(p.sea_level, p.breach_slope, r.order.iter().map(|&c| c as usize), &r.receiver, z, &|c| {
-                    distance(grid, c, r.receiver[c] as usize)
-                })
-            };
+            let base =
+                if p.round_rules.is_default() { None } else { exit_base(p.sea_level, r.order.iter().map(|&c| c as usize), &r.receiver, z) };
             for &c in visit.iter().rev() {
                 let c = c as usize;
                 let rec = r.receiver[c];
@@ -291,16 +286,9 @@ pub(super) fn distance(grid: &Grid, a: usize, b: usize) -> f64 {
 }
 
 /// The level a breach may not cut below (GEN-162, A3 sections 5.3 and 6): along each receiver chain that ends in an outlet above the sea level (a fixed exit: a land cut of the
-/// window, a basin's rim), `base[outlet] = z[outlet]` and `base[c] = base[receiver] + slope * dist[c]`. A chain that ends at or below the sea level has no base (`None` when no chain
-/// has one, so that a sea-outlet build allocates nothing and moves no bit). `order` lists the receivers before their donors; `dist` is the distance of a cell to its receiver.
-pub(super) fn exit_base(
-    sea_level: f64,
-    slope: f64,
-    order: impl Iterator<Item = usize> + Clone,
-    receiver: &[u32],
-    z: &[f64],
-    dist: &dyn Fn(usize) -> f64,
-) -> Option<Vec<f64>> {
+/// window, a basin's rim), `base[outlet] = z[outlet]` and `base[c] = base[receiver]` (flat: a slope along the chain left a sill within the slope profile standing over a pit behind it, R3b, D4). A chain that ends at or below the sea level has no base (`None` when no chain
+/// has one, so that a sea-outlet build allocates nothing and moves no bit). `order` lists the receivers before their donors;
+pub(super) fn exit_base(sea_level: f64, order: impl Iterator<Item = usize> + Clone, receiver: &[u32], z: &[f64]) -> Option<Vec<f64>> {
     if !order.clone().any(|c| receiver[c] == NONE && z[c] > sea_level) {
         return None;
     }
@@ -313,7 +301,7 @@ pub(super) fn exit_base(
                 f64::NEG_INFINITY
             }
         } else {
-            base[receiver[c] as usize] + slope * dist(c)
+            base[receiver[c] as usize]
         };
     }
     Some(base)
