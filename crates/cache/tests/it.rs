@@ -12,6 +12,7 @@ mod coupled_store;
 mod crc_reference;
 #[path = "global_store.rs"]
 mod global_store;
+#[path = "h0_stored_read.rs"]
 mod h0_stored_read;
 #[path = "hilbert_crc.rs"]
 mod hilbert_crc;
