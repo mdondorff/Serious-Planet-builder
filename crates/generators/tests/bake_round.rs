@@ -282,7 +282,7 @@ fn rounds_from(grid: &Grid, z0: &[f64], outlet: &[bool], rounds: usize) -> Vec<f
 // spec: GEN-162 (A3 sections 5.3 and 6: the breach opens a depression whose sill it can lower)
 #[test]
 fn a_bowl_whose_outlet_is_at_the_sea_is_opened_by_the_first_round() {
-    let (grid, z0, outlet) = bowl(32, Some(0.5));
+    let (grid, z0, outlet) = bowl(32, Some(0.0));
     let z = rounds_from(&grid, &z0, &outlet, 1);
     let (_, cells) = depth_under_fill(&grid, &z, &outlet);
     assert_eq!(cells, 0, "a bowl whose rim is at the sea leaves {cells} cells under the fill after round 1");
@@ -303,4 +303,14 @@ fn a_lake_behind_a_cut_outlet_does_not_deepen_round_over_round() {
         );
         prev = p50;
     }
+}
+
+// spec: GEN-162 (sea-outlet chains keep their bits): a digest of three rounds on a bowl whose rim is at the sea level, taken on the kernels before the rule (origin/main at 82931e11)
+#[test]
+fn a_field_whose_outlets_are_at_the_sea_keeps_the_bits_it_had_before_the_base_level_rule() {
+    let (grid, z0, outlet) = bowl(32, Some(0.0));
+    let z = rounds_from(&grid, &z0, &outlet, 3);
+    let mut d: u64 = 0xcbf2_9ce4_8422_2325;
+    z.iter().for_each(|v| d = (d ^ v.to_bits()).wrapping_mul(0x100_0000_01b3));
+    assert_eq!(d, 0xb9e6_6858_0505_bf11, "the sea-outlet rounds moved: digest {d:016x}");
 }
