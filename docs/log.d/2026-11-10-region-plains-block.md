@@ -1,0 +1,1 @@
+- 2026-11-10 region-plains-block: region_scale runs with the stage probe ON, times the canonical flood and prints the plains block (briefing item 13)

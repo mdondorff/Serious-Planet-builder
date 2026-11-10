@@ -1,7 +1,7 @@
 //! The prototype region at the erosion grid (inbox #100 step 1): face 1, the region of results.md (i 2014-2168, j 190-344 of the 3,072-cell grid) at 12,288 cells a face edge (814 m cells, 0.66 km^2),
 //! with a margin of `margin` cells on every side (its border an outlet: an artificial cut). `gates`: the round solver against the whole-region carve (G-ROUND), 1 and N threads (G-DET), the
 //! partitioned route against the resident route (G-PART), H1 on the carved surface with the runoff of the orographic climate (G-CON, conservation, the channel density) and the process memory.
-//! `mem`: only the set-up, the 4 rounds and the H1 pass, with the peak working set after each (PowerShell, Windows). Usage: [PLANET_REGION=seed,face,i0,j0,size] region_scale [gates|mem] [margin_cells] [threads] [tile]; without PLANET_REGION the region above (seed 14).
+//! The stage probe is ON by default (sheets in `target/review/stages/region-s<seed>-f<face>-i<i0>-j<j0>/`; `PLANET_STAGES=0` switches it off); `gates` ends with the plains block. `mem`: only the set-up, the 4 rounds and the H1 pass, with the peak working set after each (PowerShell, Windows). Usage: [PLANET_REGION=seed,face,i0,j0,size] region_scale [gates|mem] [margin_cells] [threads] [tile]; without PLANET_REGION the region above (seed 14).
 #![allow(clippy::needless_range_loop)]
 use planet_core::{Face, Vec3};
 use planet_generators::bake::carve::{carve, CarveParams};
@@ -11,10 +11,12 @@ use planet_generators::bake::hydro::{hydrology, verify, BasinClass, HydroParams}
 use planet_generators::bake::inputs::BakeInputs;
 use planet_generators::bake::metric::Metric;
 use planet_generators::bake::partition::{partitioned_route, PartCache};
+use planet_generators::bake::probe::{self, SheetProbe};
 use planet_generators::bake::round::solve_rounds;
 use planet_generators::bake::route::{route_rules, RoundRules, NONE};
 use planet_generators::bake::Grid;
 use planet_generators::runoff::{discharge_weight, pet_mm, runoff_mm};
+use std::sync::Arc;
 use std::time::Instant;
 
 const CELLS: usize = 12_288;
@@ -55,6 +57,13 @@ fn main() {
     let threads: usize = a.get(3).map_or(8, |s| s.parse().unwrap());
     let tile: usize = a.get(4).map_or(256, |s| s.parse().unwrap());
     let (seed, face, region) = region();
+    let run = Instant::now();
+    let stages = std::env::var("PLANET_STAGES").map_or(true, |v| v != "0");
+    if stages {
+        let dir = format!("target/review/stages/region-s{seed}-f{face}-i{}-j{}", region.0, region.2);
+        probe::install(Arc::new(SheetProbe::new(&dir, 20_000)));
+        println!("stage probe ON: sheets and numbers in {dir}/ (its cost is inside the times below; PLANET_STAGES=0 switches it off)");
+    }
     let (i0, i1) = (region.0.saturating_sub(margin), (region.1 + margin).min(CELLS - 1));
     let (j0, j1) = (region.2.saturating_sub(margin), (region.3 + margin).min(CELLS - 1));
     let (w, h) = (i1 - i0 + 1, j1 - j0 + 1);
@@ -139,7 +148,7 @@ fn main() {
             part.routing.area.iter().zip(&res.area).filter(|(a, b)| a.to_bits() != b.to_bits()).count()
         );
         drop((part, cache, res));
-        h1(&grid, &one, &outlet, &spec, &inputs, stream, threads, &z0);
+        h1(&grid, &one, &outlet, &spec, &inputs, stream, threads, &z0, region);
         let mut dz: Vec<f64> = Vec::new();
         for j in region.2..=region.3 {
             for i in region.0..=region.1 {
@@ -169,15 +178,26 @@ fn main() {
             "memory after the 4 rounds (z0 and z held): peak {peak_rounds:.0} MiB, now {now:.0} MiB; {:.0} bytes a cell at the peak",
             peak_rounds * 1048576.0 / n as f64
         );
-        h1(&grid, &z, &outlet, &spec, &inputs, stream, threads, &z0);
+        h1(&grid, &z, &outlet, &spec, &inputs, stream, threads, &z0, region);
         let (peak, now) = memory_mb();
         println!("memory after H1: peak {peak:.0} MiB, now {now:.0} MiB; {:.0} bytes a cell at the peak", peak * 1048576.0 / n as f64);
     }
+    println!("total {:.1} s{}", run.elapsed().as_secs_f64(), if stages { ", stage probe ON" } else { "" });
 }
 
 /// The runoff of the orographic climate, the weighted route and H1 on the surface `z`, with the gates.
 #[allow(clippy::too_many_arguments)]
-fn h1(grid: &Grid, z: &[f64], outlet: &[bool], spec: &FaceSpec, inputs: &BakeInputs, stream: u64, threads: usize, z0: &[f64]) {
+fn h1(
+    grid: &Grid,
+    z: &[f64],
+    outlet: &[bool],
+    spec: &FaceSpec,
+    inputs: &BakeInputs,
+    stream: u64,
+    threads: usize,
+    z0: &[f64],
+    region: (usize, usize, usize, usize),
+) {
     let (w, n) = (grid.w(), grid.len());
     let (i0, j0) = ((grid.global_id(0) & 0xffff_ffff) as usize, (grid.global_id(0) >> 32) as usize);
     let o = inputs.orography();
@@ -207,12 +227,28 @@ fn h1(grid: &Grid, z: &[f64], outlet: &[bool], spec: &FaceSpec, inputs: &BakeInp
     println!("runoff, weights and net evaporation: {:.1} s", t.elapsed().as_secs_f64());
     let t = Instant::now();
     let routing = route_rules(grid, z, outlet, 1e-3, stream, 0.0, Some(&weight), RoundRules::ROUND);
+    let route_s = t.elapsed().as_secs_f64();
+    let tf = Instant::now();
     let filled = priority_flood_with(grid, z, outlet, 1e-3, true);
-    println!("weighted route and filled surface: {:.1} s", t.elapsed().as_secs_f64());
+    let flood_s = tf.elapsed().as_secs_f64();
+    println!(
+        "weighted route {route_s:.1} s, canonical flood {flood_s:.1} s ({:.0} % of the route-and-flood step)",
+        100.0 * flood_s / (route_s + flood_s)
+    );
+    plains(grid, z, &filled, &routing.receiver, outlet, region);
     let params = HydroParams::default();
     let t = Instant::now();
     let hy = hydrology(grid, z, &filled, &routing, outlet, Some(&runoff), Some(&evap), &params);
     println!("H1: {:.1} s; {:?}", t.elapsed().as_secs_f64(), hy.stats);
+    probe::emit(probe::Stage::H1, |s| {
+        probe::StageView::new(s, grid)
+            .f64("area", probe::FieldKind::Area, &routing.area)
+            .f64("z", probe::FieldKind::Height, z)
+            .f64("filled", probe::FieldKind::Height, &filled)
+            .number("segments", hy.stats.segments as f64)
+            .number("basins", hy.stats.basins as f64)
+            .number("channel cells", hy.stats.channel_cells as f64)
+    });
     let v = verify(grid, &hy, &routing, &filled, outlet, Some(&runoff), Some(&weight));
     println!("G-CON and conservation: {v:?}");
     let land = (0..n).filter(|&p| z[p] > 0.0).count();
@@ -242,5 +278,51 @@ fn h1(grid: &Grid, z: &[f64], outlet: &[bool], spec: &FaceSpec, inputs: &BakeInp
         hy.basins.len() - lakes,
         hy.stats.artefacts,
         hy.stats.ramps
+    );
+}
+
+/// The plains block (item 13): over the land cells of the region proper, on the carved surface `z` and its canonical filled surface.
+/// A *false flat* is a land cell with a receiver whose filled surface drops to the receiver by exactly 0 or by less than one f32 step at that height (a drop the f32 tile surface cannot hold);
+/// a *sink* is a land cell the fill raised (filled above z) and a *pit* a land cell without a receiver that is not an outlet. Counts and shares of the land cells of the region.
+fn plains(grid: &Grid, z: &[f64], filled: &[f64], receiver: &[u32], outlet: &[bool], region: (usize, usize, usize, usize)) {
+    let w = grid.w();
+    let (i0, j0) = ((grid.global_id(0) & 0xffff_ffff) as usize, (grid.global_id(0) >> 32) as usize);
+    let (mut land, mut zero, mut sub_ulp, mut raised, mut pits) = (0usize, 0usize, 0usize, 0usize, 0usize);
+    let mut raise_m = 0.0f64;
+    for j in region.2..=region.3 {
+        for i in region.0..=region.1 {
+            let p = (j - j0) * w + (i - i0);
+            if z[p] <= 0.0 {
+                continue;
+            }
+            land += 1;
+            if filled[p] > z[p] {
+                raised += 1;
+                raise_m += filled[p] - z[p];
+            }
+            if receiver[p] == NONE {
+                if !outlet[p] {
+                    pits += 1;
+                }
+                continue;
+            }
+            let drop = filled[p] - filled[receiver[p] as usize];
+            let h = filled[p] as f32;
+            let ulp = f64::from(f32::from_bits(h.abs().to_bits() + 1) - h.abs());
+            if drop == 0.0 {
+                zero += 1;
+            } else if drop < ulp {
+                sub_ulp += 1;
+            }
+        }
+    }
+    let pc = |c: usize| 100.0 * c as f64 / land.max(1) as f64;
+    println!(
+        "plains: {land} land cells in the region; false flats {} ({:.2} %: {zero} with a drop of exactly 0, {sub_ulp} below one f32 step); sinks {raised} ({:.2} %, mean fill {:.2} m); pits {pits} ({:.2} %)",
+        zero + sub_ulp,
+        pc(zero + sub_ulp),
+        pc(raised),
+        raise_m / raised.max(1) as f64,
+        pc(pits)
     );
 }
