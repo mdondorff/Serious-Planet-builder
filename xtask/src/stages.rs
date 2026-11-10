@@ -99,6 +99,8 @@ mod tests {
         let e = sheet_size_errors(&six);
         assert_eq!(e.len(), 1, "{e:?}");
         assert!(e[0].contains("g2") && e[0].contains("5400000") && e[0].contains("5000000"), "{e:?}");
+        let exact: Vec<_> = (0..5).map(|i| s("g5", &format!("{i}.png"), 1_000_000)).collect();
+        assert!(sheet_size_errors(&exact).is_empty(), "a gate at exactly its limit passes");
         let other = sheet_size_errors(&[
             s("g3", "a.png", 900_000),
             s("g3", "b.png", 900_000),

@@ -195,9 +195,12 @@ fn a_changed_number_a_missing_line_and_an_extra_line_are_each_named_by_stage_fie
     assert!(d.contains("stage h1, field q, column 4") && d.contains("hash cc") && d.contains("hash bb"), "{d}");
     let d = first_difference("round-00 | z | cells 10 | min 1 | hash aa\n", &got).unwrap();
     assert!(d.contains("stage h1") && d.contains("<missing line>"), "{d}");
-    let d = first_difference("round-00 | z | cells 10 | min 1 | hash aa\nh1 | q | cells 10 | min 2 | hash bb\nk7 | z | cells 1\n", &got)
-        .unwrap();
-    assert!(d.contains("stage k7") && d.contains("<missing line>"), "{d}");
+    let d = first_difference(
+        "round-00 | z | cells 10 | min 1 | hash aa\nh1 | q | cells 10 | min 2 | hash bb\nk7-f0-t0-0 | z | cells 1\n",
+        &got,
+    )
+    .unwrap();
+    assert!(d.contains("stage k7-f0-t0-0") && d.contains("<missing line>"), "{d}");
 }
 
 // spec: TEST-103
