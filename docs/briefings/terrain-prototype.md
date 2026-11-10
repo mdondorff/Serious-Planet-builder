@@ -2,7 +2,7 @@
 
 Status: active since 2026-11-08 (owner: D1 = option A, conditional). Replaces the M9.1 gate of `docs/briefings/m9-plan.md`; the M9 planet bake is frozen until this block closes. Contract: `docs/design/terrain-target.md` (A3), ADRs 0110-0115 (proposed). Plan: `spikes/architecture-replan/results/results.md` sections 13 and 17. Target date: mid-December 2026 (estimate).
 
-Re-estimate: 2026-11-09 (remaining work: items 9 to 18 open; target date as above). An item that becomes done moves this date (BUILD-042).
+Re-estimate: 2026-11-10 (remaining work: items 11 and 14 open for the explorer lane (gate reading and G-SURF-I report; G-STORE field bake, temporary space and edit overrides), 12 and 13 open (spikes), 15 to 18 open; items 9 and 10 done; target date as above, unchanged). An item that becomes done moves this date (BUILD-042).
 
 Scope: the region of `spikes/prototype-region/results/results.md`. Everything stays behind switches, off the default bake path.
 
@@ -17,8 +17,8 @@ Scope: the region of `spikes/prototype-region/results/results.md`. Everything st
 | 6 | Landmass across cube edges (GEN-144) | explorer | done (#1243) |
 | 7 | Hydrology H1: channels, basins (GEN-145) | explorer | done at 3.26 km (#1244), gates at 814 m (#1245) |
 | 8 | Edit cases E1-E6, G-EQ, G-INC, G-BASIN (GEN-146) | explorer | done for the gates that exist |
-| 9 | Complete resident build against 12 GB (G-SCALE, A3 §6.6 scenarios); cache eviction | explorer, crusader (eviction) | open; partitioned rounds measured (GEN-149); eviction merged (GEN-153). Complete build in the example, with rule (1): commit peaks 11,136, 11,329 and 11,135 MiB against 11,444 MiB (2026-11-09, runs 2 to 4). Row closes on the production phase plan, worst of two runs; tile-wise route not triggered; other §6.6 scenarios not run |
-| 10 | Deposition, one-cell pit spreading and thermal on the cube grid; G-SED | explorer | kernels and balance done (GEN-150 to GEN-152); partition test open. Sediment pass moves to the canonical flood (GEN-159, in review): the plain FIFO flood had inflated the pit share to 18.5 %, void. Pits after the pass 0.26 % (k=1), 0.35 % (k=2); k=4 comes with the phase-plan runs. New-chain K7 follows, before GEN-154's gate reading. Evidence for the A/B gate (A3 §6.7): thermal leaves dams in one-cell canyons, up to 344.5 m after deposition at k=2 |
+| 9 | Complete resident build against 12 GB (G-SCALE, A3 §6.6 scenarios); cache eviction | explorer, crusader (eviction) | done for the complete resident build on the production phase plan (GEN-158, #1287): worst of two k=4 runs 11,363 MiB commit against 11,444 (margin 81 MiB, thin); a change that adds resident state in or before hydrology re-measures it (two k=4 runs), first lever rule (1) inside hydrology; eviction merged (GEN-153); other §6.6 scenarios not run; tile-wise route not triggered |
+| 10 | Deposition, one-cell pit spreading and thermal on the cube grid; G-SED | explorer | done: kernels and balance (GEN-150 to GEN-152), the partition test (GEN-155, #1290: compact against masked cube, 1 3 8 threads, groups of whole catchments; a spatial cut of the pass stays open), canonical flood in the sediment pass (GEN-159) and the new-chain K7 (GEN-160). Pits after the pass 0.26 % (k=1), 0.35 % (k=2), 0.7355 % (k=4); thermal maximum 609.7, 920 and 1,249.1 m: evidence for the A/B gate (A3 §6.7), no fix ordered. Open: the dam count (next k=4 run, probe on); sediment inside the carve against rewording A3 §6.7 (owner, architect) |
 | 11 | Local 102 m pass in the new chain on the base read (G-SURF) | explorer | pass done (GEN-148); gate and G-SURF-I report open |
 | 12 | Independent measurement of the gates by another lane | spikes | partly done (SPIKE-106); repeated at the gate |
 | 13 | Hills and plains: the structural gates on a second region and seed | spikes | open |
