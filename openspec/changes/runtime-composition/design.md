@@ -72,21 +72,20 @@ Split (decision of the lane, reason below): the first PR holds the producer in m
 - Cost: one more PR; the second is small (encode, decode, key, refusal).
 Order inside the first PR: tests 1-5 red, the function, then the manifest entry (test 9).
 
-## 9. PR 2: the store field and the kind-13 version bump, plan (on paper, 2026-11-10; after PR 1 #1313 and PR 1b #1318)
-Facts from the code (`crates/cache/src/layer_tiles.rs`): kind 13 is one record per tile, `TILE_LAYER_VERSION = 2`, payload `codec u8 | tile u32 | stats | key 16 B | brotli(row-delta i16 counts of 0.25 m)`; the layer version is in the key (`TileLayerSpec::bytes`), so a bump changes every key and an older store is refused by key (STRM-065), not read. Item 14 (D11) settled no format of the new chain's `L`: PR 2 is the first.
-| # | Question | Plan | Owner of the call |
-|---|---|---|---|
-| 1 | Where the lake list sits | Option A (recommended): in the tile record, between the key and the brotli stream: `lake count u16 | lake records`; codec byte 3, `TILE_LAYER_VERSION = 3`. Option B: one record per basin id with a tile-to-lake index (closer to a new kind: architect) | architect |
-| 2 | Lake record (fixed, little-endian) | `id u64, floor_id u64, spill_id u64, level_m f64, q_in f32, q_out f32, area_m2 f32, flags u8` (class 2 bits, overflows, wet) = 41 B | lane |
-| 3 | Which tiles carry a lake | every tile that holds a cell of the lake's water (the water predicate of PR 1b); the list is repeated in each, identical by construction (the producer is a pure function) | lane |
-| 4 | Size | about 42k lakes at k=4 (PR 1 estimate), mostly in one tile: about 2 MB for the planet against 20 GB of `L` | lane |
-| 5 | Key | the producer's parameters (`HydroParams`, the lake rule's version) join the layer spec bytes: a change re-keys the tile | lane |
-| 6 | Writer | `build_resident`'s `Built::lakes` is the input; the bake's tile writer takes a tile's lakes from it (needs a cell-to-tile map of the water: `Water` gains a tile scan) | lane |
-Tests (TEST-108 continues; tier A, cache crate):
-- T6 round-trip: encode then decode a tile record with 0, 1 and 3 lakes: equal lists, equal counts stream.
-- T6b a version-2 record or store is refused naming both versions (STRM-065): the message holds `2` and `3`.
-- T6c a lake across a tile border: both tiles hold the same record bytes for it.
+## 9. PR 2: the basin table and the version of kind 13 (architect D16, 2026-11-10; inbox #115)
+Facts from the code (`crates/cache/src/layer_tiles.rs`): kind 13 is one record per tile, `TILE_LAYER_VERSION = 2`, payload `codec u8 | tile u32 | stats | key 16 B | brotli(row-delta i16 counts of 0.25 m)`; the layer version is in the key (`TileLayerSpec::bytes`), so a bump changes every key and an older store is refused by key (STRM-065), not read. Item 14 (D11) settled no format of the new chain's `L`.
+Decisions (D16):
+| # | Question | Decision |
+|---|---|---|
+| 1 | `L` | the same kind-13 record, `TILE_LAYER_VERSION = 3`, new codec byte 3 (payload = item 14's measured encoding, GEN-156; stats block = the new chain's K7 stats; key includes `base_id`; version 2 refused naming both versions; the fill channel is gone) |
+| 2 | Lakes | not in kind 13: a basin table per K6 key unit, records sorted by basin id (id, floor, spill level and point, level, class, flags, `q_out`, tile range); a new cache kind `Kind::BasinTable = 19`, requirements STRM-080 |
+| 3 | Reading | the runtime loads a region's table once and indexes by tile; per-tile copies are rejected; the table and kind 13 are read under one `commit_id` (A3 section 7.4, CON-22) |
+| 4 | River pieces | with the channel graph in the rivers PR, not PR 2 |
+Split (lane): PR 2a the basin table (kind 19, encode and decode, key, refusals, tile ranges from the producer); PR 2b kind 13 version 3 with codec 3 and the key with `base_id`; the shared `commit_id` read in whichever merges second.
+Tests, 2a (TEST-108 continues; tier A, cache crate):
+- T6 round-trip: encode then decode a table of 0, 1 and 3 lakes: equal records in id order, whatever the input order.
+- T6b a table of another version, key or commit is refused naming both.
+- T6c the tile range of a lake across a tile border holds both tiles.
 - T6d a decoder never reserves more than the declared count allows: a count larger than the payload is refused.
-- T8 re-key: a change of a producer parameter changes the tile key; the same parameters give the same key.
-- T9 size: a fixture with the 41-byte record and N lakes adds exactly `2 + 41 N` bytes before the stream.
-Needs from the architect: #1 (option A or B); everything else is the lane's.
+- T8 re-key: a change of a producer parameter changes the table's key; the same parameters give the same key.
+- T9 size: `n` lakes take exactly the header plus the fixed record size times `n` plus the tile list entries.
