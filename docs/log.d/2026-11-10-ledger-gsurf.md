@@ -1,0 +1,1 @@
+- 2026-11-10 ledger-gsurf: G-SURF and G-SURF-I re-read on main ea6b1b2b with the canonical K7 and the two new numbers (difference over local base rise p99 0.057, max 0.315; runtime overshoot at most 2.63 m); the rows of a561a419 stay.
