@@ -1,0 +1,21 @@
+== R1: face 1 seed 14 window i 7856-8875 j 560-1579 = 1020 x 1020 = 1040400 cells; land 69.6 %; inputs read in 12.2 s, 0 of 200 spot reads differ from a single-thread read; z0 land p50 839 m p95 2064 m max 3560 m
+outlets: own mask vs Grid::outlets: 0 cells differ
+geometry (3000 cells, 8 neighbours each): cell area vs Gauss-Legendre of the gnomonic solid angle: max rel 1.1e-8; distance vs great circle of the cell directions: max rel 4.4e-13
+[ROUND 20/5] whole-region carve 6.3 s; 1 thr 5.3 s: 0 differ from the carve; 2 thr 5.1 s: 0 differ from the carve; (0 vs 1 thr) 5 thr 5.0 s: 0 differ from the carve; (0 vs 1 thr) 8 thr 4.9 s: 0 differ from the carve; (0 vs 1 thr)
+[ROUND 12/4] whole-region carve 4.4 s; 1 thr 3.9 s: 0 differ from the carve; 2 thr 3.7 s: 0 differ from the carve; (0 vs 1 thr) 5 thr 3.7 s: 0 differ from the carve; (0 vs 1 thr) 8 thr 3.7 s: 0 differ from the carve; (0 vs 1 thr)
+[route z0] flood: Dijkstra(opposite ties) 0.2 s, 0 cells differ from the canonical flood; sweep relaxation 7 sweeps 0.4 s, 0 differ
+[route z0] resident route vs own: 0 receivers, 0 A_d (bits) differ; max rel A_d 0.0e0
+[route z0] G-PART tile 128: 64 tiles, 7 sweeps, 191 floods, 3.2 s; vs resident: 0 filled, 0 receivers, 0 A_d; vs own: 0 filled, 0 receivers, 0 A_d
+[route z0] G-PART tile 256: 16 tiles, 6 sweeps, 49 floods, 3.3 s; vs resident: 0 filled, 0 receivers, 0 A_d; vs own: 0 filled, 0 receivers, 0 A_d
+[route carved z] flood: Dijkstra(opposite ties) 0.2 s, 0 cells differ from the canonical flood
+[route carved z] resident route vs own: 0 receivers, 0 A_d (bits) differ; max rel A_d 0.0e0
+[route carved z] G-PART tile 128: 64 tiles, 10 sweeps, 261 floods, 3.6 s; vs resident: 0 filled, 0 receivers, 0 A_d; vs own: 0 filled, 0 receivers, 0 A_d
+[route carved z] G-PART tile 256: 16 tiles, 7 sweeps, 64 floods, 3.7 s; vs resident: 0 filled, 0 receivers, 0 A_d; vs own: 0 filled, 0 receivers, 0 A_d
+land change (m): p5 -416.9 p50 -57.6 p95 8.6 max 20.0
+[H1] climate read 0.1 s
+[H1 carved, weighted] flood: Dijkstra(opposite ties) 0.2 s, 0 cells differ from the canonical flood
+[H1 carved, weighted] resident route vs own: 0 receivers, 0 A_d (bits) differ; max rel A_d 0.0e0
+[H1] own Q vs lib Q: max rel 2.4e-15; channel cells: own 45623 vs lib 45623 (0 differ); heads 6035 (lib 6035), confluences 5439 (lib 5439), mouths 126 (lib 126); channel ends mid-course 0, heads under T (a restart) 0
+[H1] conservation (own sums): sum Q at outlets vs sum a r: 9.1e-15; sum A_d at outlets vs sum a w: 5.2e-15; own confluence error 4.4e-16
+[H1] pit components (F - z > 0.5 m): own 136 vs lib basins 113 + artefacts 23 + ramps 0 = 136; pit cells own 42357 vs lib 42357; kept basin cells 42321; unkept pit cells 36 = 0.005 % of land (724570 land cells)
+[H1] channel density 6.3 % of land cells; 15.9 heads and 30.2 segments per 1,000 km2; basins 113 kept (110 lakes, 3 endorheic)

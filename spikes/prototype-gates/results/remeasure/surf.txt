@@ -1,0 +1,12 @@
+lattice 1366 x 1366 nodes sampled (16.6 s)
+regional window 1020 x 1020 cells solved from the C1 read of the lattice (21.6 s)
+H1: 43509 channel cells, 10823 segments
+tile (65, 7) of face 1: local cells i 66496..67648, j 7104..8256
+254 channel segments meet the window
+K7 with the channels burned in: 17.3 s, 95820316 cells burned
+stored change vs (z - b) as f32 over the core's 1048576 cells: 0 differ; |L| beyond the i16 range of steps: 0
+OWN G-SURF at the cell centres (1020 x 1020 cells of the core, two in from its edge): runtime minus bake 0.0e0 m before quantisation, 0.1250 m with L in steps of 0.25 m (read through the C1 read: 0.0e0 m, 0.1250 m)
+OWN G-SURF-I at 28730 lattice vertices: max 2.6401 m unquantised, 2.7565 m quantised; p50 0.0400 p95 0.1318 p99 0.2192 m; 179 over 0.25 m (0.62 %); B at the vertices, own lattice value against the library's `base`: max 0.00e0 m
+OWN G-SURF-I by the bake's local step height (up to 5 m, to 20 m, over 20 m): vertices [28702, 28, 0], over 0.25 m [176, 3, 0]; largest difference over step height 0.147; vertices over 0.25 m in 77 bins of 64 cells (busiest 12); overshoot of the runtime read beyond the four composed cells: max 2.6329 m, 69 vertices over 0.25 m
+OWN worst five vertices (difference, window cell x, y): [(2.756486415863037, 457, 131), (2.600175380706787, 715, 299), (2.088395595550537, 889, 437), (1.409623622894287, 73, 209), (1.388871669769287, 385, 407)]
+LIBRARY surface_gate: 28900 nodes, max 2.6401 m unquantised, 2.7565 m quantised, p50 0.0400 p95 0.1322 p99 0.2192, 179 over 0.25 m; centres 0.0e0 m / 0.1250 m; by step [28871, 29, 0], over [176, 3, 0]; max difference over step 0.147; overshoot max 2.6329 m, 69 over 0.25 m
