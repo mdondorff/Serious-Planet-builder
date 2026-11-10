@@ -635,6 +635,13 @@ fn main() {
             fnv(built.hydro.channel.iter().map(|&c| u64::from(c))),
             fnv(built.hydro.segments.iter().flat_map(|g| [g.id, g.q_up.to_bits(), g.q_down.to_bits(), u64::from(g.cells)]))
         );
+        println!(
+            "hash lakes: {} lakes, {} pieces, {} dropped cells, {:016x}",
+            built.lakes.lakes.len(),
+            built.lakes.pieces.len(),
+            built.lakes.dropped_cells,
+            fnv(format!("{:?}", built.lakes).bytes().map(u64::from))
+        );
         println!("H1: {:?}", r.h1);
         println!("G-CON (hydro::verify) before the release: {:?}", r.g_con);
         println!("sums before the release: Q {:.6e} m3/s, Qw {:.6e} m3/s (not conservation figures)", r.sum_q, r.sum_qw);
