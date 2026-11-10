@@ -1,0 +1,1 @@
+- 2026-11-10 ci-warp-serial: eight more tests over 60 s on the Windows runner join the one-at-a-time warp-heavy group (BUILD-049); no limit changes

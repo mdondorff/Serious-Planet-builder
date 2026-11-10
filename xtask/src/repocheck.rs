@@ -304,4 +304,28 @@ mod tests {
         assert!(block.contains("threads-required = 4"), "the override takes 4 slots: {block}");
         assert!(!block.contains("slow-timeout"), "the limit stays the default's: {block}");
     }
+
+    // spec: BUILD-049
+    #[test]
+    fn the_tests_over_sixty_seconds_on_the_windows_runner_share_the_one_at_a_time_group_and_keep_their_limits() {
+        let toml = std::fs::read_to_string(repo_root().join(".config/nextest.toml")).expect(".config/nextest.toml");
+        let at = toml.find("platform = 'cfg(windows)'").expect("an override for the Windows runner");
+        let block = &toml[at..];
+        let block = &block[..block.find("\n\n").unwrap_or(block.len())];
+        for name in [
+            "an_in_memory_run_is_labelled_not_the_production_source_and_real_runs_refuse_without_a_store_and_on_software",
+            "the_lit_scene_runs_every_view_and_both_flights_with_a_pass_row_each_and_logs_the_metrics_in_smoke_mode",
+            "the_stills_scene_draws_one_pose_by_name_and_refuses_a_bad_call",
+            "a_still_camera_after_streaming_settles_draws_the_same_pixels_frame_after_frame",
+            "the_hills_cast_the_march_shadow_onto_the_ground_at_eye_level_and_from_above_at_ten_and_two_degrees_of_sun_and_match_the_adapters_goldens",
+            "the_indirect_path_draws_the_image_of_the_per_draw_loop",
+            "the_overlay_inspection_images_are_written_for_a_look",
+            "ten_scripted_views_on_steep_terrain_have_no_holes",
+        ] {
+            assert!(block.contains(&format!("test({name})")), "the override names {name}: {block}");
+        }
+        assert!(block.contains("test-group = \"warp-heavy\""), "one at a time: {block}");
+        assert!(!block.contains("slow-timeout") && !block.contains("retries"), "no limit and no retry changes: {block}");
+        assert!(toml.contains("warp-heavy = { max-threads = 1 }"), "the group runs one test at a time");
+    }
 }
