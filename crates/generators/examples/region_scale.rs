@@ -292,6 +292,30 @@ fn h1(
         params.initiation_m2 / 1e6,
         params.initiation_m2 / grid.cell_area(0)
     );
+    // The river width law (PR 6, D19/D20): the width `w = a Q_w^b` of every channel cell in metres and in local cells (the local grid is 8 times finer than this grid).
+    {
+        let law = planet_generators::bake::k7::WidthLaw::STANDARD;
+        let local_m = spec.dx() / 8.0;
+        let mut w_m: Vec<f64> = (0..n).filter(|&p| hy.channel[p] && hy.qw[p] > 0.0).map(|p| law.width_m(hy.qw[p])).collect();
+        w_m.sort_by(|a, b| a.total_cmp(b));
+        if !w_m.is_empty() {
+            let at = |q: f64| w_m[((w_m.len() - 1) as f64 * q) as usize];
+            let wider = w_m.iter().filter(|&&w| w > local_m).count();
+            println!(
+                "river width (a = {}, b = {}, local cell {local_m:.0} m): {} channel cells, p50 {:.0} m ({:.2} cells), p95 {:.0} m ({:.2} cells), max {:.0} m ({:.1} cells); wider than one local cell: {:.1} % of the channel cells",
+                law.a,
+                law.b,
+                w_m.len(),
+                at(0.5),
+                at(0.5) / local_m,
+                at(0.95),
+                at(0.95) / local_m,
+                w_m[w_m.len() - 1],
+                w_m[w_m.len() - 1] / local_m,
+                100.0 * wider as f64 / w_m.len() as f64
+            );
+        }
+    }
     let (mut best, mut best_q) = (0usize, 0.0f64);
     for p in 0..n {
         if hy.channel[p] && routing.receiver[p] == NONE && hy.q[p] > best_q {

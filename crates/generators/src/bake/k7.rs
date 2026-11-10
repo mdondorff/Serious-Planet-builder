@@ -59,14 +59,50 @@ impl RegionField {
 pub struct Channel {
     pub points: Vec<(f64, f64)>,
     pub levels: Vec<f64>,
+    /// The routed discharge `Q_w` in m3/s at each point (K6's), which the width law turns into the width of the trench; empty: every point is one cell wide.
+    pub q: Vec<f64>,
+}
+
+/// The one river width law (architect D6 point 2, D19/D20): the width of a channel is `w = a * Q_w^b` metres for a discharge in m3/s. The burn-in cuts a trench of `max(1 cell, w)` and the drawing uses `w`,
+/// so the ground and the water agree by construction. `a = 7.2`, `b = 0.5` (Moody and Troutman 2002); both are bake parameters and part of the key.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WidthLaw {
+    pub a: f64,
+    pub b: f64,
+}
+
+impl WidthLaw {
+    /// The standard law.
+    pub const STANDARD: WidthLaw = WidthLaw { a: 7.2, b: 0.5 };
+
+    /// The width in metres of a channel carrying `q` m3/s (zero for no discharge).
+    pub fn width_m(&self, q: f64) -> f64 {
+        if q > 0.0 {
+            self.a * libm::pow(q, self.b)
+        } else {
+            0.0
+        }
+    }
 }
 
 /// Burns the channels into the window `z` (`w x w`, cell `(0, 0)` the face cell `(i0, j0)`): along each segment between consecutive points the cells of the 8-connected line are lowered to the
-/// level interpolated linearly along the segment (never raised). Returns the number of cells lowered.
-pub fn burn_channels(z: &mut [f64], w: usize, (i0, j0): (i64, i64), channels: &[Channel]) -> usize {
+/// level interpolated linearly along the segment (never raised). Returns the number of cells lowered. Every channel is one cell wide: [`burn_channels_wide`] with no width law.
+pub fn burn_channels(z: &mut [f64], w: usize, origin: (i64, i64), channels: &[Channel]) -> usize {
+    burn_channels_wide(z, w, origin, channels, None)
+}
+
+/// [`burn_channels`] with the width law `(law, cell_m)`, `cell_m` the metres of a local cell: where the width `w = a Q_w^b` of the channel (the discharge interpolated linearly along the segment) is more
+/// than one cell, every cell whose centre lies within `w / 2` of the point of the line is lowered to the line's level there (never raised): a trench of `max(1 cell, w)`. A channel without discharges, or
+/// narrower than a cell, burns exactly as the one-cell line (the bits of K7 before the law). The line is always burnt and the disc comes on top, so the trench of a wider river contains the one-cell line (the width is
+/// measured in face cell-index space: on the cube-face grid a cell is up to 0.7 to 1.2 times the nominal size near the edges and corners, a known limit that the drawing must share).
+pub fn burn_channels_wide(z: &mut [f64], w: usize, (i0, j0): (i64, i64), channels: &[Channel], law: Option<(&WidthLaw, f64)>) -> usize {
     let mut lowered = 0;
     for ch in channels {
         assert!(ch.points.len() == ch.levels.len() && !ch.points.is_empty(), "a level for every point");
+        assert!(ch.q.is_empty() || ch.q.len() == ch.points.len(), "a discharge for every point, or none");
+        assert!(ch.q.iter().all(|q| q.is_finite()), "the discharges of a channel are finite");
+        let width_cells = |q: f64| law.map_or(0.0, |(l, cell_m)| l.width_m(q) / cell_m);
+        let bounds = (i0, i0 + w as i64 - 1, j0, j0 + w as i64 - 1);
         let mut burn = |x: i64, y: i64, level: f64| {
             let (a, b) = (x - i0, y - j0);
             if a >= 0 && b >= 0 && (a as usize) < w && (b as usize) < w {
@@ -77,8 +113,20 @@ pub fn burn_channels(z: &mut [f64], w: usize, (i0, j0): (i64, i64), channels: &[
                 }
             }
         };
+        let q_at = |k: usize, t: f64| -> f64 {
+            if ch.q.is_empty() {
+                0.0
+            } else {
+                let k1 = (k + 1).min(ch.q.len() - 1);
+                ch.q[k] + (ch.q[k1] - ch.q[k]) * t
+            }
+        };
         if ch.points.len() == 1 {
+            let wc = width_cells(q_at(0, 0.0));
             burn(libm::round(ch.points[0].0) as i64, libm::round(ch.points[0].1) as i64, ch.levels[0]);
+            if wc > 1.0 {
+                disc(&mut burn, ch.points[0].0, ch.points[0].1, wc / 2.0, ch.levels[0], bounds);
+            }
         }
         for k in 0..ch.points.len().saturating_sub(1) {
             let ((x0, y0), (x1, y1)) = (ch.points[k], ch.points[k + 1]);
@@ -86,11 +134,32 @@ pub fn burn_channels(z: &mut [f64], w: usize, (i0, j0): (i64, i64), channels: &[
             let steps = libm::fabs(x1 - x0).max(libm::fabs(y1 - y0)).max(1.0).ceil() as i64;
             for s in 0..=steps {
                 let t = s as f64 / steps as f64;
-                burn(libm::round(x0 + (x1 - x0) * t) as i64, libm::round(y0 + (y1 - y0) * t) as i64, l0 + (l1 - l0) * t);
+                let (px, py, level) = (x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, l0 + (l1 - l0) * t);
+                let wc = width_cells(q_at(k, t));
+                // The one-cell line is always burnt (a trench is never narrower than the line: max(1 cell, w)); a wider river adds the cells within w / 2 of the point.
+                burn(libm::round(px) as i64, libm::round(py) as i64, level);
+                if wc > 1.0 {
+                    disc(&mut burn, px, py, wc / 2.0, level, bounds);
+                }
             }
         }
     }
     lowered
+}
+
+/// The cells whose centres lie within `half` cells of `(px, py)` (cell-index space) inside the window box `(x_lo, x_hi, y_lo, y_hi)` (inclusive, in face cell indices), burned to `level`.
+fn disc(burn: &mut impl FnMut(i64, i64, f64), px: f64, py: f64, half: f64, level: f64, (x_lo, x_hi, y_lo, y_hi): (i64, i64, i64, i64)) {
+    let r = libm::ceil(half) as i64;
+    let (cx, cy) = (libm::round(px) as i64, libm::round(py) as i64);
+    // Only the cells of the window: a river far outside it costs nothing.
+    for y in (cy - r).max(y_lo)..=(cy + r).min(y_hi) {
+        for x in (cx - r).max(x_lo)..=(cx + r).min(x_hi) {
+            let (dx, dy) = (x as f64 - px, y as f64 - py);
+            if dx * dx + dy * dy <= half * half {
+                burn(x, y, level);
+            }
+        }
+    }
 }
 
 /// The pits of a surface: land cells whose fill depth reaches `min_m`.
@@ -147,6 +216,8 @@ pub struct K7Params {
     /// The flood of K7's pit statistics, its incising carve and its deposition sweep: the canonical flood (cells visited by level, then cell id; A3 section 6.4, GEN-160) when on, the plain flood of pass 2 when off
     /// (the bits of K7 before GEN-160).
     pub canonical_flood: bool,
+    /// The river width law of the burn-in (and of the drawing): a bake parameter, part of the key.
+    pub width: WidthLaw,
 }
 
 impl K7Params {
@@ -154,7 +225,7 @@ impl K7Params {
     pub fn standard(seed: u64, sea_level: f64) -> K7Params {
         let mut pass2 = Pass2Params::standard(seed, sea_level);
         pass2.carve.breach_max_m = CarveParams::default().breach_max_m;
-        K7Params { pass2, canonical_flood: true }
+        K7Params { pass2, canonical_flood: true, width: WidthLaw::STANDARD }
     }
 }
 
@@ -198,7 +269,7 @@ pub fn k7_tile(
     let (w, t, h) = (g.window(), g.tile as i64, g.halo as i64);
     let origin = (i64::from(id.ti) * t - h, i64::from(id.tj) * t - h);
     let z_start = z.clone();
-    let burned = burn_channels(&mut z, w, origin, channels);
+    let burned = burn_channels_wide(&mut z, w, origin, channels, Some((&p.width, g.dx())));
     let burn_mask: Vec<bool> = z.iter().zip(&z_start).map(|(a, b)| a != b).collect();
     drop(z_start);
     pits.push(("channels burned in", stats(&z)));
