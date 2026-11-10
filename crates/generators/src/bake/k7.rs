@@ -226,6 +226,12 @@ pub fn k7_tile(
     );
     spread_pits(&grid, &mut z, q.sea_level, q.pit_min_m, q.pit_passes);
     pits.push(("the whole pass", stats(&z)));
+    // The stage probe (GEN-161) reads the finished window: off by default, read only.
+    super::probe::emit(super::probe::Stage::K7 { face: id.face.0, ti: id.ti, tj: id.tj }, |s| {
+        super::probe::StageView::new(s, &grid)
+            .f64("z", super::probe::FieldKind::Height, &z)
+            .number("pits_after_pass", pits.last().map_or(0.0, |p| p.1.pit_cells as f64))
+    });
     let (tile, halo) = (g.tile, g.halo);
     let mut change = Vec::with_capacity(tile * tile);
     for j in 0..tile {
