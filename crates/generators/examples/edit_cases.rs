@@ -1,7 +1,7 @@
 //! The edit cases E1-E6 of the prototype region (spikes/prototype-region/results/results.md) at the erosion grid (12,288 cells, 814 m), GEN-146: for each edit the memoised re-solve (G-INC: the tile
 //! floods, the catchments carved, the tiles changed) against the solve of the edited definition without a cache (G-EQ, bit equality), and the structural gates after the edit (G-PART, G-CON, the
 //! conservation of `Q` and `A_d`) with the case's own checks (basin ids and the continuity map for E3, the discharge at the outlet for E4, initiation for E5).
-//! The window is the region plus `margin` cells (its border an outlet). Usage: edit_cases [margin_cells] [threads] [tile] [only]  (`only`: a case name prefix such as E3)
+//! The window is the region plus `margin` cells (its border an outlet). Usage: edit_cases [margin_cells] [threads] [tile] [only]  (`only`: a case name prefix such as E3; `AUX`: the base solve, one edit and the store rows of A3 section 10 that were to measure, G-STORE item 14, then stop)
 #![allow(clippy::needless_range_loop)]
 use planet_core::{Face, Vec3};
 use planet_generators::bake::carve::CarveParams;
@@ -265,6 +265,74 @@ fn outlet_of(r: &Routing, from: usize) -> usize {
     m
 }
 
+/// G-STORE (item 14, inbox #123): the four rows of A3 section 10 that were "to measure", from a memoised base solve and one edit of this window, in bytes at stated layouts and scaled to Earth
+/// by the land cells (2.25e8 at 12,288 cells a face edge). `edit_cases <margin> <threads> <tile> AUX` runs this and stops.
+fn aux_report(c: &Ctx, base: &World, d_base: &Derived, z_base: &[f64], hy_base: &Hydro, cache: &mut RoundCache) {
+    const EARTH_LAND: f64 = 2.25e8;
+    let n = z_base.len();
+    let land = z_base.iter().filter(|&&v| v > 0.0).count();
+    let scale = EARTH_LAND / land as f64;
+    let gb = |b: f64| b * scale / 1e9;
+    println!("AUX window {n} cells, {land} land cells; Earth is {scale:.1} times the land of this window");
+    // 1. The catchment-round key table: one entry a catchment round the memo holds (4 rounds): the key (128 bit), the outlet cell (u32) and the member count (u32).
+    let entries = cache.len();
+    println!(
+        "AUX 1 catchment-round key table: {entries} entries over 4 rounds ({:.0} a round); 24 B an entry (key 16, outlet 4, members 4) = {} B here, {:.4} GB at Earth; the memo that holds the results as well is a cache of {:.1} MB here ({:.2} GB at Earth, evictable, GEN-153)",
+        entries as f64 / 4.0,
+        entries * 24,
+        gb((entries * 24) as f64),
+        cache.bytes() as f64 / 1e6,
+        gb(cache.bytes() as f64)
+    );
+    // 2. Per-tile border summaries: for every tile with land, the border cells (a cell with a neighbour in another tile) carry the lowest value the neighbour offers (f32) and the area share that crosses (f64).
+    let (tile, w) = (c.tile, c.w);
+    let (tw, th) = (w.div_ceil(tile), c.grid.h().div_ceil(tile));
+    let mut border_cells = 0usize;
+    let mut land_tiles = 0usize;
+    for tj in 0..th {
+        for ti in 0..tw {
+            let (x0, y0) = (ti * tile, tj * tile);
+            let (x1, y1) = ((x0 + tile).min(w), (y0 + tile).min(c.grid.h()));
+            let has_land = (y0..y1).any(|y| (x0..x1).any(|x| z_base[y * w + x] > 0.0));
+            if !has_land {
+                continue;
+            }
+            land_tiles += 1;
+            let (bw, bh) = (x1 - x0, y1 - y0);
+            border_cells += if bw >= 2 && bh >= 2 { 2 * bw + 2 * bh - 4 } else { bw * bh };
+        }
+    }
+    let bytes = border_cells * 12;
+    println!(
+        "AUX 2 per-tile border summaries (tile {tile}): {land_tiles} tiles with land of {}, {border_cells} border cells; 12 B a border cell (offer f32 4, crossing area f64 8) = {} B here, {:.4} GB at Earth",
+        tw * th,
+        bytes,
+        gb(bytes as f64)
+    );
+    // 3. Edit overrides: the authored items (TOML, brotli) of STRM-079 (a 64-stroke brush item 36,443 B, 2,936 B brotli) and the changed records of an edit (the replacement table, STRM-079: 0.9 to 2.3 MB).
+    println!("AUX 3 edit overrides: an item is 0.29 to 2.9 KB brotli (STRM-079); 10,000 items of 64 strokes: {:.3} GB brotli, {:.3} GB TOML; the changed records of an edit are the replacement table's 'added' bytes (0.9 to 2.3 MB), kept only while the edit is the latest of its tiles", 10_000.0 * 2936.0 / 1e9, 10_000.0 * 36443.0 / 1e9);
+    // 4. The continuity map of an edit (basin_continuity): for each basin of the old result, its pairs (new id u64, shared cells u32): 8 B a basin + 12 B a pair; one edit (E1) is measured.
+    let mut e1 = base.clone();
+    raise_block(c, &mut e1.z, (8612, 8675, 780, 843), 1000.0, 8.0);
+    let d1 = derive(&e1);
+    let mut z1 = e1.z.clone();
+    let _ = solve_rounds_memo(c.grid, &mut z1, c.outlet, c.p, 4, &c.threads, c.stream, &drivers(&e1, &d1), c.tile, cache);
+    let (hy1, _, _) = h1(c, &e1, &d1, &z1);
+    let map = basin_continuity(hy_base, &hy1);
+    let pairs: usize = map.iter().map(|(_, v)| v.len()).sum();
+    let bytes = map.len() * 8 + pairs * 12;
+    println!(
+        "AUX 4 continuity map of E1: {} basins before, {} after; {} old basins with {pairs} pairs = {bytes} B (8 B a basin + 12 B a pair); the basins of the window scaled to Earth: {:.0} basins, {:.4} GB for one edit's map; kept per undo step (1 or {} steps)",
+        hy_base.basins.len(),
+        hy1.basins.len(),
+        map.len(),
+        hy_base.basins.len() as f64 * scale,
+        gb(bytes as f64),
+        64
+    );
+    let _ = d_base;
+}
+
 fn main() {
     let a: Vec<String> = std::env::args().collect();
     let margin: usize = a.get(1).map_or(400, |s| s.parse().unwrap());
@@ -350,6 +418,10 @@ fn main() {
     println!("base solve (memoised, 4 rounds): {:.1} s; {} catchment rounds held", t.elapsed().as_secs_f64(), cache.len());
     let (hy_base, r_base) = gates(&c, &base, &d_base, &z_base);
     named("the base", &base);
+    if only.as_deref() == Some("AUX") {
+        aux_report(&c, &base, &d_base, &z_base, &hy_base, &mut cache);
+        return;
+    }
 
     // ---- E1: raise a range
     if run("E1") {
