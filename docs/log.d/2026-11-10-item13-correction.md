@@ -1,1 +1,1 @@
-item13-correction: results 6c re-reads R3a and R3b after GEN-162 (window pits 32,962 to 20,517 and 32,316 to 6,418, G-SED closes, stem finding unchanged); docs only.
+- 2026-11-10 item13-correction: results 6c re-reads R3a and R3b after GEN-162 (window pits 32,962 to 20,517 and 32,316 to 6,418, G-SED closes, stem finding unchanged); docs only.
