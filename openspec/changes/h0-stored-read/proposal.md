@@ -3,7 +3,8 @@ Decision D11 (architect, 2026-11-10; inbox #123): item 3's stored-field read sta
 
 ## What Changes
 - `bake::preview::PreviewBase::from_field(n, src, map, word)`: the H0 base from a `LatticeSource` (a stored bake or an in-memory grid): C1 read of the height at each cell centre, bilinear read of rainfall and temperature. It is the means for D11's read, not a new feature path: nothing in the app calls it yet; `from_class_source` is unchanged.
-- `tests/h0_stored_read` (cache): a 16-cell bake in blocks of 4 stored and read through `StoreSource` against `GridSource`: H0 of 12 cells a face edge (864 cells, 6 x 44 edge cells, 24 corner cells); every height and rainfall equal bit for bit (the stored codec is lossless: step 0), receivers, areas and outlets of the two routings equal, an empty store is an error.
+- `tests/h0_stored_read` (cache): a 16-cell bake in blocks of 4 stored and read through `StoreSource` against `GridSource`: H0 of 12 cells a face edge (864 cells, 6 x 44 edge cells, 24 corner cells); every height, rainfall and temperature equal bit for bit, every edge cell's stencil reaching over its face edge (the stored codec is lossless: step 0), receivers, areas and outlets of the two routings equal, an empty store, a recording source, a field with no cell at or below the sea level, a NaN height and a one-cell grid are errors (not panics, not placeholders; the numerics review).
+- Advisories kept: the base word is the caller's (no app caller yet; a caller folds in the source's resolution, reader versions, relief scale and mapping), the radius is the reference body's, and `map` must be the mapping the bake was made with (TangentWarp is the only one).
 - GEN-164 added (generator-pipeline).
 
 ## Impact

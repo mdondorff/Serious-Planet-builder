@@ -9,7 +9,7 @@ use planet_cache::global_store::{build_global, GlobalWorld, StoreSource};
 use planet_cache::pack::{TileStore, DEFAULT_MAX_PACK_BYTES};
 use planet_core::cube::TangentWarp;
 use planet_generators::bake::preview::PreviewBase;
-use planet_generators::global::{bake, GridSource};
+use planet_generators::global::{bake, locate_direction, GridSource, LatticeSource, ReadError};
 use planet_world_def::WorldDefinition;
 
 const R: f64 = 6_371_000.0;
@@ -48,6 +48,7 @@ fn h0_read_from_stored_blocks_is_h0_read_from_the_in_memory_bake_across_every_cu
     let stored = PreviewBase::from_field(n, &src, &TangentWarp, 1).expect("the stored field reads");
     let memory = PreviewBase::from_field(n, &mem, &TangentWarp, 1).expect("the in-memory field reads");
     let (hs, hm) = (stored.heights(), memory.heights());
+    let grid_h0 = planet_generators::bake::h0::GlobalGrid::new(n, 6_371_000.0);
     assert_eq!(hs.len(), 6 * n * n);
     let step = 0.0; // the stored block codec is lossless: the quantisation step of the production store is 0
     let mut worst = 0.0f64;
@@ -63,6 +64,17 @@ fn h0_read_from_stored_blocks_is_h0_read_from_the_in_memory_bake_across_every_cu
                 worst = worst.max((hs[id] - hm[id]).abs());
                 assert_eq!(hs[id].to_bits(), hm[id].to_bits(), "face {f} cell ({i}, {j}) height");
                 assert_eq!(stored.rainfall()[id].to_bits(), memory.rainfall()[id].to_bits(), "face {f} cell ({i}, {j}) rainfall");
+                assert_eq!(stored.temperature()[id].to_bits(), memory.temperature()[id].to_bits(), "face {f} cell ({i}, {j}) temperature");
+                if on_edge {
+                    // The stencil of an edge cell reaches over the face edge: its lattice cell is the face's first or last (a ghost node on the neighbour face is read), and a corner cell reads the diagonal ghost.
+                    let at = locate_direction(16, &TangentWarp, grid_h0.direction(id as u32)).unwrap();
+                    assert!(
+                        at.i == 0 || at.j == 0 || at.i == 15 || at.j == 15,
+                        "face {f} cell ({i}, {j}) reads lattice cell ({}, {})",
+                        at.i,
+                        at.j
+                    );
+                }
             }
         }
     }
@@ -85,5 +97,46 @@ fn h0_read_from_stored_blocks_is_h0_read_from_the_in_memory_bake_across_every_cu
     fs::create_dir_all(&empty.0).unwrap();
     let nothing = TileStore::open(&empty.0, w.params()).unwrap();
     let missing = StoreSource::new(&nothing, &w, 16).unwrap();
-    assert!(PreviewBase::from_field(n, &missing, &TangentWarp, 1).is_err());
+    assert!(matches!(PreviewBase::from_field(n, &missing, &TangentWarp, 1), Err(ReadError::Source(_))));
+    // Sources and shapes that cannot make a base are errors, not panics or placeholders.
+    assert!(matches!(PreviewBase::from_field(1, &src, &TangentWarp, 1), Err(ReadError::Shape(_))));
+    assert!(
+        matches!(PreviewBase::from_field(n, &Dry(100.0), &TangentWarp, 1), Err(ReadError::Shape(_))),
+        "no cell at or below the sea level"
+    );
+    assert!(
+        matches!(PreviewBase::from_field(n, &Dry(f32::NAN), &TangentWarp, 1), Err(ReadError::Source(_))),
+        "a height that is not a number"
+    );
+    assert!(
+        matches!(PreviewBase::from_field(n, &Recording(&mem), &TangentWarp, 1), Err(ReadError::Source(_))),
+        "a source that only records reads"
+    );
+}
+
+/// A field with one height everywhere.
+struct Dry(f32);
+
+impl LatticeSource for Dry {
+    fn res(&self) -> u32 {
+        16
+    }
+    fn at(&self, _: planet_core::Face, _: u32, _: u32) -> Result<planet_generators::global::GlobalSample, ReadError> {
+        Ok(planet_generators::global::GlobalSample { continent: 1.0, elevation_m: self.0, temperature_c: 10.0, precipitation_mm: 500.0 })
+    }
+}
+
+/// A source that only records which cells are asked for (the footprint pass of a gathered batch).
+struct Recording<'a>(&'a dyn LatticeSource);
+
+impl LatticeSource for Recording<'_> {
+    fn res(&self) -> u32 {
+        self.0.res()
+    }
+    fn at(&self, face: planet_core::Face, i: u32, j: u32) -> Result<planet_generators::global::GlobalSample, ReadError> {
+        self.0.at(face, i, j)
+    }
+    fn records_reads(&self) -> bool {
+        true
+    }
 }
