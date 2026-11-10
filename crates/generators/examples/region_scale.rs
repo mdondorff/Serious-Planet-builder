@@ -1,7 +1,7 @@
 //! The prototype region at the erosion grid (inbox #100 step 1): face 1, the region of results.md (i 2014-2168, j 190-344 of the 3,072-cell grid) at 12,288 cells a face edge (814 m cells, 0.66 km^2),
 //! with a margin of `margin` cells on every side (its border an outlet: an artificial cut). `gates`: the round solver against the whole-region carve (G-ROUND), 1 and N threads (G-DET), the
 //! partitioned route against the resident route (G-PART), H1 on the carved surface with the runoff of the orographic climate (G-CON, conservation, the channel density) and the process memory.
-//! `mem`: only the set-up, the 4 rounds and the H1 pass, with the peak working set after each (PowerShell, Windows). Usage: region_scale [gates|mem] [margin_cells] [threads] [tile]
+//! `mem`: only the set-up, the 4 rounds and the H1 pass, with the peak working set after each (PowerShell, Windows). Usage: [PLANET_REGION=seed,face,i0,j0,size] region_scale [gates|mem] [margin_cells] [threads] [tile]; without PLANET_REGION the region above (seed 14).
 #![allow(clippy::needless_range_loop)]
 use planet_core::{Face, Vec3};
 use planet_generators::bake::carve::{carve, CarveParams};
@@ -19,8 +19,22 @@ use std::time::Instant;
 
 const CELLS: usize = 12_288;
 const R: f64 = 6_371_000.0;
-/// The region of results.md at 3,072 cells, times 4.
-const REGION: (usize, usize, usize, usize) = (2014 * 4, 2168 * 4 + 3, 190 * 4, 344 * 4 + 3);
+/// The default region: the region of results.md at 3,072 cells, times 4 (seed 14, face 1, start (8056, 760), 620 cells). `PLANET_REGION=seed,face,i0,j0,size` (cells at 12,288 a face edge) names another.
+const DEFAULT_REGION: &str = "14,1,8056,760,620";
+
+/// The region: seed, face, and the inclusive cell ranges `i0..=i1`, `j0..=j1`.
+fn region() -> (u64, u8, (usize, usize, usize, usize)) {
+    let text = std::env::var("PLANET_REGION").unwrap_or_else(|_| DEFAULT_REGION.to_string());
+    let v: Vec<usize> = text
+        .split(',')
+        .map(|s| s.trim().parse().unwrap_or_else(|_| panic!("PLANET_REGION={text}: seed,face,i0,j0,size, all integers")))
+        .collect();
+    assert!(
+        v.len() == 5 && v[1] < 6 && v[4] > 0 && v[2] + v[4] <= CELLS && v[3] + v[4] <= CELLS,
+        "PLANET_REGION={text}: seed,face (0-5),i0,j0,size inside the face of {CELLS} cells"
+    );
+    (v[0] as u64, v[1] as u8, (v[2], v[2] + v[4] - 1, v[3], v[3] + v[4] - 1))
+}
 const SECONDS_PER_YEAR: f64 = 31_557_600.0;
 
 fn memory_mb() -> (f64, f64) {
@@ -40,12 +54,12 @@ fn main() {
     let margin: usize = a.get(2).map_or(400, |s| s.parse().unwrap());
     let threads: usize = a.get(3).map_or(8, |s| s.parse().unwrap());
     let tile: usize = a.get(4).map_or(256, |s| s.parse().unwrap());
-    let (i0, i1) = (REGION.0.saturating_sub(margin), (REGION.1 + margin).min(CELLS - 1));
-    let (j0, j1) = (REGION.2.saturating_sub(margin), (REGION.3 + margin).min(CELLS - 1));
+    let (seed, face, region) = region();
+    let (i0, i1) = (region.0.saturating_sub(margin), (region.1 + margin).min(CELLS - 1));
+    let (j0, j1) = (region.2.saturating_sub(margin), (region.3 + margin).min(CELLS - 1));
     let (w, h) = (i1 - i0 + 1, j1 - j0 + 1);
     let n = w * h;
-    let seed = 14u64;
-    let spec = FaceSpec { face: Face(1), cells: CELLS, radius_m: R, sea_level: 0.0, seed, halo: 0 };
+    let spec = FaceSpec { face: Face(face), cells: CELLS, radius_m: R, sea_level: 0.0, seed, halo: 0 };
     let t = Instant::now();
     let inputs = BakeInputs::new(seed, threads);
     let mut z0 = vec![0.0f64; n];
@@ -127,8 +141,8 @@ fn main() {
         drop((part, cache, res));
         h1(&grid, &one, &outlet, &spec, &inputs, stream, threads, &z0);
         let mut dz: Vec<f64> = Vec::new();
-        for j in REGION.2..=REGION.3 {
-            for i in REGION.0..=REGION.1 {
+        for j in region.2..=region.3 {
+            for i in region.0..=region.1 {
                 let k = (j - j0) * w + (i - i0);
                 if z0[k] > 0.0 {
                     dz.push(one[k] - z0[k]);
