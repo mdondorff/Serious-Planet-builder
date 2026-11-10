@@ -42,6 +42,7 @@ mod bake_spill;
 mod bake_thermal;
 #[path = "bake_tile.rs"]
 mod bake_tile;
+mod bake_water_mask;
 #[path = "block_order.rs"]
 mod block_order;
 #[path = "body_keys.rs"]

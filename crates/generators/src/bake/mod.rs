@@ -36,6 +36,7 @@ pub mod sediment;
 pub mod spill;
 pub mod thermal;
 pub mod tile;
+pub mod water_mask;
 
 /// A `w x h` grid of cells `dx` metres apart, row-major (`p = j w + i`), 8-connected, not wrapping, whose cell `(0, 0)` is the global cell `(origin.0, origin.1)`.
 #[derive(Clone, Debug, PartialEq)]
