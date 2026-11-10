@@ -107,6 +107,33 @@ fn main() {
     let rules = RoundRules::ROUND;
     let (peak, now) = memory_mb();
     println!("memory after the set-up: peak {peak:.0} MiB, now {now:.0} MiB");
+    {
+        // The relief and the precipitation of the land of the region proper, from the current base (item 13).
+        let (mut zs, mut ps) = (Vec::new(), Vec::new());
+        for j in region.2..=region.3 {
+            for i in region.0..=region.1 {
+                let k = (j - j0) * w + (i - i0);
+                if z0[k] > 0.0 {
+                    zs.push(z0[k]);
+                    ps.push(inputs.orography().precipitation_mm(spec.halo_direction(i as i64, j as i64)));
+                }
+            }
+        }
+        zs.sort_by(|a, b| a.total_cmp(b));
+        ps.sort_by(|a, b| a.total_cmp(b));
+        let q = |v: &[f64], f: f64| v[((v.len() - 1) as f64 * f) as usize];
+        println!(
+            "region land (base): {} cells, z p5 {:.0} p50 {:.0} p95 {:.0} max {:.0} m; precipitation p5 {:.0} p50 {:.0} p95 {:.0} mm",
+            zs.len(),
+            q(&zs, 0.05),
+            q(&zs, 0.5),
+            q(&zs, 0.95),
+            zs[zs.len() - 1],
+            q(&ps, 0.05),
+            q(&ps, 0.5),
+            q(&ps, 0.95)
+        );
+    }
 
     if mode == "gates" {
         let mut one = z0.clone();

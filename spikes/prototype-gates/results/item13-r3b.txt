@@ -1,0 +1,17 @@
+stage probe ON: sheets and numbers in target/review/stages/region-s15-f2-i9968-j8304/ (its cost is inside the times below; PLANET_STAGES=0 switches it off)
+window i 9768-10787 j 8104-9123: 1020 x 1020 = 1040400 cells (830.7 x 830.7 km), land 84.9 %, base sampled in 14.8 s
+memory after the set-up: peak 167 MiB, now 59 MiB
+round solver, 1 thread: 6.8 s
+round solver, 8 threads: 6.2 s
+G-DET: 0 cells differ between 1 and 8 threads
+whole-region carve (same rules): 7.7 s; G-ROUND: 0 cells differ
+G-PART, tile 256: 16 tiles, 5 sweeps, 49 tile floods, 4.1 s (resident 1.4 s); 0 receivers, 0 A_d differ
+runoff, weights and net evaporation: 0.1 s
+weighted route 1.5 s, canonical flood 0.2 s (9 % of the route-and-flood step)
+plains: 343014 land cells in the region; false flats 0 (0.00 %: 0 with a drop of exactly 0, 0 below one f32 step); sinks 4732 (1.38 %, mean fill 0.19 m); pits 0 (0.00 %)
+H1: 0.2 s; HydroStats { channel_cells: 78279, heads: 12196, confluences: 10854, mouths: 184, segments: 23031, basin_cells: 32316, ramps: 2, basins: 68, artefacts: 21 }
+G-CON and conservation: Verify { disconnected_segments: 0, broken_channel_cells: 0, miscovered_cells: 0, max_confluence_error: 4.392525765020407e-16, q_outlets_error: 2.783006267443962e-15, qw_closure_error: 1.4842700093034464e-15, qw_confluence_error: 4.20297530769703e-16, area_outlets_error: 5.888251612335644e-15 }
+channel density: 8.9 % of land cells are channel cells; 24.35 heads and 45.99 segments per 1,000 km2 of land (883645 land cells, 500810 km2); T = 75 km2 = 128 cells
+largest mouth (10255, 8791) 2104 m3/s; basins 68 kept (68 lakes, 0 endorheic), 21 artefacts, 2 ramps, 18 shallower than 1 m
+region land change (m): n 343014 p5 -133.1 p50 3.5 p95 16.5 max 19.2
+total 43.5 s, stage probe ON

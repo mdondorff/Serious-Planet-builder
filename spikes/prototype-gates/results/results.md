@@ -102,3 +102,54 @@ The prototype region on seed 15 is ocean (0 land cells): its fixtures are specif
 ## Visuals
 
 Nothing to look at: the question is numeric (bit equality and conservation); no images.
+
+## 6. Item 13 re-run on main 563c0e60 (2026-11-10)
+
+The re-run of the structural gates of section 3 on R3a and R3b with the library's example `region_scale` (not the probe), stage probe ON, on the code of main 563c0e60 (the runs were made from the branch commit 29ea4426, which main holds; the relief line printed below was added after the runs and read with a second `mem` run of the same windows); section 3's rows above are unchanged. Release build, Windows, 8 threads, BelowNormal, margin 200 (1,020 x 1,020 cells, 1.04e6), tile 256. Raw output: `item13-r3a.txt`, `item13-r3b.txt`; the probe's numbers: `item13-r3a-stages.txt`, `item13-r3b-stages.txt`. Sheets (not committed): `target/review/stages/region-s15-f4-i368-j4720/` and `region-s15-f2-i9968-j8304/` in the crusader worktree (`C:\DEV\Serious-Planet-Builder\.claude\worktrees\sonnet-crusader-c1a4f2`): `round-00..03` `z` and `area`, `h1` `area`, `z`, `filled`.
+
+| Gate | R3a (seed 15, face 4) | R3b (seed 15, face 2) | Section 3 (R3a / R3b) |
+|---|---|---|---|
+| G-ROUND (round solver against the whole-region carve) | 0 cells | 0 cells | 0 / 0 |
+| G-DET (1 against 8 threads) | 0 cells | 0 cells | 0 / 0 |
+| G-PART, tile 256 (receivers; `A_d` bits) | 0; 0 (5 sweeps, 43 floods) | 0; 0 (5 sweeps, 49 floods) | 0 (5 to 11) / 0 (5 to 9) |
+| G-CON (disconnected, broken channel cells, miscovered) | 0, 0, 0 | 0, 0, 0 | 0 |
+| `Q` at confluences / outlets; `A_d` at outlets | 4.4e-16 / 3.0e-14; 1.6e-14 | 4.4e-16 / 2.8e-15; 5.9e-15 | 4.3e-16 / 3.0e-14 / 1.6e-14; 4.3e-16 / 2.6e-15 / 5.9e-15 |
+| Channel cells, heads, segments, mouths | 76,098; 13,794; 25,835; 491 | 78,279; 12,196; 23,031; 184 | channel cells 76,098 / 78,279 |
+| Channel density; heads, segments a 1,000 km^2 | 10.5 %; 36.85, 69.01 | 8.9 %; 24.35, 45.99 | 10.5 %; 36.8, 69.0 / 8.9 %; 24.4, 46.0 |
+| Basins kept; artefacts; ramps | 195 lakes, 0 endorheic; 147; 1 | 68 lakes, 0 endorheic; 21; 2 | 195, 147, 1 / 68, 21, 2 |
+| Pits (land cells with no receiver that are not outlets) | 0 | 0 | not measured |
+
+Every number of section 3 is reproduced (same hydrology, same counts); G-SED, G-BASIN, G-LAND and H1's other gates are not in `region_scale` (it runs the round solver and H1 only), so they were not run.
+
+Relief and precipitation of the land of the region proper (620 x 620 cells) from the current base, next to section 3 (whose z is the land of the whole 1.04e6-cell window with its margin: the probe's round-00 `z` max is 747 m for R3a, so the 684 m p95 of section 3 belongs to that larger set):
+
+| Window | Land cells | z p5 / p50 / p95 / max (m) | Precipitation p5 / p50 / p95 (mm) | Section 3 z p50 / p95 / max |
+|---|---|---|---|---|
+| R3a | 321,971 | 1 / 25 / 478 / 687 | 853 / 946 / 1,316 | 35 / 684 / 744 |
+| R3b | 343,014 | 9 / 282 / 447 / 494 | 733 / 1,387 / 3,313 | 345 / 468 / 535 |
+
+Time a phase (seconds, probe ON, so the probe's cost is inside them; `probe_ms` of each field is in the stages files):
+
+| Phase | R3a | R3b |
+|---|---|---|
+| Base sampled (1.04e6 cells, 8 threads) | 14.7 | 14.8 |
+| Round solver, 4 rounds, 1 thread / 8 threads | 5.8 / 5.2 | 6.8 / 6.2 |
+| Whole-region carve (same rules) | 6.3 | 7.7 |
+| G-PART, tile 256 (resident route) | 3.6 (1.2) | 4.1 (1.4) |
+| Weighted route; canonical flood | 1.2; 0.2 | 1.5; 0.2 |
+| H1 | 0.3 | 0.2 |
+| Total | 39.2 | 43.5 |
+
+The canonical flood is 12 % (R3a) and 9 % (R3b) of the route-and-flood step, and 0.5 % of the run.
+
+Plains block. A false flat is a land cell of the region with a receiver whose drop on the canonical filled surface to the receiver is exactly 0 or below one f32 step at that height (the surface a tile stores in f32 cannot hold such a drop; a negative drop would count too). A sink is a land cell the fill raised (filled above the carved surface); a pit has no receiver and is not an outlet.
+
+| | R3a | R3b |
+|---|---|---|
+| False flats | 0 (0 at a drop of exactly 0, 0 below one f32 step) | 0 (0, 0) |
+| Sinks (share of region land; mean fill) | 30,856 (9.58 %; 0.39 m) | 4,732 (1.38 %; 0.19 m) |
+| Pits | 0 | 0 |
+
+The canonical flood's epsilon is 1e-3 m, which is above one f32 step below about 8 km of height, so the filled surface has no flat by construction at these heights; the fill raises land cells by a mean of 0.2 to 0.4 m (the plains' depressions). The sinks share is not section 3's "unkept pit cells" (0.035 % and 0.010 %: only pits deeper than a limit that H1 does not keep as basins).
+
+Verdict: no gate fails; the verdicts are the architect's.
