@@ -60,6 +60,9 @@ impl LTileSpec {
         };
         let mut b = as_tile.bytes();
         b.push(u8::from(self.k7.canonical_flood));
+        // The river width law of the burn-in (GEN-165): a and b are bake parameters, so another law is another layer.
+        b.extend(self.k7.width.a.to_bits().to_le_bytes());
+        b.extend(self.k7.width.b.to_bits().to_le_bytes());
         b.extend(self.base_id.to_le_bytes());
         b
     }

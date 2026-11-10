@@ -102,11 +102,17 @@ fn the_key_follows_the_base_every_input_and_the_layer_version_and_a_tile_under_a
     other_k7.canonical_flood = false;
     let mut other_pit = s.k7;
     other_pit.pass2.pit_min_m += 0.25;
+    let mut other_a = s.k7;
+    other_a.width.a = 7.3;
+    let mut other_b = s.k7;
+    other_b.width.b = 0.55;
     for c in [
         LTileSpec { base_id: 8, ..s },
         LTileSpec { inputs_id: 12, ..s },
         LTileSpec { k7: other_k7, ..s },
         LTileSpec { k7: other_pit, ..s },
+        LTileSpec { k7: other_a, ..s },
+        LTileSpec { k7: other_b, ..s },
         LTileSpec { grid: TileGrid { halo: 5, ..s.grid }, ..s },
         LTileSpec { grid: TileGrid { cells: 192, tile: 48, ..s.grid }, ..s },
     ] {
