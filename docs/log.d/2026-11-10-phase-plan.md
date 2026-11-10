@@ -1,0 +1,1 @@
+- 2026-11-10 phase-plan: the resident build as one phase plan (spill, rounds, one flood, H1, G-CON, release of Q and Qw, sediment pass; GEN-158); two k=4 runs read 11,363 and 11,131 MiB of peak commit against the 11,444 gate, hashes equal, G-CON at most 5.4e-13
