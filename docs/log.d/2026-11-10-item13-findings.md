@@ -1,0 +1,1 @@
+- 2026-11-10 item13-findings: region_scale prints the deposited thickness along the main stem; results section 6 gets G-LAND, G-SED and the sheet findings (item 13)

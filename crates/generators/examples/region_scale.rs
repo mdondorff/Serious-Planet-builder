@@ -310,7 +310,7 @@ fn h1(
         hy.stats.artefacts,
         hy.stats.ramps
     );
-    land_and_sediment(grid, z, &filled, outlet, z0, &hy, region, spec.seed, threads);
+    land_and_sediment(grid, z, &filled, outlet, &routing.receiver, &routing.area, z0, &hy, region, spec.seed, threads);
 }
 
 /// The plains block (item 13): over the land cells of the region proper, on the carved surface `z` and its canonical filled surface.
@@ -367,6 +367,8 @@ fn land_and_sediment(
     z: &[f64],
     filled: &[f64],
     outlet: &[bool],
+    receiver: &[u32],
+    area: &[f64],
     z0: &[f64],
     hy: &planet_generators::bake::hydro::Hydro,
     region: (usize, usize, usize, usize),
@@ -410,6 +412,7 @@ fn land_and_sediment(
     let t = Instant::now();
     let r = sediment_pass(grid, &mut zs, z0, &q2, threads);
     let rel = |a: f64, b: f64| (a - b).abs() / a.abs().max(1.0);
+    stem(grid, z, &zs, receiver, area, hy);
     println!(
         "G-SED: sediment pass {:.1} s; eroded {:.4e} m3 = deposited {:.4e} + exported {:.4e} (residual {:.2e} relative); the heights moved by {:.4e} m3 (against deposited {:.2e}); eroded before thermal {:.4e}, after {:.4e}; volume change thermal {:.2e}, pit spreading {:.2e}; pits {:?}",
         t.elapsed().as_secs_f64(),
@@ -425,4 +428,52 @@ fn land_and_sediment(
         r.spread_volume_change,
         r.pits.iter().map(|(n, p)| format!("{n} {} ({:.3} %)", p.pit_cells, 100.0 * p.share())).collect::<Vec<_>>()
     );
+}
+
+/// The deposited thickness along the main stem (item 13, finding 3): from the mouth with the largest discharge among channel cells without a receiver, upstream through the donor of the largest drainage area
+/// to a head; the thickness is the sediment pass's change of height (`after - z`) at each cell; p50 and max per tenth of the stem's cells, from the source (decile 1) to the mouth (decile 10).
+fn stem(grid: &Grid, z: &[f64], after: &[f64], receiver: &[u32], area: &[f64], hy: &planet_generators::bake::hydro::Hydro) {
+    let n = grid.len();
+    let (w, h) = (grid.w(), grid.len() / grid.w());
+    let mut donor_of = vec![usize::MAX; n];
+    for p in 0..n {
+        let r = receiver[p];
+        if r != NONE && (donor_of[r as usize] == usize::MAX || area[p] > area[donor_of[r as usize]]) {
+            donor_of[r as usize] = p;
+        }
+    }
+    // The mouths by discharge; the first whose stem does not start on the window's border (a river entering from the margin is a cut, not a source).
+    let mut mouths: Vec<usize> = (0..n).filter(|&p| hy.channel[p] && receiver[p] == NONE).collect();
+    mouths.sort_by(|&a, &b| hy.q[b].total_cmp(&hy.q[a]));
+    let (mut path, mut mouth, mut rank) = (Vec::new(), usize::MAX, 0usize);
+    for (k, &m) in mouths.iter().enumerate() {
+        let mut p = vec![m];
+        while donor_of[*p.last().unwrap()] != usize::MAX {
+            p.push(donor_of[*p.last().unwrap()]);
+        }
+        let head = *p.last().unwrap();
+        let (x, y) = (head % w, head / w);
+        if x >= 3 && y >= 3 && x + 3 < w && y + 3 < h && p.len() >= 30 {
+            (path, mouth, rank) = (p, m, k + 1);
+            break;
+        }
+    }
+    if mouth == usize::MAX {
+        println!("stem: no stem of 30 cells or more that starts inside the window");
+        return;
+    }
+    let best_q = hy.q[mouth];
+    path.reverse();
+    let len = path.len();
+    let mut out = String::new();
+    for d in 0..10 {
+        let mut v: Vec<f64> = path[d * len / 10..(d + 1) * len / 10].iter().map(|&p| after[p] - z[p]).collect();
+        v.sort_by(|a, b| a.total_cmp(b));
+        if v.is_empty() {
+            continue;
+        }
+        out += &format!(" {}: {:.2}/{:.2}", d + 1, v[v.len() / 2], v[v.len() - 1]);
+    }
+    let km = len as f64 * grid.dx() / 1000.0;
+    println!("stem (mouth number {rank} by discharge): {len} cells (about {km:.0} km of cells, straight-line steps), mouth discharge {best_q:.0} m3/s, drainage area at the mouth {:.3e} m2, at the source {:.3e} m2; deposited thickness p50/max (m) by tenth from the source:{out}", area[mouth], area[path[0]]);
 }
