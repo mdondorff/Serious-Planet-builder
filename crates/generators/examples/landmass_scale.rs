@@ -162,8 +162,108 @@ fn get(bits: &[u64], g: usize) -> bool {
     bits[g >> 6] >> (g & 63) & 1 == 1
 }
 
+/// The dams of the final surface (inbox #124): the land pits (the canonical flood, 0.5 m) deeper than 20 m, and among them those that are dams of infilled one-cell canyons, counted by a stated definition. A dam
+/// is a pit whose spill cell `q` (a rim cell at the pit's fill level) has the outside cell beyond it along the line from the pit more than 5 m lower, and both cells on either side of `q` across that line higher than
+/// `q`: a one-cell-thick wall across a cut. Components are 8-connected; the cube grid's edges can bend a line, so the cross-axis test is exact inside a face only.
+fn dam_count(grid: &Grid, z: &[f64], outlet: &[bool]) -> (usize, usize, usize) {
+    use planet_generators::bake::NEIGHBOURS;
+    let t = Instant::now();
+    let filled = priority_flood_with(grid, z, outlet, 1e-3, true);
+    let is_pit = |c: usize| z[c] > 0.0 && filled[c] - z[c] > 0.5;
+    let mut label = vec![u32::MAX; z.len()];
+    let (mut comps, mut deep, mut dams) = (0usize, 0usize, 0usize);
+    let mut worst: Vec<(f64, f64, usize)> = Vec::new();
+    let mut stack: Vec<usize> = Vec::new();
+    for s in 0..z.len() {
+        if label[s] != u32::MAX || !is_pit(s) {
+            continue;
+        }
+        let id = comps as u32;
+        comps += 1;
+        label[s] = id;
+        stack.push(s);
+        let (mut cells, mut depth, mut level) = (Vec::new(), 0.0f64, f64::NEG_INFINITY);
+        while let Some(c) = stack.pop() {
+            cells.push(c);
+            depth = depth.max(filled[c] - z[c]);
+            level = level.max(filled[c]);
+            for d in 0..8 {
+                if let Some(q) = grid.neighbour(c, d) {
+                    if label[q] == u32::MAX && is_pit(q) {
+                        label[q] = id;
+                        stack.push(q);
+                    }
+                }
+            }
+        }
+        if depth < 20.0 {
+            continue;
+        }
+        deep += 1;
+        let mut dam = false;
+        'rim: for &p in &cells {
+            for d in 0..8 {
+                let Some(q) = grid.neighbour(p, d) else { continue };
+                if label[q] == id || (z[q] - level).abs() > 0.5 {
+                    continue;
+                }
+                let (di, dj) = NEIGHBOURS[d];
+                let at = |a: i64, b: i64| NEIGHBOURS.iter().position(|&o| o == (a, b)).and_then(|k| grid.neighbour(q, k));
+                let (Some(r), Some(n1), Some(n2)) = (at(di, dj), at(-dj, di), at(dj, -di)) else { continue };
+                if z[r] < z[q] - 5.0 && z[n1] > z[q] && z[n2] > z[q] {
+                    dam = true;
+                    break 'rim;
+                }
+            }
+        }
+        if dam {
+            dams += 1;
+            worst.push((depth, level, cells[0]));
+        }
+    }
+    worst.sort_by(|a, b| b.0.total_cmp(&a.0));
+    println!(
+        "DAMS (final surface, {:.0} s): {comps} land pits over 0.5 m; {deep} deeper than 20 m; {dams} of those are dams (a one-cell wall across a cut at the spill: outside cell more than 5 m lower, both cross-axis cells higher)",
+        t.elapsed().as_secs_f64()
+    );
+    for (depth, level, cell) in worst.iter().take(10) {
+        println!("  dam: depth {depth:.1} m, fill level {level:.1} m, a pit cell {cell}");
+    }
+    (comps, deep, dams)
+}
+
+/// The dam count on a fixture: a plateau at 200 m with a sea on its west edge, a one-cell canyon (walls 200 m) whose floor rises inland and is raised to 90 m at one cell (a dam: a pit behind it over 20 m deep), and a closed
+/// 5 x 5 basin 50 m deep in the plateau (a pit with no dam). `landmass_scale 1 8 damtest` expects 2 pits deeper than 20 m and 1 dam.
+fn dam_selftest() {
+    let (w, h) = (48usize, 48usize);
+    let mut z = vec![200.0f64; w * h];
+    for j in 0..h {
+        for i in 0..2 {
+            z[j * w + i] = -10.0;
+        }
+    }
+    for i in 2..31 {
+        z[20 * w + i] = 20.0 + i as f64;
+    }
+    z[20 * w + 10] = 90.0;
+    for j in 32..37 {
+        for i in 24..29 {
+            z[j * w + i] = 150.0;
+        }
+    }
+    let grid = Grid::new(w, h, 100.0);
+    let outlet = grid.outlets(&z, 0.0);
+    let (comps, deep, dams) = dam_count(&grid, &z, &outlet);
+    println!("DAM SELFTEST: {comps} pits, {deep} deeper than 20 m, {dams} dams (expected 2 and 1)");
+    assert_eq!((deep, dams), (2, 1), "the dam count on its fixture");
+}
+
 fn main() {
     let a: Vec<String> = std::env::args().collect();
+    if a.get(3).is_some_and(|m| m == "damtest") {
+        dam_selftest();
+        return;
+    }
     let k: usize = a.get(1).map_or(1, |s| s.parse().unwrap());
     let threads: usize = a.get(2).map_or(8, |s| s.parse().unwrap());
     let n = COARSE * k;
@@ -366,6 +466,13 @@ fn main() {
             let (peak, now, commit) = memory3();
             println!("MARK {name}: working set {now:.0} MiB now, peak {peak:.0} MiB, peak commit {commit:.0} MiB");
         };
+        // The stage probe (as `region_scale`): sheets of at most `PLANET_STAGE_BINS` bins (default 4,194,304) in target/review/stages/plan-k<k>/; `PLANET_STAGES=0` switches it off. Its memory is inside the peaks below.
+        if std::env::var("PLANET_STAGES").map_or(true, |v| v != "0") {
+            let bins: usize = std::env::var("PLANET_STAGE_BINS").ok().and_then(|v| v.parse().ok()).unwrap_or(4_194_304);
+            let dir = format!("target/review/stages/plan-k{k}");
+            planet_generators::bake::probe::install(std::sync::Arc::new(planet_generators::bake::probe::SheetProbe::new(&dir, bins)));
+            println!("stage probe ON: sheets of at most {bins} bins and numbers in {dir}/ (its memory is inside the peaks; PLANET_STAGES=0 switches it off)");
+        }
         let params = PlanParams::standard(seed, threads, format!("target/plan_zstart_k{k}_{}.f64", std::process::id()).into());
         let t = Instant::now();
         let built = build_resident(&grid, z, &outlet, &params, &climate, &mark).expect("the build");
@@ -394,6 +501,9 @@ fn main() {
             r.spill_bytes,
             built.hydro.segments.len()
         );
+        if std::env::var("PLANET_DAMS").map_or(true, |v| v != "0") {
+            let _ = dam_count(&grid, &built.z, &outlet);
+        }
         cpu_phase("the plan");
         return;
     }

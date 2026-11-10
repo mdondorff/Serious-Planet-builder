@@ -1,0 +1,1 @@
+- 2026-11-10 k4-probe-dams: landmass_scale plan installs the stage probe and prints the dam count of the final surface (dam = a one-cell wall across a cut at a pit deeper than 20 m; fixture selftest 2 pits, 1 dam); k=1 hashes equal main, 516 land pits and none deeper than 20 m.
