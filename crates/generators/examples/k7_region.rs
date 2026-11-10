@@ -268,6 +268,10 @@ fn main() {
                 gate.nodes_by_step, gate.over_by_step, gate.max_error_over_step, gate.bins_over, gate.bins, gate.busiest_bin_over, gate.p95_quantised_m
             );
             println!(
+                "  G-SURF-I error against the local base slope: {} nodes with a base rise of at least 1 m across one cell; difference over that rise: p99 {:.3}, max {:.3}; overshoot of the runtime read beyond the four composed cells: max {:.4} m, {} nodes over 0.25 m",
+                gate.nodes_with_rise, gate.p99_error_over_rise, gate.max_error_over_rise, gate.max_runtime_overshoot_m, gate.runtime_overshoot_nodes
+            );
+            println!(
                 "  quantised difference at the nodes: p50 {:.4} m, p99 {:.4} m, {} nodes over 0.25 m ({:.2} %)",
                 gate.p50_quantised_m,
                 gate.p99_quantised_m,
