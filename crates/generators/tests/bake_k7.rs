@@ -129,6 +129,7 @@ fn a_dam_across_a_channel_is_a_pit_before_the_burn_in_and_none_after() {
 }
 
 // spec: GEN-148
+// spec: GEN-154
 #[test]
 fn the_runtime_surface_is_the_bake_surface_at_the_centres_and_within_a_step_at_the_lattice_nodes() {
     let g = tile_grid();
@@ -163,6 +164,11 @@ fn the_runtime_surface_is_the_bake_surface_at_the_centres_and_within_a_step_at_t
                 && g.nodes_with_rise <= g.nodes,
             "{g:?}"
         );
+    }
+    // The new numbers against the existing ones: the overshoot is the clamp of L plus the re-read of B (bounded by `max_base_resample_m` and half a step); the error over the rise is at most the difference itself, the rise being at least 1 m.
+    for g in [&gate, &gate_c] {
+        assert!(g.max_runtime_overshoot_m <= g.max_base_resample_m + 0.125 + 1e-9, "{g:?}");
+        assert!(g.max_error_over_rise <= g.max_quantised_m + 1e-9, "{g:?}");
     }
     assert!(gate.nodes_with_rise > 0, "the smooth tile has a base rise of at least 1 m across a cell somewhere: {gate:?}");
 }

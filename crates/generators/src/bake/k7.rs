@@ -278,7 +278,7 @@ pub struct SurfaceGate {
     pub bins: usize,
     pub bins_over: usize,
     pub busiest_bin_over: usize,
-    /// G-SURF-I, error against the local base slope: the largest and the 99th percentile of `|difference| / rise` over the nodes whose base `B` rises by at least 1 m across one cell (the rise is the largest `|B(neighbour) - B(here)|` of the 8 neighbours of the nearest cell), and their number.
+    /// G-SURF-I, error against the local base slope: the largest and the 99th percentile of `|difference| / rise` over the nodes whose base `B` rises by at least 1 m across one cell (the rise is the largest `|B(neighbour) - B(here)|` over the 8 neighbours, diagonals included, of the lower-left of the four cells around the node), and their number.
     pub max_error_over_rise: f64,
     pub p99_error_over_rise: f64,
     pub nodes_with_rise: usize,

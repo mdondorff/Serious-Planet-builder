@@ -5,7 +5,7 @@ Inbox #119 point 2 (architect, 2026-11-10): briefing item 11 closes on a re-read
 - `bake::k7::SurfaceGate`: `max_error_over_rise`, `p99_error_over_rise`, `nodes_with_rise` (the difference over the largest rise of `B` across one cell, at the vertices whose rise is at least 1 m) and `max_runtime_overshoot_m`, `runtime_overshoot_nodes` (the runtime read `B(node) + C1(L)` outside the range of the four composed cells `B + L`).
 - `examples/k7_region` prints both lines.
 - GEN-154 (in `openspec/changes/l-store`): the G-SURF-I list names the two numbers.
-- `tests/bake_k7`: the new fields are finite, ordered and counted on the smooth tile, with and without a channel.
+- `tests/bake_k7`: the new fields are finite, ordered and counted on the smooth tile, with and without a channel, and bounded by the existing numbers (overshoot by the base re-read plus half a step; error over rise by the difference). The overshoot adds the clamp of L and the re-read of B (where B has an extremum between cells); a NaN input reads as no overshoot, as in the existing maxima.
 
 ## Impact
 - Code: `generators::bake::k7`, `examples/k7_region`, `tests/bake_k7`. No bit moves; the example is a measurement.
