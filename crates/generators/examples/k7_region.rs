@@ -200,7 +200,11 @@ fn main() {
                     level
                 })
                 .collect();
-            channels.push(Channel { points: cells.iter().map(|&c| to_local(c)).collect(), levels });
+            channels.push(Channel {
+                points: cells.iter().map(|&c| to_local(c)).collect(),
+                levels,
+                q: cells.iter().map(|&c| hy.qw[c]).collect(),
+            });
         }
         println!("{} channel segments meet the window", channels.len());
 
