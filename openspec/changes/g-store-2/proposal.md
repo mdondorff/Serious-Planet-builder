@@ -7,4 +7,4 @@ Item 14 of the terrain prototype briefing: G-STORE (A3 section 10) lists the fie
 
 ## Impact
 - Code: `crates/cache/examples/store_space.rs` only. No bit of the default bake, no store format, no pack code changes.
-- Not in this change: a store format, a pack-wise compaction (reported as a finding if the peak calls for it), the kind 13 field on the new chain (L is `l-store`), a measurement at 12,288 cells.
+- Not in this change: a store format, a pack-wise compaction (reported as a finding if the peak calls for it), the kind 13 field on the new chain (L is `l-store`), a replacement measurement at 12,288 cells (the replacement tables are the k = 2 landmass; the field bake is also sampled at 12,288).
