@@ -244,3 +244,63 @@ fn the_route_that_keeps_its_filled_surface_is_the_route_and_the_flood_it_replace
         );
     }
 }
+
+/// A closed bowl of `n` cells a side with a noisy floor, its rim cells the only outlets at height `cut` (None: the rim's own height).
+fn bowl(n: usize, cut: Option<f64>) -> (Grid, Vec<f64>, Vec<bool>) {
+    let c = (n as f64 - 1.0) / 2.0;
+    let mut z = vec![0.0f64; n * n];
+    let mut outlet = vec![false; n * n];
+    for j in 0..n {
+        for i in 0..n {
+            let r = libm::sqrt((i as f64 - c).powi(2) + (j as f64 - c).powi(2));
+            let noise = planet_generators::bake::route::jitter(7, (j * n + i) as u64, 0);
+            z[j * n + i] = 50.0 + 10.0 * r + 20.0 * noise;
+            outlet[j * n + i] = i == 0 || j == 0 || i == n - 1 || j == n - 1;
+            if let (Some(h), true) = (cut, outlet[j * n + i]) {
+                z[j * n + i] = h;
+            }
+        }
+    }
+    (Grid::new(n, n, 814.0), z, outlet)
+}
+
+/// The median depth of the cells more than 1 m under the canonical fill (0 when there are none) and their number.
+fn depth_under_fill(grid: &Grid, z: &[f64], outlet: &[bool]) -> (f64, usize) {
+    let f = priority_flood_with(grid, z, outlet, 1e-3, true);
+    let mut d: Vec<f64> = (0..z.len()).filter(|&p| !outlet[p] && f[p] - z[p] > 1.0).map(|p| f[p] - z[p]).collect();
+    d.sort_by(f64::total_cmp);
+    (d.get(d.len() / 2).copied().unwrap_or(0.0), d.len())
+}
+
+fn rounds_from(grid: &Grid, z0: &[f64], outlet: &[bool], rounds: usize) -> Vec<f64> {
+    let mut z = z0.to_vec();
+    let p = CarveParams { steps: 5 * rounds, reroute_every: 5, round_rules: RoundRules::ROUND, ..CarveParams::default() };
+    planet_generators::bake::round::solve_rounds(grid, &mut z, outlet, &p, rounds, &1usize, 15);
+    z
+}
+
+// spec: GEN-162 (A3 sections 5.3 and 6: the breach opens a depression whose sill it can lower)
+#[test]
+fn a_bowl_whose_outlet_is_at_the_sea_is_opened_by_the_first_round() {
+    let (grid, z0, outlet) = bowl(32, Some(0.5));
+    let z = rounds_from(&grid, &z0, &outlet, 1);
+    let (_, cells) = depth_under_fill(&grid, &z, &outlet);
+    assert_eq!(cells, 0, "a bowl whose rim is at the sea leaves {cells} cells under the fill after round 1");
+}
+
+// spec: GEN-162 (inbox #118): a depression behind an outlet the breach cannot lower must not get deeper round over round (the sweeps move the floor by a few per cent of the depth; the unfixed breach added 50 %)
+#[test]
+fn a_lake_behind_a_cut_outlet_does_not_deepen_round_over_round() {
+    let (grid, z0, outlet) = bowl(32, None);
+    let (base, _) = depth_under_fill(&grid, &z0, &outlet);
+    let mut prev = base;
+    for round in 1..=4 {
+        let z = rounds_from(&grid, &z0, &outlet, round);
+        let (p50, cells) = depth_under_fill(&grid, &z, &outlet);
+        assert!(
+            p50 <= prev + 0.05 * base,
+            "round {round}: median depth under the fill {p50:.1} m against {prev:.1} m before it ({cells} cells, base {base:.1} m)"
+        );
+        prev = p50;
+    }
+}

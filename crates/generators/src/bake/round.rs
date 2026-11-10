@@ -43,13 +43,17 @@ pub struct Drivers<'a> {
 pub fn catchment_round(inp: &mut CatchmentInputs, p: &CarveParams, steps: usize) {
     let floor = p.sea_level + p.epsilon;
     let z = &mut inp.z;
+    let base = if p.round_rules.is_default() { None } else { super::carve::exit_base(p.sea_level, p.breach_slope, 0..z.len(), &inp.receiver, z, &|c| inp.dist[c]) };
     for c in (0..z.len()).rev() {
         let rec = inp.receiver[c];
         if rec == NONE || inp.receiver_is_outlet[c] {
             continue;
         }
         let rec = rec as usize;
-        let want = (z[c] - p.breach_slope * inp.dist[c]).max(floor);
+        let mut want = (z[c] - p.breach_slope * inp.dist[c]).max(floor);
+        if let Some(b) = &base {
+            want = want.max(b[rec]);
+        }
         if z[rec] > want {
             let limit = if p.breach_height_scale_m > 0.0 {
                 p.breach_max_m.min(BREACH_MIN_M)
