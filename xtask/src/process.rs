@@ -155,7 +155,21 @@ pub fn reestimate_date(briefing: &str) -> Option<String> {
     is_date(d).then(|| d.to_string())
 }
 
-/// BUILD-042: an item that is `done` in `after` and was not in `before` needs a `Re-estimate:` date that is not the one of `before`.
+/// The stamp of the briefing's `Re-estimate: YYYY-MM-DD[ HH:MM] ...` line as `YYYY-MM-DD HH:MM` (a date alone reads as 00:00), which compares as text.
+pub fn reestimate_stamp(briefing: &str) -> Option<String> {
+    let date = reestimate_date(briefing)?;
+    let rest = briefing.lines().find_map(|l| l.trim().strip_prefix("Re-estimate:"))?.trim();
+    let time = rest.get(10..).and_then(|t| t.strip_prefix(' ')).and_then(|t| t.get(..5)).filter(|t| {
+        let b = t.as_bytes();
+        b[2] == b':'
+            && b[..2].iter().chain(&b[3..]).all(u8::is_ascii_digit)
+            && t[..2].parse::<u32>().is_ok_and(|h| h < 24)
+            && t[3..].parse::<u32>().is_ok_and(|m| m < 60)
+    });
+    Some(format!("{date} {}", time.unwrap_or("00:00")))
+}
+
+/// BUILD-042: an item that is `done` in `after` and was not in `before` needs a `Re-estimate:` stamp (a date, or a date and a time `HH:MM`; a date alone is 00:00) later than the one of `before`.
 pub fn reestimate_errors(before: Option<&str>, after: Option<&str>) -> Vec<String> {
     let Some(after) = after else { return Vec::new() };
     let was = before.map(done_items).unwrap_or_default();
@@ -163,12 +177,15 @@ pub fn reestimate_errors(before: Option<&str>, after: Option<&str>) -> Vec<Strin
     if newly.is_empty() {
         return Vec::new();
     }
-    let (old, new) = (before.and_then(reestimate_date), reestimate_date(after));
+    let (old, new) = (before.and_then(reestimate_stamp), reestimate_stamp(after));
     let shown = format!("item(s) {}", newly.join(", "));
     match new {
         None => vec![format!("{BRIEFING}: {shown} became done and the briefing has no `Re-estimate: YYYY-MM-DD (...)` line (BUILD-042)")],
         Some(n) if Some(&n) == old.as_ref() => {
-            vec![format!("{BRIEFING}: {shown} became done and the re-estimate date {n} is the one of the base: re-estimate the remaining work and date it (BUILD-042)")]
+            vec![format!("{BRIEFING}: {shown} became done and the re-estimate stamp {n} is the one of the base: re-estimate the remaining work and date it (BUILD-042)")]
+        }
+        Some(n) if old.as_ref().is_some_and(|o| n < *o) => {
+            vec![format!("{BRIEFING}: {shown} became done and the re-estimate stamp {n} is earlier than the one of the base {}: a re-estimate moves forward (BUILD-042)", old.as_deref().unwrap_or_default())]
         }
         Some(_) => Vec::new(),
     }
@@ -321,6 +338,77 @@ Target date: mid-December (estimate)
         let b3 = items(&["done", "open"], None);
         let e = reestimate_errors(Some(&b0), Some(&b3));
         assert!(e.len() == 1 && e[0].contains("no `Re-estimate:"), "{e:?}");
+    }
+
+    /// A briefing whose first item is done, with the given estimate; the base has it open.
+    fn stamped(estimate: &str) -> (String, String) {
+        (items(&["open", "open"], Some("2026-11-10 (base)")), items(&["done", "open"], Some(estimate)))
+    }
+
+    // spec: BUILD-042
+    #[test]
+    fn the_reestimate_stamp_reads_a_date_with_an_optional_time_and_a_date_alone_is_midnight() {
+        assert_eq!(reestimate_stamp(&items(&["open"], Some("2026-11-10 (x)"))).as_deref(), Some("2026-11-10 00:00"));
+        assert_eq!(reestimate_stamp(&items(&["open"], Some("2026-11-10 14:30 (x)"))).as_deref(), Some("2026-11-10 14:30"));
+        assert_eq!(
+            reestimate_stamp(&items(&["open"], Some("2026-11-10 25:00 (x)"))).as_deref(),
+            Some("2026-11-10 00:00"),
+            "an invalid time is not a time"
+        );
+        assert_eq!(reestimate_stamp(&items(&["open"], Some("2026-11-10"))).as_deref(), Some("2026-11-10 00:00"));
+        assert_eq!(reestimate_stamp(&items(&["open"], Some("soon"))), None);
+    }
+
+    // spec: BUILD-042
+    #[test]
+    fn a_date_after_a_date_still_passes_and_the_same_date_still_fails() {
+        let (b0, b1) = stamped("2026-11-11 (moved)");
+        assert!(reestimate_errors(Some(&b0), Some(&b1)).is_empty());
+        let (b0, b1) = stamped("2026-11-10 (same)");
+        assert_eq!(reestimate_errors(Some(&b0), Some(&b1)).len(), 1);
+    }
+
+    // spec: BUILD-042
+    #[test]
+    fn a_later_time_on_the_same_day_passes() {
+        let b0 = items(&["open", "open"], Some("2026-11-10 09:00 (base)"));
+        let b1 = items(&["done", "open"], Some("2026-11-10 14:30 (moved)"));
+        assert!(reestimate_errors(Some(&b0), Some(&b1)).is_empty());
+    }
+
+    // spec: BUILD-042
+    #[test]
+    fn the_same_time_on_the_same_day_fails() {
+        let b0 = items(&["open", "open"], Some("2026-11-10 14:30 (base)"));
+        let b1 = items(&["done", "open"], Some("2026-11-10 14:30 (again)"));
+        let e = reestimate_errors(Some(&b0), Some(&b1));
+        assert!(e.len() == 1 && e[0].contains("is the one of the base"), "{e:?}");
+    }
+
+    // spec: BUILD-042
+    #[test]
+    fn an_earlier_time_on_the_same_day_fails() {
+        let b0 = items(&["open", "open"], Some("2026-11-10 14:30 (base)"));
+        let b1 = items(&["done", "open"], Some("2026-11-10 09:00 (earlier)"));
+        let e = reestimate_errors(Some(&b0), Some(&b1));
+        assert!(e.len() == 1 && e[0].contains("is earlier than the one of the base"), "{e:?}");
+    }
+
+    // spec: BUILD-042
+    #[test]
+    fn a_date_only_base_is_midnight_so_a_timed_line_on_the_same_day_passes_after_it_and_an_untimed_one_fails() {
+        // The base has the date alone (00:00): any time after 00:00 on that day moves forward; 00:00 and the date alone do not.
+        let (b0, b1) = stamped("2026-11-10 00:01 (a minute later)");
+        assert!(reestimate_errors(Some(&b0), Some(&b1)).is_empty());
+        let (b0, b1) = stamped("2026-11-10 00:00 (midnight)");
+        assert_eq!(reestimate_errors(Some(&b0), Some(&b1)).len(), 1);
+        // A timed base and a date-only line on the same day: the date alone is 00:00, before the base's time.
+        let b0 = items(&["open", "open"], Some("2026-11-10 09:00 (base)"));
+        let b1 = items(&["done", "open"], Some("2026-11-10 (date only)"));
+        assert_eq!(reestimate_errors(Some(&b0), Some(&b1)).len(), 1);
+        // An earlier date fails as well (the check only moves forward).
+        let (b0, b1) = stamped("2026-11-09 (earlier)");
+        assert_eq!(reestimate_errors(Some(&b0), Some(&b1)).len(), 1);
     }
 
     // spec: BUILD-042
