@@ -2,7 +2,7 @@
 
 Status: active since 2026-11-08 (owner: D1 = option A, conditional). Replaces the M9.1 gate of `docs/briefings/m9-plan.md`; the M9 planet bake is frozen until this block closes. Contract: `docs/design/terrain-target.md` (A3), ADRs 0110-0115 (proposed). Plan: `spikes/architecture-replan/results/results.md` sections 13 and 17. Target date: mid-December 2026 (estimate).
 
-Re-estimate: 2026-11-09 (remaining work: items 9 to 18 open; target date as above). An item that becomes done moves this date (BUILD-042).
+Re-estimate: 2026-11-10 (remaining work: items 11 and 14 open for the explorer lane (gate reading and G-SURF-I report; G-STORE field bake, temporary space and edit overrides), 12 and 13 open (spikes), 15 to 18 open; items 9 and 10 done; target date as above, unchanged). An item that becomes done moves this date (BUILD-042).
 
 Scope: the region of `spikes/prototype-region/results/results.md`. Everything stays behind switches, off the default bake path.
 
