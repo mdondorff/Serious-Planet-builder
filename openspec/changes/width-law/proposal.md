@@ -12,3 +12,6 @@ Item 15 PR 6 (architect D6 point 2, D19/D20): one river width law for the burn-i
 
 ## Impact
 - Code: `generators::bake::k7`, `examples/k7_region`, `examples/region_scale`, tests `bake_k7` (2 new). No stored bit changes today: no channel carries discharges in any stored layer yet.
+- Numerics review: the one-cell line is always burnt and the disc comes on top (a width just over one cell burned nothing on half-integer points: the trench is `max(1 cell, w)`), the disc is clipped to the window, a non-finite discharge is refused.
+- Known limit (for the architect): the width is measured in face cell-index space with `cell_m = dx` at the face centre; on the cube-face grid a cell is 0.7 to 1.2 times that near the face edges and corners, so a trench there is up to 0.7 to 1.2 times `w`. The drawing (PR 8) must use the same measure or a per-tile metric (a 2 x 2 metric at the tile centre, cheap) for 'the ground and the water agree'.
+- `K7Result::burned` counts lowering events (a cell lowered twice counts twice, as before); `burn_mask` is the cell set.

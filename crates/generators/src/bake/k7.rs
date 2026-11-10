@@ -93,13 +93,16 @@ pub fn burn_channels(z: &mut [f64], w: usize, origin: (i64, i64), channels: &[Ch
 
 /// [`burn_channels`] with the width law `(law, cell_m)`, `cell_m` the metres of a local cell: where the width `w = a Q_w^b` of the channel (the discharge interpolated linearly along the segment) is more
 /// than one cell, every cell whose centre lies within `w / 2` of the point of the line is lowered to the line's level there (never raised): a trench of `max(1 cell, w)`. A channel without discharges, or
-/// narrower than a cell, burns exactly as the one-cell line (the bits of K7 before the law).
+/// narrower than a cell, burns exactly as the one-cell line (the bits of K7 before the law). The line is always burnt and the disc comes on top, so the trench of a wider river contains the one-cell line (the width is
+/// measured in face cell-index space: on the cube-face grid a cell is up to 0.7 to 1.2 times the nominal size near the edges and corners, a known limit that the drawing must share).
 pub fn burn_channels_wide(z: &mut [f64], w: usize, (i0, j0): (i64, i64), channels: &[Channel], law: Option<(&WidthLaw, f64)>) -> usize {
     let mut lowered = 0;
     for ch in channels {
         assert!(ch.points.len() == ch.levels.len() && !ch.points.is_empty(), "a level for every point");
         assert!(ch.q.is_empty() || ch.q.len() == ch.points.len(), "a discharge for every point, or none");
+        assert!(ch.q.iter().all(|q| q.is_finite()), "the discharges of a channel are finite");
         let width_cells = |q: f64| law.map_or(0.0, |(l, cell_m)| l.width_m(q) / cell_m);
+        let bounds = (i0, i0 + w as i64 - 1, j0, j0 + w as i64 - 1);
         let mut burn = |x: i64, y: i64, level: f64| {
             let (a, b) = (x - i0, y - j0);
             if a >= 0 && b >= 0 && (a as usize) < w && (b as usize) < w {
@@ -120,10 +123,9 @@ pub fn burn_channels_wide(z: &mut [f64], w: usize, (i0, j0): (i64, i64), channel
         };
         if ch.points.len() == 1 {
             let wc = width_cells(q_at(0, 0.0));
+            burn(libm::round(ch.points[0].0) as i64, libm::round(ch.points[0].1) as i64, ch.levels[0]);
             if wc > 1.0 {
-                disc(&mut burn, ch.points[0].0, ch.points[0].1, wc / 2.0, ch.levels[0]);
-            } else {
-                burn(libm::round(ch.points[0].0) as i64, libm::round(ch.points[0].1) as i64, ch.levels[0]);
+                disc(&mut burn, ch.points[0].0, ch.points[0].1, wc / 2.0, ch.levels[0], bounds);
             }
         }
         for k in 0..ch.points.len().saturating_sub(1) {
@@ -134,10 +136,10 @@ pub fn burn_channels_wide(z: &mut [f64], w: usize, (i0, j0): (i64, i64), channel
                 let t = s as f64 / steps as f64;
                 let (px, py, level) = (x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, l0 + (l1 - l0) * t);
                 let wc = width_cells(q_at(k, t));
+                // The one-cell line is always burnt (a trench is never narrower than the line: max(1 cell, w)); a wider river adds the cells within w / 2 of the point.
+                burn(libm::round(px) as i64, libm::round(py) as i64, level);
                 if wc > 1.0 {
-                    disc(&mut burn, px, py, wc / 2.0, level);
-                } else {
-                    burn(libm::round(px) as i64, libm::round(py) as i64, level);
+                    disc(&mut burn, px, py, wc / 2.0, level, bounds);
                 }
             }
         }
@@ -145,12 +147,13 @@ pub fn burn_channels_wide(z: &mut [f64], w: usize, (i0, j0): (i64, i64), channel
     lowered
 }
 
-/// The cells whose centres lie within `half` cells of `(px, py)` (cell-index space), burned to `level`.
-fn disc(burn: &mut impl FnMut(i64, i64, f64), px: f64, py: f64, half: f64, level: f64) {
+/// The cells whose centres lie within `half` cells of `(px, py)` (cell-index space) inside the window box `(x_lo, x_hi, y_lo, y_hi)` (inclusive, in face cell indices), burned to `level`.
+fn disc(burn: &mut impl FnMut(i64, i64, f64), px: f64, py: f64, half: f64, level: f64, (x_lo, x_hi, y_lo, y_hi): (i64, i64, i64, i64)) {
     let r = libm::ceil(half) as i64;
     let (cx, cy) = (libm::round(px) as i64, libm::round(py) as i64);
-    for y in cy - r..=cy + r {
-        for x in cx - r..=cx + r {
+    // Only the cells of the window: a river far outside it costs nothing.
+    for y in (cy - r).max(y_lo)..=(cy + r).min(y_hi) {
+        for x in (cx - r).max(x_lo)..=(cx + r).min(x_hi) {
             let (dx, dy) = (x as f64 - px, y as f64 - py);
             if dx * dx + dy * dy <= half * half {
                 burn(x, y, level);

@@ -371,8 +371,55 @@ fn a_tile_burns_a_trench_of_the_width_law_and_the_law_is_in_the_parameters() {
     let mut big = wide.clone();
     big.q = vec![1.0e5; thin.points.len()]; // 2.3 km: 22 cells
     let c = run(&big, &p);
-    assert!(c.burned > 10 * a.burned, "a wide river lowers many more cells: {} against {}", c.burned, a.burned);
+    let mask = |r: &planet_generators::bake::k7::K7Result| r.burn_mask.iter().filter(|&&b| b).count();
+    assert!(mask(&c) > 10 * mask(&a), "a wide river lowers many more cells: {} against {}", mask(&c), mask(&a));
     // The law is a parameter: another `a` is another burn, `b = 0` makes every width the same.
     p.width = planet_generators::bake::k7::WidthLaw { a: 0.5, b: 0.5 };
     assert!(run(&big, &p).burned < c.burned, "a smaller a narrows the trench");
+}
+
+// spec: GEN-165, TEST-108
+#[test]
+fn a_trench_just_over_one_cell_wide_still_burns_the_line_on_half_integer_points_and_far_rivers_cost_nothing() {
+    use planet_generators::bake::k7::{burn_channels_wide, WidthLaw};
+    let law = WidthLaw::STANDARD;
+    let w = 64;
+    // Points on cell corners (x.5): the disc of a width of 1.2 cells has a radius of 0.6, under the 0.707 of the four nearest centres, so only the always-burnt line keeps the channel.
+    let q_for = |cells: f64| (cells * 10.0 / law.a) * (cells * 10.0 / law.a);
+    let mk = |q: f64, (x0, y0): (f64, f64), (x1, y1): (f64, f64)| Channel {
+        points: vec![(x0, y0), (x1, y1)],
+        levels: vec![50.0, 50.0],
+        q: vec![q, q],
+    };
+    for (a, b) in [((4.5, 32.5), (60.5, 32.5)), ((4.5, 8.5), (50.5, 54.5)), ((4.5, 10.5), (60.5, 40.5))] {
+        let burn = |q: f64| {
+            let mut z = vec![100.0; w * w];
+            burn_channels_wide(&mut z, w, (0, 0), &[mk(q, a, b)], Some((&law, 10.0)));
+            z
+        };
+        let narrow = burn(q_for(0.99));
+        let just_over = burn(q_for(1.2));
+        let wide = burn(q_for(3.0));
+        assert!(narrow.iter().any(|&v| v == 50.0), "the narrow channel burns its line");
+        assert!(
+            (0..w * w).all(|c| narrow[c] != 50.0 || just_over[c] == 50.0),
+            "a trench of 1.2 cells contains the line of 0.99 ({a:?} to {b:?})"
+        );
+        assert!((0..w * w).all(|c| just_over[c] != 50.0 || wide[c] == 50.0), "the trench grows with the discharge ({a:?} to {b:?})");
+    }
+    // A river far outside the window lowers nothing and costs no more than the steps along it.
+    let far = Channel { points: (0..2000).map(|k| (5000.0 + k as f64, 5000.0)).collect(), levels: vec![50.0; 2000], q: vec![1.0e7; 2000] };
+    let mut z = vec![100.0; w * w];
+    let t = std::time::Instant::now();
+    assert_eq!(burn_channels_wide(&mut z, w, (0, 0), &[far], Some((&law, 102.0))), 0);
+    assert!(t.elapsed().as_millis() < 500, "a river outside the window is skipped, not scanned: {:?}", t.elapsed());
+}
+
+// spec: GEN-165, TEST-108
+#[test]
+#[should_panic(expected = "the discharges of a channel are finite")]
+fn a_discharge_that_is_not_finite_is_refused() {
+    use planet_generators::bake::k7::{burn_channels_wide, WidthLaw};
+    let ch = Channel { points: vec![(4.0, 4.0), (20.0, 4.0)], levels: vec![50.0, 50.0], q: vec![f64::INFINITY, 5.0] };
+    burn_channels_wide(&mut vec![100.0; 32 * 32], 32, (0, 0), &[ch], Some((&WidthLaw::STANDARD, 10.0)));
 }
