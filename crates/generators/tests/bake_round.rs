@@ -252,7 +252,7 @@ fn bowl(n: usize, cut: Option<f64>) -> (Grid, Vec<f64>, Vec<bool>) {
     let mut outlet = vec![false; n * n];
     for j in 0..n {
         for i in 0..n {
-            let r = libm::sqrt((i as f64 - c).powi(2) + (j as f64 - c).powi(2));
+            let r = libm::sqrt((i as f64 - c) * (i as f64 - c) + (j as f64 - c) * (j as f64 - c));
             let noise = planet_generators::bake::route::jitter(7, (j * n + i) as u64, 0);
             z[j * n + i] = 50.0 + 10.0 * r + 20.0 * noise;
             outlet[j * n + i] = i == 0 || j == 0 || i == n - 1 || j == n - 1;

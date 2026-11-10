@@ -186,7 +186,13 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
                 }
             }
             let visit: &[u32] = if grouped.is_empty() { &r.order } else { &grouped };
-            let base = if p.round_rules.is_default() { None } else { exit_base(p.sea_level, p.breach_slope, r.order.iter().map(|&c| c as usize), &r.receiver, z, &|c| distance(grid, c, r.receiver[c] as usize)) };
+            let base = if p.round_rules.is_default() {
+                None
+            } else {
+                exit_base(p.sea_level, p.breach_slope, r.order.iter().map(|&c| c as usize), &r.receiver, z, &|c| {
+                    distance(grid, c, r.receiver[c] as usize)
+                })
+            };
             for &c in visit.iter().rev() {
                 let c = c as usize;
                 let rec = r.receiver[c];
@@ -290,19 +296,22 @@ pub(super) fn distance(grid: &Grid, a: usize, b: usize) -> f64 {
 pub(super) fn exit_base(
     sea_level: f64,
     slope: f64,
-    order: impl Iterator<Item = usize>,
+    order: impl Iterator<Item = usize> + Clone,
     receiver: &[u32],
     z: &[f64],
     dist: &dyn Fn(usize) -> f64,
 ) -> Option<Vec<f64>> {
-    let order: Vec<usize> = order.collect();
-    if !order.iter().any(|&c| receiver[c] == NONE && z[c] > sea_level) {
+    if !order.clone().any(|c| receiver[c] == NONE && z[c] > sea_level) {
         return None;
     }
     let mut base = vec![f64::NEG_INFINITY; z.len()];
     for c in order {
         base[c] = if receiver[c] == NONE {
-            if z[c] > sea_level { z[c] } else { f64::NEG_INFINITY }
+            if z[c] > sea_level {
+                z[c]
+            } else {
+                f64::NEG_INFINITY
+            }
         } else {
             base[receiver[c] as usize] + slope * dist(c)
         };
