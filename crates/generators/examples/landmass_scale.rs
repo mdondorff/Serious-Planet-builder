@@ -162,8 +162,253 @@ fn get(bits: &[u64], g: usize) -> bool {
     bits[g >> 6] >> (g & 63) & 1 == 1
 }
 
+/// The probe of the plan mode: the sheet probe (when on) and, for the dam count, the surface "z" of three stages written to disk as it passes (the last round before thermal, after thermal, after the deposition), so
+/// that the build holds no extra copy while it runs and the peaks it prints are the build's. The analysis reads the files back after the final peak line.
+struct DamProbe {
+    inner: Option<planet_generators::bake::probe::SheetProbe>,
+    prefix: String,
+    last_round: u32,
+}
+
+impl DamProbe {
+    fn path(&self, tag: &str) -> String {
+        format!("{}_{tag}.f64", self.prefix)
+    }
+}
+
+impl planet_generators::bake::probe::StageProbe for DamProbe {
+    fn stage(&self, view: &planet_generators::bake::probe::StageView<'_>) {
+        use planet_generators::bake::probe::{FieldData, Stage};
+        if let Some(inner) = &self.inner {
+            inner.stage(view);
+        }
+        let tag = match view.stage {
+            Stage::Round(r) if r == self.last_round => "before",
+            Stage::Thermal => "thermal",
+            Stage::Deposition => "deposition",
+            _ => return,
+        };
+        let Some(z) = view.fields.iter().find(|f| f.name == "z").and_then(|f| if let FieldData::F64(d) = f.data { Some(d) } else { None })
+        else {
+            return;
+        };
+        write_f64s(&self.path(tag), z);
+    }
+}
+
+fn write_f64s(path: &str, v: &[f64]) {
+    use std::io::Write;
+    // One reused buffer of 1 MiB: no allocation per chunk, so the spill adds 1 MiB to the build's memory and returns it.
+    let mut f = std::fs::File::create(path).expect("the dam spill");
+    let mut bytes = vec![0u8; 8 << 17];
+    for c in v.chunks(1 << 17) {
+        for (o, x) in bytes.chunks_exact_mut(8).zip(c) {
+            o.copy_from_slice(&x.to_le_bytes());
+        }
+        f.write_all(&bytes[..c.len() * 8]).expect("the dam spill");
+    }
+    f.flush().expect("the dam spill");
+}
+
+fn read_f64s(path: &str, n: usize) -> Vec<f64> {
+    use std::io::Read;
+    let mut f = std::fs::File::open(path).expect("the dam spill");
+    let mut out = Vec::with_capacity(n);
+    let mut buf = vec![0u8; 1 << 20];
+    while out.len() < n {
+        let want = ((n - out.len()) * 8).min(buf.len());
+        f.read_exact(&mut buf[..want]).expect("the dam spill");
+        out.extend(buf[..want].chunks_exact(8).map(|b| f64::from_le_bytes(b.try_into().expect("8 bytes"))));
+    }
+    out
+}
+
+/// The land pits of a surface: the canonical flood, 0.5 m under the fill (as G-LAND), and the depth of each cell under its fill.
+fn pit_depths(grid: &Grid, z: &[f64], outlet: &[bool]) -> Vec<f32> {
+    let filled = priority_flood_with(grid, z, outlet, 1e-3, true);
+    (0..z.len()).map(|c| if z[c] > 0.0 { (filled[c] - z[c]) as f32 } else { 0.0 }).collect()
+}
+
+/// The dams of the final surface (inbox #124, decision D15): item 10's question is whether the remaining pits are made by the pass. The land pits after the pass (canonical flood, 0.5 m, as G-LAND) are 8-connected
+/// components; a component is a DAM when the pass raised its spill cell (the lowest cell of its rim: `z_after - z_before > 0` there) and the pit is new or at least 0.5 m deeper than before the pass
+/// (`z_before` is the surface after the last round, before thermal), and inherited otherwise. The cause of a dam is the part of the raise at the spill cell by thermal, by the deposition, by the pit spreading, or by
+/// several of them. The one-cell wall (the outside cell beyond the spill along the line from the pit more than 5 m lower, both cells across the line higher) is an extra column, not the definition.
+fn dam_report(grid: &Grid, zb: &[f64], zt: &[f64], zd: &[f64], z: &[f64], outlet: &[bool]) -> DamResult {
+    use planet_generators::bake::NEIGHBOURS;
+    let before = pit_depths(grid, zb, outlet);
+    let after = pit_depths(grid, z, outlet);
+    let land = z.iter().filter(|&&v| v > 0.0).count();
+    let is_pit = |c: usize| after[c] > 0.5;
+    let mut label = vec![u32::MAX; z.len()];
+    let mut res = DamResult { land, ..DamResult::default() };
+    let mut stack: Vec<usize> = Vec::new();
+    let mut dam_depths: Vec<f64> = Vec::new();
+    for s in 0..z.len() {
+        if label[s] != u32::MAX || !is_pit(s) {
+            continue;
+        }
+        let id = res.components as u32;
+        res.components += 1;
+        label[s] = id;
+        stack.push(s);
+        let (mut cells, mut depth_after, mut depth_before) = (Vec::new(), 0.0f64, 0.0f64);
+        while let Some(c) = stack.pop() {
+            cells.push(c);
+            depth_after = depth_after.max(f64::from(after[c]));
+            depth_before = depth_before.max(f64::from(before[c]));
+            for d in 0..8 {
+                if let Some(q) = grid.neighbour(c, d) {
+                    if label[q] == u32::MAX && is_pit(q) {
+                        label[q] = id;
+                        stack.push(q);
+                    }
+                }
+            }
+        }
+        // The spill cell: the lowest cell of the rim (a neighbour outside the component); the pit cell it was found from gives the line for the wall test.
+        let mut spill: Option<(usize, usize, usize)> = None;
+        for &p in &cells {
+            for d in 0..8 {
+                let Some(q) = grid.neighbour(p, d) else { continue };
+                if label[q] != id && spill.is_none_or(|(sq, _, _)| z[q] < z[sq]) {
+                    spill = Some((q, p, d));
+                }
+            }
+        }
+        res.pit_cells += cells.len();
+        let Some((q, _p, d)) = spill else {
+            res.inherited_cells += cells.len();
+            res.inherited += 1;
+            continue;
+        };
+        let (rt, rd, rs) = (zt[q] - zb[q], zd[q] - zt[q], z[q] - zd[q]);
+        let raise = z[q] - zb[q];
+        let dam = raise > 1e-6 && depth_after - depth_before >= 0.5;
+        if !dam {
+            res.inherited_cells += cells.len();
+            res.inherited += 1;
+            continue;
+        }
+        res.dams += 1;
+        res.dam_cells += cells.len();
+        let cause = {
+            let mut parts = Vec::new();
+            for (name, v) in [("thermal", rt), ("deposition", rd), ("spreading", rs)] {
+                if v > 1e-6 {
+                    parts.push(name);
+                }
+            }
+            if parts.is_empty() {
+                "none".to_string()
+            } else {
+                parts.join("+")
+            }
+        };
+        *res.causes.entry(cause.clone()).or_insert(0) += 1;
+        dam_depths.push(depth_after);
+        if depth_after >= 20.0 {
+            res.dams_over_20 += 1;
+        }
+        // The wall column: the cell beyond the spill along the line from the pit (found as the direction from the pit cell to the spill) more than 5 m lower, both cells across it higher.
+        let (di, dj) = NEIGHBOURS[d];
+        let at = |a: i64, b: i64| NEIGHBOURS.iter().position(|&o| o == (a, b)).and_then(|k| grid.neighbour(q, k));
+        if let (Some(r), Some(n1), Some(n2)) = (at(di, dj), at(-dj, di), at(dj, -di)) {
+            if z[r] < z[q] - 5.0 && z[n1] > z[q] && z[n2] > z[q] {
+                res.walls += 1;
+            }
+        }
+        res.top.push((depth_after, cells[0], raise, cause));
+    }
+    dam_depths.sort_by(f64::total_cmp);
+    let pct = |p: usize| dam_depths.get(dam_depths.len().saturating_sub(1) * p / 100).copied().unwrap_or(0.0);
+    (res.p50, res.p95, res.max) = (pct(50), pct(95), dam_depths.last().copied().unwrap_or(0.0));
+    res.top.sort_by(|a, b| b.0.total_cmp(&a.0));
+    res.top.truncate(10);
+    res
+}
+
+#[derive(Default)]
+struct DamResult {
+    land: usize,
+    components: usize,
+    pit_cells: usize,
+    dams: usize,
+    dam_cells: usize,
+    inherited: usize,
+    inherited_cells: usize,
+    dams_over_20: usize,
+    walls: usize,
+    causes: std::collections::BTreeMap<String, usize>,
+    p50: f64,
+    p95: f64,
+    max: f64,
+    top: Vec<(f64, usize, f64, String)>,
+}
+
+fn print_dams(r: &DamResult, seconds: f64) {
+    let pct = |n: usize| 100.0 * n as f64 / r.land.max(1) as f64;
+    println!(
+        "DAMS (D15, {seconds:.0} s): land pits after the pass {} cells ({:.4} % of {} land cells) in {} components: dams {} components, {} cells ({:.4} %); inherited {} components, {} cells ({:.4} %)",
+        r.pit_cells,
+        pct(r.pit_cells),
+        r.land,
+        r.components,
+        r.dams,
+        r.dam_cells,
+        pct(r.dam_cells),
+        r.inherited,
+        r.inherited_cells,
+        pct(r.inherited_cells)
+    );
+    println!("  dams by cause (the raise at the spill cell): {:?}", r.causes);
+    println!("  dam depth under the fill: p50 {:.1} m, p95 {:.1} m, max {:.1} m; {} dams deeper than 20 m; {} of the dams are also a one-cell wall across a cut (extra column)", r.p50, r.p95, r.max, r.dams_over_20, r.walls);
+    for (depth, cell, raise, cause) in &r.top {
+        println!("  dam: depth {depth:.1} m, a pit cell {cell}, raise at the spill cell {raise:.2} m ({cause})");
+    }
+}
+
+/// The dam report on a fixture: a plateau at 200 m with a sea on its west edge, a one-cell canyon (walls 200 m) whose floor rises inland, raised to 90 m at one cell by thermal in the "after" surface (a dam: the pit
+/// behind it is new and 59 m deep), and a closed 5 x 5 basin 50 m deep in the plateau present before and after (inherited). `landmass_scale 1 8 damtest` expects 2 pits, 1 dam (cause thermal, also a wall), 1 inherited.
+fn dam_selftest() {
+    let (w, h) = (48usize, 48usize);
+    let mut zb = vec![200.0f64; w * h];
+    for j in 0..h {
+        for i in 0..2 {
+            zb[j * w + i] = -10.0;
+        }
+    }
+    for i in 2..31 {
+        zb[20 * w + i] = 20.0 + i as f64;
+    }
+    for j in 32..37 {
+        for i in 24..29 {
+            zb[j * w + i] = 150.0;
+        }
+    }
+    let mut zt = zb.clone();
+    zt[20 * w + 10] = 90.0;
+    let (zd, z) = (zt.clone(), zt.clone());
+    let grid = Grid::new(w, h, 100.0);
+    let outlet = grid.outlets(&z, 0.0);
+    let r = dam_report(&grid, &zb, &zt, &zd, &z, &outlet);
+    print_dams(&r, 0.0);
+    assert_eq!((r.components, r.dams, r.inherited, r.walls), (2, 1, 1, 1), "the dam report on its fixture");
+    assert_eq!(r.causes.get("thermal"), Some(&1));
+    assert_eq!(r.dams_over_20, 1);
+    // The spill files round trip (a size that is not a multiple of the chunk).
+    let v: Vec<f64> = (0..300_001).map(|i| f64::from(i) * 0.125 - 7.0).collect();
+    let path = format!("target/plan_dam_selftest_{}.f64", std::process::id());
+    write_f64s(&path, &v);
+    assert_eq!(read_f64s(&path, v.len()), v);
+    let _ = std::fs::remove_file(&path);
+}
+
 fn main() {
     let a: Vec<String> = std::env::args().collect();
+    if a.get(3).is_some_and(|m| m == "damtest") {
+        dam_selftest();
+        return;
+    }
     let k: usize = a.get(1).map_or(1, |s| s.parse().unwrap());
     let threads: usize = a.get(2).map_or(8, |s| s.parse().unwrap());
     let n = COARSE * k;
@@ -366,6 +611,19 @@ fn main() {
             let (peak, now, commit) = memory3();
             println!("MARK {name}: working set {now:.0} MiB now, peak {peak:.0} MiB, peak commit {commit:.0} MiB");
         };
+        // The stage probe (as `region_scale`): sheets of at most `PLANET_STAGE_BINS` bins (default 4,194,304) in target/review/stages/plan-k<k>/; `PLANET_STAGES=0` switches it off. Its memory is inside the peaks below.
+        // The probes: the sheet probe (as `region_scale`: sheets of at most `PLANET_STAGE_BINS` bins, default 4,194,304, in target/review/stages/plan-k<k>/; `PLANET_STAGES=0` switches it off; its memory is inside the printed
+        // peaks) and the dam probe (`PLANET_DAMS=0` switches it off), which writes three surfaces to disk as they pass and holds nothing.
+        let stages_on = std::env::var("PLANET_STAGES").map_or(true, |v| v != "0");
+        let dams_on = std::env::var("PLANET_DAMS").map_or(true, |v| v != "0");
+        let dam_prefix = format!("target/plan_dam_k{k}_{}", std::process::id());
+        if stages_on || dams_on {
+            let bins: usize = std::env::var("PLANET_STAGE_BINS").ok().and_then(|v| v.parse().ok()).unwrap_or(4_194_304);
+            let dir = format!("target/review/stages/plan-k{k}");
+            let inner = stages_on.then(|| planet_generators::bake::probe::SheetProbe::new(&dir, bins));
+            planet_generators::bake::probe::install(std::sync::Arc::new(DamProbe { inner, prefix: dam_prefix.clone(), last_round: 3 }));
+            println!("stage probe: sheets {} (at most {bins} bins, numbers in {dir}/; memory inside the peaks), dam surfaces {} (on disk, deleted after the count)", if stages_on { "ON" } else { "off" }, if dams_on { "ON" } else { "off" });
+        }
         let params = PlanParams::standard(seed, threads, format!("target/plan_zstart_k{k}_{}.f64", std::process::id()).into());
         let t = Instant::now();
         let built = build_resident(&grid, z, &outlet, &params, &climate, &mark).expect("the build");
@@ -394,6 +652,19 @@ fn main() {
             r.spill_bytes,
             built.hydro.segments.len()
         );
+        if dams_on {
+            let t = Instant::now();
+            let n = built.z.len();
+            let paths = ["before", "thermal", "deposition"].map(|tag| format!("{dam_prefix}_{tag}.f64"));
+            let [zb, zt, zd] = paths.clone().map(|p| read_f64s(&p, n));
+            let r = dam_report(&grid, &zb, &zt, &zd, &built.z, &outlet);
+            print_dams(&r, t.elapsed().as_secs_f64());
+            let (peak, now, commit) = memory3();
+            println!("memory after the dam count (the count holds four surfaces and two fills; after the build's own peaks above): peak working set {peak:.0} MiB, now {now:.0} MiB, peak commit {commit:.0} MiB");
+            for p in paths {
+                let _ = std::fs::remove_file(p);
+            }
+        }
         cpu_phase("the plan");
         return;
     }
