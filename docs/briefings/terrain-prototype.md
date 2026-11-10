@@ -2,16 +2,38 @@
 
 Status: active since 2026-11-08 (owner: D1 = option A, conditional). Replaces the M9.1 gate of `docs/briefings/m9-plan.md`; the M9 planet bake is frozen until this block closes. Contract: `docs/design/terrain-target.md` (A3), ADRs 0110-0115 (proposed). Plan: `spikes/architecture-replan/results/results.md` sections 13 and 17. Target date: mid-December 2026 (estimate).
 
-Re-estimate: 2026-11-10 14:50 (remaining work: item 14 open for the explorer lane (G-STORE: L on a second region, deep-ocean field tiles, temporary space, edit overrides; item 3's stored-field read), 12 repeated at the gate, 15 in progress, 16 and 17 open; items 9, 10, 11, 13 and 18 done; target date as above, unchanged). An item that becomes done moves this date (BUILD-042).
+Re-estimate: 2026-11-11 00:30 (remaining work: P0 closure; item 15 in progress, its order changed for CP1 and CP2 (owner, 2026-11-10); f32 rounds (GEN-166) and the memo-key fix added; 12 repeated at the gate; 16 and 17 open; items 3 and 14 done; target date as above, unchanged, if P0 uses the lanes' waits on machine slots). An item that becomes done moves this date (BUILD-042).
 
 Scope: the region of `spikes/prototype-region/results/results.md`. Everything stays behind switches, off the default bake path.
+
+## Phases (owner, 2026-11-10)
+The block runs in phases of about 1.5 weeks. A phase starts with an entry note here (items, exit list, risks, IDs reserved), which the owner approves in one line. It ends with a closure, which bulldozer runs and the architect verifies, and a one-page close to the owner: what passed, what deviated, go or no-go. Work in flight is never closed mid-way; it carries into the next phase.
+
+| Phase | Ends (estimate) | Exit |
+|---|---|---|
+| P0 | about 2026-11-13 | closure of finished work only (list below); in-flight work (item 15, GEN-166, the memo-key fix) is not touched |
+| P1 | CP1, about 2026-11-20 | G-LOCAL measured; one region flyable from the stored `L` (lakes as flat water, no rivers yet); f32 rounds and the G-SCALE k=4 pair; closure |
+| P2 | CP2, about 2026-12-01 | rivers and lakes drawn; G-RT frame time on the prototype region; the thermal-dam options brief; closure with an independent review pass |
+| Gate | mid-December | the A/B gate (exit list below); a full `housekeeping` skill run as a milestone close |
+
+Closure checklist (every phase):
+- Changes whose code is merged and complete: specs synced to `openspec/specs/`, change archived, `design.md` and `tasks.md` deleted (ADR 0055).
+- A3, ADRs 0110-0115 and this briefing agree with the decisions and the code (architect); `docs/status.md` current (bulldozer).
+- Worktrees of merged branches pruned (bulldozer; removal only with the owner's yes).
+- Learnings recorded; the decisions of the phase in the repo, not only in the inbox file.
+
+P0 list:
+- Archive the finished changes (each coding lane its own; during waits on machine slots).
+- The A3 and ADR text pass for the ADR review pass (`spikes/prototype-gates/results/adr-review-pass.md`, D24): Amends lists, k names, G-SURF and G-CON rows, lake pieces, width law, 12 GB unit; the CON-08 amendment proposal to the owner (architect).
+- Repository audit, read-only (spikes): outdated, misleading, overly verbose or duplicated documents and folders, ranked by cost to readers, each with a proposed action (delete, merge, shorten, move). The owner browses the report; actions follow per owner's yes.
+- Briefing and `docs/status.md` refreshed; worktree inventory.
 
 ## Items
 | # | Item | Lane | State |
 |---|---|---|---|
-| 1 | Target document and contracts, three external reviews | spikes, planner | done; a further ADR review pending |
+| 1 | Target document and contracts, three external reviews | spikes, planner | done; the ADR review pass done (#1326), its verdicts in P0 |
 | 2 | True cell metric (GEN-138) | explorer | done (#1235) |
-| 3 | H0 across cube edges (GEN-139) | explorer | done (#1236); the stored-field read is open |
+| 3 | H0 across cube edges (GEN-139) | explorer | done (#1236); the stored-field read done (GEN-164, #1317) |
 | 4 | Round kernels and solver (GEN-141, GEN-142) | explorer | done (#1238, #1240) |
 | 5 | Partitioned route (GEN-143) | explorer | done (#1241) |
 | 6 | Landmass across cube edges (GEN-144) | explorer | done (#1243) |
@@ -22,8 +44,8 @@ Scope: the region of `spikes/prototype-region/results/results.md`. Everything st
 | 11 | Local 102 m pass in the new chain on the base read (G-SURF) | explorer | done (GEN-148, GEN-154; ledger #1311 on ea6b1b2b, canonical K7 and GEN-162): G-SURF pass (5.7e-14 m at the centres before quantisation, 0.125 m after); G-SURF-I reported, A3's criteria met: 0.66 % of vertices over 0.25 m, p99 0.225 m, error grows with the bake step (0 of 3,333 over 0.25 m below 5 m, at most 0.098 of the step), spread (84 of 256 bins, at most 8 in one), error against the local base rise p99 0.057 m; the overshoot (max 2.63 m) is the base's own interpolant, not the stored change, and the C1 clamp stays. The look is checked on G-RT's flight (item 15) |
 | 12 | Independent measurement of the gates by another lane | spikes | partly done (SPIKE-106); repeated at the gate |
 | 13 | Hills and plains: the structural gates on a second region and seed | crusader | done on R3a and R3b (`spikes/prototype-gates/results/results.md` §6, corrected after GEN-162 in §6c): G-ROUND, G-DET, G-PART 0 differ; G-CON at most 3.0e-14; G-LAND 0.059 % and 0.005 % unclassified; G-SED closes. G-BASIN is not runnable on a window: read at the gate on a stored region. Findings: base stripes (17), fans over lake flats |
-| 14 | Store: real serialized data (G-STORE) | explorer | in progress |
-| 15 | Runtime: sampler composition, lakes, rivers; flight (G-RT) | crusader | in progress: design notes #1305 with the architect's answers (decisions D6: lake producer at bake time, width law `w = a · Q_w^b` as bake parameters, L as kind 13 with a version bump, G-RT on the prototype region, channels end at lake entries); order lakes, sampler switch, rivers and G-PROFILE, G-RT |
+| 14 | Store: real serialized data (G-STORE) | explorer | done: G-STORE pass on steady state (ledger, 6b5bb0ac; worst sum 28.4 GB against 35); the compaction peak (2x steady, up to 57 GB) reported for the gate |
+| 15 | Runtime: sampler composition, lakes, rivers; flight (G-RT) | crusader | in progress: lake producer (GEN-163), lake shores, basin table (kind 19), width law in K7 (GEN-165) merged; design notes #1322. Order for CP1: kind-13 v3 with the water-mask section, the bake writer, the L read behind `--erosion` (a flyable region); then for CP2: the water source, rivers and G-PROFILE, G-RT. The fill-channel deletion (PR 5b) waits for the owner's acceptance of ADR 0110 |
 | 16 | Editor path and preview levels (E1-E6 from the editor) | crusader | in progress: level 1 first (height, stamp and climate rows of A3 §11.1), no dependency on item 15; coarse-carve rows and level 2's display wait for item 15 and GEN-153; a climate item kind in `world-def` comes to the architect first (CON-10) |
 | 17 | Noise of the base bands: gradient noise, crease filter or turned lattice on eroded terrain | crusader, owner | open; decided at the gate |
 | 18 | Stage previews: a read-only probe at each new-chain stage, sheets in `target/review/stages/` (BUILD-046, GEN-161); committed manifest of data hashes and numbers on a small fixture, required up to date by CI (BUILD-047, TEST-103, TEST-104); advisory reviewer agent and sheet size cap (BUILD-048) | crusader | done (#1282 to #1289; hillshade view #1299). The next k=4 run carries the probe on |
