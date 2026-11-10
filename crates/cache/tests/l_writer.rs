@@ -242,9 +242,40 @@ fn the_records_do_not_depend_on_the_thread_count() {
 fn the_memory_feed_hands_out_the_segments_near_a_window() {
     use planet_cache::l_writer::MemoryFeed;
     let ch = |x: f64, y: f64| Channel { points: vec![(x, y), (x + 1.0, y)], levels: vec![1.0, 0.5], q: vec![2.0, 3.0] };
-    let feed = MemoryFeed { channels: vec![ch(50.0, 50.0), ch(400.0, 400.0), ch(30.0, 60.0), ch(-10.0, 60.0)], discharge: true };
+    let feed =
+        MemoryFeed { face: Face(2), channels: vec![ch(50.0, 50.0), ch(400.0, 400.0), ch(30.0, 60.0), ch(-10.0, 60.0)], discharge: true };
     let got = feed.channels_near(Face(2), 40, 40, 40);
-    assert_eq!(got.len(), 2, "the one at (50, 50) and the one 10 cells outside the window edge, within the margin; the one far outside is left");
+    assert_eq!(
+        got.len(),
+        2,
+        "the one at (50, 50) and the one 10 cells outside the window edge, within the margin; the one far outside is left"
+    );
     assert!(feed.q_is_discharge());
+    assert!(feed.channels_near(Face(3), 40, 40, 40).is_empty(), "the channels of face 2 are not burned into face 3");
     assert!(feed.channels_near(Face(2), 1000, 1000, 40).is_empty());
+}
+
+// spec: STRM-082
+#[test]
+fn a_grid_with_more_than_eight_local_cells_to_an_h1_cell_and_a_commit_naming_a_seventh_face_are_refused() {
+    let (w, d) = (world(), Dir::new("ratio"));
+    let b = LBake {
+        world: &w,
+        res: RES,
+        spec: spec(7),
+        basin: basin(),
+        base: &base,
+        regional: &zero,
+        feed: &Feed(true),
+        lakes: &lakes(),
+        h1_cells: 12,
+        h1_cell: &h1_cell,
+        face_of: &|_| Face(2),
+        threads: 1,
+    };
+    let e = bake_l(d.path(), &b, &tiles()).unwrap_err();
+    assert!(e.contains("16 local cells to an H1 cell"), "{e}");
+    let c = bake(&d, &w, spec(7), &Feed(true), &lakes(), 1).unwrap();
+    let bad = c.to_text().replacen("tile 2 ", "tile 258 ", 1);
+    assert!(Commit::parse(&bad).unwrap_err().contains("face outside"));
 }

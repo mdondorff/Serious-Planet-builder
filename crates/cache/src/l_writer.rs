@@ -39,6 +39,8 @@ pub trait ChannelFeed {
 
 /// The in-memory feed (fixtures and regions): channels made once, e.g. by `k7::channels_from_hydro`, and the segments with a point within `MARGIN` local cells of a window handed out per window.
 pub struct MemoryFeed {
+    /// The face the channels are on (their points are in that face's local cell-index space); other faces get none.
+    pub face: Face,
     pub channels: Vec<Channel>,
     /// Whether the `q` of the channels is a discharge in m3/s (see [`ChannelFeed::q_is_discharge`]).
     pub discharge: bool,
@@ -51,7 +53,10 @@ impl ChannelFeed for MemoryFeed {
     fn q_is_discharge(&self) -> bool {
         self.discharge
     }
-    fn channels_near(&self, _: Face, i0: i64, j0: i64, w: i64) -> Vec<Channel> {
+    fn channels_near(&self, face: Face, i0: i64, j0: i64, w: i64) -> Vec<Channel> {
+        if face != self.face {
+            return Vec::new();
+        }
         let (x0, x1, y0, y1) = (i0 as f64 - MARGIN, (i0 + w) as f64 + MARGIN, j0 as f64 - MARGIN, (j0 + w) as f64 + MARGIN);
         self.channels.iter().filter(|c| c.points.iter().any(|&(x, y)| x >= x0 && x <= x1 && y >= y0 && y <= y1)).cloned().collect()
     }
@@ -69,7 +74,8 @@ pub struct LBake<'a> {
     pub lakes: &'a Lakes,
     /// H1 cells a face edge; the local grid is a whole number of local cells to each.
     pub h1_cells: usize,
-    /// The H1 cell (index into the hydrology's grid) of the H1 cell `(i, j)` of a face; `None` outside the face or where the caller does not resolve it (such cells read as dry).
+    /// The H1 cell (index into the hydrology's grid) of the H1 cell `(i, j)` of a face. A window at a face edge holds H1 cells outside the face: the resolver answers them on the neighbouring face (through the
+    /// direction on the sphere), or the lake's water across the seam reads as dry there and the mask has a strip of up to 8 cells missing along it. `None` reads as dry. The planet-scale resolver is the caller's (PR 7).
     pub h1_cell: &'a dyn Fn(u8, i64, i64) -> Option<usize>,
     /// The face a lake's table is filed under.
     pub face_of: &'a dyn Fn(&Lake) -> Face,
@@ -145,6 +151,9 @@ impl Commit {
                     }
                 }
                 ["tile", f, i, j, k] => {
+                    if num(f, l)? >= 6 {
+                        return Err(format!("'{l}': a face outside 0..6"));
+                    }
                     let at = (num(f, l)? as u8, num(i, l)?, num(j, l)?);
                     if tiles.insert(at, key(k, l)?).is_some() {
                         return Err(format!("'{l}': a tile named twice"));
@@ -291,6 +300,12 @@ pub fn bake_l(dir: &Path, b: &LBake, tiles: &[PassTile]) -> Result<Commit, Strin
     }
     if b.h1_cells == 0 || !g.cells.is_multiple_of(b.h1_cells) {
         return Err(format!("{} local cells a face edge are not a whole number of the {} H1 cells", g.cells, b.h1_cells));
+    }
+    if g.cells / b.h1_cells > usize::from(RING_STEPS) {
+        return Err(format!(
+            "{} local cells to an H1 cell: the ring reaches {RING_STEPS} steps, one H1 cell at most",
+            g.cells / b.h1_cells
+        ));
     }
     if b.lakes.lakes.iter().any(|l| l.id == water_mask::NO_LAKE) {
         return Err("a lake has the id u64::MAX, the dry label of the mask".into());
