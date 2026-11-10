@@ -476,3 +476,132 @@ fn the_deposition_balances_per_catchment_and_per_round_on_a_compact_landmass() {
     }
     assert_eq!(checked, 3);
 }
+
+// spec: GEN-158
+#[test]
+fn the_phase_plan_is_the_steps_in_order_releases_what_it_should_and_does_not_move_a_bit_with_the_probe_on() {
+    use planet_generators::bake::build::{build_resident, PlanParams};
+    use planet_generators::bake::hydro::{hydrology, verify, HydroParams};
+    use planet_generators::bake::probe::{self, Stage, StageProbe, StageView};
+    use planet_generators::bake::sediment::sediment_pass;
+    use planet_generators::runoff::{discharge_weight, pet_mm, runoff_mm};
+    use std::sync::{Arc, Mutex};
+    struct Sink(Mutex<Vec<String>>);
+    impl StageProbe for Sink {
+        fn stage(&self, view: &StageView<'_>) {
+            self.0.lock().unwrap().push(view.stage.label());
+        }
+    }
+    let n = 24;
+    let small = 4000.0;
+    let (active, bits) = corner_cap(n, 0.2);
+    let grid = Grid::compact_cube(n, small, bits);
+    let cube = planet_generators::bake::h0::GlobalGrid::new(n, R);
+    let ids: Vec<usize> = (0..active.len()).filter(|&g| active[g]).collect();
+    let z0: Vec<f64> = ids
+        .iter()
+        .map(|&g| {
+            let d = cube.direction(g as u32);
+            900.0 * (d.x + d.y + d.z)
+                + 90.0 * libm::sin(11.0 * d.x + 5.0 * d.y) * libm::cos(8.0 * d.z)
+                + 2.0 * planet_generators::bake::route::jitter(5, g as u64, 0)
+                - 500.0
+        })
+        .collect();
+    let outlet: Vec<bool> = z0.iter().map(|&h| h <= 0.0).collect();
+    // A climate that varies over the cap: wetter and warmer towards the corner.
+    let climate_of = |p: usize| -> (f64, f64) {
+        let d = cube.direction(ids[p] as u32);
+        (900.0 + 700.0 * (d.x + d.y + d.z) / 1.7, 8.0 + 14.0 * d.z)
+    };
+    let spill = std::env::temp_dir().join(format!("planet-plan-{}.f64", std::process::id()));
+    let mut params = PlanParams::standard(5, 3, spill.clone());
+    params.rounds = 2;
+    params.carve.steps = 10;
+    let marks = Mutex::new(Vec::<String>::new());
+    let mark = |name: &str| marks.lock().unwrap().push(name.to_string());
+
+    let off = build_resident(&grid, z0.clone(), &outlet, &params, &climate_of, &mark).expect("the plan runs");
+    assert!(!spill.exists(), "the spill file is deleted after the read-back");
+    assert_eq!(off.report.spill_bytes, z0.len() as u64 * 8);
+    assert!(off.hydro.q.is_empty() && off.hydro.qw.is_empty(), "the per-cell discharges are released");
+    assert_eq!(off.hydro.label.len(), z0.len(), "the labels are kept");
+    for name in [
+        "pre-carve surface spilled",
+        "after the rounds",
+        "drivers",
+        "routing and filled surface",
+        "weight dropped",
+        "hydrology",
+        "H1 result kept, discharges released",
+        "pre-carve surface read back",
+        "after the sediment pass",
+    ] {
+        assert!(marks.lock().unwrap().iter().any(|m| m == name), "the allocation boundary {name} is marked");
+    }
+    // G-CON: the conservation of H1 holds to rounding, checked before the release.
+    let v = &off.report.g_con;
+    assert!(
+        v.max_confluence_error < 1e-9
+            && v.q_outlets_error < 1e-9
+            && v.qw_closure_error < 1e-9
+            && v.qw_confluence_error < 1e-9
+            && v.area_outlets_error < 1e-9,
+        "{v:?}"
+    );
+    assert_eq!((v.disconnected_segments, v.broken_channel_cells, v.miscovered_cells), (0, 0, 0));
+
+    // The steps by hand, in order: the rounds, H1 on that surface, the sediment pass against the pre-carve surface.
+    let mut z = z0.clone();
+    solve_rounds(&grid, &mut z, &outlet, &params.carve, 2, &3usize, 5);
+    let z_rounds = z.clone();
+    let (mut weight, mut runoff, mut evap) = (vec![1.0f32; z.len()], vec![0.0f32; z.len()], vec![0.0f32; z.len()]);
+    for p in 0..z.len() {
+        if z[p] > 0.0 {
+            let (pm, tc) = climate_of(p);
+            let ro = runoff_mm(pm, tc);
+            weight[p] = discharge_weight(ro) as f32;
+            runoff[p] = (ro / 1000.0 / 31_557_600.0) as f32;
+            evap[p] = ((pet_mm(tc) - (pm - ro)).max(0.0) / 1000.0 / 31_557_600.0) as f32;
+        }
+    }
+    let routing = route_rules(&grid, &z, &outlet, 1e-3, 5, 0.0, Some(&weight), RoundRules::ROUND);
+    let filled = planet_generators::bake::flood::priority_flood_with(&grid, &z, &outlet, 1e-3, true);
+    let hy = hydrology(&grid, &z, &filled, &routing, &outlet, Some(&runoff), Some(&evap), &HydroParams::default());
+    let v_hand = verify(&grid, &hy, &routing, &filled, &outlet, Some(&runoff), Some(&weight));
+    assert_eq!(
+        format!("{:?}", off.report.g_con),
+        format!("{v_hand:?}"),
+        "the area reference taken before the weights are dropped is the one verify sums"
+    );
+    assert_eq!(off.hydro.label, hy.label);
+    assert_eq!(off.hydro.channel, hy.channel);
+    assert_eq!(off.hydro.segments, hy.segments);
+    assert_eq!(format!("{:?}", off.report.h1), format!("{:?}", hy.stats));
+    assert_eq!(off.hydro.basins, hy.basins);
+    let mut q = params.sediment;
+    q.carve.breach_max_m = CarveParams::default().breach_max_m;
+    sediment_pass(&grid, &mut z, &z0, &q, 3);
+    let bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+    assert_eq!(bits(&off.z), bits(&z), "the plan's surface is the steps in order (the spill reads back the same bits)");
+    assert_ne!(bits(&z), bits(&z_rounds), "the sediment pass moved the surface");
+
+    // The probe on: every stage of the build is emitted, and no bit moves.
+    let sink = Arc::new(Sink(Mutex::new(Vec::new())));
+    probe::install_local(sink.clone());
+    let on = build_resident(&grid, z0.clone(), &outlet, &params, &climate_of, &|_| {}).expect("the plan runs with the probe");
+    probe::uninstall_local();
+    assert_eq!(bits(&on.z), bits(&off.z), "the probe moves no bit");
+    // One thread gives the bits of three: no chunk boundary enters the plan.
+    let mut one_thread = params.clone();
+    one_thread.threads = 1;
+    let one = build_resident(&grid, z0.clone(), &outlet, &one_thread, &climate_of, &|_| {}).expect("the plan runs on one thread");
+    assert_eq!(bits(&one.z), bits(&off.z), "the plan does not depend on the thread count");
+    assert_eq!(one.hydro.label, off.hydro.label);
+    assert_eq!(one.hydro.segments, off.hydro.segments);
+    assert_eq!(on.hydro.label, off.hydro.label);
+    let seen = sink.0.lock().unwrap().clone();
+    let want = [Stage::Landmass, Stage::Round(0), Stage::Round(1), Stage::H1, Stage::Thermal, Stage::Deposition, Stage::PitSpreading]
+        .map(|s| s.label());
+    assert_eq!(seen, want, "every stage of the build is emitted, once, in order");
+}

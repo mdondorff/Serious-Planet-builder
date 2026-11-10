@@ -94,6 +94,38 @@ pub fn route_rules(
     weights: Option<&[f32]>,
     rules: RoundRules,
 ) -> Routing {
+    route_core(grid, z, outlet, epsilon, seed, max_area, weights, rules, false).0
+}
+
+/// [`route_rules`] that also returns the filled surface the routing was made on (the flood of `z` under the same rules, epsilon and outlets: the bits a separate flood would give), for a caller that reads it next (H1);
+/// under the unclipped rules the surface is then not dropped before the donor lists and the order are built.
+#[allow(clippy::too_many_arguments)]
+pub fn route_rules_filled(
+    grid: &Grid,
+    z: &[f64],
+    outlet: &[bool],
+    epsilon: f64,
+    seed: u64,
+    max_area: f64,
+    weights: Option<&[f32]>,
+    rules: RoundRules,
+) -> (Routing, Vec<f64>) {
+    let (r, f) = route_core(grid, z, outlet, epsilon, seed, max_area, weights, rules, true);
+    (r, f.expect("the filled surface is kept"))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn route_core(
+    grid: &Grid,
+    z: &[f64],
+    outlet: &[bool],
+    epsilon: f64,
+    seed: u64,
+    max_area: f64,
+    weights: Option<&[f32]>,
+    rules: RoundRules,
+    keep: bool,
+) -> (Routing, Option<Vec<f64>>) {
     if let Some(w) = weights {
         assert_eq!(w.len(), grid.len(), "one runoff weight per cell");
         assert!(w.iter().all(|v| v.is_finite() && *v > 0.0), "the runoff weights are finite and positive");
@@ -101,24 +133,26 @@ pub fn route_rules(
     let filled = priority_flood_with(grid, z, outlet, epsilon, rules.canonical_flood);
     let receiver = receivers(grid, &filled, outlet, seed);
     let (area, order);
-    if rules.clip_mfd == MfdClip::Off {
+    let filled = if rules.clip_mfd == MfdClip::Off {
         // The area comes first so that the filled surface (8 bytes a cell) is dropped before the donor lists and the order are built: a face at 12,288 cells has 1.6e8 cells.
         area = mfd_area(grid, &filled, outlet, weights, None);
-        drop(filled);
+        let filled = keep.then_some(filled);
         order = topological_order(&receiver);
+        filled
     } else {
         // The clip needs the catchments, hence the order, before the area.
         order = topological_order(&receiver);
         let root = catchment_roots(&receiver, &order);
         area = mfd_area(grid, &filled, outlet, weights, Some(Clip { root: &root, receiver: &receiver, mode: rules.clip_mfd }));
-    }
+        keep.then_some(filled)
+    };
     let mut area = area;
     if max_area > 0.0 {
         for a in &mut area {
             *a = a.min(max_area);
         }
     }
-    Routing { receiver, order, area }
+    (Routing { receiver, order, area }, filled)
 }
 
 /// The root (outlet) of the D8 tree each cell drains to: the catchment label.

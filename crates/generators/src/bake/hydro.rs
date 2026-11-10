@@ -512,6 +512,33 @@ pub fn verify(
     runoff: Option<&[f32]>,
     weights: Option<&[f32]>,
 ) -> Verify {
+    verify_with_area(grid, h, routing, filled, outlet, runoff, weights, None)
+}
+
+/// The sum of the (weighted) true cell areas of every active cell, in cell order: the reference of [`verify`]'s area check, for a caller that drops the weights before it checks ([`verify_with_area`]).
+pub fn weighted_cell_area(grid: &Grid, weights: Option<&[f32]>) -> f64 {
+    let mut total = 0.0;
+    for p in 0..grid.len() {
+        if grid.is_active(p) {
+            total += grid.cell_area(p) * weights.map_or(1.0, |w| f64::from(w[p]));
+        }
+    }
+    total
+}
+
+/// [`verify`] with the sum of the weighted cell areas given (`Some`, from [`weighted_cell_area`]): `weights` is then not read, and the result is the same bits.
+#[allow(clippy::too_many_arguments)]
+pub fn verify_with_area(
+    grid: &Grid,
+    h: &Hydro,
+    routing: &Routing,
+    filled: &[f64],
+    outlet: &[bool],
+    runoff: Option<&[f32]>,
+    weights: Option<&[f32]>,
+    weighted_area: Option<f64>,
+) -> Verify {
+    debug_assert!(weights.is_none() || weighted_area.is_none(), "the weights are read only for the area: give them or their sum, not both");
     let n = grid.len();
     let receiver = &routing.receiver;
     let mut v = Verify::default();
@@ -587,7 +614,9 @@ pub fn verify(
             continue;
         }
         a_local += local(p);
-        ad_cells += grid.cell_area(p) * weights.map_or(1.0, |w| f64::from(w[p]));
+        if weighted_area.is_none() {
+            ad_cells += grid.cell_area(p) * weights.map_or(1.0, |w| f64::from(w[p]));
+        }
         if receiver[p] == NONE {
             q_out += h.q[p];
             qw_out += h.qw[p];
@@ -597,6 +626,7 @@ pub fn verify(
     let lost: f64 = h.basins.iter().map(|b| b.q_in - b.q_out).sum();
     v.qw_closure_error = (qw_out + lost - a_local).abs() / a_local.max(1e-300);
     v.q_outlets_error = (q_out - a_local).abs() / a_local.max(1e-300);
+    let ad_cells = weighted_area.unwrap_or(ad_cells);
     v.area_outlets_error = (ad_out - ad_cells).abs() / ad_cells.max(1e-300);
     v
 }

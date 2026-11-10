@@ -10,7 +10,7 @@ mod tests {
     const CALLS: [&str; 5] = ["thread::spawn(", "thread::Builder::new(", "thread::scope(", "spawn_named(", "spawn_scoped("];
 
     /// (file, calls, reason). Every other entry is the job system itself, a driver or a tool that stays.
-    const ALLOWED: [(&str, usize, &str); 18] = [
+    const ALLOWED: [(&str, usize, &str); 19] = [
         ("crates/app/src/cameraground.rs", 1, "driver: the free camera's ground read, one thread waiting on a queue (VIEW-061); stays"),
         ("crates/app/src/coupledworld.rs", 1, "driver: the coupled run's one thread; stays"),
         ("crates/app/src/horizonworld.rs", 1, "driver: the one-shot read of the stored coarse horizon; stays"),
@@ -21,6 +21,7 @@ mod tests {
         ("crates/core/src/par.rs", 4, "`run_scoped`: the scoped helper threads of a `Par`; `SharePar` takes them as permits of the terrain share first (the permit rule, BUDG-009)"),
         ("crates/core/src/thread.rs", 1, "the named scoped thread helper itself"),
         ("crates/generators/src/bake/preview.rs", 1, "tool: the preview base's row bands, the class source sampled at every H0 cell once per session (VIEW-068); the caller gives the thread count; stays"),
+        ("crates/generators/src/bake/build.rs", 1, "tool: the phase plan's H1 drivers (runoff weight, runoff, evaporation), one pass over the cells; the caller gives the thread count (GEN-158); stays"),
         ("crates/generators/src/descriptors.rs", 2, "tool: the scorecard's row bands (GEN-089, GEN-090, GEN-091); offline, the caller gives the thread count; stays"),
         ("crates/perf/src/desktop.rs", 1, "tool: the desktop probe; stays"),
         ("crates/perf/src/gate.rs", 1, "tool: the GPU load query; stays"),

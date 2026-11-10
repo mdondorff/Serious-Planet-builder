@@ -221,3 +221,26 @@ fn the_pits_of_the_sediment_pass_are_the_canonical_flood_s_pits() {
     let s = planet_generators::bake::sediment::pit_cells(&g, &z, 0.0, 0.02, 0.1);
     assert_eq!(s.pit_cells, 0, "no depression: {s:?}");
 }
+
+// spec: GEN-158
+#[test]
+fn the_route_that_keeps_its_filled_surface_is_the_route_and_the_flood_it_replaces() {
+    use planet_generators::bake::route::route_rules_filled;
+    let g = Grid::new(N, N, 800.0);
+    let z = terrain(3, true);
+    let outlet = g.outlets(&z, 0.0);
+    let weights: Vec<f32> = (0..N * N).map(|p| 0.5 + (p % 7) as f32 * 0.25).collect();
+    for rules in [RoundRules::ROUND, RoundRules { clip_mfd: MfdClip::Off, canonical_flood: true }, RoundRules::default()] {
+        let plain = route_rules(&g, &z, &outlet, 1e-3, 9, 0.0, Some(&weights), rules);
+        let (kept, filled) = route_rules_filled(&g, &z, &outlet, 1e-3, 9, 0.0, Some(&weights), rules);
+        assert_eq!(kept.receiver, plain.receiver);
+        assert_eq!(kept.order, plain.order);
+        assert_eq!(kept.area.iter().map(|a| a.to_bits()).collect::<Vec<_>>(), plain.area.iter().map(|a| a.to_bits()).collect::<Vec<_>>());
+        let flood = priority_flood_with(&g, &z, &outlet, 1e-3, rules.canonical_flood);
+        assert_eq!(
+            filled.iter().map(|a| a.to_bits()).collect::<Vec<_>>(),
+            flood.iter().map(|a| a.to_bits()).collect::<Vec<_>>(),
+            "the kept surface is the flood's bits"
+        );
+    }
+}

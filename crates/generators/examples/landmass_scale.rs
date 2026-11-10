@@ -352,6 +352,51 @@ fn main() {
     let p = CarveParams { steps: 20, reroute_every: 5, round_rules: RoundRules::ROUND, ..CarveParams::default() };
     let t = Instant::now();
     let mode = a.get(3).map_or("", |x| x.as_str());
+    if mode == "plan" {
+        // GEN-158: the production phase plan (`bake::build`): the same steps as `full`, with the pre-carve surface spilled, H1's discharges released and the stage probe called.
+        use planet_generators::bake::build::{build_resident, PlanParams};
+        let o = inputs.orography();
+        let climate = |p: usize| -> (f64, f64) {
+            let g = grid.cube_id_of(p);
+            let spec = FaceSpec { face: Face((g / nn) as u8), cells: n, radius_m: R, sea_level: 0.0, seed, halo: 0 };
+            let d: Vec3 = spec.halo_direction(((g % nn) % n) as i64, ((g % nn) / n) as i64);
+            (o.precipitation_mm(d), o.temperature_c(d))
+        };
+        let mark = |name: &str| {
+            let (peak, now, commit) = memory3();
+            println!("MARK {name}: working set {now:.0} MiB now, peak {peak:.0} MiB, peak commit {commit:.0} MiB");
+        };
+        let params = PlanParams::standard(seed, threads, format!("target/plan_zstart_k{k}_{}.f64", std::process::id()).into());
+        let t = Instant::now();
+        let built = build_resident(&grid, z, &outlet, &params, &climate, &mark).expect("the build");
+        let r = &built.report;
+        println!("plan: {:.1} s; phases {:?}", t.elapsed().as_secs_f64(), r.phases);
+        println!(
+            "hash H1: label {:016x}, channel {:016x}, segments {:016x}",
+            fnv(built.hydro.label.iter().map(|&v| u64::from(v))),
+            fnv(built.hydro.channel.iter().map(|&c| u64::from(c))),
+            fnv(built.hydro.segments.iter().flat_map(|g| [g.id, g.q_up.to_bits(), g.q_down.to_bits(), u64::from(g.cells)]))
+        );
+        println!("H1: {:?}", r.h1);
+        println!("G-CON (hydro::verify) before the release: {:?}", r.g_con);
+        println!("sums before the release: Q {:.6e} m3/s, Qw {:.6e} m3/s (not conservation figures)", r.sum_q, r.sum_qw);
+        for (name, s) in &r.sediment.pits {
+            println!("pits {name}: {} of {} land cells ({:.4} %), max {:.1} m", s.pit_cells, s.land_cells, 100.0 * s.share(), s.max_m);
+        }
+        let d = r.sediment.deposit;
+        println!("deposition: eroded {:.4e} m3, deposited {:.4e}, exported {:.4e}", d.eroded, d.deposited, d.exported);
+        println!("hash z after the sediment pass {:016x}", fnv(built.z.iter().map(|v| v.to_bits())));
+        let (peak, now, commit) = memory3();
+        println!(
+            "THE COMPLETE BUILD (plan): peak working set {peak:.0} MiB ({:.0} bytes a cell), now {now:.0} MiB, peak commit {commit:.0} MiB ({:.2} GB of the 12 GB budget; the gate reads commit against 11,444 MiB); spill {} B on disk, deleted; H1 result kept: {}",
+            peak * 1048576.0 / active as f64,
+            peak.max(commit) * 1048576.0 / 1e9,
+            r.spill_bytes,
+            built.hydro.segments.len()
+        );
+        cpu_phase("the plan");
+        return;
+    }
     let rep = if mode == "part" || mode == "both" {
         // `part` keeps nothing between rounds (the memory of one solve); `both` keeps the memos like an edited build.
         let mut cache = if mode == "part" { RoundCache::without_memory() } else { RoundCache::default() };
