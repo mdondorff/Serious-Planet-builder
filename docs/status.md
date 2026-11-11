@@ -10,7 +10,7 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 - **World-build share values** (ADR 0097, BUDG-014): terrain 40 %, future content 40 %, margin 20 % of a 24 h day, proposed; confirm or change.
 - **Ocean square at orbit** (owner test 2026-11-03, `docs/dev_screenshots/2026-11-03-ocean-square-*.jpg`): press F9 when it shows again; the bundle lets crusader replay it (Tracked).
 - **Cliffs** (SPIKE-94, #1082): asset library or procedural only; the Alps' 4.3 % of area above 45° as the v1 coverage. Trigger: after M9's generator rounds.
-- **ADR 0110 acceptance** gates item 15 PR 5b (it retires ADR 0101 point 3); the CON-08 amendment proposal (architect drafting) gates ADRs 0110-0115 at the A/B gate.
+- **ADR 0110 acceptance** gates item 15 PR 5b (it retires ADR 0101 point 3); CON-08: resolved by constitution v1.7 (ADR 0116, #1335). ADRs 0110-0115: architect's text pass in P0, then owner acceptance.
 - **Optional, when convenient:** the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); excluding the repo's `target` folders from Windows Search indexing.
 
 Dormant (no near trigger; not asked now):

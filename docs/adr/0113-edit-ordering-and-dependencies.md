@@ -1,5 +1,5 @@
 # 0113 Edit ordering and dependencies: landform and driver edits below erosion
-Status: proposed (spikes session for opus-planner, 2026-11-08, inbox #100; amended after the ADR review, inbox #102). Acceptance blocked by the owner: the reading of CON-08 (point 7) and the changes to accepted ADRs 0007 and 0066, plus the D2-D10 pass. Production: G-EQ, G-INC on E1-E7 (A/B gate)
+Status: proposed (spikes session for opus-planner, 2026-11-08, inbox #100; amended after the ADR review, inbox #102). Acceptance: the owner's, for the changes to accepted ADRs 0007, 0066 and 0089 and the D2-D10 pass; CON-08 is resolved by constitution v1.7 (ADR 0116). Production: G-EQ, G-INC on E1-E7 (A/B gate)
 Date: 2026-11-08
 Source: `docs/design/terrain-target.md` §7; SPIKE-105 §3 (X1-X4), §13.5 (D4), §18; ADR 0007, 0066, 0072, 0086
 
@@ -15,10 +15,11 @@ Source: `docs/design/terrain-target.md` §7; SPIKE-105 §3 (X1-X4), §13.5 (D4),
 3. Dirtiness below erosion is found by keys over the routing (ADR 0112 point 6), not by a radius; the radius of ADR 0066 point 1 stays for items above erosion.
 4. Propagation ends at bit equality of the canonical stored forms of a catchment-round's inputs, never at a tolerance.
 5. An edit that changes the land mask or landmass connectivity re-derives the regions at its commit; all routing and erosion state of an affected region follows through the keys, which hold no region id. A merged region over the job limits goes to a batch re-run. A change of the sea level is a full rebuild.
-6. A commit is one coherent set of keys (surface, hydrology, basins, water levels, materials) under a `commit_id`. A frame reads one commit; the runtime draws the previous commit until the new one's drawn tiles are ready (CON-22); a superseded result is dropped. Per-tile refresh (ADR 0072) stays for items above erosion.
-7. CON-08 is read: H0 and the regional solver are global-coarse and regional stages that read items; "a stage reads only earlier outputs" holds across rounds of one solve as a fixed order (owner to confirm the reading).
+6. A commit is one coherent set of keys (surface, hydrology, basins, water levels, materials) under a `commit_id`. A frame reads one commit; the runtime draws the previous commit until the new one's drawn tiles are ready (A3 §7.4; CON-22: never blocking); a superseded result is dropped. Per-tile refresh (ADR 0072) stays for items above erosion.
+7. H0 and the regional solver are stages over global and regional domains that read items, and the rounds of one solve are an iterative stage with a fixed count (CON-08 v1.7, ADR 0116). Point 4's bit equality is CON-29's rule.
 
 ## Consequences
-- Amends ADR 0007 (layer order), ADR 0066 points 1 and 4; settles ADR 0086 point 3. Point 6 is new against ADR 0072 (runtime and editor work).
+- Amends ADR 0007 (layer order), ADR 0066 points 1, 2 and 5 (items below erosion are bounded by keys, not by footprint or reach; point 4 is already amended by ADR 0068) and ADR 0089 point 11 (height edits leave the override stage); settles ADR 0086 point 3. Point 6 is new against ADR 0072 (runtime and editor work).
 - Undo removes an item: earlier keys read back.
+- Interim, until the A/B gate: the accepted ADRs named here govern the shipped bake; this ADR governs the prototype path behind its switches (architect D24, 2026-11-10).
 - Gates G-INC, G-EQ, on E1-E7 (E7: land bridge joined, then separated).
