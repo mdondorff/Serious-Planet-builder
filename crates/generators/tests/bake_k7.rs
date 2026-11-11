@@ -4,7 +4,7 @@
 use planet_core::cube::{face_to_direction, TangentWarp};
 use planet_core::{Face, Vec3};
 use planet_generators::bake::deposit::{DepositParams, Kc};
-use planet_generators::bake::k7::{burn_channels, k7_tile, pit_stats, surface_gate, Channel, K7Params, RegionField};
+use planet_generators::bake::k7::{burn_channels, k7_tile, pit_stats, surface_gate, Channel, K7Params, QUnit, RegionField};
 use planet_generators::bake::tile::{TileGrid, TileId};
 
 /// A tiny planet: 384 cells a face edge of about 100 m.
@@ -67,7 +67,7 @@ fn channel(g: &TileGrid, row: i64) -> Channel {
             base(d) - 60.0 - 0.2 * k as f64
         })
         .collect();
-    Channel { points, levels, q: Vec::new() }
+    Channel { points, levels, q: Vec::new(), q_unit: QUnit::Discharge }
 }
 
 // spec: GEN-148
@@ -76,7 +76,12 @@ fn the_burn_in_only_lowers_and_reaches_the_profile_along_the_segment() {
     let w = 40;
     let mut z: Vec<f64> = (0..w * w).map(|p| 100.0 + ((p * 37) % 11) as f64).collect();
     let before = z.clone();
-    let ch = Channel { points: vec![(3.0, 5.0), (12.0, 9.0), (30.0, 9.0)], levels: vec![90.0, 80.0, 70.0], q: Vec::new() };
+    let ch = Channel {
+        points: vec![(3.0, 5.0), (12.0, 9.0), (30.0, 9.0)],
+        levels: vec![90.0, 80.0, 70.0],
+        q: Vec::new(),
+        q_unit: QUnit::Discharge,
+    };
     let lowered = burn_channels(&mut z, w, (0, 0), std::slice::from_ref(&ch));
     assert!(lowered > 20);
     assert!(z.iter().zip(&before).all(|(a, b)| a <= b), "only lowers");
@@ -315,7 +320,8 @@ fn the_width_law_is_a_q_to_the_b_and_a_trench_is_max_of_one_cell_and_the_width()
     assert!((law.width_m(100.0) - 72.0).abs() < 1e-12 && (law.width_m(1.0e4) - 720.0).abs() < 1e-9);
     assert_eq!((law.width_m(0.0), law.width_m(-3.0)), (0.0, 0.0), "no discharge, no width");
     let w = 64;
-    let line = |q: f64| Channel { points: vec![(4.0, 32.0), (60.0, 32.0)], levels: vec![50.0, 50.0], q: vec![q, q] };
+    let line =
+        |q: f64| Channel { points: vec![(4.0, 32.0), (60.0, 32.0)], levels: vec![50.0, 50.0], q: vec![q, q], q_unit: QUnit::Discharge };
     let burn = |q: f64, cell_m: f64| {
         let mut z = vec![100.0; w * w];
         let n = burn_channels_wide(&mut z, w, (0, 0), &[line(q)], Some((&law, cell_m)));
@@ -390,6 +396,7 @@ fn a_trench_just_over_one_cell_wide_still_burns_the_line_on_half_integer_points_
         points: vec![(x0, y0), (x1, y1)],
         levels: vec![50.0, 50.0],
         q: vec![q, q],
+        q_unit: QUnit::Discharge,
     };
     for (a, b) in [((4.5, 32.5), (60.5, 32.5)), ((4.5, 8.5), (50.5, 54.5)), ((4.5, 10.5), (60.5, 40.5))] {
         let burn = |q: f64| {
@@ -408,7 +415,12 @@ fn a_trench_just_over_one_cell_wide_still_burns_the_line_on_half_integer_points_
         assert!((0..w * w).all(|c| just_over[c] != 50.0 || wide[c] == 50.0), "the trench grows with the discharge ({a:?} to {b:?})");
     }
     // A river far outside the window lowers nothing and costs no more than the steps along it.
-    let far = Channel { points: (0..2000).map(|k| (5000.0 + k as f64, 5000.0)).collect(), levels: vec![50.0; 2000], q: vec![1.0e7; 2000] };
+    let far = Channel {
+        points: (0..2000).map(|k| (5000.0 + k as f64, 5000.0)).collect(),
+        levels: vec![50.0; 2000],
+        q: vec![1.0e7; 2000],
+        q_unit: QUnit::Discharge,
+    };
     let mut z = vec![100.0; w * w];
     let t = std::time::Instant::now();
     assert_eq!(burn_channels_wide(&mut z, w, (0, 0), &[far], Some((&law, 102.0))), 0);
@@ -420,7 +432,8 @@ fn a_trench_just_over_one_cell_wide_still_burns_the_line_on_half_integer_points_
 #[should_panic(expected = "the discharges of a channel are finite")]
 fn a_discharge_that_is_not_finite_is_refused() {
     use planet_generators::bake::k7::{burn_channels_wide, WidthLaw};
-    let ch = Channel { points: vec![(4.0, 4.0), (20.0, 4.0)], levels: vec![50.0, 50.0], q: vec![f64::INFINITY, 5.0] };
+    let ch =
+        Channel { points: vec![(4.0, 4.0), (20.0, 4.0)], levels: vec![50.0, 50.0], q: vec![f64::INFINITY, 5.0], q_unit: QUnit::Discharge };
     burn_channels_wide(&mut vec![100.0; 32 * 32], 32, (0, 0), &[ch], Some((&WidthLaw::STANDARD, 10.0)));
 }
 
@@ -432,7 +445,7 @@ fn the_trench_width_follows_a_q_to_the_b_within_one_cell_at_two_discharges() {
     let w = 96;
     let cell_m = 10.0;
     for q in [60.0f64, 600.0] {
-        let ch = Channel { points: vec![(2.0, 48.0), (93.0, 48.0)], levels: vec![50.0, 50.0], q: vec![q, q] };
+        let ch = Channel { points: vec![(2.0, 48.0), (93.0, 48.0)], levels: vec![50.0, 50.0], q: vec![q, q], q_unit: QUnit::Discharge };
         let mut z = vec![100.0; w * w];
         burn_channels_wide(&mut z, w, (0, 0), &[ch], Some((&law, cell_m)));
         let across = (0..w).filter(|&y| z[y * w + 48] == 50.0).count() as f64;
@@ -440,4 +453,33 @@ fn the_trench_width_follows_a_q_to_the_b_within_one_cell_at_two_discharges() {
         assert!((across - want).abs() <= 1.0, "Q = {q}: {across} cells across, the law says {want}");
         assert!(z.iter().all(|&v| v == 50.0 || v == 100.0), "only lowered to the bed");
     }
+}
+
+// spec: GEN-165
+/// The units bug of 2026-11-10: H1 without the runoff returns `Q_w` as an area in m2, and a width law fed with it cuts trenches tens of kilometres wide. The width law refuses an area.
+#[test]
+#[should_panic(expected = "the width law needs a discharge in m3/s")]
+fn the_width_law_refuses_an_area() {
+    use planet_generators::bake::k7::{burn_channels_wide, WidthLaw};
+    let ch = Channel { points: vec![(4.0, 32.0), (60.0, 32.0)], levels: vec![50.0, 50.0], q: vec![1.0e9, 1.0e9], q_unit: QUnit::Area };
+    let mut z = vec![100.0; 64 * 64];
+    burn_channels_wide(&mut z, 64, (0, 0), &[ch], Some((&WidthLaw::STANDARD, 10.0)));
+}
+
+// spec: GEN-165
+/// Without the width law a channel in any unit burns as the one-cell line (K7 before the law); the same channel as a discharge is accepted by the law.
+#[test]
+fn an_area_without_the_law_burns_the_line_and_a_discharge_is_accepted_by_the_law() {
+    use planet_generators::bake::k7::{burn_channels_wide, WidthLaw};
+    let mk = |u| Channel { points: vec![(4.0, 32.0), (60.0, 32.0)], levels: vec![50.0, 50.0], q: vec![4.0, 4.0], q_unit: u };
+    let (mut a, mut b) = (vec![100.0; 64 * 64], vec![100.0; 64 * 64]);
+    let na = burn_channels_wide(&mut a, 64, (0, 0), &[mk(QUnit::Area)], None);
+    let nb = burn_channels_wide(&mut b, 64, (0, 0), &[mk(QUnit::Discharge)], Some((&WidthLaw::STANDARD, 10.0)));
+    assert!(na > 0 && nb > 0);
+    // Without the law the unit changes nothing: an area and a discharge burn the same cells to the same levels.
+    let (mut c, mut d) = (vec![100.0; 64 * 64], vec![100.0; 64 * 64]);
+    let nc = burn_channels_wide(&mut c, 64, (0, 0), &[mk(QUnit::Area)], None);
+    let nd = burn_channels_wide(&mut d, 64, (0, 0), &[mk(QUnit::Discharge)], None);
+    assert_eq!(nc, nd);
+    assert!(c.iter().zip(&d).all(|(x, y)| x.to_bits() == y.to_bits()));
 }
