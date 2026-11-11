@@ -10,7 +10,7 @@ Source: `docs/design/terrain-target.md` §7; SPIKE-105 §3 (X1-X4), §13.5 (D4),
 - The owner's P0: edits update erosion and hydrology (R1a, R4b).
 
 ## Decision
-1. Landform height items and driver items (lithology, uplift, climate, class paint) sit **below** erosion: applied at K2 and K3; `B` gains a read-time term for them.
+1. Landform height items and driver items (lithology, uplift, climate, class paint) sit **below** erosion: applied at K2 and K3; `B` gains a read-time term for them. (Amended by ADR 0117, proposed: the rainfall, temperature, lithology and uplift edits are driver regions of a world-level table, not items.)
 2. Constructed features (roads, plots, objects) stay **above** erosion, exact (ADR 0089 point 11).
 3. Dirtiness below erosion is found by keys over the routing (ADR 0112 point 6), not by a radius; the radius of ADR 0066 point 1 stays for items above erosion.
 4. Propagation ends at bit equality of the canonical stored forms of a catchment-round's inputs, never at a tolerance.
