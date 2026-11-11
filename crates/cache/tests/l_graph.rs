@@ -290,5 +290,5 @@ fn a_graph_block_the_commit_names_and_the_store_lacks_is_an_error_naming_the_til
     let r = RiverReader::new(Arc::new(TileStore::open(d.path(), w.params()).unwrap()), c, 2).unwrap();
     let e = r.tile_channels(Face(2), 1, 1).unwrap_err();
     assert!(e.contains("river tile 2/1/1") && e.contains("no record"), "{e}");
-    assert!(r.tile_channels(Face(2), 3, 3).is_ok() || r.tile_channels(Face(2), 3, 3).is_err_and(|e| e.contains("river tile 2/3/3")));
+    assert!(r.tile_channels(Face(2), 3, 3).is_ok(), "a tile away from the missing block still reads");
 }
