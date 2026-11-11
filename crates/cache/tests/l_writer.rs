@@ -284,3 +284,38 @@ fn a_grid_with_more_than_eight_local_cells_to_an_h1_cell_and_a_commit_naming_a_s
     let bad = c.to_text().replacen("tile 2 ", "tile 258 ", 1);
     assert!(Commit::parse(&bad).unwrap_err().contains("face outside"));
 }
+
+// spec: STRM-082
+#[test]
+fn a_channel_in_area_units_is_refused_even_when_the_feed_claims_discharges() {
+    use planet_cache::l_writer::MemoryFeed;
+    use planet_generators::bake::k7::QUnit;
+    let (w, d) = (world(), Dir::new("area-channel"));
+    let feed = MemoryFeed {
+        face: Face(2),
+        channels: vec![Channel {
+            points: vec![(100.0, 100.0), (101.0, 100.0)],
+            levels: vec![1.0, 0.5],
+            q: vec![2.0, 3.0],
+            q_unit: QUnit::Area,
+        }],
+        discharge: true,
+    };
+    let b = LBake {
+        world: &w,
+        res: RES,
+        spec: spec(7),
+        basin: basin(),
+        base: &base,
+        regional: &zero,
+        feed: &feed,
+        lakes: &lakes(),
+        h1_cells: H1,
+        h1_cell: &h1_cell,
+        face_of: &|_| Face(2),
+        threads: 1,
+    };
+    let e = bake_l(d.path(), &b, &tiles()).unwrap_err();
+    assert!(e.contains("area") && e.contains("m3/s"), "{e}");
+    assert_eq!(Commit::read(d.path()).unwrap(), None, "no commit after the refusal");
+}
