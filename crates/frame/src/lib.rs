@@ -27,6 +27,7 @@ pub mod regions;
 pub mod repro;
 pub mod reserve;
 pub mod residency;
+pub mod river;
 pub mod scalerefs;
 pub mod scenes;
 pub mod shadowview;
