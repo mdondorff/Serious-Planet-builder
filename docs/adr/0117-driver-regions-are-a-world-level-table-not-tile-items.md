@@ -1,7 +1,8 @@
 # 0117 Driver regions (rainfall, temperature, lithology, uplift) are a world-level table, not tile items
 Status: proposed (crusader, 2026-11-11; CON-10: the architect decides, then the owner for the schema)
 Date: 2026-11-11
-Source: briefing item 16 (preview level 1); A3 section 11.1; ADR 0066, 0069, 0070, 0076 point 7; constitution CON-09, CON-10, CON-29; `docs/design/driver-regions.md`
+Source: briefing item 16 (preview level 1); A3 section 11.1; ADR 0066, 0069, 0070, 0076 point 7, 0113; constitution CON-09, CON-10, CON-29; `docs/design/driver-regions.md`
+Amends: ADR 0113 point 1 (driver items below erosion): the driver edits of rainfall, temperature, lithology and uplift are driver regions of a table, not items; their place below erosion (K2, K3) and `B`'s read-time term stay as ADR 0113 point 1 says. Class paint stays as ADR 0113 and ADR 0089 decision 8 have it.
 
 ## Context
 - Preview level 1 for rainfall and temperature regions exists (`bake::preview::ClimateRegion`: a cap of `reach_m` round a direction, a rain factor and a temperature offset, faded to nothing at the rim), but the editor cannot create one: `world-def` has no such item kind.
@@ -12,7 +13,7 @@ Source: briefing item 16 (preview level 1); A3 section 11.1; ADR 0066, 0069, 007
 
 ## Decision
 1. Driver regions are stored in a world-level table of the WorldDefinition file, not as tile items: `[[driver_region]]` entries, each a cap (anchor, `reach_m` up to a hemisphere) with a feather and one driver term. The tile reach index and ADR 0070's 40 km cap are untouched.
-2. Four term kinds in the first version: `rainfall` (a factor), `temperature` (an offset in K), `lithology` (a K multiplier, a hardness class), `uplift` (an offset in m/Ma). A region carries exactly one term; overlapping regions combine in table order (factors multiply, offsets add), each feathered by a smoothstep of the distance to its rim.
+2. Four term kinds in the first version: `rainfall` (a factor), `temperature` (an offset in K), `lithology` (a factor on the erodibility K only: no hardness class, no other lithology field), `uplift` (an offset in m/Ma). A region carries exactly one term; overlapping regions combine in table order (factors multiply, offsets add), each feathered by a smoothstep of the distance to its rim.
 3. The table is part of the keys of the stages that read it: H0 climate reads rainfall and temperature regions, K3 lithology, K4 uplift; their identity is the hash of the parsed regions that touch the stage (WDEF-003 form: parsed, canonical, `-0.0` is `0.0`); a world without regions has the identity of today (nothing moves).
 4. The schema is bumped by one version with a migration that adds the empty table; fixtures of the older version load (CON-10).
 5. Editor commands put, move, resize and remove a region with undo (the command log, ADR 0066): level 0 draws the driver map re-evaluated with the region over the affected area (GEN-122, 125, 130 maps through the overlay path), level 1 is the existing preview for climate (`ClimateRegion` is built from the table) and the coarse carve for lithology and uplift when item 15 and GEN-153 land.

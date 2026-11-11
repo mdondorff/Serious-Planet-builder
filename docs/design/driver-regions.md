@@ -15,12 +15,12 @@ Status: proposal for the architect (crusader, 2026-11-11). Read with ADR 0117, A
 [[driver_region]]
 id = "01J..."          # ULID, as an item id
 body = "planet"
-kind = "rainfall"      # rainfall | temperature | lithology | uplift
+kind = "rainfall"      # rainfall | temperature | lithology (a K factor only) | uplift
 lat = 12.5             # anchor, geo-coordinates on the reference surface (CON-09)
 lon = -40.0
 reach_m = 1500000.0    # cap radius along the surface, up to a hemisphere (10,007,000 m on the Earth-size sphere)
 feather = 0.5          # the fraction of the reach over which the term fades to nothing at the rim
-factor = 1.8           # rainfall: multiplier; lithology: K multiplier
+factor = 1.8           # rainfall: multiplier; lithology: multiplier of the erodibility K (nothing else of the lithology)
 offset = 0.0           # temperature: K; uplift: m/Ma
 priority = 0           # order in the table: lower first, ties by id
 ```
