@@ -210,3 +210,85 @@ fn a_graph_whose_margin_is_smaller_than_the_tile_halo_needs_is_refused_naming_bo
     let e = bake_l(d.path(), &b, &tiles()).unwrap_err();
     assert!(e.contains("reaches 3 H1 cells") && e.contains("halo of 24") && e.contains("needs 4"), "{e}");
 }
+
+fn baked(name: &str, regional: &(dyn Fn(planet_core::Vec3) -> f64 + Sync)) -> (Dir, planet_cache::l_writer::Commit, H1) {
+    let w = world();
+    let h = h1(true);
+    let to_local = |c: u32| (8.0 * f64::from(c % W as u32) + 3.5, 8.0 * f64::from(c / W as u32) + 3.5);
+    let memory = MemoryFeed { face: Face(2), channels: channels_from_graph(&h.graph, &h.g, &to_local), discharge: true };
+    let d = Dir::new(name);
+    let lakes = Lakes { lakes: Vec::new(), pieces: Vec::new(), dropped_cells: 0, water: Vec::new(), ring: Vec::new() };
+    let b = LBake {
+        world: &w,
+        res: RES,
+        spec: spec(),
+        basin: basin(),
+        base: &base,
+        regional,
+        feed: &memory,
+        lakes: &lakes,
+        h1_cells: W,
+        h1_cell: &|_, _, _| None,
+        face_of: &|_| Face(2),
+        threads: 2,
+        graph: Some(GraphInput {
+            spec: GraphSpec { basin: basin(), h1_cells: W as u32, margin_h1: 4 },
+            graph: &h.graph,
+            segment_ids: &h.ids,
+            grid: &h.g,
+            cell_xy: &xy,
+        }),
+    };
+    let c = bake_l(d.path(), &b, &tiles()).expect("bake");
+    (d, c, h)
+}
+
+// spec: STRM-085
+#[test]
+fn the_river_reader_gives_the_tile_its_channels_under_the_commit_of_the_layer_and_keeps_a_bounded_cache() {
+    use planet_cache::l_layer::CommitLayer;
+    use planet_cache::river_read::RiverReader;
+    use planet_generators::erosion_layer::LayerSource;
+    let w = world();
+    let (d, c, _h) = baked("river-read", &zero);
+    let layer = CommitLayer::open(d.path(), Arc::new(world()), 4).unwrap();
+    let rivers = layer.rivers(3).expect("a reader over the commit of the layer");
+    assert_eq!(rivers.commit_id(), layer.id(), "the rivers, the tiles and the tables are one commit");
+    let store = Arc::new(TileStore::open(d.path(), w.params()).unwrap());
+    let feed = ChannelGraphFeed::new(store.clone(), c.clone()).unwrap();
+    let mut seen = 0;
+    for tj in 0..4u32 {
+        for ti in 0..4u32 {
+            let got = rivers.tile_channels(Face(2), ti, tj).expect("reads");
+            let want = feed.try_channels_near(Face(2), i64::from(ti) * 64 - 16, i64::from(tj) * 64 - 16, 64 + 32).unwrap();
+            assert_eq!(*got, want, "tile ({ti}, {tj}): the reader returns the feed's channels of the tile widened by the widest trench");
+            seen += got.len();
+            assert!(rivers.len() <= 3, "the cache holds at most its capacity");
+        }
+    }
+    assert!(seen > 100, "the fixture has rivers in its tiles");
+    assert_eq!(rivers.decodes(), 16);
+    rivers.tile_channels(Face(2), 3, 3).unwrap();
+    assert_eq!(rivers.decodes(), 16, "the newest tile is a hit");
+    rivers.tile_channels(Face(2), 0, 0).unwrap();
+    assert_eq!(rivers.decodes(), 17, "an evicted tile is decoded again, to the same channels");
+    // A commit without a graph has no reader.
+    let dn = Dir::new("river-none");
+    let cn = run(&dn, &w, &Feed(true), None).unwrap();
+    let e = RiverReader::new(Arc::new(TileStore::open(dn.path(), w.params()).unwrap()), cn, 2).err().unwrap();
+    assert!(e.contains("holds no channel graph"), "{e}");
+}
+
+// spec: STRM-085
+#[test]
+fn a_graph_block_the_commit_names_and_the_store_lacks_is_an_error_naming_the_tile_not_a_stop() {
+    use planet_cache::river_read::RiverReader;
+    let w = world();
+    let (d, mut c, _h) = baked("river-missing", &zero);
+    let key = c.graph.get_mut(&(2, 1, 1)).expect("a block of the commit");
+    key.0[0] ^= 1;
+    let r = RiverReader::new(Arc::new(TileStore::open(d.path(), w.params()).unwrap()), c, 2).unwrap();
+    let e = r.tile_channels(Face(2), 1, 1).unwrap_err();
+    assert!(e.contains("river tile 2/1/1") && e.contains("no record"), "{e}");
+    assert!(r.tile_channels(Face(2), 3, 3).is_ok(), "a tile away from the missing block still reads");
+}

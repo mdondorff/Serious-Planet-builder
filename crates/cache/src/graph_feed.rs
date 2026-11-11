@@ -1,4 +1,4 @@
-//! The channel feed over a commit's graph blocks (item 15 PR 7, STRM-084; architect D51): `channels_near` reads the blocks a window touches through the commit, turns their pieces into K7 channels (points in
+//! The channel feed over a commit's graph blocks (item 15 PR 7, STRM-084; architect, 2026-11-11): `channels_near` reads the blocks a window touches through the commit, turns their pieces into K7 channels (points in
 //! the face's local cell-index space, the bed level and `Q_w` dequantised: the burn and the drawing read the same values) and hands them to the writer. A face edge is the limit of a block's pieces: a
 //! channel of a neighbouring face is not mapped into this face's plane.
 
@@ -59,6 +59,24 @@ impl ChannelFeed for ChannelGraphFeed {
 
     /// The pieces of the blocks that meet the window. A block the store lacks or that is damaged stops the bake with a message naming it: a commit is written after its records.
     fn channels_near(&self, face: Face, i0: i64, j0: i64, w: i64) -> Vec<Channel> {
+        self.try_channels_near(face, i0, j0, w).unwrap_or_else(|e| panic!("{e}"))
+    }
+}
+
+impl ChannelGraphFeed {
+    /// The commit this feed reads (the one the layer and the basin tables are read under).
+    pub fn commit(&self) -> &Commit {
+        &self.commit
+    }
+
+    /// Local cells a tile of the commit.
+    pub fn tile_cells(&self) -> i64 {
+        i64::from(self.commit.spec.tile)
+    }
+
+    /// The channels of the blocks the window `[i0, i0 + w) x [j0, j0 + w)` meets (face cell indices): an error naming the block, the key and the commit when the commit names a block the store lacks or
+    /// that is damaged (STRM-085: the runtime reads the same chains the bake burnt, and reports instead of stopping).
+    pub fn try_channels_near(&self, face: Face, i0: i64, j0: i64, w: i64) -> Result<Vec<Channel>, String> {
         let tile = i64::from(self.commit.spec.tile);
         let n = i64::from(self.spec.basin.tiles_per_edge);
         let (b0i, b1i) = ((i0.div_euclid(tile)).clamp(0, n - 1), ((i0 + w - 1).div_euclid(tile)).clamp(0, n - 1));
@@ -68,13 +86,13 @@ impl ChannelFeed for ChannelGraphFeed {
             for bi in b0i..=b1i {
                 let Some(&key) = self.commit.graph.get(&(face.0, bi as u32, bj as u32)) else { continue };
                 let block = load_graph_block(&self.store, &self.spec, face.0, bi as u32, bj as u32, key)
-                    .unwrap_or_else(|e| panic!("{e}"))
-                    .unwrap_or_else(|| {
-                        panic!(
+                    .map_err(|e| format!("commit {:016x}, graph block {}/{bi}/{bj}: {e}", self.commit.id, face.0))?
+                    .ok_or_else(|| {
+                        format!(
                             "commit {:016x} names the graph block {}/{bi}/{bj} (key {key}) but the store holds no record of it",
                             self.commit.id, face.0
                         )
-                    });
+                    })?;
                 let half = (self.ratio - 1) as f64 / 2.0;
                 for p in &block.pieces {
                     out.push(Channel {
@@ -86,6 +104,6 @@ impl ChannelFeed for ChannelGraphFeed {
                 }
             }
         }
-        out
+        Ok(out)
     }
 }

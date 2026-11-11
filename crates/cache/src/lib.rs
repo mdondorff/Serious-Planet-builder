@@ -21,5 +21,6 @@ pub mod layer_tiles;
 pub mod meshpack;
 pub mod pack;
 pub mod relief_store;
+pub mod river_read;
 pub mod stage_key;
 pub mod tiles;
