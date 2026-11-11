@@ -239,6 +239,7 @@ The complete world build (rounds, H1, the lakes phase and the sediment pass, ADR
 
 Verify: D
 Status: planned
+Review: the G-SCALE rows of `docs/gates/ledger.md` (two k=4 runs on one commit, their MARK logs in `target/review/`), read by the architect
 Source: ADR 0115 point 7 (owner, 2026-11-08, 2026-11-11); A3 §6.6
 
 #### Scenario: Above the target, below the limit
