@@ -252,7 +252,16 @@ fn the_river_reader_gives_the_tile_its_channels_under_the_commit_of_the_layer_an
     let w = world();
     let (d, c, _h) = baked("river-read", &zero);
     let layer = CommitLayer::open(d.path(), Arc::new(world()), 4).unwrap();
-    let rivers = layer.rivers(3).expect("a reader over the commit of the layer");
+    // The size of all 16 tiles decoded, to set a bound of a quarter of it.
+    let all = layer.rivers(planet_cache::river_read::DEFAULT_CACHE_BYTES).unwrap();
+    for tj in 0..4u32 {
+        for ti in 0..4u32 {
+            all.tile_channels(Face(2), ti, tj).unwrap();
+        }
+    }
+    assert_eq!(all.len(), 16, "the default bound holds the whole fixture");
+    let bound = all.bytes() / 4;
+    let rivers = layer.rivers(bound).expect("a reader over the commit of the layer");
     assert_eq!(rivers.commit_id(), layer.id(), "the rivers, the tiles and the tables are one commit");
     let store = Arc::new(TileStore::open(d.path(), w.params()).unwrap());
     let feed = ChannelGraphFeed::new(store.clone(), c.clone()).unwrap();
@@ -263,11 +272,12 @@ fn the_river_reader_gives_the_tile_its_channels_under_the_commit_of_the_layer_an
             let want = feed.try_channels_near(Face(2), i64::from(ti) * 64 - 16, i64::from(tj) * 64 - 16, 64 + 32).unwrap();
             assert_eq!(*got, want, "tile ({ti}, {tj}): the reader returns the feed's channels of the tile widened by the widest trench");
             seen += got.len();
-            assert!(rivers.len() <= 3, "the cache holds at most its capacity");
+            assert!(rivers.bytes() <= bound || rivers.len() == 1, "the cache holds at most its byte bound ({} of {bound})", rivers.bytes());
         }
     }
     assert!(seen > 100, "the fixture has rivers in its tiles");
     assert_eq!(rivers.decodes(), 16);
+    assert!(rivers.len() < 16, "a quarter of the bytes cannot hold every tile");
     rivers.tile_channels(Face(2), 3, 3).unwrap();
     assert_eq!(rivers.decodes(), 16, "the newest tile is a hit");
     rivers.tile_channels(Face(2), 0, 0).unwrap();
@@ -275,7 +285,7 @@ fn the_river_reader_gives_the_tile_its_channels_under_the_commit_of_the_layer_an
     // A commit without a graph has no reader.
     let dn = Dir::new("river-none");
     let cn = run(&dn, &w, &Feed(true), None).unwrap();
-    let e = RiverReader::new(Arc::new(TileStore::open(dn.path(), w.params()).unwrap()), cn, 2).err().unwrap();
+    let e = RiverReader::new(Arc::new(TileStore::open(dn.path(), w.params()).unwrap()), cn, 1 << 20).err().unwrap();
     assert!(e.contains("holds no channel graph"), "{e}");
 }
 
@@ -287,7 +297,7 @@ fn a_graph_block_the_commit_names_and_the_store_lacks_is_an_error_naming_the_til
     let (d, mut c, _h) = baked("river-missing", &zero);
     let key = c.graph.get_mut(&(2, 1, 1)).expect("a block of the commit");
     key.0[0] ^= 1;
-    let r = RiverReader::new(Arc::new(TileStore::open(d.path(), w.params()).unwrap()), c, 2).unwrap();
+    let r = RiverReader::new(Arc::new(TileStore::open(d.path(), w.params()).unwrap()), c, 1 << 20).unwrap();
     let e = r.tile_channels(Face(2), 1, 1).unwrap_err();
     assert!(e.contains("river tile 2/1/1") && e.contains("no record"), "{e}");
     assert!(r.tile_channels(Face(2), 3, 3).is_ok(), "a tile away from the missing block still reads");

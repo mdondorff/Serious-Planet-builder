@@ -1,8 +1,8 @@
 ## ADDED Requirements
 ### Requirement: STRM-085 The runtime reads the channels of a tile through the commit and reports a failed read
-The runtime SHALL read the channels that can touch an L tile (the tile's core widened by the widest trench) through the same commit as the L tiles and the basin tables, decode them once while they stay in a bounded least-recently-used cache, and return an error naming the tile and the commit for a block the commit names and the store lacks or that is damaged; it SHALL NOT stop the process.
+The runtime SHALL read the channels that can touch an L tile (the tile's core widened by the widest trench) through the same commit as the L tiles and the basin tables, decode them once while they stay in a least-recently-used cache bounded in bytes, and return an error naming the tile and the commit for a block the commit names and the store lacks or that is damaged; it SHALL NOT stop the process.
 - A commit without a channel graph has no reader, and the refusal says so.
-- The cache bound is a parameter of the reader, not a machine count.
+- The cache bound is a byte count, a parameter of the reader (a profile value, default 64 MiB), evicting the least recently used tile; the newest tile is always kept.
 - An evicted tile read again gives the same channels.
 
 Verify: A
