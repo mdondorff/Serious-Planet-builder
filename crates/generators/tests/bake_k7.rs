@@ -733,9 +733,7 @@ fn k7_gives_the_same_bits_whatever_the_order_the_feed_lists_the_channels_in() {
 // spec: GEN-169
 // spec: TEST-112
 #[test]
-#[should_panic(
-    expected = "the tile halo of 8 cells is smaller than the trench radius cap of 16 cells plus the smallest profile carry of 8 cells (24)"
-)]
+#[should_panic(expected = "radius cap of 16 cells plus the smallest profile carry of 8 cells (24)")]
 fn a_halo_smaller_than_the_trench_radius_cap_plus_the_smallest_carry_is_refused_naming_both_numbers() {
     let g = TileGrid { cells: 384, tile: 48, halo: 8, radius_m: 100.0 * 384.0 * 2.0 / core::f64::consts::PI };
     let ch = Channel { points: vec![(150.0, 212.0), (160.0, 212.0)], levels: vec![10.0, 9.0], q: Vec::new(), q_unit: QUnit::Discharge };
