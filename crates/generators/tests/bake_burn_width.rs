@@ -283,6 +283,30 @@ fn two_segments_ending_in_each_others_first_cell_are_ordered_by_the_order_given_
 // spec: GEN-169
 // spec: TEST-113
 #[test]
+fn one_cell_pieces_of_a_segment_are_nobodys_tributary_so_a_window_with_one_more_copy_burns_the_same_bits() {
+    // Pieces of one segment in two overlapping blocks can leave a one-cell piece twice at the cell W; they used to point at each other and break the order.
+    let t = row_channel(20.0, 30.0, 40.0, 90.0, 0.01);
+    let d = row_channel(20.0, 40.0, 50.0, 89.9, 0.01);
+    let one = |level: f64| Channel { points: vec![(30.0, 20.0)], levels: vec![level], q: Vec::new(), q_unit: QUnit::Discharge };
+    let ordered = upstream_first(vec![d.clone(), t.clone(), one(90.0), one(90.0)]);
+    let at = |ch: &Channel| ordered.iter().position(|o| o.points == ch.points && o.levels == ch.levels).unwrap();
+    assert!(at(&t) < at(&d), "the tributary comes before the channel it joins");
+    let w = 64usize;
+    let burn = |chs: Vec<Channel>| {
+        let mut z: Vec<f64> = (0..w * w).map(|c| if (c % w, c / w) == (36, 20) { 80.0 } else { 100.0 }).collect();
+        burn_channels_bounded(&mut z, w, (0, 0), &upstream_first(chs), None, 8);
+        z
+    };
+    let with_both = burn(vec![d.clone(), t.clone(), one(90.0), one(90.0)]);
+    let with_one = burn(vec![d.clone(), t.clone(), one(90.0)]);
+    let without = burn(vec![d, t]);
+    assert_eq!(with_both, with_one, "a copy of the piece changes nothing");
+    assert_eq!(with_one, without, "a one-cell piece changes nothing");
+}
+
+// spec: GEN-169
+// spec: TEST-113
+#[test]
 fn a_wide_river_burns_the_same_core_in_two_overlapping_windows() {
     // A river of w = 6 cells (disc radius 3) along row 20 with holes 7 m and 3 m deep upstream of the second window; halo 40 holds the carry 8 and the disc radius cap.
     let (w, halo) = (140usize, 40usize);

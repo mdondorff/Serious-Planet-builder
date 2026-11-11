@@ -346,3 +346,48 @@ fn the_margin_follows_the_halo_is_recorded_in_the_block_and_a_reader_that_needs_
     assert!(e.contains(&format!("reach {} H1 cells", s.margin_h1)) && e.contains(&format!("needs {}", more.margin_h1)), "{e}");
     assert_ne!(graph_key(&w, RES, &more, 0, bi, bj).unwrap(), r.key, "the margin is part of the key");
 }
+
+// spec: STRM-084, GEN-169
+#[test]
+fn a_block_holds_every_vertex_inside_its_box_when_the_margin_is_more_than_half_a_block_and_a_margin_over_a_block_is_refused() {
+    let (w, d) = (world(), Dir::new("wide-margin"));
+    let s = GraphSpec { margin_h1: 6, ..spec() };
+    let h = i64::from(s.h1_per_block());
+    assert!(2 * i64::from(s.margin_h1) > h, "the case where the corners alone miss the blocks beside the vertex");
+    let f = fixture(false);
+    let records = graph_block_records(&w, RES, &s, &f.graph, &f.ids, &f.g, &xy);
+    let store = store_of(&d, &w, &records);
+    let m = i64::from(s.margin_h1);
+    let mut checked = 0;
+    for bj in 0..4u32 {
+        for bi in 0..4u32 {
+            let key = graph_key(&w, RES, &s, 0, bi, bj).unwrap();
+            let block = load_graph_block(&store, &s, 0, bi, bj, key).unwrap();
+            let (lo_i, hi_i) = (i64::from(bi) * h - m, (i64::from(bi) + 1) * h + m);
+            let (lo_j, hi_j) = (i64::from(bj) * h - m, (i64::from(bj) + 1) * h + m);
+            f.graph.for_each(|seg| {
+                for (k, &c) in seg.cells(&f.g).iter().enumerate() {
+                    let (_, i, j) = xy(c);
+                    if i < lo_i || i >= hi_i || j < lo_j || j >= hi_j {
+                        continue;
+                    }
+                    let found = block
+                        .as_ref()
+                        .is_some_and(|b| b.pieces.iter().filter(|p| p.segment == f.ids[seg.index]).any(|p| p.coords().contains(&(i, j))));
+                    assert!(
+                        found,
+                        "vertex {k} of segment {} at ({i}, {j}) is in the box of block ({bi}, {bj}) but not in its pieces",
+                        seg.index
+                    );
+                    checked += 1;
+                }
+            });
+        }
+    }
+    assert!(checked > 400, "{checked}");
+    // A reader that needs a margin over the block side is refused by the block's smaller margin: an error, not a panic.
+    let wide = GraphSpec { margin_h1: s.h1_per_block() + 1, ..s };
+    let key = graph_key(&w, RES, &s, 0, 0, 0).unwrap();
+    let e = load_graph_block(&store, &wide, 0, 0, 0, key).unwrap_err().0;
+    assert!(e.contains("reach 6 H1 cells"), "{e}");
+}

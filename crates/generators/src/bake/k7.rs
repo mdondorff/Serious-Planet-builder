@@ -110,7 +110,11 @@ pub fn upstream_first(channels: Vec<Channel>) -> Vec<Channel> {
     let n = channels.len();
     let mut ending: std::collections::HashMap<(i64, i64), Vec<usize>> = std::collections::HashMap::new();
     for (i, c) in channels.iter().enumerate() {
-        ending.entry(cell(*c.points.last().expect("a point"))).or_default().push(i);
+        let last = cell(*c.points.last().expect("a point"));
+        // a channel inside one cell is nobody's tributary: whatever it joins is read from the channels that end in that cell (a one-cell channel is the only way two channels can end in each other's first cell)
+        if last != cell(c.points[0]) {
+            ending.entry(last).or_default().push(i);
+        }
     }
     // indegree: the tributaries of each channel; the channels with none are ready, taken in the order given
     let tributaries = |i: usize| ending.get(&cell(channels[i].points[0])).map_or(0, |v| v.iter().filter(|&&u| u != i).count());
@@ -122,11 +126,19 @@ pub fn upstream_first(channels: Vec<Channel>) -> Vec<Channel> {
     }
     let mut order = Vec::with_capacity(n);
     let mut placed = vec![false; n];
-    // a cycle (two segments whose end cells meet in one rounded cell) has no upstream: the first unplaced one in the order given is taken
-    while let Some(u) = ready.pop_first().or_else(|| (0..n).find(|&i| !placed[i])) {
+    let mut cursor = 0;
+    // malformed input only (a cycle of channels has no upstream; hydrology gives none, one-cell channels are not tributaries): the first unplaced one in the order given is taken
+    while let Some(u) = ready.pop_first().or_else(|| {
+        while cursor < n && placed[cursor] {
+            cursor += 1;
+        }
+        (cursor < n).then_some(cursor)
+    }) {
         placed[u] = true;
         order.push(u);
-        for &c in starts.get(&cell(*channels[u].points.last().expect("a point"))).into_iter().flatten().filter(|&&c| c != u) {
+        let last = cell(*channels[u].points.last().expect("a point"));
+        let joins = if last == cell(channels[u].points[0]) { None } else { starts.get(&last) };
+        for &c in joins.into_iter().flatten().filter(|&&c| c != u) {
             waiting[c] = waiting[c].saturating_sub(1);
             if waiting[c] == 0 && !placed[c] {
                 ready.insert(c);
@@ -203,7 +215,7 @@ fn tree_carry(lines: &[Vec<(i64, i64)>], value: &[Vec<f64>], carry: usize) -> Ve
     let l = carry.min(lines.iter().map(Vec::len).sum::<usize>());
     let mut ending: std::collections::HashMap<(i64, i64), Vec<usize>> = std::collections::HashMap::new();
     for (c, line) in lines.iter().enumerate() {
-        if let Some(&last) = line.last() {
+        if let Some(&last) = line.last().filter(|&&l| Some(&l) != line.first()) {
             ending.entry(last).or_default().push(c);
         }
     }
@@ -249,7 +261,7 @@ fn tree_carry(lines: &[Vec<(i64, i64)>], value: &[Vec<f64>], carry: usize) -> Ve
 fn tree_min_unbounded(lines: &[Vec<(i64, i64)>], value: &[Vec<f64>]) -> Vec<Vec<f64>> {
     let mut ending: std::collections::HashMap<(i64, i64), Vec<usize>> = std::collections::HashMap::new();
     for (c, line) in lines.iter().enumerate() {
-        if let Some(&last) = line.last() {
+        if let Some(&last) = line.last().filter(|&&l| Some(&l) != line.first()) {
             ending.entry(last).or_default().push(c);
         }
     }

@@ -201,7 +201,7 @@ pub fn graph_block_records(
         // The blocks the segment touches: each vertex's block and its neighbours' within the margin.
         let mut touched: Vec<(u8, u32, u32)> = Vec::new();
         for &(f, i, j) in &coords {
-            for (di, dj) in [(-margin, -margin), (margin, margin), (-margin, margin), (margin, -margin), (0, 0)] {
+            for (di, dj) in [-margin, 0, margin].into_iter().flat_map(|di| [-margin, 0, margin].into_iter().map(move |dj| (di, dj))) {
                 let (a, b) = ((i + di).clamp(0, n - 1), (j + dj).clamp(0, n - 1));
                 touched.push((f, (a / h) as u32, (b / h) as u32));
             }
@@ -353,6 +353,9 @@ pub fn load_graph_block(
     };
     let count = u32_at(p, 19) as usize;
     let margin = u32_at(p, 39);
+    if u64::from(margin) > u64::from(spec.h1_per_block()) {
+        return Err(what(format!("its margin of {margin} H1 cells is more than a block side of {}", spec.h1_per_block())));
+    }
     if margin < spec.margin_h1 {
         return Err(what(format!(
             "its pieces reach {margin} H1 cells beyond the block, the K7 halo needs {} (rewrite the graph with a margin of at least that)",
@@ -362,7 +365,7 @@ pub fn load_graph_block(
     if p[23..39] != key.0 {
         return Err(what("the key inside the payload is not the record key".into()));
     }
-    // A block holds at most one vertex of any segment in each of its (h + 2)^2 cells (a cell is on one segment), each with at most 5 bytes, a piece header of 36 and a lake cut of 8: the bound of a body.
+    // A block holds at most one vertex of any segment in each of its (h + 2 margin)^2 cells (a cell is on one segment), each with at most 5 bytes, a piece header of 36 and a lake cut of 8: the bound of a body.
     let side = u64::from(spec.h1_per_block()) + 2 * u64::from(margin);
     let max_body = ((side * side * (PIECE_FIXED as u64 + 5 + 8) + 4096) as usize).min(MAX_BODY);
     let mut body = Vec::new();

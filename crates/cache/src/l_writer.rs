@@ -521,6 +521,9 @@ pub fn bake_l(dir: &Path, b: &LBake, tiles: &[PassTile]) -> Result<Commit, Strin
             ));
         }
         let need = gi.spec.required_margin(b.spec.grid.halo as u32);
+        if need > gi.spec.h1_per_block() {
+            return Err(format!("the tile halo of {} local cells needs a margin of {need} H1 cells, more than the block side of {} H1 cells (a larger tile or a smaller halo)", b.spec.grid.halo, gi.spec.h1_per_block()));
+        }
         if gi.spec.margin_h1 < need {
             return Err(format!("the graph reaches {} H1 cells beyond its blocks, the tile halo of {} local cells needs {need} (GEN-169: the profile reads a halo upstream)", gi.spec.margin_h1, b.spec.grid.halo));
         }
