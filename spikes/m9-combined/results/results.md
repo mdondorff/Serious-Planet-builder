@@ -8,7 +8,7 @@ Question: what does the re-derived generator give when its parts run together? T
 - SPIKE-79's plate-margin belts, with one try at width variety and a back-arc plateau;
 - the class amplitudes (SPIKE-76);
 - ADR 0088's two-pass bake.
-Why it matters: the last synthesis before the owner decides decisions 1, 2 and 4 of `docs/briefings/m9-decisions.md`.
+Why it matters: the last synthesis before the owner decides decisions 1, 2 and 4 of `docs/archive/M9/briefings/m9-decisions.md`.
 Time box: 3 h (opus-planner, 2026-10-31); used about 2 h, with 15 min of machine time.
 Success criteria:
 - global hypsometry and class shares against Earth;

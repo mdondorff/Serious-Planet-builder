@@ -5,7 +5,7 @@ The scorecard run (TEST-079) over a store with the erosion layer (STRM-065) and 
 
 Verify: A, B
 Status: planned
-Source: M9 draft (`docs/briefings/m9-draft.md`) decision 6, criterion 1's bound; ADR 0088, ADR 0089, ADR 0088/0089 accepted 2026-11-01; SPIKE-80, SPIKE-81 (the stand-in: the hill landforms pass with the class hill band, the Alps at 0.71-0.72); the 45° ceiling: ADR 0091, SPIKE-85
+Source: M9 draft (`docs/archive/M9/briefings/m9-draft.md`) decision 6, criterion 1's bound; ADR 0088, ADR 0089, ADR 0088/0089 accepted 2026-11-01; SPIKE-80, SPIKE-81 (the stand-in: the hill landforms pass with the class hill band, the Alps at 0.71-0.72); the 45° ceiling: ADR 0091, SPIKE-85
 
 #### Scenario: Pass and fail named (A)
 - **WHEN** the check reads a site whose slope ratio is 0.65 and 1 km relief ratio 0.55

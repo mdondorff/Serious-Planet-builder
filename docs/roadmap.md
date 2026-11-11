@@ -7,7 +7,7 @@ Status: direction, not a plan (owner and opus-planner, 2026-10-23). Each milesto
 |---|---|---|---|
 | M0 to M7 | Foundations to cities | coordinates, LOD, fields and cache, streaming, atmosphere and ocean, editor, cities | done |
 | M8 | Natural landscape | global coupled river network, plausible relief, horizon shadows, the speed envelope, the no-degradation gate; fine erosion per 5 km square failed its stop rule and moved to M9 (`docs/milestones/M8-report.md`) | done 2026-10-30 |
-| M9 | Realistic terrain | the generator redesigned (continents, relief to Earth's bands, belts at convergent margins), the two-pass erosion bake (ADR 0088), relief classes (ADR 0089), channels, ground detail, the look against the reference; plan and iterations: `docs/briefings/m9-plan.md` | active since 2026-11-01 |
+| M9 | Realistic terrain | the generator redesigned (continents, relief to Earth's bands, belts at convergent margins), the two-pass erosion bake (ADR 0088), relief classes (ADR 0089), channels, ground detail, the look against the reference; plan and iterations: `docs/archive/M9/briefings/m9-plan.md` | active since 2026-11-01 |
 | M10 | Living surface | vegetation, rocks and ground cover placed from the driver maps (wetness, soil depth); GPU instancing (SPIKE-28); the speed envelope stays a regression check | open |
 | M11 | Water and sky | rivers and lakes as water surfaces from the global network, FFT ocean, clouds, weather light | open |
 | M12 | Settled world | cities on the natural landscape: roads follow terrain and cross rivers, settlement placement from the driver maps, night lights | open |
@@ -24,7 +24,7 @@ Generator polish, after M8: why a stamped hill in the ocean ends just below sea 
 Data later (owner's idea, 2026-10-25): stores read through a local or remote data server, the local disk a cache, larger bakes streamed on demand; a backend behind the pack store's interface.
 
 ## Deferred to M9 (running list, opus-planner)
-Folded into `docs/briefings/m9-plan.md` (2026-11-02): uplift independent of the input network and hill realism (I3, I5, I9); edits on top of the erosion (D3, ADR 0088's separate layer). Still open, not scheduled: the coarse/fine network beyond a 1 km node slide (Tracked); the photo layer (D6); the flight lead margin (Tracked).
+Folded into `docs/archive/M9/briefings/m9-plan.md` (2026-11-02): uplift independent of the input network and hill realism (I3, I5, I9); edits on top of the erosion (D3, ADR 0088's separate layer). Still open, not scheduled: the coarse/fine network beyond a 1 km node slide (Tracked); the photo layer (D6); the flight lead margin (Tracked).
 
 ## Game layer: direction
 - One workspace and one technology: the planet crates (`core`, `world-def`, `generators`, `cache`, `streaming`, `frame`, `render`) stay a library without game logic; a game is its own crate and run mode on top.

@@ -1,6 +1,6 @@
 # Terrain prototype (work block after SPIKE-105)
 
-Status: active since 2026-11-08 (owner: D1 = option A, conditional). Replaces the M9.1 gate of `docs/briefings/m9-plan.md`; the M9 planet bake is frozen until this block closes. Contract: `docs/design/terrain-target.md` (A3), ADRs 0110-0115 (proposed). Plan: `spikes/architecture-replan/results/results.md` sections 13 and 17. Target date: mid-December 2026 (estimate).
+Status: active since 2026-11-08 (owner: D1 = option A, conditional). Replaces the M9.1 gate of `docs/archive/M9/briefings/m9-plan.md`; the M9 planet bake is frozen until this block closes. Contract: `docs/design/terrain-target.md` (A3), ADRs 0110-0115 (proposed). Plan: `spikes/architecture-replan/results/results.md` sections 13 and 17. Target date: mid-December 2026 (estimate).
 
 Re-estimate: 2026-11-11 00:30 (remaining work: P0 closure; item 15 in progress, its order changed for CP1 and CP2 (owner, 2026-11-10); f32 rounds (GEN-166) and the memo-key fix added; 12 repeated at the gate; 16 and 17 open; items 3 and 14 done; target date as above, unchanged, if P0 uses the lanes' waits on machine slots). An item that becomes done moves this date (BUILD-042).
 

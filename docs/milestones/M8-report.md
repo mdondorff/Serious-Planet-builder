@@ -63,7 +63,7 @@ Drafted by opus-planner from `cargo xtask accept M8` (main 3ecfaee1, 2026-10-30 
 - SPIKE-58's draft (perf windows that block less): to be filed after phase 2.
 
 ## 7. Recommendation
-Option B for the away week (owner, 2026-10-30), then ADR 0085's build, the terrain scorecard and M9's bake (`docs/briefings/week-2026-11-02.md`).
+Option B for the away week (owner, 2026-10-30), then ADR 0085's build, the terrain scorecard and M9's bake (`docs/archive/M9/briefings/week-2026-11-02.md`).
 
 ## Process review
 opus-planner, 2026-10-30, from recorded data; M7 is the baseline.
