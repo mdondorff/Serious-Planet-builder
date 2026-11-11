@@ -16,6 +16,8 @@ mod bake_fillgeom;
 mod bake_h0;
 #[path = "bake_hydro.rs"]
 mod bake_hydro;
+#[path = "bake_burn_width.rs"]
+mod bake_burn_width;
 #[path = "bake_k7.rs"]
 mod bake_k7;
 #[path = "bake_kernels.rs"]
