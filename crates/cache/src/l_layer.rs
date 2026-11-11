@@ -91,9 +91,9 @@ impl CommitLayer {
         self.decodes.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// The reader of this commit's channel graph, with `capacity` tiles cached: the rivers are read under the same commit as the tiles and the basin tables (STRM-085, CON-22). An error when the commit holds none.
-    pub fn rivers(&self, capacity: usize) -> Result<crate::river_read::RiverReader, String> {
-        crate::river_read::RiverReader::new(self.store.clone(), self.commit.clone(), capacity)
+    /// The reader of this commit's channel graph, with `capacity_bytes` cached ([`crate::river_read::DEFAULT_CACHE_BYTES`]): the rivers are read under the same commit as the tiles and the basin tables (STRM-085, CON-22). An error when the commit holds none.
+    pub fn rivers(&self, capacity_bytes: usize) -> Result<crate::river_read::RiverReader, String> {
+        crate::river_read::RiverReader::new(self.store.clone(), self.commit.clone(), capacity_bytes)
     }
 
     /// Whether the record of a tile the commit names is in the store (a tile the commit does not name is no land: present).
