@@ -104,8 +104,19 @@ pub struct HydroStats {
     pub artefacts: usize,
 }
 
+/// What `Q` and `Q_w` are (the units bug of 2026-11-10): a discharge in m3/s when H1 got the runoff in m/s, a true area in m2 when it got none (`runoff` `None`: every local term is 1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QUnit {
+    /// `Q = sum(r dA)` with `r` in m/s: m3/s.
+    Discharge,
+    /// `Q = sum(dA)`: m2. Not a discharge: the width law and the stored discharges refuse it.
+    Area,
+}
+
 /// H1's result.
 pub struct Hydro {
+    /// The unit of `q` and `qw`.
+    pub q_unit: QUnit,
     /// The potential discharge `Q` per cell (zero off the grid): the local terms accumulated along the D8 tree, before the losses of basins.
     pub q: Vec<f64>,
     /// The routed discharge `Q_w` per cell (A3 section 5.5): `Q` with the basins' losses; the segments store it.
@@ -433,7 +444,7 @@ pub fn hydrology_with(
         sg.downstream = index.get(&sg.down).copied().unwrap_or(NONE);
     }
     stats.segments = segments.len();
-    Hydro { q, qw, channel, segments, basins, label, stats }
+    Hydro { q_unit: if runoff.is_some() { QUnit::Discharge } else { QUnit::Area }, q, qw, channel, segments, basins, label, stats }
 }
 
 /// The steady balance of section 5.5 for a basin with the inflow `q_in`: `Q_in = A(h) E_open + q_out(h)`. Returns the class (lake or endorheic), whether it overflows, the water level and `q_out`.

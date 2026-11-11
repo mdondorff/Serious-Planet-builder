@@ -18,5 +18,6 @@ Source: `docs/design/terrain-target.md` §3; SPIKE-104 §3; SPIKE-105 §6, §11 
 6. Every derived layer folds `base_id` into its key; a mismatch is refused. `base_id` covers the lattice key, the C1 read's version and parameters, the mapping, radius and `k`, the sea level, the below-erosion items at the tile, and the stored forms (A3 §3.2).
 
 ## Consequences
-- Amends ADR 0088 points 2 and 5, ADR 0099 point 3, ADR 0100; replaces ADR 0101 point 3.
+- Amends ADR 0088 points 2, 4.2 (pass 2 gains K7's breach and loses its stride-4 base) and 5, ADR 0099 point 3, ADR 0100; replaces ADR 0101 point 3 (the fill-depth channel; its deletion waits for this ADR's acceptance).
+- Interim, until the A/B gate: the accepted ADRs named here govern the shipped bake; this ADR governs the prototype path behind its switches (architect D24, 2026-11-10).
 - Gates G-SURF, G-CON, G-PROFILE (channels through the complete read).

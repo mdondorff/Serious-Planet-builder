@@ -18,7 +18,7 @@ use planet_generators::bake::route::{route_rules, RoundRules, NONE};
 use planet_generators::bake::tile::{TileGrid, TileId};
 use planet_generators::bake::Grid;
 use planet_generators::global::{read_elevation_c1, GlobalSample, LatticeSource, ReadError};
-use planet_generators::runoff::{discharge_weight, runoff_mm};
+use planet_generators::runoff::{discharge_weight, pet_mm, runoff_mm};
 use std::time::Instant;
 
 const K: u32 = 14;
@@ -26,6 +26,7 @@ const LATTICE: usize = 1 << K; // 16,384 nodes a face edge
 const REGIONAL: usize = 12_288;
 const LOCAL: usize = 6 << K; // 98,304
 const R: f64 = 6_371_000.0;
+const SECONDS_PER_YEAR: f64 = 31_557_600.0;
 /// The default region: seed 14, face 1, the prototype region (inclusive cell ranges at 12,288 cells a face edge). `PLANET_REGION=seed,face,i0,j0,size` names another (item 14: L on a second region); `PLANET_L_DIR` names the directory `store` writes (default `target/k7_l`).
 const DEFAULT_REGION: (u64, u8, (usize, usize, usize, usize)) = (14, 1, (2014 * 4, 2168 * 4 + 3, 190 * 4, 344 * 4 + 3));
 
@@ -136,18 +137,19 @@ fn main() {
 
     // ---- H1 on the solved surface: the channel segments
     let o = inputs.orography();
-    let weight: Vec<f32> = (0..n)
-        .map(|c| {
-            if zs[c] <= 0.0 {
-                return 1.0;
-            }
-            let d = spec_r.halo_direction((ri0 + c % rw) as i64, (rj0 + c / rw) as i64);
-            discharge_weight(runoff_mm(o.precipitation_mm(d), o.temperature_c(d))) as f32
-        })
-        .collect();
+    // The runoff in m/s and the net open-water evaporation as the build gives them to H1 (region_scale, build.rs): without the runoff Q is an area in m2, not a discharge (the units bug of 2026-11-10).
+    let (mut weight, mut runoff, mut evap) = (vec![1.0f32; n], vec![0.0f32; n], vec![0.0f32; n]);
+    for c in (0..n).filter(|&c| zs[c] > 0.0) {
+        let d = spec_r.halo_direction((ri0 + c % rw) as i64, (rj0 + c / rw) as i64);
+        let (pm, tc) = (o.precipitation_mm(d), o.temperature_c(d));
+        let ro = runoff_mm(pm, tc);
+        weight[c] = discharge_weight(ro) as f32;
+        runoff[c] = (ro / 1000.0 / SECONDS_PER_YEAR) as f32;
+        evap[c] = ((pet_mm(tc) - (pm - ro)).max(0.0) / 1000.0 / SECONDS_PER_YEAR) as f32;
+    }
     let routing = route_rules(&grid, &zs, &outlet, 1e-3, stream, 0.0, Some(&weight), RoundRules::ROUND);
     let filled = priority_flood_with(&grid, &zs, &outlet, 1e-3, true);
-    let hy = hydrology(&grid, &zs, &filled, &routing, &outlet, None, None, &HydroParams::default());
+    let hy = hydrology(&grid, &zs, &filled, &routing, &outlet, Some(&runoff), Some(&evap), &HydroParams::default());
     println!("H1: {} channel cells, {} segments", hy.stats.channel_cells, hy.stats.segments);
 
     // ---- the tile
@@ -204,9 +206,31 @@ fn main() {
                 points: cells.iter().map(|&c| to_local(c)).collect(),
                 levels,
                 q: cells.iter().map(|&c| hy.qw[c]).collect(),
+                q_unit: hy.q_unit,
             });
         }
         println!("{} channel segments meet the window", channels.len());
+        // The trench widths of the width law in metres and in local cells (a local cell is about pi R / 2 / LOCAL metres): the check that Q is a discharge.
+        let cell_m = std::f64::consts::FRAC_PI_2 * R / LOCAL as f64;
+        let mut widths: Vec<f64> = channels
+            .iter()
+            .flat_map(|ch| ch.q.iter().filter(|&&q| q > 0.0).map(|&q| K7Params::standard(seed, 0.0).width.width_m(q)))
+            .collect();
+        widths.sort_by(f64::total_cmp);
+        if let Some(&max) = widths.last() {
+            let at = |f: f64| widths[((widths.len() - 1) as f64 * f) as usize];
+            println!(
+                "  trench widths (w = 7.2 Q^0.5, Q in {:?}): p50 {:.1} m ({:.2} cells), p99 {:.1} m ({:.2} cells), max {:.1} m ({:.2} cells); a local cell is {:.1} m",
+                hy.q_unit,
+                at(0.5),
+                at(0.5) / cell_m,
+                at(0.99),
+                at(0.99) / cell_m,
+                max,
+                max / cell_m,
+                cell_m
+            );
+        }
 
         let params = K7Params::standard(seed, 0.0);
         let runs: Vec<(&str, &[Channel])> = if store {
