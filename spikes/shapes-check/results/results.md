@@ -152,3 +152,69 @@ Raw output: `raw/` (the `RAW` lines hold the 1-degree chord histograms).
 | `images/R1-h1-area-top-centre-crop.png` | the "^" at the top centre, 4x |
 | `images/R1-left-area-runs-rounds-U.png` | the probe's area map of the left part after the rounds (lifted flats blue) |
 | `images/orient-*.png` | chord orientation charts: R1h-full against the high-relief DEM pool and R3a against the mid pool, chords of 8 and 16 |
+
+## 10. Addendum (architect, 2026-11-11): the breach chains, and three direction-jitter forms
+
+### 10.1 Where the owner's two valleys are
+
+Per the architect's reading, the two 45-degree valleys are U's breach trenches in `spikes/mfd-comparison/results/images/R3b-hillshade.png`, panel U, top left: they start at the window's top edge (the cut root) and cross the flat left by the depression fill. Section 5's candidate list is for the owner's sheet of the other region. The probe reproduces the trench class (10.3).
+
+### 10.2 Method
+
+`shapes_check breach` (probe branch `spike/spike-108-probe`): the breach of a round, as in `catchment_round` (`z[rec] = max(z[c] - 0.001 dist, floor, exit base under C, z[rec] - 500 m)` for a receiver higher than its donor allows), applied region-wide on the surface at the start of the round (the library's solved surface after the earlier rounds of the same rules; round 1 = the start surface), visiting the cells in the reversed receivers-first order.
+
+| Item | Definition |
+|---|---|
+| Lowered cell | a receiver the breach lowered; its lowering is the sum of its passes |
+| Chain | lowered cells linked along their D8 receivers; a step is a lowered cell whose receiver is also lowered |
+| Exit class | the root outlet of the cell's catchment: `cut` = a land cell (a window cut), `sea` = at or below the sea level (the water reaches the sea: interior spills and rims of basins that drain to the sea) |
+| Straight share | the share of chain length (diagonal steps weigh sqrt 2) in single-direction runs over 10 (and 20) cells |
+| Angle of a run | axis (0/90 degrees), diagonal NW-SE, diagonal NE-SW; counted once per run |
+| Edge end | a run over 10 cells whose downstream end lies within 10 cells of the window border |
+
+Fixtures: R3b at margin 0 (the SPIKE-107 window, the trenches' window) and at margin 200 (box = the inner 1,020 cells); R3a and R1h at margin 200; R1h-full (margin 0, whole 1,420 window). 4 rounds, U and C. Raw: `raw/breach-*.txt`.
+Caveats: the breach is emulated region-wide in the receivers-first order, not per catchment's index order; classes by root outlet, so a basin that drains to a window cut counts as `cut`; one seed per region.
+
+### 10.3 Window-cut chains: the trenches (R3b, margin 0, the SPIKE-107 window)
+
+| Round | Rules | Exit | Lowered cells (mean / max m) | Straight share > 10 / > 20 | Longest run | Runs > 10 (axis / NW-SE / NE-SW), edge ends | Lowering in runs > 10 (mean / max m) |
+|---|---|---|---|---|---|---|---|
+| 1 | U | cut | 87,583 (12.7 / 346) | 0.028 / 0.006 | 103 | 135 (42 / 22 / 71), 3 | 53.0 / 340 |
+| 2 | U | cut | 12,785 (5.6 / 299) | 0.041 / 0.023 | 97 | 18 (2 / 7 / 9), 5 | 54.6 / 287 |
+| 3 | U | cut | 6,363 (13.4 / 332) | 0.078 / 0.039 | 94 | 19 (1 / 6 / 12), see raw | see raw |
+| 4 | U | cut | 5,534 (19.2 / 361) | 0.099 / 0.048 | 98 | 22 (3 / 6 / 13), 10 | 46.6 / 311 |
+| 4 | C | cut | 10,104 (2.7 / 16) | 0.048 / 0.013 | 53 | 27 (6 / 8 / 13), 0 | 4.2 / 8 |
+
+- Under U, 10 of the 22 runs over 10 cells of round 4 end within 10 cells of the window border, and the lowering in the runs is 47 m on average and 311 m at most: the trenches. Under C (the exit base holds the breach at the exit's level) none ends at the border and the lowering is 8 m at most.
+- With margin 200 the same class exists behind the margin's cut (R3b round 4 under U: lowering in the runs mean 61 m, max 297 m; 13 runs; under C mean 4.8 m, max 9 m) and none ends at the box border: the inner box excludes them, as the architect noted.
+
+### 10.4 Interior chains (sea-exit class), U, rounds 1 and 4
+
+| Fixture | Round | Lowered cells (mean / max m) | Straight share > 10 / > 20 | Longest | Runs > 10 (axis / NW-SE / NE-SW) | Lowering in runs (mean / max m) |
+|---|---|---|---|---|---|---|
+| R3b m200 | 1 | 156,458 (14.8 / 433) | 0.027 / 0.006 | 63 | 244 (79 / 38 / 127) | 48.4 / 386 |
+| R3b m200 | 4 | 17,953 (1.7 / 25) | 0.033 / 0.012 | 37 | 31 (4 / 11 / 16) | 4.2 / 24 |
+| R3a m200 | 1 | 148,098 (5.4 / 261) | 0.047 / 0.019 | 179 | 332 (186 / 118 / 28) | 18.2 / 245 |
+| R3a m200 | 4 | 54,714 (0.4 / 10) | 0.079 / 0.043 | 179 | 158 (49 / 95 / 14) | 1.2 / 6 |
+| R1h m200 | 1 | 54,622 (65.1 / 811) | 0.034 / 0.013 | 64 | 91 (33 / 21 / 37) | 189.0 / 717 |
+| R1h m200 | 4 | 8,174 (1.6 / 38) | 0.059 / 0.024 | 62 | 22 (8 / 6 / 8) | 4.6 / 12 |
+| R1h-full | 1 | 171,589 (77.5 / 1,171) | 0.040 / 0.011 | 64 | 355 (87 / 67 / 201) | see raw |
+| R1h-full | 4 | 23,493 (1.3 / 114) | 0.050 / 0.019 | 61 | 54 (9 / 15 / 30) | see raw |
+
+- The straight share of interior breach chains is 0.027 to 0.047 in round 1 and 0.033 to 0.079 in round 4, the same range as the whole channel network (0.05 to 0.11, section 4); the window-cut class under U is higher in the later rounds (0.07 to 0.14 in rounds 2 to 4 of R1h-full and R3b) and deep.
+- Round 1 digs deep inside straight runs at interior spills too (mean 48 to 189 m in the runs of R3b and R1h, 717 m at most): the start surface's flats are breached along their routes at the first round. From round 2 the interior lowering is a few metres (mean 1.2 to 4.6 m).
+- R3a's interior runs are mostly NW-SE (95 of 158 in round 4) and R3b's mostly NE-SW (16 of 31): one diagonal dominates per fixture.
+- C against U on interior chains: the same within 0.003 (R3b 0.034 / 0.033, R3a 0.080 / 0.079, R1h 0.062 / 0.059). C changes the cut class only (10.3).
+
+### 10.5 Three direction-jitter forms (named and estimated; nothing built)
+
+Today's rule (`route.rs`): the receiver is the neighbour of the largest slope times `1 + 0.5 u`, `u` a hash of (global cell id, direction) in [-1, 1) (CON-14, CON-29). The flats' gradient is one epsilon per 8-neighbour step (section 3), set by the flood, not by the receiver choice.
+
+| Form | What it changes | Acts on | Likely effect on this check's measures (estimate, not measured) | Cost |
+|---|---|---|---|---|
+| (i) Node-position jitter | each cell centre gets a hashed offset (say within 0.25 cell), so neighbour distances and slopes differ and are symmetric between the two cells of a pair | slope-driven choices (receivers, MFD weights, carve distances); the flats' levels only if their gradient is made distance-based | spreads chord angles by a few degrees on slopes, so the diagonal and axis peaks shrink somewhat; the flats' fronts stay (the level rule does not read distances); expected reduction of the straight-run excess: small to moderate | the largest: every kernel that reads a distance (route, MFD, carve, hydrology, K7, the metric tables) must use the offset distances; a distance table per cell |
+| (ii) Stochastic D8 (rho8) | the receiver is drawn among the lower neighbours with probability proportional to slope times a hashed weight (today's rule is a bounded form of it) | the receiver of every cell | on a flat a cell has 1 to 3 lower neighbours, so a path is a random walk: a run of n steps in one direction has probability of about 0.5^n to 0.3^n, and runs over 10 cells on flats nearly vanish; on slopes the steepest neighbour keeps the largest weight and straight runs shorten less; the carve follows the receivers, so the carved valleys of the 128 off-flat runs wiggle at cell scale; expected: the run share over 10 cells moves from 0.05 to 0.11 towards the DEM's 0.01 to 0.03, with more sinuous channels | low: the receiver choice only (the tree stays a tree: receivers are strictly lower); drainage areas (MFD) are unchanged; every receiver and carve result changes (goldens) |
+| (iii) Tie jitter on flats | a hashed offset of a few epsilon added to the level of each flat cell (an offset below one epsilon cannot reorder the chessboard rings) | the flood's flat levels only | removes the chessboard rings and the 45-degree medial lines on flats, the cause found for 242 of 243 runs at the start surface and, through the breach and the carve, for about 97 % of the cells of the carved runs; slopes unchanged; expected: runs on flats nearly vanish and the overall run share over 10 cells drops by roughly half or more (R1h 0.07 towards 0.03 to 0.04); the flats stay flat to within a few millimetres | low: the flood only (the visit key stays (level, id), so the order stays total); every filled surface changes bit for bit |
+
+- Order by likely effect on the measured cause per cost: (iii), then (ii), then (i). (iii) and (ii) can be combined with the flats' gradient of section 6 (Garbrecht and Martz), which removes the rings instead of roughening them.
+- All three use a hash of the global cell id and no RNG stream (CON-14, CON-29), so a partition changes nothing.
