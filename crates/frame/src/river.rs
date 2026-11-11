@@ -5,7 +5,7 @@
 //! water where the interpolated code is at or under [`CODE_ZERO`], which makes the banks smooth lines instead of cell staircases. Distances are of the cell centres in the face's cell-index space (cell `i` has
 //! its centre at `i`, as the channels' points do) and a function of the channels alone, so any window of the same channels gives the same texels (CON-30).
 
-use planet_generators::bake::k7::{trench_width_cells, Channel, WidthLaw};
+use planet_generators::bake::k7::{trench_width_cells, Channel, QUnit, WidthLaw};
 
 /// The distance, in cells, from the edge up to which a code differs from the clamps.
 pub const RANGE_CELLS: f64 = 4.0;
@@ -21,6 +21,9 @@ pub fn drawn_width_cells(law: &WidthLaw, cell_m: f64, q: f64) -> f64 {
 
 /// The code of a signed distance in cells.
 pub fn distance_code(d: f64) -> u8 {
+    if d.is_nan() {
+        return 255;
+    }
     libm::round(f64::from(CODE_ZERO) + d * CODE_PER_CELL).clamp(0.0, 255.0) as u8
 }
 
@@ -33,6 +36,9 @@ pub fn river_distance(channels: &[Channel], origin: (i64, i64), size: (usize, us
     let (i0, j0) = origin;
     for ch in channels {
         assert!(ch.points.len() == ch.levels.len() && !ch.points.is_empty(), "a level for every point");
+        assert!(ch.q.is_empty() || ch.q.len() == ch.points.len(), "a discharge for every point, or none");
+        assert!(ch.q.is_empty() || ch.q_unit == QUnit::Discharge, "the river width needs a discharge in m3/s, not an area");
+        assert!(ch.q.iter().all(|q| q.is_finite()), "the discharges of a channel are finite");
         let q_of = |k: usize| if ch.q.is_empty() { 0.0 } else { ch.q[k] };
         let n = ch.points.len();
         // A single point is a segment of no length.
@@ -47,14 +53,35 @@ pub fn river_distance(channels: &[Channel], origin: (i64, i64), size: (usize, us
             let y_hi = (libm::ceil(p0.1.max(p1.1) + reach) as i64).min(j0 + h as i64 - 1);
             let (dx, dy) = (p1.0 - p0.0, p1.1 - p0.1);
             let len2 = dx * dx + dy * dy;
+            let half_at = |t: f64| drawn_width_cells(law, cell_m, q0 + (q1 - q0) * t) / 2.0;
+            let (h0, h1) = (half_at(0.0), half_at(1.0));
             for y in y_lo..=y_hi {
                 for x in x_lo..=x_hi {
                     let (px, py) = (x as f64, y as f64);
-                    let t = if len2 > 0.0 { (((px - p0.0) * dx + (py - p0.1) * dy) / len2).clamp(0.0, 1.0) } else { 0.0 };
-                    let (nx, ny) = (p0.0 + dx * t, p0.1 + dy * t);
-                    let dist = libm::sqrt((px - nx) * (px - nx) + (py - ny) * (py - ny));
-                    let half = drawn_width_cells(law, cell_m, q0 + (q1 - q0) * t) / 2.0;
-                    let sd = dist - half;
+                    // The signed distance at the point of the segment with parameter t: its distance minus the half width there.
+                    let sd_at = |t: f64| {
+                        let (nx, ny) = (p0.0 + dx * t, p0.1 + dy * t);
+                        libm::sqrt((px - nx) * (px - nx) + (py - ny) * (py - ny)) - half_at(t)
+                    };
+                    let sd = if h0 == h1 {
+                        // A river of one width along the segment: the nearest point of the segment.
+                        let t = if len2 > 0.0 { (((px - p0.0) * dx + (py - p0.1) * dy) / len2).clamp(0.0, 1.0) } else { 0.0 };
+                        let (nx, ny) = (p0.0 + dx * t, p0.1 + dy * t);
+                        libm::sqrt((px - nx) * (px - nx) + (py - ny) * (py - ny)) - h0
+                    } else {
+                        // A river that widens along the segment is the union of discs the burn cuts along it (its edge is the envelope of the discs, not the nearest point's width): the minimum over the
+                        // segment of `distance - half width`, a convex function of t (the width is concave in t), found by a fixed number of ternary steps (deterministic, the same in every window).
+                        let (mut lo, mut hi) = (0.0f64, 1.0f64);
+                        for _ in 0..50 {
+                            let (m1, m2) = (lo + (hi - lo) / 3.0, hi - (hi - lo) / 3.0);
+                            if sd_at(m1) < sd_at(m2) {
+                                hi = m2;
+                            } else {
+                                lo = m1;
+                            }
+                        }
+                        sd_at(0.5 * (lo + hi)).min(sd_at(0.0)).min(sd_at(1.0))
+                    };
                     let c = (y - j0) as usize * w + (x - i0) as usize;
                     if sd < out[c] {
                         out[c] = sd;

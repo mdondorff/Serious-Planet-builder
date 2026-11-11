@@ -69,11 +69,10 @@ fn the_banks_of_a_diagonal_river_are_smooth_there_is_no_cell_staircase() {
     for s in &steps {
         assert!((s.abs() - std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-9, "the distance changes by cos 45 deg a cell along a row, got {s}");
     }
-    // The codes follow the distance to within one code (the quantisation step).
+    // The codes of the row are the distance coded at 32 a cell: consecutive texels differ by 22 or 23 codes (32 cos 45 = 22.6), never a staircase's 0 and 45.
     for x in 22..38usize {
-        let want = distance_code(d[row * 61 + x]);
-        let got = (CODE_ZERO as f64 + d[row * 61 + x] * CODE_PER_CELL).round().clamp(0.0, 255.0) as u8;
-        assert_eq!(want, got);
+        let (a, b) = (distance_code(d[row * 61 + x]) as i32, distance_code(d[row * 61 + x + 1]) as i32);
+        assert!((a - b).abs() == 22 || (a - b).abs() == 23 || a == 0 || b == 0 || a == 255 || b == 255, "codes {a} and {b}");
     }
 }
 
@@ -146,5 +145,87 @@ fn the_coverage_agrees_with_the_burn_on_which_cells_are_the_river() {
         }
         assert!(burnt_n > 30, "the burn lowered cells (width {cells})");
         assert!(cells < 2.0 || inside > 10, "the river has cells well inside its edge (width {cells})");
+    }
+}
+
+// spec: REND-059
+#[test]
+fn a_river_that_widens_along_a_segment_is_drawn_as_the_burns_union_of_discs() {
+    // A tributary that joins a trunk over one long segment: one cell wide at the start, 32 cells at the end (the burn cuts a disc of its own radius at every sample).
+    for (from, to, q0, q1) in [
+        ((4.0, 20.0), (14.0, 20.0), q_for(1.0), q_for(32.0)),
+        ((4.0, 6.0), (30.0, 22.0), q_for(2.0), q_for(14.0)),
+        ((30.0, 22.0), (4.0, 6.0), q_for(14.0), q_for(2.0)),
+    ] {
+        let ch = Channel { points: vec![from, to], levels: vec![10.0, 5.0], q: vec![q0, q1], q_unit: QUnit::Discharge };
+        let w = 64usize;
+        let mut z = vec![100.0; w * w];
+        burn_channels_wide(&mut z, w, (0, 0), std::slice::from_ref(&ch), Some((&LAW, CELL_M)));
+        let d = river_distance(std::slice::from_ref(&ch), (0, 0), (w, w), &LAW, CELL_M);
+        let (mut burnt_n, mut wet) = (0, 0);
+        for i in 0..w * w {
+            let burnt = z[i] < 100.0;
+            burnt_n += usize::from(burnt);
+            wet += usize::from(d[i] <= 0.0);
+            // Every burnt cell is drawn (within the line's own rasterisation) and every cell well inside the drawing is burnt.
+            if burnt {
+                assert!(d[i] <= 0.75, "cell {i}: burnt but {} cells outside the edge ({from:?} to {to:?})", d[i]);
+            }
+            if d[i] <= -0.5 {
+                assert!(burnt, "cell {i}: inside the edge by {} but not burnt ({from:?} to {to:?})", d[i]);
+            }
+        }
+        assert!(burnt_n > 100 && wet > 100, "the river is a real shape ({burnt_n} burnt, {wet} wet)");
+    }
+}
+
+// spec: REND-059
+#[test]
+fn a_single_point_is_a_disc_and_a_nan_distance_codes_as_far_outside() {
+    let one = Channel { points: vec![(10.0, 10.0)], levels: vec![1.0], q: vec![q_for(6.0)], q_unit: QUnit::Discharge };
+    let d = river_distance(&[one], (0, 0), (21, 21), &LAW, CELL_M);
+    assert!((d[10 * 21 + 10] + 3.0).abs() < 1e-12, "the centre is 3 cells inside a disc of 6 cells across");
+    assert!((d[10 * 21 + 16] - 3.0).abs() < 1e-12, "6 cells to the side is 3 cells outside");
+    assert_eq!(distance_code(f64::NAN), 255);
+}
+
+// spec: REND-059
+#[test]
+#[should_panic(expected = "discharge in m3/s")]
+fn a_discharge_given_as_an_area_is_refused_as_the_burn_refuses_it() {
+    let ch = Channel { points: vec![(0.0, 0.0), (5.0, 0.0)], levels: vec![1.0, 1.0], q: vec![1e6, 1e6], q_unit: QUnit::Area };
+    river_distance(&[ch], (0, 0), (8, 8), &LAW, CELL_M);
+}
+
+// spec: REND-059
+#[test]
+#[should_panic(expected = "a discharge for every point")]
+fn a_discharge_list_of_another_length_is_refused_with_a_message() {
+    let ch = Channel { points: vec![(0.0, 0.0), (5.0, 0.0)], levels: vec![1.0, 1.0], q: vec![1.0], q_unit: QUnit::Discharge };
+    river_distance(&[ch], (0, 0), (8, 8), &LAW, CELL_M);
+}
+
+// spec: REND-059, CON-30
+#[test]
+fn windows_at_production_cell_indices_give_the_same_texels_as_one_window() {
+    // Face cell indices of a 3,072-cell-tile planet reach about 2^21: the same river is coded from two windows there.
+    let o = 2_000_000i64;
+    let chans = vec![Channel {
+        points: vec![(o as f64 + 3.0, o as f64 + 7.5), (o as f64 + 58.0, o as f64 + 41.25)],
+        levels: vec![2.0, 1.0],
+        q: vec![q_for(2.0), q_for(20.0)],
+        q_unit: QUnit::Discharge,
+    }];
+    let whole = river_coverage(&chans, (o, o), (64, 48), &LAW, CELL_M);
+    for (tx, ty) in [(0i64, 0i64), (24, 0), (40, 16), (13, 29)] {
+        let tile = river_coverage(&chans, (o + tx, o + ty), (24, 16), &LAW, CELL_M);
+        for y in 0..16usize {
+            for x in 0..24usize {
+                let (gx, gy) = (tx as usize + x, ty as usize + y);
+                if gx < 64 && gy < 48 {
+                    assert_eq!(tile[y * 24 + x], whole[gy * 64 + gx], "texel ({gx}, {gy})");
+                }
+            }
+        }
     }
 }

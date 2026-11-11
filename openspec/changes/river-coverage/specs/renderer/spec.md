@@ -12,3 +12,7 @@ Source: Architect 2026-11-11 (item 15 PR 8), GEN-165, GEN-168
 #### Scenario: Smooth banks
 - **WHEN** a 45-degree river is coded
 - **THEN** the distance changes by cos 45 degrees a cell along a row, with no staircase, and a river under a cell is one cell wide
+
+#### Scenario: A widening river
+- **WHEN** a segment widens from one cell to 32 cells and is burnt and coded
+- **THEN** every burnt cell is within 0.75 cell of the coded edge and every cell half a cell inside the edge is burnt (the edge is the envelope of the burn's discs)
