@@ -1,0 +1,28 @@
+lattice 1366 x 1366 nodes sampled (17.6 s)
+regional window 1020 x 1020 cells solved from the C1 read of the lattice (22.5 s)
+H1: 43509 channel cells, 10823 segments
+Q unit Discharge
+peak Q of a channel cell on land 735 m3/s at regional cell (8378, 1105) (local tile (65, 8)); tiles with a channel cell over 200 m3/s: 8 of 61
+  tile (65, 8): peak Q 735 m3/s (width law 195 m = 1.92 cells), 1141 channel cells, 106 of them at 200 m3/s or more
+  tile (64, 8): peak Q 502 m3/s (width law 161 m = 1.59 cells), 1059 channel cells, 195 of them at 200 m3/s or more
+  tile (63, 8): peak Q 404 m3/s (width law 145 m = 1.42 cells), 462 channel cells, 41 of them at 200 m3/s or more
+  tile (64, 7): peak Q 400 m3/s (width law 144 m = 1.41 cells), 964 channel cells, 65 of them at 200 m3/s or more
+  tile (63, 7): peak Q 395 m3/s (width law 143 m = 1.41 cells), 432 channel cells, 67 of them at 200 m3/s or more
+  tile (63, 6): peak Q 384 m3/s (width law 141 m = 1.39 cells), 928 channel cells, 98 of them at 200 m3/s or more
+  tile (65, 6): peak Q 337 m3/s (width law 132 m = 1.30 cells), 846 channel cells, 145 of them at 200 m3/s or more
+  tile (66, 6): peak Q 229 m3/s (width law 109 m = 1.07 cells), 1075 channel cells, 5 of them at 200 m3/s or more
+  tile (64, 4): peak Q 188 m3/s (width law 99 m = 0.97 cells), 1340 channel cells, 0 of them at 200 m3/s or more
+  tile (67, 4): peak Q 185 m3/s (width law 98 m = 0.96 cells), 1107 channel cells, 0 of them at 200 m3/s or more
+  tile (62, 6): peak Q 181 m3/s (width law 97 m = 0.95 cells), 911 channel cells, 0 of them at 200 m3/s or more
+  tile (67, 8): peak Q 180 m3/s (width law 97 m = 0.95 cells), 721 channel cells, 0 of them at 200 m3/s or more
+tile (65, 7) of face 1: local cells i 66496..67648, j 7104..8256
+254 channel segments meet the window
+K7 with the channels burned in: 6.2 s, 4631 cells burned (a window has 1327104 cells)
+peak Q of a channel point in the window 161 m3/s: the law w = 7.2 Q^0.5 gives 91 m = 0.90 cells (101.8 m a cell); channels whose law width is 1.25 cells or more: 0
+stored change vs (z - b) as f32 over the core's 1048576 cells: 0 differ; |L| beyond the i16 range of steps: 0
+OWN G-SURF at the cell centres (1020 x 1020 cells of the core, two in from its edge): runtime minus bake 5.7e-14 m before quantisation, 0.1250 m after
+OWN G-SURF-I all vertices: 28730 vertices, 189 over 0.25 m (0.66 %), p50 0.0396 p99 0.2242 max 2.5537 m; B at the vertices own lattice value against `base`: 0.00e0 m; max difference unquantised 2.5713 m; overshoot of the runtime read beyond the four composed cells 2.6338 m, 38 vertices over 0.25 m
+OWN G-SURF-I outside any trench: 28539 vertices, 187 over 0.25 m (0.66 %), p50 0.0395 p99 0.2236 max 2.5537 m
+OWN G-SURF-I in a burnt cell of a channel under 1.25 cells wide: 191 vertices, 2 over 0.25 m (1.05 %), p50 0.0422 p99 0.2280 max 0.8190 m
+OWN G-SURF-I in the law's trench of a channel 1.25 cells or wider: none
+LIBRARY surface_gate: 28900 nodes, max 2.5713 m unquantised, 2.5537 m quantised, p50 0.0396 p99 0.2249, 192 over 0.25 m; centres 5.7e-14 m / 0.1250 m; overshoot max 2.6338 m, 39 over 0.25 m
