@@ -856,6 +856,8 @@ Draft contracts, the questions the reviewers asked:
 
 ### 13.5 Owner decisions, revised
 
+Decided: 1 = a (owner, 2026-11-08); 2 to 10 at the recommended options (owner, 2026-11-11).
+
 **D1. Route (changed).**
 - Context: §13.1; the second review; the owner's direction: evolve.
 - Options:

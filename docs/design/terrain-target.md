@@ -1,6 +1,6 @@
 # Terrain and hydrology: target architecture and data contracts (A3)
 
-Status: proposed (spikes session for opus-planner, 2026-11-08; inbox #100). Route: option A, conditional (owner, 2026-11-08; SPIKE-105 §13.5). The other owner decisions of SPIKE-105 §13.5 are working assumptions at their recommended options until recorded (§12.4). ADRs 0110-0115 accepted for the prototype (owner, 2026-11-11), with the conditions of §12.4. Amended after the external reviews of A3 (S105 §15) and of ADRs 0110-0115 (S105 §18, §19). The prototype's binding contract; production approval follows the gates of §12 (the A/B gate).
+Status: proposed (spikes session for opus-planner, 2026-11-08; inbox #100). Route: option A, conditional (owner, 2026-11-08; SPIKE-105 §13.5). Decisions 2-10 of SPIKE-105 §13.5 confirmed at their recommended options (owner, 2026-11-11). ADRs 0110-0115 accepted for the prototype (owner, 2026-11-11), with the conditions of §12.4. Amended after the external reviews of A3 (S105 §15) and of ADRs 0110-0115 (S105 §18, §19). The prototype's binding contract; production approval follows the gates of §12 (the A/B gate).
 Source: `spikes/architecture-replan/results/results.md` (SPIKE-105; "§" numbers below without a file name are of this document, "S105 §" of that file). Evidence: S105 §8 and §12 (F1-F6), SPIKE-104.
 Scope: the terrain and hydrology from the world definition to the runtime surface. Rendering, streaming, keys and the store format stay unless a section says otherwise.
 Reading rule: every element is marked **E** (exists as needed), **X** (exists, extended) or **N** (new). A statement that the prototype must confirm is marked **[gate]** with the gate of §12.
@@ -632,7 +632,7 @@ ADRs 0110-0115 are accepted for the prototype (owner, 2026-11-11), with conditio
 
 | Area | Condition | ADR | Priority |
 |---|---|---|---|
-| Owner decisions | SPIKE-105 §13.5's decisions 2-10 recorded as the owner's explicit choices, not working assumptions | all | P0 |
+| Owner decisions | SPIKE-105 §13.5's decisions 2-10 recorded as the owner's explicit choices: done, all at the recommended options (owner, 2026-11-11) | all | P0 |
 | MFD | catchment-clipped MFD stays provisional until compared with unclipped region-wide MFD and a boundary-flux exchange (ADR 0112 condition 1) | 0112 | P0 |
 | f32 rounds | the numerical and correctness gates re-run on the f32 round form, with near-degenerate fixtures (ADR 0114 condition 1) | 0114 | P0 |
 | Determinism | toolchain, `Cargo.lock`, profile, flags, CPU features and floating-point settings pinned; Windows and Linux CI across thread counts and repeated runs; incremental equals fresh | 0114 | P0 |
