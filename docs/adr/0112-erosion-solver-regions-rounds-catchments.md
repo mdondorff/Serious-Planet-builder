@@ -1,5 +1,5 @@
 # 0112 The erosion solver: regions, rounds and catchments
-Status: proposed (2026-11-08). Acceptance: the owner's, with SPIKE-105's D2-D10, as the prototype's architecture; production only after G-LOCAL, G-ROUND, G-PART, G-EQ and G-INC pass on the actual kernels at the A/B gate (D3)
+Status: accepted for the prototype (owner, 2026-11-11: "approve with the conditions mentioned", after the external review of 2026-11-11), with the conditions below. Production: only after G-LOCAL, G-ROUND, G-PART, G-EQ and G-INC pass on the actual kernels at the A/B gate (SPIKE-105 §13.5)
 Date: 2026-11-08
 Source: `docs/design/terrain-target.md` §6; SPIKE-105 F2, F4, F7, §18; ADR 0088 point 4, 0099
 
@@ -17,10 +17,15 @@ Source: `docs/design/terrain-target.md` §6; SPIKE-105 F2, F4, F7, §18; ADR 008
 4. A **catchment** is a D8 tree of a round's routing. The breach and the sweeps run per catchment, any order, on the shared routing. Thermal and pit spreading cross divides and run after the last round: per tile with a halo is the target; today they run on a whole grid and their spatial cut is untested. A later coupling is added to the contract; "independent" is not a permanent limit.
 5. MFD is clipped to the catchment (a lower neighbour in another catchment is dropped from the weights and from their sum; the D8 receiver always remains, so no fallback is needed; `A_d` at an outlet is the sum of `a w`). The flood orders visits by (level, global cell id).
 6. A re-solve's result is by definition a full region re-route; a full recomputation is always an allowed fallback. Reuse is an optimisation: each step is reused only if all its inputs are bit-equal, including a tile's incoming offers (dependency table, A3 §6.8). No dirty region is predicted (F9).
-7. Every value a catchment-round reads is in its key, directly or through an immutable upstream key, in canonical form (A3 §6.5); a catchment's members are visited and hashed in `Routing.order` restricted to the catchment (D31). The same function makes a fresh build (CON-29).
+7. Every value a catchment-round reads is in its key, directly or through an immutable upstream key, in canonical form (A3 §6.5); a catchment's members are visited and hashed in `Routing.order` restricted to the catchment. The same function makes a fresh build (CON-29).
 
 ## Consequences
 - On the gate, replaces ADR 0109 and ADR 0105 point 1: deposition is not dropped but moves to the post-round sediment pass (A3 §6.7; the basin infill is replaced through ADR 0111 point 5). Amends ADR 0088 point 4.1 and ADR 0099 points 1 and 2.
 - CON-08 v1.7 (ADR 0116) allows the regional solver and its rounds; CON-30 is G-PART's basis.
-- Interim, for ADRs 0110-0115 until the A/B gate: the accepted ADRs they amend govern the shipped bake; 0110-0115 govern the prototype path, a distinct implementation identity behind its switches (CON-07; architect D24).
+- Interim, for ADRs 0110-0115 until the A/B gate: the accepted ADRs they amend govern the shipped bake; 0110-0115 govern the prototype path, a distinct implementation identity behind its switches (CON-07).
 - Gates G-ROUND, G-LOCAL, G-EQ, G-INC, G-SCALE, G-PART. A failure of G-LOCAL or G-EQ is switch criterion S1 or S2 of S105 §13.1. F7 did not test these kernels; passing on prototype fixtures is not passing a gate at scale.
+
+## Conditions (external review, 2026-11-11)
+1. Point 5's catchment-clipped MFD is provisional. It is compared with unclipped region-wide MFD and with a boundary-flux exchange between catchments, on effective area near divides, flow divergence and convergence, ridge and valley statistics, channel initiation, outlet consistency, erosion displacement and visual fixtures. G-LOCAL shows computational consistency, not geomorphological plausibility.
+2. Thermal erosion is investigated on its own (it causes a large share of the remaining pits and dams): slope threshold, material dependence, channel interaction, resolution sensitivity, with targeted fixtures and sweeps.
+3. Point 3's fixed rounds stay; equilibrium is not required. Convergence or oscillation indicators are recorded per round, each with a defined denominator.

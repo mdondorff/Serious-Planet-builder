@@ -1,7 +1,7 @@
 # 0114 Simulation profile, cell metric and canonical forms
-Status: proposed (2026-11-08). Acceptance: the owner's, with SPIKE-105's D2-D10 and point 6 (the toolchain pin). Production: G-EQ (the f32 form) and G-DET on both operating systems at the A/B gate
+Status: accepted for the prototype (owner, 2026-11-11: "approve with the conditions mentioned", after the external review of 2026-11-11), with the conditions below. Production: G-EQ (the f32 form) and G-DET on both operating systems at the A/B gate
 Date: 2026-11-08
-Source: `docs/design/terrain-target.md` §4.2, §8, §9; SPIKE-105 F5, §11 (points 3, 9B, 9C), §13.5 (D9, D10), §18; ADR 0010
+Source: `docs/design/terrain-target.md` §4.2, §8, §9; SPIKE-105 F5, §11 (points 3, 9B, 9C), §13.5, §18; ADR 0010
 
 ## Context
 - An edit must not advance erosion by an arbitrary amount of time; simulated time and editor time are separate.
@@ -15,10 +15,15 @@ Source: `docs/design/terrain-target.md` §4.2, §8, §9; SPIKE-105 F5, §11 (poi
 3. Three representations are kept apart: the canonical persistent form, the stage computation, the runtime composition (f64). Each value's forms and its single conversion point are in A3 §9's table.
 4. Each value one stage passes to another has one canonical stored form; both a fresh run and a re-solve read that form. Round surfaces are f32 on the regional grid, narrowed once at the end of a round; a kernel computes in f64.
 5. Determinism is CON-14, CON-28 and CON-30. This ADR adds: each source of divergence has a named control (A3 §9), shown by the actual builds (G-DET), not inferred; ties break by global cell id.
-6. Open, proposed for the owner: a toolchain pin before the world build; CI uses `stable`.
+6. The build environment is pinned before the world build (condition 2).
 7. Reproducibility (bit equality) and correctness (connectivity, conservation, seams, locality, relief) are separate gates.
 
 ## Consequences
-- Extends ADR 0010; uses ADR 0003's mapping. Changes erosion constants through the metric (D9).
+- Extends ADR 0010; uses ADR 0003's mapping. Changes erosion constants through the metric (SPIKE-105 §13.5).
 - Gates G-EQ, G-DET. CI's determinism manifest must add a fixture of the round solver and H1.
-- Point 4's f32 round surfaces are not yet built (main is f64 across rounds); GEN-166 builds them (architect D24, D27).
+- Point 4's f32 round surfaces are not yet built (main is f64 across rounds); GEN-166 builds them.
+
+## Conditions (external review, 2026-11-11)
+1. Point 4's f32 round surfaces change numerics, not only storage: receiver order, breach decisions, slope thresholds, catchments and basin topology. The correctness gates re-run on the f32 form, with fixtures for near-degenerate elevations, flats, shallow pits, narrow channels, spill levels and low gradients.
+2. The Rust toolchain, `Cargo.lock`, the build profile, compiler flags, target CPU features and floating-point settings are pinned.
+3. Determinism is shown on actual Windows and Linux CI, across thread counts and repeated runs; one platform is not cross-platform proof.

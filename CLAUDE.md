@@ -45,6 +45,7 @@ Specs, ADRs and working files are read by agents and the owner. Write definition
 - Constitution rules most often broken: CON-03 (the renderer executes a `FramePlan`), CON-11 (no planet-radius values in shaders), CON-14 (`libm`, bit-exact on any thread count), CON-28 to CON-30 (CPU-only authority; incremental equals fresh; partitioning changes nothing).
 - Failure output must be actionable: numeric deltas, tile IDs, diff images in `target/review/`.
 - Bless goldens only through the `golden-review` skill's policy (ADR 0017): it auto-blesses rounding noise (also on lit, sky and water, ADR 0096) and declared changes per adapter (ADR 0061), and escalates the rest to the owner's `/bless`. Never copy a candidate into `tests/goldens/` by hand.
+- Never cite the architect's decisions channel (its entry numbers, such as "D32") in the repo, in commit messages or in PR titles: it lives outside the repo. State the content, with its date and who decided (owner, 2026-11-11).
 - Never weaken, skip or delete a test to make a build green (CON-31). Quarantine only with a tracking entry in `docs/status.md`.
 
 ## Git

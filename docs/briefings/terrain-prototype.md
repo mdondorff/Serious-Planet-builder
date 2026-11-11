@@ -1,6 +1,6 @@
 # Terrain prototype (work block after SPIKE-105)
 
-Status: active since 2026-11-08 (owner: D1 = option A, conditional). Replaces the M9.1 gate of `docs/archive/M9/briefings/m9-plan.md`; the M9 planet bake is frozen until this block closes. Contract: `docs/design/terrain-target.md` (A3), ADRs 0110-0115 (proposed). Plan: `spikes/architecture-replan/results/results.md` sections 13 and 17. Target date: mid-December 2026 (estimate).
+Status: active since 2026-11-08 (owner, 2026-11-08: option A, conditional). Replaces the M9.1 gate of `docs/archive/M9/briefings/m9-plan.md`; the M9 planet bake is frozen until this block closes. Contract: `docs/design/terrain-target.md` (A3), ADRs 0110-0115 (accepted for the prototype, 2026-11-11, with the conditions of A3 §12.4). Plan: `spikes/architecture-replan/results/results.md` sections 13 and 17. Target date: mid-December 2026 (estimate).
 
 Re-estimate: 2026-11-11 00:30 (remaining work: P0 closure; item 15 in progress, its order changed for CP1 and CP2 (owner, 2026-11-10); f32 rounds (GEN-166) and the memo-key fix added; 12 repeated at the gate; 16 and 17 open; items 3 and 14 done; target date as above, unchanged, if P0 uses the lanes' waits on machine slots). An item that becomes done moves this date (BUILD-042).
 
@@ -24,7 +24,7 @@ Closure checklist (every phase):
 
 P0 list:
 - Archive the finished changes (each coding lane its own; during waits on machine slots).
-- The A3 and ADR text pass for the ADR review pass (`spikes/prototype-gates/results/adr-review-pass.md`, D24): Amends lists, k names, G-SURF and G-CON rows, lake pieces, width law, 12 GB unit (architect; done in this PR). CON-08: resolved by constitution v1.7 (ADR 0116, #1335).
+- The A3 and ADR text pass for the ADR review pass (`spikes/prototype-gates/results/adr-review-pass.md`): Amends lists, k names, G-SURF and G-CON rows, lake pieces, width law, 12 GB unit (architect; done in this PR). CON-08: resolved by constitution v1.7 (ADR 0116, #1335).
 - Repository audit, read-only (spikes): outdated, misleading, overly verbose or duplicated documents and folders, ranked by cost to readers, each with a proposed action (delete, merge, shorten, move). The owner browses the report; actions follow per owner's yes.
 - Briefing and `docs/status.md` refreshed; worktree inventory.
 
@@ -64,13 +64,15 @@ A change of a gate row of A3 12.1 or of the table above needs a line here (BUILD
 - 2026-11-09 | Memory | compact resident route is the normal path; cache eviction required; tile-wise route only if needed | owner
 - 2026-11-09 | Sediment | post-round pass for the prototype (A3 6.7); G-SED kept with a partition test | owner
 - 2026-11-09 | Stage previews | committed manifest; images in target/ and CI; sheets committed only at gates; item 18 added | owner
-- 2026-11-11 | G-SURF | tightened to the spec: at most 1e-9 m before quantisation, half a step (0.125 m) after (GEN-154; the measured values pass) | architect (D24)
-- 2026-11-11 | G-SURF-I | the vertex set is the tile's core store-lattice vertices (170 x 170 at 102 m) | architect (D32)
-- 2026-11-11 | G-CON | read on H1's whole graph; the stored river pieces end at a lake entry and restart at the spill cell, checked on their own | architect (D24, GEN-163)
+- 2026-11-11 | G-SURF | tightened to the spec: at most 1e-9 m before quantisation, half a step (0.125 m) after (GEN-154; the measured values pass) | architect
+- 2026-11-11 | G-SURF-I | the vertex set is the tile's core store-lattice vertices (170 x 170 at 102 m) | architect
+- 2026-11-11 | G-CON | read on H1's whole graph; the stored river pieces end at a lake entry and restart at the spill cell, checked on their own | architect (GEN-163)
 - 2026-11-11 | G-SCALE | a working target of 11e9 B peak commit by the A/B gate below the 12e9 B hard limit (BUDG-016); additions inside the hydrology call bring an equal saving until it holds | owner
 - 2026-11-11 | Constitution | v1.7: CON-08 allows regional, partitioned and iterative stages; CON-28 to CON-31 added | owner (ADR 0116)
+- 2026-11-11 | ADRs 0110-0115 | accepted for the prototype; the external review's conditions become A3 §12.4 and each ADR's conditions | owner
 
 ## Exit list (the A/B gate)
+- The P0 and P1 conditions of A3 §12.4 are closed or reported.
 - Every gate of A3 section 12.1 passes on the fresh build and after each edit, or its failure is reported against S1-S5.
 - Measured: landmass memory against 12 GB, store against 40 GB, latency of the preview levels.
 - Measured by a lane other than the one that built the item (item 12).
