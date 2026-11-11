@@ -121,7 +121,7 @@ fn the_memoised_f32_solve_is_the_fresh_solve_and_a_changed_flag_is_not_a_cache_h
     solve_rounds(&g, &mut f64fresh, &outlet, &pd, 3, &1usize, 3);
     let mut z = z0.clone();
     solve_rounds_memo(&g, &mut z, &outlet, &pd, 3, &1usize, 3, &Drivers::default(), 16, &mut cache);
-    assert!(z.iter().zip(&f64fresh).all(|(a, b)| a.to_bits() == b.to_bits()), "the flag is part of the memo key");
+    assert!(z.iter().zip(&f64fresh).all(|(a, b)| a.to_bits() == b.to_bits()), "a cache filled by an f32 solve gives the f64 solve's bits");
 }
 
 // spec: GEN-166, TEST-120 (architect's small item: an unhashed requirement is refused, not assumed)

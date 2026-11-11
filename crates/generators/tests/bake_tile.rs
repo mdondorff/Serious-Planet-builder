@@ -284,3 +284,12 @@ fn a_tile_keeps_its_final_heights_for_the_post_pass_and_no_depth_of_its_own() {
         }
     }
 }
+
+// spec: GEN-166, TEST-120 (pass 2 has no key byte for the f32 round surface, so it refuses the flag)
+#[test]
+#[should_panic(expected = "pass 2 does not take the f32 round surface")]
+fn pass_two_refuses_the_f32_round_surface() {
+    let mut p = Pass2Params::standard(9, 0.0);
+    p.carve.round_f32 = true;
+    pass2_tile(&grid(), tile(1, 1), &base, &nothing, None, &p, 1);
+}

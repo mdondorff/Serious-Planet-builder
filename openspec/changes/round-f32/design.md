@@ -1,6 +1,6 @@
 # round-f32: design (GEN-166; architect D24 row 8, inbox #125)
 
-Status: draft, numerics first. No code yet. Heavy runs: the bulldozer's slot. Moves to a `change/round-f32` branch off main when code starts.
+Status: PR 1 (the narrowing) implemented on `change/round-f32`; PR 2 (f32 storage) and the region gates follow. Heavy runs: the bulldozer's slot.
 
 ## Contract (A3 §9)
 - The round surface is stored f32; the round computes in f64 and the routing and sweeps read the widened heights.
@@ -19,7 +19,7 @@ Status: draft, numerics first. No code yet. Heavy runs: the bulldozer's slot. Mo
 ## Rounding rule
 - `z = f64::from(z as f32)`: round to nearest, ties to even (the `as` cast), on the supported targets (x86-64 SSE2, MSVC and Linux).
 - Heights are finite (asserted) and |z| < 1e4 m: no overflow.
-- ulp(f32) at 800 m = 6.1e-5 m, at 4,000 m = 4.9e-4 m, at 8,192 m and above = 9.8e-4 m. The flood epsilon is 1e-3 m; the filled surface is f64 scratch derived from the widened heights, so the epsilon ramp is unaffected. Two neighbours at 8 km or more can be bit-equal after narrowing; equal heights are ties by global cell id (§6.4), deterministic.
+- ulp(f32) at 800 m = 6.1e-5 m, at 4,000 m = 4.9e-4 m, at 8,192 m and above = 9.8e-4 m. The flood epsilon is 1e-3 m; the filled surface is f64 scratch derived from the widened heights. A cell the sweep clamped to `receiver + epsilon` can end a round with a descent just below epsilon after the narrowing (at 512 m to 16,384 m the f32 spacing is at most 2^-10 = 9.766e-4 m, a deficit of 2.3e-5 m): the next flood lifts it by that much (a micro-fill below every pit threshold). Above 16,384 m the spacing exceeds epsilon and a carved chain of epsilon steps collapses to equal heights (ties by cell id): a region with relief above 16 km needs a larger epsilon or the f64 round surface. Reported in G-EQ with the receiver changes. Two neighbours at 8 km or more can be bit-equal after narrowing; equal heights are ties by global cell id (§6.4), deterministic.
 - A per-round change below half an ulp does not move a cell (lost at the narrowing point, not accumulated). Measured under G-EQ: the share of land cells whose round change is below half an ulp, by round.
 
 ## What G-EQ expects (§12 row, text unchanged)
@@ -44,7 +44,7 @@ Status: draft, numerics first. No code yet. Heavy runs: the bulldozer's slot. Mo
 - A saving needs f32 storage of the carried heights (8 B to 4 B a cell; 148,929,871 land cells: about 0.55 GiB for one copy) and a widening read in `gather_with`: a second step, after the numerics pass the gates. G-SCALE (two k=4 runs) follows the storage step; peak commit and working set against 11,444 MiB.
 
 ## Key
-- D24 row 9: a key byte only when on. `catchment_key` and the bake key add one word for `round_f32` only when set; with it off the keys are today's bytes (no BAKE_KERNEL_VERSION change).
+- D24 row 9: a key part only when on. The layer key adds the byte 0xC6 and `catchment_key` the bit 61 for `round_f32` only when set; with it off the keys are today's bytes (no BAKE_KERNEL_VERSION change). Pass 2 and K7 refuse the flag (their tile key has no byte for it).
 
 ## Steps
 1. Failing tier-A fixtures: `carve_rock` with `round_f32` equals `solve_rounds` with it, bit for bit, on 1, 3 and 8 threads; narrowing idempotent; bowl and sea-outlet digests.
