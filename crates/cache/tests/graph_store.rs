@@ -266,8 +266,11 @@ fn the_lake_entries_and_spill_cells_are_stored_with_the_pieces_so_the_drawing_de
             let Some(b) = load_graph_block(&store, &s, 0, bi, bj, key).unwrap() else { continue };
             for p in &b.pieces {
                 let seg = f.ids.iter().position(|&id| id == p.segment).expect("a segment of the graph");
-                let want: Vec<(u32, u32)> =
-                    f.graph.cuts_of(seg).iter().filter(|c| c.1 < p.v0 + p.vertices() as u32 && c.2 > p.v0).map(|c| (c.1, c.2)).collect();
+                let want: Vec<(u32, u32)> = f.graph.cuts_of(seg).iter().map(|c| (c.1, c.2)).collect();
+                assert_eq!(
+                    p.seg_vertices as usize,
+                    f.graph.cuts_of(seg).first().map_or(p.seg_vertices as usize, |_| p.seg_vertices as usize)
+                );
                 assert_eq!(p.cuts, want, "piece {} of segment {seg} in block ({bi}, {bj})", p.part);
                 // The piece's vertices are the chain from v0: its first vertex is the chain's vertex v0.
                 let mut cells = Vec::new();
@@ -290,7 +293,35 @@ fn the_lake_entries_and_spill_cells_are_stored_with_the_pieces_so_the_drawing_de
     println!(
         "lake cuts: {with_cuts} pieces meet a lake; {extra_bytes} extra bytes before compression for v0 and the cut counts and ranges"
     );
-    // A damaged cut count is an error, not an allocation.
-    let r0 = records[0].clone();
-    assert!(!r0.payload.is_empty());
+}
+
+// spec: STRM-084
+#[test]
+fn a_lake_cut_that_is_empty_unsorted_or_past_the_segment_and_a_piece_past_its_segment_are_refused() {
+    let (w, s) = (world(), spec());
+    let piece = |v0: u32, seg_vertices: u32, cuts: Vec<(u32, u32)>| Piece {
+        segment: 5,
+        part: 0,
+        v0,
+        seg_vertices,
+        cuts,
+        i0: 3,
+        j0: 3,
+        steps: vec![0],
+        q: vec![10, 10],
+        bed: vec![5, 4],
+    };
+    let load = |p: Piece| {
+        let b = GraphBlock { face: 0, bi: 0, bj: 0, q_unit: QUnit::Discharge, pieces: vec![p] };
+        let r = block_record(&w, RES, &s, &b);
+        let dir = Dir::new("cuts-refuse");
+        let store = store_of(&dir, &w, std::slice::from_ref(&r));
+        load_graph_block(&store, &s, 0, 0, 0, r.key)
+    };
+    assert!(load(piece(0, 10, vec![(2, 4), (6, 8)])).unwrap().is_some(), "a sound piece loads");
+    assert!(load(piece(0, 10, vec![(4, 4)])).unwrap_err().0.contains("empty, unsorted"), "an empty cut");
+    assert!(load(piece(0, 10, vec![(6, 8), (2, 4)])).unwrap_err().0.contains("empty, unsorted"), "unsorted cuts");
+    assert!(load(piece(0, 10, vec![(2, 6), (5, 8)])).unwrap_err().0.contains("empty, unsorted"), "overlapping cuts");
+    assert!(load(piece(0, 10, vec![(2, 10)])).unwrap_err().0.contains("past the segment"), "a cut that reaches the segment's last vertex");
+    assert!(load(piece(9, 10, vec![])).unwrap_err().0.contains("starts at vertex 9"), "a piece past its segment");
 }

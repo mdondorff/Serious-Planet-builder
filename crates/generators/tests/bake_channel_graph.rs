@@ -70,7 +70,7 @@ fn the_q_code_is_monotone_round_trips_and_is_within_the_step() {
 
 // spec: GEN-170, TEST-114
 #[test]
-fn the_bed_code_keeps_the_order_of_the_levels_and_is_within_half_a_step() {
+fn the_bed_code_keeps_the_order_of_the_levels_is_at_or_below_the_level_and_within_a_step() {
     for z in [-11000.0, -3.2, 0.0, 0.2, 0.26, 100.3, 100.4, 8848.0, 12000.0] {
         let below = z - bed_value(bed_code(z));
         assert!((0.0..BED_STEP_M).contains(&below), "the stored bed is at or below the level, less than a step: {z}: {below}");

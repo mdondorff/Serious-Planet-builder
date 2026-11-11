@@ -32,7 +32,7 @@ const BROTLI_WINDOW_BITS: u32 = 22;
 const BROTLI_BUFFER: usize = 64 * 1024;
 const HEADER_LEN: usize = 1 + 4 + 1 + 4 + 4 + 4 + 1 + 4 + 16;
 /// The fixed part of a piece.
-const PIECE_FIXED: usize = 8 + 4 + 4 + 4 + 4 + 4 + 4;
+const PIECE_FIXED: usize = 8 + 4 + 4 + 4 + 4 + 4 + 4 + 4;
 /// How far beyond its block (H1 cells) a block's pieces reach.
 pub const MARGIN_H1: i64 = 1;
 /// The most bytes a decoded block may hold (a damaged length is an error, not a request to reserve memory).
@@ -118,6 +118,9 @@ pub struct Piece {
     /// The index of the piece's first vertex in its segment's chain, and the vertex ranges of the segment under a lake's water that meet the piece (D54: the lake entry is the vertex before a range, the spill cell the vertex at its end; when the end is the segment's last vertex and it is under water too, the next segment starts with a cut at vertex 0), in the segment's
     /// vertex numbering. The drawing derives the lake-cut pieces from these.
     pub v0: u32,
+    /// The vertices of the whole segment and ALL its lake cuts (not only those that meet this piece): with them the producer's pieces of the segment (the runs between the cuts, numbered from 0) and their ends are known from
+    /// any one of its pieces, whatever block it is in.
+    pub seg_vertices: u32,
     pub cuts: Vec<(u32, u32)>,
     /// The first vertex as H1 coordinates on the face.
     pub i0: i32,
@@ -217,11 +220,13 @@ pub fn graph_block_records(
                     })
                     .collect();
                 let (v0, v1) = (start as u32, k as u32);
-                let cuts: Vec<(u32, u32)> = graph.cuts_of(s.index).iter().filter(|c| c.1 < v1 && c.2 > v0).map(|c| (c.1, c.2)).collect();
+                let _ = v1;
+                let cuts: Vec<(u32, u32)> = graph.cuts_of(s.index).iter().map(|c| (c.1, c.2)).collect();
                 blocks.entry((f, bi, bj)).or_default().push(Piece {
                     segment: ids[s.index],
                     part,
                     v0,
+                    seg_vertices: coords.len() as u32,
                     cuts,
                     i0: run[0].1 as i32,
                     j0: run[0].2 as i32,
@@ -255,6 +260,7 @@ pub fn block_record(world: &GlobalWorld, res: u32, spec: &GraphSpec, b: &GraphBl
         body.extend(p.part.to_le_bytes());
         body.extend((p.q.len() as u32).to_le_bytes());
         body.extend(p.v0.to_le_bytes());
+        body.extend(p.seg_vertices.to_le_bytes());
         body.extend((p.cuts.len() as u32).to_le_bytes());
         body.extend(p.i0.to_le_bytes());
         body.extend(p.j0.to_le_bytes());
@@ -336,9 +342,9 @@ pub fn load_graph_block(
     if p[23..39] != key.0 {
         return Err(what("the key inside the payload is not the record key".into()));
     }
-    // A block holds at most one vertex of any segment in each of its (h + 2)^2 cells (a cell is on one segment), each with at most 5 bytes and a piece header of 24: the bound of a body.
+    // A block holds at most one vertex of any segment in each of its (h + 2)^2 cells (a cell is on one segment), each with at most 5 bytes, a piece header of 36 and a lake cut of 8: the bound of a body.
     let side = u64::from(spec.h1_per_block()) + 2;
-    let max_body = ((side * side * 32 + 4096) as usize).min(MAX_BODY);
+    let max_body = ((side * side * (PIECE_FIXED as u64 + 5 + 8) + 4096) as usize).min(MAX_BODY);
     let mut body = Vec::new();
     brotli::Decompressor::new(&p[HEADER_LEN..], BROTLI_BUFFER)
         .take(max_body as u64 + 1)
@@ -361,8 +367,9 @@ pub fn load_graph_block(
         }
         let segment = u64::from_le_bytes(body[at..at + 8].try_into().expect("eight bytes"));
         let (part, n) = (u32_at(&body, at + 8), u32_at(&body, at + 12) as usize);
-        let (v0, ncuts) = (u32_at(&body, at + 16), u32_at(&body, at + 20) as usize);
-        let (i0, j0) = (u32_at(&body, at + 24) as i32, u32_at(&body, at + 28) as i32);
+        let (v0, seg_vertices) = (u32_at(&body, at + 16), u32_at(&body, at + 20));
+        let ncuts = u32_at(&body, at + 24) as usize;
+        let (i0, j0) = (u32_at(&body, at + 28) as i32, u32_at(&body, at + 32) as i32);
         at += PIECE_FIXED;
         if n == 0 {
             return Err(what(format!("piece {k} has no vertex")));
@@ -373,8 +380,8 @@ pub fn load_graph_block(
         let mut cuts = Vec::with_capacity(ncuts);
         for _ in 0..ncuts {
             let (a, b) = (u32_at(&body, at), u32_at(&body, at + 4));
-            if a >= b {
-                return Err(what(format!("piece {k} has an empty lake cut ({a}, {b})")));
+            if a >= b || b >= seg_vertices || cuts.last().is_some_and(|&(_, pb): &(u32, u32)| a <= pb) {
+                return Err(what(format!("piece {k} has a lake cut ({a}, {b}) that is empty, unsorted, overlapping or past the segment's {seg_vertices} vertices")));
             }
             cuts.push((a, b));
             at += 8;
@@ -395,7 +402,10 @@ pub fn load_graph_block(
         if k > 0 && (pieces[k - 1].segment, pieces[k - 1].part) >= (segment, part) {
             return Err(what(format!("piece {k} is out of order or repeated")));
         }
-        pieces.push(Piece { segment, part, v0, cuts, i0, j0, steps, q, bed });
+        if u64::from(v0) + n as u64 > u64::from(seg_vertices) {
+            return Err(what(format!("piece {k} starts at vertex {v0} of a segment of {seg_vertices} and has {n} vertices")));
+        }
+        pieces.push(Piece { segment, part, v0, seg_vertices, cuts, i0, j0, steps, q, bed });
     }
     if at != body.len() {
         return Err(what(format!("{} bytes follow the last piece", body.len() - at)));
