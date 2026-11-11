@@ -496,36 +496,42 @@ fn trench_width_after_the_burn_and_after_the_whole_pass_report() {
         let law = planet_generators::bake::k7::WidthLaw::STANDARD;
         let q = (w_cells * g.dx() / law.a).powi(2);
         base_ch.q = vec![q; base_ch.points.len()];
-        for (stage, no_carve, no_thermal, no_dep) in [("all", false, false, false), ("no carve", true, false, false), ("no thermal", false, true, false), ("no deposit", false, false, true), ("burn only", true, true, true)] {
-        let mut p = K7Params::standard(5, 0.0);
-        if no_carve {
-            p.pass2.carve.k_dt = 0.0;
-        }
-        if no_thermal {
-            p.pass2.thermal.passes = 0;
-        }
-        if no_dep {
-            p.pass2.kc = 0.0;
-        }
-        let r = k7_tile(&g, id(), &base, &|_| 0.0, std::slice::from_ref(&base_ch), &p, 2);
-        let (mut burnt, mut kept, mut cols) = (0usize, 0usize, 0usize);
-        let mut gaps = 0usize;
-        for a in 8..w - 8 {
-            let mut nb = 0;
-            let mut nk = 0;
-            for b in 0..w {
-                let c = b * w + a;
-                nb += usize::from(r.burn_mask[c]);
-                nk += usize::from(r.z[c] - r.b[c] < -30.0);
+        for (stage, no_carve, no_thermal, no_dep) in [
+            ("all", false, false, false),
+            ("no carve", true, false, false),
+            ("no thermal", false, true, false),
+            ("no deposit", false, false, true),
+            ("burn only", true, true, true),
+        ] {
+            let mut p = K7Params::standard(5, 0.0);
+            if no_carve {
+                p.pass2.carve.k_dt = 0.0;
             }
-            burnt += nb;
-            kept += nk;
-            cols += 1;
-            if nk == 0 {
-                gaps += 1;
+            if no_thermal {
+                p.pass2.thermal.passes = 0;
             }
-        }
-        println!(
+            if no_dep {
+                p.pass2.kc = 0.0;
+            }
+            let r = k7_tile(&g, id(), &base, &|_| 0.0, std::slice::from_ref(&base_ch), &p, 2);
+            let (mut burnt, mut kept, mut cols) = (0usize, 0usize, 0usize);
+            let mut gaps = 0usize;
+            for a in 8..w - 8 {
+                let mut nb = 0;
+                let mut nk = 0;
+                for b in 0..w {
+                    let c = b * w + a;
+                    nb += usize::from(r.burn_mask[c]);
+                    nk += usize::from(r.z[c] - r.b[c] < -30.0);
+                }
+                burnt += nb;
+                kept += nk;
+                cols += 1;
+                if nk == 0 {
+                    gaps += 1;
+                }
+            }
+            println!(
             "{stage:10} w={w_cells:.1} cells: burn mask {:.2} cells across, finished window {:.2} cells across (under -30 m), columns with no trench cell {gaps} of {cols}",
             burnt as f64 / cols as f64,
             kept as f64 / cols as f64

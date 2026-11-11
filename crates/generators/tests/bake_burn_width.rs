@@ -46,7 +46,10 @@ fn the_burn_matches_the_width_law_on_a_straight_a_diagonal_and_a_curved_channel(
             assert!(z.iter().all(|&v| v <= FLAT), "{name} w={w}: no cell is raised");
             for p in &ch.points {
                 let (x, y) = (p.0.round() as i64, p.1.round() as i64);
-                assert!(burnt(x, y) && z[y as usize * N + x as usize] == LEVEL, "{name} w={w}: the line cell ({x}, {y}) is lowered to its level (no gap)");
+                assert!(
+                    burnt(x, y) && z[y as usize * N + x as usize] == LEVEL,
+                    "{name} w={w}: the line cell ({x}, {y}) is lowered to its level (no gap)"
+                );
             }
             // The burnt cells nearest to the middle of the line (not to an end's cap) over the arc length of that middle.
             let mid = &ch.points[END..ch.points.len() - END];
