@@ -1,0 +1,117 @@
+lattice 1366 x 1366 nodes sampled (18.0 s)
+regional window 1020 x 1020 cells solved from the C1 read of the lattice (23.2 s)
+H1: 43509 channel cells, 10823 segments
+Q unit Discharge
+peak Q of a channel cell on land 735 m3/s at regional cell (8378, 1105) (local tile (65, 8)); tiles with a channel cell over 200 m3/s: 8 of 61
+  tile (65, 8): peak Q 735 m3/s (width law 195 m = 1.92 cells), 1141 channel cells, 106 of them at 200 m3/s or more
+  tile (64, 8): peak Q 502 m3/s (width law 161 m = 1.59 cells), 1059 channel cells, 195 of them at 200 m3/s or more
+  tile (63, 8): peak Q 404 m3/s (width law 145 m = 1.42 cells), 462 channel cells, 41 of them at 200 m3/s or more
+  tile (64, 7): peak Q 400 m3/s (width law 144 m = 1.41 cells), 964 channel cells, 65 of them at 200 m3/s or more
+  tile (63, 7): peak Q 395 m3/s (width law 143 m = 1.41 cells), 432 channel cells, 67 of them at 200 m3/s or more
+  tile (63, 6): peak Q 384 m3/s (width law 141 m = 1.39 cells), 928 channel cells, 98 of them at 200 m3/s or more
+  tile (65, 6): peak Q 337 m3/s (width law 132 m = 1.30 cells), 846 channel cells, 145 of them at 200 m3/s or more
+  tile (66, 6): peak Q 229 m3/s (width law 109 m = 1.07 cells), 1075 channel cells, 5 of them at 200 m3/s or more
+  tile (64, 4): peak Q 188 m3/s (width law 99 m = 0.97 cells), 1340 channel cells, 0 of them at 200 m3/s or more
+  tile (67, 4): peak Q 185 m3/s (width law 98 m = 0.96 cells), 1107 channel cells, 0 of them at 200 m3/s or more
+  tile (62, 6): peak Q 181 m3/s (width law 97 m = 0.95 cells), 911 channel cells, 0 of them at 200 m3/s or more
+  tile (67, 8): peak Q 180 m3/s (width law 97 m = 0.95 cells), 721 channel cells, 0 of them at 200 m3/s or more
+tile (64, 8) of face 1: local cells i 65472..66624, j 8128..9280
+456 channel segments meet the window
+K7 with the channels burned in: 6.3 s, 7138 cells burned (a window has 1327104 cells)
+peak Q of a channel point in the window 502 m3/s: the law w = 7.2 Q^0.5 gives 161 m = 1.59 cells (101.8 m a cell); channels whose law width is 1.25 cells or more: 65
+  channel at window (1156, 372), peak Q 502 m3/s: law width 161 m = 1.59 cells; burnt width (twice the distance where the burnt share falls below one half): 102 m = 1.00 cells; burnt share within the law's half width 0 % (10 cells), in the next 1.5 cells 0 %
+  channel at window (1156, 380), peak Q 502 m3/s: law width 161 m = 1.59 cells; burnt width (twice the distance where the burnt share falls below one half): 102 m = 1.00 cells; burnt share within the law's half width 20 % (10 cells), in the next 1.5 cells 14 %
+  channel at window (1132, 380), peak Q 502 m3/s: law width 161 m = 1.59 cells; burnt width (twice the distance where the burnt share falls below one half): 305 m = 3.00 cells; burnt share within the law's half width 50 % (20 cells), in the next 1.5 cells 11 %
+  channel at window (1132, 380), peak Q 502 m3/s: law width 161 m = 1.59 cells; burnt width (twice the distance where the burnt share falls below one half): 255 m = 2.50 cells; burnt share within the law's half width 64 % (28 cells), in the next 1.5 cells 11 %
+  channel at window (1116, 380), peak Q 502 m3/s: law width 161 m = 1.59 cells; burnt width (twice the distance where the burnt share falls below one half): 0 m = 0.00 cells; burnt share within the law's half width 25 % (44 cells), in the next 1.5 cells 7 %
+stored change vs (z - b) as f32 over the core's 1048576 cells: 0 differ; |L| beyond the i16 range of steps: 0
+OWN G-SURF at the cell centres (1020 x 1020 cells of the core, two in from its edge): runtime minus bake 5.7e-14 m before quantisation, 0.1250 m after
+OWN G-SURF-I all vertices: 28730 vertices, 20 over 0.25 m (0.07 %), p50 0.0326 p99 0.1166 max 1.0169 m; B at the vertices own lattice value against `base`: 0.00e0 m; max difference unquantised 0.9264 m; overshoot of the runtime read beyond the four composed cells 0.4495 m, 4 vertices over 0.25 m
+OWN G-SURF-I outside any trench: 28448 vertices, 15 over 0.25 m (0.05 %), p50 0.0326 p99 0.1163 max 1.0169 m
+OWN G-SURF-I in a burnt cell of a channel under 1.25 cells wide: 174 vertices, 0 over 0.25 m (0.00 %), p50 0.0339 p99 0.1194 max 0.1289 m
+OWN G-SURF-I in the law's trench of a channel 1.25 cells or wider: 108 vertices, 5 over 0.25 m (4.63 %), p50 0.0401 p99 0.3214 max 0.3347 m
+LIBRARY surface_gate: 28900 nodes, max 0.9264 m unquantised, 1.0169 m quantised, p50 0.0326 p99 0.1168, 20 over 0.25 m; centres 5.7e-14 m / 0.1250 m; overshoot max 0.4495 m, 4 over 0.25 m
+G-PROFILE read on the finished K7 surface (B + L quantised, bed = the surface at the cells of the segment's rasterised D8 path, core two cells in): 302 segments with samples in the core of 456 meeting the window; largest rise above an upstream sample 14.683 m, largest single step up 12.947 m; segments over 0.25 m: 176 (by the cumulative rise) and 164 (by a single step)
+  with thermal off: largest rise 14.683 m, segments over 0.25 m: 176
+  with deposition off: largest rise 17.139 m, segments over 0.25 m: 171
+  with pit spreading off: largest rise 14.683 m, segments over 0.25 m: 176
+  with thermal, deposition and pits off: largest rise 17.139 m, segments over 0.25 m: 171
+  after burn only: largest rise 10.889 m, segments over 0.25 m: 138
+  after burn and breach: largest rise 10.889 m, segments over 0.25 m: 135
+  after burn, breach and incision: largest rise 17.139 m, segments over 0.25 m: 171
+  segment 379: peak Q 3 m3/s, 25 samples in the core, rise 14.683 m (single step 12.947) from window cell (417, 927) to (420, 924); rise without: thermal off 14.683, deposition off 17.139, pit spreading off 14.683, thermal, deposition and pits off 17.139
+      path cell (416, 928): B 422.47, burn 177.67, + breach 177.67, + incision 145.61, finished 145.61
+      path cell (417, 927): B 421.46, burn 169.57, + breach 169.57, + incision 141.63, finished 141.63
+      path cell (418, 926): B 420.50, burn 167.22, + breach 167.22, + incision 139.31, finished 142.96
+      path cell (419, 925): B 419.70, burn 171.75, + breach 171.75, + incision 143.42, finished 143.42
+      path cell (420, 924): B 419.14, burn 178.07, + breach 178.07, + incision 156.48, finished 156.48
+  segment 378: peak Q 6 m3/s, 153 samples in the core, rise 10.421 m (single step 10.421) from window cell (286, 916) to (287, 916); rise without: thermal off 10.421, deposition off 4.363, pit spreading off 10.421, thermal, deposition and pits off 4.363
+      path cell (283, 917): B 561.81, burn 282.22, + breach 282.22, + incision 259.06, finished 261.60
+      path cell (284, 916): B 558.96, burn 274.75, + breach 274.75, + incision 253.97, finished 256.14
+      path cell (285, 916): B 557.13, burn 270.99, + breach 270.99, + incision 251.09, finished 251.09
+      path cell (286, 916): B 555.29, burn 269.15, + breach 269.15, + incision 248.59, finished 248.59
+      path cell (287, 916): B 553.46, burn 267.32, + breach 267.32, + incision 252.74, finished 258.87
+      path cell (288, 916): B 551.67, burn 265.52, + breach 265.52, + incision 247.76, finished 247.76
+  segment 85: peak Q 3 m3/s, 25 samples in the core, rise 10.013 m (single step 6.277) from window cell (673, 204) to (676, 204); rise without: thermal off 10.013, deposition off 5.255, pit spreading off 10.013, thermal, deposition and pits off 5.255
+      path cell (672, 204): B 570.42, burn 352.51, + breach 352.51, + incision 327.16, finished 327.16
+      path cell (673, 204): B 570.58, burn 349.27, + breach 349.27, + incision 325.47, finished 325.47
+      path cell (674, 204): B 570.61, burn 349.26, + breach 349.26, + incision 328.10, finished 331.74
+      path cell (675, 204): B 570.59, burn 351.82, + breach 351.82, + incision 330.88, finished 330.88
+      path cell (676, 204): B 570.60, burn 349.01, + breach 349.01, + incision 330.30, finished 335.60
+      path cell (677, 203): B 570.37, burn 342.79, + breach 342.79, + incision 326.95, finished 332.38
+  segment 67: peak Q 452 m3/s, 382 samples in the core, rise 9.349 m (single step 6.083) from window cell (96, 468) to (168, 504); rise without: thermal off 6.449, deposition off 9.080, pit spreading off 9.349, thermal, deposition and pits off 6.328
+      path cell (172, 500): B 643.65, burn 5.00, + breach 5.00, + incision 0.43, finished 1.71
+      path cell (171, 501): B 643.30, burn 5.00, + breach 0.00, + incision 0.00, finished 1.71
+      path cell (170, 502): B 642.82, burn 5.00, + breach 0.00, + incision 0.00, finished 1.71
+      path cell (169, 503): B 642.33, burn 5.00, + breach 0.00, + incision 0.00, finished 1.70
+      path cell (168, 504): B 641.91, burn 5.00, + breach 0.00, + incision 0.00, finished 7.87
+      path cell (167, 505): B 641.64, burn 5.00, + breach 0.00, + incision 0.00, finished 7.57
+  segment 79: peak Q 3 m3/s, 9 samples in the core, rise 7.632 m (single step 7.632) from window cell (680, 196) to (681, 196); rise without: thermal off 7.632, deposition off 7.632, pit spreading off 7.632, thermal, deposition and pits off 7.632
+  segment 344: peak Q 1 m3/s, 9 samples in the core, rise 7.066 m (single step 7.066) from window cell (403, 707) to (404, 708); rise without: thermal off 7.066, deposition off 2.816, pit spreading off 7.066, thermal, deposition and pits off 2.816
+  segment 328: peak Q 455 m3/s, 313 samples in the core, rise 6.869 m (single step 5.140) from window cell (143, 700) to (232, 728); rise without: thermal off 4.918, deposition off 6.873, pit spreading off 6.869, thermal, deposition and pits off 4.922
+      path cell (228, 724): B 586.76, burn 5.00, + breach 4.90, + incision 0.85, finished 1.23
+      path cell (229, 725): B 587.73, burn 5.00, + breach 4.76, + incision 0.48, finished 0.67
+      path cell (230, 726): B 588.37, burn 5.00, + breach 4.90, + incision 1.50, finished 1.51
+      path cell (231, 727): B 588.61, burn 5.00, + breach 5.00, + incision 0.39, finished 1.51
+      path cell (232, 728): B 588.50, burn 5.00, + breach 5.00, + incision 0.41, finished 6.75
+      path cell (233, 729): B 588.13, burn 5.00, + breach 4.90, + incision 0.40, finished 4.68
+  segment 57: peak Q 403 m3/s, 73 samples in the core, rise 5.672 m (single step 1.826) from window cell (96, 120) to (100, 126); rise without: thermal off 5.672, deposition off 5.672, pit spreading off 5.672, thermal, deposition and pits off 5.672
+      path cell (98, 122): B 665.43, burn 3.12, + breach 3.12, + incision 1.85, finished 1.85
+      path cell (99, 123): B 665.98, burn 4.42, + breach 4.42, + incision 3.73, finished 3.73
+      path cell (100, 124): B 667.16, burn 5.00, + breach 5.00, + incision 3.37, finished 3.37
+      path cell (100, 125): B 668.84, burn 5.00, + breach 5.00, + incision 3.80, finished 3.80
+      path cell (100, 126): B 670.38, burn 5.00, + breach 5.00, + incision 4.70, finished 4.70
+      path cell (100, 127): B 671.57, burn 5.00, + breach 5.00, + incision 4.51, finished 4.51
+  segment 58: peak Q 403 m3/s, 27 samples in the core, rise 5.624 m (single step 1.860) from window cell (72, 72) to (84, 68); rise without: thermal off 5.624, deposition off 5.624, pit spreading off 5.624, thermal, deposition and pits off 5.624
+      path cell (80, 68): B 655.01, burn 2.60, + breach 2.60, + incision 0.82, finished 0.82
+      path cell (81, 68): B 654.66, burn 3.59, + breach 3.59, + incision 1.74, finished 1.74
+      path cell (82, 68): B 654.36, burn 4.53, + breach 4.53, + incision 3.29, finished 3.29
+      path cell (83, 68): B 653.93, burn 5.16, + breach 5.16, + incision 4.62, finished 4.62
+      path cell (84, 68): B 653.22, burn 5.23, + breach 5.23, + incision 4.77, finished 4.77
+      path cell (85, 68): B 652.23, burn 4.55, + breach 4.55, + incision 3.67, finished 3.67
+  segment 358: peak Q 464 m3/s, 17 samples in the core, rise 5.083 m (single step 1.430) from window cell (453, 811) to (461, 803); rise without: thermal off 5.083, deposition off 4.769, pit spreading off 5.083, thermal, deposition and pits off 4.769
+      path cell (457, 807): B 376.12, burn 3.91, + breach 3.65, + incision 2.93, finished 2.93
+      path cell (458, 806): B 376.62, burn 4.41, + breach 2.40, + incision 1.64, finished 1.81
+      path cell (459, 805): B 377.18, burn 4.96, + breach 4.70, + incision 2.87, finished 2.87
+      path cell (460, 804): B 377.81, burn 5.49, + breach 5.49, + incision 3.11, finished 3.71
+      path cell (461, 803): B 378.49, burn 5.43, + breach 5.43, + incision 4.58, finished 5.24
+      path cell (462, 802): B 379.17, burn 5.37, + breach 5.29, + incision 5.02, finished 5.24
+  segment 351: peak Q 455 m3/s, 57 samples in the core, rise 4.952 m (single step 2.009) from window cell (390, 770) to (386, 774); rise without: thermal off 4.952, deposition off 4.952, pit spreading off 4.952, thermal, deposition and pits off 4.952
+      path cell (390, 770): B 376.72, burn 1.29, + breach 1.29, + incision 0.00, finished 0.00
+      path cell (389, 771): B 375.91, burn 3.86, + breach 3.86, + incision 0.73, finished 0.73
+      path cell (388, 772): B 375.17, burn 5.47, + breach 5.47, + incision 2.75, finished 2.75
+      path cell (387, 773): B 374.51, burn 5.84, + breach 5.84, + incision 4.32, finished 4.32
+      path cell (386, 774): B 373.92, burn 5.72, + breach 5.72, + incision 4.93, finished 4.93
+      path cell (385, 775): B 373.42, burn 5.60, + breach 5.60, + incision 4.98, finished 4.98
+  segment 355: peak Q 461 m3/s, 81 samples in the core, rise 4.944 m (single step 2.765) from window cell (383, 780) to (399, 783); rise without: thermal off 4.944, deposition off 4.944, pit spreading off 4.944, thermal, deposition and pits off 4.944
+      path cell (395, 780): B 375.66, burn 4.35, + breach 4.35, + incision 2.82, finished 2.82
+      path cell (396, 780): B 376.98, burn 5.00, + breach 5.00, + incision 3.87, finished 3.87
+      path cell (397, 781): B 378.69, burn 5.00, + breach 4.76, + incision 4.05, finished 4.43
+      path cell (398, 782): B 380.46, burn 5.00, + breach 5.00, + incision 4.64, finished 4.64
+      path cell (399, 783): B 381.69, burn 5.00, + breach 5.00, + incision 4.88, finished 5.00
+      path cell (400, 784): B 381.97, burn 5.00, + breach 5.00, + incision 4.75, finished 4.75
+  segment 179: peak Q 502 m3/s, 10 samples in the core, rise 0.230 m (single step 0.214) from window cell (1079, 380) to (1085, 380); rise without: thermal off 0.230, deposition off 0.230, pit spreading off 0.230, thermal, deposition and pits off 0.230
+  segment 184: peak Q 502 m3/s, 10 samples in the core, rise 0.128 m (single step 0.054) from window cell (1081, 388) to (1084, 388); rise without: thermal off 0.128, deposition off 0.169, pit spreading off 0.128, thermal, deposition and pits off 0.169
+  segment 191: peak Q 502 m3/s, 10 samples in the core, rise 0.143 m (single step 0.051) from window cell (1078, 396) to (1083, 396); rise without: thermal off 0.143, deposition off 0.143, pit spreading off 0.143, thermal, deposition and pits off 0.143
+  segment 183: peak Q 502 m3/s, 9 samples in the core, rise 0.238 m (single step 0.180) from window cell (1071, 391) to (1073, 393); rise without: thermal off 0.238, deposition off 0.238, pit spreading off 0.238, thermal, deposition and pits off 0.238
+  segment 197: peak Q 502 m3/s, 17 samples in the core, rise 0.272 m (single step 0.139) from window cell (1061, 403) to (1069, 396); rise without: thermal off 0.272, deposition off 0.272, pit spreading off 0.272, thermal, deposition and pits off 0.272
