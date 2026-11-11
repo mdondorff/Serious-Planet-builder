@@ -71,6 +71,7 @@ A change of a gate row of A3 12.1 or of the table above needs a line here (BUILD
 - 2026-11-11 | Constitution | v1.7: CON-08 allows regional, partitioned and iterative stages; CON-28 to CON-31 added | owner (ADR 0116)
 - 2026-11-11 | ADRs 0110-0115 | accepted for the prototype; the external review's conditions become A3 §12.4 and each ADR's conditions | owner
 - 2026-11-11 | SPIKE-105 §13.5 | decisions 2-10 confirmed at the recommended options (A3 §12.4's first P0 condition closed) | owner
+- 2026-11-12 | G-MFD | new gate row for ADR 0112 condition 1 (the MFD comparison, SPIKE-107) | architect
 
 ## Exit list (the A/B gate)
 - The P0 and P1 conditions of A3 §12.4 are closed or reported.
