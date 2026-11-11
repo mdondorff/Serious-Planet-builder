@@ -1267,3 +1267,18 @@ Source: Architect D16 (inbox #115), item 14 (GEN-156), item 15
 #### Scenario: Round trip and refusals
 - **WHEN** a tile of L is written and read, and read under another base, parameters or version, and a payload is damaged
 - **THEN** the core is within half a quantisation step with the stats equal and the clamped cells counted, a previous-layer record is refused with both versions in the message, and every other mismatch is refused or reads as absent as stated
+
+### Requirement: STRM-082 The bake writer commits the L tiles and the basin tables together
+The bake writer SHALL write L tiles (each with its lake water mask), the six basin tables and then a commit record; a reader SHALL read them only through that commit.
+- The commit record is a text file beside the layer manifest, written last and atomically: the L spec, the id and the key of every tile and table.
+- A key other than the reader's is refused naming both; a damaged record is an error.
+- A bake that fails before its commit leaves the previous commit current.
+- An area feed, a halo under 8 and unsorted or overlapping lists are refused before any record; records do not depend on the thread count.
+
+Verify: A
+Status: planned
+Source: Architect D17/D18/D33/D34, design section 14
+
+#### Scenario: Round trip and refusals
+- **WHEN** a small face is baked and read back through its commit, read under another spec, and baked with a feed in area units
+- **THEN** every tile, mask and table reads back, the other spec is refused naming both keys and the area feed writes nothing

@@ -1,0 +1,1 @@
+- 2026-11-11 layer-source-l: CommitLayer, a LayerSource over a commit of the new chain, and PairedLayer (STRM-083, TEST-111); bake-writer archived (GEN-167, TEST-109, STRM-082 synced).

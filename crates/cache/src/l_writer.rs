@@ -12,9 +12,9 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use planet_core::{Face, Vec3};
-use planet_generators::bake::k7::{k7_tile, Channel};
+use planet_generators::bake::k7::{k7_tile, Channel, K7Params, WidthLaw};
 use planet_generators::bake::lakes::{Lake, Lakes};
-use planet_generators::bake::tile::{dequantise, quantise, TileId as PassTile};
+use planet_generators::bake::tile::{dequantise, quantise, TileGrid, TileId as PassTile};
 use planet_generators::bake::water_mask::{self, Status, Window, RING_STEPS};
 
 use crate::basin_table::{basin_table_records, load_basin_table, BasinSpec};
@@ -27,7 +27,7 @@ use crate::pack::{PackWriter, TileStore, DEFAULT_MAX_PACK_BYTES};
 /// The file name of the commit record (beside the layer manifest).
 pub const COMMIT_FILE: &str = "layer-commit.txt";
 /// Version of the commit record's layout.
-pub const COMMIT_VERSION: u32 = 1;
+pub const COMMIT_VERSION: u32 = 2;
 
 /// The channels K7 burns into a window, in face cell-index space with the discharge `Q_w` at each point.
 pub trait ChannelFeed {
@@ -82,10 +82,109 @@ pub struct LBake<'a> {
     pub threads: usize,
 }
 
-/// The commit: the keys of the records that are read together.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// What a reader needs of the L spec to form the keys of the commit's tiles: the grid, the seed and sea level of K7's standard parameters, the flood, the width law and the identities of the base and
+/// of the other inputs. A bake whose K7 parameters are not the standard ones with these values is refused by the writer (a reader could not rebuild its keys).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CommitSpec {
+    /// The `res` the records' keys were made with (the bake's resolution, as the caller named it).
+    pub res: u32,
+    pub cells: u32,
+    pub tile: u32,
+    pub halo: u32,
+    pub radius_m: f64,
+    pub seed: u64,
+    pub sea_level_m: f64,
+    pub canonical_flood: bool,
+    pub width_a: f64,
+    pub width_b: f64,
+    pub base_id: u64,
+    pub inputs_id: u64,
+}
+
+impl CommitSpec {
+    /// The part of `spec` the commit records, or an error when `spec`'s K7 parameters are not describable by it.
+    pub fn of(spec: &LTileSpec, res: u32) -> Result<CommitSpec, String> {
+        let k = &spec.k7;
+        let c = CommitSpec {
+            res,
+            cells: spec.grid.cells as u32,
+            tile: spec.grid.tile as u32,
+            halo: spec.grid.halo as u32,
+            radius_m: spec.grid.radius_m,
+            seed: k.pass2.seed,
+            sea_level_m: k.pass2.sea_level,
+            canonical_flood: k.canonical_flood,
+            width_a: k.width.a,
+            width_b: k.width.b,
+            base_id: spec.base_id,
+            inputs_id: spec.inputs_id,
+        };
+        if c.l_spec() != *spec {
+            return Err("the K7 parameters are not the standard ones for this seed and sea level (with the commit's flood and width law): a reader could not rebuild the keys of the tiles".into());
+        }
+        Ok(c)
+    }
+
+    /// The L spec this describes: K7's standard parameters for the seed and sea level, with the flood and the width law.
+    pub fn l_spec(&self) -> LTileSpec {
+        let mut k7 = K7Params::standard(self.seed, self.sea_level_m);
+        k7.canonical_flood = self.canonical_flood;
+        k7.width = WidthLaw { a: self.width_a, b: self.width_b };
+        LTileSpec {
+            grid: TileGrid { cells: self.cells as usize, tile: self.tile as usize, halo: self.halo as usize, radius_m: self.radius_m },
+            k7,
+            base_id: self.base_id,
+            inputs_id: self.inputs_id,
+        }
+    }
+
+    fn to_line(self) -> String {
+        format!(
+            "spec {} {} {} {} {:016x} {} {:016x} {} {:016x} {:016x} {} {}",
+            self.res,
+            self.cells,
+            self.tile,
+            self.halo,
+            self.radius_m.to_bits(),
+            self.seed,
+            self.sea_level_m.to_bits(),
+            u8::from(self.canonical_flood),
+            self.width_a.to_bits(),
+            self.width_b.to_bits(),
+            self.base_id,
+            self.inputs_id
+        )
+    }
+
+    fn parse(parts: &[&str]) -> Result<CommitSpec, String> {
+        if parts.len() != 12 {
+            return Err(format!("a spec line holds 12 numbers, this one {}", parts.len()));
+        }
+        let n = |i: usize| parts[i].parse::<u64>().map_err(|e| format!("spec field {i}: {e}"));
+        let h = |i: usize| u64::from_str_radix(parts[i], 16).map(f64::from_bits).map_err(|e| format!("spec field {i}: {e}"));
+        Ok(CommitSpec {
+            res: n(0)? as u32,
+            cells: n(1)? as u32,
+            tile: n(2)? as u32,
+            halo: n(3)? as u32,
+            radius_m: h(4)?,
+            seed: n(5)?,
+            sea_level_m: h(6)?,
+            canonical_flood: n(7)? != 0,
+            width_a: h(8)?,
+            width_b: h(9)?,
+            base_id: n(10)?,
+            inputs_id: n(11)?,
+        })
+    }
+}
+
+/// The commit: the spec and the keys of the records that are read together.
+#[derive(Clone, Debug, PartialEq)]
 pub struct Commit {
     pub id: u64,
+    /// What the keys of the tiles were made from.
+    pub spec: CommitSpec,
     /// The key of the basin table of each face.
     pub tables: [CacheKey; 6],
     /// The key of each L tile, by `(face, ti, tj)`.
@@ -99,8 +198,9 @@ fn fnv(h: &mut u64, bytes: &[u8]) {
 }
 
 impl Commit {
-    fn id_of(tables: &[CacheKey; 6], tiles: &BTreeMap<(u8, u32, u32), CacheKey>) -> u64 {
+    fn id_of(spec: &CommitSpec, tables: &[CacheKey; 6], tiles: &BTreeMap<(u8, u32, u32), CacheKey>) -> u64 {
         let mut h = 0xcbf2_9ce4_8422_2325u64;
+        fnv(&mut h, spec.to_line().as_bytes());
         for k in tables {
             fnv(&mut h, &k.0);
         }
@@ -113,12 +213,12 @@ impl Commit {
         h
     }
 
-    pub fn new(tables: [CacheKey; 6], tiles: BTreeMap<(u8, u32, u32), CacheKey>) -> Commit {
-        Commit { id: Commit::id_of(&tables, &tiles), tables, tiles }
+    pub fn new(spec: CommitSpec, tables: [CacheKey; 6], tiles: BTreeMap<(u8, u32, u32), CacheKey>) -> Commit {
+        Commit { id: Commit::id_of(&spec, &tables, &tiles), spec, tables, tiles }
     }
 
     pub fn to_text(&self) -> String {
-        let mut t = format!("l-commit {COMMIT_VERSION}\ncommit_id {:016x}\n", self.id);
+        let mut t = format!("l-commit {COMMIT_VERSION}\ncommit_id {:016x}\n{}\n", self.id, self.spec.to_line());
         for (f, k) in self.tables.iter().enumerate() {
             t.push_str(&format!("table {f} {k}\n"));
         }
@@ -136,6 +236,7 @@ impl Commit {
             return Err(format!("'{head}': this build reads l-commit {COMMIT_VERSION}"));
         }
         let mut id: Option<u64> = None;
+        let mut spec: Option<CommitSpec> = None;
         let mut tables: [Option<CacheKey>; 6] = [None; 6];
         let mut tiles = BTreeMap::new();
         let key = |s: &str, l: &str| CacheKey::from_hex(s).ok_or_else(|| format!("'{l}': '{s}' is not a key"));
@@ -144,6 +245,7 @@ impl Commit {
             let p: Vec<&str> = l.split(' ').collect();
             match p.as_slice() {
                 ["commit_id", v] => id = Some(u64::from_str_radix(v, 16).map_err(|e| format!("'{l}': {e}"))?),
+                ["spec", rest @ ..] => spec = Some(CommitSpec::parse(rest).map_err(|e| format!("'{l}': {e}"))?),
                 ["table", f, k] => {
                     let f = num(f, l)? as usize;
                     if f >= 6 || tables[f].replace(key(k, l)?).is_some() {
@@ -167,7 +269,8 @@ impl Commit {
         for (f, k) in tables.iter().enumerate() {
             t[f] = k.ok_or_else(|| format!("the commit record names no table for face {f}"))?;
         }
-        let c = Commit::new(t, tiles);
+        let spec = spec.ok_or("the commit record has no spec line")?;
+        let c = Commit::new(spec, t, tiles);
         if c.id != id {
             return Err(format!("the commit id {id:016x} does not match its keys (they hash to {:016x}): the record is damaged", c.id));
         }
@@ -214,7 +317,12 @@ pub fn read_l_tile(
             commit.id, id.face.0, id.ti, id.tj
         )));
     }
-    load_l_tile(store, world, res, spec, id)
+    load_l_tile(store, world, res, spec, id)?.map(Some).ok_or_else(|| {
+        LayerStoreError(format!(
+            "commit {:016x} names L tile {}/{}/{} (key {named}) but the store holds no record of it: a commit is written after its records, so the store is incomplete or is not the one the commit was written for",
+            commit.id, id.face.0, id.ti, id.tj
+        ))
+    })
 }
 
 /// The basin table of `face` of `commit`, read under the key the commit names (an error naming both keys when the reader's spec makes another).
@@ -335,7 +443,7 @@ pub fn bake_l(dir: &Path, b: &LBake, tiles: &[PassTile]) -> Result<Commit, Strin
         writer.append(&r).map_err(|e| e.to_string())?;
     }
     writer.finish().map_err(|e| e.to_string())?;
-    let commit = Commit::new(tables, keys);
+    let commit = Commit::new(CommitSpec::of(&b.spec, b.res)?, tables, keys);
     commit.write(dir)?;
     Ok(commit)
 }

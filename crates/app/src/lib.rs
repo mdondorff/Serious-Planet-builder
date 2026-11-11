@@ -2059,6 +2059,76 @@ mod tests {
         assert_eq!(b.height(v).to_bits(), c.height(v).to_bits(), "the heights are the layer's, channels or not");
     }
 
+    // spec: STRM-083
+    #[test]
+    fn the_erosion_layer_of_a_commit_of_the_new_chain_is_read_through_its_commit_and_refuses_the_old_channels() {
+        use planet_cache::global_store::GlobalWorld;
+        use planet_cache::l_writer::{bake_l, ChannelFeed, LBake};
+        use planet_cache::layer_l::LTileSpec;
+        use planet_generators::bake::k7::{Channel, K7Params};
+        use planet_generators::bake::lakes::Lakes;
+        use planet_generators::bake::tile::TileGrid;
+        struct NoChannels;
+        impl ChannelFeed for NoChannels {
+            fn q_is_discharge(&self) -> bool {
+                true
+            }
+            fn channels_near(&self, _: planet_core::Face, _: i64, _: i64, _: i64) -> Vec<Channel> {
+                Vec::new()
+            }
+        }
+        let d = TempDir::new("erosion-commit");
+        let (store, dir) = (d.s("store"), d.0.join("lcommit"));
+        run_str(&["generate", "--global-dir", &store, "--global-res", "8", "--seed", "3", "--prefill-levels", "0"]).unwrap();
+        let def = || planet_world_def::WorldDefinition::single_planet(skeleton::RADIUS_M, 3);
+        let world = GlobalWorld::from_definition(&def()).unwrap();
+        let inputs = planet_cache::global_store::class_inputs(&def(), 3, 8);
+        let base = |v: planet_core::Vec3| inputs.base(v);
+        let zero = |_: planet_core::Vec3| 0.0;
+        let spec = LTileSpec {
+            grid: TileGrid { cells: 64, tile: 64, halo: 8, radius_m: skeleton::RADIUS_M },
+            k7: K7Params::standard(3, 0.0),
+            base_id: 1,
+            inputs_id: 2,
+        };
+        let lakes = Lakes { lakes: Vec::new(), pieces: Vec::new(), dropped_cells: 0, water: Vec::new(), ring: Vec::new() };
+        let b = LBake {
+            world: &world,
+            res: 64,
+            spec,
+            basin: planet_cache::basin_table::BasinSpec {
+                hydro: planet_generators::bake::hydro::HydroParams::default(),
+                tile_cells: 64,
+                tiles_per_edge: 1,
+                base_id: 1,
+                inputs_id: 2,
+            },
+            base: &base,
+            regional: &zero,
+            feed: &NoChannels,
+            lakes: &lakes,
+            h1_cells: 64,
+            h1_cell: &|_, _, _| None,
+            face_of: &|_| planet_core::Face(0),
+            threads: 2,
+        };
+        let tiles: Vec<_> = spec.grid.all_tiles();
+        let commit = bake_l(&dir, &b, &tiles).unwrap();
+        let options = |channels: bool| worldfield::ErosionOptions {
+            layer_dir: Some(dir.clone()),
+            face_res: None,
+            planet_res: None,
+            unchecked: true,
+            channels,
+        };
+        let open = || worldfield::WorldTerrain::open_store(def(), std::path::Path::new(&store), 8).unwrap();
+        let e = open().with_erosion(&options(true)).err().unwrap();
+        assert!(e.contains("holds a commit of the new chain") && e.contains("--channels off"), "{e}");
+        let on = open().with_erosion(&options(false)).unwrap();
+        assert!(on.erosion_note().contains(&format!("commit {:016x}", commit.id)), "{}", on.erosion_note());
+        assert!(on.describe().contains("erosion layer"), "{}", on.describe());
+    }
+
     // spec: VIEW-065
     #[test]
     fn the_viewer_opens_the_world_a_store_records_and_the_layer_by_its_manifest() {

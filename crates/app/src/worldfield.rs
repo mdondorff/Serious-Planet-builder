@@ -707,6 +707,32 @@ impl WorldTerrain {
         let defaults = planet_cache::layer_tiles::BakeShape::production(seed, self.radius_m);
         let over = planet_cache::layer_tiles::ShapeOverride { face_res: o.face_res, planet_res: o.planet_res };
         let dir = o.layer_dir.clone().unwrap_or(store_dir);
+        // The layer of the new chain (item 15 PR 5a): a folder that holds a commit record is read through it, as L with no fill; the old layer's reader is used otherwise.
+        if let Some(commit_dir) =
+            [dir.clone(), dir.join("tiles")].into_iter().find(|d| d.join(planet_cache::l_writer::COMMIT_FILE).is_file())
+        {
+            if o.channels {
+                return Err(format!(
+                    "--channels on: {} holds a commit of the new chain, whose drainage and depth channels are not stored (the channel graph is a later item): turn --channels off",
+                    commit_dir.display()
+                ));
+            }
+            let layer = planet_cache::l_layer::CommitLayer::open(&commit_dir, world.clone(), LAYER_CACHE_TILES)
+                .map_err(|e| format!("--erosion: {e}"))?;
+            let commit_id = layer.commit().id;
+            let layer = planet_generators::erosion_layer::ErosionLayer::new(Arc::new(layer)).map_err(|e| format!("--erosion: {e}"))?;
+            let sea_level_m = def.sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
+            self.kind = HeightFieldKind::ErodedC1;
+            self.erosion_note = format!(
+                "erosion layer {} (commit {commit_id:016x} of the new chain, L with no fill, seed {seed}, coast fade {} m over the sea level {sea_level_m} m, crease band on, relief channels off, C1 base)",
+                commit_dir.display(),
+                planet_generators::erosion_layer::COAST_FADE_M
+            );
+            self.source = format!("{} + {}", self.source, self.erosion_note);
+            self.erosion =
+                Some(planet_generators::height_fields::ErosionSwitch { relief: None, layer: Arc::new(layer), sea_level_m, channels: None });
+            return Ok(self);
+        }
         let (layer, manifest, shape) =
             planet_cache::layer_tiles::StoreLayer::open_recorded(&dir, world.clone(), &defaults, over, LAYER_CACHE_TILES)
                 .map_err(|e| format!("--erosion: {e}"))?;
