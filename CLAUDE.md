@@ -7,16 +7,16 @@ A planet-scale generator, editor and real-time renderer: Rust + wgpu, one binary
 1. `docs/constitution.md`: non-negotiable rules. Read it at the start of every session. Never edit it; propose amendments as ADRs.
 2. `openspec/specs/`: current subsystem specs, the single home of current rules (every normative number, budget, limit and format; ADR 0055). Read only the 2–3 specs your task touches.
 3. `docs/adr/`: accepted decisions and why they were made. Edit accepted ADRs only per ADR 0078.
-4. `docs/background/`: frozen research and setup docs. **Read only when an ADR, spec or task points at a specific section** (e.g. "background report §5"). Never treat them as requirements, never update them.
+4. `docs/background/`: frozen research and setup docs. **Read only when an ADR, spec or task points at a specific section**. Never treat them as requirements, never update them.
 
 Working files: `docs/status.md` (forward state only: waiting for the owner, the current queue, the current stop report, tracked items), `docs/log.md` and `docs/log.d/` (the current milestone's log; read it with `cargo xtask log`), `docs/spikes.md` (spike register), `docs/learnings.md` (findings, each with a scope). Finished milestones are archived in `docs/archive/<M>/` by the `housekeeping` skill. `docs/README.md` maps every folder.
 
 ## Commands (always via xtask)
 - `cargo xtask` alone lists every command.
-- `cargo xtask test fast`: tier A for changed crates (<= 20 s; owner, 2026-10-16)
+- `cargo xtask test fast`: tier A for changed crates (<= 20 s)
 - `cargo xtask test`: tiers A + B on the software adapter
 - `cargo xtask test gpu`: tier C goldens and debug views
-- `cargo xtask test gpu --real`: the same on the discrete GPU. Run it yourself when real-GPU evidence helps, no owner confirmation (owner, 2026-10-12), never during a perf window. Its golden candidates go through `golden-review` (ADR 0017).
+- `cargo xtask test gpu --real`: the same on the discrete GPU. Run it yourself when real-GPU evidence helps, no owner confirmation, never during a perf window. Its golden candidates go through `golden-review` (ADR 0017).
 - `cargo xtask spec-lint`: trace IDs, tiers, requirement coverage
 - `cargo xtask accept <milestone>`: milestone acceptance
 - `cargo xtask repro <bundle>`: replay a repro bundle
@@ -45,15 +45,16 @@ Specs, ADRs and working files are read by agents and the owner. Write definition
 - Constitution rules most often broken: CON-03 (the renderer executes a `FramePlan`), CON-11 (no planet-radius values in shaders), CON-14 (`libm`, bit-exact on any thread count), CON-28 to CON-30 (CPU-only authority; incremental equals fresh; partitioning changes nothing).
 - Failure output must be actionable: numeric deltas, tile IDs, diff images in `target/review/`.
 - Bless goldens only through the `golden-review` skill's policy (ADR 0017): it auto-blesses rounding noise (also on lit, sky and water, ADR 0096) and declared changes per adapter (ADR 0061), and escalates the rest to the owner's `/bless`. Never copy a candidate into `tests/goldens/` by hand.
+- Never cite the decisions channel's entry numbers ("D32") in the repo, commits or PR titles; state the content and date (owner, 2026-11-11).
 - Never weaken, skip or delete a test to make a build green (CON-31). Quarantine only with a tracking entry in `docs/status.md`.
 
 ## Git
 - One branch per OpenSpec change (`change/<id>`). Small commits.
 - Push the branch, open a PR with `gh pr create`. Merge (squash; who merges: `docs/routing.md`) only when CI is green on Windows and Linux and the verifier passed; the PR body carries `Verifier: PASS <sha>` (pr-gate). A docs-only PR (only docs/, openspec/, .claude/, root `*.md`, `spikes/**/results/**`, `spikes/README.md`) runs the light `docs` check (spec-lint) and needs only it green (owner, 2026-10-16).
 - Before every push to a PR branch run `cargo xtask prepush` (check, test fast, and test gpu when the diff touches render, shaders or another golden-producing crate), while waiting is cheap. Lavapipe-only golden differences stay CI's job (owner, 2026-10-19).
-- After every push to a PR, start `gh pr checks <n> --watch` as a background command and act on its result (fix a failure, or verify and merge). Never end a turn with CI pending and no watch running (owner, 2026-10-18).
+- After every push to a PR, start `gh pr checks <n> --watch` as a background command and act on its result (fix a failure, or verify and merge). Never end a turn with CI pending and no watch running.
 - Worktrees only under `.claude/worktrees/`, never inside `target/` or a scratchpad. Remove yours once its PR is merged (`cargo xtask worktrees --prune`).
-- Temp output only under `target/` (xtask sets `TMP` there). Prepush and bake refuse below 20 GB free (owner, 2026-11-08).
+- Temp output only under `target/` (xtask sets `TMP` there). Prepush and bake refuse below 20 GB free.
 - Never force-push, never rewrite `main`'s history, never commit secrets or large binaries (goldens are small PNGs; over 1 MB needs an ADR).
 
 ## When to stop and report

@@ -1,7 +1,7 @@
 # 0113 Edit ordering and dependencies: landform and driver edits below erosion
-Status: proposed (2026-11-08). Acceptance: the owner's, with SPIKE-105's D2-D10 (it changes accepted ADRs 0007, 0066 and 0089). Production: G-EQ, G-INC on E1-E7 at the A/B gate
+Status: accepted for the prototype (owner, 2026-11-11: "approve with the conditions mentioned", after the external review of 2026-11-11), with the conditions below (it changes accepted ADRs 0007, 0066 and 0089). Production: G-EQ, G-INC on E1-E7 at the A/B gate
 Date: 2026-11-08
-Source: `docs/design/terrain-target.md` §7; SPIKE-105 §3 (X1-X4), §13.5 (D4), §18; ADR 0007, 0066, 0072, 0086
+Source: `docs/design/terrain-target.md` §7; SPIKE-105 §3 (X1-X4), §13.5, §18; ADR 0007, 0066, 0072, 0086
 
 ## Context
 - Authored items are stages after the base and the erosion layer; an edit moves heights, but rivers and erosion do not respond (ADR 0007, ADR 0066 point 4).
@@ -22,3 +22,8 @@ Source: `docs/design/terrain-target.md` §7; SPIKE-105 §3 (X1-X4), §13.5 (D4),
 - Amends ADR 0007 (layer order), ADR 0066 points 1, 2 and 5 (items below erosion are bounded by keys, not by footprint or reach; point 4 is already amended by ADR 0068) and ADR 0089 point 11 (height edits leave the override stage); settles ADR 0086 point 3. Point 6 is new against ADR 0072 (runtime and editor work).
 - Undo removes an item: earlier keys read back.
 - Gates G-INC, G-EQ, on E1-E7 (E7: land bridge joined, then separated).
+
+## Conditions (external review, 2026-11-11)
+1. Point 6 is completed by: the smallest coherent simulation domain that a commit waits for; whether unaffected regions commit on their own; how failed and superseded work is handled. Terrain and water never show different generations.
+2. An end-to-end undo and replay test includes basin splits and merges.
+3. Preview-quality identities stay apart from authoritative state. The editor's latency contract names three levels (immediate preview, regional re-solve, full rebuild), each measured.

@@ -1,5 +1,5 @@
 # 0110 The authoritative surface: one composition, one base read, one elevation source
-Status: proposed (2026-11-08). Acceptance: the owner's, with SPIKE-105's D2-D10. Production: G-SURF, G-PROFILE, G-BASIN at the A/B gate
+Status: accepted for the prototype (owner, 2026-11-11: "approve with the conditions mentioned", after the external review of 2026-11-11), with the conditions below. Production: G-SURF, G-PROFILE, G-BASIN at the A/B gate
 Date: 2026-11-08
 Source: `docs/design/terrain-target.md` §3; SPIKE-104 §3; SPIKE-105 §6, §11 (points 9A), §13, §18
 
@@ -18,5 +18,9 @@ Source: `docs/design/terrain-target.md` §3; SPIKE-104 §3; SPIKE-105 §6, §11 
 6. Every derived layer folds `base_id` into its key; a mismatch is refused. `base_id` covers the lattice key, the C1 read's version and parameters, the mapping, radius and `k`, the sea level, the below-erosion items at the tile, and the stored forms (A3 §3.2).
 
 ## Consequences
-- Amends ADR 0088 points 2, 4.2 (pass 2 gains K7's breach and loses its stride-4 base) and 5, ADR 0099 point 3, ADR 0100; replaces ADR 0101 point 3 (the fill-depth channel; its deletion waits for this ADR's acceptance).
+- Amends ADR 0088 points 2, 4.2 (pass 2 gains K7's breach and loses its stride-4 base) and 5, ADR 0099 point 3, ADR 0100; replaces ADR 0101 point 3 (the fill-depth channel; its deletion is unblocked by this acceptance, item 15 PR 5b).
 - Gates G-SURF, G-CON, G-PROFILE (channels through the complete read).
+
+## Conditions (external review, 2026-11-11)
+1. The sampling and interpolation order, the coast fade and the precision boundaries stay explicit contracts (A3 §3, §9).
+2. Equality at the cell centres (G-SURF) does not show conformance at the lattice vertices; G-SURF-I is not counted as passed while its tail exceeds the tolerance.

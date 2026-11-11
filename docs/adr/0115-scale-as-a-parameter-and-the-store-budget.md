@@ -1,7 +1,7 @@
 # 0115 Scale as a parameter and the store budget
-Status: proposed (2026-11-08). Acceptance: the owner's, with SPIKE-105's D2-D10; point 7's budget set by the owner (2026-11-08, 2026-11-09). Production: G-STORE and G-SCALE measured at the A/B gate
+Status: accepted for the prototype (owner, 2026-11-11: "approve with the conditions mentioned", after the external review of 2026-11-11), with the conditions below; point 7's budget set by the owner (2026-11-08, 2026-11-09, 2026-11-11). Production: G-STORE and G-SCALE measured at the A/B gate
 Date: 2026-11-08
-Source: `docs/design/terrain-target.md` §4, §10, §12; SPIKE-105 §3 (X11-X13), §13.5 (D6, D7), §16, §18; ADR 0045 point 2, ADR 0108
+Source: `docs/design/terrain-target.md` §4, §10, §12; SPIKE-105 §3 (X11-X13), §13.5, §16, §18; ADR 0045 point 2, ADR 0108
 
 ## Context
 - Grids are fixed counts per cube-face edge (`BakeShape::production`); the planet's scale is implicit.
@@ -20,6 +20,11 @@ Source: `docs/design/terrain-target.md` §4, §10, §12; SPIKE-105 §3 (X11-X13)
 
 ## Consequences
 - Supersedes ADR 0045 point 2 (a ceil on the bake cell) with point 1's rule (the largest `k` whose local cell is at least the target; Earth 101.8 m at `k` = 14). Gates G-STORE, G-SCALE (one large and one small body).
-- Point 7 is a new budget; the owner decides it with this ADR.
+- Point 7 is a new budget.
 - The resident rounds of the largest landmass are measured (7.7 GiB, 55 bytes a cell, on a compact grid of the landmass, A3 §6.6); the partitioned route measured more memory and time as built (8,854 MiB, 2,974 s against 7,858 MiB, 1,716 s), so the 2026-11-08 choice of it as the normal path, made on the assumption that it bounds memory, is replaced.
 - Since measured: the complete resident build at k=4, 11,387 MiB worst of two runs (GEN-158; ledger G-SCALE).
+
+## Conditions (external review, 2026-11-11)
+1. The store budget stays a hard constraint; smaller and larger bodies are validated, since an Earth-only result does not show planetary scalability. Numerical scaling and computational scaling are reported apart; a phenomenon may use its own resolution where justified.
+2. The compaction peak and temporary disk use are measured, not only the steady-state store. Replacement is atomic and crash-safe, with tests.
+3. Memory headroom below point 7's hard limit is kept; optimisation comes before a coarser grid, which needs evidence that it is necessary.
