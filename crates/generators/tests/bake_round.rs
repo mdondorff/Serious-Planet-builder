@@ -197,19 +197,26 @@ fn chain_beside_two_outlets() -> (Grid, Vec<f64>, usize) {
 #[test]
 fn the_canonical_flood_does_not_lift_a_cell_above_a_lower_outlet_beside_it() {
     // The plain flood drains the flat chain from A in its FIFO before the heap pops B (the same level, the higher id): the cell `q`, next to B, is lifted to the end of the chain's epsilon ramp (0.16 m).
-    // The canonical flood visits by (level, id): `q` is one epsilon above B.
+    // The canonical flood visits by (level, id): `q` stands at the flat grade (GEN-173) above B, never above the chessboard count of one epsilon (GEN-159), and above the outlet beside it.
     let (g, z, q) = chain_beside_two_outlets();
     let eps = 0.02;
     let outlet = g.outlets(&z, 0.0);
     let canonical = priority_flood_with(&g, &z, &outlet, eps, true);
-    assert!((canonical[q] - eps).abs() < 1e-12, "q is one epsilon above the outlet beside it: {}", canonical[q]);
+    assert!(
+        (canonical[q] - eps / std::f64::consts::SQRT_2).abs() < 1e-12,
+        "q is eps d / sqrt 2 above the outlet beside it (d = 1): {}",
+        canonical[q]
+    );
+    assert!(canonical[q] > 0.0 && canonical[q] <= eps, "above the outlet beside it, never above the chessboard count: {}", canonical[q]);
     // The mechanism: the plain flood lifts it by the length of the chain, 8 epsilons (0.16 m), while B is still in its heap.
     let plain = priority_flood(&g, &z, &outlet, eps);
     assert!((plain[q] - 8.0 * eps).abs() < 1e-12, "the plain flood's FIFO runs the chain first: {}", plain[q]);
-    // The ramp from both ends: each chain cell stands one epsilon a step from the nearer outlet (A at column 2, B at column 11).
+    // The ramp from both ends: each chain cell stands eps d / sqrt 2 above the nearer outlet (A at column 2, B at column 11), d the distance to it in cells (GEN-173), and never above the chessboard count.
     for x in 3..=10usize {
-        let want = eps * (x as f64 - 2.0).min(11.0 - x as f64);
+        let d = (x as f64 - 2.0).min(11.0 - x as f64);
+        let want = eps * d / std::f64::consts::SQRT_2;
         assert!((canonical[4 * 16 + x] - want).abs() < 1e-12, "column {x}: {} against {want}", canonical[4 * 16 + x]);
+        assert!(canonical[4 * 16 + x] <= eps * d, "column {x}: above the chessboard count");
     }
 }
 
@@ -288,33 +295,46 @@ fn a_bowl_whose_outlet_is_at_the_sea_is_opened_by_the_first_round() {
     assert_eq!(cells, 0, "a bowl whose rim is at the sea leaves {cells} cells under the fill after round 1");
 }
 
-// spec: GEN-162 (inbox #118): a depression behind an outlet the breach cannot lower must not get deeper round over round (the sweeps move the floor by up to 6 % of the depth in a round; the unfixed breach added 50 %)
+// spec: GEN-162 (inbox #118), GEN-173: a depression behind an outlet the breach cannot lower must not get deeper round over round (the sweeps move the floor by up to 6 % of the depth in a round; the unfixed breach added 50 %).
+// Two bounds (architect, 2026-11-12): the per-round one (round 1 may move the floor by 10 % of the base depth, each later round by at most 0.25 m over the one before) and a cumulative one with no slack, so drift over the rounds fails: rounds 2 to 4 are each at most the median of round 1, and round 4 is below round 1.
+// Sequences: 42.7, 41.7, 41.4, 40.9 m, the same under the flat grade of GEN-173 (42.665, 41.745, 41.400, 40.855 m).
 #[test]
 fn a_lake_behind_a_cut_outlet_does_not_deepen_round_over_round() {
     let (grid, z0, outlet) = bowl(32, None);
     let (base, _) = depth_under_fill(&grid, &z0, &outlet);
-    let mut prev = base;
+    let (mut prev, mut first) = (base, f64::NAN);
     for round in 1..=4 {
         let z = rounds_from(&grid, &z0, &outlet, round);
         let (p50, cells) = depth_under_fill(&grid, &z, &outlet);
-        // round 1: the incision of the sweeps moves the floor (a bowl without the breach reads 42.2 m against 40.3 m); after it the depth falls (42.7, 41.7, 41.4, 40.9 m)
+        // round 1: the incision of the sweeps moves the floor (a bowl without the breach reads 42.2 m against 40.3 m); after it the depth falls
         let allowed = if round == 1 { 0.1 * base } else { 0.25 };
         assert!(
             p50 <= prev + allowed,
             "round {round}: median depth under the fill {p50:.1} m against {prev:.1} m before it ({cells} cells, base {base:.1} m)"
         );
+        if round == 1 {
+            first = p50;
+        } else {
+            assert!(
+                p50 <= first,
+                "round {round}: median depth under the fill {p50:.3} m is deeper than round 1's {first:.3} m ({cells} cells)"
+            );
+        }
+        if round == 4 {
+            assert!(p50 < first, "round 4: {p50:.3} m is not below round 1's {first:.3} m");
+        }
         prev = p50;
     }
 }
 
-// spec: GEN-162 (sea-outlet chains keep their bits): a digest of three rounds on a bowl whose rim is at the sea level, taken on the kernels before the rule (origin/main at 82931e11)
+// spec: GEN-162, GEN-173 (sea-outlet chains keep their bits through the base-level rule): a digest of three rounds on a bowl whose rim is at the sea level. Taken on the kernels before GEN-162 (origin/main at 82931e11: 0xb9e6_6858_0505_bf11, which GEN-162 left unchanged); declared change of GEN-173: the flats are graded by Euclidean distance, so the digest moves to the value below
 #[test]
 fn a_field_whose_outlets_are_at_the_sea_keeps_the_bits_it_had_before_the_base_level_rule() {
     let (grid, z0, outlet) = bowl(32, Some(0.0));
     let z = rounds_from(&grid, &z0, &outlet, 3);
     let mut d: u64 = 0xcbf2_9ce4_8422_2325;
     z.iter().for_each(|v| d = (d ^ v.to_bits()).wrapping_mul(0x100_0000_01b3));
-    assert_eq!(d, 0xb9e6_6858_0505_bf11, "the sea-outlet rounds moved: digest {d:016x}");
+    assert_eq!(d, 0x8686_f0d1_ac1d_02ec, "the sea-outlet rounds moved: digest {d:016x}");
 }
 
 /// The lowest height of the cells that stand beside a rim cell of the bowl and are not outlets, against the lowest rim cell: how far the breach cut below the exit.

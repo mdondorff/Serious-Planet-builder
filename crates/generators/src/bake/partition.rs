@@ -412,6 +412,8 @@ pub fn partitioned_route_weighted(
         }
     }
     assert!((0..n).all(|p| !grid.is_active(p) || filled[p].is_finite()), "a cell is not reached by the flood: no outlet on its component");
+    // The flats are graded on the assembled surface by the same function as the resident flood (GEN-173): a pure function of the flat and its rim, so no tiling decides it.
+    let _ = super::flood::regrade_flats(grid, z, outlet, epsilon, super::flood::FLAT_BOUND, &mut filled);
 
     // The cells off the grid hold what the resident flood leaves there: their height if flagged as outlets, 0.0 otherwise.
     for p in 0..n {

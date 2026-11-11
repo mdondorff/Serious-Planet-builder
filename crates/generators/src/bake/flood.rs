@@ -2,7 +2,9 @@
 //! gradient of `epsilon` per cell over the flats, so that every cell drains. The improved variant keeps the cells that fill to the level of their parent in a plain queue and
 //! only the others in the heap.
 
-use super::{assert_finite, Grid};
+#![allow(clippy::needless_range_loop)]
+
+use super::{assert_finite, Grid, NEIGHBOURS};
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, VecDeque};
 
@@ -27,6 +29,15 @@ pub fn priority_flood(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64) -> 
 /// visited by (level, cell id), so a cell's level comes from its lowest visited neighbour by a total order that no other cell's presence changes. The id order of the cells of a rectangular grid
 /// is the global id order (row-major), so it is the same in every window.
 pub fn priority_flood_with(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64, canonical: bool) -> Vec<f64> {
+    let mut filled = priority_flood_ungraded(grid, z, outlet, epsilon, canonical);
+    if canonical {
+        let _ = regrade_flats(grid, z, outlet, epsilon, FLAT_BOUND, &mut filled);
+    }
+    filled
+}
+
+/// [`priority_flood_with`] before the flats are graded (GEN-173): the chessboard levels the grade starts from.
+pub fn priority_flood_ungraded(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64, canonical: bool) -> Vec<f64> {
     let n = grid.len();
     assert!(z.len() == n && outlet.len() == n, "one height and one outlet flag per cell");
     assert!(epsilon > 0.0 && epsilon.is_finite(), "the epsilon is finite and positive (a flat could not drain), not {epsilon}");
@@ -74,6 +85,190 @@ pub fn priority_flood_with(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64
         }
     }
     filled
+}
+
+/// The largest Chebyshev diameter in cells of a flat that is graded by Euclidean distance (GEN-173): the production profile's halo (128 cells) minus 1. A flat that size lies, with its lower
+/// rim, inside the core plus halo of every tile of its cells, so every tiling sees the same flat.
+pub const FLAT_BOUND: usize = 127;
+
+/// The step added to a flat cell's level over its parent's, as a share of `epsilon`: a cell has more than the neighbour it drains to.
+const FLAT_STEP: f64 = 1e-6;
+
+/// The flats of a canonical filled surface graded by Euclidean distance (GEN-173, SPIKE-108). A cell is lifted when `filled > z`; its parent is the neighbour whose level plus `epsilon` is its level
+/// (the lowest by (level, id)); a flat is a connected set of lifted cells with one pour level (the level of the non-lifted cell their parent chains end at). A flat whose Chebyshev diameter is at most
+/// `bound`, and none of whose cells lies on the border of the grid (it does not touch the window's outer ring: it may be larger than the window shows), is regraded to `base + epsilon d / sqrt 2` where `d`
+/// is the Euclidean distance in cells to the nearest lower rim cell (propagated offsets, Dijkstra by (d squared, cell id)); each cell stays strictly above its parent. A larger flat keeps the
+/// chessboard grade. The result depends only on the cells of the flat and its rim, never on a tiling. Cube grids are left as they are.
+pub fn regrade_flats(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64, bound: usize, filled: &mut [f64]) -> Vec<FlatInfo> {
+    let mut infos = Vec::new();
+    if grid.is_cube() {
+        return infos;
+    }
+    let n = grid.len();
+    let lifted = |q: usize, f: &[f64]| !outlet[q] && grid.is_active(q) && f[q] > z[q];
+    let mut ids: Vec<u32> = (0..n).filter(|&q| lifted(q, filled)).map(|q| q as u32).collect();
+    if ids.is_empty() {
+        return infos;
+    }
+    // Parent chains, in order of level: the base of a cell is the level of the non-lifted cell its chain ends at.
+    ids.sort_unstable_by(|&a, &b| filled[a as usize].total_cmp(&filled[b as usize]).then(a.cmp(&b)));
+    let mut slot = vec![u32::MAX; n];
+    for (k, &q) in ids.iter().enumerate() {
+        slot[q as usize] = k as u32;
+    }
+    let mut base = vec![f64::NAN; ids.len()];
+    for (k, &q) in ids.iter().enumerate() {
+        let q = q as usize;
+        let mut parent: Option<usize> = None;
+        for d in 0..8 {
+            let Some(s) = grid.neighbour(q, d) else { continue };
+            if filled[s] + epsilon == filled[q] && parent.is_none_or(|b| (filled[s], s) < (filled[b], b)) {
+                parent = Some(s);
+            }
+        }
+        base[k] = match parent {
+            Some(s) if slot[s] != u32::MAX => base[slot[s] as usize],
+            Some(s) => filled[s],
+            None => f64::NAN,
+        };
+    }
+    // Flats: connected lifted cells of one base.
+    let mut flat = vec![u32::MAX; ids.len()];
+    let mut count = 0u32;
+    // The levels are written after every flat is read, so the rim of a flat is always the chessboard surface: no neighbouring flat decides a bit.
+    let mut writes: Vec<(u32, f64)> = Vec::new();
+    for k0 in 0..ids.len() {
+        if flat[k0] != u32::MAX || base[k0].is_nan() {
+            continue;
+        }
+        let mut members = vec![k0];
+        flat[k0] = count;
+        let (mut x0, mut x1, mut y0, mut y1) = (usize::MAX, 0, usize::MAX, 0);
+        let mut touches = false;
+        let mut i = 0;
+        while i < members.len() {
+            let p = ids[members[i]] as usize;
+            i += 1;
+            let (x, y) = grid.xy(p);
+            (x0, x1, y0, y1) = (x0.min(x), x1.max(x), y0.min(y), y1.max(y));
+            // On the grid border or beside it: the border cells of a window are outlets, so a flat cut by the window ends one cell inside.
+            touches |= x <= 1 || y <= 1 || x + 2 >= grid.w() || y + 2 >= grid.h();
+            for d in 0..8 {
+                match grid.neighbour(p, d) {
+                    None => {}
+                    Some(q) => {
+                        let kq = slot[q];
+                        if kq != u32::MAX && flat[kq as usize] == u32::MAX && base[kq as usize] == base[k0] {
+                            flat[kq as usize] = count;
+                            members.push(kq as usize);
+                        }
+                    }
+                }
+            }
+        }
+        let small = !touches && (x1 - x0).max(y1 - y0) <= bound;
+        let depth = members.iter().map(|&k| filled[ids[k] as usize] - z[ids[k] as usize]).fold(0.0f64, f64::max);
+        infos.push(FlatInfo {
+            cells: members.len(),
+            diameter: (x1 - x0).max(y1 - y0),
+            touches_border: touches,
+            graded: small,
+            max_lift_m: depth,
+        });
+        if small {
+            regrade_one(grid, z, epsilon, &ids, &members, base[k0], filled, &mut writes);
+        }
+        count += 1;
+    }
+    for (q, v) in writes {
+        filled[q as usize] = v;
+    }
+    infos
+}
+
+/// One flat seen by [`regrade_flats`]: its size, whether it was graded, and its deepest lift in metres (a lake bed is deep, a plain is a fraction of a metre).
+#[derive(Clone, Debug, PartialEq)]
+pub struct FlatInfo {
+    pub cells: usize,
+    pub diameter: usize,
+    pub touches_border: bool,
+    pub graded: bool,
+    pub max_lift_m: f64,
+}
+
+/// One flat's Euclidean grade (see [`regrade_flats`]).
+#[allow(clippy::too_many_arguments)]
+fn regrade_one(
+    grid: &Grid,
+    z: &[f64],
+    epsilon: f64,
+    ids: &[u32],
+    members: &[usize],
+    base: f64,
+    filled: &[f64],
+    writes: &mut Vec<(u32, f64)>,
+) {
+    let m = members.len();
+    let mut local = std::collections::HashMap::with_capacity(m);
+    for (j, &k) in members.iter().enumerate() {
+        local.insert(ids[k] as usize, j);
+    }
+    let mut best = vec![u64::MAX; m];
+    let mut off = vec![(0i32, 0i32); m];
+    let mut parent = vec![u32::MAX; m];
+    let mut rank = vec![0.0f64; m];
+    let mut done = vec![false; m];
+    let mut heap: BinaryHeap<Reverse<(u64, u32)>> = BinaryHeap::new();
+    for (j, &k) in members.iter().enumerate() {
+        let q = ids[k] as usize;
+        for d in 0..8 {
+            let Some(s) = grid.neighbour(q, d) else { continue };
+            if local.contains_key(&s) || filled[s] > base {
+                continue;
+            }
+            // The offset from the source `s` to `q` is the opposite of the step from `q` to `s`.
+            let v = (-(NEIGHBOURS[d].0 as i32), -(NEIGHBOURS[d].1 as i32));
+            let d2 = (v.0 * v.0 + v.1 * v.1) as u64;
+            if d2 < best[j] {
+                best[j] = d2;
+                off[j] = v;
+            }
+        }
+        if best[j] != u64::MAX {
+            heap.push(Reverse((best[j], q as u32)));
+        }
+    }
+    while let Some(Reverse((d2, p))) = heap.pop() {
+        let p = p as usize;
+        let jp = local[&p];
+        if done[jp] || d2 != best[jp] {
+            continue;
+        }
+        done[jp] = true;
+        let below = if parent[jp] == u32::MAX { 0.0 } else { rank[local[&(parent[jp] as usize)]] };
+        // Never below the cell's own height: a cell lifted by less than the chessboard count may stand above its grade.
+        let own = (z[p] - base) / epsilon + FLAT_STEP;
+        rank[jp] = (libm::sqrt(d2 as f64) / std::f64::consts::SQRT_2).max(below + FLAT_STEP).max(own);
+        for d in 0..8 {
+            let Some(q) = grid.neighbour(p, d) else { continue };
+            let Some(&jq) = local.get(&q) else { continue };
+            if done[jq] {
+                continue;
+            }
+            let v = (off[jp].0 + NEIGHBOURS[d].0 as i32, off[jp].1 + NEIGHBOURS[d].1 as i32);
+            let c = (i64::from(v.0) * i64::from(v.0) + i64::from(v.1) * i64::from(v.1)) as u64;
+            if c < best[jq] {
+                best[jq] = c;
+                off[jq] = v;
+                parent[jq] = p as u32;
+                heap.push(Reverse((c, q as u32)));
+            }
+        }
+    }
+    assert!(done.iter().all(|&d| d), "a flat of {m} cells at {base} m has a cell its lower rim does not reach (cell {})", ids[members[0]]);
+    for (j, &k) in members.iter().enumerate() {
+        writes.push((ids[k], base + epsilon * rank[j]));
+    }
 }
 
 /// The depth each cell of `z` lies below the surface [`priority_flood`] makes of it, in metres, for the cells that hold a pit of at least `min_m` and 0 elsewhere (GEN-120): the epsilon

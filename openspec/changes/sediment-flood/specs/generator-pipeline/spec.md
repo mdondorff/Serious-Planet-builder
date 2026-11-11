@@ -10,4 +10,4 @@ Source: A3 section 6.4, inbox #111, #113
 
 #### Scenario: a chain beside two outlets
 - **WHEN** a chain of seven flat land cells lies between two sea cells and the cell next to the second sea cell is flooded
-- **THEN** that cell stands one epsilon above the sea cell and the sediment pass reports no pit
+- **THEN** that cell stands at the flat grade of GEN-173 above the sea cell (epsilon d / sqrt 2, d the distance to it in cells; never above one epsilon, the chessboard count) and the sediment pass reports no pit

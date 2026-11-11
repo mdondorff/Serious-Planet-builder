@@ -16,6 +16,8 @@ mod bake_eviction;
 mod bake_face;
 #[path = "bake_fillgeom.rs"]
 mod bake_fillgeom;
+#[path = "bake_flats.rs"]
+mod bake_flats;
 #[path = "bake_h0.rs"]
 mod bake_h0;
 #[path = "bake_hydro.rs"]
