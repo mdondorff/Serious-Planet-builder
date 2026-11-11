@@ -11,5 +11,6 @@ Per-spike register sections of M5 and M6: `docs/archive/M6/spikes.md`. Closed sp
 |---|---|---|---|
 | SPIKE-96 | Cheap edit-aware sky visibility factor for the sky ambient | planned only, not run (waits for the owner's ADR 0095 look decision and a perf slot; the horizon bake stays until it decides) | plan: `spikes/sky-visibility/results/plan.md`; no results folder |
 | SPIKE-107 | MFD comparison: unclipped vs clipped vs boundary flux (A3 §12.4, ADR 0112 condition 1) | runs done 2026-11-11 (R1, R3a, R3b; the breach rule, not the area clip, makes most of C's difference in R3a and R3b); the architect judges | `spikes/mfd-comparison/results/results.md` |
+| SPIKE-108 | 0/45/90-degree shapes check: channel orientation and straight runs against GLO-30, the flats, the mechanism | measured 2026-11-11 (diagonal chords 1.2 to 4.7x and straight runs 2.3 to 10x the DEM's; the straight runs trace to the start surface's chessboard-gradient flats, then carved); the architect judges | `spikes/shapes-check/results/results.md` |
 
 Every exploration gets a `SPIKE-NN` entry.

@@ -1,0 +1,37 @@
+stage probe ON: sheets and numbers in target/review/stages/region-s14-f1-i8056-j760/ (its cost is inside the times below; PLANET_STAGES=0 switches it off)
+window i 7656-9075 j 360-1779: 1420 x 1420 = 2016400 cells (1156.5 x 1156.5 km), land 68.1 %, base sampled in 17.6 s
+memory after the set-up: peak 168 MiB, now 68 MiB
+region land (base): 267717 cells, z p5 7 p50 632 p95 1210 max 2353 m; precipitation p5 416 p50 706 p95 1495 mm
+4 rounds, 8 threads: 16.5 s
+memory after the 4 rounds (z0 and z held): peak 213 MiB, now 84 MiB; 111 bytes a cell at the peak
+runoff, weights and net evaporation: 0.1 s
+weighted route 2.6 s, canonical flood 0.3 s (11 % of the route-and-flood step)
+plains: 267717 land cells in the region; false flats 0 (0.00 %: 0 with a drop of exactly 0, 0 below one f32 step); sinks 4991 (1.86 %, mean fill 0.86 m); pits 0 (0.00 %)
+H1: 0.3 s; HydroStats { channel_cells: 87085, heads: 10261, confluences: 9346, mouths: 183, segments: 19589, basin_cells: 20479, ramps: 0, basins: 139, artefacts: 30 }
+G-CON and conservation: Verify { disconnected_segments: 0, broken_channel_cells: 0, miscovered_cells: 0, max_confluence_error: 4.3911820954328504e-16, q_outlets_error: 4.4649827940927764e-14, qw_closure_error: 4.5023466668466905e-14, qw_confluence_error: 4.1160831782647394e-16, area_outlets_error: 1.2388145388598018e-14 }
+channel density: 6.3 % of land cells are channel cells; 14.35 heads and 27.39 segments per 1,000 km2 of land (1373538 land cells, 715234 km2); T = 75 km2 = 152 cells
+river width (a = 7.2, b = 0.5, local cell 102 m): 87085 channel cells, p50 12 m (0.11 cells), p95 111 m (1.09 cells), max 322 m (3.2 cells); wider than one local cell: 5.2 % of the channel cells
+largest mouth (8625, 360) 2005 m3/s; basins 139 kept (136 lakes, 3 endorheic), 30 artefacts, 0 ramps, 4 shallower than 1 m
+G-LAND: pit cells of the window 20479 = 20434 in kept basins + 45 unclassified (artefacts and ramps: 30 and 0); of the region's 267717 land cells 12 unclassified (0.004 %; rule: at most 1 %), 961 in kept basins
+stem (mouth number 3 by discharge): 51 cells (about 42 km of cells, straight-line steps), mouth discharge 1012 m3/s, drainage area at the mouth 1.065e11 m2, at the source 1.874e6 m2; the mouth cell is at -0 m, 367 cells from the window border, an outlet cell; deposited thickness p50/max (m) by tenth from the source, in lakes and outside them:
+  1: lake - open 0.05/20.86 (n 5)
+  2: lake - open 0.05/0.09 (n 5)
+  3: lake - open 0.02/0.04 (n 5)
+  4: lake - open 0.02/0.03 (n 5)
+  5: lake - open 0.01/0.02 (n 5)
+  6: lake - open 0.01/0.01 (n 5)
+  7: lake - open 0.00/0.00 (n 5)
+  8: lake 0.00/0.00 (n 3) open 0.00/0.00 (n 2)
+  9: lake 0.00/0.00 (n 5) open -
+  10: lake 0.00/0.00 (n 3) open 0.00/0.00 (n 3)
+deposit by place over the window's land: in lakes (kept basin or filled above z) 5.6953e11 m3 on 37009 cells, outside 2.3766e13 m3 on 1336529 cells (2.3 % of the change in lakes)
+deposit by place over the region proper: in lakes (kept basin or filled above z) 1.1465e9 m3 on 4991 cells, outside 3.2773e12 m3 on 262726 cells (0.0 % of the change in lakes)
+depth base: region land under the fill 97119 of 267717 (36.28 %); along the stem p50/max (m) by tenth from the source: 0.0/2.1 0.0/0.5 0.0/0.3 0.0/0.3 0.0/0.0 0.0/0.5 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0
+depth after round 1: region land under the fill 11863 of 267717 (4.43 %); along the stem p50/max (m) by tenth from the source: 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0
+depth after round 2: region land under the fill 4205 of 267717 (1.57 %); along the stem p50/max (m) by tenth from the source: 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0
+depth after round 3: region land under the fill 4370 of 267717 (1.63 %); along the stem p50/max (m) by tenth from the source: 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0
+depth after round 4 (before the pass): region land under the fill 4514 of 267717 (1.69 %); along the stem p50/max (m) by tenth from the source: 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0
+depth after the pass: region land under the fill 1394 of 267717 (0.52 %); along the stem p50/max (m) by tenth from the source: 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0 0.0/0.0
+G-SED: sediment pass 34.9 s; eroded 1.2528e14 m3 = deposited 3.1195e13 + exported 9.4088e13 (residual 8.73e-16 relative); the heights moved by 3.1195e13 m3 (against deposited 2.05e-11); eroded before thermal 1.2528e14, after 1.2528e14; volume change thermal -8.54e-16, pit spreading -1.46e-15; pits ["start 20479 (1.495 %)", "after thermal 37938 (2.769 %)", "after deposition 16527 (1.206 %)", "after pit spreading 16671 (1.217 %)"]
+memory after H1: peak 411 MiB, now 85 MiB; 214 bytes a cell at the peak
+total 76.2 s, stage probe ON
