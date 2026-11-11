@@ -233,3 +233,18 @@ Source: ADR 0097 point 7 (owner, 2026-11-03); #1132
 #### Scenario: Default and override
 - **WHEN** a bake command runs without a thread count on a machine with P = 12
 - **THEN** it runs on B = 10 workers and its log says "B = 10 (P = 12)"; with `--threads 4` the log says "override 4 (B = 10)"
+
+### Requirement: BUDG-016 World build memory
+The complete world build (rounds, H1, the lakes phase and the sediment pass, ADR 0115 point 7) SHALL stay below a hard limit of 12e9 bytes (11,444 MiB) of peak commit charge on the reference machine, read as the worse of two runs on one commit (gate G-SCALE). It SHALL also meet a working target of 11e9 bytes (10,490 MiB) by the A/B gate, which keeps headroom for later features (owner, 2026-11-11). Until the target holds, a change that adds memory inside the hydrology call SHALL bring an equal saving. A reading SHALL report the peak, the phase that reaches it, and both margins.
+
+Verify: D
+Status: planned
+Source: ADR 0115 point 7 (owner, 2026-11-08, 2026-11-11); A3 §6.6
+
+#### Scenario: Above the target, below the limit
+- **WHEN** two runs peak at 11,376 and 11,387 MiB of commit charge in the hydrology phase
+- **THEN** the reading reports 11,387 MiB, the hydrology phase, 57 MiB under the limit and 897 MiB over the target: G-SCALE passes the limit and the target is open
+
+#### Scenario: Over the limit
+- **WHEN** one of two runs peaks at 11,500 MiB
+- **THEN** the reading names the phase and 56 MiB over the limit, and G-SCALE fails

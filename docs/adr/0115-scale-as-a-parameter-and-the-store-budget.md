@@ -15,7 +15,7 @@ Source: `docs/design/terrain-target.md` §4, §10, §12; SPIKE-105 §3 (X11-X13)
 4. The 40 GB limit is a hard gate at Earth on real serialized data, including indexes, keys, graph metadata and edit overrides; peak temporary storage, replacement-commit space and retained versions are reported separately.
 5. Field narrowing comes first; a coarser local grid (about 200 m) is a fallback only.
 6. Larger planets take coarser cells at the same counts (2x Earth at `k` = 14, 204 m), unless given a store budget of their own. A scaling model in `k` and radius estimates cells, store and build memory (A3 §4.3).
-7. A world build has its own memory budget, separate from CON-21's runtime 8 GB: 12 GB peak on the reference machine (owner, 2026-11-08), measured as the process's peak commit charge of the complete build, 12e9 bytes (11,444 MiB), the worst of two runs (architect D24). The compact resident route is the normal path (owner, 2026-11-09); the partitioned route stays a tested equal. A tile-wise route is prototyped only if the unavoidable working set exceeds the budget after retention and caches are removed.
+7. A world build has its own memory budget, separate from CON-21's runtime 8 GB: a hard limit and a lower working target that keeps headroom (owner, 2026-11-08 and 2026-11-11), both read as peak commit charge of the complete build on the reference machine; the values are in BUDG-016. The compact resident route is the normal path (owner, 2026-11-09); the partitioned route stays a tested equal. A tile-wise route is prototyped only if the unavoidable working set exceeds the budget after retention and caches are removed.
 8. Caches are evictable; eviction never changes a result or breaks undo and replay (owner, 2026-11-09; A3 §6.6).
 
 ## Consequences

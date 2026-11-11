@@ -67,6 +67,7 @@ A change of a gate row of A3 12.1 or of the table above needs a line here (BUILD
 - 2026-11-11 | G-SURF | tightened to the spec: at most 1e-9 m before quantisation, half a step (0.125 m) after (GEN-154; the measured values pass) | architect (D24)
 - 2026-11-11 | G-SURF-I | the vertex set is the tile's core store-lattice vertices (170 x 170 at 102 m) | architect (D32)
 - 2026-11-11 | G-CON | read on H1's whole graph; the stored river pieces end at a lake entry and restart at the spill cell, checked on their own | architect (D24, GEN-163)
+- 2026-11-11 | G-SCALE | a working target of 11e9 B peak commit by the A/B gate below the 12e9 B hard limit (BUDG-016); additions inside the hydrology call bring an equal saving until it holds | owner
 - 2026-11-11 | Constitution | v1.7: CON-08 allows regional, partitioned and iterative stages; CON-28 to CON-31 added | owner (ADR 0116)
 
 ## Exit list (the A/B gate)
