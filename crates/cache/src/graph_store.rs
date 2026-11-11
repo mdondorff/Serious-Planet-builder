@@ -23,18 +23,16 @@ use crate::pack::{Record, TileStore};
 
 /// The kind byte of a graph block.
 pub const KIND_CHANNEL_GRAPH: u8 = Kind::ChannelGraph as u8;
-/// Version of the layout and of the meaning of the key. History: 1 = the layout of this file.
-pub const GRAPH_VERSION: u32 = 1;
+/// Version of the layout and of the meaning of the key. History: 1 = the layout of this file; 2 = the margin is a field of the spec and of the block (it was 1 H1 cell fixed): the H1 cells that hold the K7 halo, plus one (GEN-169).
+pub const GRAPH_VERSION: u32 = 2;
 const CODEC_VERSION: u8 = 1;
 const IMPLEMENTATION_ID: &str = "channel-graph-block";
 const BROTLI_QUALITY: u32 = 5;
 const BROTLI_WINDOW_BITS: u32 = 22;
 const BROTLI_BUFFER: usize = 64 * 1024;
-const HEADER_LEN: usize = 1 + 4 + 1 + 4 + 4 + 4 + 1 + 4 + 16;
+const HEADER_LEN: usize = 1 + 4 + 1 + 4 + 4 + 4 + 1 + 4 + 16 + 4;
 /// The fixed part of a piece.
 const PIECE_FIXED: usize = 8 + 4 + 4 + 4 + 4 + 4 + 4 + 4;
-/// How far beyond its block (H1 cells) a block's pieces reach.
-pub const MARGIN_H1: i64 = 1;
 /// The most bytes a decoded block may hold (a damaged length is an error, not a request to reserve memory).
 const MAX_BODY: usize = 1 << 30;
 
@@ -53,12 +51,24 @@ impl std::fmt::Display for GraphStoreError {
 pub struct GraphSpec {
     pub basin: BasinSpec,
     pub h1_cells: u32,
+    /// How far beyond its block (H1 cells) a block's pieces reach: at least `required_margin` of the halo of the K7 tiles that read the graph.
+    pub margin_h1: u32,
 }
 
 impl GraphSpec {
     /// H1 cells to a block side (the L tile's core in H1 cells).
     pub fn h1_per_block(&self) -> u32 {
         self.h1_cells / self.basin.tiles_per_edge
+    }
+
+    /// Local cells to an H1 cell.
+    pub fn l_per_h1(&self) -> u32 {
+        self.basin.tile_cells / self.h1_per_block()
+    }
+
+    /// The margin a window of `halo` local cells needs: the H1 cells that hold the halo, plus one for the next vertex of a line that leaves the window (GEN-169: the carry reads a halo upstream).
+    pub fn required_margin(&self, halo: u32) -> u32 {
+        halo.div_ceil(self.l_per_h1()) + 1
     }
 
     fn bytes(&self) -> Vec<u8> {
@@ -74,6 +84,7 @@ impl GraphSpec {
         b.extend(self.basin.tile_cells.to_le_bytes());
         b.extend(self.basin.tiles_per_edge.to_le_bytes());
         b.extend(self.h1_cells.to_le_bytes());
+        b.extend(self.margin_h1.to_le_bytes());
         b.extend(self.basin.base_id.to_le_bytes());
         b.extend(self.basin.inputs_id.to_le_bytes());
         b
@@ -181,7 +192,8 @@ pub fn graph_block_records(
 ) -> Vec<Record> {
     assert_eq!(ids.len(), graph.segments(), "one id per segment");
     let h = i64::from(spec.h1_per_block());
-    assert!(h >= 2, "a block is at least 2 H1 cells a side (the margin reaches the neighbouring block only from 2 up), it is {h}");
+    let margin = i64::from(spec.margin_h1);
+    assert!(h >= margin && margin >= 1, "a block is at least {margin} H1 cells a side, as its margin (the margin reaches the neighbouring block only from there), it is {h}");
     let n = i64::from(spec.h1_cells);
     let mut blocks: BTreeMap<(u8, u32, u32), Vec<Piece>> = BTreeMap::new();
     graph.for_each(|s| {
@@ -189,7 +201,7 @@ pub fn graph_block_records(
         // The blocks the segment touches: each vertex's block and its neighbours' within the margin.
         let mut touched: Vec<(u8, u32, u32)> = Vec::new();
         for &(f, i, j) in &coords {
-            for (di, dj) in [(-MARGIN_H1, -MARGIN_H1), (MARGIN_H1, MARGIN_H1), (-MARGIN_H1, MARGIN_H1), (MARGIN_H1, -MARGIN_H1), (0, 0)] {
+            for (di, dj) in [-margin, 0, margin].into_iter().flat_map(|di| [-margin, 0, margin].into_iter().map(move |dj| (di, dj))) {
                 let (a, b) = ((i + di).clamp(0, n - 1), (j + dj).clamp(0, n - 1));
                 touched.push((f, (a / h) as u32, (b / h) as u32));
             }
@@ -197,8 +209,8 @@ pub fn graph_block_records(
         touched.sort_unstable();
         touched.dedup();
         for (f, bi, bj) in touched {
-            let (lo_i, hi_i) = (i64::from(bi) * h - MARGIN_H1, (i64::from(bi) + 1) * h + MARGIN_H1);
-            let (lo_j, hi_j) = (i64::from(bj) * h - MARGIN_H1, (i64::from(bj) + 1) * h + MARGIN_H1);
+            let (lo_i, hi_i) = (i64::from(bi) * h - margin, (i64::from(bi) + 1) * h + margin);
+            let (lo_j, hi_j) = (i64::from(bj) * h - margin, (i64::from(bj) + 1) * h + margin);
             let inside = |&(vf, i, j): &(u8, i64, i64)| vf == f && i >= lo_i && i < hi_i && j >= lo_j && j < hi_j;
             let mut part = 0u32;
             let mut k = 0;
@@ -286,6 +298,7 @@ pub fn block_record(world: &GlobalWorld, res: u32, spec: &GraphSpec, b: &GraphBl
     payload.push(unit_byte(b.q_unit));
     payload.extend((b.pieces.len() as u32).to_le_bytes());
     payload.extend(key.0);
+    payload.extend(spec.margin_h1.to_le_bytes());
     {
         let mut w = brotli::CompressorWriter::new(&mut payload, BROTLI_BUFFER, BROTLI_QUALITY, BROTLI_WINDOW_BITS);
         w.write_all(&body).expect("writing to a vector");
@@ -339,11 +352,21 @@ pub fn load_graph_block(
         u => return Err(what(format!("its unit byte is {u}, not 1 (discharge) or 2 (area)"))),
     };
     let count = u32_at(p, 19) as usize;
+    let margin = u32_at(p, 39);
+    if u64::from(margin) > u64::from(spec.h1_per_block()) {
+        return Err(what(format!("its margin of {margin} H1 cells is more than a block side of {}", spec.h1_per_block())));
+    }
+    if margin < spec.margin_h1 {
+        return Err(what(format!(
+            "its pieces reach {margin} H1 cells beyond the block, the K7 halo needs {} (rewrite the graph with a margin of at least that)",
+            spec.margin_h1
+        )));
+    }
     if p[23..39] != key.0 {
         return Err(what("the key inside the payload is not the record key".into()));
     }
-    // A block holds at most one vertex of any segment in each of its (h + 2)^2 cells (a cell is on one segment), each with at most 5 bytes, a piece header of 36 and a lake cut of 8: the bound of a body.
-    let side = u64::from(spec.h1_per_block()) + 2;
+    // A block holds at most one vertex of any segment in each of its (h + 2 margin)^2 cells (a cell is on one segment), each with at most 5 bytes, a piece header of 36 and a lake cut of 8: the bound of a body.
+    let side = u64::from(spec.h1_per_block()) + 2 * u64::from(margin);
     let max_body = ((side * side * (PIECE_FIXED as u64 + 5 + 8) + 4096) as usize).min(MAX_BODY);
     let mut body = Vec::new();
     brotli::Decompressor::new(&p[HEADER_LEN..], BROTLI_BUFFER)

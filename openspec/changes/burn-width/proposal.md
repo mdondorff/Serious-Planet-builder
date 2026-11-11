@@ -8,4 +8,7 @@
 - No code change in `burn_channels_wide` (architect, 2026-11-11).
 
 ## Ids
-- GEN-168, TEST-110 (planner).
+- GEN-168, TEST-110, GEN-169, TEST-112, TEST-113 (planner).
+
+## Addition of 2026-11-11
+- Spikes' G-PROFILE read: the burn alone leaves 136 to 146 segments over 0.25 m (it lowers min(z, level), so the heights along the path are not monotone). GEN-169 burns to the running minimum along the line; TEST-112 tests it; `PASS2_KERNEL_VERSION` 5 to 6.

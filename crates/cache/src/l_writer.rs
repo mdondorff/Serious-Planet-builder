@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use planet_core::{Face, Vec3};
-use planet_generators::bake::k7::{k7_tile, Channel, K7Params, WidthLaw};
+use planet_generators::bake::k7::{k7_tile, upstream_first, Channel, K7Params, WidthLaw};
 use planet_generators::bake::lakes::{Lake, Lakes};
 use planet_generators::bake::tile::{dequantise, quantise, TileGrid, TileId as PassTile};
 use planet_generators::bake::water_mask::{self, Status, Window, RING_STEPS};
@@ -61,7 +61,10 @@ impl ChannelFeed for MemoryFeed {
             return Vec::new();
         }
         let (x0, x1, y0, y1) = (i0 as f64 - MARGIN, (i0 + w) as f64 + MARGIN, j0 as f64 - MARGIN, (j0 + w) as f64 + MARGIN);
-        self.channels.iter().filter(|c| c.points.iter().any(|&(x, y)| x >= x0 && x <= x1 && y >= y0 && y <= y1)).cloned().collect()
+        // Upstream first (GEN-169): the burn and the final pass carry the profile down the channel tree.
+        upstream_first(
+            self.channels.iter().filter(|c| c.points.iter().any(|&(x, y)| x >= x0 && x <= x1 && y >= y0 && y <= y1)).cloned().collect(),
+        )
     }
 }
 
@@ -516,6 +519,13 @@ pub fn bake_l(dir: &Path, b: &LBake, tiles: &[PassTile]) -> Result<Commit, Strin
                 "the graph was made for {} H1 cells a face edge with {} blocks, the bake has {} H1 cells and {} blocks (or the specs differ, or the cells do not divide)",
                 gi.spec.h1_cells, gi.spec.basin.tiles_per_edge, b.h1_cells, b.basin.tiles_per_edge
             ));
+        }
+        let need = gi.spec.required_margin(b.spec.grid.halo as u32);
+        if need > gi.spec.h1_per_block() {
+            return Err(format!("the tile halo of {} local cells needs a margin of {need} H1 cells, more than the block side of {} H1 cells (a larger tile or a smaller halo)", b.spec.grid.halo, gi.spec.h1_per_block()));
+        }
+        if gi.spec.margin_h1 < need {
+            return Err(format!("the graph reaches {} H1 cells beyond its blocks, the tile halo of {} local cells needs {need} (GEN-169: the profile reads a halo upstream)", gi.spec.margin_h1, b.spec.grid.halo));
         }
         graph_cells = gi.spec.h1_cells;
         for r in graph_block_records(b.world, b.res, &gi.spec, gi.graph, gi.segment_ids, gi.grid, gi.cell_xy) {

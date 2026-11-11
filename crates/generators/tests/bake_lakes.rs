@@ -516,7 +516,23 @@ fn the_channels_of_a_hydrology_follow_its_segments_with_q_w_and_a_bed_that_does_
     let r = run(&z, Some(1.0e-8), None, &small_t());
     let ch = channels_from_hydro(&r.hydro, &r.routing, &r.z, &|c| ((c % W) as f64 * 8.0 + 3.5, (c / W) as f64 * 8.0 + 3.5));
     assert_eq!(ch.len(), r.hydro.segments.len());
-    for (c, s) in ch.iter().zip(&r.hydro.segments) {
+    // upstream first (GEN-169): a channel ending at another's first point comes before it
+    for (i, c) in ch.iter().enumerate() {
+        assert!(
+            ch.iter().enumerate().all(|(j, u)| u.points.last() != c.points.first() || j < i || j == i),
+            "channel {i} is listed before its tributary"
+        );
+    }
+    for c in &ch {
+        let s = r
+            .hydro
+            .segments
+            .iter()
+            .find(|s| {
+                c.points[0] == ((s.up as usize % W) as f64 * 8.0 + 3.5, (s.up as usize / W) as f64 * 8.0 + 3.5)
+                    && c.points.len() == s.cells as usize + 1
+            })
+            .expect("a segment of this channel");
         assert_eq!(c.points.len(), s.cells as usize + 1, "the cells from up to down, both included");
         assert_eq!(c.q.len(), c.points.len());
         assert!(c.levels.windows(2).all(|w| w[1] <= w[0]), "the bed does not rise downstream");
