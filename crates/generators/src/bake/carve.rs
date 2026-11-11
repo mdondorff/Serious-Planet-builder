@@ -291,8 +291,7 @@ pub(super) fn distance(grid: &Grid, a: usize, b: usize) -> f64 {
     }
 }
 
-/// The level a breach may not cut below (GEN-162, A3 sections 5.3 and 6): along each receiver chain that ends in an outlet above the sea level (a fixed exit: a land cut of the
-/// window, a basin's rim), `base[outlet] = z[outlet]` and `base[c] = base[receiver]` (flat: a slope along the chain left a sill within the slope profile standing over a pit behind it, R3b, D4). A chain that ends at or below the sea level has no base (`None` when no chain
+/// The level a breach may not cut below (GEN-162, A3 sections 5.3 and 6; a window cut gets no base, GEN-172): along each receiver chain that ends in an outlet above the sea level (a fixed exit: a basin's rim), `base[outlet] = z[outlet]` and `base[c] = base[receiver]` (flat: a slope along the chain left a sill within the slope profile standing over a pit behind it, R3b, D4). A chain that ends at or below the sea level has no base (`None` when no chain
 /// has one, so that a sea-outlet build allocates nothing and moves no bit). `order` lists the receivers before their donors;
 pub(super) fn exit_base(
     sea_level: f64,

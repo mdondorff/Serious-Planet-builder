@@ -50,6 +50,7 @@ fn variants() -> Vec<(&'static str, CarveParams)> {
         ("height-scaled breach", CarveParams { breach_height_scale_m: 400.0, breach_max_m: 300.0, ..base }),
         ("no taper", CarveParams { uplift_taper_m: 0.0, ..base }),
         ("no uplift", CarveParams { u_over_k: 0.0, ..base }),
+        ("window cut", CarveParams { window_cut: true, ..base }),
     ]
 }
 

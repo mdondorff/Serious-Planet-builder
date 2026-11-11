@@ -367,7 +367,7 @@ pub struct RoundWork {
 }
 
 /// The key of a catchment round: the member cell ids, the key inputs and every parameter of the carve that `catchment_round` reads: `k_dt`, `epsilon`, `breach_slope`, `breach_max_m`, `breach_height_scale_m`,
-/// `sea_level`, `keep_pits`, `incise_only`, the sweeps per round and whether the round rules clip locally (`clip_mfd`, GEN-162: it changes the breach). The memo is in memory only: no stored key.
+/// `sea_level`, `keep_pits`, `incise_only`, the sweeps per round, whether the round rules clip locally (`clip_mfd`, GEN-162: it changes the breach) and whether the catchment's outlet is a window cut (`exit_window_cut`, GEN-172: it removes the base of the breach). The memo is in memory only: no stored key.
 pub fn catchment_key(grid: &Grid, cells: &[u32], inp: &CatchmentInputs, p: &CarveParams) -> (u64, u64) {
     let mut h = Hash::new();
     for v in [p.k_dt, p.u_over_k, p.epsilon, p.breach_slope, p.breach_max_m, p.breach_height_scale_m, p.sea_level] {
