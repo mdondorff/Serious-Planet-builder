@@ -374,7 +374,14 @@ fn main() {
         h,
     ));
     let outlet = grid.outlets(&base.z, 0.0);
-    let p = CarveParams { steps: 20, reroute_every: 5, round_rules: RoundRules::ROUND, cell_metric: true, ..CarveParams::default() };
+    let p = CarveParams {
+        steps: 20,
+        reroute_every: 5,
+        round_rules: RoundRules::ROUND,
+        cell_metric: true,
+        window_cut: true,
+        ..CarveParams::default()
+    };
     let c = Ctx { grid: &grid, outlet: &outlet, p: &p, stream: spec.stream(), threads, tile, i0, j0, w };
     let run = |name: &str| only.as_ref().is_none_or(|o| name.starts_with(o.as_str()));
 

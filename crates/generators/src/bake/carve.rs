@@ -40,6 +40,8 @@ pub struct CarveParams {
     pub cell_metric: bool,
     /// The round kernels (GEN-141): the clipped MFD area and the canonical flood tie rule; off (today's kernels) by default.
     pub round_rules: RoundRules,
+    /// The land outlets on the border of the grid are window cuts (GEN-172): the region goes on beyond them at an unknown, lower level, so the exit height is no base for a breach (`exit_base` skips their chains). An outlet in the interior (a basin's rim) keeps its base. Set by the caller that solves a window; off by default (every land outlet keeps its base).
+    pub window_cut: bool,
     /// How a round visits the cells (GEN-141): execution only, the result is the same bits (a sweep reads a cell and its receiver, which share a catchment); not part of any key.
     pub schedule: Schedule,
 }
@@ -75,6 +77,7 @@ impl Default for CarveParams {
             keep_pits: true,
             cell_metric: false,
             round_rules: RoundRules { clip_mfd: super::route::MfdClip::Off, canonical_flood: false },
+            window_cut: false,
             schedule: Schedule::Region,
         }
     }
@@ -189,7 +192,7 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
             let base = if p.round_rules.clip_mfd != super::route::MfdClip::Local {
                 None
             } else {
-                exit_base(p.sea_level, r.order.iter().map(|&c| c as usize), &r.receiver, z)
+                exit_base(p.sea_level, r.order.iter().map(|&c| c as usize), &r.receiver, z, &|c| p.window_cut && grid.is_edge(c))
             };
             for &c in visit.iter().rev() {
                 let c = c as usize;
@@ -291,14 +294,20 @@ pub(super) fn distance(grid: &Grid, a: usize, b: usize) -> f64 {
 /// The level a breach may not cut below (GEN-162, A3 sections 5.3 and 6): along each receiver chain that ends in an outlet above the sea level (a fixed exit: a land cut of the
 /// window, a basin's rim), `base[outlet] = z[outlet]` and `base[c] = base[receiver]` (flat: a slope along the chain left a sill within the slope profile standing over a pit behind it, R3b, D4). A chain that ends at or below the sea level has no base (`None` when no chain
 /// has one, so that a sea-outlet build allocates nothing and moves no bit). `order` lists the receivers before their donors;
-pub(super) fn exit_base(sea_level: f64, order: impl Iterator<Item = usize> + Clone, receiver: &[u32], z: &[f64]) -> Option<Vec<f64>> {
-    if !order.clone().any(|c| receiver[c] == NONE && z[c] > sea_level) {
+pub(super) fn exit_base(
+    sea_level: f64,
+    order: impl Iterator<Item = usize> + Clone,
+    receiver: &[u32],
+    z: &[f64],
+    window_cut: &dyn Fn(usize) -> bool,
+) -> Option<Vec<f64>> {
+    if !order.clone().any(|c| receiver[c] == NONE && z[c] > sea_level && !window_cut(c)) {
         return None;
     }
     let mut base = vec![f64::NEG_INFINITY; z.len()];
     for c in order {
         base[c] = if receiver[c] == NONE {
-            if z[c] > sea_level {
+            if z[c] > sea_level && !window_cut(c) {
                 z[c]
             } else {
                 f64::NEG_INFINITY

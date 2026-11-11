@@ -282,6 +282,12 @@ impl Grid {
         i == 0 || j == 0 || i == self.w - 1 || j == self.h - 1
     }
 
+    /// The window-cut outlets (GEN-172): the border cells above `sea_level`. Those below it are sea outlets; none on a region bounded by the sea.
+    pub fn window_cut(&self, z: &[f64], sea_level: f64) -> Vec<bool> {
+        assert_eq!(z.len(), self.len(), "one height per cell");
+        (0..self.len()).map(|p| self.is_edge(p) && z[p] > sea_level).collect()
+    }
+
     /// The outlets of a face: its border cells and every cell at or below `sea_level` (water leaves through them).
     pub fn outlets(&self, z: &[f64], sea_level: f64) -> Vec<bool> {
         assert_eq!(z.len(), self.len(), "one height per cell");

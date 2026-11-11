@@ -317,7 +317,62 @@ fn a_field_whose_outlets_are_at_the_sea_keeps_the_bits_it_had_before_the_base_le
     assert_eq!(d, 0xb9e6_6858_0505_bf11, "the sea-outlet rounds moved: digest {d:016x}");
 }
 
+/// The lowest height of the cells that stand beside a rim cell of the bowl and are not outlets, against the lowest rim cell: how far the breach cut below the exit.
+fn cut_below_the_rim(grid: &Grid, z: &[f64], outlet: &[bool]) -> f64 {
+    let rim = (0..z.len()).filter(|&p| outlet[p]).map(|p| z[p]).fold(f64::INFINITY, f64::min);
+    let beside = (0..z.len())
+        .filter(|&p| !outlet[p] && (0..8).any(|d| grid.neighbour(p, d).is_some_and(|q| outlet[q])))
+        .map(|p| z[p])
+        .fold(f64::INFINITY, f64::min);
+    rim - beside
+}
+
+// spec: GEN-172
+// spec: TEST-118
+#[test]
+fn a_window_cut_outlet_gives_the_breach_no_floor_and_a_basin_rim_keeps_it() {
+    let (grid, z0, outlet) = bowl(32, None);
+    let base = CarveParams { steps: 5, reroute_every: 5, round_rules: RoundRules::ROUND, ..CarveParams::default() };
+    let run = |window_cut: bool| {
+        let mut z = z0.clone();
+        planet_generators::bake::round::solve_rounds(&grid, &mut z, &outlet, &CarveParams { window_cut, ..base }, 1, &1usize, 15);
+        z
+    };
+    let (rim_kept, cut_open) = (cut_below_the_rim(&grid, &run(false), &outlet), cut_below_the_rim(&grid, &run(true), &outlet));
+    // the rim as a basin's rim (GEN-162): nothing beside it is cut below it; as a window cut the breach goes down toward the depression behind it
+    assert!(rim_kept <= 3.0, "a basin rim is the floor of the breach: the cells beside it are at most {rim_kept:.2} m under it");
+    assert!(cut_open > 100.0, "a window cut gives no floor: the cells beside it are {cut_open:.2} m under it");
+    // the same through the region carve (`carve_rock`)
+    let carve_run = |window_cut: bool| {
+        let mut z = z0.clone();
+        let p = CarveParams { window_cut, ..base };
+        planet_generators::bake::carve::carve(&grid, &mut z, &outlet, &p, None, 15);
+        z
+    };
+    assert!(cut_below_the_rim(&grid, &carve_run(false), &outlet) <= 3.0);
+    assert!(cut_below_the_rim(&grid, &carve_run(true), &outlet) > 100.0);
+}
+
+// spec: GEN-172
+// spec: TEST-118
+#[test]
+fn a_region_bounded_by_the_sea_has_no_window_cut_outlet_and_the_flag_changes_no_bit_on_it() {
+    let (grid, z0, outlet) = bowl(32, Some(0.0));
+    assert!(grid.window_cut(&z0, 0.0).iter().all(|&c| !c), "border cells at the sea level are sea outlets, not window cuts");
+    let (_, land, _) = bowl(32, None);
+    assert!(grid.window_cut(&land, 0.0).iter().filter(|&&c| c).count() >= 4 * 31, "a land border is window cut all around");
+    let run = |window_cut: bool| {
+        let mut z = z0.clone();
+        let p = CarveParams { steps: 15, reroute_every: 5, round_rules: RoundRules::ROUND, window_cut, ..CarveParams::default() };
+        planet_generators::bake::round::solve_rounds(&grid, &mut z, &outlet, &p, 3, &1usize, 15);
+        z.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+    };
+    assert_eq!(run(false), run(true), "no window-cut outlet: the flag moves no bit");
+}
+
 // spec: GEN-146
+// spec: GEN-172
+// spec: TEST-118
 /// The key of a catchment round holds every parameter `catchment_round` reads (inbox D28): flipping one changes the key, the same inputs keep it.
 #[test]
 fn catchment_key_holds_every_parameter_the_round_reads() {
@@ -334,6 +389,7 @@ fn catchment_key_holds_every_parameter_the_round_reads() {
         receiver_is_outlet: vec![false; 4],
         scale: vec![1.0; 4],
         up_unit: vec![0.0; 4],
+        exit_window_cut: false,
     };
     let p = CarveParams { round_rules: RoundRules::ROUND, ..CarveParams::default() };
     let key = catchment_key(&grid, &cells, &inp, &p);
@@ -353,6 +409,9 @@ fn catchment_key_holds_every_parameter_the_round_reads() {
     for (name, q) in changed {
         assert_ne!(key, catchment_key(&grid, &cells, &inp, &q), "flipping {name} must change the catchment key");
     }
+    // the outlet kind of the catchment is read by the round (GEN-172)
+    let cut = CatchmentInputs { exit_window_cut: true, ..inp.clone() };
+    assert_ne!(key, catchment_key(&grid, &cells, &cut, &p), "the outlet kind must change the catchment key");
 }
 
 // spec: GEN-146
@@ -404,6 +463,7 @@ fn the_catchment_key_is_the_members_in_the_routing_order_and_another_order_does_
         receiver_is_outlet: perm.iter().map(|&o| inp.receiver_is_outlet[o]).collect(),
         scale: pick(&inp.scale),
         up_unit: pick(&inp.up_unit),
+        exit_window_cut: inp.exit_window_cut,
     };
     let cells_permuted: Vec<u32> = perm.iter().map(|&o| cells[o]).collect();
     assert_ne!(key, catchment_key(&g, &cells_permuted, &permuted, &p), "a round on the same members in another order is not a key match");

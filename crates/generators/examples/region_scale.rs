@@ -105,7 +105,14 @@ fn main() {
         h,
     ));
     let outlet = grid.outlets(&z0, 0.0);
-    let p = CarveParams { steps: 20, reroute_every: 5, round_rules: RoundRules::ROUND, cell_metric: true, ..CarveParams::default() };
+    let p = CarveParams {
+        steps: 20,
+        reroute_every: 5,
+        round_rules: RoundRules::ROUND,
+        cell_metric: true,
+        window_cut: true,
+        ..CarveParams::default()
+    };
     let stream = spec.stream();
     let eps = p.epsilon;
     let rules = RoundRules::ROUND;
@@ -566,7 +573,14 @@ fn depth_along(
     }
     let w = grid.w();
     let (i0, j0) = ((grid.global_id(0) & 0xffff_ffff) as usize, (grid.global_id(0) >> 32) as usize);
-    let p = CarveParams { steps: 20, reroute_every: 5, round_rules: RoundRules::ROUND, cell_metric: true, ..CarveParams::default() };
+    let p = CarveParams {
+        steps: 20,
+        reroute_every: 5,
+        round_rules: RoundRules::ROUND,
+        cell_metric: true,
+        window_cut: true,
+        ..CarveParams::default()
+    };
     let eps = 1e-3;
     let mut stages: Vec<(String, Vec<f64>)> = vec![("base".to_string(), z0.to_vec())];
     for k in 1..=3usize {
