@@ -1,9 +1,9 @@
-//! The runtime's layer source over a commit of the new chain (item 15 PR 5a, STRM-083; architect D17/D19): the L tiles (kind 13, layer version 3) read through a [`Commit`], with no fill channel.
+//! The runtime's layer source over a commit of the new chain (item 15 PR 5a, STRM-083; architect, 2026-11-10): the L tiles (kind 13, layer version 3) read through a [`Commit`], with no fill channel.
 //!
 //! - [`CommitLayer`] is a [`LayerSource`]: tiles decoded once while they stay in a bounded least-recently-used cache, each held with its min/max pyramid. A tile the commit does not name is a tile with no
 //!   land (`None`). A tile whose key in the commit is not the one this build forms from the commit's spec, a damaged record, or a change outside the layer's range is an error naming the tile.
 //! - The surface is `B + L`: the change is the stored core as it is; nothing is added back (a basin is a lake, not a depth).
-//! - [`PairedLayer`] holds the commit that is drawn. A new commit becomes the drawn one only when every tile the caller needs of it reads and its basin tables are in the store (D17, A3 section 7.4,
+//! - [`PairedLayer`] holds the commit that is drawn. A new commit becomes the drawn one only when every tile the caller needs of it reads and its basin tables are in the store (architect, 2026-11-10, A3 section 7.4,
 //!   CON-22): until then the previous commit is drawn, and a frame never takes L from one commit and lakes from another.
 
 use std::collections::{HashMap, VecDeque};
@@ -89,6 +89,11 @@ impl CommitLayer {
     /// Tiles decoded so far (a hit is not a decode; a tile that left the cache and comes back is).
     pub fn decodes(&self) -> u64 {
         self.decodes.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// The reader of this commit's channel graph, with `capacity` tiles cached: the rivers are read under the same commit as the tiles and the basin tables (STRM-085, CON-22). An error when the commit holds none.
+    pub fn rivers(&self, capacity: usize) -> Result<crate::river_read::RiverReader, String> {
+        crate::river_read::RiverReader::new(self.store.clone(), self.commit.clone(), capacity)
     }
 
     /// Whether the record of a tile the commit names is in the store (a tile the commit does not name is no land: present).
@@ -184,7 +189,7 @@ impl LayerSource for CommitLayer {
     }
 }
 
-/// The commit that is drawn, and the swap to a new one (D17, A3 section 7.4, CON-22).
+/// The commit that is drawn, and the swap to a new one (architect, 2026-11-10, A3 section 7.4, CON-22).
 pub struct PairedLayer {
     drawn: Mutex<Arc<CommitLayer>>,
 }
