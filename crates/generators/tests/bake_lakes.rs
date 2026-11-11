@@ -262,7 +262,7 @@ fn a_segment_cut_twice_has_numbered_runs_and_one_inside_a_lake_has_none() {
     let with_labels = |inside: &[usize]| {
         let set: std::collections::HashSet<u32> = inside.iter().map(|&k| chain[k]).collect();
         let (pieces, dropped_cells) = cut_segments(&r.hydro, &r.routing, &|c| set.contains(&(c as u32)));
-        Lakes { lakes: Vec::new(), pieces, dropped_cells }
+        Lakes { lakes: Vec::new(), pieces, dropped_cells, water: Vec::new(), ring: Vec::new() }
     };
     let mine = |l: &Lakes| l.pieces.iter().filter(|p| p.segment == s.id).map(|p| (p.part, p.first, p.cells)).collect::<Vec<_>>();
     // Cells 0, 3 and 4 inside: a run at the start is dropped, then a run of 2 (1..=2), then the rest (5..).
@@ -445,12 +445,83 @@ fn the_producer_in_two_steps_around_the_release_gives_the_same_lakes() {
         let mut r = run(&z, runoff, evap, &small_t());
         let whole = lakes(&r);
         // The plan's order: the pieces while `Q_w` is there, the records after `q` and `qw` are released.
-        let (pieces, dropped_cells) = river_pieces(&r.g, &r.routing, &r.hydro, &r.z);
+        let pre = river_pieces(&r.g, &r.routing, &r.hydro, &r.z);
         r.hydro.q = Vec::new();
         r.hydro.qw = Vec::new();
-        let split = Lakes { lakes: lake_records(&r.g, &r.hydro), pieces, dropped_cells };
+        let split = Lakes {
+            lakes: lake_records(&r.g, &r.hydro),
+            pieces: pre.pieces,
+            dropped_cells: pre.dropped_cells,
+            water: pre.water,
+            ring: pre.ring,
+        };
         assert_eq!(split, whole, "the same lakes, pieces and dropped cells, bit for bit");
         assert_eq!(format!("{split:?}"), format!("{whole:?}"));
+    }
+}
+
+// spec: GEN-167, TEST-109
+#[test]
+fn the_water_and_ring_lists_are_the_lakes_cells_and_the_cells_next_to_them_that_drain_in() {
+    let z = bowl_land();
+    let r = run(&z, None, None, &small_t());
+    let l = lakes(&r);
+    assert_eq!(l.lakes.len(), 1);
+    assert!(l.water.windows(2).all(|w| w[0].0 < w[1].0), "the water list is sorted by cell, one entry a cell");
+    assert!(l.ring.windows(2).all(|w| w[0] < w[1]), "the ring list is sorted without repeats");
+    assert!(l.water.iter().all(|e| e.1 == 0) && l.ring.iter().all(|e| e.1 == 0), "the index of the one lake is 0");
+    // Every labelled cell under the level is water and every water cell is a cell of the water rule.
+    let level = r.hydro.basins[0].water_level_m;
+    for (c, &lab) in r.hydro.label.iter().enumerate() {
+        if lab != NONE && r.z[c] < level {
+            assert!(
+                l.water.binary_search_by_key(&(c as u32), |e| e.0).is_ok(),
+                "cell {c} of the basin under the level is in the water list"
+            );
+        }
+    }
+    let w = water_cells(&r.g, &r.routing, &r.hydro, &r.z);
+    assert!(l.water.iter().all(|e| w.contains(e.0 as usize)));
+    // The ring: next to the water, not water, drains into the lake: the east side of the bowl is in it, and a ring cell's receiver chain reaches the water.
+    assert!(!l.ring.is_empty());
+    assert!(l.ring.iter().any(|e| e.0 as usize == 12 * W + 16), "the cell east of the bowl drains into it");
+    assert!(
+        !l.ring.iter().any(|e| e.0 as usize == 12 * W + 9),
+        "the west side is the spill side: the cell there drains away from the lake"
+    );
+    for &(c, _) in &l.ring {
+        assert!(l.water.binary_search_by_key(&c, |e| e.0).is_err(), "a ring cell is not water");
+        let mut cur = c as usize;
+        let mut hit = false;
+        for _ in 0..16 {
+            let nxt = r.routing.receiver[cur];
+            if nxt == NONE {
+                break;
+            }
+            cur = nxt as usize;
+            if l.water.binary_search_by_key(&(cur as u32), |e| e.0).is_ok() {
+                hit = true;
+                break;
+            }
+        }
+        assert!(hit, "ring cell {c} drains into the lake's water");
+    }
+}
+
+// spec: GEN-167, TEST-109
+#[test]
+fn the_channels_of_a_hydrology_follow_its_segments_with_q_w_and_a_bed_that_does_not_rise() {
+    use planet_generators::bake::k7::channels_from_hydro;
+    let z = bowl_land();
+    let r = run(&z, Some(1.0e-8), None, &small_t());
+    let ch = channels_from_hydro(&r.hydro, &r.routing, &r.z, &|c| ((c % W) as f64 * 8.0 + 3.5, (c / W) as f64 * 8.0 + 3.5));
+    assert_eq!(ch.len(), r.hydro.segments.len());
+    for (c, s) in ch.iter().zip(&r.hydro.segments) {
+        assert_eq!(c.points.len(), s.cells as usize + 1, "the cells from up to down, both included");
+        assert_eq!(c.q.len(), c.points.len());
+        assert!(c.levels.windows(2).all(|w| w[1] <= w[0]), "the bed does not rise downstream");
+        assert_eq!(c.q[0], r.hydro.qw[s.up as usize]);
+        assert_eq!(*c.q.last().unwrap(), r.hydro.qw[s.down as usize]);
     }
 }
 

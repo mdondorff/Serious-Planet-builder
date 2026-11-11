@@ -210,7 +210,7 @@ pub fn build_resident(
     lap("hydrology", &mut phases);
     mark("hydrology");
     // The pieces of the river segments carry `Q_w` at their ends: they are cut now and are the only part of the lake producer that reads the discharges (GEN-163, D22).
-    let (pieces, dropped_cells) = river_pieces(grid, &routing, &hy, &z);
+    let pre = river_pieces(grid, &routing, &hy, &z);
     lap("river pieces", &mut phases);
     mark("river pieces");
     // The open-water evaporation is H1's input only.
@@ -232,7 +232,8 @@ pub fn build_resident(
     hy.qw = Vec::new();
     mark("H1 result kept, discharges released");
     // The lake records come after the release: they read the basins only, and the working set has its headroom here (D22).
-    let lakes = Lakes { lakes: lake_records(grid, &hy), pieces, dropped_cells };
+    let lakes =
+        Lakes { lakes: lake_records(grid, &hy), pieces: pre.pieces, dropped_cells: pre.dropped_cells, water: pre.water, ring: pre.ring };
     lap("lakes", &mut phases);
     mark("lakes");
 

@@ -642,6 +642,13 @@ fn main() {
             built.lakes.dropped_cells,
             fnv(format!("{:?}", built.lakes).bytes().map(u64::from))
         );
+        println!(
+            "lake lists: water {} entries, ring {} entries ({} KiB at 8 B an entry, D37), basin cells {}",
+            built.lakes.water.len(),
+            built.lakes.ring.len(),
+            (built.lakes.water.len() + built.lakes.ring.len()) * 8 / 1024,
+            built.lakes.lakes.iter().map(|l| u64::from(l.cells)).sum::<u64>()
+        );
         println!("H1: {:?}", r.h1);
         println!("G-CON (hydro::verify) before the release: {:?}", r.g_con);
         println!("sums before the release: Q {:.6e} m3/s, Qw {:.6e} m3/s (not conservation figures)", r.sum_q, r.sum_qw);

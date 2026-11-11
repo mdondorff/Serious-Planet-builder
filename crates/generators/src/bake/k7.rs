@@ -7,9 +7,10 @@
 use super::carve::{carve, CarveParams};
 use super::deposit::{deposit_on_own_route_flood, spread_pits, DepositParams, Kc};
 use super::flood::priority_flood_with;
+use super::hydro::Hydro;
 pub use super::hydro::QUnit;
 use super::map::catmull_rom;
-use super::route::{MfdClip, RoundRules};
+use super::route::{MfdClip, RoundRules, Routing, NONE};
 use super::thermal::thermal;
 use super::tile::{sample_window, window_grid, Pass2Params, TileGrid, TileId, QUANT_STEP_M};
 use planet_core::cube::{face_to_direction, TangentWarp};
@@ -64,6 +65,39 @@ pub struct Channel {
     pub q: Vec<f64>,
     /// The unit of `q`: the width law refuses an area (m2), which is what H1 returns without the runoff.
     pub q_unit: QUnit,
+}
+
+/// The channels of a hydrology on the local grid (the in-memory feed of the bake writer, GEN-167): one [`Channel`] per segment, its points the cells from `up` to `down` (both included) mapped by `to_local`
+/// (H1 cell to a point in the face's local cell-index space), the bed level the running minimum of `zs` (not rising downstream) and `q` the routed discharge `hydro.qw` at each cell. `qw` must still be there:
+/// run it before the discharges are released. The unit of `qw` is m3/s when H1 ran with runoff.
+pub fn channels_from_hydro(hydro: &Hydro, routing: &Routing, zs: &[f64], to_local: &dyn Fn(usize) -> (f64, f64)) -> Vec<Channel> {
+    assert!(hydro.qw.len() == zs.len(), "the channels need Q_w: run before the discharges are released");
+    hydro
+        .segments
+        .iter()
+        .map(|sg| {
+            let mut cells = vec![sg.up as usize];
+            while *cells.last().expect("a cell") != sg.down as usize {
+                let r = routing.receiver[*cells.last().expect("a cell")];
+                assert!(r != NONE, "a segment reaches its end cell");
+                cells.push(r as usize);
+            }
+            let mut level = f64::INFINITY;
+            let levels = cells
+                .iter()
+                .map(|&c| {
+                    level = level.min(zs[c]);
+                    level
+                })
+                .collect();
+            Channel {
+                points: cells.iter().map(|&c| to_local(c)).collect(),
+                levels,
+                q: cells.iter().map(|&c| hydro.qw[c]).collect(),
+                q_unit: hydro.q_unit,
+            }
+        })
+        .collect()
 }
 
 /// The one river width law (architect D6 point 2, D19/D20): the width of a channel is `w = a * Q_w^b` metres for a discharge in m3/s. The burn-in cuts a trench of `max(1 cell, w)` and the drawing uses `w`,
