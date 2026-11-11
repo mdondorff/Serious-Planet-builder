@@ -302,3 +302,168 @@ fn a_graph_block_the_commit_names_and_the_store_lacks_is_an_error_naming_the_til
     assert!(e.contains("river tile 2/1/1") && e.contains("no record"), "{e}");
     assert!(r.tile_channels(Face(2), 3, 3).is_ok(), "a tile away from the missing block still reads");
 }
+
+/// A ground that falls steeply along the flow of the fixture channels (they run toward low `x`; 3 m a metre of `x`), so that the pits stay within the carry of the profile and no cutoff binds: the shallow fixture of G-PROFILE.
+fn shallow_base(d: planet_core::Vec3) -> f64 {
+    700.0 - 3000.0 * d.x
+}
+
+fn regional_c(d: planet_core::Vec3) -> f64 {
+    8.0 * d.x - 5.0 * d.y
+}
+
+fn bake_with(
+    name: &str,
+    ground: &(dyn Fn(planet_core::Vec3) -> f64 + Sync),
+    regional: &(dyn Fn(planet_core::Vec3) -> f64 + Sync),
+) -> (Dir, planet_cache::l_writer::Commit) {
+    let w = world();
+    let h = h1(true);
+    let to_local = |c: u32| (8.0 * f64::from(c % W as u32) + 3.5, 8.0 * f64::from(c / W as u32) + 3.5);
+    let memory = MemoryFeed { face: Face(2), channels: channels_from_graph(&h.graph, &h.g, &to_local), discharge: true };
+    let d = Dir::new(name);
+    let lakes = Lakes { lakes: Vec::new(), pieces: Vec::new(), dropped_cells: 0, water: Vec::new(), ring: Vec::new() };
+    let b = LBake {
+        world: &w,
+        res: RES,
+        spec: spec(),
+        basin: basin(),
+        base: ground,
+        regional,
+        feed: &memory,
+        lakes: &lakes,
+        h1_cells: W,
+        h1_cell: &|_, _, _| None,
+        face_of: &|_| Face(2),
+        threads: 2,
+        graph: Some(GraphInput {
+            spec: GraphSpec { basin: basin(), h1_cells: W as u32, margin_h1: 4 },
+            graph: &h.graph,
+            segment_ids: &h.ids,
+            grid: &h.g,
+            cell_xy: &xy,
+        }),
+    };
+    let c = bake_l(d.path(), &b, &tiles()).expect("bake");
+    (d, c)
+}
+
+/// The rises along the stored channels of a tile core in K7 own heights: the line steps with both cells in the core, the number over `step` and the largest, with the final pass report.
+fn k7_rises(
+    feed: &ChannelGraphFeed,
+    ground: &(dyn Fn(planet_core::Vec3) -> f64 + Sync),
+    regional: &(dyn Fn(planet_core::Vec3) -> f64 + Sync),
+    id: PassTile,
+    step: f64,
+) -> (usize, usize, f64, planet_generators::bake::k7::FinalPass) {
+    use planet_generators::bake::k7::{k7_tile, line_cells, upstream_first};
+    let g = spec().grid;
+    let (win, h, t) = (g.window() as i64, g.halo as i64, g.tile as i64);
+    let (i0, j0) = (i64::from(id.ti) * t - h, i64::from(id.tj) * t - h);
+    let chans = upstream_first(feed.try_channels_near(Face(2), i0, j0, win).unwrap());
+    let r = k7_tile(&g, id, ground, regional, &chans, &spec().k7, 1);
+    let at = |x: i64, y: i64| r.z[((y - j0) * win + (x - i0)) as usize];
+    let core = |x: i64, y: i64| {
+        x >= i64::from(id.ti) * t && y >= i64::from(id.tj) * t && x < i64::from(id.ti + 1) * t && y < i64::from(id.tj + 1) * t
+    };
+    let (mut n, mut over, mut worst) = (0, 0, 0.0f64);
+    for ch in &chans {
+        for p in line_cells(ch).windows(2) {
+            let ((a, b), (c, e)) = (p[0], p[1]);
+            if core(a, b) && core(c, e) {
+                n += 1;
+                let rise = at(c, e) - at(a, b);
+                over += usize::from(rise > step);
+                worst = worst.max(rise);
+            }
+        }
+    }
+    (n, over, worst, r.final_pass)
+}
+
+// spec: TEST-116, GEN-169
+#[test]
+fn g_profile_on_a_fixture_whose_burn_stays_within_the_carry_has_no_cutoff_and_no_rise_over_a_step() {
+    use planet_cache::l_layer::CommitLayer;
+    use planet_generators::bake::k7::line_cells;
+    use planet_generators::erosion_layer::LayerSource;
+    let step = 0.25;
+    let g = spec().grid;
+    let t = g.tile as i64;
+    for (name, regional) in [("profile-off", &zero as &(dyn Fn(planet_core::Vec3) -> f64 + Sync)), ("profile-on", &regional_c)] {
+        let (d, c) = bake_with(name, &shallow_base, regional);
+        let w = world();
+        let store = Arc::new(TileStore::open(d.path(), w.params()).unwrap());
+        let feed = ChannelGraphFeed::new(store, c).unwrap();
+        // K7 own heights: the profile holds in every tile core and the cutoff never binds.
+        let (mut steps, mut binds, mut worked_tiles) = (0, 0, 0);
+        for id in tiles() {
+            let (n, over, worst, fp) = k7_rises(&feed, &shallow_base, regional, id, step);
+            assert_eq!(over, 0, "{name}: tile ({}, {}) has {over} rises over {step} m (largest {worst} m)", id.ti, id.tj);
+            steps += n;
+            binds += fp.cutoff_binds;
+            worked_tiles += usize::from(fp.lowered > 0);
+        }
+        assert!(
+            steps > 1000 && worked_tiles > 4,
+            "{name}: the fixture has channel steps ({steps}) and the pass works in {worked_tiles} tiles"
+        );
+        assert_eq!(binds, 0, "{name}: the carry holds the profile everywhere: no cutoff binds");
+        // Through the stored read (B + L): the same along every stored piece, tile borders included.
+        let layer = CommitLayer::open(d.path(), Arc::new(world()), 16).unwrap();
+        let rivers = layer.rivers(planet_cache::river_read::DEFAULT_CACHE_BYTES).unwrap();
+        let mut bs = std::collections::HashMap::new();
+        for id in tiles() {
+            bs.insert((id.ti, id.tj), planet_generators::bake::k7::k7_tile(&g, id, &shallow_base, regional, &[], &spec().k7, 1).b);
+        }
+        let surf = |i: i64, j: i64| {
+            let (ti, tj) = ((i / t) as u32, (j / t) as u32);
+            let tile = layer.tile(Face(2), ti, tj).unwrap().expect("a tile of the commit");
+            let (li, lj) = ((i % t) as usize, (j % t) as usize);
+            bs[&(ti, tj)][(lj + g.halo) * g.window() + li + g.halo] + f64::from(tile.cell(li, lj))
+        };
+        let (mut cells, mut worst, mut border) = (0usize, f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for tj in 0..4u32 {
+            for ti in 0..4u32 {
+                for ch in rivers.tile_channels(Face(2), ti, tj).unwrap().iter() {
+                    for pair in line_cells(ch).windows(2) {
+                        let ((a, b), (c, e)) = (pair[0], pair[1]);
+                        if [a, b, c, e].iter().any(|&v| !(0..256).contains(&v)) {
+                            continue;
+                        }
+                        let rise = surf(c, e) - surf(a, b);
+                        cells += 1;
+                        worst = worst.max(rise);
+                        if a / t != c / t || b / t != e / t {
+                            border = border.max(rise);
+                        }
+                    }
+                }
+            }
+        }
+        println!("G-PROFILE {name}: {cells} stored steps, largest rise {worst:.4} m, across a tile border {border:.4} m");
+        assert!(cells > 1000);
+        assert!(worst <= step, "{name}: the stored surface rises {worst} m downstream along a piece (limit {step} m)");
+        assert!(border <= step, "{name}: the step across a tile border is {border} m (limit {step} m)");
+    }
+}
+
+// spec: TEST-116, GEN-169
+#[test]
+fn on_the_deep_fixture_every_rise_over_a_step_is_reported_by_the_cutoff_count() {
+    let w = world();
+    let (d, c, _h) = baked("profile-deep", &zero);
+    let store = Arc::new(TileStore::open(d.path(), w.params()).unwrap());
+    let feed = ChannelGraphFeed::new(store, c).unwrap();
+    let (mut rises, mut binds) = (0usize, 0usize);
+    for id in tiles() {
+        let (_, over, _, fp) = k7_rises(&feed, &base, &zero, id, 0.25);
+        // A rise exists only where the pass reports a cutoff, and the report counts at least every rise.
+        assert!(over == 0 || fp.cutoff_binds > 0, "tile ({}, {}): {over} rises over 0.25 m and no cutoff reported", id.ti, id.tj);
+        assert!(over <= fp.cutoff_binds, "tile ({}, {}): {over} rises over 0.25 m but {} cutoff cells", id.ti, id.tj, fp.cutoff_binds);
+        rises += over;
+        binds += fp.cutoff_binds;
+    }
+    assert!(rises > 0, "the deep fixture does show the cutoff rises (else it is not the deep case)");
+    println!("deep fixture: {rises} rises over 0.25 m, {binds} cutoff cells reported");
+}
