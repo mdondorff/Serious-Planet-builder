@@ -20,21 +20,21 @@ use planet_generators::bake::water_mask::{decode, NO_LAKE};
 use planet_world_def::WorldDefinition;
 
 const R: f64 = 6_371_000.0;
-const RES: u32 = 64;
-const T: usize = 24;
+pub const RES: u32 = 64;
+pub const T: usize = 24;
 const H1: usize = 24;
 const LAKE: u64 = 42;
 
-struct Dir(PathBuf);
+pub struct Dir(PathBuf);
 
 impl Dir {
-    fn new(name: &str) -> Dir {
+    pub fn new(name: &str) -> Dir {
         static N: AtomicUsize = AtomicUsize::new(0);
         let p = std::env::temp_dir().join(format!("planet-l-writer-{}-{}-{name}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
         let _ = fs::remove_dir_all(&p);
         Dir(p)
     }
-    fn path(&self) -> &Path {
+    pub fn path(&self) -> &Path {
         &self.0
     }
 }
@@ -45,7 +45,7 @@ impl Drop for Dir {
     }
 }
 
-struct Feed(bool);
+pub struct Feed(pub bool);
 
 impl ChannelFeed for Feed {
     fn q_is_discharge(&self) -> bool {
@@ -56,19 +56,19 @@ impl ChannelFeed for Feed {
     }
 }
 
-fn world() -> GlobalWorld {
+pub fn world() -> GlobalWorld {
     GlobalWorld::from_definition(&WorldDefinition::single_planet(R, 3)).unwrap().with_block_limit(4)
 }
 
-fn spec(base_id: u64) -> LTileSpec {
+pub fn spec(base_id: u64) -> LTileSpec {
     LTileSpec { grid: TileGrid { cells: 192, tile: T, halo: 8, radius_m: R }, k7: K7Params::standard(5, 0.0), base_id, inputs_id: 11 }
 }
 
-fn basin() -> BasinSpec {
+pub fn basin() -> BasinSpec {
     BasinSpec { hydro: HydroParams::default(), tile_cells: T as u32, tiles_per_edge: 8, base_id: 7, inputs_id: 11 }
 }
 
-fn lake() -> Lake {
+pub fn lake() -> Lake {
     Lake {
         id: LAKE,
         floor_id: 1,
@@ -88,30 +88,43 @@ fn lake() -> Lake {
 }
 
 /// H1 cells (i, j) of face 2: the water is the block 10..12 x 10..12 and the ring one cell west of it at (9, 10).
-fn lakes() -> Lakes {
+pub fn lakes() -> Lakes {
     let cell = |i: usize, j: usize| (j * H1 + i) as u32;
     let mut water: Vec<(u32, u32)> = [(10, 10), (11, 10), (10, 11), (11, 11)].iter().map(|&(i, j)| (cell(i, j), 0)).collect();
     water.sort_unstable();
     Lakes { lakes: vec![lake()], pieces: Vec::new(), dropped_cells: 0, water, ring: vec![(cell(9, 10), 0)] }
 }
 
-fn h1_cell(face: u8, i: i64, j: i64) -> Option<usize> {
+pub fn h1_cell(face: u8, i: i64, j: i64) -> Option<usize> {
     (face == 2 && (0..H1 as i64).contains(&i) && (0..H1 as i64).contains(&j)).then(|| (j * H1 as i64 + i) as usize)
 }
 
-fn base(d: Vec3) -> f64 {
+pub fn base(d: Vec3) -> f64 {
     300.0 + 100.0 * d.z
 }
 
-fn zero(_: Vec3) -> f64 {
+pub fn zero(_: Vec3) -> f64 {
     0.0
 }
 
-fn tiles() -> Vec<PassTile> {
+pub fn tiles() -> Vec<PassTile> {
     (2..=4u32).flat_map(|tj| (2..=4u32).map(move |ti| PassTile { face: Face(2), ti, tj })).collect()
 }
 
-fn bake(dir: &Dir, w: &GlobalWorld, s: LTileSpec, feed: &Feed, l: &Lakes, threads: usize) -> Result<Commit, String> {
+pub fn bake(dir: &Dir, w: &GlobalWorld, s: LTileSpec, feed: &Feed, l: &Lakes, threads: usize) -> Result<Commit, String> {
+    bake_tiles(dir, w, s, feed, l, threads, &tiles())
+}
+
+/// [`bake`] over the given tiles.
+pub fn bake_tiles(
+    dir: &Dir,
+    w: &GlobalWorld,
+    s: LTileSpec,
+    feed: &Feed,
+    l: &Lakes,
+    threads: usize,
+    ts: &[PassTile],
+) -> Result<Commit, String> {
     let b = LBake {
         world: w,
         res: RES,
@@ -126,11 +139,11 @@ fn bake(dir: &Dir, w: &GlobalWorld, s: LTileSpec, feed: &Feed, l: &Lakes, thread
         face_of: &|_| Face(2),
         threads,
     };
-    bake_l(dir.path(), &b, &tiles())
+    bake_l(dir.path(), &b, ts)
 }
 
 /// The mask the rule gives on this fixture: every level is above the surface, so a cell is wet when its H1 parent is a water cell, or a ring cell within 8 steps of one (the ring cell at (9, 10) is next to the block).
-fn expected(ti: u32, tj: u32) -> Vec<u64> {
+pub fn expected(ti: u32, tj: u32) -> Vec<u64> {
     let in_set =
         |i: i64, j: i64| h1_cell(2, i, j).is_some_and(|c| lakes().water.iter().chain(lakes().ring.iter()).any(|e| e.0 as usize == c));
     (0..T * T)

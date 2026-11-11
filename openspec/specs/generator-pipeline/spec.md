@@ -1461,3 +1461,18 @@ Source: Architect D6 point 2, D19/D20 (inbox #117), item 15
 #### Scenario: Trench widths
 - **WHEN** a straight channel is burnt with `Q_w` of 100 m3/s into 10 m cells
 - **THEN** the cells within 3.6 cells of the line are at the bed level, none farther is touched, and a smaller discharge burns a subset
+
+### Requirement: GEN-167 The lake water mask of a tile
+The bake SHALL decide for each cell of a tile of L which lake's water it is, on `B + L`, as a pure function of the tile's window, and store the runs in the record's water section.
+- Core wet: the cell's H1 parent is a water cell of a lake and its height is under the lake's level.
+- Ring wet: under the level, within 8 steps of a core wet cell, entering only cells whose H1 parent drains into the lake.
+- A cell is in one lake only; labels index the tile's lake list (255 at most).
+- The window reaches 8 cells beyond the core, so tiles agree at their edges in any order (CON-14).
+
+Verify: A
+Status: planned
+Source: Architect D17/D18/D20, design section 13
+
+#### Scenario: Bowl, valley and hollow
+- **WHEN** a lake with a sill, a valley below the sill and another hollow under the level are masked
+- **THEN** only the lake's own water and its ring are wet; the valley, its sides and the hollow are dry
