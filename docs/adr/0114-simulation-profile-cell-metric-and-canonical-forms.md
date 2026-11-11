@@ -1,5 +1,5 @@
 # 0114 Simulation profile, cell metric and canonical forms
-Status: proposed (spikes session for opus-planner, 2026-11-08, inbox #100; amended after the ADR review, inbox #102). Acceptance blocked by the owner's D2-D10 pass; a toolchain pin is the owner's call (point 6). Production: G-EQ (the f32 form) and G-DET on both operating systems (A/B gate)
+Status: proposed (2026-11-08). Acceptance: the owner's, with SPIKE-105's D2-D10 and point 6 (the toolchain pin). Production: G-EQ (the f32 form) and G-DET on both operating systems at the A/B gate
 Date: 2026-11-08
 Source: `docs/design/terrain-target.md` §4.2, §8, §9; SPIKE-105 F5, §11 (points 3, 9B, 9C), §13.5 (D9, D10), §18; ADR 0010
 
@@ -14,7 +14,7 @@ Source: `docs/design/terrain-target.md` §4.2, §8, §9; SPIKE-105 F5, §11 (poi
 2. Every grid exposes true per-cell area and neighbour distance from the mapping; the uniform `dx` is retired; constants that read area are re-tuned once.
 3. Three representations are kept apart: the canonical persistent form, the stage computation, the runtime composition (f64). Each value's forms and its single conversion point are in A3 §9's table.
 4. Each value one stage passes to another has one canonical stored form; both a fresh run and a re-solve read that form. Round surfaces are f32 on the regional grid, narrowed once at the end of a round; a kernel computes in f64.
-5. Determinism: given the same definition, seed, profile, edit history and kernel versions, a supported build (Windows MSVC, Linux; x86-64) on 1 or 8 threads gives identical canonical serialized results. Each source of divergence has a named control (A3 §9); it is shown by the actual builds (G-DET), not inferred. No GPU feedback; ties by global cell id.
+5. Determinism is CON-14, CON-28 and CON-30. This ADR adds: each source of divergence has a named control (A3 §9), shown by the actual builds (G-DET), not inferred; ties break by global cell id.
 6. Open, proposed for the owner: a toolchain pin before the world build; CI uses `stable`.
 7. Reproducibility (bit equality) and correctness (connectivity, conservation, seams, locality, relief) are separate gates.
 
@@ -22,4 +22,3 @@ Source: `docs/design/terrain-target.md` §4.2, §8, §9; SPIKE-105 F5, §11 (poi
 - Extends ADR 0010; uses ADR 0003's mapping. Changes erosion constants through the metric (D9).
 - Gates G-EQ, G-DET. CI's determinism manifest must add a fixture of the round solver and H1.
 - Point 4's f32 round surfaces are not yet built (main is f64 across rounds); GEN-166 builds them (architect D24, D27).
-- Interim, until the A/B gate: the accepted ADRs named here govern the shipped bake; this ADR governs the prototype path behind its switches (architect D24, 2026-11-10).

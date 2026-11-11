@@ -1,5 +1,5 @@
 # 0113 Edit ordering and dependencies: landform and driver edits below erosion
-Status: proposed (spikes session for opus-planner, 2026-11-08, inbox #100; amended after the ADR review, inbox #102). Acceptance: the owner's, for the changes to accepted ADRs 0007, 0066 and 0089 and the D2-D10 pass; CON-08 is resolved by constitution v1.7 (ADR 0116). Production: G-EQ, G-INC on E1-E7 (A/B gate)
+Status: proposed (2026-11-08). Acceptance: the owner's, with SPIKE-105's D2-D10 (it changes accepted ADRs 0007, 0066 and 0089). Production: G-EQ, G-INC on E1-E7 at the A/B gate
 Date: 2026-11-08
 Source: `docs/design/terrain-target.md` §7; SPIKE-105 §3 (X1-X4), §13.5 (D4), §18; ADR 0007, 0066, 0072, 0086
 
@@ -21,5 +21,4 @@ Source: `docs/design/terrain-target.md` §7; SPIKE-105 §3 (X1-X4), §13.5 (D4),
 ## Consequences
 - Amends ADR 0007 (layer order), ADR 0066 points 1, 2 and 5 (items below erosion are bounded by keys, not by footprint or reach; point 4 is already amended by ADR 0068) and ADR 0089 point 11 (height edits leave the override stage); settles ADR 0086 point 3. Point 6 is new against ADR 0072 (runtime and editor work).
 - Undo removes an item: earlier keys read back.
-- Interim, until the A/B gate: the accepted ADRs named here govern the shipped bake; this ADR governs the prototype path behind its switches (architect D24, 2026-11-10).
 - Gates G-INC, G-EQ, on E1-E7 (E7: land bridge joined, then separated).

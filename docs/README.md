@@ -10,6 +10,7 @@
 | The current work block's plan: items, phases, exit list | `docs/briefings/terrain-prototype.md` |
 | The target architecture and its gate table | `docs/design/terrain-target.md` (A3) |
 | Every gate reading with its commit and verdict | `docs/gates/ledger.md` |
+| Review packs for the owner and external reviewers | `docs/review/` |
 | The stage previews' committed manifest | `docs/stages/manifest.txt` |
 | Where the milestones may go after the current one (non-binding) | `docs/roadmap.md` |
 | What was done, newest first | `cargo xtask log` (current milestone: `docs/log.md` and `docs/log.d/`) |
