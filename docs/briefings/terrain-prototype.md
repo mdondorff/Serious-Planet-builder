@@ -24,7 +24,7 @@ Closure checklist (every phase):
 
 P0 list:
 - Archive the finished changes (each coding lane its own; during waits on machine slots).
-- The A3 and ADR text pass for the ADR review pass (`spikes/prototype-gates/results/adr-review-pass.md`, D24): Amends lists, k names, G-SURF and G-CON rows, lake pieces, width law, 12 GB unit; the CON-08 amendment proposal to the owner (architect).
+- The A3 and ADR text pass for the ADR review pass (`spikes/prototype-gates/results/adr-review-pass.md`, D24): Amends lists, k names, G-SURF and G-CON rows, lake pieces, width law, 12 GB unit (architect; done in this PR). CON-08: resolved by constitution v1.7 (ADR 0116, #1335).
 - Repository audit, read-only (spikes): outdated, misleading, overly verbose or duplicated documents and folders, ranked by cost to readers, each with a proposed action (delete, merge, shorten, move). The owner browses the report; actions follow per owner's yes.
 - Briefing and `docs/status.md` refreshed; worktree inventory.
 
@@ -64,6 +64,10 @@ A change of a gate row of A3 12.1 or of the table above needs a line here (BUILD
 - 2026-11-09 | Memory | compact resident route is the normal path; cache eviction required; tile-wise route only if needed | owner
 - 2026-11-09 | Sediment | post-round pass for the prototype (A3 6.7); G-SED kept with a partition test | owner
 - 2026-11-09 | Stage previews | committed manifest; images in target/ and CI; sheets committed only at gates; item 18 added | owner
+- 2026-11-11 | G-SURF | tightened to the spec: at most 1e-9 m before quantisation, half a step (0.125 m) after (GEN-154; the measured values pass) | architect (D24)
+- 2026-11-11 | G-SURF-I | the vertex set is the tile's core store-lattice vertices (170 x 170 at 102 m) | architect (D32)
+- 2026-11-11 | G-CON | read on H1's whole graph; the stored river pieces end at a lake entry and restart at the spill cell, checked on their own | architect (D24, GEN-163)
+- 2026-11-11 | Constitution | v1.7: CON-08 allows regional, partitioned and iterative stages; CON-28 to CON-31 added | owner (ADR 0116)
 
 ## Exit list (the A/B gate)
 - Every gate of A3 section 12.1 passes on the fresh build and after each edit, or its failure is reported against S1-S5.

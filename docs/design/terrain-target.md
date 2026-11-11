@@ -59,9 +59,9 @@ The surface at a direction `d` is one function, evaluated in this order. Every c
 | 4 | `A(d)` | items above erosion (§7.1): constructed features | item stages (ADR 0066) | as today |
 
 - Surface: `S = B + L + C + A`, composed in f64, rounded to f32 only at the mesh (CON-13).
-- **G-SURF measured (GEN-148, a tile of the prototype region at 102 m): holds at the centres of the local cells, where the bake defines its heights; the store-lattice vertices are a diagnostic (G-SURF-I, §12.1).** At the centres the runtime's `B + L` is the bake's surface (5.7e-14 m before quantisation, half a step after). At the lattice vertices 192 of 28,900 (0.66 %) differ by more than 0.25 m after quantisation (p99 0.22 m, maximum 2.55 m), spread over the tile and beside steep flanks. The reference is an interpolant of the bake's cell values (the bake defines `z` at centres only), which differs from the stored `B` by up to 2.6 m there; the clamp of the C1 read is not linear. Reading the composed cells and clamping once gives 0.16 m at all nodes at 16 lattice reads a sample. Owner, 2026-11-09: equality is required at the centres, the vertices stay reported, the clamp stays. Not done: the stored `L`, G-PROFILE, a K6 level profile, tile continuity.
+- **G-SURF measured (GEN-148, a tile of the prototype region at 102 m): holds at the centres of the local cells, where the bake defines its heights; the store-lattice vertices are a diagnostic (G-SURF-I, §12.1).** At the centres the runtime's `B + L` is the bake's surface (5.7e-14 m before quantisation, half a step after). At the lattice vertices 192 of 28,900 (0.66 %) differ by more than 0.25 m after quantisation (p99 0.22 m, maximum 2.55 m), spread over the tile and beside steep flanks. The reference is an interpolant of the bake's cell values (the bake defines `z` at centres only), which differs from the stored `B` by up to 2.6 m there; the clamp of the C1 read is not linear. Reading the composed cells and clamping once gives 0.16 m at all nodes at 16 lattice reads a sample. Owner, 2026-11-09: equality is required at the centres, the vertices stay reported, the clamp stays. Stored since: `L` as kind 13 (GEN-154, GEN-156); re-read on the canonical K7 with the same numbers (ea6b1b2b; D9, D35). Not done: G-PROFILE, a K6 level profile, tile continuity.
 - **One elevation source:** nothing else adds height. `L` is the only baked elevation term the runtime reads (`k` is an amplitude, not a height). The regional change, the channels and the fill depth are inputs of the bake, not runtime terms (§3.3).
-- Step 2 replaces today's `change + fill depth` (GEN-112, ADR 0101 point 3): the runtime no longer adds the fill depth back. A basin shows its floor and the water field draws its lake (§5.5). The switch to this form waits for G-BASIN and the lake producer (K11), since until then a basin would show a dry hole.
+- Step 2 replaces today's `change + fill depth` (GEN-112, ADR 0101 point 3): the runtime no longer adds the fill depth back. A basin shows its floor and the water field draws its lake (§5.5). The lake producer exists (GEN-163, bake time) and its records are stored as kind 19 (STRM-080); the water extent is a mask in the kind-13 v3 record (D18, D20). The switch (item 15 PR 5a) waits for the water source, and the fill channel's deletion (PR 5b) for ADR 0110's acceptance.
 - Presentation data (ground detail, normals) follows CON-14 and adds no height.
 
 ### 3.2 Identity
@@ -91,7 +91,7 @@ The surface at a direction `d` is one function, evaluated in this order. Every c
 | K7's total change against `B` | yes: `L` | the surface |
 | Fill depth | no | retired as a surface term; the basin object replaces it (§5.3) |
 
-- **Burn-in rule (K7):** K7 starts from `B + C1(ΔR)` (the regional change read C1). It lowers cells along each channel segment to the segment's level profile (rasterised, 8-connected, along the segment's D8 path at the local grid), then runs the breach (SPIKE-104 D-A: pass 1's rule at the local grid), the incising carve, thermal and deposition. It only lowers. Channels are thus part of `L`, not a separate term.
+- **Burn-in rule (K7):** K7 starts from `B + C1(ΔR)` (the regional change read C1). It lowers cells along each channel segment to the segment's level profile, in a trench `max(1 cell, w)` wide with `w = a Q_w^b` (GEN-165; `a` = 7.2, `b` = 0.5 as named bake parameters, Q_w in m³/s, never an area: D19, D21, D33), rasterised along the segment's D8 path at the local grid, then runs the breach (SPIKE-104 D-A: pass 1's rule at the local grid), the incising carve, thermal and deposition. The burn-in only lowers; thermal and deposition after it may raise cells (G-PROFILE bounds the result along a segment). Channels are thus part of `L`, not a separate term. The same `w` draws the river (D6).
 - **The hand-over rule:** a C1 read must not be used to transfer a channel network between grids: it re-dams diagonal links (SPIKE-104 §3, 13.3 % of land). Burn-in plus breach is the transfer **[gate G-CON]**.
 - **The channel after the sampler:** a channel correct on the local grid must stay correct through the composition `S`. Along every segment, at the local grid's nodes: no rise above one quantisation step (0.25 m), continuous across tile borders, and a confluence's floors meet. Between nodes a C1 read lifts a diagonal link toward its off-diagonal neighbours, by design; that rise is reported, not gated, as is the rise from `C` **[gate G-PROFILE]**.
 - **Below the local grid:** a bank profile may be added later as a lower-only term with a declared bound, in the place of creases (GEN-109); not in the MVP.
@@ -109,7 +109,7 @@ One free integer per body, `k`, sets every grid (counts per cube-face edge). Ear
 | Regional grid | `3 x 2^(k-2)` | 814 m | K5, K6 |
 | H0 grid | `3 x 2^(k-4)` | 3.26 km | K4 |
 
-- `k` follows from the body's target local cell size: the largest `k` whose local cell is at least the target (ADR 0045 point 2 made normative). The grid counts are never constants of the code (X11 of S105 §3).
+- `k` follows from the body's target local cell size: the largest `k` whose local cell is at least the target (supersedes ADR 0045 point 2's ceil on the bake cell; Earth: 101.8 m at `k` = 14, printed as 102 m). Here `k` is the grid exponent; the relief driver is `krelief` and the round count `rounds`. The grid counts are never constants of the code (X11 of S105 §3).
 - Nesting: the base lattice's nodes are every 6th local cell corner; a regional cell is 8 local cells; an H0 cell is 4 regional cells.
 
 ### 4.2 The cell metric
@@ -186,7 +186,7 @@ Rules. The quantities, kept apart (`a` the true cell area in m^2):
 - `A_d` and `Q` differ by design: MFD spreads diffuse flow, D8 keeps a river as one line; `w` is clamped, `r` is not. The carve keeps `A_d`; rivers report `Q_w`.
 - **The stored byte.** `round(8 log2(A_d / a_n))`, `a_n` the body's mean regional cell area: code 0 is one reference cell or less, one step is 9 %, 255 is 2^31.9 cells and saturates. It is one-way, for materials and detail (GEN-110, GEN-119). No simulation stage reads it: the carve, the initiation and the key read the routing's f64.
 - **River initiation:** `T` is a preset parameter in m^2 of effective area (default 50-100 km^2, D5), calibrated with the runoff model, not a universal constant. Because `A_d` is runoff-weighted, a rainfall edit moves initiation with no height change (E5).
-- A channel's heads are initiated cells with no channel donor. Confluences have two or more channel donors. A channel ends at an outlet of the routing (the sea, the mouth); it passes through a basin and continues below its spill point. Inside a lake it is a line under water; below an endorheic basin it continues with `Q_w` = 0, a dry valley that K7 still burns in and K11 does not draw as water.
+- A channel's heads are initiated cells with no channel donor. Confluences have two or more channel donors. A channel ends at an outlet of the routing (the sea, the mouth); it passes through a basin and continues below its spill point. In H1's graph a channel passes through a basin. The stored river pieces do not: the lake producer drops the channel cells inside a kept lake, so a piece ends at the last cell before the water and the next starts at the spill cell (GEN-163, D6 point 5, D10: inside = below the lake's level). Below an endorheic basin the channel continues with `Q_w` = 0, a dry valley that K7 still burns in and K11 does not draw as water.
 
 ### 5.3 Basins
 
@@ -223,7 +223,7 @@ Identities are **pure functions of the current surface**, so a from-scratch buil
 | Object | Id | Definition |
 |---|---|---|
 | Basin | `basin_id = hash(body, canonical cell)` | canonical cell: the lowest cell of the basin, ties by the global cell id |
-| River segment | `segment_id = hash(body, downstream end cell, upstream end cell)` | ends are confluences, heads, outlets; cell ids on the regional grid |
+| River segment | `segment_id = hash(body, downstream end cell, upstream end cell)` | ends are confluences, heads, outlets; a stored piece also ends at a lake entry or starts at a spill cell; cell ids on the regional grid |
 | Region, domain | by their outlet set | scratch ids of a solve, not persisted beyond it |
 
 | Event | Effect on ids | Effect on the continuity map (at the commit of an edit) |
@@ -307,11 +307,11 @@ F7 measured what couples catchments in a routing, and the contract removes each 
 
 ### 6.4 The two kernel changes
 
-Both change the bake's output slightly and carry a kernel version bump:
+Both change the bake's output slightly; they carry no kernel version bump, but a key byte when on (GEN-141):
 1. MFD clipped to the D8 catchment (`route.rs`).
 2. Flood tie rule by (level, global cell id) (`flood.rs`), replacing the FIFO order; the cost on flats is measured **[gate G-SCALE]**.
 
-Result: a catchment's round depends only on the inputs of its key (§6.5): its members, receivers, `A_d`, surface and drivers. **[gate G-LOCAL]** verifies that on the new kernels (the round is a pure function of its key inputs; G-ROUND is the exactness test). Both rules are behind switches (`RoundRules`, default off; a key byte only when on).
+Result: a catchment's round depends only on the inputs of its key (§6.5): its members, receivers, `A_d`, surface, drivers and the round rules (D28). **[gate G-LOCAL]** verifies that on the new kernels (the round is a pure function of its key inputs; G-ROUND is the exactness test). Both rules are behind switches (`RoundRules`, default off; a key byte only when on).
 
 Measured (GEN-141, `openspec/changes/round-kernels/design.md`; four 96 x 96 lands, about 820 catchments; a catchment **routed alone** is the grid masked to its members with its outlet the only outlet):
 - Member areas that differ from the region routing, smooth land: today's kernels 26,041 of 26,265; clip to the receiver 23,939; local clip 0; local clip with the canonical flood 0.
@@ -347,7 +347,8 @@ The problem: the new catchments are not known before a routing, yet routing is 8
 F9 (E2-type edit on 144 tiles): the flood output differs in exactly the tiles whose heights changed (2, then 4 after one round); levels, receivers and area change in 2 to 4 tiles (2.8 %, under 0.25 % of cells), and tiles plus graph reproduce the whole-window flood exactly (0 cells differ). The work per round is therefore of the order of the changed tiles and the tile sweeps, with no prediction of the dirty set. GEN-143 measures the tile floods only (E2: 3 of 65, 4.6 %); the offers, receivers, roots, order and area sweep are recomputed whole (1.58 s an edit against 0.71 s for the resident route on 1.6e6 cells). **[gate G-INC, on E2]**
 
 **The catchment-round key.** The rule: every value the catchment-round function reads is in its key, directly or through an immutable upstream key, in its canonical form (§9). Today's read set is `CatchmentInputs`; G-LOCAL enforces the rule by computing a round from the key's inputs alone. The hash, in canonical order, of:
-- the member cell ids;
+- the member cell ids, in `Routing.order` restricted to the catchment: the depth-first walk of the donors from the outlet in cell-id order (the `cut` order), a function of the ids and receivers; a round on the same members in another order is not a key match (D31);
+- the round rules (`RoundRules`) the round reads (D28);
 - the outlet cell, and its base level (sea or basin spill);
 - the receiver of every member, whether it is an outlet of the region, and `A_d` at every member (the routing topology and magnitude, §6.3);
 - every member's distance to its receiver (the metric, or the mapping's identity);
@@ -373,7 +374,7 @@ With clipped MFD and the canonical flood a catchment has no other border conditi
 - Measured at the erosion grid (12,288 cells, `examples/region_scale`, windows of the prototype region of 1.0e6 to 44e6 cells): the resident rounds peak at about 90 bytes a cell (74 without the example's height copies) and about 2 microseconds a cell on 8 threads; the whole prototype landmass (about 150e6 cells) is measured below (the bound of 11 to 13.5 GB was an extrapolation). The 2.98 GiB and the 39.5 % channel share of the GEN-144 and GEN-145 runs are at 3,072 cells (3.26 km); at 12,288 cells 7 % of land cells are channel cells.
 - A landmass routing does **not** have to be resident. The partitioned route produces the same result (F9: levels equal, 0 cells differ); the tile flood is swept to a fixed point from the neighbours' offers and the accumulation is a topological sweep across tiles with border shares (`bake/partition.rs`, GEN-143).
 - The world build runs the compact resident route (owner, 2026-11-09). The partitioned route stays a tested equal (G-PART), not the normal path. Editor jobs keep the partitioned route with memoised tiles (§6.5); G-INC judges it.
-- World-build memory is a separate budget from CON-21 (a runtime rule): 12 GB (owner, 2026-11-08; ADR 0115 point 7, the ADR otherwise proposed), measured by G-SCALE as the process's peak on the reference machine, with inputs and drivers, flood and routing arrays, accumulation, erosion state, tile-border state, temporary allocations, parallel overhead and the allocator, for the complete build (rounds, H1, sediment pass). It is separate from terrain's 4 GB at runtime (BUDG-005). An estimate is not a pass.
+- World-build memory is a separate budget from CON-21 (a runtime rule): 12 GB (owner, 2026-11-08; ADR 0115 point 7, the ADR otherwise proposed), measured by G-SCALE as the process's peak commit charge on the reference machine, 12e9 bytes (11,444 MiB), the worst of two runs, with inputs and drivers, flood and routing arrays, accumulation, erosion state, tile-border state, temporary allocations, parallel overhead and the allocator, for the complete build (rounds, H1, sediment pass). It is separate from terrain's 4 GB at runtime (BUDG-005). An estimate is not a pass.
 - **The compact resident route is the normal path (owner, 2026-11-09; replaces the partitioned route of 2026-11-08, whose memory bound is not built).** As built the partitioned route holds its arrays resident: 8,854 MiB in 2,974 s against 7,858 MiB in 1,716 s.
 - **When the complete resident build exceeds 12 GB,** in order: (1) remove unnecessary retention, duplicate buffers and caches; (2) only if the unavoidable working set still exceeds the budget, prototype a tile-wise route that releases intermediate state. Moving state into other global buffers does not count. No tile-wise route is built before that.
 - **H0-region split at artificial borders** (the earlier fallback) is kept only as a tested fallback for a landmass over the budget after that rule; G-SCALE measures its divide migration across the split. The design no longer relies on it.
@@ -395,7 +396,7 @@ With clipped MFD and the canonical flood a catchment has no other border conditi
 - K7 stays per tile with its halo (GEN-101): it does not route globally; it reads the channel levels as boundary conditions (§3.3).
 - **What is catchment-local.** The breach and the implicit sweeps: inside a round a catchment reads and writes only its members. Across rounds it couples through the surface.
 - **Breach base level (GEN-162, 2026-11-10):** a breach never cuts below its chain's exit. Every cell of the chain is lowered at most to the exit's height (a flat floor), on land and at sea alike. A depression whose exit cannot be lowered (a window's land-height cut, a fixed outlet) is not excavated below it.
-- **What is not.** Thermal and one-cell pit spreading read 8 neighbours and cross divides. They are not catchment-round steps: they run per tile with a halo, keyed per tile, after the last round (as K7 does today) **[gate G-SED, G-SURF]**.
+- **What is not.** Thermal and one-cell pit spreading read 8 neighbours and cross divides. They are not catchment-round steps: they run after the last round. Per tile with a halo, keyed per tile (as K7), is the target; today they run on a whole grid and the spatial cut is untested (GEN-155 tests groups of whole catchments) **[gate G-SED, G-SURF]**.
 - **Sediment contract of the prototype (owner, 2026-11-09; describes what is built, GEN-151, GEN-152):**
 
 | Question | Answer |
@@ -498,7 +499,7 @@ A `SimulationProfile` belongs to K1 and is part of every derived key. It is the 
 
 ## 9. Determinism and canonical forms
 
-Hard constraints (CON-07, CON-14, ADR 0010). The contract: given the same world definition, seed, profile and edit history, and the same kernel versions, a supported build on 1 or 8 threads produces identical canonical serialized results. Supported builds: **Windows (MSVC) and Linux on x86-64**. ARM and macOS are excluded until they are added to CI (CON-26). No GPU result enters any authoritative value. Bit equality must be shown by the actual builds, not inferred: **[gate G-DET]**.
+Hard constraints (CON-07, CON-14, CON-29, CON-30, ADR 0010). The contract: given the same world definition, seed, profile and edit history, and the same kernel versions, a supported build on 1 or 8 threads produces identical canonical serialized results. Supported builds: **Windows (MSVC) and Linux on x86-64**. ARM and macOS are excluded until they are added to CI (CON-26). No GPU result enters any authoritative value. Bit equality must be shown by the actual builds, not inferred: **[gate G-DET]**.
 
 | Source of divergence | Control | State |
 |---|---|---|
@@ -596,9 +597,9 @@ These are S105 §13.3's table, renamed, with the changes the round solver brings
 
 | Gate | Measure | Pass |
 |---|---|---|
-| G-SURF | runtime minus bake surface at the bake's defined positions, the centres of the local cells | 0 before quantisation; at most 0.25 m after |
-| G-SURF-I (diagnostic) | the same difference at other positions, the store-lattice vertices included: p50, p95, p99, maximum, share over 0.25 m, error against local base slope or step height, spatial concentration, overshoot | reported; no systematic discontinuity or visible artefact, no uncontrolled overshoot. The clamp of the C1 read stays. GEN-148's tile: 0.66 % over 0.25 m, p99 0.22 m, maximum 2.55 m |
-| G-CON | channels and conservation at every sampling: every channel cell's D8 receiver is a channel cell or an outlet (a channel never ends mid-course, also where `A_d` falls below `T` and through a basin); `Q` at a confluence equals the sum of its donors plus the local term; sum of `Q` at the outlets against the sum of `a r`; sum of `Q_w` at the outlets plus the basins' losses against the sum of `a r`; `A_d` at outlets against the sum of `a w`, and `A_g` against the sum of `a`, across cube edges | 0 disconnected segments; relative error at most 1e-9 for every sum |
+| G-SURF | runtime minus bake surface at the bake's defined positions, the centres of the local cells | at most 1e-9 m before quantisation; at most half a step (0.125 m) after (GEN-154) |
+| G-SURF-I (diagnostic) | the same difference at other positions, the store-lattice vertices included (the tile's core vertices, 170 × 170 at 102 m; D32): p50, p95, p99, maximum, share over 0.25 m, error against local base slope or step height, spatial concentration, overshoot | reported; no systematic discontinuity or visible artefact, no uncontrolled overshoot. The clamp of the C1 read stays. GEN-148's tile: 0.66 % over 0.25 m, p99 0.22 m, maximum 2.55 m |
+| G-CON | channels and conservation at every sampling: on H1's whole graph, every channel cell's D8 receiver is a channel cell or an outlet (a channel never ends mid-course, also where `A_d` falls below `T` and through a basin); every stored river piece ends at a lake entry, a confluence, a head or an outlet, and restarts at the spill cell (D24); `Q` at a confluence equals the sum of its donors plus the local term; sum of `Q` at the outlets against the sum of `a r`; sum of `Q_w` at the outlets plus the basins' losses against the sum of `a r`; `A_d` at outlets against the sum of `a w`, and `A_g` against the sum of `a`, across cube edges | 0 disconnected segments; relative error at most 1e-9 for every sum |
 | G-PROFILE | §3.3: along every segment through the complete read `S` at the local grid's nodes, with `C` off and with `C` on; tile borders; confluences | with `C` off: no rise over 0.25 m, tile-border step at most 0.25 m. Rises between nodes and with `C` on are reported |
 | G-LOCAL | on the new kernels (clipped MFD, canonical flood): the round is a pure function of its key inputs: a catchment carved from the key inputs alone, in any order, against its part of the region round (§6.4 for why a catchment routed alone is not the test) | 0 cells differ |
 | G-ROUND | the round solver against a whole-region carve **with the same new kernel rules** in the reference | 0 cells differ |
@@ -623,20 +624,20 @@ Named landscape fixtures (the first review's suite), the prototype region and th
 
 ### 12.3 Who judges
 
-The planner judges numeric gates. A failure of an architecture or requirement gate (G-LOCAL, G-ROUND, G-EQ, G-STORE, G-SCALE) and the A/B gate go to the owner (D8).
+The architect judges numeric gates (`docs/routing.md`). A failure of an architecture or requirement gate (G-LOCAL, G-ROUND, G-EQ, G-STORE, G-SCALE) and the A/B gate go to the owner (D8).
 
-## 13. ADRs (proposed, numbers reserved)
+## 13. ADRs (proposed)
 
 | ADR | Subject | Amends |
 |---|---|---|
-| 0110 | The authoritative surface | 0088 points 2 and 5, 0099 point 3, 0100, 0101 point 3 |
-| 0111 | Hydrology model and identity | 0041 (producers), 0101 |
+| 0110 | The authoritative surface | 0088 points 2, 4.2 and 5, 0099 point 3, 0100, 0101 point 3 |
+| 0111 | Hydrology model and identity | 0041 (extends), 0101 points 2 and 3, 0105 points 2 and 3 |
 | 0112 | The erosion solver: regions, rounds, catchments | 0088 point 4, 0099 |
-| 0113 | Edit ordering and dependencies | 0007, 0066 points 1 and 4, CON-08 reading |
+| 0113 | Edit ordering and dependencies | 0007, 0066 points 1, 2 and 5, 0089 point 11; CON-08 v1.7 (ADR 0116) |
 | 0114 | Simulation profile, cell metric, canonical forms | 0010 (forms), 0003 (metric use) |
-| 0115 | Scale as a parameter and the store budget | 0045 point 2 |
+| 0115 | Scale as a parameter and the store budget | 0045 point 2 (superseded) |
 
-ADR 0109 (infill), ADR 0105 point 1 (pass-1 deposition for pits) are superseded by 0112 if the gate passes; the kernel-level changes (MFD clip, canonical flood) are within 0112.
+ADR 0109 (infill) and ADR 0105 point 1 (pass-1 deposition for pits) are replaced by 0112 if the gate passes: deposition moves to the post-round pass (§6.7), it is not dropped. Until the gate the accepted ADRs govern the shipped bake and 0110-0115 the prototype path (D24); the kernel-level changes (MFD clip, canonical flood) are within 0112.
 
 Open items for the review:
 1. Whether clipped MFD changes the look (the kernels' area at divides).
