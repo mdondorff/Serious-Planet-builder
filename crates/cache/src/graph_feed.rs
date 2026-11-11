@@ -40,7 +40,9 @@ impl ChannelGraphFeed {
                 inputs_id: s.inputs_id,
             },
             h1_cells: commit.graph_h1_cells,
+            margin_h1: 0,
         };
+        let spec = GraphSpec { margin_h1: spec.required_margin(s.halo), ..spec };
         let per_block = spec.h1_per_block();
         if per_block == 0 || !s.tile.is_multiple_of(per_block) {
             return Err(format!("{} local cells a tile are not a whole number of the {per_block} H1 cells of a block", s.tile));

@@ -22,7 +22,7 @@ use planet_generators::bake::route::{route_rules, RoundRules};
 use planet_generators::bake::tile::{TileGrid, TileId as PassTile};
 use planet_generators::bake::Grid;
 
-const W: usize = 40;
+const W: usize = 32;
 const R: f64 = 6_371_000.0;
 
 /// A ground well above the beds of the H1 channels (500-900 m), so that the burn-in lowers cells.
@@ -35,11 +35,11 @@ fn world() -> GlobalWorld {
 }
 
 fn spec() -> LTileSpec {
-    LTileSpec { grid: TileGrid { cells: 320, tile: 40, halo: 8, radius_m: R }, k7: K7Params::standard(5, 0.0), base_id: 7, inputs_id: 11 }
+    LTileSpec { grid: TileGrid { cells: 256, tile: 64, halo: 24, radius_m: R }, k7: K7Params::standard(5, 0.0), base_id: 7, inputs_id: 11 }
 }
 
 fn basin() -> BasinSpec {
-    BasinSpec { hydro: HydroParams::default(), tile_cells: 40, tiles_per_edge: 8, base_id: 7, inputs_id: 11 }
+    BasinSpec { hydro: HydroParams::default(), tile_cells: 64, tiles_per_edge: 4, base_id: 7, inputs_id: 11 }
 }
 
 struct H1 {
@@ -50,7 +50,7 @@ struct H1 {
 
 fn h1(runoff: bool) -> H1 {
     let g = Grid::new(W, W, 800.0);
-    let z: Vec<f64> = (0..W * W).map(|p| 500.0 + 10.0 * (p % W) as f64 + 3.0 * ((p / W) as f64 - 20.0).abs()).collect();
+    let z: Vec<f64> = (0..W * W).map(|p| 500.0 + 10.0 * (p % W) as f64 + 3.0 * ((p / W) as f64 - 16.0).abs()).collect();
     let outlet = g.outlets(&z, 0.0);
     let routing = route_rules(&g, &z, &outlet, 1e-3, 3, 0.0, None, RoundRules::ROUND);
     let filled = priority_flood_with(&g, &z, &outlet, 1e-3, true);
@@ -67,7 +67,7 @@ fn xy(c: u32) -> (u8, i64, i64) {
 }
 
 fn tiles() -> Vec<PassTile> {
-    (0..8u32).flat_map(|tj| (0..8u32).map(move |ti| PassTile { face: Face(2), ti, tj })).collect()
+    (0..4u32).flat_map(|tj| (0..4u32).map(move |ti| PassTile { face: Face(2), ti, tj })).collect()
 }
 
 fn run(
@@ -78,7 +78,7 @@ fn run(
 ) -> Result<planet_cache::l_writer::Commit, String> {
     let lakes = Lakes { lakes: Vec::new(), pieces: Vec::new(), dropped_cells: 0, water: Vec::new(), ring: Vec::new() };
     let gi = with_graph.map(|h| GraphInput {
-        spec: GraphSpec { basin: basin(), h1_cells: W as u32 },
+        spec: GraphSpec { basin: basin(), h1_cells: W as u32, margin_h1: 4 },
         graph: &h.graph,
         segment_ids: &h.ids,
         grid: &h.g,
@@ -168,7 +168,7 @@ fn a_graph_made_for_another_grid_than_the_bake_is_refused_naming_both() {
         face_of: &|_| Face(2),
         threads: 1,
         graph: Some(GraphInput {
-            spec: GraphSpec { basin: basin(), h1_cells: 80 },
+            spec: GraphSpec { basin: basin(), h1_cells: 80, margin_h1: 4 },
             graph: &h.graph,
             segment_ids: &h.ids,
             grid: &h.g,
@@ -176,5 +176,37 @@ fn a_graph_made_for_another_grid_than_the_bake_is_refused_naming_both() {
         }),
     };
     let e = bake_l(d.path(), &b, &tiles()).unwrap_err();
-    assert!(e.contains("80 H1 cells") && e.contains("40 H1 cells"), "{e}");
+    assert!(e.contains("80 H1 cells") && e.contains("32 H1 cells"), "{e}");
+}
+
+// spec: STRM-084, GEN-169
+#[test]
+fn a_graph_whose_margin_is_smaller_than_the_tile_halo_needs_is_refused_naming_both_numbers() {
+    let w = world();
+    let h = h1(true);
+    let d = Dir::new("graph-margin");
+    let lakes = Lakes { lakes: Vec::new(), pieces: Vec::new(), dropped_cells: 0, water: Vec::new(), ring: Vec::new() };
+    let b = LBake {
+        world: &w,
+        res: RES,
+        spec: spec(),
+        basin: basin(),
+        base: &base,
+        regional: &zero,
+        feed: &Feed(true),
+        lakes: &lakes,
+        h1_cells: W,
+        h1_cell: &|_, _, _| None,
+        face_of: &|_| Face(2),
+        threads: 1,
+        graph: Some(GraphInput {
+            spec: GraphSpec { basin: basin(), h1_cells: W as u32, margin_h1: 3 },
+            graph: &h.graph,
+            segment_ids: &h.ids,
+            grid: &h.g,
+            cell_xy: &xy,
+        }),
+    };
+    let e = bake_l(d.path(), &b, &tiles()).unwrap_err();
+    assert!(e.contains("reaches 3 H1 cells") && e.contains("halo of 24") && e.contains("needs 4"), "{e}");
 }

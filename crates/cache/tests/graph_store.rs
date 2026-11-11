@@ -49,6 +49,7 @@ fn spec() -> GraphSpec {
     GraphSpec {
         basin: BasinSpec { hydro: HydroParams::default(), tile_cells: 80, tiles_per_edge: 4, base_id: 7, inputs_id: 11 },
         h1_cells: W as u32,
+        margin_h1: 2,
     }
 }
 
@@ -324,4 +325,24 @@ fn a_lake_cut_that_is_empty_unsorted_or_past_the_segment_and_a_piece_past_its_se
     assert!(load(piece(0, 10, vec![(2, 6), (5, 8)])).unwrap_err().0.contains("empty, unsorted"), "overlapping cuts");
     assert!(load(piece(0, 10, vec![(2, 10)])).unwrap_err().0.contains("past the segment"), "a cut that reaches the segment's last vertex");
     assert!(load(piece(9, 10, vec![])).unwrap_err().0.contains("starts at vertex 9"), "a piece past its segment");
+}
+
+// spec: STRM-084, GEN-169
+#[test]
+fn the_margin_follows_the_halo_is_recorded_in_the_block_and_a_reader_that_needs_more_is_refused_naming_both() {
+    let (w, d, s) = (world(), Dir::new("margin"), spec());
+    // 8 local cells to an H1 cell: the H1 cells that hold the halo, plus one.
+    assert_eq!(s.l_per_h1(), 8);
+    assert_eq!((s.required_margin(24), s.required_margin(128), s.required_margin(1)), (4, 17, 2));
+    let f = fixture(false);
+    let records = graph_block_records(&w, RES, &s, &f.graph, &f.ids, &f.g, &xy);
+    let r = records.iter().find(|r| r.kind == planet_cache::graph_store::KIND_CHANNEL_GRAPH).expect("a block");
+    let (_, bi, bj) = planet_cache::graph_store::block_of(&s, r).unwrap();
+    assert_eq!(u32::from_le_bytes(r.payload[39..43].try_into().unwrap()), s.margin_h1, "the block records its margin");
+    let store = store_of(&d, &w, std::slice::from_ref(r));
+    assert!(load_graph_block(&store, &s, 0, bi, bj, r.key).unwrap().is_some(), "a reader that needs the margin the block has reads it");
+    let more = GraphSpec { margin_h1: s.required_margin(128), ..s };
+    let e = load_graph_block(&store, &more, 0, bi, bj, r.key).unwrap_err().0;
+    assert!(e.contains(&format!("reach {} H1 cells", s.margin_h1)) && e.contains(&format!("needs {}", more.margin_h1)), "{e}");
+    assert_ne!(graph_key(&w, RES, &more, 0, bi, bj).unwrap(), r.key, "the margin is part of the key");
 }

@@ -5,7 +5,7 @@
 //! with the bake's surface at the lattice nodes.
 
 use super::carve::{carve, CarveParams};
-use super::deposit::{deposit_on_own_route_flood, spread_pits, DepositParams, Kc};
+use super::deposit::{deposit_on_own_route_flood, spread_pits, DepositParams, DepositReport, Kc};
 use super::flood::priority_flood_with;
 use super::hydro::Hydro;
 pub use super::hydro::QUnit;
@@ -72,9 +72,11 @@ pub struct Channel {
 /// run it before the discharges are released. The unit of `qw` is m3/s when H1 ran with runoff.
 pub fn channels_from_hydro(hydro: &Hydro, routing: &Routing, zs: &[f64], to_local: &dyn Fn(usize) -> (f64, f64)) -> Vec<Channel> {
     assert!(hydro.qw.len() == zs.len(), "the channels need Q_w: run before the discharges are released");
-    hydro
-        .segments
+    let mut order: Vec<usize> = (0..hydro.segments.len()).collect();
+    order.sort_by_key(|&i| hydro.segments[i].id);
+    let channels: Vec<Channel> = order
         .iter()
+        .map(|&i| &hydro.segments[i])
         .map(|sg| {
             let mut cells = vec![sg.up as usize];
             while *cells.last().expect("a cell") != sg.down as usize {
@@ -97,7 +99,43 @@ pub fn channels_from_hydro(hydro: &Hydro, routing: &Routing, zs: &[f64], to_loca
                 q_unit: hydro.q_unit,
             }
         })
-        .collect()
+        .collect();
+    upstream_first(channels)
+}
+
+/// The channels in the tree order of GEN-169 (architect, 2026-11-11): every channel after the channels that end at its first cell (its tributaries), ties by the order given (the segment-id order). A channel `U` is a tributary of
+/// `C` when the rounded cell of `U`'s last point is the rounded cell of `C`'s first point. The burn and the final pass require this order; the producers of channels apply it.
+pub fn upstream_first(channels: Vec<Channel>) -> Vec<Channel> {
+    let cell = |p: (f64, f64)| (libm::round(p.0) as i64, libm::round(p.1) as i64);
+    let n = channels.len();
+    let mut ending: std::collections::HashMap<(i64, i64), Vec<usize>> = std::collections::HashMap::new();
+    for (i, c) in channels.iter().enumerate() {
+        ending.entry(cell(*c.points.last().expect("a point"))).or_default().push(i);
+    }
+    // indegree: the tributaries of each channel; the channels with none are ready, taken in the order given
+    let tributaries = |i: usize| ending.get(&cell(channels[i].points[0])).map_or(0, |v| v.iter().filter(|&&u| u != i).count());
+    let mut waiting: Vec<usize> = (0..n).map(tributaries).collect();
+    let mut ready: std::collections::BTreeSet<usize> = (0..n).filter(|&i| waiting[i] == 0).collect();
+    let mut starts: std::collections::HashMap<(i64, i64), Vec<usize>> = std::collections::HashMap::new();
+    for (i, c) in channels.iter().enumerate() {
+        starts.entry(cell(c.points[0])).or_default().push(i);
+    }
+    let mut order = Vec::with_capacity(n);
+    let mut placed = vec![false; n];
+    // a cycle (two segments whose end cells meet in one rounded cell) has no upstream: the first unplaced one in the order given is taken
+    while let Some(u) = ready.pop_first().or_else(|| (0..n).find(|&i| !placed[i])) {
+        placed[u] = true;
+        order.push(u);
+        for &c in starts.get(&cell(*channels[u].points.last().expect("a point"))).into_iter().flatten().filter(|&&c| c != u) {
+            waiting[c] = waiting[c].saturating_sub(1);
+            if waiting[c] == 0 && !placed[c] {
+                ready.insert(c);
+            }
+        }
+    }
+    assert!(order.len() == n, "every channel is placed once");
+    let mut slots: Vec<Option<Channel>> = channels.into_iter().map(Some).collect();
+    order.into_iter().map(|i| slots[i].take().expect("each once")).collect()
 }
 
 /// The one river width law (architect D6 point 2, D19/D20): the width of a channel is `w = a * Q_w^b` metres for a discharge in m3/s. The burn-in cuts a trench of `max(1 cell, w)` and the drawing uses `w`,
@@ -122,6 +160,123 @@ impl WidthLaw {
     }
 }
 
+/// The cells of a channel's line in order, each with the level of the profile there (a cell repeated in a row is listed once, at the lowest level of its samples), in face cell-index space: the cells
+/// [`burn_channels_wide`] burns the line to.
+fn line_with_levels(ch: &Channel) -> Vec<((i64, i64), f64)> {
+    let mut out: Vec<((i64, i64), f64)> = Vec::new();
+    let mut push = |x: f64, y: f64, level: f64| {
+        let c = (libm::round(x) as i64, libm::round(y) as i64);
+        match out.last_mut() {
+            Some(last) if last.0 == c => last.1 = last.1.min(level),
+            _ => out.push((c, level)),
+        }
+    };
+    if ch.points.len() == 1 {
+        push(ch.points[0].0, ch.points[0].1, ch.levels[0]);
+    }
+    for k in 0..ch.points.len().saturating_sub(1) {
+        let ((x0, y0), (x1, y1)) = (ch.points[k], ch.points[k + 1]);
+        let (l0, l1) = (ch.levels[k], ch.levels[k + 1]);
+        let steps = libm::fabs(x1 - x0).max(libm::fabs(y1 - y0)).max(1.0).ceil() as i64;
+        for s in 0..=steps {
+            let t = s as f64 / steps as f64;
+            if s == steps {
+                push(x1, y1, l1);
+            } else {
+                push(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, l0 + (l1 - l0) * t);
+            }
+        }
+    }
+    out
+}
+
+/// The cells of a channel's line in order (a cell repeated in a row is listed once), in face cell-index space.
+pub fn line_cells(ch: &Channel) -> Vec<(i64, i64)> {
+    line_with_levels(ch).into_iter().map(|(c, _)| c).collect()
+}
+
+/// For every channel and every cell of its line, the lowest `value` over the cells within `carry` steps upstream of it along the channel and its tributaries (the channel tree), the cell itself included
+/// (GEN-169): a tributary is a channel whose last cell is this channel's first cell. A function of the values within `carry` line steps only, so a window that holds all of them returns the same bits
+/// for the cell whatever else it holds (one line step moves one cell at most). `channels` must be listed upstream first (a tributary before the channel it joins).
+fn tree_carry(lines: &[Vec<(i64, i64)>], value: &[Vec<f64>], carry: usize) -> Vec<Vec<f64>> {
+    let n = lines.len();
+    let l = carry.min(lines.iter().map(Vec::len).sum::<usize>());
+    let mut ending: std::collections::HashMap<(i64, i64), Vec<usize>> = std::collections::HashMap::new();
+    for (c, line) in lines.iter().enumerate() {
+        if let Some(&last) = line.last() {
+            ending.entry(last).or_default().push(c);
+        }
+    }
+    // up[c][s]: the lowest value over the tributaries' cells within s steps upstream of the first cell of channel c.
+    let mut up: Vec<Vec<f64>> = Vec::with_capacity(n);
+    for c in 0..n {
+        let mut v = vec![f64::INFINITY; l + 1];
+        if let Some(first) = lines[c].first() {
+            for &u in ending.get(first).into_iter().flatten().filter(|&&u| u < c) {
+                let nu = lines[u].len();
+                let mut run = f64::INFINITY;
+                for (s, slot) in v.iter_mut().enumerate() {
+                    if s < nu {
+                        run = run.min(value[u][nu - 1 - s]);
+                    }
+                    let mut m = run;
+                    if s + 1 >= nu {
+                        m = m.min(up[u][s + 1 - nu]);
+                    }
+                    *slot = slot.min(m);
+                }
+            }
+        }
+        up.push(v);
+    }
+    (0..n)
+        .map(|c| {
+            let len = value[c].len();
+            (0..len)
+                .map(|k| {
+                    let mut m = value[c][k.saturating_sub(l)..=k].iter().copied().fold(f64::INFINITY, f64::min);
+                    if k <= l {
+                        m = m.min(up[c][l - k]);
+                    }
+                    m
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// [`tree_carry`] with no limit, in O(cells): the lowest value over everything upstream of the cell along the tree (the report of where the cutoff binds).
+fn tree_min_unbounded(lines: &[Vec<(i64, i64)>], value: &[Vec<f64>]) -> Vec<Vec<f64>> {
+    let mut ending: std::collections::HashMap<(i64, i64), Vec<usize>> = std::collections::HashMap::new();
+    for (c, line) in lines.iter().enumerate() {
+        if let Some(&last) = line.last() {
+            ending.entry(last).or_default().push(c);
+        }
+    }
+    // whole[c]: the lowest value over channel c and everything upstream of it
+    let mut whole: Vec<f64> = Vec::with_capacity(lines.len());
+    let mut out = Vec::with_capacity(lines.len());
+    for c in 0..lines.len() {
+        let mut up = f64::INFINITY;
+        if let Some(first) = lines[c].first() {
+            for &u in ending.get(first).into_iter().flatten().filter(|&&u| u < c) {
+                up = up.min(whole[u]);
+            }
+        }
+        let mut run = up;
+        let prefix: Vec<f64> = value[c]
+            .iter()
+            .map(|&v| {
+                run = run.min(v);
+                run
+            })
+            .collect();
+        whole.push(prefix.last().copied().unwrap_or(up));
+        out.push(prefix);
+    }
+    out
+}
+
 /// Burns the channels into the window `z` (`w x w`, cell `(0, 0)` the face cell `(i0, j0)`): along each segment between consecutive points the cells of the 8-connected line are lowered to the
 /// level interpolated linearly along the segment (never raised). Returns the number of cells lowered. Every channel is one cell wide: [`burn_channels_wide`] with no width law.
 pub fn burn_channels(z: &mut [f64], w: usize, origin: (i64, i64), channels: &[Channel]) -> usize {
@@ -131,9 +286,28 @@ pub fn burn_channels(z: &mut [f64], w: usize, origin: (i64, i64), channels: &[Ch
 /// [`burn_channels`] with the width law `(law, cell_m)`, `cell_m` the metres of a local cell: where the width `w = a Q_w^b` of the channel (the discharge interpolated linearly along the segment) is more
 /// than one cell, every cell whose centre lies within `w / 2` of the point of the line is lowered to the line's level there (never raised): a trench of `max(1 cell, w)`. A channel without discharges, or
 /// narrower than a cell, burns exactly as the one-cell line (the bits of K7 before the law). The line is always burnt and the disc comes on top, so the trench of a wider river contains the one-cell line (the width is
-/// measured in face cell-index space: on the cube-face grid a cell is up to 0.7 to 1.2 times the nominal size near the edges and corners, a known limit that the drawing must share).
-pub fn burn_channels_wide(z: &mut [f64], w: usize, (i0, j0): (i64, i64), channels: &[Channel], law: Option<(&WidthLaw, f64)>) -> usize {
+/// measured in face cell-index space: on the cube-face grid a cell is up to 0.7 to 1.2 times the nominal size near the edges and corners, a known limit that the drawing must share). The profile carries every
+/// hole upstream down the line with no limit: [`burn_channels_bounded`] with `carry` unbounded.
+pub fn burn_channels_wide(z: &mut [f64], w: usize, origin: (i64, i64), channels: &[Channel], law: Option<(&WidthLaw, f64)>) -> usize {
+    burn_channels_bounded(z, w, origin, channels, law, usize::MAX)
+}
+
+/// [`burn_channels_wide`] with the profile of GEN-169 (architect, 2026-11-11): the target at a cell of a line is the lowest of its level and of `min(height found, level)` over the cells within `carry` line steps upstream
+/// along the channel tree (a tributary is a channel whose last cell is this channel's first cell; `channels` upstream first), so no cell stands above its upstream neighbour within `carry` steps. Lowering
+/// only; the disc of a wide river burns to the same target. The heights are those found before any burn (a wide river's disc, or the order of the channels, does not move another line), and the target of a
+/// cell is a function of the cells within `carry` steps, so a window with a halo of `carry` cells burns its core as any other window does (partition independence).
+pub fn burn_channels_bounded(
+    z: &mut [f64],
+    w: usize,
+    (i0, j0): (i64, i64),
+    channels: &[Channel],
+    law: Option<(&WidthLaw, f64)>,
+    carry: usize,
+) -> usize {
     let mut lowered = 0;
+    // The disc of a wide river reaches DISC_RADIUS_MAX cells from the line, so a cell of the core is burnt by a line cell up to that far outside it, whose own carry reaches `carry` steps further: the profile
+    // carries `carry - DISC_RADIUS_MAX` steps when a law is given, and the half width is capped (GEN-169, partition independence with the discs).
+    let carry = if law.is_some() && carry != usize::MAX { carry.saturating_sub(DISC_RADIUS_MAX as usize) } else { carry };
     for ch in channels {
         assert!(ch.points.len() == ch.levels.len() && !ch.points.is_empty(), "a level for every point");
         assert!(ch.q.is_empty() || ch.q.len() == ch.points.len(), "a discharge for every point, or none");
@@ -142,12 +316,27 @@ pub fn burn_channels_wide(z: &mut [f64], w: usize, (i0, j0): (i64, i64), channel
             "the width law needs a discharge in m3/s: H1 returned an area in m2 (no runoff); pass the runoff to hydrology"
         );
         assert!(ch.q.iter().all(|q| q.is_finite()), "the discharges of a channel are finite");
-        let width_cells = |q: f64| law.map_or(0.0, |(l, cell_m)| l.width_m(q) / cell_m);
+        assert!(ch.levels.iter().all(|l| l.is_finite()), "the levels of a channel are finite");
+    }
+    let in_window = |x: i64, y: i64| x >= i0 && y >= j0 && x < i0 + w as i64 && y < j0 + w as i64;
+    // The profile of every channel: the lowest of the level and the height found, carried `carry` steps down the tree. The heights are read before any burn.
+    let lines: Vec<Vec<((i64, i64), f64)>> = channels.iter().map(line_with_levels).collect();
+    let cells: Vec<Vec<(i64, i64)>> = lines.iter().map(|l| l.iter().map(|&(c, _)| c).collect()).collect();
+    let value: Vec<Vec<f64>> = lines
+        .iter()
+        .map(|l| {
+            l.iter()
+                .map(|&((x, y), level)| if in_window(x, y) { level.min(z[(y - j0) as usize * w + (x - i0) as usize]) } else { level })
+                .collect()
+        })
+        .collect();
+    let target = tree_carry(&cells, &value, carry);
+    for (ci, ch) in channels.iter().enumerate() {
         let bounds = (i0, i0 + w as i64 - 1, j0, j0 + w as i64 - 1);
+        let width_cells = |q: f64| law.map_or(0.0, |(l, cell_m)| (l.width_m(q) / cell_m).min(2.0 * DISC_RADIUS_MAX as f64));
         let mut burn = |x: i64, y: i64, level: f64| {
-            let (a, b) = (x - i0, y - j0);
-            if a >= 0 && b >= 0 && (a as usize) < w && (b as usize) < w {
-                let c = b as usize * w + a as usize;
+            if in_window(x, y) {
+                let c = (y - j0) as usize * w + (x - i0) as usize;
                 if level < z[c] {
                     z[c] = level;
                     lowered += 1;
@@ -162,23 +351,35 @@ pub fn burn_channels_wide(z: &mut [f64], w: usize, (i0, j0): (i64, i64), channel
                 ch.q[k] + (ch.q[k1] - ch.q[k]) * t
             }
         };
+        // The index of the sample's cell in the line (a cell repeated in a row is one entry).
+        let (mut kidx, mut last_cell) = (0usize, None);
+        let mut at_cell = |cell: (i64, i64)| -> f64 {
+            if last_cell.is_some() && last_cell != Some(cell) {
+                kidx += 1;
+            }
+            last_cell = Some(cell);
+            target[ci][kidx]
+        };
         if ch.points.len() == 1 {
             let wc = width_cells(q_at(0, 0.0));
-            burn(libm::round(ch.points[0].0) as i64, libm::round(ch.points[0].1) as i64, ch.levels[0]);
+            let cell = (libm::round(ch.points[0].0) as i64, libm::round(ch.points[0].1) as i64);
+            let level = at_cell(cell);
+            burn(cell.0, cell.1, level);
             if wc > 1.0 {
-                disc(&mut burn, ch.points[0].0, ch.points[0].1, wc / 2.0, ch.levels[0], bounds);
+                disc(&mut burn, ch.points[0].0, ch.points[0].1, wc / 2.0, level, bounds);
             }
         }
         for k in 0..ch.points.len().saturating_sub(1) {
             let ((x0, y0), (x1, y1)) = (ch.points[k], ch.points[k + 1]);
-            let (l0, l1) = (ch.levels[k], ch.levels[k + 1]);
             let steps = libm::fabs(x1 - x0).max(libm::fabs(y1 - y0)).max(1.0).ceil() as i64;
             for s in 0..=steps {
                 let t = s as f64 / steps as f64;
-                let (px, py, level) = (x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, l0 + (l1 - l0) * t);
+                let (px, py) = if s == steps { (x1, y1) } else { (x0 + (x1 - x0) * t, y0 + (y1 - y0) * t) };
                 let wc = width_cells(q_at(k, t));
                 // The one-cell line is always burnt (a trench is never narrower than the line: max(1 cell, w)); a wider river adds the cells within w / 2 of the point.
-                burn(libm::round(px) as i64, libm::round(py) as i64, level);
+                let cell = (libm::round(px) as i64, libm::round(py) as i64);
+                let level = at_cell(cell);
+                burn(cell.0, cell.1, level);
                 if wc > 1.0 {
                     disc(&mut burn, px, py, wc / 2.0, level, bounds);
                 }
@@ -186,6 +387,77 @@ pub fn burn_channels_wide(z: &mut [f64], w: usize, (i0, j0): (i64, i64), channel
         }
     }
     lowered
+}
+
+/// The largest half width of a trench in cells (GEN-169): a wider river is burnt as one of `2 * DISC_RADIUS_MAX` cells (3.3 km at 101.8 m cells; the Amazon's mouth is about 16 cells). The tile halo must hold
+/// the carry and this radius.
+pub const DISC_RADIUS_MAX: i64 = 16;
+
+/// The smallest carry of the profile in line steps, after the trench radius is taken from the halo (GEN-169): `k7_tile` refuses a halo under `DISC_RADIUS_MAX + PROFILE_CARRY_MIN` when it has channels.
+pub const PROFILE_CARRY_MIN: usize = 8;
+
+/// What the final channel pass did (GEN-169).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FinalPass {
+    /// The path cells lowered, and those lowered by more than 1 m.
+    pub lowered: usize,
+    pub over_1m: usize,
+    /// The largest lowering in metres, and the removed volume in cubic metres (land cells only, `cell_area_m2` a cell): booked as eroded and exported.
+    pub largest_m: f64,
+    pub removed_m3: f64,
+    /// The land path cells whose target differs from the unbounded carry (the cutoff binds: a hole more than `carry` steps upstream is not carried to them).
+    pub cutoff_binds: usize,
+}
+
+/// The final channel pass (GEN-169): every land cell of a channel's line is lowered to the lowest height over the cells within `carry` steps upstream along the channel tree (the heights as the pass
+/// finds them, so the order of the channels does not matter), lowering path cells only. A cell outside the window or at or under the sea level neither is lowered nor carries. `origin` is the face cell
+/// `(i0, j0)` of the window's cell `(0, 0)`; `channels` upstream first. A function of the cells within `carry` steps: a window with a halo of `carry` cells returns the same bits for its core.
+pub fn final_channel_pass(
+    z: &mut [f64],
+    w: usize,
+    (i0, j0): (i64, i64),
+    channels: &[Channel],
+    sea_level: f64,
+    cell_area_m2: f64,
+    carry: usize,
+) -> FinalPass {
+    let in_window = |x: i64, y: i64| x >= i0 && y >= j0 && x < i0 + w as i64 && y < j0 + w as i64;
+    let cells: Vec<Vec<(i64, i64)>> = channels.iter().map(line_cells).collect();
+    let value: Vec<Vec<f64>> = cells
+        .iter()
+        .map(|l| {
+            l.iter()
+                .map(|&(x, y)| {
+                    if in_window(x, y) && z[(y - j0) as usize * w + (x - i0) as usize] > sea_level {
+                        z[(y - j0) as usize * w + (x - i0) as usize]
+                    } else {
+                        f64::INFINITY
+                    }
+                })
+                .collect()
+        })
+        .collect();
+    let target = tree_carry(&cells, &value, carry);
+    let unbounded = tree_min_unbounded(&cells, &value);
+    let mut report = FinalPass::default();
+    for (ci, line) in cells.iter().enumerate() {
+        for (k, &(x, y)) in line.iter().enumerate() {
+            if !in_window(x, y) || value[ci][k] == f64::INFINITY {
+                continue;
+            }
+            report.cutoff_binds += usize::from(target[ci][k] != unbounded[ci][k]);
+            let c = (y - j0) as usize * w + (x - i0) as usize;
+            if z[c] > target[ci][k] {
+                let d = z[c] - target[ci][k];
+                report.lowered += 1;
+                report.over_1m += usize::from(d > 1.0);
+                report.largest_m = report.largest_m.max(d);
+                report.removed_m3 += d * cell_area_m2;
+                z[c] = target[ci][k];
+            }
+        }
+    }
+    report
 }
 
 /// The cells whose centres lie within `half` cells of `(px, py)` (cell-index space) inside the window box `(x_lo, x_hi, y_lo, y_hi)` (inclusive, in face cell indices), burned to `level`.
@@ -283,6 +555,10 @@ pub struct K7Result {
     pub burn_mask: Vec<bool>,
     /// The pits (at `pit_min_m`) after each stage: the start, the burn-in, the breach alone, the incising carve, the whole pass.
     pub pits: Vec<(&'static str, PitStats)>,
+    /// The deposition sweep's ledger with the final channel pass's removed volume booked as eroded and exported (G-SED closes: eroded = deposited + exported).
+    pub sediment: DepositReport,
+    /// The final channel pass (GEN-169).
+    pub final_pass: FinalPass,
 }
 
 /// K7 on one tile. `base` is `B` (read at every cell of the window), `regional` the regional change (a C1 read of the regional solve, `RegionField::at`), `channels` the channel segments on the local
@@ -310,7 +586,16 @@ pub fn k7_tile(
     let (w, t, h) = (g.window(), g.tile as i64, g.halo as i64);
     let origin = (i64::from(id.ti) * t - h, i64::from(id.tj) * t - h);
     let z_start = z.clone();
-    let burned = burn_channels_wide(&mut z, w, origin, channels, Some((&p.width, g.dx())));
+    assert!(
+        channels.is_empty() || g.halo >= DISC_RADIUS_MAX as usize + PROFILE_CARRY_MIN,
+        "the tile halo of {} cells is smaller than the trench radius cap of {} cells plus the smallest profile carry of {} cells ({}): the profile would carry nothing across the halo (GEN-169)",
+        g.halo,
+        DISC_RADIUS_MAX,
+        PROFILE_CARRY_MIN,
+        DISC_RADIUS_MAX as usize + PROFILE_CARRY_MIN
+    );
+    let channels = &upstream_first(channels.to_vec());
+    let burned = burn_channels_bounded(&mut z, w, origin, channels, Some((&p.width, g.dx())), g.halo);
     let burn_mask: Vec<bool> = z.iter().zip(&z_start).map(|(a, b)| a != b).collect();
     drop(z_start);
     pits.push(("channels burned in", stats(&z)));
@@ -327,7 +612,7 @@ pub fn k7_tile(
     let _ = carve(&grid, &mut z, &outlet, &local, None, stream);
     pits.push(("breach and incision", stats(&z)));
     thermal(&grid, &mut z, &q.thermal, threads);
-    deposit_on_own_route_flood(
+    let mut sediment = deposit_on_own_route_flood(
         &grid,
         &mut z,
         &z_burned,
@@ -337,6 +622,9 @@ pub fn k7_tile(
         p.canonical_flood,
     );
     spread_pits(&grid, &mut z, q.sea_level, q.pit_min_m, q.pit_passes);
+    let final_pass = final_channel_pass(&mut z, w, origin, channels, q.sea_level, g.dx() * g.dx(), g.halo);
+    sediment.eroded += final_pass.removed_m3;
+    sediment.exported += final_pass.removed_m3;
     pits.push(("the whole pass", stats(&z)));
     // The stage probe (GEN-161) reads the finished window: off by default, read only.
     super::probe::emit(super::probe::Stage::K7 { face: id.face.0, ti: id.ti, tj: id.tj }, |s| {
@@ -352,7 +640,7 @@ pub fn k7_tile(
             change.push((z[c] - b[c]) as f32);
         }
     }
-    K7Result { z, b, change, burned, burn_mask, pits }
+    K7Result { z, b, change, burned, burn_mask, pits, sediment, final_pass }
 }
 
 /// The result of G-SURF at the lattice nodes of a tile.

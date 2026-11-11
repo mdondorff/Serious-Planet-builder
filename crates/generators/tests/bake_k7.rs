@@ -4,16 +4,18 @@
 use planet_core::cube::{face_to_direction, TangentWarp};
 use planet_core::{Face, Vec3};
 use planet_generators::bake::deposit::{DepositParams, Kc};
-use planet_generators::bake::k7::{burn_channels, k7_tile, pit_stats, surface_gate, Channel, K7Params, QUnit, RegionField};
+use planet_generators::bake::k7::{
+    burn_channels, final_channel_pass, k7_tile, line_cells, pit_stats, surface_gate, Channel, K7Params, QUnit, RegionField,
+};
 use planet_generators::bake::tile::{TileGrid, TileId};
 
 /// A tiny planet: 384 cells a face edge of about 100 m.
 fn tile_grid() -> TileGrid {
-    TileGrid { cells: 384, tile: 48, halo: 8, radius_m: 100.0 * 384.0 * 2.0 / core::f64::consts::PI }
+    TileGrid { cells: 384, tile: 96, halo: 24, radius_m: 100.0 * 384.0 * 2.0 / core::f64::consts::PI }
 }
 
 fn id() -> TileId {
-    TileId { face: Face(1), ti: 3, tj: 4 }
+    TileId { face: Face(1), ti: 1, tj: 2 }
 }
 
 /// The face cell-index coordinates of a direction on the tile's face.
@@ -125,8 +127,9 @@ fn a_dam_across_a_channel_is_a_pit_before_the_burn_in_and_none_after() {
     );
     assert!(with.pits[4].1.max_m <= with.pits[1].1.max_m + 1.0, "the whole pass leaves no deeper pit than the burn-in: {:?}", with.pits);
     assert_eq!(without.burned, 0);
-    // Without the burn-in the pits stay (the breach of pass 1 at the local grid is reported, not asserted to drain a dam of 40 m: its first pass can deepen the floor it cuts from).
-    assert!(without.pits[4].1.pit_cells > 0, "without the channel the dam still holds water after the whole pass: {:?}", without.pits);
+    // Without the channel the burn-in leaves the pits (it is the burn-in that drains the dam, not the breach): after the burn-in stage the pit cells are those of the start. (On the tile of 96 with a halo of 24 the
+    // breach of pass 1 at the local grid drains a dam of 40 m by itself later in the pass, which the tile of 48 with a halo of 8 did not; the stage after the burn-in is what this test is about.)
+    assert_eq!(without.pits[1].1.pit_cells, start.pit_cells, "without the channel the burn-in drains nothing: {:?}", without.pits);
     // The result is the same bits on any thread count.
     let again = k7_tile(&g, id(), &base, &regional, std::slice::from_ref(&ch), &p, 1);
     assert_eq!(with.z.iter().map(|v| v.to_bits()).collect::<Vec<_>>(), again.z.iter().map(|v| v.to_bits()).collect::<Vec<_>>());
@@ -249,9 +252,10 @@ fn k7_with_the_plain_flood_is_the_k7_of_before_and_the_canonical_k7_is_thread_in
     plain.canonical_flood = false;
     let with = k7_tile(&g, id(), &base, &smooth, &[channel(&g, g.halo as i64 + 20)], &plain, 2);
     let without = k7_tile(&g, id(), &base, &smooth, &[], &plain, 2);
-    // The digests were taken on the code before GEN-160 (origin/main at 3d3ad99a).
-    assert_eq!(k7_digest(&with), 0x68e2e76ffed7d2b7, "the plain-flood K7 with a channel is what it was");
-    assert_eq!(k7_digest(&without), 0x7700012a670c5e69, "the plain-flood K7 without a channel is what it was");
+    // The digests are the plain-flood K7 of before GEN-160 and before GEN-169 (the code of origin/main), re-taken on the tile of 96 with a halo of 24 (the halo the profile of GEN-169 needs; architect, 2026-11-11): the smooth surface
+    // has no hole under the profile, so the profile moves no bit here (TEST-112 and TEST-113 carry the cases where it does).
+    assert_eq!(k7_digest(&with), 0x24e829d93ce40015, "the plain-flood K7 with a channel is what it was");
+    assert_eq!(k7_digest(&without), 0xfe5873743fc77bff, "the plain-flood K7 without a channel is what it was");
     // The canonical flood is the default of the new chain. The valley above has no flat, so both floods agree on it; a surface cut flat at 380 m (a plain of the base) tells them apart.
     let canonical = K7Params::standard(5, 0.0);
     assert!(canonical.canonical_flood);
@@ -517,6 +521,16 @@ fn trench_width_after_the_burn_and_after_the_whole_pass_report() {
                 p.pass2.kc = 0.0;
             }
             let r = k7_tile(&g, id(), &base, &|_| 0.0, std::slice::from_ref(&base_ch), &p, 2);
+            // the rises along the channel's line (the window row): steps up of more than 0.25 m between consecutive cells going downstream (east), and the largest
+            let (mut rises, mut max_rise) = (0usize, 0.0f64);
+            for a in 1..w {
+                let d = r.z[row as usize * w + a] - r.z[row as usize * w + a - 1];
+                if d > 0.25 {
+                    rises += 1;
+                }
+                max_rise = max_rise.max(d);
+            }
+            println!("{stage:10} w={w_cells:.1}: rises over 0.25 m along the line {rises} of {} cells, largest {max_rise:.2} m", w - 1);
             let (mut burnt, mut kept, mut cols) = (0usize, 0usize, 0usize);
             let mut gaps = 0usize;
             for a in 8..w - 8 {
@@ -541,4 +555,202 @@ fn trench_width_after_the_burn_and_after_the_whole_pass_report() {
         );
         }
     }
+}
+
+// spec: GEN-169
+// spec: TEST-112
+#[test]
+fn the_final_pass_lowers_path_cells_only_to_the_running_minimum_and_books_the_volume() {
+    let w = 40;
+    let ch = Channel { points: vec![(3.0, 5.0), (12.0, 9.0), (30.0, 9.0)], levels: vec![0.0; 3], q: Vec::new(), q_unit: QUnit::Discharge };
+    let path = line_cells(&ch);
+    // heights falling along the path with bumps (3 m, 0.6 m) and one cell at the sea level; the rest of the window is higher and untouched
+    let mut z: Vec<f64> = vec![500.0; w * w];
+    for (k, &(x, y)) in path.iter().enumerate() {
+        z[y as usize * w + x as usize] = 100.0 - 0.5 * k as f64;
+    }
+    let (b1, b2, sea) = (8, 14, 24);
+    let (c1, c2, cs) = (path[b1], path[b2], path[sea]);
+    z[c1.1 as usize * w + c1.0 as usize] += 3.0;
+    z[c2.1 as usize * w + c2.0 as usize] += 0.6;
+    z[cs.1 as usize * w + cs.0 as usize] = 0.0;
+    let before = z.clone();
+    let area = 100.0 * 100.0;
+    let r = final_channel_pass(&mut z, w, (0, 0), std::slice::from_ref(&ch), 0.0, area, usize::MAX);
+    // no path cell above its upstream neighbour (the sea cell is skipped), no cell raised, only path cells changed
+    let mut last = f64::INFINITY;
+    for (k, &(x, y)) in path.iter().enumerate() {
+        let h = z[y as usize * w + x as usize];
+        if k != sea {
+            assert!(h <= last, "path cell {k} at {h} above its upstream neighbour at {last}");
+            last = h;
+        }
+    }
+    assert!(z.iter().zip(&before).all(|(a, b)| a <= b), "none raised");
+    let on_path: std::collections::HashSet<usize> = path.iter().map(|&(x, y)| y as usize * w + x as usize).collect();
+    assert!((0..w * w).filter(|c| !on_path.contains(c)).all(|c| z[c] == before[c]), "only path cells are lowered");
+    assert_eq!(z[cs.1 as usize * w + cs.0 as usize], 0.0, "a cell at the sea level is left alone");
+    // the two bumps stand 2.5 m and 0.1 m over the cell upstream (a falling profile of 0.5 m a cell: 3 m minus 0.5, 0.6 minus 0.5): the removed volume is those heights times the cell area
+    assert_eq!((r.lowered, r.over_1m), (2, 1));
+    assert!((r.largest_m - 2.5).abs() < 1e-9 && (r.removed_m3 - 2.6 * area).abs() < 1e-6, "{r:?}");
+    // deterministic: the same again
+    let mut again = before.clone();
+    assert_eq!(final_channel_pass(&mut again, w, (0, 0), std::slice::from_ref(&ch), 0.0, area, usize::MAX), r);
+    assert_eq!(again, z);
+    // idempotent: a second pass lowers nothing
+    assert_eq!(final_channel_pass(&mut z, w, (0, 0), std::slice::from_ref(&ch), 0.0, area, usize::MAX).lowered, 0);
+}
+
+// spec: GEN-169
+// spec: TEST-112
+#[test]
+fn after_the_whole_k7_no_path_cell_is_above_its_upstream_neighbour_and_the_sediment_ledger_closes() {
+    let g = tile_grid();
+    let row = g.halo as i64 + 20;
+    let (_, y) = cell(&g, 0, row);
+    let (x_dam, _) = cell(&g, g.halo as i64 + 24, 0);
+    // a dam of 40 m across the channel and a ridge that is not enough to be a pit: the burn and the incision leave what they leave, the final pass guarantees the profile
+    let regional = dam_at(&g, x_dam, y - 100.0, y + 100.0);
+    let mut ch = channel(&g, row);
+    let law = planet_generators::bake::k7::WidthLaw::STANDARD;
+    let u = 1.5 * g.dx() / law.a;
+    ch.q = vec![u * u; ch.points.len()];
+    let p = K7Params::standard(5, 0.0);
+    let r = k7_tile(&g, id(), &base, &regional, std::slice::from_ref(&ch), &p, 2);
+    let w = g.window();
+    let mut last = f64::INFINITY;
+    for &(x, yy) in &line_cells(&ch) {
+        let (a, b) = (x - cell(&g, 0, 0).0 as i64, yy - cell(&g, 0, 0).1 as i64);
+        if a < 0 || b < 0 || a as usize >= w || b as usize >= w {
+            continue;
+        }
+        let h = r.z[b as usize * w + a as usize];
+        assert!(h <= last + 1e-9, "path cell ({x}, {yy}) at {h} above its upstream neighbour at {last}");
+        last = last.min(h);
+    }
+    // G-SED: what was eroded is deposited or leaves, the final pass's volume included
+    let s = r.sediment;
+    assert!(
+        (s.eroded - s.deposited - s.exported).abs() <= 1e-9 * s.eroded.max(1.0),
+        "eroded {} deposited {} exported {} (final pass {:?})",
+        s.eroded,
+        s.deposited,
+        s.exported,
+        r.final_pass
+    );
+    // the same bits on any thread count
+    let again = k7_tile(&g, id(), &base, &regional, std::slice::from_ref(&ch), &p, 1);
+    assert_eq!(r.z.iter().map(|v| v.to_bits()).collect::<Vec<_>>(), again.z.iter().map(|v| v.to_bits()).collect::<Vec<_>>());
+    assert_eq!(r.final_pass, again.final_pass);
+}
+
+// spec: GEN-169
+// spec: TEST-113
+#[test]
+fn k7_under_two_tilings_core_cells_and_seam_rises_report() {
+    // The tile of 96 at (1, 2) and the tiles of 64 whose cores overlap its core: the same face cells in two partitions with the same halo of 24.
+    let ga = tile_grid();
+    let gb = TileGrid { tile: 64, ..ga };
+    let row = ga.halo as i64 + 20;
+    let mut ch = channel(&ga, row);
+    let law = planet_generators::bake::k7::WidthLaw::STANDARD;
+    let u = 1.5 * ga.dx() / law.a;
+    ch.q = vec![u * u; ch.points.len()];
+    let (_, y) = cell(&ga, 0, row);
+    let (x_dam, _) = cell(&ga, ga.halo as i64 + 24, 0);
+    let regional = dam_at(&ga, x_dam, y - 100.0, y + 100.0);
+    let p = K7Params::standard(5, 0.0);
+    let ra = k7_tile(&ga, id(), &base, &regional, std::slice::from_ref(&ch), &p, 2);
+    let (wa, wb) = (ga.window(), gb.window());
+    let oa = cell(&ga, 0, 0);
+    let (mut cells, mut differing, mut max_d) = (0usize, 0usize, 0.0f64);
+    let (ax0, ay0) = (i64::from(id().ti) * 96, i64::from(id().tj) * 96);
+    for (ti, tj) in [(1u32, 3u32), (2, 3), (1, 4), (2, 4)] {
+        let tid = TileId { face: id().face, ti, tj };
+        let rb = k7_tile(&gb, tid, &base, &regional, std::slice::from_ref(&ch), &p, 2);
+        let ob = (i64::from(ti) * 64 - 24, i64::from(tj) * 64 - 24);
+        for j in 0..64i64 {
+            for i in 0..64i64 {
+                let (gx, gy) = (i64::from(ti) * 64 + i, i64::from(tj) * 64 + j);
+                if gx < ax0 || gx >= ax0 + 96 || gy < ay0 || gy >= ay0 + 96 {
+                    continue;
+                }
+                let za = ra.z[(gy - oa.1 as i64) as usize * wa + (gx - oa.0 as i64) as usize];
+                let zb = rb.z[(gy - ob.1) as usize * wb + (gx - ob.0) as usize];
+                cells += 1;
+                differing += usize::from(za.to_bits() != zb.to_bits());
+                max_d = max_d.max((za - zb).abs());
+            }
+        }
+    }
+    println!("two tilings (tile 96 against tiles of 64, halo 24): {cells} core cells compared, {differing} differ, largest difference {max_d:.3} m (K7's general halo difference: carve, thermal, deposition)");
+}
+
+// spec: GEN-169
+// spec: TEST-112
+#[test]
+fn two_crossing_lines_give_the_same_final_pass_in_either_order() {
+    let w = 40;
+    let across = Channel { points: vec![(2.0, 20.0), (37.0, 20.0)], levels: vec![0.0; 2], q: Vec::new(), q_unit: QUnit::Discharge };
+    let down = Channel { points: vec![(20.0, 2.0), (20.0, 37.0)], levels: vec![0.0; 2], q: Vec::new(), q_unit: QUnit::Discharge };
+    let surface = |ch: &[Channel]| {
+        // heights falling along both lines, a hole on each upstream of the crossing at (20, 20)
+        let mut z = vec![500.0; w * w];
+        for x in 2..=37usize {
+            z[20 * w + x] = 200.0 - x as f64;
+        }
+        for y in 2..=37usize {
+            z[y * w + 20] = 150.0 - y as f64 * 0.5;
+        }
+        z[20 * w + 8] -= 30.0;
+        z[10 * w + 20] -= 20.0;
+        let r = final_channel_pass(&mut z, w, (0, 0), ch, 0.0, 1.0, usize::MAX);
+        (z, r)
+    };
+    let (a, ra) = surface(&[across.clone(), down.clone()]);
+    let (b, rb) = surface(&[down, across]);
+    assert_eq!(a, b, "the order of two crossing lines does not change the final pass");
+    assert_eq!(ra.lowered, rb.lowered);
+}
+
+// spec: GEN-169
+// spec: TEST-113
+#[test]
+fn k7_gives_the_same_bits_whatever_the_order_the_feed_lists_the_channels_in() {
+    let g = tile_grid();
+    let row = g.halo as i64 + 20;
+    let whole = channel(&g, row);
+    let m = whole.points.len() / 2;
+    let up = Channel { points: whole.points[..=m].to_vec(), levels: whole.levels[..=m].to_vec(), q: Vec::new(), q_unit: QUnit::Discharge };
+    let down = Channel { points: whole.points[m..].to_vec(), levels: whole.levels[m..].to_vec(), q: Vec::new(), q_unit: QUnit::Discharge };
+    let p = K7Params::standard(5, 0.0);
+    let a = k7_tile(&g, id(), &base, &|_| 0.0, &[up.clone(), down.clone()], &p, 2);
+    let b = k7_tile(&g, id(), &base, &|_| 0.0, &[down, up], &p, 2);
+    assert_eq!(a.z.iter().map(|v| v.to_bits()).collect::<Vec<_>>(), b.z.iter().map(|v| v.to_bits()).collect::<Vec<_>>());
+    assert_eq!(a.final_pass, b.final_pass);
+}
+
+// spec: GEN-169
+// spec: TEST-112
+#[test]
+#[should_panic(
+    expected = "the tile halo of 8 cells is smaller than the trench radius cap of 16 cells plus the smallest profile carry of 8 cells (24)"
+)]
+fn a_halo_smaller_than_the_trench_radius_cap_plus_the_smallest_carry_is_refused_naming_both_numbers() {
+    let g = TileGrid { cells: 384, tile: 48, halo: 8, radius_m: 100.0 * 384.0 * 2.0 / core::f64::consts::PI };
+    let ch = Channel { points: vec![(150.0, 212.0), (160.0, 212.0)], levels: vec![10.0, 9.0], q: Vec::new(), q_unit: QUnit::Discharge };
+    let _ = k7_tile(&g, id(), &base, &|_| 0.0, &[ch], &K7Params::standard(5, 0.0), 1);
+}
+
+// spec: GEN-169
+// spec: TEST-112
+#[test]
+fn a_halo_of_exactly_the_cap_plus_the_smallest_carry_is_accepted() {
+    // tile 96 with a halo of 24 = 16 + 8: runs; without channels any halo runs
+    let g = tile_grid();
+    assert_eq!(g.halo, 24);
+    let ch = channel(&g, g.halo as i64 + 20);
+    let _ = k7_tile(&g, id(), &base, &|_| 0.0, &[ch], &K7Params::standard(5, 0.0), 1);
+    let small = TileGrid { cells: 384, tile: 48, halo: 8, radius_m: g.radius_m };
+    let _ = k7_tile(&small, TileId { face: Face(1), ti: 3, tj: 4 }, &base, &|_| 0.0, &[], &K7Params::standard(5, 0.0), 1);
 }
