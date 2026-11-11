@@ -113,3 +113,42 @@ fn the_graph_holds_the_routings_chains_q_w_and_a_bed_that_does_not_rise() {
     assert_eq!(graph.bytes(), graph.segments() * 8 + vertices * 5, "8 bytes a segment, 5 a vertex (direction, Q_w code, bed code)");
     println!("graph: {} segments, {} vertices, {} bytes", graph.segments(), vertices, graph.bytes());
 }
+
+// spec: GEN-170, TEST-114
+#[test]
+fn a_cell_one_step_outside_a_face_resolves_across_the_cube_edge_as_the_graph_joins_it() {
+    let n = 12usize;
+    let g = Grid::cube(n, 6_371_000.0);
+    let id = |f: u8, i: usize, j: usize| usize::from(f) * n * n + j * n + i;
+    for f in 0..6u8 {
+        // Inside: the identity.
+        assert_eq!(g.cell_at_face(f, 3, 4), Some(id(f, 3, 4)));
+        for k in 0..n {
+            // One step outside along each axis is the neighbour across the edge, i.e. the graph's own neighbour of the edge cell.
+            for (o, (a, b), d) in
+                [(0usize, (-1i64, k as i64), 0usize), (1, (n as i64, k as i64), 1), (2, (k as i64, -1), 2), (3, (k as i64, n as i64), 3)]
+            {
+                let edge_cell = match o {
+                    0 => id(f, 0, k),
+                    1 => id(f, n - 1, k),
+                    2 => id(f, k, 0),
+                    _ => id(f, k, n - 1),
+                };
+                let got = g.cell_at_face(f, a, b).expect("a cell across the edge");
+                assert_eq!(Some(got), g.neighbour(edge_cell, d), "face {f}, side {o}, k {k}");
+                assert_ne!(got / (n * n), usize::from(f), "it is on another face");
+            }
+        }
+        // A corner quadrant, two steps out and a face above 5 have no cell.
+        assert_eq!(g.cell_at_face(f, -1, -1), None);
+        assert_eq!(g.cell_at_face(f, n as i64, n as i64), None);
+        assert_eq!(g.cell_at_face(f, -2, 3), None);
+        assert_eq!(g.cell_at_face(f, 3, n as i64 + 1), None);
+    }
+    assert_eq!(g.cell_at_face(6, 1, 1), None);
+    // A plane grid has face 0 and its own cells only.
+    let p = Grid::new(10, 10, 800.0);
+    assert_eq!(p.cell_at_face(0, 2, 3), Some(32));
+    assert_eq!(p.cell_at_face(0, -1, 3), None);
+    assert_eq!(p.cell_at_face(1, 2, 3), None);
+}

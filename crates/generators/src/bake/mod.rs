@@ -231,6 +231,19 @@ impl Grid {
         (u64::from(self.origin.1) + (p / self.w) as u64) << 32 | (u64::from(self.origin.0) + (p % self.w) as u64)
     }
 
+    /// The cell of this grid at the H1 coordinates `(i, j)` of `face`, also one step outside the face along one axis (resolved across the cube edge, [`cube::Cube::resolve`]): `None` when there is no such
+    /// cell (a corner quadrant, further out, a cell the compact grid does not hold). On a plane grid only face 0 and the cells inside exist.
+    pub fn cell_at_face(&self, face: u8, i: i64, j: i64) -> Option<usize> {
+        if let Some(c) = &self.cube {
+            let id = c.resolve(face, i, j)?;
+            return match &self.compact {
+                Some(k) => k.rank(id),
+                None => Some(id),
+            };
+        }
+        (face == 0 && i >= 0 && j >= 0 && (i as usize) < self.w && (j as usize) < self.h).then(|| j as usize * self.w + i as usize)
+    }
+
     /// The neighbour `d` of cell `p`, if it is on the grid.
     pub fn neighbour(&self, p: usize, d: usize) -> Option<usize> {
         if let Some(c) = &self.cube {
