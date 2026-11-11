@@ -1462,6 +1462,10 @@ Source: Architect 2026-11-10, item 15
 - **WHEN** a straight channel is burnt with `Q_w` of 100 m3/s into 10 m cells
 - **THEN** the cells within 3.6 cells of the line are at the bed level, none farther is touched, and a smaller discharge burns a subset
 
+#### Scenario: The width cap
+- **WHEN** the law gives a width over 32 cells (`DISC_RADIUS_MAX` 16, GEN-168)
+- **THEN** the burn-in and the drawing both use 32 cells, never the uncapped law (architect, 2026-11-11)
+
 ### Requirement: GEN-167 The lake water mask of a tile
 The bake SHALL decide for each cell of a tile of L which lake's water it is, on `B + L`, as a pure function of the tile's window, and store the runs in the record's water section.
 - Core wet: the cell's H1 parent is a water cell of a lake and its height is under the lake's level.
