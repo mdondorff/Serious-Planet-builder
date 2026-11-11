@@ -99,6 +99,17 @@ pub fn graph_key(world: &GlobalWorld, res: u32, spec: &GraphSpec, face: u8, bi: 
     Ok(cache_key(&inputs))
 }
 
+/// The block `(face, bi, bj)` a record of this kind belongs to, read from its payload header.
+pub fn block_of(spec: &GraphSpec, r: &Record) -> Result<(u8, u32, u32), String> {
+    let p = &r.payload;
+    if r.kind != KIND_CHANNEL_GRAPH || p.len() < HEADER_LEN {
+        return Err(format!("a record of kind {} with {} bytes is not a channel graph block", r.kind, p.len()));
+    }
+    let (face, bi, bj) = (p[5], u32_at(p, 6), u32_at(p, 10));
+    block_tile(spec, face, bi, bj).map_err(|e| e.0)?;
+    Ok((face, bi, bj))
+}
+
 /// A run of consecutive vertices of one segment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Piece {

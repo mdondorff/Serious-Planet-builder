@@ -8,6 +8,7 @@
 //! - The arrays are built in the pre-release step, from the routing and `Q_w` that are released afterwards; they hold no pointers into either.
 
 use super::hydro::{Hydro, QUnit};
+use super::k7::Channel;
 use super::route::{Routing, NONE};
 use super::Grid;
 
@@ -157,4 +158,18 @@ impl ChannelGraph {
             at += v;
         }
     }
+}
+
+/// The channels of a graph on the local grid (K7's input from the compact arrays): one [`Channel`] per segment with the dequantised `Q_w` and bed levels, the points `to_local` of each cell.
+pub fn channels_from_graph(graph: &ChannelGraph, grid: &Grid, to_local: &dyn Fn(u32) -> (f64, f64)) -> Vec<Channel> {
+    let mut out = Vec::with_capacity(graph.segments());
+    graph.for_each(|s| {
+        out.push(Channel {
+            points: s.cells(grid).iter().map(|&c| to_local(c)).collect(),
+            levels: s.bed.iter().map(|&b| bed_value(b)).collect(),
+            q: s.q.iter().map(|&q| q_value(q)).collect(),
+            q_unit: graph.q_unit,
+        });
+    });
+    out
 }

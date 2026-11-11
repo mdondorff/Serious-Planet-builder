@@ -19,15 +19,18 @@ use planet_generators::bake::water_mask::{self, Status, Window, RING_STEPS};
 
 use crate::basin_table::{basin_table_records, load_basin_table, BasinSpec};
 use crate::global_store::GlobalWorld;
+use crate::graph_store::{graph_block_records, GraphSpec};
 use crate::key::CacheKey;
 use crate::layer_l::{l_tile_key, l_tile_record, load_l_tile, LTile, LTileSpec, LTileStats};
 use crate::layer_store::LayerStoreError;
 use crate::pack::{PackWriter, TileStore, DEFAULT_MAX_PACK_BYTES};
+use planet_generators::bake::channel_graph::ChannelGraph;
+use planet_generators::bake::Grid;
 
 /// The file name of the commit record (beside the layer manifest).
 pub const COMMIT_FILE: &str = "layer-commit.txt";
 /// Version of the commit record's layout.
-pub const COMMIT_VERSION: u32 = 2;
+pub const COMMIT_VERSION: u32 = 3;
 
 /// The channels K7 burns into a window, in face cell-index space with the discharge `Q_w` at each point.
 pub trait ChannelFeed {
@@ -80,6 +83,19 @@ pub struct LBake<'a> {
     /// The face a lake's table is filed under.
     pub face_of: &'a dyn Fn(&Lake) -> Face,
     pub threads: usize,
+    /// The channel graph to store beside the L tiles (PR 7), if the bake has one.
+    pub graph: Option<GraphInput<'a>>,
+}
+
+/// The channel graph of a bake and what its blocks are made from.
+pub struct GraphInput<'a> {
+    pub spec: GraphSpec,
+    pub graph: &'a ChannelGraph,
+    /// The id of each segment of the graph (`Hydro::segments[k].id`).
+    pub segment_ids: &'a [u64],
+    pub grid: &'a Grid,
+    /// The `(face, i, j)` of a cell of `grid` on the face's H1 grid.
+    pub cell_xy: &'a dyn Fn(u32) -> (u8, i64, i64),
 }
 
 /// What a reader needs of the L spec to form the keys of the commit's tiles: the grid, the seed and sea level of K7's standard parameters, the flood, the width law and the identities of the base and
@@ -189,6 +205,9 @@ pub struct Commit {
     pub tables: [CacheKey; 6],
     /// The key of each L tile, by `(face, ti, tj)`.
     pub tiles: BTreeMap<(u8, u32, u32), CacheKey>,
+    /// The channel graph of the commit (PR 7): the H1 cells a face edge (0 when the commit has none) and the key of each block that holds a piece, by `(face, bi, bj)`.
+    pub graph_h1_cells: u32,
+    pub graph: BTreeMap<(u8, u32, u32), CacheKey>,
 }
 
 fn fnv(h: &mut u64, bytes: &[u8]) {
@@ -198,9 +217,22 @@ fn fnv(h: &mut u64, bytes: &[u8]) {
 }
 
 impl Commit {
-    fn id_of(spec: &CommitSpec, tables: &[CacheKey; 6], tiles: &BTreeMap<(u8, u32, u32), CacheKey>) -> u64 {
+    fn id_of(
+        spec: &CommitSpec,
+        tables: &[CacheKey; 6],
+        tiles: &BTreeMap<(u8, u32, u32), CacheKey>,
+        graph_h1_cells: u32,
+        graph: &BTreeMap<(u8, u32, u32), CacheKey>,
+    ) -> u64 {
         let mut h = 0xcbf2_9ce4_8422_2325u64;
         fnv(&mut h, spec.to_line().as_bytes());
+        fnv(&mut h, &graph_h1_cells.to_le_bytes());
+        for (&(f, i, j), k) in graph {
+            fnv(&mut h, &[0xe0, f]);
+            fnv(&mut h, &i.to_le_bytes());
+            fnv(&mut h, &j.to_le_bytes());
+            fnv(&mut h, &k.0);
+        }
         for k in tables {
             fnv(&mut h, &k.0);
         }
@@ -213,8 +245,14 @@ impl Commit {
         h
     }
 
-    pub fn new(spec: CommitSpec, tables: [CacheKey; 6], tiles: BTreeMap<(u8, u32, u32), CacheKey>) -> Commit {
-        Commit { id: Commit::id_of(&spec, &tables, &tiles), spec, tables, tiles }
+    pub fn new(
+        spec: CommitSpec,
+        tables: [CacheKey; 6],
+        tiles: BTreeMap<(u8, u32, u32), CacheKey>,
+        graph_h1_cells: u32,
+        graph: BTreeMap<(u8, u32, u32), CacheKey>,
+    ) -> Commit {
+        Commit { id: Commit::id_of(&spec, &tables, &tiles, graph_h1_cells, &graph), spec, tables, tiles, graph_h1_cells, graph }
     }
 
     pub fn to_text(&self) -> String {
@@ -224,6 +262,12 @@ impl Commit {
         }
         for (&(f, i, j), k) in &self.tiles {
             t.push_str(&format!("tile {f} {i} {j} {k}\n"));
+        }
+        if self.graph_h1_cells > 0 {
+            t.push_str(&format!("graph_cells {}\n", self.graph_h1_cells));
+        }
+        for (&(f, i, j), k) in &self.graph {
+            t.push_str(&format!("graph {f} {i} {j} {k}\n"));
         }
         t
     }
@@ -239,6 +283,8 @@ impl Commit {
         let mut spec: Option<CommitSpec> = None;
         let mut tables: [Option<CacheKey>; 6] = [None; 6];
         let mut tiles = BTreeMap::new();
+        let mut graph = BTreeMap::new();
+        let mut graph_h1_cells = 0u32;
         let key = |s: &str, l: &str| CacheKey::from_hex(s).ok_or_else(|| format!("'{l}': '{s}' is not a key"));
         let num = |s: &str, l: &str| s.parse::<u32>().map_err(|e| format!("'{l}': {e}"));
         for l in lines.filter(|l| !l.trim().is_empty()) {
@@ -261,6 +307,16 @@ impl Commit {
                         return Err(format!("'{l}': a tile named twice"));
                     }
                 }
+                ["graph_cells", n] => graph_h1_cells = num(n, l)?,
+                ["graph", f, i, j, k] => {
+                    if num(f, l)? >= 6 {
+                        return Err(format!("'{l}': a face outside 0..6"));
+                    }
+                    let at = (num(f, l)? as u8, num(i, l)?, num(j, l)?);
+                    if graph.insert(at, key(k, l)?).is_some() {
+                        return Err(format!("'{l}': a graph block named twice"));
+                    }
+                }
                 _ => return Err(format!("'{l}' is not a line of the commit record")),
             }
         }
@@ -270,7 +326,10 @@ impl Commit {
             t[f] = k.ok_or_else(|| format!("the commit record names no table for face {f}"))?;
         }
         let spec = spec.ok_or("the commit record has no spec line")?;
-        let c = Commit::new(spec, t, tiles);
+        if !graph.is_empty() && graph_h1_cells == 0 {
+            return Err("the commit record names graph blocks but no graph_cells line".into());
+        }
+        let c = Commit::new(spec, t, tiles, graph_h1_cells, graph);
         if c.id != id {
             return Err(format!("the commit id {id:016x} does not match its keys (they hash to {:016x}): the record is damaged", c.id));
         }
@@ -442,8 +501,20 @@ pub fn bake_l(dir: &Path, b: &LBake, tiles: &[PassTile]) -> Result<Commit, Strin
         keys.insert((id.face.0, id.ti, id.tj), r.key);
         writer.append(&r).map_err(|e| e.to_string())?;
     }
+    let (mut graph_keys, mut graph_cells) = (BTreeMap::new(), 0u32);
+    if let Some(gi) = &b.graph {
+        if gi.graph.q_unit != planet_generators::bake::hydro::QUnit::Discharge {
+            return Err("the channel graph carries Q_w as an area, not a discharge in m3/s (D33)".into());
+        }
+        graph_cells = gi.spec.h1_cells;
+        for r in graph_block_records(b.world, b.res, &gi.spec, gi.graph, gi.segment_ids, gi.grid, gi.cell_xy) {
+            let (face, bi, bj) = crate::graph_store::block_of(&gi.spec, &r)?;
+            graph_keys.insert((face, bi, bj), r.key);
+            writer.append(&r).map_err(|e| e.to_string())?;
+        }
+    }
     writer.finish().map_err(|e| e.to_string())?;
-    let commit = Commit::new(CommitSpec::of(&b.spec, b.res)?, tables, keys);
+    let commit = Commit::new(CommitSpec::of(&b.spec, b.res)?, tables, keys, graph_cells, graph_keys);
     commit.write(dir)?;
     Ok(commit)
 }

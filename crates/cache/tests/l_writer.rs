@@ -138,6 +138,7 @@ pub fn bake_tiles(
         h1_cell: &h1_cell,
         face_of: &|_| Face(2),
         threads,
+        graph: None,
     };
     bake_l(dir.path(), &b, ts)
 }
@@ -290,6 +291,7 @@ fn a_grid_with_more_than_eight_local_cells_to_an_h1_cell_and_a_commit_naming_a_s
         h1_cell: &h1_cell,
         face_of: &|_| Face(2),
         threads: 1,
+        graph: None,
     };
     let e = bake_l(d.path(), &b, &tiles()).unwrap_err();
     assert!(e.contains("16 local cells to an H1 cell"), "{e}");
@@ -327,6 +329,7 @@ fn a_channel_in_area_units_is_refused_even_when_the_feed_claims_discharges() {
         h1_cell: &h1_cell,
         face_of: &|_| Face(2),
         threads: 1,
+        graph: None,
     };
     let e = bake_l(d.path(), &b, &tiles()).unwrap_err();
     assert!(e.contains("area") && e.contains("m3/s"), "{e}");
