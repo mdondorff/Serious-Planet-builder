@@ -1,7 +1,7 @@
 # 0088 The M9 terrain bake
 Status: accepted (owner, 2026-11-01; the planet bake runs only after the owner has approved the engine's whole-planet preview of the classes and base heights; drafted by the spikes session for opus-planner, amended 2026-11-01; points 2 and 5 amended by ADR 0098: creases only below the layer's grid; point 4 amended by ADR 0099: pass 1 at 12,288 cells, MFD area, C1 read; point 5 amended by ADR 0100: C1 runtime read, coast fade; storage: ~24 GB for the planet with kind 13 and the channels, owner 2026-11-04, supersedes the 7-10 GB of the Context; point 4 extended by ADR 0101: depressions kept, fill depth a stored channel; and by ADR 0102: erodibility from an analytic lithology field)
 Date: 2026-10-31
-Source: SPIKE-61 to SPIKE-83 (`spikes/m9-*/results/results.md`); ADR 0089; ADR 0006, ADR 0016, ADR 0026, ADR 0030, ADR 0045, ADR 0055, ADR 0056, ADR 0086, ADR 0087; M9 draft (`docs/briefings/m9-draft.md`) decision 7; CON-02, CON-07, CON-11, CON-14; GEN-020, GEN-062
+Source: SPIKE-61 to SPIKE-83 (`spikes/m9-*/results/results.md`); ADR 0089; ADR 0006, ADR 0016, ADR 0026, ADR 0030, ADR 0045, ADR 0055, ADR 0056, ADR 0086, ADR 0087; M9 draft (`docs/archive/M9/briefings/m9-draft.md`) decision 7; CON-02, CON-07, CON-11, CON-14; GEN-020, GEN-062
 
 ## Context
 - Hills and mountains are 4-9x too gentle in slope and relief (SPIKE-55); the relief comes from the amplitude of the base field below about 20 km, x4-6 for hills and about x7.5 for the Alps (SPIKE-65, SPIKE-66).
@@ -47,3 +47,5 @@ Source: SPIKE-61 to SPIKE-83 (`spikes/m9-*/results/results.md`); ADR 0089; ADR 0
 
 ## Licences of adopted code or techniques
 - Implicit stream power after Braun and Willett (2013), the improved priority flood after Barnes et al. (2014) and the thermal pass after Schott et al. (2024): algorithms from the papers, no code adopted.
+
+Maintained: 2026-11-11, links: the M9 briefings moved to docs/archive/M9/briefings (audit batch A, owner 2026-11-11).

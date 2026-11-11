@@ -2,6 +2,7 @@
 
 - `architecture-report.md`: architecture survey and decision report (Revision 4, 2026-10-09). Research, options, rationale, estimates.
 - `starter.md`: tooling and project setup (v2, 2026-10-09). One-time runbook for M0.
+- `optimization-brainstorm.md` and `optimization-brainstorm-review.md`: an optimisation brainstorm and its review (pre-M9). Ideas, not decisions.
 
 Rules:
 - These files are history. They are never edited to match later decisions.

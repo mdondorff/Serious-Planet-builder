@@ -253,7 +253,7 @@ The ranking weighs three things:
 **Buildable plan: one row per PR**
 
 - Lanes: explorer for the bake kernels, crusader for the generator fields, either for the docs.
-- Effort follows `docs/briefings/estimates.md`: one code change is 0.5-3 h including CI; research-like items are ×2.
+- Effort follows `docs/archive/M9/briefings/estimates.md`: one code change is 0.5-3 h including CI; research-like items are ×2.
 - Requirement IDs come from the planner.
 - Each PR's preview follows ADR 0097 point 5; the owner approves before the next dependent bake.
 

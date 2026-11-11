@@ -1,6 +1,6 @@
 # M9: decisions for the owner on return
 Status: for the owner (drafted by the spikes session for opus-planner, 2026-10-31). No new findings: each line cites the spike results.
-Sources: SPIKE-61 to SPIKE-83 (`spikes/m9-*/results/results.md`); ADR 0088 and ADR 0089 (proposed); `docs/briefings/m9-draft.md`.
+Sources: SPIKE-61 to SPIKE-83 (`spikes/m9-*/results/results.md`); ADR 0088 and ADR 0089 (proposed); `docs/archive/M9/briefings/m9-draft.md`.
 
 ## What the combined generator gives ([SPIKE-80](../../spikes/m9-combined/results/results.md))
 With decisions 1, 2 and 5 together (class map and plateau rule, plate-margin belts, class amplitudes, the two-pass bake), at coarse global resolution and at re-matched scorecard sites:

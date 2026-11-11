@@ -1,7 +1,7 @@
 # SPIKE-84: B5 test robustness, scouting
 
 Opened: 2026-11-01
-Question: what makes the tests fail or run slow today, and which 4-6 short PRs would fix it (option B, item B5 of `docs/briefings/week-2026-11-02.md`)?
+Question: what makes the tests fail or run slow today, and which 4-6 short PRs would fix it (option B, item B5 of `docs/archive/M9/briefings/week-2026-11-02.md`)?
 Why it matters: B5 lets a coder lane fix flaky CI, local tier-C timeouts, the F9 repro path and the `test fast` budget without a perf window.
 Time box: 2 h (opus-planner, 2026-11-01); used about 1 h 10 min. Analysis only: no code changes, no `cargo xtask perf`, no `test gpu --real`.
 Success criteria: the CI failures of 14 days classified; the 12 local timeouts named with their cause; the `test fast` times against 20 s; what blocks F9 repro and `editor --smoke` on the real store; a ranked fix list.
