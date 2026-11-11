@@ -242,9 +242,9 @@ fn status_of(lakes: &Lakes, cell: Option<usize>) -> Status {
     let Some(c) = cell else { return Status::Dry };
     let c = c as u32;
     if let Ok(k) = lakes.water.binary_search_by_key(&c, |e| e.0) {
-        Status::Water(lakes.water[k].1)
+        Status::Water(lakes.lakes[lakes.water[k].1 as usize].id)
     } else if let Ok(k) = lakes.ring.binary_search_by_key(&c, |e| e.0) {
-        Status::Ring(lakes.ring[k].1)
+        Status::Ring(lakes.lakes[lakes.ring[k].1 as usize].id)
     } else {
         Status::Dry
     }

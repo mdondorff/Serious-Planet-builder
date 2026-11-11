@@ -90,9 +90,9 @@ fn lake() -> Lake {
 /// H1 cells (i, j) of face 2: the water is the block 10..12 x 10..12 and the ring one cell west of it at (9, 10).
 fn lakes() -> Lakes {
     let cell = |i: usize, j: usize| (j * H1 + i) as u32;
-    let mut water: Vec<(u32, u64)> = [(10, 10), (11, 10), (10, 11), (11, 11)].iter().map(|&(i, j)| (cell(i, j), LAKE)).collect();
+    let mut water: Vec<(u32, u32)> = [(10, 10), (11, 10), (10, 11), (11, 11)].iter().map(|&(i, j)| (cell(i, j), 0)).collect();
     water.sort_unstable();
-    Lakes { lakes: vec![lake()], pieces: Vec::new(), dropped_cells: 0, water, ring: vec![(cell(9, 10), LAKE)] }
+    Lakes { lakes: vec![lake()], pieces: Vec::new(), dropped_cells: 0, water, ring: vec![(cell(9, 10), 0)] }
 }
 
 fn h1_cell(face: u8, i: i64, j: i64) -> Option<usize> {

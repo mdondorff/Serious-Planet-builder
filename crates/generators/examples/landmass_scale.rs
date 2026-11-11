@@ -643,11 +643,10 @@ fn main() {
             fnv(format!("{:?}", built.lakes).bytes().map(u64::from))
         );
         println!(
-            "lake lists: water {} entries, ring {} entries ({} MiB at 16 B an entry, {} MiB at 8 B), basin cells {}",
+            "lake lists: water {} entries, ring {} entries ({} KiB at 8 B an entry, D37), basin cells {}",
             built.lakes.water.len(),
             built.lakes.ring.len(),
-            (built.lakes.water.len() + built.lakes.ring.len()) * 16 / 1_048_576,
-            (built.lakes.water.len() + built.lakes.ring.len()) * 8 / 1_048_576,
+            (built.lakes.water.len() + built.lakes.ring.len()) * 8 / 1024,
             built.lakes.lakes.iter().map(|l| u64::from(l.cells)).sum::<u64>()
         );
         println!("H1: {:?}", r.h1);

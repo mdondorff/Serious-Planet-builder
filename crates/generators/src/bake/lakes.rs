@@ -79,10 +79,10 @@ pub struct Lakes {
     pub pieces: Vec<RiverPiece>,
     /// The channel cells of the segments that lie inside kept basins and are in no piece.
     pub dropped_cells: usize,
-    /// The water of the lakes as H1 cells with the lake's id, sorted by cell (GEN-167; the mask's water blocks). Empty when the producer ran without them (the records alone).
-    pub water: Vec<(u32, u64)>,
+    /// The water of the lakes as H1 cells with the lake's index in `lakes` (sorted by id), sorted by cell: 8 bytes an entry (GEN-167, D37; the mask's water blocks). Empty when the producer ran without them (the records alone).
+    pub water: Vec<(u32, u32)>,
     /// The ring of each lake: the H1 cells next to its water that drain into it and belong to no other basin, sorted by cell (GEN-167; the mask's ring, D20).
-    pub ring: Vec<(u32, u64)>,
+    pub ring: Vec<(u32, u32)>,
 }
 
 /// What the producer reads the discharges and the routing for (D22, GEN-167): the river pieces and the lists of the water and the ring. Made before the release; the records follow after it.
@@ -90,8 +90,8 @@ pub struct Lakes {
 pub struct PreRelease {
     pub pieces: Vec<RiverPiece>,
     pub dropped_cells: usize,
-    pub water: Vec<(u32, u64)>,
-    pub ring: Vec<(u32, u64)>,
+    pub water: Vec<(u32, u32)>,
+    pub ring: Vec<(u32, u32)>,
 }
 
 /// The longest receiver chain followed from a cell next to a lake's water to see whether it drains into the lake (a cell that drains into it meets its water within a few steps; the bound keeps the cost
@@ -160,15 +160,15 @@ impl Water<'_> {
         out
     }
 
-    /// The water cells with the id of the lake they belong to, sorted by cell: `ids` maps the index of a basin in the hydrology to its id. The dead ground is not water.
-    pub fn lake_cells(&self, ids: &[u64]) -> Vec<(u32, u64)> {
-        let mut v: Vec<(u32, u64)> = Vec::new();
+    /// The water cells with the index of the lake they belong to, sorted by cell: `rank` maps the index of a basin in the hydrology to its place in the lakes by id. The dead ground is not water.
+    pub fn lake_cells(&self, rank: &[u32]) -> Vec<(u32, u32)> {
+        let mut v: Vec<(u32, u32)> = Vec::new();
         for (c, &l) in self.label.iter().enumerate() {
             if self.seed(c) {
-                v.push((c as u32, ids[l as usize]));
+                v.push((c as u32, rank[l as usize]));
             }
         }
-        v.extend(self.extra.iter().filter(|e| e.1 != DEAD).map(|&(c, l)| (c, ids[l as usize])));
+        v.extend(self.extra.iter().filter(|e| e.1 != DEAD).map(|&(c, l)| (c, rank[l as usize])));
         v.sort_unstable();
         v
     }
@@ -287,17 +287,28 @@ pub fn river_pieces(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &[f64]) ->
     assert!(routing.receiver.len() == grid.len(), "one receiver per cell");
     let water = water_cells(grid, routing, hydro, z);
     let (pieces, dropped_cells) = cut_segments(hydro, routing, &|c| water.contains(c));
-    let ids: Vec<u64> = hydro.basins.iter().map(|b| b.id).collect();
-    let cells = water.lake_cells(&ids);
-    let ring = ring_cells(grid, routing, hydro, &ids, &cells);
+    let rank = basin_ranks(hydro);
+    let cells = water.lake_cells(&rank);
+    let ring = ring_cells(grid, routing, hydro, &rank, &cells);
     PreRelease { pieces, dropped_cells, water: cells, ring }
 }
 
+/// The place of each basin of the hydrology among the basins by id (the index of its lake in [`Lakes::lakes`]).
+fn basin_ranks(hydro: &Hydro) -> Vec<u32> {
+    let mut order: Vec<usize> = (0..hydro.basins.len()).collect();
+    order.sort_unstable_by_key(|&k| hydro.basins[k].id);
+    let mut rank = vec![0u32; order.len()];
+    for (r, &k) in order.iter().enumerate() {
+        rank[k] = r as u32;
+    }
+    rank
+}
+
 /// The ring of every lake (D20): the H1 cells next to a water cell of the lake that are not water, belong to no other basin and drain into the lake along their receiver chain.
-fn ring_cells(grid: &Grid, routing: &Routing, hydro: &Hydro, ids: &[u64], water: &[(u32, u64)]) -> Vec<(u32, u64)> {
+fn ring_cells(grid: &Grid, routing: &Routing, hydro: &Hydro, rank: &[u32], water: &[(u32, u32)]) -> Vec<(u32, u32)> {
     let lake_of = |c: usize| water.binary_search_by_key(&(c as u32), |e| e.0).ok().map(|k| water[k].1);
-    let other = |c: usize, id: u64| hydro.label[c] != NONE && ids[hydro.label[c] as usize] != id;
-    let mut out: Vec<(u32, u64)> = Vec::new();
+    let other = |c: usize, id: u32| hydro.label[c] != NONE && rank[hydro.label[c] as usize] != id;
+    let mut out: Vec<(u32, u32)> = Vec::new();
     for &(c, id) in water {
         for d in 0..8 {
             let Some(q) = grid.neighbour(c as usize, d) else { continue };
@@ -378,8 +389,8 @@ fn produce(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &[f64], tile_of: Op
     }
     lakes.sort_unstable_by_key(|l| l.id);
     let (pieces, dropped_cells) = cut_segments(hydro, routing, &|c| water.contains(c));
-    let ids: Vec<u64> = hydro.basins.iter().map(|b| b.id).collect();
-    let cells = water.lake_cells(&ids);
-    let ring = ring_cells(grid, routing, hydro, &ids, &cells);
+    let rank = basin_ranks(hydro);
+    let cells = water.lake_cells(&rank);
+    let ring = ring_cells(grid, routing, hydro, &rank, &cells);
     Lakes { lakes, pieces, dropped_cells, water: cells, ring }
 }

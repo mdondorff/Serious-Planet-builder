@@ -462,10 +462,10 @@ fn the_water_and_ring_lists_are_the_lakes_cells_and_the_cells_next_to_them_that_
     let z = bowl_land();
     let r = run(&z, None, None, &small_t());
     let l = lakes(&r);
-    let id = r.hydro.basins[0].id;
+    assert_eq!(l.lakes.len(), 1);
     assert!(l.water.windows(2).all(|w| w[0].0 < w[1].0), "the water list is sorted by cell, one entry a cell");
     assert!(l.ring.windows(2).all(|w| w[0] < w[1]), "the ring list is sorted without repeats");
-    assert!(l.water.iter().all(|e| e.1 == id) && l.ring.iter().all(|e| e.1 == id));
+    assert!(l.water.iter().all(|e| e.1 == 0) && l.ring.iter().all(|e| e.1 == 0), "the index of the one lake is 0");
     // Every labelled cell under the level is water and every water cell is a cell of the water rule.
     let level = r.hydro.basins[0].water_level_m;
     for (c, &lab) in r.hydro.label.iter().enumerate() {
