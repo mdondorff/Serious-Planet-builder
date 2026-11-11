@@ -1,0 +1,1 @@
+- 2026-11-11 channel-graph: Kind 20 channel graph store, the graph arrays (Q_w u16 log, bed i16), the cube-edge resolver and the feed over the commit (GEN-170, STRM-084, TEST-114; item 15 PR 7).

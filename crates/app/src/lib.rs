@@ -2111,6 +2111,7 @@ mod tests {
             h1_cell: &|_, _, _| None,
             face_of: &|_| planet_core::Face(0),
             threads: 2,
+            graph: None,
         };
         let tiles: Vec<_> = spec.grid.all_tiles();
         let commit = bake_l(&dir, &b, &tiles).unwrap();

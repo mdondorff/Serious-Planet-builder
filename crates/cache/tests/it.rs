@@ -14,6 +14,8 @@ mod coupled_store;
 mod crc_reference;
 #[path = "global_store.rs"]
 mod global_store;
+#[path = "graph_store.rs"]
+mod graph_store;
 #[path = "h0_stored_read.rs"]
 mod h0_stored_read;
 #[path = "hilbert_crc.rs"]
@@ -26,6 +28,8 @@ mod keys;
 mod keys_footprint;
 #[path = "keys_wide_ids.rs"]
 mod keys_wide_ids;
+#[path = "l_graph.rs"]
+mod l_graph;
 #[path = "l_layer.rs"]
 mod l_layer;
 #[path = "l_writer.rs"]

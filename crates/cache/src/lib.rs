@@ -4,6 +4,8 @@ pub mod basin_table;
 pub mod codec;
 pub mod crc32c;
 pub mod global_store;
+pub mod graph_feed;
+pub mod graph_store;
 pub mod hilbert;
 pub mod horizon_store;
 pub mod key;

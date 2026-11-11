@@ -2,6 +2,8 @@
 mod arid;
 #[path = "bake_burn_width.rs"]
 mod bake_burn_width;
+#[path = "bake_channel_graph.rs"]
+mod bake_channel_graph;
 #[path = "bake_compact.rs"]
 mod bake_compact;
 #[path = "bake_cube.rs"]

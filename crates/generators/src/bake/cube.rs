@@ -52,6 +52,24 @@ impl Cube {
         self.n
     }
 
+    /// The cube id of the cell `(face, i, j)` of a face's H1 grid, also for a cell one step outside the face along one axis (the neighbour across the edge, as the graph joins it: GEN-139): `None` for a cell
+    /// outside the face in both axes (a corner quadrant has no cell in the graph), for one more than a step outside, and for a face above 5.
+    pub fn resolve(&self, face: u8, i: i64, j: i64) -> Option<usize> {
+        let n = self.n as i64;
+        if face >= 6 {
+            return None;
+        }
+        let base = |a: i64, b: i64| usize::from(face) * self.n * self.n + b as usize * self.n + a as usize;
+        let (oi, oj) = (i < 0 || i >= n, j < 0 || j >= n);
+        match (oi, oj) {
+            (false, false) => Some(base(i, j)),
+            (true, true) => None,
+            (true, false) if (-1..=n).contains(&i) => self.neighbour(base(i.clamp(0, n - 1), j), if i < 0 { 0 } else { 1 }),
+            (false, true) if (-1..=n).contains(&j) => self.neighbour(base(i, j.clamp(0, n - 1)), if j < 0 { 2 } else { 3 }),
+            _ => None,
+        }
+    }
+
     /// The neighbour `d` (a slot of [`NEIGHBOURS`]) of cell `p`.
     pub fn neighbour(&self, p: usize, d: usize) -> Option<usize> {
         let n = self.n;
