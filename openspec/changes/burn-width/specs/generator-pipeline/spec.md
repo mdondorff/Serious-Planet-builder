@@ -4,7 +4,7 @@
 
 Verify: A
 Status: planned
-Source: architect D41/D43
+Source: architect, 2026-11-11
 
 #### Scenario: Lattice limit
 - **WHEN** a symmetric burn is centred on a cell row

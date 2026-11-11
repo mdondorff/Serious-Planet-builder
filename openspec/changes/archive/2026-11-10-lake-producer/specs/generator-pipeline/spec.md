@@ -6,7 +6,7 @@ The bake SHALL turn each kept basin of H1 into one lake record: the water level 
 
 Verify: A
 Status: planned
-Source: Architect D6 (inbox #109), item 13 finding 2, briefing item 15
+Source: Architect 2026-11-10, item 13 finding 2, briefing item 15
 
 #### Scenario: Bowl with a river
 - **WHEN** a bowl with a known sill and a channel through it is produced

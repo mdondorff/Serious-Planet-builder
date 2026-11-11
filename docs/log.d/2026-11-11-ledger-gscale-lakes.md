@@ -1,1 +1,1 @@
-- 2026-11-11 **ledger-gscale-lakes**: G-SCALE with Lakes at k=4 on ee8347b7 (runs 1 and 2): pass, worst 11,387 MiB peak commit against 11,444, the dam probe costs 11 MiB (architect D29).
+- 2026-11-11 **ledger-gscale-lakes**: G-SCALE with Lakes at k=4 on ee8347b7 (runs 1 and 2): pass, worst 11,387 MiB peak commit against 11,444, the dam probe costs 11 MiB (architect, 2026-11-11).

@@ -1,0 +1,1 @@
+- 2026-11-11 **ledger-gsurfi-units**: G-SURF-I: the ea6b1b2b row reproduces with the right units; the verdict of 2026-11-10 (#1311) stands (architect, 2026-11-11); the spikes row stays as the record of the k7_region unit bug.

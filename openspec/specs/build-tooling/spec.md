@@ -787,7 +787,7 @@ On Windows the nextest profile SHALL put the `gpu_all` tests that took over 60 s
 
 Verify: A
 Status: active
-Source: Architect 2026-11-10 (decision D2: the `look-2km` smoke took 248 s beside nine heavy tests in CI run 42780685812, `C 1/4`), BUILD-003, BUILD-045
+Source: Architect 2026-11-10 (the `look-2km` smoke took 248 s beside nine heavy tests in CI run 42780685812, `C 1/4`), BUILD-003, BUILD-045
 
 #### Scenario: The override
 - **WHEN** `.config/nextest.toml` is read

@@ -1,4 +1,4 @@
-# SPIKE-106 round 2, addendum: G-PROFILE read on the finished K7 (D43)
+# SPIKE-106 round 2, addendum: G-PROFILE read on the finished K7
 
 Run 2026-11-11 by the spikes lane on the bulldozer's slot. Reported, not gated. Main c5305536 and later (units fix in). Release build, Windows, 8 threads, BelowNormal, margin 200 regional cells; 62 to 131 s a tile in the final runs (an earlier run of one tile took 702 s: other load on the machine, which the slot allowed). Probe: `crates/generators/examples/gate_surf.rs`, local branch `spike/gate-remeasure` (commit 879d4bf7), spike code, never merged. Raw output: `gprofile/`. Tiles: (65, 8) and (64, 8) of face 1 seed 14 (the tiles of the G-SURF-I re-read, rivers up to 735 and 502 m3/s) and the prototype tile (65, 7).
 

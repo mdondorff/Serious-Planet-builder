@@ -182,9 +182,9 @@ Findings of the sheets (architect's review of the 1020 x 1020 sheets, `target/re
 
 What this does not settle: the stem is one stem a window; the depth lines count the cells the cut's drainage reaches inside the region (the region's land under the fill after round 4 is 1.21 % against the explorer's 0.05 % at a stricter definition); a window without a land-height cut (a region ringed by sea, or a stored face) would remove it.
 
-### 6c. Correction after GEN-162 (2026-11-10, main 8b673de3; architect D7)
+### 6c. Correction after GEN-162 (2026-11-10, main 8b673de3; architect, 2026-11-10)
 
-GEN-162 (a breach never cuts below its chain exit, #1307) changed the window's pits and G-SED totals; section 6b's rows above stay as read on 563c0e60. Same windows, margin 200, release, BelowNormal, 8 threads, `region_scale` as of main 8b673de3; raw output `item13-d7-r3a.txt`, `item13-d7-r3b.txt`. Sheets are rewritten in the crusader worktree's `target/review/stages/` (not committed). Relief, hypsometry and precipitation were not re-read.
+GEN-162 (a breach never cuts below its chain exit, #1307) changed the window's pits and G-SED totals; section 6b's rows above stay as read on 563c0e60. Same windows, margin 200, release, BelowNormal, 8 threads, `region_scale` as of main 8b673de3; raw output `item13-6c-r3a.txt`, `item13-6c-r3b.txt`. Sheets are rewritten in the crusader worktree's `target/review/stages/` (not committed). Relief, hypsometry and precipitation were not re-read.
 
 | Row | R3a before (563c0e60) | R3a now | R3b before | R3b now |
 |---|---|---|---|---|

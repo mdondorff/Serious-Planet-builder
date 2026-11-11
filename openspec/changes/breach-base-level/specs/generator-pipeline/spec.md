@@ -6,7 +6,7 @@ Under the local clip of the round rules (the round solver's rules) a breach SHAL
 
 Verify: A
 Status: planned
-Source: Architect order inbox #118 and #119 (2026-11-10), decision D3
+Source: Architect, 2026-11-10
 
 #### Scenario: Lake behind a cut outlet
 - **WHEN** a closed bowl whose rim is its only outlet runs four rounds

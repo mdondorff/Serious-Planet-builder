@@ -8,7 +8,7 @@ The bake SHALL keep the segments of H1 as compact arrays built before the discha
 
 Verify: A
 Status: planned
-Source: Architect D51, D19, item 15 PR 7
+Source: Architect 2026-11-10 and 2026-11-11, item 15 PR 7
 
 #### Scenario: Chains and codes
 - **WHEN** a hydrology's graph is built

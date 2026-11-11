@@ -4,7 +4,7 @@ The burn SHALL be tested at tier A on a straight line (off and on a cell row), a
 
 Verify: A
 Status: planned
-Source: GEN-168, architect D43
+Source: GEN-168, architect 2026-11-11
 
 #### Scenario: Cases
 - **WHEN** the tests of `bake_burn_width` run

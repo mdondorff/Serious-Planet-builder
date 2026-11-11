@@ -6,7 +6,7 @@ H0 read from a stored bake SHALL equal the in-memory H0 within the store's quant
 
 Verify: A
 Status: planned
-Source: Architect decisions D11 and D14, inbox #123 (item 3's stored-field read), GEN-139, GEN-107
+Source: Architect 2026-11-10 (item 3's stored-field read), GEN-139, GEN-107
 
 #### Scenario: A stored bake across the cube edges
 - **WHEN** a 16-cell bake in blocks of 4 is stored and the H0 cells of a 12-cell face edge are read from the store and from the in-memory bake

@@ -7,7 +7,7 @@ The runtime SHALL read the L tiles of the new chain through the commit their bak
 
 Verify: A
 Status: planned
-Source: Architect D17/D19, A3 section 7.4, CON-22
+Source: Architect 2026-11-10, A3 section 7.4, CON-22
 
 #### Scenario: Swap
 - **WHEN** a new commit is offered with a table or a tile not yet in the store, and then complete

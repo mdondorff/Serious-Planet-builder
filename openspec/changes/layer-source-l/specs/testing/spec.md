@@ -4,7 +4,7 @@ The commit layer SHALL be tested at tier A on a small baked face: the source ret
 
 Verify: A
 Status: planned
-Source: STRM-083, architect D17/D19
+Source: STRM-083, architect 2026-11-10
 
 #### Scenario: Cases
 - **WHEN** the tests of `l_layer` run

@@ -3,7 +3,7 @@
 The round solver SHALL route the region once per round under the round rules (GEN-141) and then run the breach and the implicit sweeps of every catchment from that catchment's key inputs alone (its members, their receivers, `A_d`, distances, taper and surface), on any number of threads in any order.
 - The result SHALL be the bits of the whole-region carve with the same rules (G-ROUND), on any thread count (G-DET).
 - A catchment's round SHALL be unchanged when the surface outside its members changes (G-LOCAL).
-- A catchment's members SHALL be listed in the order of `Routing.order` restricted to the catchment (the depth-first walk of the donors from the outlet in cell-id order: the `cut` order), a function of the cell ids and the receivers. The catchment-round key SHALL hash the members in that order and every carve parameter the round reads (the round rules' local clip, GEN-162, included); a round run on the same members in another order, or under another such parameter, SHALL NOT be a key match (D28, D31).
+- A catchment's members SHALL be listed in the order of `Routing.order` restricted to the catchment (the depth-first walk of the donors from the outlet in cell-id order: the `cut` order), a function of the cell ids and the receivers. The catchment-round key SHALL hash the members in that order and every carve parameter the round reads (the round rules' local clip, GEN-162, included); a round run on the same members in another order, or under another such parameter, SHALL NOT be a key match (architect, 2026-11-10 and 2026-11-11).
 
 Verify: A
 Status: planned

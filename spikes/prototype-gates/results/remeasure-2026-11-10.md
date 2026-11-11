@@ -47,13 +47,13 @@ Rounds 1 (from the base) and 3 (after two carved rounds), f64 rounds.
 Findings:
 - **The member order is part of the result and A3 does not define it.** R1 round 1: 135 cells of one catchment (15,128 cells) differ, up to 4.59 m. The probe ordered members by (filled level, id), the reading of A3 6.3 and 6.5. The library walks `Routing.order`, a depth-first walk of the donors from the outlet in index order (`cut`). The lists differ in 1,047 to 2,560 catchments a run (same members, other order). The breach is order dependent where two donors lower one receiver in sequence under `breach_max`. On the library's order the own kernel matches in all 6 runs (L1b), and receivers, `A_d` and distances are equal in every catchment with the same list.
 - The order is a function of ids and receivers only, so purity holds. A3 6.5 must name it (the key lists "the member cell ids" without an order) and the key hash must keep the members in that order (read from the code, not re-checked).
-- **The memo key misses the round rules.** The clip rule alone changes the result of 53 to 209 catchments on identical inputs (L4). `catchment_key` hashes no round rules (round.rs, read from the code). Latent while the rules are fixed per solve (D28).
+- **The memo key misses the round rules.** The clip rule alone changes the result of 53 to 209 catchments on identical inputs (L4). `catchment_key` hashes no round rules (round.rs, read from the code). Latent while the rules are fixed per solve (fixed by #1355).
 - L3 (one input changed at a time, largest and median catchment, round 1): +1 mm on z moves 7 / 0 / 0 cells (R3a / R3b / R1; the largest catchment), `A_d` x (1 + 1e-9) 7 / 26 / 235, distance 7 / 27 / 496, taper -1e-6 7 / 27 / 491, the receiver-is-outlet flag flipped 0 / 29 / 2,209, two siblings exchanged in the member order 0 / 0 / 0 on the largest and 2 on a median catchment of R3b. The outlet flag and the sibling order are read (R3b, R1). R3a moves 0 for both.
-- Limits: one probe, three windows, two rounds, f64 rounds (repeat after GEN-166's f32 rounds); L3 not run with a rule flip (waits for D28's merge); L3 flips one member of one catchment at a time.
+- Limits: one probe, three windows, two rounds, f64 rounds (repeat after GEN-166's f32 rounds); L3 not run with a rule flip (waits for the memo-key fix); L3 flips one member of one catchment at a time.
 
 ## 3. G-SURF and G-SURF-I (`gate_surf`)
 
-**Correction 2026-11-11: the G-SURF-I numbers in this section were measured on code from before the units fix (D33) and are the bug, not a change of K7; see `gsurfi-reread-2026-11-11.md`.**
+**Correction 2026-11-11: the G-SURF-I numbers in this section were measured on code from before the units fix and are the bug, not a change of K7; see `gsurfi-reread-2026-11-11.md`.**
 
 The tile (65, 7) of face 1 seed 14 is built as `k7_region` builds it (library code: lattice, regional solve, H1 channels, K7 with the channels burned in; 17.3 s). The gate is measured by own code: Catmull-Rom read with the clamp to the four cells, `L = z - B` quantised to i16 steps of 0.25 m, the vertices of the store lattice (every 6 local cells, `B` the lattice's stored node value), the cell centres.
 
@@ -88,4 +88,4 @@ gate_probe local R3a 4 368 987 4720 5339 15 200 8
 gate_surf 200 8
 ```
 
-The probe is reusable for G-ROUND, G-PART, G-DET and G-LOCAL after GEN-166's f32 rounds and after D28's memo-key fix (L3 with a rule flip).
+The probe is reusable for G-ROUND, G-PART, G-DET and G-LOCAL after GEN-166's f32 rounds and after the memo-key fix (L3 with a rule flip).

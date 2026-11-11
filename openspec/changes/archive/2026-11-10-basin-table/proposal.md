@@ -1,5 +1,5 @@
 ## Why
-Item 15 PR 2a (architect D16, design notes section 9): the lake records of the producer (GEN-163) are bake output and the runtime only reads them. They are stored as a basin table, a new cache kind, not inside the tile records of kind 13.
+Item 15 PR 2a (architect, 2026-11-10; design notes section 9): the lake records of the producer (GEN-163) are bake output and the runtime only reads them. They are stored as a basin table, a new cache kind, not inside the tile records of kind 13.
 
 ## What Changes
 - `cache::basin_table` (new) and `Kind::BasinTable = 19`, `PARAM_BASIN_TABLE`: one record per cube face, the lakes sorted by basin id (id, floor and spill ids, floor and spill levels, level, `q_in`, `q_out`, area, cells, class and flags, the tiles that hold the lake water), keyed by the table version, the producer version, the hydrology parameters, the tile grid, the base id and `inputs_id` (the climate, the intentional mask and the routing rules the parameters do not name); `load_basin_table` reads `Ok(None)` for another spec and refuses a damaged record naming what it found.
