@@ -1,0 +1,66 @@
+== window face 4 cells 12288 seed 15: i 0-1387 j 4320-5739 = 1388 x 1420; box i 168-1187 j 4520-5539; land 64.6 %; base sampled in 20.9 s
+-- [R3a] the lifted cells of the start surface by depression size and depth
+  pits [z0]: lifted 25.46 % of 727199 land cells; share of lifted cells by component size (rows) and largest fill depth (columns), % of land:
+           size |      <1 m    1-10 m  10-100 m    >100 m
+            1-3 |      0.52      0.15      0.00      0.00   components: 4791 / 1091 / 0 / 0
+           4-30 |      0.37      2.42      0.03      0.00   components: 573 / 3123 / 11 / 0
+         31-300 |      0.16      3.90      2.55      0.00   components: 24 / 816 / 271 / 0
+       301-3000 |      0.15      0.65      5.08      0.00   components: 1 / 11 / 91 / 1
+          >3000 |      0.00      0.73      6.23      2.55   components: 0 / 1 / 7 / 5
+noise floor, final surface without a round-0 breach under two jitter seeds: |dz| p50 0.97 p95 15.25 max 358 m
+
+-- [R3a] z0 after 0 round-0 breach pass(es): lowered cells 0 (mean -0.0 m, max 0 m)
+  pits [z0 + 0 passes]: lifted 25.46 % of 727199 land cells; share of lifted cells by component size (rows) and largest fill depth (columns), % of land:
+           size |      <1 m    1-10 m  10-100 m    >100 m
+            1-3 |      0.52      0.15      0.00      0.00   components: 4791 / 1091 / 0 / 0
+           4-30 |      0.37      2.42      0.03      0.00   components: 573 / 3123 / 11 / 0
+         31-300 |      0.16      3.90      2.55      0.00   components: 24 / 816 / 271 / 0
+       301-3000 |      0.15      0.65      5.08      0.00   components: 1 / 11 / 91 / 1
+          >3000 |      0.00      0.73      6.23      2.55   components: 0 / 1 / 7 / 5
+  (a) flats [after 4 rounds from z0 + 0 passes]: land cells 727199; raw flat or pit (no strictly lower neighbour) 0.75 %; lifted by the fill >= 0.5 mm 6.61 %, >= 1 m 1.20 %, >= 10 m 0.13 %
+      lifted components 1393: size p50 3 p95 125 max 10441 cells; the 5 largest hold 34.6 % of the lifted cells; level rule (lowest neighbour + epsilon) holds for 100.000 % of lifted cells; receiver step is a pure epsilon step for 99.9 %
+      lifted cells: z p5/p50/p95 0/0/3 m against all land 0/34/691 m; receiver direction shares (W,E,N,S,NW,NE,SW,SE) of lifted cells: 0.201 0.052 0.197 0.112 0.195 0.077 0.106 0.060
+    after 4 rounds from z0 + 0 passes, routed U: land 727199 cells, channel steps 40687 (40345 km of length); chords 8: 35507 / 16: 33557
+      chord  8: share within 2.5 deg of 0/45/90/135: 0.1901 (axis 0.0742, diagonal 0.1159); within 5 deg: 0.3014 (axis 0.0742, diagonal 0.2272); uniform 0.0889 / 0.2222
+      chord 16: share within 2.5 deg of 0/45/90/135: 0.1495 (axis 0.0328, diagonal 0.1168); within 5 deg: 0.3184 (axis 0.0983, diagonal 0.2201); uniform 0.0889 / 0.2222
+      straight runs (one D8 direction): channel length in runs > 10 cells 0.1133, > 20 cells 0.0574; diagonal share of channel length 0.6115; steps on lifted flats 0.5109 of channel steps (their length in runs > 10: 0.1880)
+  relief [after 4 rounds, 0 passes]: 3x3 relief p50 17 p95 116 m; steepest neighbour slope p50 0.0112 p95 0.0686 (727199 cells)
+RAW R3a | breach0 | chords8 [1257, 0, 0, 0, 0, 0, 0, 1173, 76, 19, 0, 4, 0, 0, 1074, 109, 0, 0, 27, 0, 842, 21, 0, 96, 0, 0, 791, 0, 0, 162, 14, 0, 760, 62, 0, 221, 764, 0, 26, 103, 265, 818, 0, 0, 0, 3210, 0, 0, 1412, 306, 96, 25, 0, 1252, 178, 0, 91, 995, 0, 10, 148, 0, 0, 985, 0, 0, 90, 0, 7, 872, 0, 22, 0, 0, 83, 1096, 0, 0, 5, 0, 13, 54, 1331, 0, 0, 0, 0, 0, 0, 0, 1378, 0, 0, 0, 0, 0, 0, 1030, 90, 18, 0, 7, 0, 0, 872, 141, 0, 0, 31, 0, 763, 14, 0, 204, 0, 0, 684, 0, 0, 262, 14, 0, 540, 101, 0, 314, 431, 0, 43, 172, 265, 308, 0, 0, 0, 904, 0, 0, 267, 312, 173, 51, 0, 390, 272, 0, 92, 473, 0, 15, 219, 0, 0, 670, 0, 0, 195, 0, 13, 682, 0, 44, 0, 0, 146, 824, 0, 0, 4, 0, 18, 121, 975, 0, 0, 0, 0, 0, 0, 0] | chords16 [520, 0, 0, 527, 53, 9, 3, 571, 45, 10, 475, 77, 66, 0, 489, 39, 5, 419, 88, 57, 333, 85, 19, 312, 38, 73, 361, 0, 123, 368, 110, 33, 413, 177, 370, 90, 522, 74, 290, 420, 335, 412, 354, 533, 0, 2201, 716, 305, 675, 372, 653, 297, 77, 892, 78, 615, 160, 555, 20, 100, 492, 120, 0, 397, 71, 27, 382, 19, 86, 331, 34, 80, 372, 2, 32, 430, 0, 44, 56, 476, 9, 40, 554, 0, 8, 40, 584, 0, 0, 0, 579, 0, 0, 458, 54, 5, 2, 396, 55, 10, 320, 87, 61, 0, 376, 39, 3, 257, 117, 67, 195, 117, 18, 228, 53, 117, 246, 0, 198, 233, 143, 51, 223, 107, 179, 72, 244, 85, 117, 147, 180, 90, 214, 65, 0, 362, 41, 258, 79, 193, 135, 132, 118, 177, 80, 139, 139, 164, 56, 143, 178, 167, 0, 257, 64, 39, 260, 11, 139, 211, 57, 135, 271, 11, 53, 328, 0, 67, 85, 213, 8, 60, 328, 1, 7, 63, 420, 0, 0, 0]
+
+-- [R3a] z0 after 1 round-0 breach pass(es): lowered cells 156412 (mean 6.6 m, max 476 m)
+  pits [z0 + 1 passes]: lifted 5.44 % of 727199 land cells; share of lifted cells by component size (rows) and largest fill depth (columns), % of land:
+           size |      <1 m    1-10 m  10-100 m    >100 m
+            1-3 |      0.03      0.00      0.00      0.00   components: 226 / 12 / 0 / 0
+           4-30 |      0.24      0.00      0.00      0.00   components: 237 / 43 / 3 / 0
+         31-300 |      0.43      0.00      0.00      0.00   components: 57 / 4 / 18 / 0
+       301-3000 |      1.94      0.03      0.08      0.00   components: 20 / 2 / 6 / 2
+          >3000 |      2.70      0.00      0.00      0.00   components: 3 / 0 / 0 / 0
+  (a) flats [after 4 rounds from z0 + 1 passes]: land cells 727199; raw flat or pit (no strictly lower neighbour) 4.55 %; lifted by the fill >= 0.5 mm 6.64 %, >= 1 m 0.20 %, >= 10 m 0.12 %
+      lifted components 691: size p50 7 p95 329 max 13777 cells; the 5 largest hold 40.6 % of the lifted cells; level rule (lowest neighbour + epsilon) holds for 100.000 % of lifted cells; receiver step is a pure epsilon step for 100.0 %
+      lifted cells: z p5/p50/p95 0/0/0 m against all land 0/34/691 m; receiver direction shares (W,E,N,S,NW,NE,SW,SE) of lifted cells: 0.179 0.056 0.179 0.116 0.180 0.097 0.131 0.063
+    after 4 rounds from z0 + 1 passes, routed U: land 727199 cells, channel steps 38034 (38049 km of length); chords 8: 33323 / 16: 31319
+      chord  8: share within 2.5 deg of 0/45/90/135: 0.1977 (axis 0.0808, diagonal 0.1169); within 5 deg: 0.2998 (axis 0.0808, diagonal 0.2191); uniform 0.0889 / 0.2222
+      chord 16: share within 2.5 deg of 0/45/90/135: 0.1478 (axis 0.0363, diagonal 0.1115); within 5 deg: 0.3191 (axis 0.1084, diagonal 0.2107); uniform 0.0889 / 0.2222
+      straight runs (one D8 direction): channel length in runs > 10 cells 0.1130, > 20 cells 0.0594; diagonal share of channel length 0.6361; steps on lifted flats 0.5535 of channel steps (their length in runs > 10: 0.1781)
+  relief [after 4 rounds, 1 passes]: 3x3 relief p50 18 p95 119 m; steepest neighbour slope p50 0.0123 p95 0.0713 (727199 cells)
+      displacement of the final surface against the final surface without a round-0 breach: |dz| p50 0.39 p95 9.41 max 480 m, mean dz -0.22 m
+RAW R3a | breach1 | chords8 [1266, 0, 0, 0, 0, 0, 0, 1105, 50, 15, 0, 7, 0, 0, 1010, 74, 0, 0, 36, 0, 775, 9, 0, 99, 0, 0, 691, 0, 0, 140, 17, 0, 611, 77, 0, 195, 586, 0, 34, 98, 255, 650, 0, 0, 0, 3003, 0, 0, 1084, 255, 96, 26, 0, 1005, 161, 0, 78, 805, 0, 9, 137, 0, 0, 817, 0, 0, 92, 0, 3, 752, 0, 22, 0, 0, 59, 1091, 0, 0, 4, 0, 12, 40, 1417, 0, 0, 0, 0, 0, 0, 0, 1425, 0, 0, 0, 0, 0, 0, 1135, 79, 13, 0, 7, 0, 0, 931, 126, 0, 0, 35, 0, 736, 10, 0, 188, 0, 0, 677, 0, 0, 235, 21, 0, 503, 112, 0, 267, 438, 0, 43, 169, 280, 298, 0, 0, 0, 893, 0, 0, 278, 304, 150, 53, 0, 403, 261, 0, 106, 467, 0, 19, 215, 0, 0, 679, 0, 0, 196, 0, 13, 698, 0, 45, 0, 0, 134, 826, 0, 0, 7, 0, 16, 94, 970, 0, 0, 0, 0, 0, 0, 0] | chords16 [530, 0, 0, 525, 63, 9, 1, 564, 64, 9, 432, 52, 66, 0, 449, 51, 4, 371, 78, 56, 297, 82, 11, 280, 40, 67, 304, 0, 130, 310, 112, 37, 315, 148, 269, 80, 397, 74, 230, 364, 311, 344, 309, 413, 0, 2102, 565, 271, 564, 306, 583, 195, 75, 728, 74, 492, 142, 455, 24, 96, 395, 104, 0, 346, 57, 15, 332, 13, 74, 296, 37, 65, 358, 3, 22, 415, 0, 32, 38, 507, 8, 29, 606, 0, 11, 32, 655, 0, 0, 0, 607, 0, 0, 472, 46, 6, 1, 440, 34, 10, 311, 109, 57, 0, 382, 44, 5, 289, 114, 65, 192, 122, 18, 233, 56, 97, 282, 0, 184, 223, 141, 57, 228, 125, 188, 68, 237, 91, 134, 155, 185, 72, 211, 36, 0, 343, 33, 248, 72, 213, 141, 147, 105, 195, 91, 128, 142, 201, 55, 143, 188, 165, 0, 234, 84, 55, 245, 16, 135, 217, 60, 124, 270, 9, 46, 315, 0, 63, 66, 231, 17, 53, 296, 1, 9, 57, 409, 0, 0, 0]
+
+-- [R3a] z0 after 3 round-0 breach pass(es): lowered cells 156688 (mean 6.6 m, max 476 m)
+  pits [z0 + 3 passes]: lifted 5.47 % of 727199 land cells; share of lifted cells by component size (rows) and largest fill depth (columns), % of land:
+           size |      <1 m    1-10 m  10-100 m    >100 m
+            1-3 |      0.03      0.00      0.00      0.00   components: 222 / 11 / 0 / 0
+           4-30 |      0.24      0.00      0.00      0.00   components: 238 / 43 / 3 / 0
+         31-300 |      0.42      0.00      0.00      0.00   components: 55 / 4 / 17 / 0
+       301-3000 |      1.96      0.03      0.08      0.00   components: 21 / 2 / 6 / 2
+          >3000 |      2.71      0.00      0.00      0.00   components: 3 / 0 / 0 / 0
+  (a) flats [after 4 rounds from z0 + 3 passes]: land cells 727199; raw flat or pit (no strictly lower neighbour) 4.58 %; lifted by the fill >= 0.5 mm 6.64 %, >= 1 m 0.20 %, >= 10 m 0.12 %
+      lifted components 695: size p50 7 p95 329 max 13775 cells; the 5 largest hold 40.6 % of the lifted cells; level rule (lowest neighbour + epsilon) holds for 100.000 % of lifted cells; receiver step is a pure epsilon step for 100.0 %
+      lifted cells: z p5/p50/p95 0/0/0 m against all land 0/34/691 m; receiver direction shares (W,E,N,S,NW,NE,SW,SE) of lifted cells: 0.179 0.056 0.179 0.116 0.180 0.097 0.131 0.062
+    after 4 rounds from z0 + 3 passes, routed U: land 727199 cells, channel steps 38031 (38048 km of length); chords 8: 33322 / 16: 31314
+      chord  8: share within 2.5 deg of 0/45/90/135: 0.1978 (axis 0.0810, diagonal 0.1168); within 5 deg: 0.3001 (axis 0.0810, diagonal 0.2191); uniform 0.0889 / 0.2222
+      chord 16: share within 2.5 deg of 0/45/90/135: 0.1478 (axis 0.0364, diagonal 0.1115); within 5 deg: 0.3192 (axis 0.1085, diagonal 0.2107); uniform 0.0889 / 0.2222
+      straight runs (one D8 direction): channel length in runs > 10 cells 0.1130, > 20 cells 0.0594; diagonal share of channel length 0.6363; steps on lifted flats 0.5539 of channel steps (their length in runs > 10: 0.1779)
+  relief [after 4 rounds, 3 passes]: 3x3 relief p50 18 p95 119 m; steepest neighbour slope p50 0.0123 p95 0.0713 (727199 cells)
+      displacement of the final surface against the final surface without a round-0 breach: |dz| p50 0.39 p95 9.42 max 480 m, mean dz -0.22 m
+RAW R3a | breach3 | chords8 [1267, 0, 0, 0, 0, 0, 0, 1105, 50, 15, 0, 7, 0, 0, 1010, 74, 0, 0, 36, 0, 775, 9, 0, 99, 0, 0, 691, 0, 0, 140, 17, 0, 611, 76, 0, 194, 587, 0, 33, 96, 258, 650, 0, 0, 0, 3001, 0, 0, 1084, 255, 96, 26, 0, 1004, 166, 0, 76, 798, 0, 9, 138, 0, 0, 810, 0, 0, 93, 0, 3, 748, 0, 22, 0, 0, 59, 1093, 0, 0, 4, 0, 12, 41, 1418, 0, 0, 0, 0, 0, 0, 0, 1432, 0, 0, 0, 0, 0, 0, 1135, 79, 13, 0, 7, 0, 0, 933, 126, 0, 0, 35, 0, 735, 10, 0, 189, 0, 0, 676, 0, 0, 238, 21, 0, 502, 112, 0, 265, 438, 0, 43, 170, 280, 298, 0, 0, 0, 892, 0, 0, 278, 305, 152, 53, 0, 402, 262, 0, 106, 466, 0, 19, 212, 0, 0, 681, 0, 0, 198, 0, 13, 698, 0, 45, 0, 0, 134, 827, 0, 0, 7, 0, 16, 94, 969, 0, 0, 0, 0, 0, 0, 0] | chords16 [529, 0, 0, 525, 64, 9, 1, 564, 63, 9, 432, 52, 67, 0, 449, 50, 4, 371, 78, 57, 297, 82, 11, 280, 40, 67, 304, 0, 131, 310, 112, 37, 315, 146, 269, 80, 397, 74, 229, 363, 313, 344, 308, 413, 0, 2100, 565, 270, 564, 306, 582, 200, 68, 728, 76, 487, 140, 454, 24, 103, 385, 109, 0, 340, 59, 15, 330, 13, 74, 296, 37, 67, 357, 3, 22, 418, 0, 32, 38, 507, 8, 29, 606, 0, 11, 32, 654, 0, 0, 0, 610, 0, 0, 471, 46, 6, 1, 440, 35, 10, 312, 109, 57, 0, 382, 44, 5, 290, 114, 65, 192, 126, 18, 233, 57, 96, 282, 0, 188, 220, 137, 58, 229, 125, 190, 67, 237, 90, 133, 156, 185, 72, 212, 36, 0, 343, 33, 248, 72, 213, 141, 147, 105, 195, 91, 127, 142, 202, 55, 145, 188, 164, 0, 234, 84, 56, 245, 16, 135, 217, 60, 123, 270, 9, 46, 315, 0, 64, 66, 231, 17, 52, 295, 1, 9, 58, 409, 0, 0, 0]
