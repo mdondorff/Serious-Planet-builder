@@ -494,7 +494,10 @@ fn trench_width_after_the_burn_and_after_the_whole_pass_report() {
     let mut base_ch = channel(&g, row);
     for w_cells in [0.5, 1.5, 2.0, 3.0] {
         let law = planet_generators::bake::k7::WidthLaw::STANDARD;
-        let q = (w_cells * g.dx() / law.a).powi(2);
+        let q = {
+            let u = w_cells * g.dx() / law.a;
+            u * u
+        };
         base_ch.q = vec![q; base_ch.points.len()];
         for (stage, no_carve, no_thermal, no_dep) in [
             ("all", false, false, false),

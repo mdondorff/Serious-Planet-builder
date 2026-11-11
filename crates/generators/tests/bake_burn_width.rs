@@ -12,7 +12,7 @@ const END: usize = 6;
 /// A channel of points one cell apart along `f(s)`, with the discharge that gives `w_cells` at a 1 m cell.
 fn channel(f: &dyn Fn(f64) -> (f64, f64), len: usize, w_cells: f64) -> Channel {
     let law = WidthLaw::STANDARD;
-    let q = (w_cells / law.a).powf(1.0 / law.b);
+    let q = libm::pow(w_cells / law.a, 1.0 / law.b);
     let points: Vec<(f64, f64)> = (0..=len).map(|k| f(k as f64)).collect();
     Channel { levels: vec![LEVEL; points.len()], q: vec![q; points.len()], q_unit: QUnit::Discharge, points }
 }
@@ -24,13 +24,13 @@ fn shapes() -> Vec<Shape> {
     vec![
         ("straight", Box::new(|s| (10.0 + s, 48.3)), 90, 0.5),
         ("straight, on the cell row", Box::new(|s| (10.0 + s, 48.0)), 90, 1.05),
-        ("diagonal", Box::new(|s| (10.0 + s * 0.7071, 10.0 + s * 0.7071)), 120, 0.71),
-        ("curved", Box::new(|s| (60.0 + 40.0 * (s / 40.0).cos(), 60.0 + 40.0 * (s / 40.0).sin())), 110, 0.71),
+        ("diagonal", Box::new(|s| (10.0 + s * core::f64::consts::FRAC_1_SQRT_2, 10.0 + s * core::f64::consts::FRAC_1_SQRT_2)), 120, 0.71),
+        ("curved", Box::new(|s| (60.0 + 40.0 * libm::cos(s / 40.0), 60.0 + 40.0 * libm::sin(s / 40.0))), 110, 0.71),
     ]
 }
 
 fn dist(a: (f64, f64), x: i64, y: i64) -> f64 {
-    ((a.0 - x as f64).powi(2) + (a.1 - y as f64).powi(2)).sqrt()
+    libm::hypot(a.0 - x as f64, a.1 - y as f64)
 }
 
 // spec: GEN-168
@@ -55,7 +55,7 @@ fn the_burn_matches_the_width_law_on_a_straight_a_diagonal_and_a_curved_channel(
             let mid = &ch.points[END..ch.points.len() - END];
             let ends: Vec<(f64, f64)> = ch.points[..END].iter().chain(&ch.points[ch.points.len() - END..]).copied().collect();
             let arc: f64 = mid.windows(2).map(|p| dist(p[0], p[1].0.round() as i64, p[1].1.round() as i64).max(0.0)).sum::<f64>();
-            let arc = arc.max(mid.windows(2).map(|p| ((p[1].0 - p[0].0).powi(2) + (p[1].1 - p[0].1).powi(2)).sqrt()).sum::<f64>());
+            let arc = arc.max(mid.windows(2).map(|p| libm::hypot(p[1].0 - p[0].0, p[1].1 - p[0].1)).sum::<f64>());
             let mut count = 0usize;
             for y in 0..N as i64 {
                 for x in 0..N as i64 {
