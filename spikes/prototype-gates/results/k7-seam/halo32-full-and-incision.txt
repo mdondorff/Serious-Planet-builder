@@ -1,0 +1,25 @@
+lattice 1366 x 1366 nodes sampled (30.0 s)
+regional window 1020 x 1020 cells solved from the C1 read of the lattice (36.4 s)
+H1: 43509 channel cells, 10823 segments
+Q unit Discharge
+peak Q of a channel cell on land 735 m3/s at regional cell (8378, 1105) (local tile (65, 8)); tiles with a channel cell over 200 m3/s: 8 of 61
+  tile (65, 8): peak Q 735 m3/s (width law 195 m = 1.92 cells), 1141 channel cells, 106 of them at 200 m3/s or more
+  tile (64, 8): peak Q 502 m3/s (width law 161 m = 1.59 cells), 1059 channel cells, 195 of them at 200 m3/s or more
+  tile (63, 8): peak Q 404 m3/s (width law 145 m = 1.42 cells), 462 channel cells, 41 of them at 200 m3/s or more
+  tile (64, 7): peak Q 400 m3/s (width law 144 m = 1.41 cells), 964 channel cells, 65 of them at 200 m3/s or more
+  tile (63, 7): peak Q 395 m3/s (width law 143 m = 1.41 cells), 432 channel cells, 67 of them at 200 m3/s or more
+  tile (63, 6): peak Q 384 m3/s (width law 141 m = 1.39 cells), 928 channel cells, 98 of them at 200 m3/s or more
+  tile (65, 6): peak Q 337 m3/s (width law 132 m = 1.30 cells), 846 channel cells, 145 of them at 200 m3/s or more
+  tile (66, 6): peak Q 229 m3/s (width law 109 m = 1.07 cells), 1075 channel cells, 5 of them at 200 m3/s or more
+  tile (64, 4): peak Q 188 m3/s (width law 99 m = 0.97 cells), 1340 channel cells, 0 of them at 200 m3/s or more
+  tile (67, 4): peak Q 185 m3/s (width law 98 m = 0.96 cells), 1107 channel cells, 0 of them at 200 m3/s or more
+  tile (62, 6): peak Q 181 m3/s (width law 97 m = 0.95 cells), 911 channel cells, 0 of them at 200 m3/s or more
+  tile (67, 8): peak Q 180 m3/s (width law 97 m = 0.95 cells), 721 channel cells, 0 of them at 200 m3/s or more
+K7 tile continuity at halo 32: the core of tile (65, 8) of 1024 cells (window 1088) against the cores of the four tiles of 512 cells inside it (window 576); the seams of the second tiling are at the middle of the core
+[full K7] two tilings (1 x 1024 against 4 x 512): 37797 of 1048576 core cells differ in bits (3.60 %), 1212 by more than 0.25 m, 429 by more than 1 m; among those that differ p50 0.000 m, p99 1.125 m, max 7.162 m (8.2 s)
+   by distance to a seam of the small tiling (cells, cells differing in bits and by over 0.25 m): 0-7: 7515 in bits, 341 over 0.25 m, of 30495; 8-31: 11726 in bits, 520 over 0.25 m, of 94560; 32-127: 17723 in bits, 351 over 0.25 m, of 332160; 128-256: 833 in bits, 0 over 0.25 m, of 330240;
+   steps between adjacent cells: across the seams of the small tiling (mosaic) p50 0.164 p99 2.427 max 6.245 m; the same pairs in the big tile p50 0.164 p99 2.822 max 6.476; interior pairs of the mosaic p50 0.177 p99 3.797 max 28.901, of the big tile p50 0.177 p99 3.796 max 28.901
+   the fixed tiling's borders (2048 pairs, tile (65, 8) against (66, 8) and (65, 9)): step p50 0.119 p99 1.720 max 3.418 m, against the interior steps of the tile p50 0.177 p99 3.796 max 28.901
+[burn, breach and incision (thermal, deposition, pits off)] two tilings (1 x 1024 against 4 x 512): 37609 of 1048576 core cells differ in bits (3.59 %), 1070 by more than 0.25 m, 362 by more than 1 m; among those that differ p50 0.000 m, p99 0.957 m, max 7.162 m (10.2 s)
+   by distance to a seam of the small tiling (cells, cells differing in bits and by over 0.25 m): 0-7: 7462 in bits, 324 over 0.25 m, of 30495; 8-31: 11642 in bits, 429 over 0.25 m, of 94560; 32-127: 17679 in bits, 317 over 0.25 m, of 332160; 128-256: 826 in bits, 0 over 0.25 m, of 330240;
+   steps between adjacent cells: across the seams of the small tiling (mosaic) p50 0.164 p99 2.329 max 4.013 m; the same pairs in the big tile p50 0.165 p99 2.765 max 4.454; interior pairs of the mosaic p50 0.179 p99 3.727 max 28.901, of the big tile p50 0.179 p99 3.727 max 28.901
