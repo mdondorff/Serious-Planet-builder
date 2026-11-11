@@ -8,7 +8,7 @@ The bake SHALL decide for each cell of a tile of L which lake's water it is, on 
 
 Verify: A
 Status: planned
-Source: Architect D17/D18/D20, design section 13
+Source: Architect 2026-11-10, design section 13
 
 #### Scenario: Bowl, valley and hollow
 - **WHEN** a lake with a sill, a valley below the sill and another hollow under the level are masked

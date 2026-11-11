@@ -1,10 +1,10 @@
-# SPIKE-106 round 2, addendum: G-SURF-I on tiles with a river over 200 m3/s (D35)
+# SPIKE-106 round 2, addendum: G-SURF-I on tiles with a river over 200 m3/s
 
-Run 2026-11-11 by the spikes lane on the bulldozer's slot. Reported, not gated (D35). Main c5305536 and later (the units fix, D33; the width law GEN-165 and the lake producer are in). Release build, Windows, 8 threads, BelowNormal, margin 200 regional cells; about 30 s a tile; other load on the machine was possible (the slot allowed the explorer's prepush to start meanwhile; this is not a perf measurement). Probe: `crates/generators/examples/gate_surf.rs` on the local branch `spike/gate-remeasure` (commit 0e59c594), spike code, never merged. Raw output: `gsurfi-reread/`.
+Run 2026-11-11 by the spikes lane on the bulldozer's slot. Reported, not gated (architect, 2026-11-11). Main c5305536 and later (the units fix; the width law GEN-165 and the lake producer are in). Release build, Windows, 8 threads, BelowNormal, margin 200 regional cells; about 30 s a tile; other load on the machine was possible (the slot allowed the explorer's prepush to start meanwhile; this is not a perf measurement). Probe: `crates/generators/examples/gate_surf.rs` on the local branch `spike/gate-remeasure` (commit 0e59c594), spike code, never merged. Raw output: `gsurfi-reread/`.
 
 ## Correction to section 3 of `remeasure-2026-11-10.md`
 
-The G-SURF-I numbers of that section (179 vertices over 0.25 m, maximum 2.76 m, burn count 95,820,316, "moved since the ledger rows") were measured on a copy of `k7_region` from before the units fix: H1 got no runoff, so `Q` was an area in m2, the width law turned areas into trenches of kilometres, and the numbers are the D33 bug, not a change of K7. With the fix the prototype tile (65, 7) reproduces the ledger row of ea6b1b2b (below). The section's other findings stand (own measurement equals the library's; the vertex sets differ by 170; the ledger's step classes do not match `nodes_by_step`).
+The G-SURF-I numbers of that section (179 vertices over 0.25 m, maximum 2.76 m, burn count 95,820,316, "moved since the ledger rows") were measured on a copy of `k7_region` from before the units fix: H1 got no runoff, so `Q` was an area in m2, the width law turned areas into trenches of kilometres, and the numbers are the units bug, not a change of K7. With the fix the prototype tile (65, 7) reproduces the ledger row of ea6b1b2b (below). The section's other findings stand (own measurement equals the library's; the vertex sets differ by 170; the ledger's step classes do not match `nodes_by_step`).
 
 ## 1. Where the rivers over 200 m3/s are (the prototype region, seed 14 face 1)
 
@@ -59,7 +59,7 @@ Reading: where the burn is measurable it is as wide as or wider than the law (1.
 - **The tiles with rivers are better than the prototype tile on G-SURF-I** (0.00 % and 0.07 % over 0.25 m against 0.66 %), and on the prototype tile 187 of its 189 vertices over 0.25 m lie outside any trench, so its rise is not the trench of a river (the probe did not look into what causes it).
 - The maximum of (64, 8), 1.02 m, is a vertex outside any trench (15 over 0.25 m outside); the probe did not look into its cause.
 - A trench several cells wide (a river over about 1,000 m3/s) is not covered: seed 15 face 4 (mouth 1,561 m3/s) and face 2 (2,104 m3/s) were not run (the region here had rivers over 200 m3/s, so the fallback was not needed). A run on one of them would test a 3 cell trench.
-- Reported, not gated (D35). Three tiles of one region and one seed; the vertex set of the own measurement (169 x 170) differs from the library's (170 x 170) on two tiles.
+- Reported, not gated. Three tiles of one region and one seed; the vertex set of the own measurement (169 x 170) differs from the library's (170 x 170) on two tiles.
 
 ## 6. Reproduce
 

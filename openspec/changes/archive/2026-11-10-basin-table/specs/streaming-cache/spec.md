@@ -5,7 +5,7 @@ The lakes of the lake producer (GEN-163) SHALL be stored as one record of kind 1
 
 Verify: A
 Status: planned
-Source: Architect D16 (inbox #115), GEN-163, item 15
+Source: Architect 2026-11-10, GEN-163, item 15
 
 #### Scenario: Round trip and refusals
 - **WHEN** a table is written, read, and read under another spec, version or grid, and a payload is damaged

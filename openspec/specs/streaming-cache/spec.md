@@ -1248,7 +1248,7 @@ The lakes of the lake producer (GEN-163) SHALL be stored as one record of kind 1
 
 Verify: A
 Status: planned
-Source: Architect D16 (inbox #115), GEN-163, item 15
+Source: Architect 2026-11-10, GEN-163, item 15
 
 #### Scenario: Round trip and refusals
 - **WHEN** a table is written, read, and read under another spec, version or grid, and a payload is damaged
@@ -1262,7 +1262,7 @@ The local change L of the new chain SHALL be stored as one record of kind 13 per
 
 Verify: A
 Status: planned
-Source: Architect D16 (inbox #115), item 14 (GEN-156), item 15
+Source: Architect 2026-11-10, item 14 (GEN-156), item 15
 
 #### Scenario: Round trip and refusals
 - **WHEN** a tile of L is written and read, and read under another base, parameters or version, and a payload is damaged
@@ -1277,7 +1277,7 @@ The bake writer SHALL write L tiles (each with its lake water mask), the six bas
 
 Verify: A
 Status: planned
-Source: Architect D17/D18/D33/D34, design section 14
+Source: Architect 2026-11-10 and 2026-11-11, design section 14
 
 #### Scenario: Round trip and refusals
 - **WHEN** a small face is baked and read back through its commit, read under another spec, and baked with a feed in area units

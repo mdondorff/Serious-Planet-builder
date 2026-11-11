@@ -4,7 +4,7 @@ The lake producer SHALL be tested on small fixtures at tier A: the level in the 
 
 Verify: A
 Status: planned
-Source: GEN-163, architect D6
+Source: GEN-163, architect 2026-11-10
 
 #### Scenario: Cases
 - **WHEN** the tests of `bake_lakes` run

@@ -4,7 +4,7 @@ The lake water mask SHALL be tested at tier A on an analytic surface: the valley
 
 Verify: A
 Status: planned
-Source: GEN-167, architect D17/D18/D20
+Source: GEN-167, architect 2026-11-10
 
 #### Scenario: Cases
 - **WHEN** the tests of `bake_water_mask` run

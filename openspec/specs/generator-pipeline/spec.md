@@ -1389,7 +1389,7 @@ The noise of the hill band, the mountain band and the creases SHALL be switchabl
 
 Verify: A
 Status: active
-Source: SPIKE-104 D-C, planner inbox #91 (owner D1 = A conditional)
+Source: SPIKE-104 D-C, planner inbox #91 (owner, SPIKE-105 decision 1 = A conditional)
 
 #### Scenario: Planes
 - **WHEN** the octaves of the untouched noise and of the turned noise are summed and their slope is measured across the world planes `x = k / f`
@@ -1440,7 +1440,7 @@ The bake SHALL turn each kept basin of H1 into one lake record and SHALL produce
 
 Verify: A
 Status: planned
-Source: Architect D6 (inbox #109), item 13 finding 2, briefing item 15
+Source: Architect 2026-11-10, item 13 finding 2, briefing item 15
 
 #### Scenario: Bowl with a river
 - **WHEN** a bowl with a known sill and a channel through it is produced
@@ -1456,7 +1456,7 @@ The width of a river SHALL be `w = a * Q_w^b` metres for a routed discharge `Q_w
 
 Verify: A
 Status: planned
-Source: Architect D6 point 2, D19/D20 (inbox #117), item 15
+Source: Architect 2026-11-10, item 15
 
 #### Scenario: Trench widths
 - **WHEN** a straight channel is burnt with `Q_w` of 100 m3/s into 10 m cells
@@ -1471,7 +1471,7 @@ The bake SHALL decide for each cell of a tile of L which lake's water it is, on 
 
 Verify: A
 Status: planned
-Source: Architect D17/D18/D20, design section 13
+Source: Architect 2026-11-10, design section 13
 
 #### Scenario: Bowl, valley and hollow
 - **WHEN** a lake with a sill, a valley below the sill and another hollow under the level are masked

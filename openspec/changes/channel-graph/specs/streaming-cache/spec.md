@@ -8,7 +8,7 @@ The bake SHALL store the channel graph as one record of kind 20 per L tile, hold
 
 Verify: A
 Status: planned
-Source: Architect D51, D17
+Source: Architect 2026-11-10 and 2026-11-11
 
 #### Scenario: Round trip
 - **WHEN** a face is baked with a graph and then baked again with the channels read through its commit

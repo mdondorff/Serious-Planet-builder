@@ -4,7 +4,7 @@ The local change L of the new chain SHALL be stored as one record of kind 13 per
 
 Verify: A
 Status: planned
-Source: Architect D16 (inbox #115), item 14 (GEN-156), item 15
+Source: Architect 2026-11-10, item 14 (GEN-156), item 15
 
 #### Scenario: Round trip and refusals
 - **WHEN** a tile of L is written and read, and read under another base, parameters or version, and a payload is damaged

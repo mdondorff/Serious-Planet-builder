@@ -1,1 +1,1 @@
-- 2026-11-10 lake-shore: the water of a lake is its basin and the shore cells under the level that drain into it, not H1's label; a river is drawn over a dry basin slope down to the water's edge (GEN-163, D10).
+- 2026-11-10 lake-shore: the water of a lake is its basin and the shore cells under the level that drain into it, not H1's label; a river is drawn over a dry basin slope down to the water's edge (GEN-163).

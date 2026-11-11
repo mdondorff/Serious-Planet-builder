@@ -5,7 +5,7 @@ The width of a river SHALL be `w = a * Q_w^b` metres for a routed discharge `Q_w
 
 Verify: A
 Status: planned
-Source: Architect D6 point 2, D19/D20 (inbox #117), item 15
+Source: Architect 2026-11-10, item 15
 
 #### Scenario: Trench widths
 - **WHEN** a straight channel is burnt with `Q_w` of 100 m3/s into 10 m cells

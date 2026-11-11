@@ -4,7 +4,7 @@ The channel graph SHALL be tested at tier A: the codes (monotone, round trip, cl
 
 Verify: A
 Status: planned
-Source: GEN-170, STRM-084, architect D51
+Source: GEN-170, STRM-084, architect 2026-11-11
 
 #### Scenario: Cases
 - **WHEN** the tests of `bake_channel_graph`, `graph_store` and `l_graph` run
