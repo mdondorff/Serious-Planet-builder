@@ -78,7 +78,7 @@ fn a_node_samples_lie_where_the_cell_centres_of_its_window_are_by_the_face_mappi
     for k in [0u32, 5, 16] {
         let s = s0 + (s1 - s0) * f64::from(k) / 16.0;
         let x = (s + 1.0) * f64::from(GRID.cells) / 2.0 - 0.5;
-        assert!((origin.0 + f64::from(k) * step - x).abs() < 1e-9);
+        assert_eq!(origin.0 + f64::from(k) * step, x, "sample {k}: the mapping is exact");
     }
 }
 
@@ -112,8 +112,8 @@ fn nodes_coarser_than_the_limit_carry_no_coverage_and_the_limit_is_a_parameter()
     let (_, step) = node_window(coarse, 32, GRID.cells);
     assert_eq!(step, 4.0);
     assert!(plan_rivers(&request(&src, 32, 2.0), &[(0, coarse)]).unwrap().nodes.is_empty());
+    assert!(src.reads.lock().unwrap().is_empty(), "a refused node reads no tile");
     assert_eq!(plan_rivers(&request(&src, 32, 4.0), &[(0, coarse)]).unwrap().nodes.len(), 1, "with the limit at 4 cells it carries one");
-    assert!(src.reads.lock().unwrap().len() < 20, "a coarse node reads no tiles when it is refused");
 }
 
 // spec: REND-059, CON-30
@@ -153,4 +153,54 @@ fn a_failed_read_is_an_error_naming_the_tile_and_a_node_at_a_face_edge_reads_onl
     plan_rivers(&request(&src, 32, 2.0), &[(0, tile(2, 3, 0, 0)), (1, tile(2, 3, 7, 7))]).unwrap();
     assert!(src.reads.lock().unwrap().iter().all(|&(_, ti, tj)| ti < 4 && tj < 4), "{:?}", src.reads.lock().unwrap());
     assert_eq!(RANGE_CELLS, 4.0);
+}
+
+// spec: REND-059, CON-30
+#[test]
+fn a_node_and_its_child_give_the_same_codes_at_the_positions_they_share() {
+    // A river across the area of the level 3 node (1, 1); its level 4 child (2, 2) covers its lower-left quarter. The child's samples at even indices are the parent's samples: the codes agree bit for bit.
+    let src = Source::new(vec![channel(&[(30.0, 36.0), (70.0, 52.0)], q_for(5.0))]);
+    let (parent, child) = (tile(2, 3, 1, 1), tile(2, 4, 2, 2));
+    let p = plan_rivers(&request(&src, 32, 2.0), &[(0, parent), (1, child)]).unwrap();
+    let (pc, cc) = (&p.nodes[0].coverage, &p.nodes[1].coverage);
+    let mut shared = 0;
+    for l in 0..=16usize {
+        for k in 0..=16usize {
+            // The child's sample (2k, 2l) is at the parent's sample (k, l) of its lower-left quarter.
+            assert_eq!(cc[(2 * l) * 33 + 2 * k], pc[l * 33 + k], "sample ({k}, {l})");
+            shared += 1;
+        }
+    }
+    assert_eq!(shared, 289);
+}
+
+// spec: REND-059
+#[test]
+fn two_rivers_that_share_a_start_and_a_length_are_both_drawn() {
+    // A distributary: two pieces start at the same point with the same discharge and the same number of points, and part ways.
+    let a = channel(&[(40.0, 40.0), (60.0, 40.0)], q_for(3.0));
+    let b = channel(&[(40.0, 40.0), (40.0, 62.0)], q_for(3.0));
+    let src = Source::new(vec![a.clone(), b.clone()]);
+    let t = tile(2, 3, 1, 1);
+    let both = plan_rivers(&request(&src, 32, 2.0), &[(0, t)]).unwrap();
+    let (origin, step) = node_window(t, 32, GRID.cells);
+    let want = river_coverage_grid(&[a.clone(), b.clone()], origin, step);
+    assert_eq!(both.nodes[0].coverage, want, "the second piece is not dropped as a duplicate of the first");
+}
+
+// spec: REND-059
+#[test]
+fn a_plan_with_nothing_to_sample_or_a_bad_grid_is_an_error_not_a_panic() {
+    let src = Source::new(Vec::new());
+    for (res, limit) in [(0u32, 2.0), (32, f64::NAN), (32, f64::INFINITY), (32, 0.0)] {
+        assert!(plan_rivers(&request(&src, res, limit), &[(0, tile(2, 3, 1, 1))]).is_err(), "res {res}, limit {limit}");
+    }
+}
+
+// spec: REND-059
+#[test]
+#[should_panic(expected = "points of a channel are finite")]
+fn a_channel_point_that_is_not_finite_is_refused_with_a_message() {
+    let ch = channel(&[(f64::NEG_INFINITY, 5.0), (5.0, 5.0)], 1.0);
+    river_distance_grid(&[ch], (0.0, 0.0), 1.0, (8, 8), &LAW, GRID.cell_m);
 }

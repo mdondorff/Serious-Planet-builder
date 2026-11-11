@@ -53,6 +53,7 @@ pub fn river_distance_grid(
         assert!(ch.q.is_empty() || ch.q.len() == ch.points.len(), "a discharge for every point, or none");
         assert!(ch.q.is_empty() || ch.q_unit == QUnit::Discharge, "the river width needs a discharge in m3/s, not an area");
         assert!(ch.q.iter().all(|q| q.is_finite()), "the discharges of a channel are finite");
+        assert!(ch.points.iter().all(|p| p.0.is_finite() && p.1.is_finite()), "the points of a channel are finite");
         let q_of = |k: usize| if ch.q.is_empty() { 0.0 } else { ch.q[k] };
         let n = ch.points.len();
         // A single point is a segment of no length.
@@ -62,10 +63,10 @@ pub fn river_distance_grid(
             let (q0, q1) = (q_of(k), q_of((k + 1).min(n - 1)));
             let reach = drawn_width_cells(law, cell_m, q0).max(drawn_width_cells(law, cell_m, q1)) / 2.0 + RANGE_CELLS;
             // The texels (indices) a point within `reach` of the segment can have: one index of slack each way.
-            let x_lo = (libm::floor((p0.0.min(p1.0) - reach - ox) / step) as i64 - 1).max(0);
-            let x_hi = (libm::ceil((p0.0.max(p1.0) + reach - ox) / step) as i64 + 1).min(w as i64 - 1);
-            let y_lo = (libm::floor((p0.1.min(p1.1) - reach - oy) / step) as i64 - 1).max(0);
-            let y_hi = (libm::ceil((p0.1.max(p1.1) + reach - oy) / step) as i64 + 1).min(h as i64 - 1);
+            let x_lo = (libm::floor((p0.0.min(p1.0) - reach - ox) / step) as i64).saturating_sub(1).max(0);
+            let x_hi = (libm::ceil((p0.0.max(p1.0) + reach - ox) / step) as i64).saturating_add(1).min(w as i64 - 1);
+            let y_lo = (libm::floor((p0.1.min(p1.1) - reach - oy) / step) as i64).saturating_sub(1).max(0);
+            let y_hi = (libm::ceil((p0.1.max(p1.1) + reach - oy) / step) as i64).saturating_add(1).min(h as i64 - 1);
             let (dx, dy) = (p1.0 - p0.0, p1.1 - p0.1);
             let len2 = dx * dx + dy * dy;
             let half_at = |t: f64| drawn_width_cells(law, cell_m, q0 + (q1 - q0) * t) / 2.0;
@@ -160,7 +161,8 @@ pub struct RiverPlan {
 }
 
 /// Where the samples of terrain node `tile` (`res` cells an edge, `res + 1` samples) lie in the face's cell-index space on an L grid of `cells` cells an edge: the first sample's position and the distance between
-/// samples, in cells. The node's face coordinate `s` (the bake's own mapping: cell `i` has its centre at `s = 2 (i + 1/2) / cells - 1`) is at the cell-index position `(s + 1) cells / 2 - 1/2`.
+/// samples, in cells. Exact (every factor is a power of two or an integer) while the face edge is at most 2^20 cells and the node level at most 28; it takes the bake's own face mapping (`TangentWarp`, the only production
+/// one) for granted, as the L grid does. The node's face coordinate `s` (the bake's own mapping: cell `i` has its centre at `s = 2 (i + 1/2) / cells - 1`) is at the cell-index position `(s + 1) cells / 2 - 1/2`.
 pub fn node_window(tile: planet_core::TileId, res: u32, cells: u32) -> ((f64, f64), f64) {
     let (s0, s1, t0, _) = tile.bounds();
     let half = f64::from(cells) / 2.0;
@@ -172,6 +174,15 @@ pub fn node_window(tile: planet_core::TileId, res: u32, cells: u32) -> ((f64, f6
 /// channels come from the L tiles the node's window meets widened by the widest trench and the code's range; a channel handed out by two tiles counts once. An error names the tile that failed.
 pub fn plan_rivers(req: &RiverRequest<'_>, nodes: &[(u32, planet_core::TileId)]) -> Result<RiverPlan, String> {
     let grid = req.source.grid();
+    if req.res == 0 || !(req.max_step_cells.is_finite() && req.max_step_cells > 0.0) {
+        return Err(format!(
+            "the river plan needs a node of at least one cell and a finite positive step limit (res {}, limit {})",
+            req.res, req.max_step_cells
+        ));
+    }
+    if grid.tile == 0 || grid.cells == 0 || !grid.cells.is_multiple_of(grid.tile) {
+        return Err(format!("the river grid of {} cells a face edge is not a whole number of tiles of {} cells", grid.cells, grid.tile));
+    }
     let per_edge = i64::from(grid.cells / grid.tile);
     let reach = crate::river::reach_cells();
     let size = req.res as usize + 1;
@@ -182,6 +193,7 @@ pub fn plan_rivers(req: &RiverRequest<'_>, nodes: &[(u32, planet_core::TileId)])
             continue;
         }
         let span = f64::from(req.res) * step;
+        // The tile of a position is its floor; a cell centre `i` owns `[i - 1/2, i + 1/2)`, so near a tile's upper edge this can pick the tile below: harmless because the reader widens a tile by the widest trench.
         let range = |o: f64| {
             let lo = (libm::floor((o - reach) / f64::from(grid.tile)) as i64).clamp(0, per_edge - 1);
             let hi = (libm::floor((o + span + reach) / f64::from(grid.tile)) as i64).clamp(0, per_edge - 1);
@@ -193,13 +205,14 @@ pub fn plan_rivers(req: &RiverRequest<'_>, nodes: &[(u32, planet_core::TileId)])
         for tj in tj0..=tj1 {
             for ti in ti0..=ti1 {
                 for c in req.source.tile_channels(tile.face(), ti as u32, tj as u32)?.iter() {
-                    let key = (
-                        c.points[0].0.to_bits(),
-                        c.points[0].1.to_bits(),
-                        c.points.len(),
-                        c.q.first().map(|q| q.to_bits()),
-                        c.levels[0].to_bits(),
-                    );
+                    // The whole channel is the key: two pieces that share a start and a length are still two rivers.
+                    let key: Vec<u64> = c
+                        .points
+                        .iter()
+                        .flat_map(|p| [p.0.to_bits(), p.1.to_bits()])
+                        .chain(c.q.iter().map(|q| q.to_bits()))
+                        .chain(c.levels.iter().map(|l| l.to_bits()))
+                        .collect();
                     if seen.insert(key) {
                         channels.push(c.clone());
                     }
