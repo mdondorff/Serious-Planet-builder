@@ -316,3 +316,97 @@ fn a_field_whose_outlets_are_at_the_sea_keeps_the_bits_it_had_before_the_base_le
     z.iter().for_each(|v| d = (d ^ v.to_bits()).wrapping_mul(0x100_0000_01b3));
     assert_eq!(d, 0xb9e6_6858_0505_bf11, "the sea-outlet rounds moved: digest {d:016x}");
 }
+
+// spec: GEN-146
+/// The key of a catchment round holds every parameter `catchment_round` reads (inbox D28): flipping one changes the key, the same inputs keep it.
+#[test]
+fn catchment_key_holds_every_parameter_the_round_reads() {
+    use planet_generators::bake::carve::CarveParams;
+    use planet_generators::bake::round::{catchment_key, CatchmentInputs};
+    let grid = Grid::new(4, 3, 100.0);
+    let cells = [0u32, 1, 2, 3];
+    let inp = CatchmentInputs {
+        z: vec![10.0, 20.0, 30.0, 40.0],
+        receiver: vec![u32::MAX, 0, 1, 2],
+        area: vec![4e4, 3e4, 2e4, 1e4],
+        dist: vec![100.0; 4],
+        taper: vec![1.0; 4],
+        receiver_is_outlet: vec![false; 4],
+        scale: vec![1.0; 4],
+        up_unit: vec![0.0; 4],
+    };
+    let p = CarveParams { round_rules: RoundRules::ROUND, ..CarveParams::default() };
+    let key = catchment_key(&grid, &cells, &inp, &p);
+    assert_eq!(key, catchment_key(&grid, &cells, &inp.clone(), &p.clone()), "identical inputs keep the key");
+    let changed: Vec<(&str, CarveParams)> = vec![
+        ("clip_mfd", CarveParams { round_rules: RoundRules::default(), ..p }),
+        ("k_dt", CarveParams { k_dt: p.k_dt * 1.5, ..p }),
+        ("epsilon", CarveParams { epsilon: p.epsilon * 2.0, ..p }),
+        ("breach_slope", CarveParams { breach_slope: p.breach_slope + 1e-3, ..p }),
+        ("breach_max_m", CarveParams { breach_max_m: p.breach_max_m + 1.0, ..p }),
+        ("breach_height_scale_m", CarveParams { breach_height_scale_m: p.breach_height_scale_m + 100.0, ..p }),
+        ("sea_level", CarveParams { sea_level: p.sea_level + 1.0, ..p }),
+        ("keep_pits", CarveParams { keep_pits: !p.keep_pits, ..p }),
+        ("incise_only", CarveParams { incise_only: !p.incise_only, ..p }),
+        ("reroute_every", CarveParams { reroute_every: p.reroute_every + 1, ..p }),
+    ];
+    for (name, q) in changed {
+        assert_ne!(key, catchment_key(&grid, &cells, &inp, &q), "flipping {name} must change the catchment key");
+    }
+}
+
+// spec: GEN-146
+/// D31: a catchment round visits its members in `Routing.order` (the depth-first walk of the donors from the outlet in cell-id order, the `cut` order), a function of the ids and the receivers, which are
+/// key inputs. The key hashes the members in that order, and a round on the same members in another order is not a key match.
+#[test]
+fn the_catchment_key_is_the_members_in_the_routing_order_and_another_order_does_not_match() {
+    use planet_generators::bake::carve::CarveParams;
+    use planet_generators::bake::round::{catchment_key, cut_in, gather, CatchmentInputs};
+    let z = terrain(5, true);
+    let g = Grid::new(N, N, 1000.0);
+    let outlet = g.outlets(&z, 0.0);
+    let p = CarveParams { round_rules: RoundRules::ROUND, ..CarveParams::default() };
+    let r = route_rules(&g, &z, &outlet, p.epsilon, 5, 0.0, None, RoundRules::ROUND);
+    let cuts = cut_in(Some(&g), &r);
+    let taper: Vec<f32> = z.iter().map(|h| planet_core::smoothstep(0.0, p.uplift_taper_m, h - p.sea_level) as f32).collect();
+    let k = (0..cuts.members.len()).max_by_key(|&k| cuts.members[k].len()).unwrap();
+    let cells = cuts.members[k].clone();
+    assert!(cells.len() > 50, "a catchment with something to permute");
+    // (a) the members are the catchment's cells in the order of the routing, the outlet first.
+    let root = catchment_roots(&r.receiver, &r.order);
+    let in_order: Vec<u32> = r.order.iter().copied().filter(|&c| root[c as usize] == root[cells[0] as usize]).collect();
+    assert_eq!(cells, in_order, "the members of a catchment are in the order of `Routing.order`");
+    let inp = gather(&g, &z, &outlet, &r, &cuts, &taper, &p, k);
+    let key = catchment_key(&g, &cells, &inp, &p);
+    assert_eq!(
+        key,
+        catchment_key(&g, &cells, &gather(&g, &z, &outlet, &r, &cuts, &taper, &p, k), &p),
+        "the same members in the same order: the same key"
+    );
+    // (b) the same members and the same data in another order (two members past the outlet swapped; the receivers are positions, so they are re-pointed): not a key match.
+    let n = cells.len();
+    let mut perm: Vec<usize> = (0..n).collect();
+    perm.swap(n / 3, n / 3 + 1);
+    let mut inverse = vec![0usize; n];
+    for (new, &old) in perm.iter().enumerate() {
+        inverse[old] = new;
+    }
+    let pick = |v: &Vec<f64>| perm.iter().map(|&o| v[o]).collect::<Vec<_>>();
+    let permuted = CatchmentInputs {
+        z: pick(&inp.z),
+        receiver: perm
+            .iter()
+            .map(|&o| if inp.receiver[o] == u32::MAX { u32::MAX } else { inverse[inp.receiver[o] as usize] as u32 })
+            .collect(),
+        area: pick(&inp.area),
+        dist: pick(&inp.dist),
+        taper: perm.iter().map(|&o| inp.taper[o]).collect(),
+        receiver_is_outlet: perm.iter().map(|&o| inp.receiver_is_outlet[o]).collect(),
+        scale: pick(&inp.scale),
+        up_unit: pick(&inp.up_unit),
+    };
+    let cells_permuted: Vec<u32> = perm.iter().map(|&o| cells[o]).collect();
+    assert_ne!(key, catchment_key(&g, &cells_permuted, &permuted, &p), "a round on the same members in another order is not a key match");
+    // The cell ids alone in another order, the data kept: not a match either (the key hashes the members in the order they are given).
+    assert_ne!(key, catchment_key(&g, &cells_permuted, &inp, &p), "the member list is part of the key in its order");
+}

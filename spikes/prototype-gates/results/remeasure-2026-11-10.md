@@ -53,6 +53,8 @@ Findings:
 
 ## 3. G-SURF and G-SURF-I (`gate_surf`)
 
+**Correction 2026-11-11: the G-SURF-I numbers in this section were measured on code from before the units fix (D33) and are the bug, not a change of K7; see `gsurfi-reread-2026-11-11.md`.**
+
 The tile (65, 7) of face 1 seed 14 is built as `k7_region` builds it (library code: lattice, regional solve, H1 channels, K7 with the channels burned in; 17.3 s). The gate is measured by own code: Catmull-Rom read with the clamp to the four cells, `L = z - B` quantised to i16 steps of 0.25 m, the vertices of the store lattice (every 6 local cells, `B` the lattice's stored node value), the cell centres.
 
 | Quantity | Own | Library `surface_gate` | Ledger rows (ea6b1b2b) |
