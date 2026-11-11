@@ -20,7 +20,7 @@ Closure checklist (every phase):
 - Changes whose code is merged and complete: specs synced to `openspec/specs/`, change archived, `design.md` and `tasks.md` deleted (ADR 0055).
 - A3, ADRs 0110-0115 and this briefing agree with the decisions and the code (architect); `docs/status.md` current (bulldozer).
 - Worktrees of merged branches pruned (bulldozer; removal only with the owner's yes).
-- Learnings recorded; the decisions of the phase in the repo, not only in the inbox file.
+- Learnings recorded. Every lasting decision of the phase is in its home (the ledger, a change's design and spec deltas, A3, the ADRs, the briefing). The architect's working channel to bulldozer is not archived (owner, 2026-11-11).
 
 P0 list:
 - Archive the finished changes (each coding lane its own; during waits on machine slots).

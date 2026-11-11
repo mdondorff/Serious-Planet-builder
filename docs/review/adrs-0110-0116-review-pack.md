@@ -368,4 +368,4 @@ Source: external review of constitution v1.6 (owner, 2026-11-11; the PDF is not 
 - The briefing with phases and items: `docs/briefings/terrain-prototype.md`.
 - The ADR review pass by spikes: `spikes/prototype-gates/results/adr-review-pass.md`; the repository audit: `spikes/repo-audit/results/audit.md`.
 - The replan: `spikes/architecture-replan/results/results.md` (SPIKE-105; D1-D10 in §13.5).
-- The architect's decisions of 2026-11-10/11 (D1-D38) live in `C:/DEV/planner-inbox/architect-decisions.md`, outside the repository. Those that changed the contract are carried into A3, the ADRs and the briefing's contract-change lines.
+- The architect's rulings reach the lanes through a working channel that is not part of the record (owner, 2026-11-11). Every ruling that changed the contract is in A3, the ADRs, the specs, the ledger or the briefing's contract-change lines; the "D" numbers cited here are those rulings' labels.
