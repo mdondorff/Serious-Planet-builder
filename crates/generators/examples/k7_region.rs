@@ -212,7 +212,10 @@ fn main() {
         println!("{} channel segments meet the window", channels.len());
         // The trench widths of the width law in metres and in local cells (a local cell is about pi R / 2 / LOCAL metres): the check that Q is a discharge.
         let cell_m = std::f64::consts::FRAC_PI_2 * R / LOCAL as f64;
-        let mut widths: Vec<f64> = channels.iter().flat_map(|ch| ch.q.iter().filter(|&&q| q > 0.0).map(|&q| 7.2 * q.sqrt())).collect();
+        let mut widths: Vec<f64> = channels
+            .iter()
+            .flat_map(|ch| ch.q.iter().filter(|&&q| q > 0.0).map(|&q| K7Params::standard(seed, 0.0).width.width_m(q)))
+            .collect();
         widths.sort_by(f64::total_cmp);
         if let Some(&max) = widths.last() {
             let at = |f: f64| widths[((widths.len() - 1) as f64 * f) as usize];

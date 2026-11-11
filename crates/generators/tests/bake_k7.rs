@@ -476,4 +476,10 @@ fn an_area_without_the_law_burns_the_line_and_a_discharge_is_accepted_by_the_law
     let na = burn_channels_wide(&mut a, 64, (0, 0), &[mk(QUnit::Area)], None);
     let nb = burn_channels_wide(&mut b, 64, (0, 0), &[mk(QUnit::Discharge)], Some((&WidthLaw::STANDARD, 10.0)));
     assert!(na > 0 && nb > 0);
+    // Without the law the unit changes nothing: an area and a discharge burn the same cells to the same levels.
+    let (mut c, mut d) = (vec![100.0; 64 * 64], vec![100.0; 64 * 64]);
+    let nc = burn_channels_wide(&mut c, 64, (0, 0), &[mk(QUnit::Area)], None);
+    let nd = burn_channels_wide(&mut d, 64, (0, 0), &[mk(QUnit::Discharge)], None);
+    assert_eq!(nc, nd);
+    assert!(c.iter().zip(&d).all(|(x, y)| x.to_bits() == y.to_bits()));
 }

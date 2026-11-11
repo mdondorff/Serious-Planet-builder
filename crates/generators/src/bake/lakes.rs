@@ -197,6 +197,7 @@ pub fn water_cells<'a>(grid: &Grid, routing: &Routing, hydro: &'a Hydro, z: &'a 
 
 /// Cut the segments of a hydrology at the cells `water` says are under water: the pieces of the segments that lose a cell (first cell, count, `Q_w` at both ends) and the number of cells dropped.
 pub fn cut_segments(hydro: &Hydro, routing: &Routing, water: &dyn Fn(usize) -> bool) -> (Vec<RiverPiece>, usize) {
+    assert_discharge(hydro);
     let mut pieces: Vec<RiverPiece> = Vec::new();
     let mut dropped_cells = 0usize;
     for s in &hydro.segments {

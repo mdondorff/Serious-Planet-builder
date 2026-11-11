@@ -468,3 +468,17 @@ fn the_producer_refuses_an_area() {
     assert_eq!(hydro.q_unit, QUnit::Area);
     let _ = lakes_from_hydro(&g, &routing, &hydro, &z);
 }
+
+// spec: GEN-165
+/// `cut_segments` writes `q_first` and `q_last`: it refuses an area too (the reviewer's gap, D35).
+#[test]
+#[should_panic(expected = "the producer stores discharges")]
+fn cut_segments_refuses_an_area() {
+    let g = Grid::new(W, W, 800.0);
+    let z = vec![10.0; W * W];
+    let outlet = g.outlets(&z, 0.0);
+    let routing = route_rules(&g, &z, &outlet, EPS, 3, 0.0, None, RoundRules::ROUND);
+    let filled = priority_flood_with(&g, &z, &outlet, EPS, true);
+    let hydro = hydrology(&g, &z, &filled, &routing, &outlet, None, None, &small_t());
+    let _ = cut_segments(&hydro, &routing, &|_| true);
+}
