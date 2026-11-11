@@ -92,6 +92,32 @@ pub struct PreRelease {
     pub dropped_cells: usize,
     pub water: Vec<(u32, u32)>,
     pub ring: Vec<(u32, u32)>,
+    /// Where the segments go under water (D54): `(segment index, first vertex, end vertex)`, vertices `first..end` of the segment's chain are under a lake's water (or its dead ground); the vertex before `first` is the
+    /// lake entry and the one at `end` is the spill cell, where the river continues. Sorted by segment and vertex.
+    pub cuts: Vec<(u32, u32, u32)>,
+}
+
+/// The runs of vertices of each segment that are under water, as [`PreRelease::cuts`]: the walk of [`cut_segments`] without the discharges (the last vertex of a segment, its `down` cell, is never cut: it starts the next).
+pub fn lake_cut_ranges(hydro: &Hydro, routing: &Routing, water: &dyn Fn(usize) -> bool) -> Vec<(u32, u32, u32)> {
+    let mut out = Vec::new();
+    for (index, s) in hydro.segments.iter().enumerate() {
+        let mut cur = s.up as usize;
+        let mut open: Option<u32> = None;
+        for k in 0..s.cells {
+            if water(cur) {
+                open.get_or_insert(k);
+            } else if let Some(first) = open.take() {
+                out.push((index as u32, first, k));
+            }
+            let next = routing.receiver[cur];
+            assert!(next != NONE, "a segment reaches its end cell");
+            cur = next as usize;
+        }
+        if let Some(first) = open {
+            out.push((index as u32, first, s.cells));
+        }
+    }
+    out
 }
 
 /// The longest receiver chain followed from a cell next to a lake's water to see whether it drains into the lake (a cell that drains into it meets its water within a few steps; the bound keeps the cost
@@ -292,7 +318,8 @@ pub fn river_pieces(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &[f64]) ->
     let rank = basin_ranks(hydro);
     let cells = water.lake_cells(&rank);
     let ring = ring_cells(grid, routing, hydro, &rank, &cells);
-    PreRelease { pieces, dropped_cells, water: cells, ring }
+    let cuts = lake_cut_ranges(hydro, routing, &|c| water.contains(c));
+    PreRelease { pieces, dropped_cells, water: cells, ring, cuts }
 }
 
 /// The place of each basin of the hydrology among the basins by id (the index of its lake in [`Lakes::lakes`]).

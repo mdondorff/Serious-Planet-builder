@@ -66,6 +66,8 @@ pub struct ChannelGraph {
     dir: Vec<u8>,
     q: Vec<u16>,
     bed: Vec<i16>,
+    /// Where segments go under a lake (D54): `(segment index, first vertex, end vertex)`, sorted; see [`PreRelease::cuts`](super::lakes::PreRelease).
+    cuts: Vec<(u32, u32, u32)>,
 }
 
 /// One segment of the graph.
@@ -111,6 +113,7 @@ impl ChannelGraph {
             dir: Vec::new(),
             q: Vec::new(),
             bed: Vec::new(),
+            cuts: Vec::new(),
         };
         for sg in &hydro.segments {
             let mut cur = sg.up as usize;
@@ -141,6 +144,27 @@ impl ChannelGraph {
         g
     }
 
+    /// Records where the segments go under a lake (the producer's cuts, [`super::lakes::lake_cut_ranges`]): sorted, inside the segments and not empty.
+    pub fn set_cuts(&mut self, cuts: Vec<(u32, u32, u32)>) {
+        assert!(cuts.windows(2).all(|w| (w[0].0, w[0].1) < (w[1].0, w[1].1)), "the cuts are sorted by segment and vertex");
+        assert!(
+            cuts.iter().all(|&(s, a, b)| (s as usize) < self.verts.len() && a < b && b < self.verts[s as usize]),
+            "a cut lies inside its segment and leaves its last vertex"
+        );
+        self.cuts = cuts;
+    }
+
+    /// The cuts of segment `index`: vertex ranges under water.
+    pub fn cuts_of(&self, index: usize) -> &[(u32, u32, u32)] {
+        let lo = self.cuts.partition_point(|c| (c.0 as usize) < index);
+        let hi = self.cuts.partition_point(|c| (c.0 as usize) <= index);
+        &self.cuts[lo..hi]
+    }
+
+    pub fn cuts(&self) -> &[(u32, u32, u32)] {
+        &self.cuts
+    }
+
     pub fn segments(&self) -> usize {
         self.first.len()
     }
@@ -151,7 +175,7 @@ impl ChannelGraph {
 
     /// The bytes the arrays hold.
     pub fn bytes(&self) -> usize {
-        self.first.len() * 4 + self.verts.len() * 4 + self.dir.len() + self.q.len() * 2 + self.bed.len() * 2
+        self.first.len() * 4 + self.verts.len() * 4 + self.dir.len() + self.q.len() * 2 + self.bed.len() * 2 + self.cuts.len() * 12
     }
 
     /// Calls `f` for every segment in order.

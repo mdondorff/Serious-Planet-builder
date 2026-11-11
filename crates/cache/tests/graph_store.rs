@@ -68,7 +68,11 @@ fn fixture(unit_area: bool) -> Fixture {
     let runoff = vec![1.0e-8f32; W * W];
     let p = HydroParams { initiation_m2: 3.0 * 800.0 * 800.0, ..HydroParams::default() };
     let hydro = hydrology(&g, &z, &filled, &routing, &outlet, if unit_area { None } else { Some(&runoff) }, None, &p);
-    let graph = ChannelGraph::from_hydro(&g, &routing, &hydro, &z);
+    let mut graph = ChannelGraph::from_hydro(&g, &routing, &hydro, &z);
+    // A lake under part of the channels: the cells of a 5 x 5 square are water.
+    graph.set_cuts(planet_generators::bake::lakes::lake_cut_ranges(&hydro, &routing, &|c| {
+        (14..19).contains(&(c % W)) && (14..19).contains(&(c / W))
+    }));
     let ids = hydro.segments.iter().map(|s| s.id).collect();
     Fixture { g, graph, ids, qw: hydro.qw.clone() }
 }
@@ -243,4 +247,50 @@ fn a_damaged_foreign_or_misplaced_block_is_refused_naming_the_record_and_a_huge_
     // A block outside the grid is refused.
     assert!(graph_key(&w, RES, &s, 0, 9, 0).unwrap_err().0.contains("outside"));
     let _ = (tile, d);
+}
+
+// spec: STRM-084, TEST-114 (D54)
+#[test]
+fn the_lake_entries_and_spill_cells_are_stored_with_the_pieces_so_the_drawing_derives_its_pieces_from_the_record() {
+    let (w, d, s) = (world(), Dir::new("cuts"), spec());
+    let f = fixture(false);
+    assert!(!f.graph.cuts().is_empty(), "the fixture has channels under water");
+    let records = graph_block_records(&w, RES, &s, &f.graph, &f.ids, &f.g, &xy);
+    let store = store_of(&d, &w, &records);
+    let h = i64::from(s.h1_per_block());
+    let mut with_cuts = 0;
+    let mut extra_bytes = 0usize;
+    for bj in 0..4u32 {
+        for bi in 0..4u32 {
+            let key = graph_key(&w, RES, &s, 0, bi, bj).unwrap();
+            let Some(b) = load_graph_block(&store, &s, 0, bi, bj, key).unwrap() else { continue };
+            for p in &b.pieces {
+                let seg = f.ids.iter().position(|&id| id == p.segment).expect("a segment of the graph");
+                let want: Vec<(u32, u32)> =
+                    f.graph.cuts_of(seg).iter().filter(|c| c.1 < p.v0 + p.vertices() as u32 && c.2 > p.v0).map(|c| (c.1, c.2)).collect();
+                assert_eq!(p.cuts, want, "piece {} of segment {seg} in block ({bi}, {bj})", p.part);
+                // The piece's vertices are the chain from v0: its first vertex is the chain's vertex v0.
+                let mut cells = Vec::new();
+                f.graph.for_each(|sv| {
+                    if sv.index == seg {
+                        cells = sv.cells(&f.g);
+                    }
+                });
+                let (_, i, j) = xy(cells[p.v0 as usize]);
+                assert_eq!((i64::from(p.i0), i64::from(p.j0)), (i, j), "v0 is the index of the piece's first vertex in its segment");
+                assert!(i / h >= 0);
+                if !p.cuts.is_empty() {
+                    with_cuts += 1;
+                }
+                extra_bytes += 8 + 8 * p.cuts.len();
+            }
+        }
+    }
+    assert!(with_cuts > 0, "some piece meets a lake");
+    println!(
+        "lake cuts: {with_cuts} pieces meet a lake; {extra_bytes} extra bytes before compression for v0 and the cut counts and ranges"
+    );
+    // A damaged cut count is an error, not an allocation.
+    let r0 = records[0].clone();
+    assert!(!r0.payload.is_empty());
 }

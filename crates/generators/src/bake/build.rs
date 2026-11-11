@@ -214,7 +214,8 @@ pub fn build_resident(
     mark("hydrology");
     // The pieces of the river segments carry `Q_w` at their ends: they are cut now and are the only part of the lake producer that reads the discharges (GEN-163, D22).
     let pre = river_pieces(grid, &routing, &hy, &z);
-    let graph = ChannelGraph::from_hydro(grid, &routing, &hy, &z);
+    let mut graph = ChannelGraph::from_hydro(grid, &routing, &hy, &z);
+    graph.set_cuts(pre.cuts.clone());
     mark("channel graph");
     lap("river pieces", &mut phases);
     mark("river pieces");

@@ -159,3 +159,86 @@ fn a_cell_one_step_outside_a_face_resolves_across_the_cube_edge_as_the_graph_joi
     assert_eq!(p.cell_at_face(0, -1, 3), None);
     assert_eq!(p.cell_at_face(1, 2, 3), None);
 }
+
+// spec: GEN-170, TEST-114
+#[test]
+fn the_lake_cuts_of_the_graph_are_the_producers_pieces_and_a_lake_entry_and_spill_cell_are_in_the_chain() {
+    use planet_generators::bake::lakes::{lake_cut_ranges, lakes_from_hydro, river_pieces, water_cells};
+    // A bowl with a river through it (as the lake producer's tests): the producer cuts the segments that go under water into pieces.
+    let g = Grid::new(W, W, 800.0);
+    let mut z: Vec<f64> = (0..W * W).map(|p| 500.0 + 10.0 * (p % W) as f64).collect();
+    for j in 10..16 {
+        for i in 10..16 {
+            z[j * W + i] = 300.0;
+        }
+    }
+    z[12 * W + 12] = 280.0;
+    let outlet = g.outlets(&z, 0.0);
+    let routing = route_rules(&g, &z, &outlet, EPS, 3, 0.0, None, RoundRules::ROUND);
+    let filled = priority_flood_with(&g, &z, &outlet, EPS, true);
+    let runoff = vec![1.0e-8f32; W * W];
+    let p = HydroParams { initiation_m2: 3.0 * 800.0 * 800.0, ..HydroParams::default() };
+    let hydro = hydrology(&g, &z, &filled, &routing, &outlet, Some(&runoff), None, &p);
+    let lakes = lakes_from_hydro(&g, &routing, &hydro, &z);
+    assert!(!lakes.pieces.is_empty() && lakes.dropped_cells > 0, "the fixture has a river under a lake");
+    let pre = river_pieces(&g, &routing, &hydro, &z);
+    let mut graph = ChannelGraph::from_hydro(&g, &routing, &hydro, &z);
+    graph.set_cuts(pre.cuts.clone());
+    // The dropped cells are the cut vertices; the pieces are the runs between the cuts.
+    assert_eq!(pre.cuts.iter().map(|c| (c.2 - c.1) as usize).sum::<usize>(), lakes.dropped_cells);
+    let water = water_cells(&g, &routing, &hydro, &z);
+    let mut pieces_seen = 0;
+    graph.for_each(|s| {
+        let cells = s.cells(&g);
+        let seg = &hydro.segments[s.index];
+        let cuts = graph.cuts_of(s.index);
+        // Every cut vertex is under water, the vertex before it (the lake entry) and the one at its end (the spill cell) are not, and they are in the chain.
+        for &(_, a, b) in cuts {
+            assert!((a..b).all(|k| water.contains(cells[k as usize] as usize)));
+            if a > 0 {
+                assert!(!water.contains(cells[a as usize - 1] as usize), "the lake entry is out of the water");
+            }
+            assert!((b as usize) < cells.len());
+            if b < seg.cells {
+                assert!(!water.contains(cells[b as usize] as usize), "the spill cell is out of the water");
+            } else if water.contains(cells[b as usize] as usize) {
+                // The water runs on into the next segment (it starts under water): its cut begins at vertex 0.
+                assert!(
+                    graph.cuts_of(seg.downstream as usize).first().is_some_and(|c| c.1 == 0),
+                    "the river continues under water in the downstream segment"
+                );
+            }
+        }
+        // The runs between the cuts (over the segment's cells, its end cell excluded) are the producer's pieces, in order and numbered from 0.
+        let mut runs: Vec<(u32, u32)> = Vec::new();
+        let mut start = 0u32;
+        for &(_, a, b) in cuts {
+            if a > start {
+                runs.push((start, a));
+            }
+            start = b;
+        }
+        if start < seg.cells {
+            runs.push((start, seg.cells));
+        }
+        let mine: Vec<_> = lakes.pieces.iter().filter(|p| p.segment == seg.id).collect();
+        if cuts.is_empty() {
+            assert!(mine.is_empty(), "a segment with no cut has no piece");
+        } else {
+            assert_eq!(mine.len(), runs.len(), "segment {}", s.index);
+            for (part, (m, r)) in mine.iter().zip(&runs).enumerate() {
+                assert_eq!(
+                    (m.part as usize, m.first, m.cells),
+                    (part, cells[r.0 as usize], r.1 - r.0),
+                    "piece {part} of segment {}",
+                    s.index
+                );
+                pieces_seen += 1;
+            }
+        }
+    });
+    assert_eq!(pieces_seen, lakes.pieces.len());
+    // The cuts are part of the stated bytes.
+    assert_eq!(graph.bytes(), graph.segments() * 8 + graph.vertices() * 5 + graph.cuts().len() * 12);
+    assert_eq!(lake_cut_ranges(&hydro, &routing, &|c| water.contains(c)), pre.cuts);
+}
