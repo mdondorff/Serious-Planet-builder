@@ -76,6 +76,10 @@ impl LayerSpec {
         if c.window_cut {
             b.push(0xC5);
         }
+        // The f32 round surface (GEN-166) likewise: a byte only when on.
+        if c.round_f32 {
+            b.push(0xC6);
+        }
         b.extend((c.steps as u64).to_le_bytes());
         b.extend((c.reroute_every as u64).to_le_bytes());
         b.extend(self.inputs_id.to_le_bytes());
@@ -283,6 +287,7 @@ mod tests {
             CarveParams { keep_pits: false, ..base.carve },
             CarveParams { cell_metric: true, ..base.carve },
             CarveParams { window_cut: true, ..base.carve },
+            CarveParams { round_f32: true, ..base.carve },
             CarveParams { round_rules: planet_generators::bake::route::RoundRules::ROUND, ..base.carve },
             CarveParams {
                 round_rules: planet_generators::bake::route::RoundRules { canonical_flood: true, ..Default::default() },
