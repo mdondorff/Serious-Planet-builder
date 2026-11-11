@@ -1,0 +1,130 @@
+== synthetic land terraced, salt 1: 96 x 96 cells of 800 m, uniform metric; land (not outlet) 83.5 %
+box land cells 4572
+
+-- static measures on the surface z0 (the start surface)
+  probe MFD against the library: U 0 cells differ, C 0 cells differ (of 9216)
+  F passes built in 0.0 s
+  land cells 7696; catchment-border land cells 5002 (65.0 % of land); catchments of more than one cell 498
+  A_d against U, by distance in cells from a catchment border (ratio V / U):
+  [C]
+    0: 5002 cells; ratio outside 0.9-1.1: 3292 (65.8 %); p5 0.386 p50 0.961 p95 1.518 min 0.008 max 4.060
+    1: 1510 cells; ratio outside 0.9-1.1: 467 (30.9 %); p5 0.842 p50 1.014 p95 1.275 min 0.365 max 3.006
+    2: 734 cells; ratio outside 0.9-1.1: 64 (8.7 %); p5 0.919 p50 1.005 p95 1.110 min 0.678 max 1.475
+    3-4: 449 cells; ratio outside 0.9-1.1: 10 (2.2 %); p5 0.941 p50 0.999 p95 1.062 min 0.869 max 1.319
+    5-8: 1 cells; ratio outside 0.9-1.1: 0 (0.0 %); p5 1.004 p50 1.004 p95 1.004 min 1.004 max 1.004
+    >8 (control): 0 cells; ratio outside 0.9-1.1: 0 (0.0 %); p5 NaN p50 NaN p95 NaN min NaN max NaN
+  [ToRecv]
+    0: 5002 cells; ratio outside 0.9-1.1: 3305 (66.1 %); p5 0.380 p50 0.941 p95 1.563 min 0.007 max 4.068
+    1: 1510 cells; ratio outside 0.9-1.1: 415 (27.5 %); p5 0.827 p50 1.000 p95 1.256 min 0.361 max 3.318
+    2: 734 cells; ratio outside 0.9-1.1: 70 (9.5 %); p5 0.917 p50 1.000 p95 1.115 min 0.690 max 1.473
+    3-4: 449 cells; ratio outside 0.9-1.1: 10 (2.2 %); p5 0.942 p50 0.997 p95 1.062 min 0.872 max 1.320
+    5-8: 1 cells; ratio outside 0.9-1.1: 0 (0.0 %); p5 1.003 p50 1.003 p95 1.003 min 1.003 max 1.003
+    >8 (control): 0 cells; ratio outside 0.9-1.1: 0 (0.0 %); p5 NaN p50 NaN p95 NaN min NaN max NaN
+  [F1]
+    0: 5002 cells; ratio outside 0.9-1.1: 1495 (29.9 %); p5 0.701 p50 0.962 p95 1.000 min 0.026 max 1.000
+    1: 1510 cells; ratio outside 0.9-1.1: 68 (4.5 %); p5 0.904 p50 0.993 p95 1.000 min 0.556 max 1.000
+    2: 734 cells; ratio outside 0.9-1.1: 5 (0.7 %); p5 0.960 p50 0.997 p95 1.000 min 0.777 max 1.000
+    3-4: 449 cells; ratio outside 0.9-1.1: 0 (0.0 %); p5 0.977 p50 0.996 p95 1.000 min 0.923 max 1.000
+    5-8: 1 cells; ratio outside 0.9-1.1: 0 (0.0 %); p5 0.995 p50 0.995 p95 0.995 min 0.995 max 0.995
+    >8 (control): 0 cells; ratio outside 0.9-1.1: 0 (0.0 %); p5 NaN p50 NaN p95 NaN min NaN max NaN
+  [F2]
+    0: 5002 cells; ratio outside 0.9-1.1: 280 (5.6 %); p5 0.894 p50 0.996 p95 1.000 min 0.646 max 1.000
+    1: 1510 cells; ratio outside 0.9-1.1: 5 (0.3 %); p5 0.970 p50 1.000 p95 1.000 min 0.843 max 1.000
+    2: 734 cells; ratio outside 0.9-1.1: 0 (0.0 %); p5 0.990 p50 1.000 p95 1.000 min 0.909 max 1.000
+    3-4: 449 cells; ratio outside 0.9-1.1: 0 (0.0 %); p5 0.994 p50 1.000 p95 1.000 min 0.983 max 1.000
+    5-8: 1 cells; ratio outside 0.9-1.1: 0 (0.0 %); p5 0.998 p50 0.998 p95 0.998 min 0.998 max 0.998
+    >8 (control): 0 cells; ratio outside 0.9-1.1: 0 (0.0 %); p5 NaN p50 NaN p95 NaN min NaN max NaN
+  [F3]
+    0: 5002 cells; ratio outside 0.9-1.1: 9 (0.2 %); p5 0.967 p50 1.000 p95 1.000 min 0.846 max 1.000
+    1: 1510 cells; ratio outside 0.9-1.1: 0 (0.0 %); p5 0.993 p50 1.000 p95 1.000 min 0.913 max 1.000
+    2: 734 cells; ratio outside 0.9-1.1: 0 (0.0 %); p5 0.998 p50 1.000 p95 1.000 min 0.954 max 1.000
+    3-4: 449 cells; ratio outside 0.9-1.1: 0 (0.0 %); p5 0.999 p50 1.000 p95 1.000 min 0.993 max 1.000
+    5-8: 1 cells; ratio outside 0.9-1.1: 0 (0.0 %); p5 1.000 p50 1.000 p95 1.000 min 1.000 max 1.000
+    >8 (control): 0 cells; ratio outside 0.9-1.1: 0 (0.0 %); p5 NaN p50 NaN p95 NaN min NaN max NaN
+  [F4]
+    0: 5002 cells; ratio outside 0.9-1.1: 0 (0.0 %); p5 0.991 p50 1.000 p95 1.000 min 0.948 max 1.000
+    1: 1510 cells; ratio outside 0.9-1.1: 0 (0.0 %); p5 0.998 p50 1.000 p95 1.000 min 0.974 max 1.000
+    2: 734 cells; ratio outside 0.9-1.1: 0 (0.0 %); p5 1.000 p50 1.000 p95 1.000 min 0.990 max 1.000
+    3-4: 449 cells; ratio outside 0.9-1.1: 0 (0.0 %); p5 1.000 p50 1.000 p95 1.000 min 0.999 max 1.000
+    5-8: 1 cells; ratio outside 0.9-1.1: 0 (0.0 %); p5 1.000 p50 1.000 p95 1.000 min 1.000 max 1.000
+    >8 (control): 0 cells; ratio outside 0.9-1.1: 0 (0.0 %); p5 NaN p50 NaN p95 NaN min NaN max NaN
+  land cells by number of lower neighbours: U weights (0: 0.00 %, 1: 6.4 %, 2: 7.8 %, 3+: 85.8 %); C weights (0: 0.00 %, 1: 21.2 %, 2: 22.7 %, 3+: 56.2 %)
+  border cells whose C area is under half their U area: 449 of 5002 (9.0 %)
+  channel cells (A_d >= 75 km^2): U 52, heads 12
+  [C] channel cells 53; membership differs from U on 7 cells = 13.46 % of U's channel cells; heads 13 of which 2 are more than 2 cells from a U head
+  [ToRecv] channel cells 53; membership differs from U on 7 cells = 13.46 % of U's channel cells; heads 13 of which 2 are more than 2 cells from a U head
+  [F1] channel cells 48; membership differs from U on 4 cells = 7.69 % of U's channel cells; heads 11 of which 0 are more than 2 cells from a U head
+  [F2] channel cells 51; membership differs from U on 1 cells = 1.92 % of U's channel cells; heads 12 of which 0 are more than 2 cells from a U head
+  [F3] channel cells 52; membership differs from U on 0 cells = 0.00 % of U's channel cells; heads 12 of which 0 are more than 2 cells from a U head
+  [F4] channel cells 52; membership differs from U on 0 cells = 0.00 % of U's channel cells; heads 12 of which 0 are more than 2 cells from a U head
+  outlet closure: relative gap |A_d(outlet) - sum of members' cell areas| / sum, over catchments of 2+ cells:
+    [U] p50 3.844e-1 p95 2.549e0 max 3.330e1; area-weighted 4.258e-1
+    [C] p50 0.000e0 p95 1.908e-16 max 4.176e-16; area-weighted 1.129e-16
+    [ToRecv] p50 0.000e0 p95 2.176e-16 max 8.353e-16; area-weighted 1.361e-16
+    [F1] p50 3.920e-1 p95 1.385e0 max 2.976e1; area-weighted 4.375e-1
+    [F2] p50 3.810e-1 p95 2.131e0 max 3.237e1; area-weighted 4.117e-1
+    [F3] p50 3.851e-1 p95 2.320e0 max 3.306e1; area-weighted 4.228e-1
+    [F4] p50 3.858e-1 p95 2.490e0 max 3.321e1; area-weighted 4.246e-1
+    [F1] whole land: 7696 cells; ratio outside 0.9-1.1: 1568 (20.4 %); p5 0.747 p50 0.985 p95 1.000 min 0.026 max 1.000
+    [F2] whole land: 7696 cells; ratio outside 0.9-1.1: 285 (3.7 %); p5 0.914 p50 0.999 p95 1.000 min 0.646 max 1.000
+    [F3] whole land: 7696 cells; ratio outside 0.9-1.1: 9 (0.1 %); p5 0.975 p50 1.000 p95 1.000 min 0.846 max 1.000
+    [F4] whole land: 7696 cells; ratio outside 0.9-1.1: 0 (0.0 %); p5 0.994 p50 1.000 p95 1.000 min 0.948 max 1.000
+
+-- rounds: 4 rounds of 5 steps, true cell metric; the noise floor is the same variant under a second jitter seed
+  [U] solved in 0.0 s
+  [C] solved in 0.1 s
+  [ToRecv] solved in 0.1 s
+  [F1] solved in 0.1 s
+  [F2] solved in 0.1 s
+  [UaCb] solved in 0.1 s
+  [CaUb] solved in 0.1 s
+  [F2aUb] solved in 0.1 s
+  probe round loop (C) against solve_rounds: 0 cells differ (4 rounds)
+  change against the start surface (U): 
+    U - z0: n 4572; dz p5 -236.55 p50 -117.05 p95 -3.75 m, mean -122.339; |dz| p50 117.04 p95 236.21 max 358.4 m; higher in the first on 0.1 % of cells
+  noise floor: the same variant under the second jitter seed
+    U seed A - seed B: n 4572; dz p5 -28.47 p50 0.00 p95 30.49 m, mean 0.453; |dz| p50 5.90 p95 41.11 max 151.2 m; higher in the first on 46.4 % of cells
+    C seed A - seed B: n 4572; dz p5 -39.73 p50 0.00 p95 43.81 m, mean 0.529; |dz| p50 10.55 p95 54.70 max 160.4 m; higher in the first on 47.5 % of cells
+  displacement against U (same seed):
+    C - U: n 4572; dz p5 -19.95 p50 0.00 p95 27.47 m, mean 1.249; |dz| p50 4.43 p95 34.39 max 116.9 m; higher in the first on 46.3 % of cells
+    ToRecv - U: n 4572; dz p5 -20.50 p50 0.00 p95 28.35 m, mean 1.610; |dz| p50 4.33 p95 35.25 max 120.9 m; higher in the first on 48.4 % of cells
+    F1 - U: n 4572; dz p5 -0.13 p50 0.95 p95 11.68 m, mean 2.748; |dz| p50 1.00 p95 11.81 max 54.9 m; higher in the first on 82.6 % of cells
+    F2 - U: n 4572; dz p5 -0.05 p50 0.13 p95 3.01 m, mean 0.614; |dz| p50 0.15 p95 3.14 max 25.2 m; higher in the first on 78.1 % of cells
+    UaCb - U: n 4572; dz p5 -0.00 p50 0.00 p95 0.00 m, mean 0.005; |dz| p50 0.00 p95 0.00 max 1.5 m; higher in the first on 24.3 % of cells
+    CaUb - U: n 4572; dz p5 -20.33 p50 0.00 p95 27.47 m, mean 1.235; |dz| p50 4.43 p95 34.39 max 116.9 m; higher in the first on 46.2 % of cells
+    F2aUb - U: n 4572; dz p5 -0.05 p50 0.12 p95 3.01 m, mean 0.610; |dz| p50 0.14 p95 3.14 max 25.2 m; higher in the first on 77.5 % of cells
+  surface statistics on the box land:
+    [z0] ridge cells 15.07 %, valley cells 11.33 %; max-descent slope p5 0.0002 p50 0.1061 p95 0.2121; height p10 62 p50 362 p90 722 m; 3x3 relief p50 180.1 p95 360.1 m
+    [U] ridge cells 14.17 %, valley cells 10.15 %; max-descent slope p5 0.0201 p50 0.1067 p95 0.2031; height p10 10 p50 227 p90 614 m; 3x3 relief p50 217.4 p95 387.1 m
+    [C] ridge cells 16.25 %, valley cells 11.70 %; max-descent slope p5 0.0200 p50 0.1094 p95 0.2103; height p10 12 p50 230 p90 613 m; 3x3 relief p50 221.8 p95 400.7 m
+    [ToRecv] ridge cells 16.45 %, valley cells 11.79 %; max-descent slope p5 0.0201 p50 0.1095 p95 0.2121; height p10 12 p50 231 p90 614 m; 3x3 relief p50 222.7 p95 395.1 m
+    [F1] ridge cells 14.26 %, valley cells 10.15 %; max-descent slope p5 0.0218 p50 0.1075 p95 0.2024; height p10 11 p50 231 p90 616 m; 3x3 relief p50 220.3 p95 382.4 m
+    [F2] ridge cells 14.15 %, valley cells 10.15 %; max-descent slope p5 0.0211 p50 0.1068 p95 0.2032; height p10 11 p50 228 p90 615 m; 3x3 relief p50 217.7 p95 388.6 m
+    [UaCb] ridge cells 14.17 %, valley cells 10.17 %; max-descent slope p5 0.0201 p50 0.1067 p95 0.2031; height p10 10 p50 227 p90 614 m; 3x3 relief p50 217.4 p95 387.1 m
+    [CaUb] ridge cells 16.25 %, valley cells 11.72 %; max-descent slope p5 0.0200 p50 0.1094 p95 0.2105; height p10 12 p50 230 p90 613 m; 3x3 relief p50 221.8 p95 400.8 m
+    [F2aUb] ridge cells 14.15 %, valley cells 10.13 %; max-descent slope p5 0.0211 p50 0.1068 p95 0.2032; height p10 11 p50 228 p90 615 m; 3x3 relief p50 217.7 p95 388.5 m
+  surface statistics of U under the second seed (the floor of the statistics above):
+    [U seed B] ridge cells 14.48 %, valley cells 10.21 %; max-descent slope p5 0.0195 p50 0.1069 p95 0.2019; height p10 11 p50 227 p90 611 m; 3x3 relief p50 221.1 p95 390.4 m
+  steps across catchment borders against interior steps (slope between neighbours; the roots are those of U's routing of the start surface):
+    [U] across borders: 4232 pairs, mean slope 0.05404, p95 0.14990; interior: 13274 pairs, mean 0.07421, p95 0.17439; ratio of means 0.728
+    [C] across borders: 4232 pairs, mean slope 0.05443, p95 0.15598; interior: 13274 pairs, mean 0.07606, p95 0.18071; ratio of means 0.716
+    [ToRecv] across borders: 4232 pairs, mean slope 0.05436, p95 0.15544; interior: 13274 pairs, mean 0.07623, p95 0.18172; ratio of means 0.713
+    [F1] across borders: 4232 pairs, mean slope 0.05404, p95 0.14743; interior: 13274 pairs, mean 0.07424, p95 0.17326; ratio of means 0.728
+    [F2] across borders: 4232 pairs, mean slope 0.05404, p95 0.14943; interior: 13274 pairs, mean 0.07419, p95 0.17387; ratio of means 0.728
+    [UaCb] across borders: 4232 pairs, mean slope 0.05404, p95 0.14990; interior: 13274 pairs, mean 0.07421, p95 0.17439; ratio of means 0.728
+    [CaUb] across borders: 4232 pairs, mean slope 0.05444, p95 0.15616; interior: 13274 pairs, mean 0.07606, p95 0.18069; ratio of means 0.716
+    [F2aUb] across borders: 4232 pairs, mean slope 0.05404, p95 0.14943; interior: 13274 pairs, mean 0.07420, p95 0.17387; ratio of means 0.728
+    [U seed B] across borders: 4232 pairs, mean slope 0.05369, p95 0.15015; interior: 13274 pairs, mean 0.07430, p95 0.17595; ratio of means 0.723
+    [z0] across borders: 4232 pairs, mean slope 0.04943, p95 0.15002; interior: 13274 pairs, mean 0.07010, p95 0.15906; ratio of means 0.705
+  channels on each variant's final surface, with its own area:
+    U: 43 channel cells in the box
+    U seed B (the floor): 43 channel cells in the box; membership differs from U seed A on 20 = 46.51 % of U's
+    C: 44 channel cells in the box; membership differs from U on 7 = 16.28 % of U's
+    ToRecv: 46 channel cells in the box; membership differs from U on 9 = 20.93 % of U's
+    F1: 39 channel cells in the box; membership differs from U on 4 = 9.30 % of U's
+    F2: 43 channel cells in the box; membership differs from U on 0 = 0.00 % of U's
+    UaCb: 43 channel cells in the box; membership differs from U on 0 = 0.00 % of U's
+    CaUb: 44 channel cells in the box; membership differs from U on 7 = 16.28 % of U's
+    F2aUb: 43 channel cells in the box; membership differs from U on 0 = 0.00 % of U's
+hillshade crop: window cells i 0-95 j 0-95 of the box, panels U, C, UaCb, CaUb, F2aUb
+renders in target\review\mfd-synth-terraced-1
