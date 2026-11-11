@@ -34,6 +34,7 @@ fn dist(a: (f64, f64), x: i64, y: i64) -> f64 {
 }
 
 // spec: GEN-168
+// spec: TEST-110
 #[test]
 fn the_burn_matches_the_width_law_on_a_straight_a_diagonal_and_a_curved_channel() {
     for (name, f, len, tol) in &shapes() {
