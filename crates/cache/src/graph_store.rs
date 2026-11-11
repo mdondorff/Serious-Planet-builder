@@ -174,6 +174,7 @@ pub fn graph_block_records(
 ) -> Vec<Record> {
     assert_eq!(ids.len(), graph.segments(), "one id per segment");
     let h = i64::from(spec.h1_per_block());
+    assert!(h >= 2, "a block is at least 2 H1 cells a side (the margin reaches the neighbouring block only from 2 up), it is {h}");
     let n = i64::from(spec.h1_cells);
     let mut blocks: BTreeMap<(u8, u32, u32), Vec<Piece>> = BTreeMap::new();
     graph.for_each(|s| {
@@ -321,13 +322,19 @@ pub fn load_graph_block(
     if p[23..39] != key.0 {
         return Err(what("the key inside the payload is not the record key".into()));
     }
+    // A block holds at most one vertex of any segment in each of its (h + 2)^2 cells (a cell is on one segment), each with at most 5 bytes and a piece header of 24: the bound of a body.
+    let side = u64::from(spec.h1_per_block()) + 2;
+    let max_body = ((side * side * 32 + 4096) as usize).min(MAX_BODY);
     let mut body = Vec::new();
     brotli::Decompressor::new(&p[HEADER_LEN..], BROTLI_BUFFER)
-        .take(MAX_BODY as u64 + 1)
+        .take(max_body as u64 + 1)
         .read_to_end(&mut body)
         .map_err(|e| what(format!("its pieces do not decompress: {e}")))?;
-    if body.len() > MAX_BODY {
-        return Err(what(format!("its pieces decode to more than {MAX_BODY} bytes")));
+    if body.len() > max_body {
+        return Err(what(format!(
+            "its pieces decode to more than the {max_body} bytes a block of {} H1 cells a side can hold",
+            spec.h1_per_block()
+        )));
     }
     if count > body.len() / PIECE_FIXED {
         return Err(what(format!("{count} pieces cannot fit in {} bytes", body.len())));

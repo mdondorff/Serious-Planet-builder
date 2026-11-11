@@ -57,14 +57,14 @@ fn the_q_code_is_monotone_round_trips_and_is_within_the_step() {
         assert_eq!(q_code(v), c, "code {c} round trips");
         prev = v;
     }
-    // The relative error of a read is at most half a step, 1.9e-4; the width 7.2 sqrt(Q) half of it.
+    // The relative error of a read is at most half a step, 1.94e-4; the width 7.2 sqrt(Q) half of it.
     let mut worst = 0.0f64;
     let mut q = 2.0e-4;
     while q < 5.0e6 {
         worst = worst.max(((q_value(q_code(q)) - q) / q).abs());
         q *= 1.0137;
     }
-    assert!(worst <= 1.95e-4, "worst relative error {worst}");
+    assert!(worst <= 1.94e-4, "worst relative error {worst}");
     println!("q code: step {:.3e}, worst relative error {worst:.3e}", q_value(2) / q_value(1) - 1.0);
 }
 
@@ -101,7 +101,7 @@ fn the_graph_holds_the_routings_chains_q_w_and_a_bed_that_does_not_rise() {
             }
             let want = r.hydro.qw[c as usize];
             let got = q_value(s.q[k]);
-            assert!(((got - want) / want).abs() <= 1.95e-4, "vertex {k} of segment {}: {got} against {want}", s.index);
+            assert!(((got - want) / want).abs() <= 1.94e-4, "vertex {k} of segment {}: {got} against {want}", s.index);
             level = level.min(r.z[c as usize]);
             assert_eq!(s.bed[k], bed_code(level), "the bed is the running minimum");
         }
@@ -109,7 +109,7 @@ fn the_graph_holds_the_routings_chains_q_w_and_a_bed_that_does_not_rise() {
         vertices += cells.len();
     });
     assert_eq!(graph.vertices(), vertices);
-    assert!(graph.max_q_rel_error <= 1.95e-4 && graph.max_q_rel_error > 0.0, "the stated error: {}", graph.max_q_rel_error);
+    assert!(graph.max_q_rel_error <= 1.94e-4 && graph.max_q_rel_error > 0.0, "the stated error: {}", graph.max_q_rel_error);
     assert_eq!(graph.bytes(), graph.segments() * 8 + vertices * 5, "8 bytes a segment, 5 a vertex (direction, Q_w code, bed code)");
     println!("graph: {} segments, {} vertices, {} bytes", graph.segments(), vertices, graph.bytes());
 }

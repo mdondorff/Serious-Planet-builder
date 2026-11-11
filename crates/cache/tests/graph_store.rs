@@ -97,11 +97,7 @@ fn every_vertex_is_in_the_block_of_its_cell_and_the_pieces_round_trip_through_a_
     let h = i64::from(s.h1_per_block());
     let mut blocks = std::collections::BTreeMap::new();
     for r in &records {
-        // The record is under the key of its block, read back by that key.
-        let tile = r.tile;
         assert_eq!(r.kind, KIND_CHANNEL_GRAPH);
-        let (face, bi, bj) = (0u8, 0u32, 0u32);
-        let _ = (tile, face, bi, bj);
     }
     for bj in 0..4u32 {
         for bi in 0..4u32 {
@@ -128,12 +124,19 @@ fn every_vertex_is_in_the_block_of_its_cell_and_the_pieces_round_trip_through_a_
         }
     });
     assert!(checked > 100);
-    // Q_w read from a piece is the dequantised code of the f64 within the step.
-    let p = &blocks.values().next().unwrap().pieces[0];
-    for &q in &p.q {
-        assert!(q == 0 || q_value(q) > 0.0);
+    // Q_w of every stored vertex is the dequantised code of the f64 within the step.
+    for b in blocks.values() {
+        for p in &b.pieces {
+            for (v, &(i, j)) in p.coords().iter().enumerate() {
+                let want = f.qw[(j as usize) * W + i as usize];
+                assert!(
+                    p.q[v] != 0 && ((q_value(p.q[v]) - want) / want).abs() <= 1.94e-4,
+                    "vertex ({i}, {j}): {} against {want}",
+                    q_value(p.q[v])
+                );
+            }
+        }
     }
-    assert!(f.qw.iter().any(|&q| q > 0.0));
     // The same input gives the same bytes (CON-14).
     let again = graph_block_records(&w, RES, &s, &f.graph, &f.ids, &f.g, &xy);
     assert_eq!(

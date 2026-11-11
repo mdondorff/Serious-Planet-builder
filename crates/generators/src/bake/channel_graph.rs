@@ -2,8 +2,8 @@
 //! and K7's burn and the river drawing read.
 //!
 //! - A segment is its vertices from `up` to `down` (both included); consecutive vertices are 8-neighbours, so the chain is one cell index and one direction (`Grid::neighbour`) a step.
-//! - `Q_w` is a `u16` on a log scale (D51, ADR 0114 point 4): code 0 is no discharge, codes 1..=65535 span [`Q_CODE_MIN`], [`Q_CODE_MAX`] m3/s in equal ratios, a relative step of about 3.9e-4 (so a read is within
-//!   1.9e-4 of the stored discharge and a width `7.2 sqrt(Q)` within 1e-4). K7's burn reads the dequantised value, so the burn and the drawing use the same width (D6) and a fresh build and a re-solve agree (CON-29).
+//! - `Q_w` is a `u16` on a log scale (D51, ADR 0114 point 4): code 0 is no discharge, codes 1..=65535 span [`Q_CODE_MIN`], [`Q_CODE_MAX`] m3/s in equal ratios, a relative step of 3.87e-4 (so a read is within
+//!   1.94e-4 of the stored discharge and a width `7.2 sqrt(Q)` within 0.97e-4). K7's burn reads the dequantised value, so the burn and the drawing use the same width (D6) and a fresh build and a re-solve agree (CON-29).
 //! - The bed level is the running minimum of the H1 surface along the segment (the channel never rises downstream), as an `i16` count of [`BED_STEP_M`]; the minimum of quantised values is the quantised minimum.
 //! - The arrays are built in the pre-release step, from the routing and `Q_w` that are released afterwards; they hold no pointers into either.
 
@@ -56,7 +56,7 @@ pub fn bed_value(code: i16) -> f64 {
 pub struct ChannelGraph {
     /// The unit of `Q_w` (a discharge in m3/s or an area): an area is refused by the consumers (D33).
     pub q_unit: QUnit,
-    /// The largest relative error of a stored `Q_w` against the f64 it was made from, over every vertex (at most half a step, 1.9e-4; the width `7.2 sqrt(Q)` is within half of it).
+    /// The largest relative error of a stored `Q_w` against the f64 it was made from, over every vertex (at most half a step, 1.94e-4; the width `7.2 sqrt(Q)` is within half of it).
     pub max_q_rel_error: f64,
     /// The first cell (the `up` cell) and the number of vertices of each segment.
     first: Vec<u32>,
