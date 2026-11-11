@@ -1,7 +1,7 @@
 # Planet builder: agent operating manual
 
 ## What this is
-A planet-scale generator, editor and real-time renderer: Rust + wgpu, one binary with three run modes (editor/viewer, `generate` headless CLI, `test-render` headless harness). Developed spec-first with OpenSpec. Primary machine: "Rasierklinge" (Windows 11, RTX 3080 Ti Laptop GPU, 16 GB).
+A planet-scale generator, editor and real-time renderer: Rust + wgpu, one binary with three run modes (editor/viewer, `generate` headless CLI, `test-render` headless harness). Developed spec-first with OpenSpec. Primary machine: "Rasierklinge" (Windows 11, RTX 3080 Ti Laptop GPU with 16 GB VRAM, 32 GB RAM).
 
 ## Sources of truth (highest first)
 1. `docs/constitution.md`: non-negotiable rules. Read it at the start of every session. Never edit it; propose amendments as ADRs.
@@ -12,6 +12,7 @@ A planet-scale generator, editor and real-time renderer: Rust + wgpu, one binary
 Working files: `docs/status.md` (forward state only: waiting for the owner, the current queue, the current stop report, tracked items), `docs/log.md` and `docs/log.d/` (the current milestone's log; read it with `cargo xtask log`), `docs/spikes.md` (spike register), `docs/learnings.md` (findings, each with a scope). Finished milestones are archived in `docs/archive/<M>/` by the `housekeeping` skill. `docs/README.md` maps every folder.
 
 ## Commands (always via xtask)
+- `cargo xtask` alone lists every command.
 - `cargo xtask test fast`: tier A for changed crates (<= 20 s; owner, 2026-10-16)
 - `cargo xtask test`: tiers A + B on the software adapter
 - `cargo xtask test gpu`: tier C goldens and debug views
@@ -20,7 +21,7 @@ Working files: `docs/status.md` (forward state only: waiting for the owner, the 
 - `cargo xtask accept <milestone>`: milestone acceptance
 - `cargo xtask repro <bundle>`: replay a repro bundle
 - `cargo xtask golden-review [--proposal <file>] [--extra <dir>]... [--apply]`: classify golden candidates under ADR 0017 (the `golden-review` skill)
-- `cargo xtask perf`: Rasierklinge only. The readiness gate (ADR 0020) refuses when the machine is not ready; perf runs need `sonnet-bulldozer`'s authorization: it coordinates the window, and a lane session started in the native Claude UI runs it on its go (owner, 2026-10-16). Coders never start one on their own. `--machine-ready` is the owner's override of a failed gate
+- `cargo xtask perf`: Rasierklinge only; the readiness gate (ADR 0020) refuses an unready machine (`--machine-ready`: the owner's override). Runs only in a window `sonnet-bulldozer` authorizes, by the lane it names (`docs/routing.md`)
 
 Until an xtask command exists, create it in `xtask/`, not a script. The shell is Git Bash on Windows; keep commands portable, never add `.sh` or `.ps1` files.
 
@@ -41,16 +42,14 @@ Specs, ADRs and working files are read by agents and the owner. Write definition
 - an ADR is at most about one page (Context up to 5 bullets, Decision as numbered one- or two-line points, Consequences); the current value of a number lives in the spec, not the ADR.
 
 ## Rules that are easy to break
-- The renderer executes a `FramePlan`; decisions live in GPU-free crates (CON-03).
-- f64 on the CPU, tile-local or camera-relative f32 on the GPU; no planet-radius values in shaders (CON-11).
-- `libm` for transcendentals in generator code; no thread-count-dependent results (CON-14).
+- Constitution rules most often broken: CON-03 (the renderer executes a `FramePlan`), CON-11 (no planet-radius values in shaders), CON-14 (`libm`, bit-exact on any thread count), CON-28 to CON-30 (CPU-only authority; incremental equals fresh; partitioning changes nothing).
 - Failure output must be actionable: numeric deltas, tile IDs, diff images in `target/review/`.
 - Bless goldens only through the `golden-review` skill's policy (ADR 0017): it auto-blesses rounding noise (also on lit, sky and water, ADR 0096) and declared changes per adapter (ADR 0061), and escalates the rest to the owner's `/bless`. Never copy a candidate into `tests/goldens/` by hand.
-- Never weaken, skip or delete a test to make a build green. Quarantine only with a tracking entry in `docs/status.md`.
+- Never weaken, skip or delete a test to make a build green (CON-31). Quarantine only with a tracking entry in `docs/status.md`.
 
 ## Git
 - One branch per OpenSpec change (`change/<id>`). Small commits.
-- Push the branch, open a PR with `gh pr create`. Merge (squash; who merges: `docs/routing.md`) only when CI is green on Windows and Linux and the verifier passed. A docs-only PR (only docs/, openspec/, .claude/, root `*.md`, `spikes/**/results/**`, `spikes/README.md`) runs the light `docs` check (spec-lint) and needs only it green (owner, 2026-10-16).
+- Push the branch, open a PR with `gh pr create`. Merge (squash; who merges: `docs/routing.md`) only when CI is green on Windows and Linux and the verifier passed; the PR body carries `Verifier: PASS <sha>` (pr-gate). A docs-only PR (only docs/, openspec/, .claude/, root `*.md`, `spikes/**/results/**`, `spikes/README.md`) runs the light `docs` check (spec-lint) and needs only it green (owner, 2026-10-16).
 - Before every push to a PR branch run `cargo xtask prepush` (check, test fast, and test gpu when the diff touches render, shaders or another golden-producing crate), while waiting is cheap. Lavapipe-only golden differences stay CI's job (owner, 2026-10-19).
 - After every push to a PR, start `gh pr checks <n> --watch` as a background command and act on its result (fix a failure, or verify and merge). Never end a turn with CI pending and no watch running (owner, 2026-10-18).
 - Worktrees only under `.claude/worktrees/`, never inside `target/` or a scratchpad. Remove yours once its PR is merged (`cargo xtask worktrees --prune`).

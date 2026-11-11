@@ -1,7 +1,7 @@
 # 0089 Relief classes drive the terrain's amplitude
 Status: accepted (owner, 2026-11-01; drafted by the spikes session for opus-planner)
 Date: 2026-11-01
-Source: SPIKE-55, SPIKE-65 to SPIKE-83 (`spikes/m9-*/results/results.md`); `docs/briefings/m9-decisions.md` sections 2, 5 and 6; ADR 0016, 0026, 0028, 0030, 0045, 0066, 0076, 0080, 0088; CON-02, CON-06, CON-07, CON-14
+Source: SPIKE-55, SPIKE-65 to SPIKE-83 (`spikes/m9-*/results/results.md`); `docs/archive/M9/briefings/m9-decisions.md` sections 2, 5 and 6; ADR 0016, 0026, 0028, 0030, 0045, 0066, 0076, 0080, 0088; CON-02, CON-06, CON-07, CON-14
 
 ## Context
 - Relief below about 20 km comes from per-landform amplitude; hills and mountains are 4-9x too gentle today (SPIKE-55, SPIKE-65, SPIKE-66).
@@ -45,3 +45,5 @@ Source: SPIKE-55, SPIKE-65 to SPIKE-83 (`spikes/m9-*/results/results.md`); `docs
 
 ## Licences of adopted code or techniques
 None. The plate mask is a spherical Voronoi tessellation with Euler-pole rotations, a textbook construction; no code adopted.
+
+Maintained: 2026-11-11, links: the M9 briefings moved to docs/archive/M9/briefings (audit batch A, owner 2026-11-11).

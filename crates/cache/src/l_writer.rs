@@ -256,6 +256,9 @@ fn l_tile(b: &LBake, id: PassTile) -> Result<crate::pack::Record, String> {
     let (w, t, h) = (g.window(), g.tile, g.halo);
     let (i0, j0) = (i64::from(id.ti) * t as i64 - h as i64, i64::from(id.tj) * t as i64 - h as i64);
     let channels = b.feed.channels_near(id.face, i0, j0, w as i64);
+    if channels.iter().any(|c| c.q_unit != planet_generators::bake::k7::QUnit::Discharge) {
+        return Err(format!("tile {}/{}/{}: a channel carries Q_w as an area, not a discharge in m3/s (D33)", id.face.0, id.ti, id.tj));
+    }
     let r = k7_tile(g, id, b.base, b.regional, &channels, &b.spec.k7, b.threads);
     let last = &r.pits.last().expect("K7 reports the pits after the whole pass").1;
     let stats = LTileStats {

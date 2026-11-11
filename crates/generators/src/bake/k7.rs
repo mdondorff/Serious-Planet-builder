@@ -8,6 +8,7 @@ use super::carve::{carve, CarveParams};
 use super::deposit::{deposit_on_own_route_flood, spread_pits, DepositParams, Kc};
 use super::flood::priority_flood_with;
 use super::hydro::Hydro;
+pub use super::hydro::QUnit;
 use super::map::catmull_rom;
 use super::route::{MfdClip, RoundRules, Routing, NONE};
 use super::thermal::thermal;
@@ -62,6 +63,8 @@ pub struct Channel {
     pub levels: Vec<f64>,
     /// The routed discharge `Q_w` in m3/s at each point (K6's), which the width law turns into the width of the trench; empty: every point is one cell wide.
     pub q: Vec<f64>,
+    /// The unit of `q`: the width law refuses an area (m2), which is what H1 returns without the runoff.
+    pub q_unit: QUnit,
 }
 
 /// The channels of a hydrology on the local grid (the in-memory feed of the bake writer, GEN-167): one [`Channel`] per segment, its points the cells from `up` to `down` (both included) mapped by `to_local`
@@ -87,7 +90,12 @@ pub fn channels_from_hydro(hydro: &Hydro, routing: &Routing, zs: &[f64], to_loca
                     level
                 })
                 .collect();
-            Channel { points: cells.iter().map(|&c| to_local(c)).collect(), levels, q: cells.iter().map(|&c| hydro.qw[c]).collect() }
+            Channel {
+                points: cells.iter().map(|&c| to_local(c)).collect(),
+                levels,
+                q: cells.iter().map(|&c| hydro.qw[c]).collect(),
+                q_unit: hydro.q_unit,
+            }
         })
         .collect()
 }
@@ -129,6 +137,10 @@ pub fn burn_channels_wide(z: &mut [f64], w: usize, (i0, j0): (i64, i64), channel
     for ch in channels {
         assert!(ch.points.len() == ch.levels.len() && !ch.points.is_empty(), "a level for every point");
         assert!(ch.q.is_empty() || ch.q.len() == ch.points.len(), "a discharge for every point, or none");
+        assert!(
+            law.is_none() || ch.q.is_empty() || ch.q_unit == QUnit::Discharge,
+            "the width law needs a discharge in m3/s: H1 returned an area in m2 (no runoff); pass the runoff to hydrology"
+        );
         assert!(ch.q.iter().all(|q| q.is_finite()), "the discharges of a channel are finite");
         let width_cells = |q: f64| law.map_or(0.0, |(l, cell_m)| l.width_m(q) / cell_m);
         let bounds = (i0, i0 + w as i64 - 1, j0, j0 + w as i64 - 1);

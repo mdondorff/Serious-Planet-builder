@@ -21,7 +21,7 @@ your agent memory (confirm it against main) and `C:/DEV/planner-inbox/`. Work in
 | CI | `gh pr checks <n> --watch` after every push; act on the result |
 | `docs/status.md` | forward state only; under 15 KB (`docs/spikes.md` under 10240 B) |
 | ID reservations | record each with date, lane and purpose |
-| Gate ledger, lane state | upkeep from `cargo xtask gates` and `cargo xtask lanes` (BUILD-041, BUILD-043, in progress) |
+| Gate ledger, lane state | upkeep from `cargo xtask gates` and `cargo xtask lanes` (BUILD-041, BUILD-043) |
 | Briefing item-state column | item content and order belong to the architect |
 | Perf windows | only for measurements `docs/status.md` or the briefing lists, never because lanes are idle; check stray processes first; no CPU in a quiet half |
 | Summaries | owner status; push-notify only execution blockers, quiet 22:00-07:00, one summary after |
@@ -35,7 +35,7 @@ When the current briefing lists a next item that is not blocked, you give that o
 Golden candidates: you run `golden-review` and escalate to the owner's `/bless`. Send a golden to the architect only when the question is whether the intended look or a contract number is right.
 
 ## Merging
-Merge conditions are in the "Git" section of `CLAUDE.md` and enforced by the `pr-gate` check (BUILD-044 once built). In addition, you:
+Merge conditions are in the "Git" section of `CLAUDE.md` and enforced by the `pr-gate` check (BUILD-044). In addition, you:
 - read the checks in a separate command from the merge;
 - send a PR to the architect for review before merging it if it departs from an accepted ADR, changes a contract number or claims to close a gate;
 - watch main's post-merge CI after every merge.

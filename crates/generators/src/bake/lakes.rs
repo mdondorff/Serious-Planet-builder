@@ -13,7 +13,7 @@
 //!   and the cut segments, not a second copy of the rivers.
 //! - The result is a pure function of the hydrology: lakes are in the order of their id, pieces in the order of the segments (CON-14).
 
-use super::hydro::{Basin, BasinClass, Hydro, CURVE_STEPS};
+use super::hydro::{Basin, BasinClass, Hydro, QUnit, CURVE_STEPS};
 use super::route::{Routing, NONE};
 use super::Grid;
 use std::collections::HashSet;
@@ -227,6 +227,7 @@ pub fn water_cells<'a>(grid: &Grid, routing: &Routing, hydro: &'a Hydro, z: &'a 
 
 /// Cut the segments of a hydrology at the cells `water` says are under water: the pieces of the segments that lose a cell (first cell, count, `Q_w` at both ends) and the number of cells dropped.
 pub fn cut_segments(hydro: &Hydro, routing: &Routing, water: &dyn Fn(usize) -> bool) -> (Vec<RiverPiece>, usize) {
+    assert_discharge(hydro);
     let mut pieces: Vec<RiverPiece> = Vec::new();
     let mut dropped_cells = 0usize;
     for s in &hydro.segments {
@@ -283,6 +284,7 @@ pub fn lakes_with_tiles(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &[f64]
 
 /// The part of the producer that reads the discharges (`Q_w` at the ends of the pieces): the river pieces and the number of cells dropped. Run it before the discharges are released (D22); it holds nothing back, so the rest ([`lake_records`]) can run after the release.
 pub fn river_pieces(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &[f64]) -> PreRelease {
+    assert_discharge(hydro);
     assert!(hydro.qw.len() == grid.len(), "the producer needs Q_w: run it before the discharges are released");
     assert!(routing.receiver.len() == grid.len(), "one receiver per cell");
     let water = water_cells(grid, routing, hydro, z);
@@ -341,8 +343,14 @@ fn ring_cells(grid: &Grid, routing: &Routing, hydro: &Hydro, rank: &[u32], water
     out
 }
 
+/// What the producer stores (`q_first`, `q_last`, `q_out`) is a discharge in m3/s: it refuses a hydrology run without the runoff, whose `Q` is an area in m2 (the units bug of 2026-11-10, D35).
+fn assert_discharge(hydro: &Hydro) {
+    assert!(hydro.q_unit == QUnit::Discharge, "the producer stores discharges (q_first, q_last, q_out) in m3/s: H1 returned an area in m2 (no runoff); pass the runoff to hydrology");
+}
+
 /// The lake records of the kept basins, by id (`q_out` is the basin's own, kept by H1; no discharge field is read).
 pub fn lake_records(grid: &Grid, hydro: &Hydro) -> Vec<Lake> {
+    assert_discharge(hydro);
     let mut lakes = basin_lakes(grid, hydro);
     lakes.sort_unstable_by_key(|l| l.id);
     lakes
@@ -374,8 +382,8 @@ fn basin_lakes(grid: &Grid, hydro: &Hydro) -> Vec<Lake> {
         })
         .collect()
 }
-
 fn produce(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &[f64], tile_of: Option<&dyn Fn(usize) -> TileRef>) -> Lakes {
+    assert_discharge(hydro);
     assert!(hydro.qw.len() == grid.len(), "the producer needs Q_w: run it before the discharges are released");
     assert!(routing.receiver.len() == grid.len(), "one receiver per cell");
     let mut lakes = basin_lakes(grid, hydro);

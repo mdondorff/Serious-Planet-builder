@@ -1,6 +1,6 @@
 # M9 Realistic terrain: plan and iterations
 Status: active; split into M9.1 and M9.2 (owner, 2026-11-06) (started 2026-11-01 with the owner's M9 decisions; plan written by opus-planner, 2026-11-02; re-planned 2026-11-04 after the erosion preview). Updated at every iteration boundary; an iteration closes with a line per item: done, carried or dropped.
-Sources: `docs/briefings/m9-decisions.md`; ADR 0088, 0089, 0091, 0092 (proposed); `docs/roadmap.md`.
+Sources: `docs/archive/M9/briefings/m9-decisions.md`; ADR 0088, 0089, 0091, 0092 (proposed); `docs/roadmap.md`.
 
 ## Split (owner, 2026-11-06)
 - **M9.1 Bake-ready:** everything that changes baked heights, the proof that it works together, and milestone-closure diligence. Ends with the owner's go for the planet bake (gate below).

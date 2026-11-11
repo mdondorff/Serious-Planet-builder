@@ -114,3 +114,9 @@ Scope: project (GEN-159, GEN-141, A3 6.4)
 What happened: the sediment pass flooded with the plain `priority_flood` (FIFO for flats) while the rounds and H1 use the canonical flood; its pit count was 1.0 times H1's at 3,072 cells, 2.2 times at 6,144 and 18.5 times at 12,288 on one surface. A fixture shows the FIFO overtaking a lower heap entry on a flat chain; that it captures a whole valley is inferred from the scale trend. With the canonical flood the definitions agree (0.26 % and 0.35 % pits after the pass at k = 1 and 2).
 Assumption it changes: that the two floods differ only by tie order at epsilon scale; a statistic or sweep on the plain flood (K7, `deposit_on_own_route`, `fill_depth`) can be inflated on large flats.
 Obsolete when: the plain flood has no caller.
+
+## 2026-11-10 H1 without the runoff returns areas, not discharges
+Scope: project (GEN-165, GEN-145, A3 5.5)
+What happened: `hydrology(.., runoff None, ..)` makes `Q` and `Q_w` true areas in m2 (every local term is 1); `k7_region` called it that way and passed `hy.qw` to the width law `w = 7.2 Q^0.5` (m3/s), which cut trenches of tens to hundreds of km and 95,820,316 lowerings; the G-SURF-I bisect (ea6b1b2b..760bf0e7) found the first commit, 59a7deaa. With the runoff in m/s the widest channel of the prototype tile is 93.5 m (0.92 cells), the burn count is 4,631 again and the G-SURF-I numbers equal the old row.
+Assumption it changes: that a `Q` read from H1 is a discharge. `Hydro.q_unit` records which it is; the width law (`burn_channels_wide`) refuses a channel whose `q_unit` is an area.
+Obsolete when: H1 has no path without the runoff.

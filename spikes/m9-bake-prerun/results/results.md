@@ -2,7 +2,7 @@
 
 Opened: 2026-10-30
 Question: how long and how large is a 100 m bake of one cube face with the coupled run's network routed on the ground (SPIKE-60 recommendation 2) and a stream-power carve, extrapolated to the planet; does it fit the M9 draft's criterion 7 (10 h, about 28 GB)?
-Why it matters: M9 step R3 (`docs/briefings/m9-draft.md`); R4 (the bake) is sized from it.
+Why it matters: M9 step R3 (`docs/archive/M9/briefings/m9-draft.md`); R4 (the bake) is sized from it.
 Time box: 3 h of work plus machine hours overnight (opus-planner, 2026-10-30); used about 2.5 h and 1.3 h of machine time (20:28 to 21:33).
 Success criteria: measured time per phase and stored size on sampled tiles of a face, a planet extrapolation, and a yes or no against criterion 7 with what would change it.
 Fallback if it fails: report the phase that dominates and its scaling.

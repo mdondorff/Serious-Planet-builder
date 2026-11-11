@@ -241,7 +241,12 @@ fn the_records_do_not_depend_on_the_thread_count() {
 #[test]
 fn the_memory_feed_hands_out_the_segments_near_a_window() {
     use planet_cache::l_writer::MemoryFeed;
-    let ch = |x: f64, y: f64| Channel { points: vec![(x, y), (x + 1.0, y)], levels: vec![1.0, 0.5], q: vec![2.0, 3.0] };
+    let ch = |x: f64, y: f64| Channel {
+        points: vec![(x, y), (x + 1.0, y)],
+        levels: vec![1.0, 0.5],
+        q: vec![2.0, 3.0],
+        q_unit: planet_generators::bake::k7::QUnit::Discharge,
+    };
     let feed =
         MemoryFeed { face: Face(2), channels: vec![ch(50.0, 50.0), ch(400.0, 400.0), ch(30.0, 60.0), ch(-10.0, 60.0)], discharge: true };
     let got = feed.channels_near(Face(2), 40, 40, 40);

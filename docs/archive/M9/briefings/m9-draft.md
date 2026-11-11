@@ -1,6 +1,6 @@
 # M9 Realistic terrain: draft plan
 Status: draft for the owner's decision after the away week (drafted by the spikes session for opus-planner, 2026-10-30)
-Sources: roadmap M9 and its design constraints (2026-10-28); `docs/briefings/week-2026-11-02.md` section 3 (R1 to R8); SPIKE-55, SPIKE-56, SPIKE-57, SPIKE-58, SPIKE-60; `openspec/changes/shadow-clipmap-march` (#941), `openspec/changes/terrain-scorecard` (#942); owner test 2026-10-27 (`docs/milestones/M8/owner-test-2026-10-27/README.md`); ADR 0076 (open), ADR 0084 (not pursued), ADR 0085, ADR 0086, ADR 0087; M8 report, improvement 4 (a stop rule in every criterion that depends on a new subsystem).
+Sources: roadmap M9 and its design constraints (2026-10-28); `docs/archive/M9/briefings/week-2026-11-02.md` section 3 (R1 to R8); SPIKE-55, SPIKE-56, SPIKE-57, SPIKE-58, SPIKE-60; `openspec/changes/shadow-clipmap-march` (#941), `openspec/changes/terrain-scorecard` (#942); owner test 2026-10-27 (`docs/milestones/M8/owner-test-2026-10-27/README.md`); ADR 0076 (open), ADR 0084 (not pursued), ADR 0085, ADR 0086, ADR 0087; M8 report, improvement 4 (a stop rule in every criterion that depends on a new subsystem).
 
 ## Goal
 - Hill and mountain terrain that reads as real at 300 m, 30 m and 1.8 m against the owner's look reference, measured against GLO-30 (scorecard) and judged by the owner.

@@ -11,7 +11,7 @@ Code location: none in the repo; phase 2 drove the existing scenes with scratch 
 Closed: 2026-10-30 (phase 2: about 1.5 h of machine time, 18:44 to 19:54).
 
 ## Inputs read
-- `cargo xtask log` (M8), `git log` of main since 2026-10-20 (window commits with times), `docs/briefings/estimates.md` (planned against actual), `docs/milestones/M8/` (`criterion-6-edit-window.md`, `acceptance-runbook.md`, 20 edit-latency tables, envelope logs), `docs/status.md`, `docs/learnings.md`, `perf/logs/*.json`.
+- `cargo xtask log` (M8), `git log` of main since 2026-10-20 (window commits with times), `docs/archive/M9/briefings/estimates.md` (planned against actual), `docs/milestones/M8/` (`criterion-6-edit-window.md`, `acceptance-runbook.md`, 20 edit-latency tables, envelope logs), `docs/status.md`, `docs/learnings.md`, `perf/logs/*.json`.
 - ADR 0020 (readiness gate, noise 10 %), ADR 0034 (clock state), ADR 0036 (power cap normal, clock floor 1,400 MHz).
 - `crates/perf/src/gate.rs`, `calibration.rs` (TEST-039, a fixed CPU kernel timed before and after each scene), `load.rs` (competing load sampled during a case, recorded only), `clock.rs`; `xtask/src/heavy.rs` (the quiet flag).
 - Limit: no perf log records a window's wall time (`acceptance-runbook.md` says so for edit-latency), so durations below come from the estimates ledger and from the spacing of the commits that recorded each window. They are a reconstruction, not a measurement.

@@ -1,19 +1,17 @@
 # Architect memory
 
-Refreshed 2026-10-30 at M8's housekeeping (session `opus-planner`, worktree `.claude/worktrees/opus-planner`). Confirm against `main` and `docs/status.md` before acting. The repo records decisions (ADRs, specs, log); this file keeps only what it does not.
+Refreshed 2026-11-11 (audit batch A). Confirm against `main`, `docs/routing.md` and `docs/status.md` before acting. The repo records decisions (ADRs, specs, log, ledger); this file keeps only what it does not.
 
 ## Sessions
-- **sonnet-explorer** (worktree `start-879e4b`): main lane; B4 owner checks, then B2/B3.
-- **sonnet-crusader** (worktree `sonnet-crusader-c1a4f2`): support lane; B6 chunk-stage removal (ADR 0086), then B5.
-- **sonnet-spikes** (worktree `sonnet-spikes-36fc88`): spikes and docs-only passes; keeps uncommitted prototypes (SPIKE-56 until ADR 0085's build).
-- Desktop sessions wake on a message; after a clear or restart a lane gets a new `[ref]`: re-check `ListAgents`.
+- **opus-architect**: the owner's main contact; contract, ADRs, gate verdicts, briefing content and order, reviews, decision briefs.
+- **sonnet-bulldozer**: execution: lane orders and sequencing, merges, CI, `docs/status.md`, ID reservations, ledger upkeep, perf windows, summaries.
+- **sonnet-explorer**, **sonnet-crusader**: the coding lanes; **sonnet-spikes**: spikes, independent gate measurement, docs-only reviews. Worktrees: `docs/lanes.txt`.
+- **opus-planner**: retired 2026-11-09; its worktree stays.
+- Desktop sessions wake on a message; after a restart a session gets a new `[ref]`: re-check `ListAgents` before sending.
 
 ## Practice
-- Owner decisions are committed in the planner session; coders merge them.
-- Merge slots: the planner hands the slot on; the up-to-date ruleset is off (owner, 2026-11-05): a code PR re-runs CI only if code moved on main since its run.
-- New requirement IDs, ADR and SPIKE numbers are reserved through the planner.
+- Decisions on defined work go to `C:/DEV/planner-inbox/architect-decisions.md` (one entry each, never edited after writing); new work and briefing order go to bulldozer by message.
+- The app pauses a session's sends after 10 without an owner message: batch decisions into one message to bulldozer; never relay through another session.
+- Check a lane's headline number against what the gate measures, and the units of every input (D33: an area passed as a discharge).
 - A merge a lane's permission check refused goes to the owner, never to another session.
-- Real-GPU window checks need an unlocked desktop; NOT RUN when locked (TEST-073).
-- Check a coder's headline number against what the criterion measures.
-- Repro hunts are time-boxed to about 1 h.
-- Escalate exit criteria, constitution and open trade-offs (push notification); decide reversible design questions and say so.
+- Escalate gate failures of architecture gates, the A/B gate and constitution matters to the owner; decide reversible design questions and say so.

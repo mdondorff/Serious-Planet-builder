@@ -25,12 +25,12 @@ Closed: 2026-11-01
   - rise share: the share of the summed gradient magnitude (total ascent per area) on cells above c.
 - Relief: 1 km non-overlapping blocks, p50 (as SPIKE-55 and the scorecard).
 - Criterion-1 window: "centre" is the central half of the tile in each axis (0.5 degree), as TEST-079 uses; the values differ by up to 1.4 degrees from SPIKE-74's resampling (Alps 23.7 against 22.35); ratios are what counts.
-- Inventory: ADR 0088 and 0089, `openspec/changes/m9-bake/specs/`, SPIKE-74 to 83, `docs/briefings/m9-draft.md`, `crates/app/src/terrainscore.rs`.
+- Inventory: ADR 0088 and 0089, `openspec/changes/m9-bake/specs/`, SPIKE-74 to 83, `docs/archive/M9/briefings/m9-draft.md`, `crates/app/src/terrainscore.rs`.
 
 ## 1. Slope targets in force or planned
 | Number | Where | What it measures | Kind |
 |---|---|---|---|
-| >= 0.6 of real at both sites | `docs/briefings/m9-draft.md` criterion 1; TEST-081 (`openspec/changes/m9-bake/specs/testing/spec.md`) | generator p50 / real p50 of slope (degrees, 30 m) and of 1 km relief at Valley and Ridge, Black Forest, Highlands, Alps | pass/fail; a floor, no upper bound |
+| >= 0.6 of real at both sites | `docs/archive/M9/briefings/m9-draft.md` criterion 1; TEST-081 (`openspec/changes/m9-bake/specs/testing/spec.md`) | generator p50 / real p50 of slope (degrees, 30 m) and of 1 km relief at Valley and Ridge, Black Forest, Highlands, Alps | pass/fail; a floor, no upper bound |
 | 0.8 of real | TEST-081; m9-draft R7 | the same ratios | tuning aim |
 | below 0.4 after the bake and 2 tuning rounds | m9-draft criterion 1 | the same ratios | stop rule |
 | not worse than the baseline | m9-draft criterion 1 | Badlands and Erg Chebbi descriptor distances (slope among them) | pass/fail |
