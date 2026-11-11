@@ -21,3 +21,5 @@ Source: `docs/design/terrain-target.md` §4.2, §8, §9; SPIKE-105 F5, §11 (poi
 ## Consequences
 - Extends ADR 0010; uses ADR 0003's mapping. Changes erosion constants through the metric (D9).
 - Gates G-EQ, G-DET. CI's determinism manifest must add a fixture of the round solver and H1.
+- Point 4's f32 round surfaces are not yet built (main is f64 across rounds); GEN-166 builds them (architect D24, D27).
+- Interim, until the A/B gate: the accepted ADRs named here govern the shipped bake; this ADR governs the prototype path behind its switches (architect D24, 2026-11-10).

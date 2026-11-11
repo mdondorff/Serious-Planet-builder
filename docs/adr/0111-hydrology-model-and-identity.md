@@ -21,6 +21,7 @@ Source: `docs/design/terrain-target.md` §5; SPIKE-105 §6, §8 F3, §12 F5-F6, 
 9. Lakes are producers of the water field (ADR 0041 point 7); the fill depth stops being a stored term.
 
 ## Consequences
-- Gates G-CON, G-BASIN. Amends ADR 0101 points 2 and 3; extends ADR 0041.
+- Gates G-CON, G-BASIN. Amends ADR 0101 points 2 and 3 and ADR 0105 points 2 and 3 (an endorheic basin by water balance, not by aridity; the fill-depth channel retired by point 9); extends ADR 0041.
+- Interim, until the A/B gate: the accepted ADRs named here govern the shipped bake; this ADR governs the prototype path behind its switches (architect D24, 2026-11-10).
 - Rivers and lakes (later authoring) become constraints on K6 inputs, not new stages.
 - Open: nested basins; basin losses in the carve's `A_d` (ADR 0105 point 2 is not in the round solver).
