@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use crate::l_writer::{bake, base, basin, lakes, spec, tiles, world, zero, Dir, Feed, RES, T};
+use crate::l_writer::{bake, bake_tiles, base, basin, lakes, spec, tiles, world, zero, Dir, Feed, RES, T};
 use planet_cache::l_layer::{l_change_range, CommitLayer, PairedLayer};
 use planet_cache::l_writer::{read_l_tile, Commit};
 use planet_cache::pack::TileStore;
@@ -66,7 +66,15 @@ fn t2_a_tile_the_commit_does_not_name_is_no_land_and_one_it_names_but_the_store_
     key.0[0] ^= 0xff;
     let layer = layer_of(&d, &w, bad, 4);
     let e = layer.tile(Face(2), 3, 3).err().expect("refused");
-    assert!(e.contains("names key") || e.contains("holds no record"), "{e}");
+    assert!(e.contains("names key"), "a key the spec does not make: {e}");
+    // A commit that names a tile under its correct key whose record the store does not hold (the store is another bake's): the record is missing.
+    let other = Dir::new("t2-other");
+    bake_tiles(&other, &w, spec(7), &Feed(true), &lakes(), 1, &[tile(2, 2)]).unwrap();
+    let layer = layer_of(&other, &w, c.clone(), 4);
+    let e = layer.tile(Face(2), 3, 3).err().expect("refused");
+    assert!(e.contains("holds no record"), "{e}");
+    assert!(!layer.tile_present(tile(3, 3)).unwrap(), "the record is not in this store");
+    assert!(layer.tile_present(tile(6, 6)).unwrap(), "a tile outside the commit is no land: nothing is missing");
     // A folder with no commit is refused naming the file.
     let empty = Dir::new("t2-empty");
     std::fs::create_dir_all(empty.path()).unwrap();

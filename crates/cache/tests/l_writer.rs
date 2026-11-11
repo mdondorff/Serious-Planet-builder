@@ -112,6 +112,19 @@ pub fn tiles() -> Vec<PassTile> {
 }
 
 pub fn bake(dir: &Dir, w: &GlobalWorld, s: LTileSpec, feed: &Feed, l: &Lakes, threads: usize) -> Result<Commit, String> {
+    bake_tiles(dir, w, s, feed, l, threads, &tiles())
+}
+
+/// [`bake`] over the given tiles.
+pub fn bake_tiles(
+    dir: &Dir,
+    w: &GlobalWorld,
+    s: LTileSpec,
+    feed: &Feed,
+    l: &Lakes,
+    threads: usize,
+    ts: &[PassTile],
+) -> Result<Commit, String> {
     let b = LBake {
         world: w,
         res: RES,
@@ -126,7 +139,7 @@ pub fn bake(dir: &Dir, w: &GlobalWorld, s: LTileSpec, feed: &Feed, l: &Lakes, th
         face_of: &|_| Face(2),
         threads,
     };
-    bake_l(dir.path(), &b, &tiles())
+    bake_l(dir.path(), &b, ts)
 }
 
 /// The mask the rule gives on this fixture: every level is above the surface, so a cell is wet when its H1 parent is a water cell, or a ring cell within 8 steps of one (the ring cell at (9, 10) is next to the block).
