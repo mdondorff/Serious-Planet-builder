@@ -13,6 +13,7 @@ pub const PASS2_KERNEL_VERSION: u32 = 5;
 
 pub mod build;
 pub mod carve;
+pub mod channel_graph;
 pub mod compact;
 pub mod cube;
 pub mod deposit;

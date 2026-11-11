@@ -10,6 +10,7 @@
 //! Nothing here changes a bit of what the steps compute: the plan is the order and the lifetimes.
 
 use super::carve::CarveParams;
+use super::channel_graph::ChannelGraph;
 use super::hydro::{hydrology, verify_with_area, weighted_cell_area, Hydro, HydroParams, HydroStats, Verify};
 use super::lakes::{lake_records, river_pieces, Lakes};
 use super::probe;
@@ -84,6 +85,8 @@ pub struct Built {
     pub hydro: Hydro,
     /// The lake producer's result on H1 (GEN-163): the lake records and the river pieces outside the lakes.
     pub lakes: Lakes,
+    /// The channel graph as compact arrays (item 15 PR 7, D51): chains, `Q_w` codes and bed codes, built before the discharges are released.
+    pub graph: ChannelGraph,
     pub report: PlanReport,
 }
 
@@ -211,6 +214,8 @@ pub fn build_resident(
     mark("hydrology");
     // The pieces of the river segments carry `Q_w` at their ends: they are cut now and are the only part of the lake producer that reads the discharges (GEN-163, D22).
     let pre = river_pieces(grid, &routing, &hy, &z);
+    let graph = ChannelGraph::from_hydro(grid, &routing, &hy, &z);
+    mark("channel graph");
     lap("river pieces", &mut phases);
     mark("river pieces");
     // The open-water evaporation is H1's input only.
@@ -245,5 +250,5 @@ pub fn build_resident(
     drop(z_start);
     lap("sediment pass", &mut phases);
     mark("after the sediment pass");
-    Ok(Built { z, hydro: hy, lakes, report: PlanReport { rounds, h1, g_con, sum_q, sum_qw, sediment, spill_bytes, phases } })
+    Ok(Built { z, hydro: hy, lakes, graph, report: PlanReport { rounds, h1, g_con, sum_q, sum_qw, sediment, spill_bytes, phases } })
 }

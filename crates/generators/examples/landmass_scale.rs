@@ -649,6 +649,15 @@ fn main() {
             (built.lakes.water.len() + built.lakes.ring.len()) * 8 / 1024,
             built.lakes.lakes.iter().map(|l| u64::from(l.cells)).sum::<u64>()
         );
+        println!(
+            "channel graph: {} segments, {} vertices, {} bytes ({:.1} MiB; {:.1} B a vertex), largest relative Q_w error {:.3e}",
+            built.graph.segments(),
+            built.graph.vertices(),
+            built.graph.bytes(),
+            built.graph.bytes() as f64 / 1_048_576.0,
+            built.graph.bytes() as f64 / built.graph.vertices().max(1) as f64,
+            built.graph.max_q_rel_error
+        );
         println!("H1: {:?}", r.h1);
         println!("G-CON (hydro::verify) before the release: {:?}", r.g_con);
         println!("sums before the release: Q {:.6e} m3/s, Qw {:.6e} m3/s (not conservation figures)", r.sum_q, r.sum_qw);
