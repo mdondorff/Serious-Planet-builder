@@ -29,6 +29,8 @@ pub struct CatchmentInputs {
     pub scale: Vec<f64>,
     /// The uplift of a step at each member before the taper: `u_over_k k_dt class`, or `k_dt U` with an uplift per cell.
     pub up_unit: Vec<f64>,
+    /// The catchment's outlet is a window cut (the caller set `CarveParams::window_cut` and the outlet is on the border of the grid): its height is no base for the breach (GEN-172).
+    pub exit_window_cut: bool,
 }
 
 /// What a carve reads besides the heights (the drivers of `carve_rock` without a layered rock): the class factor, the uplift per cell (the ratio `U / K` at K 1) and the runoff weights.
@@ -41,12 +43,13 @@ pub struct Drivers<'a> {
 
 /// The breach and `steps` sweeps of one catchment of the round (the loops of `carve_rock` without layers), on the inputs alone.
 pub fn catchment_round(inp: &mut CatchmentInputs, p: &CarveParams, steps: usize) {
+    let window_cut = inp.exit_window_cut;
     let floor = p.sea_level + p.epsilon;
     let z = &mut inp.z;
     let base = if p.round_rules.clip_mfd != super::route::MfdClip::Local {
         None
     } else {
-        super::carve::exit_base(p.sea_level, 0..z.len(), &inp.receiver, z)
+        super::carve::exit_base(p.sea_level, 0..z.len(), &inp.receiver, z, &|_| window_cut)
     };
     for c in (0..z.len()).rev() {
         let rec = inp.receiver[c];
@@ -159,6 +162,7 @@ pub fn gather_with(
         receiver_is_outlet: Vec::with_capacity(cells.len()),
         scale: Vec::with_capacity(cells.len()),
         up_unit: Vec::with_capacity(cells.len()),
+        exit_window_cut: false,
     };
     for &c in cells {
         let c = c as usize;
@@ -174,6 +178,7 @@ pub fn gather_with(
         });
         if rec == NONE {
             inp.receiver.push(NONE);
+            inp.exit_window_cut |= p.window_cut && grid.is_edge(c) && z[c] > p.sea_level;
             inp.dist.push(1.0);
             inp.receiver_is_outlet.push(false);
         } else {
@@ -362,7 +367,7 @@ pub struct RoundWork {
 }
 
 /// The key of a catchment round: the member cell ids, the key inputs and every parameter of the carve that `catchment_round` reads: `k_dt`, `epsilon`, `breach_slope`, `breach_max_m`, `breach_height_scale_m`,
-/// `sea_level`, `keep_pits`, `incise_only`, the sweeps per round and whether the round rules clip locally (`clip_mfd`, GEN-162: it changes the breach). The memo is in memory only: no stored key.
+/// `sea_level`, `keep_pits`, `incise_only`, the sweeps per round, whether the round rules clip locally (`clip_mfd`, GEN-162: it changes the breach) and whether the catchment's outlet is a window cut (`exit_window_cut`, GEN-172: it removes the base of the breach). The memo is in memory only: no stored key.
 pub fn catchment_key(grid: &Grid, cells: &[u32], inp: &CatchmentInputs, p: &CarveParams) -> (u64, u64) {
     let mut h = Hash::new();
     for v in [p.k_dt, p.u_over_k, p.epsilon, p.breach_slope, p.breach_max_m, p.breach_height_scale_m, p.sea_level] {
@@ -372,7 +377,8 @@ pub fn catchment_key(grid: &Grid, cells: &[u32], inp: &CatchmentInputs, p: &Carv
         u64::from(p.keep_pits)
             | (u64::from(p.incise_only) << 1)
             | ((p.reroute_every as u64) << 2)
-            | (u64::from(p.round_rules.clip_mfd == MfdClip::Local) << 63),
+            | (u64::from(p.round_rules.clip_mfd == MfdClip::Local) << 63)
+            | (u64::from(inp.exit_window_cut) << 62),
     );
     h.word(cells.len() as u64);
     for (k, &c) in cells.iter().enumerate() {

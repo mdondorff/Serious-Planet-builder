@@ -126,7 +126,14 @@ fn main() {
         rh,
     ));
     let outlet = grid.outlets(&zb, 0.0);
-    let p = CarveParams { steps: 20, reroute_every: 5, round_rules: RoundRules::ROUND, cell_metric: true, ..CarveParams::default() };
+    let p = CarveParams {
+        steps: 20,
+        reroute_every: 5,
+        round_rules: RoundRules::ROUND,
+        cell_metric: true,
+        window_cut: true,
+        ..CarveParams::default()
+    };
     let stream = spec_r.stream();
     let mut zs = zb.clone();
     solve_rounds(&grid, &mut zs, &outlet, &p, 4, &threads, stream);

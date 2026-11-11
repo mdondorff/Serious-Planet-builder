@@ -486,6 +486,7 @@ fn the_taper_follows_the_uplift_field_when_the_uniform_ratio_is_zero_and_a_cache
             params(2),
             CarveParams { k_dt: 0.03, ..params(2) },
             CarveParams { breach_height_scale_m: 300.0, breach_max_m: 300.0, ..params(2) },
+            CarveParams { window_cut: true, ..params(2) },
             params(2),
         ] {
             let mut memo = z0.clone();

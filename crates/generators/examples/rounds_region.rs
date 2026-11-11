@@ -52,7 +52,14 @@ fn main() {
     let outlet = grid.outlets(&z0, 0.0);
     let land = z0.iter().filter(|v| **v > 0.0).count();
     println!("land {:.1} %", 100.0 * land as f64 / z0.len() as f64);
-    let p = CarveParams { steps: 20, reroute_every: 5, round_rules: RoundRules::ROUND, cell_metric: true, ..CarveParams::default() };
+    let p = CarveParams {
+        steps: 20,
+        reroute_every: 5,
+        round_rules: RoundRules::ROUND,
+        cell_metric: true,
+        window_cut: true,
+        ..CarveParams::default()
+    };
     let stream = spec.stream();
 
     let mut one = z0.clone();
