@@ -10,5 +10,6 @@ Per-spike register sections of M5 and M6: `docs/archive/M6/spikes.md`. Closed sp
 | Id | Title | Status | Results |
 |---|---|---|---|
 | SPIKE-96 | Cheap edit-aware sky visibility factor for the sky ambient | planned only, not run (waits for the owner's ADR 0095 look decision and a perf slot; the horizon bake stays until it decides) | plan: `spikes/sky-visibility/results/plan.md`; no results folder |
+| SPIKE-107 | MFD comparison: unclipped vs clipped vs boundary flux (A3 §12.4, ADR 0112 condition 1) | open, plan written 2026-11-11; heavy runs wait for the bulldozer's go | `spikes/mfd-comparison/results/results.md` |
 
 Every exploration gets a `SPIKE-NN` entry.
