@@ -307,7 +307,12 @@ impl Commit {
                         return Err(format!("'{l}': a tile named twice"));
                     }
                 }
-                ["graph_cells", n] => graph_h1_cells = num(n, l)?,
+                ["graph_cells", n] => {
+                    if graph_h1_cells != 0 {
+                        return Err(format!("'{l}': graph_cells named twice"));
+                    }
+                    graph_h1_cells = num(n, l)?;
+                }
                 ["graph", f, i, j, k] => {
                     if num(f, l)? >= 6 {
                         return Err(format!("'{l}': a face outside 0..6"));
@@ -505,6 +510,12 @@ pub fn bake_l(dir: &Path, b: &LBake, tiles: &[PassTile]) -> Result<Commit, Strin
     if let Some(gi) = &b.graph {
         if gi.graph.q_unit != planet_generators::bake::hydro::QUnit::Discharge {
             return Err("the channel graph carries Q_w as an area, not a discharge in m3/s (D33)".into());
+        }
+        if gi.spec.h1_cells as usize != b.h1_cells || gi.spec.basin != b.basin || gi.spec.h1_cells % gi.spec.basin.tiles_per_edge != 0 {
+            return Err(format!(
+                "the graph was made for {} H1 cells a face edge with {} blocks, the bake has {} H1 cells and {} blocks (or the specs differ, or the cells do not divide)",
+                gi.spec.h1_cells, gi.spec.basin.tiles_per_edge, b.h1_cells, b.basin.tiles_per_edge
+            ));
         }
         graph_cells = gi.spec.h1_cells;
         for r in graph_block_records(b.world, b.res, &gi.spec, gi.graph, gi.segment_ids, gi.grid, gi.cell_xy) {

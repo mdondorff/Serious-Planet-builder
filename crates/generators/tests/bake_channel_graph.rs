@@ -71,9 +71,9 @@ fn the_q_code_is_monotone_round_trips_and_is_within_the_step() {
 // spec: GEN-170, TEST-114
 #[test]
 fn the_bed_code_keeps_the_order_of_the_levels_and_is_within_half_a_step() {
-    for z in [-11000.0, -3.2, 0.0, 0.2, 0.26, 8848.0, 12000.0] {
-        let err = (bed_value(bed_code(z)) - z).abs();
-        assert!(err <= BED_STEP_M / 2.0 + 1e-9 || z.abs() > 16000.0, "{z}: {err}");
+    for z in [-11000.0, -3.2, 0.0, 0.2, 0.26, 100.3, 100.4, 8848.0, 12000.0] {
+        let below = z - bed_value(bed_code(z));
+        assert!((0.0..BED_STEP_M).contains(&below), "the stored bed is at or below the level, less than a step: {z}: {below}");
     }
     assert!(bed_code(100.0) <= bed_code(100.3), "monotone");
     assert_eq!(bed_code(1.0e9), i16::MAX);
@@ -106,6 +106,13 @@ fn the_graph_holds_the_routings_chains_q_w_and_a_bed_that_does_not_rise() {
             assert_eq!(s.bed[k], bed_code(level), "the bed is the running minimum");
         }
         assert!(s.bed.windows(2).all(|w| w[1] <= w[0]));
+        assert!(
+            s.bed
+                .iter()
+                .enumerate()
+                .all(|(k, &b)| bed_value(b) <= cells[..=k].iter().map(|&c| r.z[c as usize]).fold(f64::INFINITY, f64::min)),
+            "the bed is never above the surface it came from"
+        );
         vertices += cells.len();
     });
     assert_eq!(graph.vertices(), vertices);

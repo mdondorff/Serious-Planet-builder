@@ -146,3 +146,35 @@ fn a_commit_without_a_graph_has_no_feed_and_a_graph_in_area_units_is_refused() {
     assert!(e.contains("area") && e.contains("m3/s"), "{e}");
     assert!(planet_cache::l_writer::Commit::read(d2.path()).unwrap().is_none(), "no commit after the refusal");
 }
+
+// spec: STRM-084
+#[test]
+fn a_graph_made_for_another_grid_than_the_bake_is_refused_naming_both() {
+    let w = world();
+    let h = h1(true);
+    let d = Dir::new("graph-mismatch");
+    let lakes = Lakes { lakes: Vec::new(), pieces: Vec::new(), dropped_cells: 0, water: Vec::new(), ring: Vec::new() };
+    let b = LBake {
+        world: &w,
+        res: RES,
+        spec: spec(),
+        basin: basin(),
+        base: &base,
+        regional: &zero,
+        feed: &Feed(true),
+        lakes: &lakes,
+        h1_cells: W,
+        h1_cell: &|_, _, _| None,
+        face_of: &|_| Face(2),
+        threads: 1,
+        graph: Some(GraphInput {
+            spec: GraphSpec { basin: basin(), h1_cells: 80 },
+            graph: &h.graph,
+            segment_ids: &h.ids,
+            grid: &h.g,
+            cell_xy: &xy,
+        }),
+    };
+    let e = bake_l(d.path(), &b, &tiles()).unwrap_err();
+    assert!(e.contains("80 H1 cells") && e.contains("40 H1 cells"), "{e}");
+}

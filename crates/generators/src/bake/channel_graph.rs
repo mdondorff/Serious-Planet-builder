@@ -41,9 +41,10 @@ pub fn q_value(code: u16) -> f64 {
     }
 }
 
-/// The code of a bed level in metres (clamped to the `i16` range).
+/// The code of a bed level in metres: the step at or below it (clamped to the `i16` range), so the stored bed never lies above the surface it was made from and K7's burn (which only lowers) cuts every cell the
+/// unquantised bed would cut. The floor is as monotone as the level, so the quantised running minimum is the minimum of the quantised levels.
 pub fn bed_code(z: f64) -> i16 {
-    libm::round(z / BED_STEP_M).clamp(f64::from(i16::MIN), f64::from(i16::MAX)) as i16
+    libm::floor(z / BED_STEP_M).clamp(f64::from(i16::MIN), f64::from(i16::MAX)) as i16
 }
 
 /// The bed level of a code, metres.
@@ -93,6 +94,10 @@ impl SegmentView<'_> {
 impl ChannelGraph {
     /// The graph of `hydro` on `grid`: the chains by the routing's receivers, `Q_w` and the running minimum of `zs` (the H1 surface) along them. `Q_w` must still be there (run before the discharges are released).
     pub fn from_hydro(grid: &Grid, routing: &Routing, hydro: &Hydro, zs: &[f64]) -> ChannelGraph {
+        assert!(
+            hydro.qw.iter().all(|q| !q.is_nan()) && zs.iter().all(|z| !z.is_nan()),
+            "the graph needs Q_w and the surface without a NaN"
+        );
         assert!(
             hydro.qw.len() == grid.len() && zs.len() == grid.len(),
             "the graph needs Q_w and the surface: run it before the discharges are released"
