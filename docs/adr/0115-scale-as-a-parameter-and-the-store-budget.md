@@ -1,5 +1,5 @@
 # 0115 Scale as a parameter and the store budget
-Status: proposed (spikes session for opus-planner, 2026-11-08, inbox #100; amended after the ADR review, inbox #102). Acceptance blocked by the owner's D2-D10 pass; point 7's budget was set by the owner (2026-11-08, 2026-11-09). The budgets are hard gates, not facts: production needs G-STORE and G-SCALE measured (A/B gate)
+Status: proposed (2026-11-08). Acceptance: the owner's, with SPIKE-105's D2-D10; point 7's budget set by the owner (2026-11-08, 2026-11-09). Production: G-STORE and G-SCALE measured at the A/B gate
 Date: 2026-11-08
 Source: `docs/design/terrain-target.md` §4, §10, §12; SPIKE-105 §3 (X11-X13), §13.5 (D6, D7), §16, §18; ADR 0045 point 2, ADR 0108
 
@@ -21,6 +21,5 @@ Source: `docs/design/terrain-target.md` §4, §10, §12; SPIKE-105 §3 (X11-X13)
 ## Consequences
 - Supersedes ADR 0045 point 2 (a ceil on the bake cell) with point 1's rule (the largest `k` whose local cell is at least the target; Earth 101.8 m at `k` = 14). Gates G-STORE, G-SCALE (one large and one small body).
 - Point 7 is a new budget; the owner decides it with this ADR.
-- The resident rounds of the largest landmass are measured (7.7 GiB, 55 bytes a cell, on a compact grid of the landmass, A3 §6.6); the H1 pass is extrapolated at 12 GB (81 bytes a cell at a quarter of the cells); the partitioned route measured more memory and time as built (8,854 MiB, 2,974 s against 7,858 MiB, 1,716 s), so the 2026-11-08 choice of it as the normal path, made on the assumption that it bounds memory, is replaced.
+- The resident rounds of the largest landmass are measured (7.7 GiB, 55 bytes a cell, on a compact grid of the landmass, A3 §6.6); the partitioned route measured more memory and time as built (8,854 MiB, 2,974 s against 7,858 MiB, 1,716 s), so the 2026-11-08 choice of it as the normal path, made on the assumption that it bounds memory, is replaced.
 - Since measured: the complete resident build at k=4, 11,387 MiB worst of two runs (GEN-158; ledger G-SCALE).
-- Interim, until the A/B gate: the accepted ADRs named here govern the shipped bake; this ADR governs the prototype path behind its switches (architect D24, 2026-11-10).

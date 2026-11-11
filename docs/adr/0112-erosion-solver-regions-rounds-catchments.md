@@ -1,5 +1,5 @@
 # 0112 The erosion solver: regions, rounds and catchments
-Status: proposed (spikes session for opus-planner, 2026-11-08, inbox #100; amended after the ADR review, inbox #102). Acceptable as the prototype's architecture after the owner's D2-D10 pass; not approved for production before G-LOCAL, G-ROUND, G-PART, G-EQ and G-INC pass on the actual kernels (A/B gate, D3)
+Status: proposed (2026-11-08). Acceptance: the owner's, with SPIKE-105's D2-D10, as the prototype's architecture; production only after G-LOCAL, G-ROUND, G-PART, G-EQ and G-INC pass on the actual kernels at the A/B gate (D3)
 Date: 2026-11-08
 Source: `docs/design/terrain-target.md` §6; SPIKE-105 F2, F4, F7, §18; ADR 0088 point 4, 0099
 
@@ -8,7 +8,7 @@ Source: `docs/design/terrain-target.md` §6; SPIKE-105 F2, F4, F7, §18; ADR 008
 - With one routing per round, the breach and sweeps per D8 catchment are bit-identical to the whole-window carve (F7).
 - MFD shares and the flood's tie order couple catchments (F7).
 - Routing is 85-90 % of a round.
-- The smallest erosion unit today is a whole face (10 GB, ADR 0099); it cannot run in the editor (S105 X7, X8).
+- The smallest erosion unit today is a whole face (about 1.6e8 cells, ADR 0099); it cannot run in the editor (S105 X7, X8).
 
 ## Decision
 1. The scope of one routing is a **region**: a connected component of the land mask at the regional grid, bounded by the sea, re-derived at every commit. It is routed whole, resident or partitioned. A split at H0 divides is a tested fallback only.
@@ -22,5 +22,5 @@ Source: `docs/design/terrain-target.md` §6; SPIKE-105 F2, F4, F7, §18; ADR 008
 ## Consequences
 - On the gate, replaces ADR 0109 and ADR 0105 point 1: deposition is not dropped but moves to the post-round sediment pass (A3 §6.7; the basin infill is replaced through ADR 0111 point 5). Amends ADR 0088 point 4.1 and ADR 0099 points 1 and 2.
 - CON-08 v1.7 (ADR 0116) allows the regional solver and its rounds; CON-30 is G-PART's basis.
-- Interim, until the A/B gate: the accepted ADRs named here govern the shipped bake; this ADR governs the prototype path behind its switches (architect D24, 2026-11-10).
+- Interim, for ADRs 0110-0115 until the A/B gate: the accepted ADRs they amend govern the shipped bake; 0110-0115 govern the prototype path, a distinct implementation identity behind its switches (CON-07; architect D24).
 - Gates G-ROUND, G-LOCAL, G-EQ, G-INC, G-SCALE, G-PART. A failure of G-LOCAL or G-EQ is switch criterion S1 or S2 of S105 §13.1. F7 did not test these kernels; passing on prototype fixtures is not passing a gate at scale.
