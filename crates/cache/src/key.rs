@@ -104,6 +104,8 @@ pub enum Kind {
     LayerHeights = 18,
     /// The basin table of one cube face: the lakes of the hydrology of the K6 key unit, sorted by basin id (M9 item 15, GEN-163, STRM-080): one record per face.
     BasinTable = 19,
+    /// The channel graph of one L tile's block of H1 cells: the pieces of the segments with their `Q_w` and bed codes (M9 item 15 PR 7, STRM-084): one record per tile.
+    ChannelGraph = 20,
 }
 
 /// One entry of a read set, in its 128-bit form (ADR 0018).
@@ -367,6 +369,8 @@ pub const PARAM_TILE_LAYER: u8 = 16;
 pub const PARAM_LAYER_CHANNELS: u8 = 17;
 /// What a basin table is made of: its version, the lake producer's version, the hydrology parameters, the tile grid and the identity of the base it was computed on (STRM-080).
 pub const PARAM_BASIN_TABLE: u8 = 18;
+/// What a channel graph block is made of: its version, the hydrology parameters, the tile grid, the H1 cells a face edge and the identity of the base and the other inputs (STRM-084).
+pub const PARAM_CHANNEL_GRAPH: u8 = 19;
 
 fn field_inputs(kind: Kind, field: &dyn HeightField, map: &dyn FaceMapping, tile: TileId, radius_m: f64) -> KeyInputs {
     assert!(
