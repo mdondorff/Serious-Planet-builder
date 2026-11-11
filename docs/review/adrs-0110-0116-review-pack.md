@@ -350,6 +350,7 @@ Source: external review of constitution v1.6 (owner, 2026-11-11; the PDF is not 
 | O6 | **Memory headroom.** 57 MiB under the hard limit, 897 MiB over the 11e9 B target. The levers are named (f32 storage, hydrology cleanup). | M | measurement; owner at the gate if unmet |
 | O7 | **Compaction peak.** The store needs 2x its steady size (up to 57 GB) during compaction; pack-wise compaction is the lever, not ordered. | M | owner at the A/B gate |
 | O8 | **G-RT frame time** is unmeasured; it is the largest unknown for the date. | L | measurement (CP1 early, CP2 full) |
+| O9 | **K7 tile continuity against CON-30.** On a small fixture (halo 8), the whole local pass under two tilings differs in 1,100 of 1,152 core cells, by up to 25 m. The river profile fix itself is partition-exact (TEST-113). Measuring at the production halo (128) and the cause per step is ordered; the likely cause is drainage area accumulated inside the tile's window. A fix may touch ADR 0110 or A3 §6.7. | M-L | measurement, then architect; owner if an ADR changes |
 
 ## 8. Questions for the external reviewer
 
@@ -359,7 +360,8 @@ Source: external review of constitution v1.6 (owner, 2026-11-11; the PDF is not 
 4. Is ending propagation at bit equality of canonical stored forms (0113 point 4, CON-29) practical once the f32 forms exist, or will near-equal results defeat reuse?
 5. Basin identity by the canonical lowest cell and segment identity by end cells (0111 point 8): robust enough across edits, with continuity as a separate non-authoritative map?
 6. The store and memory budgets (0115, BUDG-016): is 40 GB at Earth, with an 11e9 B build target, a sound frame, and is the compaction peak a design problem or an operations one?
-7. Is anything missing that the A/B gate should test before production, given these ADRs?
+7. K7 runs per tile with a halo (A3 §6.7). Should its incision read the region's receivers and drainage area (K6) rather than route inside its window, to meet CON-30 (O9)?
+8. Is anything missing that the A/B gate should test before production, given these ADRs?
 
 ## 9. Appendix: where to look
 
