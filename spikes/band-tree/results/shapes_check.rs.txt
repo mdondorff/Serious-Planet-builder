@@ -2596,11 +2596,20 @@ fn run_z0tree(threads: usize) {
             (0..w * h).map(|q| if g.outlet[q] { 0.0 } else { plain[q] - g.z0[q] }).collect()
         } else {
             let (a0, lfac, gain, kn): (f64, f64, f64, f64) = (vv[1].parse().unwrap(), vv[2].parse().unwrap(), vv[3].parse().unwrap(), vv[4].parse().unwrap());
+            let cf: usize = vv.get(5).map_or(1, |s| s.parse().unwrap());
+            let coarse = if cf > 1 { Some(coarse_tree(&g, cf)) } else { None };
             let wts = [0.2, 0.3, 0.5];
             let mut dist: Vec<Vec<f64>> = Vec::new();
             let mut lens: Vec<f64> = Vec::new();
             for t in 0..3 {
                 let area_km2 = a0 * 4f64.powi(t);
+                if let Some(ct) = &coarse {
+                    let tc = Instant::now();
+                    dist.push(coarse_dist(ct, w, h, area_km2));
+                    lens.push(lfac * 1000.0 * area_km2.sqrt());
+                    println!("  tier {t}: coarse lattice {} x {} (cf {cf}), area >= {area_km2} km2, distance read at the fine cells in {:.2} s", ct.wc, ct.hc, tc.elapsed().as_secs_f64());
+                    continue;
+                }
                 let src: Vec<bool> = (0..w * h).map(|q| !g.outlet[q] && rt.area[q] >= area_km2 * 1.0e6).collect();
                 let n = src.iter().filter(|&&b| b).count();
                 println!("  tier {t}: channels at {area_km2} km2: {n} cells ({:.2} % of the window)", 100.0 * n as f64 / (w * h) as f64);
@@ -2756,4 +2765,59 @@ fn oblique(z: &[f64], outlet: &[bool], w: usize, h: usize, dx: f64, path: &str, 
     scale_bar(&mut rgb, iw, ih, mpp, bar_m, bar_label);
     png(std::path::Path::new(path), iw, ih, &rgb);
     println!("  oblique {path}: camera at window cell ({cx:.0}, {cy:.0}), {height_m:.0} m above the ground, azimuth {:.0} deg, pitch {:.0} deg, fov {:.0} deg, sun from {:.0} deg at {:.0} deg elevation; {mpp:.1} m per pixel at the screen centre ({:.1} km away)", az.to_degrees(), pitch.to_degrees(), fov.to_degrees(), sun_az.to_degrees(), sun_el.to_degrees(), centre_dist / 1000.0);
+}
+
+/// SPIKE-111: the tree on a coarse lattice (block means of e0 over `cf` x `cf` cells, routed there): the pointwise-form test. Distances are measured at the coarse scale and read back bilinearly.
+struct CoarseTree {
+    wc: usize,
+    hc: usize,
+    area: Vec<f64>,
+    outlet: Vec<bool>,
+    cf: usize,
+    dx: f64,
+}
+
+fn coarse_tree(g: &GenWin, cf: usize) -> CoarseTree {
+    let (w, h) = (g.w, g.h);
+    let (wc, hc) = (w / cf, h / cf);
+    let mut zc = vec![0.0f64; wc * hc];
+    for j in 0..hc {
+        for i in 0..wc {
+            let mut s = 0.0;
+            for dj in 0..cf {
+                for di in 0..cf {
+                    s += g.z0[(j * cf + dj) * w + i * cf + di];
+                }
+            }
+            zc[j * wc + i] = s / (cf * cf) as f64;
+        }
+    }
+    let dx = g.grid.dx() * cf as f64;
+    let grid = Grid::new(wc, hc, dx);
+    let outlet = grid.outlets(&zc, 0.0);
+    let r = route(&grid, &zc, &outlet, U_RULES, g.stream);
+    CoarseTree { wc, hc, area: r.area, outlet, cf, dx }
+}
+
+/// The distance in metres to the nearest coarse channel cell of area at least `area_km2`, read at every fine cell of the window by bilinear interpolation.
+fn coarse_dist(ct: &CoarseTree, w: usize, h: usize, area_km2: f64) -> Vec<f64> {
+    let src: Vec<bool> = (0..ct.wc * ct.hc).map(|q| !ct.outlet[q] && ct.area[q] >= area_km2 * 1.0e6).collect();
+    let mut dc = chamfer(ct.wc, ct.hc, ct.dx, &src);
+    for v in dc.iter_mut() {
+        if !v.is_finite() {
+            *v = 1.0e9;
+        }
+    }
+    let at = |i: isize, j: isize| dc[(j.clamp(0, ct.hc as isize - 1) as usize) * ct.wc + i.clamp(0, ct.wc as isize - 1) as usize];
+    let mut out = vec![0.0f64; w * h];
+    for j in 0..h {
+        for i in 0..w {
+            let (x, y) = ((i as f64 + 0.5) / ct.cf as f64 - 0.5, (j as f64 + 0.5) / ct.cf as f64 - 0.5);
+            let (x0, y0) = (x.floor(), y.floor());
+            let (fx, fy) = (x - x0, y - y0);
+            let (xi, yi) = (x0 as isize, y0 as isize);
+            out[j * w + i] = at(xi, yi) * (1.0 - fx) * (1.0 - fy) + at(xi + 1, yi) * fx * (1.0 - fy) + at(xi, yi + 1) * (1.0 - fx) * fy + at(xi + 1, yi + 1) * fx * fy;
+        }
+    }
+    out
 }

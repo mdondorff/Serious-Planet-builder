@@ -39,7 +39,29 @@ Probe: `probe-src.diff` (changes in `crates/generators/src` on main a74445d0: `s
 
 ## Result 3: cost per base sample (the probe is window-based)
 - Routing the e0 surface of a window (D8, U rules, canonical flood): 1.1 s for 1.04 million cells (R1h), 2.4 and 2.5 s for 1.97 and 2.02 million cells (R3a, R3b): about 1.1 to 1.2 us a cell; the three chamfer distances 0.03 s each for 1.04 million cells (0.06 to 0.07 s for 2 million), about 0.03 us a cell each. The tree adds about 1.3 us a cell, window-based, against the three base evaluations a cell of the probe (`band_amp`, `base`, S) that took 18.8 s (R1h, run alone), 31.8 s (R3a) and 28.8 s (R3b): about 18, 16 and 14 us a cell for the three, so about 5 to 6 us each: the tree is a fifth to a quarter of one base evaluation.
-- Not a pointwise function: the tree needs a neighbourhood (the routed upstream area of the window). In the bake the base is sampled by tile and by LOD with no neighbourhood; a window-based tree changes with the window (CON-30: partitioning changes nothing; the same cell in two tilings would differ where its upstream path leaves a window, as the K7 note 2026-11-12 measured for the incision). What C needs in production is a drainage structure fixed by (seed, point): the regional solve (12,288 cells a face edge) is the only structure of that scale; a tree grown from e0 on a coarse global lattice (SPIKE-109's e0 is band-free and smooth, so it can be routed once per face at 3 to 6 km) and read like the class lattice is the form to cost. Not done in this first cut.
+- The window form is not a pointwise function (Result 4 reads the tree from a coarse lattice instead): it needs a neighbourhood (the routed upstream area of the window). In the bake the base is sampled by tile and by LOD with no neighbourhood; a window-based tree changes with the window (CON-30: partitioning changes nothing; the same cell in two tilings would differ where its upstream path leaves a window, as the K7 note 2026-11-12 measured for the incision). What C needs in production is a drainage structure fixed by (seed, point): the regional solve (12,288 cells a face edge) is the only structure of that scale; a tree grown from e0 on a coarse global lattice (SPIKE-109's e0 is band-free and smooth, so it can be routed once per face at 3 to 6 km) and read like the class lattice is the form to cost. Not done in this first cut.
+
+
+## Result 4: the pointwise form, the tree on a coarse lattice (share % / depth p95 (m) / slope p50 p95 / relief p50 p95 (m) at tilt 0 and 4 m/km)
+The e0 of the window is averaged over `cf` x `cf` cells, routed there (the same area thresholds in km2), the distance to the channels measured there, and the distance read back at the fine cells bilinearly (what a stored per-face lattice read at a point would give; `tree:16:0.6:1.0:0.5:<cf>`). cf 1 is the window form of Result 2; cf 2, 4, 8 are lattices of 1.6, 3.3 and 6.5 km.
+| Window | cf | Tilt 0 | Tilt 4 |
+|---|---|---|---|
+| R1h | 1 | 12.72 / 269 / 0.0181 0.134 / 83.5 488.5 | 6.78 / 271 / 0.0199 0.138 / 92.0 497.8 |
+| R1h | 2 | 13.66 / 271 / 0.0148 0.111 / 68.1 419.7 | 7.34 / 268 / 0.0167 0.115 / 76.7 430.2 |
+| R1h | 4 | 15.02 / 237 / 0.0113 0.091 / 52.3 354.1 | 6.99 / 236 / 0.0134 0.094 / 62.0 367.8 |
+| R1h | 8 | 17.38 / 235 / 0.0072 0.068 / 32.2 270.5 | 8.20 / 234 / 0.0097 0.071 / 44.2 291.7 |
+| R3a | 1 | 7.56 / 13 / 0.0044 0.0393 / 18.1 171.6 | 6.17 / 46 / 0.0068 0.0414 / 30.3 200.6 |
+| R3a | 2 | 11.20 / 13 / 0.0041 0.0396 / 17.4 173.2 | 6.26 / 63 / 0.0067 0.0417 / 30.0 202.2 |
+| R3a | 4 | 16.35 / 18 / 0.0037 0.0398 / 16.3 173.8 | 6.62 / 91 / 0.0065 0.0419 / 29.8 203.0 |
+| R3a | 8 | 20.41 / 21 / 0.0031 0.0396 / 13.6 173.2 | 6.39 / 105 / 0.0062 0.0417 / 28.2 202.7 |
+| R3b | 1 | 10.26 / 11 / 0.0031 0.0090 / 12.7 32.5 | 1.10 / 11 / 0.0054 0.0124 / 22.7 50.0 |
+| R3b | 2 | 10.81 / 14 / 0.0029 0.0086 / 12.0 31.8 | 0.97 / 14 / 0.0053 0.0122 / 22.2 49.8 |
+| R3b | 4 | 12.11 / 18 / 0.0026 0.0081 / 10.8 30.6 | 1.01 / 17 / 0.0051 0.0118 / 21.5 48.9 |
+| R3b | 8 | 15.15 / 27 / 0.0022 0.0074 / 9.2 29.1 | 1.17 / 18 / 0.0049 0.0113 / 20.7 47.8 |
+- At the 4 m/km tilt stand-in the bars hold for cf 2 and 4 on all three windows (share 7.34 / 6.26 / 0.97 % and 6.99 / 6.62 / 1.01 %, a hair over 7 % at cf 2 in R1h) and the share is 8.2 % at cf 8 in R1h; depth p95 stays under 270 m.
+- What the coarse lattice costs is relief in R1h: p50 / p95 76.7 / 430 (cf 2), 62.0 / 368 (cf 4), 44.2 / 292 m (cf 8) against 92.0 / 498 m (cf 1), the plain band 101.8 / 656 m: a smoother distance field gives lower slopes; a larger gain would restore it (not tried).
+- Without the tilt the plains lose the drainage as the lattice coarsens (R3a 7.56 -> 11.2 / 16.4 / 20.4 %, R3b 10.3 -> 10.8 / 12.1 / 15.2 %): the fine tree's gradient toward the channels needs the fine distance.
+- Storage of the lattice (an estimate, not built): a cube face of 98,304 local cells a side is 10,000 km; at cf 4 (3.3 km) 3,070 cells a side, 9.4 million cells a face, 57 million cells for six faces, three tiers of a distance in u16: about 340 MB; at cf 2 four times that. The tier distances could be one field each of a coarse order-weighted distance (1 value a cell: 115 MB at cf 4). Not measured; the lattice would be computed once per world from e0 (a band-free smooth surface) by a routing pass over the 57 million cells: about 60 seconds at the probe's 1.1 us a cell.
 
 ## Look
 - Top-down crops (3 x magnified, 200 x 200 cells = 163 km a side, 20 km bar; NW light): `images/R1h-plain-band-tilt4-crop.png` against `images/R1h-tree-tilt4-crop.png`; boxes `R1h-*-box.png` (505 km, 100 km bar); R3b crops. Basins outlined in red.
@@ -47,7 +69,7 @@ Probe: `probe-src.diff` (changes in `crates/generators/src` on main a74445d0: `s
 - Low-sun oblique, R1h: `images/R1h-plain-band-tilt4-oblique.png` and `R1h-tree-tilt4-oblique.png`: pinhole camera at face 1 cell (8526, 960) (window cell (670, 400)), 1,500 m above the ground, azimuth 350 deg (north-north-west, clockwise from up the image), pitch -7 deg, horizontal field of view 70 deg, sun from 80 deg (east) at 14 deg elevation with cast shadows; 26.0 m (plain band) and 19.5 m (tree) per pixel at the screen centre (18.6 and 13.9 km away); the scale bar is the bar at the lower left at the centre's scale. A simple height-field ray marcher over the 814 m cells (no texture; hard grid-scale shadow edges): relief is modest at this scale (R1h's 5 x 5 relief p95 is 0.5 to 0.7 km), the tree surface reads as broad valleys with smooth slopes, the plain band as lumpy ridges.
 
 ## Not done in this cut (the time-box has 1.4 days left)
-- The tree as a function of (seed, point): a coarse global tree lattice (above), the order of a channel (Strahler) instead of the area tiers, tributary junction smoothing, a valley-floor width law.
+- The order of a channel (Strahler) instead of the area tiers, tributary junction smoothing, a valley-floor width law, a gain that restores the relief on the coarse lattices, the lattice computed across face edges (the probe averages and routes inside one window).
 - The plateau fix and the bounded tilt (the bars are read with my S-tilt stand-in at 4 m/km, +1.0 to +1.5 km of height at the medians; refused as a fix); the effect on the erosion bake; hypsometry (the relief is positive on a floor: the median height falls by the plain band's mean, like SPIKE-110's variants); class weights.
 - More windows and seeds (three fixtures only), a second look pass.
 
