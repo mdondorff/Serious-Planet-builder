@@ -90,6 +90,8 @@ mod preview_lines;
 mod regions;
 #[path = "residency.rs"]
 mod residency;
+#[path = "river_coverage.rs"]
+mod river_coverage;
 #[path = "scheduler_equivalence.rs"]
 mod scheduler_equivalence;
 #[path = "scheduler_incremental.rs"]

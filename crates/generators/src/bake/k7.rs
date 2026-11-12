@@ -172,6 +172,12 @@ impl WidthLaw {
     }
 }
 
+/// The width in cells of the trench the burn cuts for a discharge `q` (m3/s) on cells of `cell_m` metres: the law's width capped at `2 * DISC_RADIUS_MAX` cells (GEN-165, GEN-169), zero for no discharge. The one
+/// function of the burn and of the river drawing (REND-059): the drawing takes `max(1 cell, this)`.
+pub fn trench_width_cells(law: &WidthLaw, cell_m: f64, q: f64) -> f64 {
+    (law.width_m(q) / cell_m).min(2.0 * DISC_RADIUS_MAX as f64)
+}
+
 /// The cells of a channel's line in order, each with the level of the profile there (a cell repeated in a row is listed once, at the lowest level of its samples), in face cell-index space: the cells
 /// [`burn_channels_wide`] burns the line to.
 fn line_with_levels(ch: &Channel) -> Vec<((i64, i64), f64)> {
@@ -345,7 +351,7 @@ pub fn burn_channels_bounded(
     let target = tree_carry(&cells, &value, carry);
     for (ci, ch) in channels.iter().enumerate() {
         let bounds = (i0, i0 + w as i64 - 1, j0, j0 + w as i64 - 1);
-        let width_cells = |q: f64| law.map_or(0.0, |(l, cell_m)| (l.width_m(q) / cell_m).min(2.0 * DISC_RADIUS_MAX as f64));
+        let width_cells = |q: f64| law.map_or(0.0, |(l, cell_m)| trench_width_cells(l, cell_m, q));
         let mut burn = |x: i64, y: i64, level: f64| {
             if in_window(x, y) {
                 let c = (y - j0) as usize * w + (x - i0) as usize;
