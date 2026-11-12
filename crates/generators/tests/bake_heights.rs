@@ -105,12 +105,8 @@ fn the_plan_stores_the_heights_f32_between_the_rounds_and_the_sediment_pass_and_
     let (on, marks_on) = run(true);
     let (off, marks_off) = run(false);
     let pos = |marks: &[String], name: &str| marks.iter().position(|m| m == name);
-    let (a, b, c, d) = (
-        pos(&marks_on, "after the rounds"),
-        pos(&marks_on, "heights stored f32"),
-        pos(&marks_on, "heights widened"),
-        pos(&marks_on, "pre-carve surface read back"),
-    );
+    let at = |name: &str| pos(&marks_on, name).unwrap_or_else(|| panic!("the mark {name} is missing: {marks_on:?}"));
+    let (a, b, c, d) = (at("after the rounds"), at("heights stored f32"), at("heights widened"), at("pre-carve surface read back"));
     assert!(a < b && b < c && c < d, "the f64 heights are dropped after the rounds and widened before the sediment pass: {marks_on:?}");
     assert!(pos(&marks_off, "heights stored f32").is_none(), "with f64 rounds nothing is stored f32: {marks_off:?}");
     // the bits: `the_phase_plan_is_the_steps_in_order_...` (bake_compact) compares this plan, with the flag on, against the steps run by hand on f64 heights

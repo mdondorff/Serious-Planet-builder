@@ -211,16 +211,19 @@ fn h1_stage<Z: Heights + ?Sized>(
     let g_con = verify_with_area(grid, &hy, &routing, &filled, outlet, Some(&runoff), None, Some(weighted_area));
     let (sum_q, sum_qw) = (hy.q.iter().sum::<f64>(), hy.qw.iter().sum::<f64>());
     lap("conservation check");
-    // The probe reads f64; the widened copy exists only while a probe is installed.
-    let widened: Vec<f64> = if probe::enabled() { (0..z.len()).map(|c| z.at(c)).collect() } else { Vec::new() };
-    probe::emit(probe::Stage::H1, |s| {
-        probe::StageView::new(s, grid)
-            .f64("area", probe::FieldKind::Area, &routing.area)
-            .f64("z", probe::FieldKind::Height, &widened)
-            .number("segments", hy.stats.segments as f64)
-            .number("basins", hy.stats.basins as f64)
-            .number("channel cells", hy.stats.channel_cells as f64)
-    });
+    // The probe reads f64: f64 heights are borrowed; f32 ones are widened into a copy that exists only while a probe is installed and only for this emit (a measurement run has the probes off).
+    {
+        let widened: Option<Vec<f64>> = (probe::enabled() && z.as_f64().is_none()).then(|| (0..z.len()).map(|c| z.at(c)).collect());
+        let zf: &[f64] = z.as_f64().or(widened.as_deref()).unwrap_or(&[]);
+        probe::emit(probe::Stage::H1, |s| {
+            probe::StageView::new(s, grid)
+                .f64("area", probe::FieldKind::Area, &routing.area)
+                .f64("z", probe::FieldKind::Height, zf)
+                .number("segments", hy.stats.segments as f64)
+                .number("basins", hy.stats.basins as f64)
+                .number("channel cells", hy.stats.channel_cells as f64)
+        });
+    }
     let h1 = hy.stats.clone();
     drop((routing, filled, runoff));
     hy.q = Vec::new();

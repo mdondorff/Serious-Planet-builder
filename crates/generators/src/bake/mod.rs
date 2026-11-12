@@ -297,7 +297,6 @@ impl Grid {
     }
 }
 
-/// Refuses a height field with a value that is not finite (a failed read of the base): a NaN would be left in place by every kernel.
 /// A read-only height per cell (GEN-166 PR 2): `[f64]` and `[f32]` (and their `Vec`s) give the same values, the f32 ones widened exactly, so a reader generic over it is today's code on f64 and reads the
 /// f32-stored round surface without a widened copy.
 pub trait Heights: Sync {
@@ -307,11 +306,19 @@ pub trait Heights: Sync {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+    /// The heights as an f64 slice when they are stored f64 (no copy), else `None`.
+    fn as_f64(&self) -> Option<&[f64]> {
+        None
+    }
     /// The height of cell `i` in metres.
     fn at(&self, i: usize) -> f64;
 }
 
 impl Heights for [f64] {
+    #[inline(always)]
+    fn as_f64(&self) -> Option<&[f64]> {
+        Some(self)
+    }
     #[inline(always)]
     fn len(&self) -> usize {
         <[f64]>::len(self)
@@ -335,6 +342,10 @@ impl Heights for [f32] {
 
 impl Heights for Vec<f64> {
     #[inline(always)]
+    fn as_f64(&self) -> Option<&[f64]> {
+        Some(self)
+    }
+    #[inline(always)]
     fn len(&self) -> usize {
         Vec::len(self)
     }
@@ -356,6 +367,10 @@ impl Heights for Vec<f32> {
 }
 
 impl<const N: usize> Heights for [f64; N] {
+    #[inline(always)]
+    fn as_f64(&self) -> Option<&[f64]> {
+        Some(self)
+    }
     #[inline(always)]
     fn len(&self) -> usize {
         N
@@ -384,6 +399,7 @@ pub(crate) fn assert_finite_heights(what: &str, v: &(impl Heights + ?Sized)) {
     }
 }
 
+/// Refuses a height field with a value that is not finite (a failed read of the base): a NaN would be left in place by every kernel.
 pub(crate) fn assert_finite(what: &str, v: &[f64]) {
     if let Some(p) = v.iter().position(|x| !x.is_finite()) {
         panic!("{what} holds a value that is not finite at cell {p} ({})", v[p]);
