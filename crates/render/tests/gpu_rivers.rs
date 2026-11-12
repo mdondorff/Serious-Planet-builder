@@ -96,7 +96,8 @@ fn river_plan(plan: &TerrainPlan, max_layers: usize) -> RiverPlan {
     let grid = RiverGrid { cells, tile: cells / 4, cell_m: 1.0 };
     let law = WidthLaw::STANDARD;
     let pick = plan.nodes.iter().filter(|n| n.level == finest).min_by(|a, b| {
-        let d = |n: &planet_frame::terrain::TerrainDraw| n.camera_relative_origin.iter().map(|v| f64::from(*v).powi(2)).sum::<f64>();
+        let d =
+            |n: &planet_frame::terrain::TerrainDraw| n.camera_relative_origin.iter().map(|v| f64::from(*v) * f64::from(*v)).sum::<f64>();
         d(a).total_cmp(&d(b))
     });
     let tile = pick.expect("a finest node").tile;
@@ -113,7 +114,7 @@ fn river_plan(plan: &TerrainPlan, max_layers: usize) -> RiverPlan {
         .nodes
         .iter()
         .enumerate()
-        .map(|(i, n)| (i as u32, n.tile, n.camera_relative_origin.iter().map(|v| f64::from(*v).powi(2)).sum::<f64>().sqrt()))
+        .map(|(i, n)| (i as u32, n.tile, n.camera_relative_origin.iter().map(|v| f64::from(*v) * f64::from(*v)).sum::<f64>().sqrt()))
         .collect();
     plan_rivers(&RiverRequest { source: &src, law: &law, res: CELLS, max_step_cells: 2.0, max_layers }, &nodes).unwrap()
 }
