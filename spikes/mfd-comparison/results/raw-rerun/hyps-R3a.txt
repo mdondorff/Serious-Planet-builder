@@ -1,0 +1,10 @@
+== window face 4 cells 12288 seed 15: i 0-1387 j 4320-5739 = 1388 x 1420; box i 168-1187 j 4520-5539; land 64.6 %; base sampled in 546.2 s
+-- [R3a] hypsometry of the box land (727199 cells), height in m, after 4 rounds
+  quantile |        p5       p10       p25       p50       p75       p90       p95
+        z0 |      1.04      3.63     16.83     35.09    275.77    650.00    684.44
+         U |      0.01      0.46      7.90     33.89    220.55    630.98    690.89
+         C |      0.02      0.48      7.91     33.89    220.64    630.88    690.88
+  U seed B |      0.01      0.46      7.91     33.87    220.44    630.40    690.86
+     C - U |     +0.00     +0.02     +0.01     +0.01     +0.09     -0.10     -0.01
+     B - U |     +0.00     +0.00     +0.01     -0.02     -0.11     -0.58     -0.03
+  max |C - U| over the quantiles 0.10 m, max |U seed B - U| 0.58 m
