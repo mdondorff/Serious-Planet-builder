@@ -86,6 +86,8 @@ mod classes;
 mod climate;
 #[path = "coast.rs"]
 mod coast;
+#[path = "coast_tilt.rs"]
+mod coast_tilt;
 #[path = "compact.rs"]
 mod compact;
 #[path = "continents.rs"]
