@@ -1578,3 +1578,31 @@ Source: Architect, 2026-11-12 (G-PROFILE on production geometry: R1h tile (21, 2
 - **AND** the material is counted as `thermal_exported_m3` and `deposit_exported_to_fixed_m3`, with `fixed_cells`, in the result and the MARK line; thermal's is a report only (the givers' loss is already the deposition sweep's eroded column), the sweep's own export to fixed cells is part of its ledger, so G-SED closes; a pit spreads from its free neighbours only, keeping the volume
 - **AND** the final pass's `cutoff_binds` counts every path cell of the window, sub-sea cells included (on the cells' own heights), and the burn reports its own `burn_cutoff_binds` (the cells of the window whose floored target differs from the unbounded carry), both in the MARK line and the G-PROFILE ledger row with the distribution of what a cutoff costs, the bounded target minus the unbounded one in metres (p50, p99, max)
 - **AND** G-PROFILE gates that no line step rises over 0.25 m and that no cutoff changes a height by more than 0.25 m; a cutoff above it comes to the architect with its tile and cell
+
+### Requirement: GEN-166 The round surface is stored f32
+When `CarveParams::round_f32` is set, the heights SHALL be narrowed to f32 (`f64::from(z as f32)`: round to nearest, ties to even) once at the end of every round and after the last round, and SHALL be read widened by every reader. The round SHALL compute in f64 and the breach is not narrowed separately; a height that does not fit an f32 SHALL be refused. The narrowing SHALL be idempotent, and every route to the round result SHALL give the same bits under the flag. The flag SHALL be part of every key that holds a round result; with it off every result and key SHALL be the bits of the build before this requirement.
+
+Verify: A
+Status: active
+Source: A3 section 9, architect 2026-11-10 (D24 row 8)
+
+#### Scenario: Round solver and carve under the flag
+- **WHEN** a region is solved by the whole-region carve and by the round solver on 1, 3 and 8 threads with the flag set
+- **THEN** every height is f32-representable and the results are bit-identical
+
+#### Scenario: Details
+- **WHEN** the flag is read
+- **THEN** the layer key carries it by a byte and the catchment key by a bit, only when set
+- **AND** the memoised solve refuses a run without the canonical flood, naming the reason, and pass 2 and K7 refuse the flag
+- **AND** the flood's epsilon exceeds the f32 spacing at the largest height of the region (9.77e-4 m up to 16,384 m), above which carved epsilon chains collapse to equal heights
+
+### Requirement: GEN-178 The plan stores the round surface f32 until the sediment pass
+Under `round_f32` the resident plan SHALL hold the heights after the rounds as f32 (exact: the surface is f32-representable) and drop the f64 copy until the sediment pass, which SHALL read them widened. The flood, the weighted route, H1, the river pieces, the channel graph and the plan's drivers SHALL read heights through a trait with an f32 and an f64 form; every result and key SHALL be the bits of the plan on f64 heights. With f64 rounds the plan SHALL keep f64 heights. The saving SHALL be at least 200 MiB of the peak commit at k = 4, or the step is dropped.
+
+Verify: A
+Status: active
+Source: Architect 2026-11-10 (GEN-166 row, the 200 MiB bar), inbox #125
+
+#### Scenario: Same bits
+- **WHEN** the plan runs with `round_f32` on a small compact cube
+- **THEN** its H1 and sediment results equal the steps run by hand on f64 heights, and the allocation marks show the heights stored f32 after the rounds and widened before the sediment pass
