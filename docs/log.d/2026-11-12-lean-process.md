@@ -1,0 +1,1 @@
+- 2026-11-12 lean-process: ADR 0120 (lead and lanes, bulldozer retired); milestone P1 with five exit items; parking list; status queue by exit item (owner)

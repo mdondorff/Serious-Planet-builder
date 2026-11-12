@@ -7,20 +7,20 @@ Re-estimate: 2026-11-11 00:30 (remaining work: P0 closure; item 15 in progress, 
 Scope: the region of `spikes/prototype-region/results/results.md`. Everything stays behind switches, off the default bake path.
 
 ## Phases (owner, 2026-11-10)
-The block runs in phases of about 1.5 weeks. A phase starts with an entry note here (items, exit list, risks, IDs reserved), which the owner approves in one line. It ends with a closure, which bulldozer runs and the architect verifies, and a one-page close to the owner: what passed, what deviated, go or no-go. Work in flight is never closed mid-way; it carries into the next phase.
+The block runs in phases of about 1.5 weeks. A phase starts with an entry note here (items, exit list, risks, IDs reserved), which the owner approves in one line. It ends with a closure, which the lead runs, and a one-page close to the owner: what passed, what deviated, go or no-go. Work in flight is never closed mid-way; it carries into the next phase.
 
 | Phase | Ends (estimate) | Exit |
 |---|---|---|
 | P0 | about 2026-11-13 | closure of finished work only (list below); in-flight work (item 15, GEN-166, the memo-key fix) is not touched |
-| P1 | CP1, about 2026-11-20 | G-LOCAL measured; one region flyable from the stored `L` (lakes as flat water, no rivers yet); f32 rounds and the G-SCALE k=4 pair; closure |
+| P1 | CP1, about 2026-11-20; now milestone `docs/milestones/P1.md` with five exit items, the rest on `docs/parking.md` (ADR 0120) | G-LOCAL measured; one region flyable from the stored `L` (lakes as flat water, no rivers yet); f32 rounds and the G-SCALE k=4 pair; closure |
 | P2 | CP2, about 2026-12-01 | rivers and lakes drawn; G-RT frame time on the prototype region; the thermal-dam options brief; closure with an independent review pass |
 | Gate | mid-December | the A/B gate (exit list below); a full `housekeeping` skill run as a milestone close |
 
 Closure checklist (every phase):
 - Changes whose code is merged and complete: specs synced to `openspec/specs/`, change archived, `design.md` and `tasks.md` deleted (ADR 0055).
-- A3, ADRs 0110-0115 and this briefing agree with the decisions and the code (architect); `docs/status.md` current (bulldozer).
-- Worktrees of merged branches pruned (bulldozer; removal only with the owner's yes).
-- Learnings recorded. Every lasting decision of the phase is in its home (the ledger, a change's design and spec deltas, A3, the ADRs, the briefing). The architect's working channel to bulldozer is not archived (owner, 2026-11-11).
+- A3, ADRs 0110-0115 and this briefing agree with the decisions and the code (architect); `docs/status.md` current (lead).
+- Worktrees of merged branches pruned (lead; removal only with the owner's yes).
+- Learnings recorded. Every lasting decision of the phase is in its home (the ledger, a change's design and spec deltas, A3, the ADRs, the briefing). The lead's lane order files are not archived (owner, 2026-11-11).
 
 P0 list:
 - Archive the finished changes (each coding lane its own; during waits on machine slots).
