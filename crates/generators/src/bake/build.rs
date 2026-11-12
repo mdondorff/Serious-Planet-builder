@@ -19,6 +19,7 @@ use super::route::{route_rules_filled, RoundRules};
 use super::sediment::{sediment_pass, SedimentReport};
 use super::tile::Pass2Params;
 use super::Grid;
+use super::Heights;
 use crate::runoff::{discharge_weight, pet_mm, runoff_mm};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -134,7 +135,7 @@ impl Drop for SpillGuard {
 pub type Climate<'a> = &'a (dyn Fn(usize) -> (f64, f64) + Sync);
 
 /// H1's drivers on the land of `z` (a cell at or under the sea has weight 1 and no runoff): the runoff weight, the runoff and the open-water evaporation, f32 a cell.
-fn drivers(z: &[f64], threads: usize, climate: Climate) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+fn drivers(z: &(impl Heights + ?Sized), threads: usize, climate: Climate) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
     let n = z.len();
     let mut weight = vec![1.0f32; n];
     let mut runoff = vec![0.0f32; n];
@@ -145,7 +146,7 @@ fn drivers(z: &[f64], threads: usize, climate: Climate) -> (Vec<f32>, Vec<f32>, 
             s.spawn(move || {
                 for c in 0..wc.len() {
                     let p = t * per + c;
-                    if z[p] <= 0.0 {
+                    if z.at(p) <= 0.0 {
                         continue;
                     }
                     let (pm, tc) = climate(p);
@@ -158,6 +159,79 @@ fn drivers(z: &[f64], threads: usize, climate: Climate) -> (Vec<f32>, Vec<f32>, 
         }
     });
     (weight, runoff, evap)
+}
+
+/// What the H1 stage of the plan leaves.
+struct H1Stage {
+    hy: Hydro,
+    lakes: Lakes,
+    graph: ChannelGraph,
+    h1: HydroStats,
+    g_con: Verify,
+    sum_q: f64,
+    sum_qw: f64,
+}
+
+/// The plan's H1 stage (drivers, the weighted route and its filled surface, hydrology, river pieces, the channel graph, the conservation check, the lakes) on heights read through [`Heights`]: the f32-stored
+/// round surface (GEN-166) or the f64 one give the same bits.
+#[allow(clippy::too_many_arguments)]
+fn h1_stage<Z: Heights + ?Sized>(
+    grid: &Grid,
+    z: &Z,
+    outlet: &[bool],
+    p: &PlanParams,
+    climate: Climate,
+    mark: &dyn Fn(&str),
+    lap: &mut dyn FnMut(&'static str),
+) -> H1Stage {
+    // ---- H1: drivers, the weighted route, the filled surface, the hydrology
+    let (weight, runoff, evap) = drivers(z, p.threads, climate);
+    lap("drivers");
+    mark("drivers");
+    // One flood: the weighted route's own filled surface is H1's (it was computed twice before the plan; the bits are the same).
+    let (routing, filled) = route_rules_filled(grid, z, outlet, p.epsilon, p.seed, 0.0, Some(&weight), RoundRules::ROUND);
+    lap("weighted route and filled surface");
+    mark("routing and filled surface");
+    // The conservation check's reference for the area (the weighted sum of the cell areas) is taken now, so that the weights are not regenerated later.
+    let weighted_area = weighted_cell_area(grid, Some(&weight));
+    drop(weight);
+    mark("weight dropped");
+    let mut hy = hydrology(grid, z, &filled, &routing, outlet, Some(&runoff), Some(&evap), &p.hydro);
+    lap("hydrology");
+    mark("hydrology");
+    // The pieces of the river segments carry `Q_w` at their ends: they are cut now and are the only part of the lake producer that reads the discharges (GEN-163, D22).
+    let pre = river_pieces(grid, &routing, &hy, z);
+    let mut graph = ChannelGraph::from_hydro(grid, &routing, &hy, z);
+    graph.set_cuts(pre.cuts.clone());
+    mark("channel graph");
+    lap("river pieces");
+    mark("river pieces");
+    // The open-water evaporation is H1's input only.
+    drop(evap);
+    let g_con = verify_with_area(grid, &hy, &routing, &filled, outlet, Some(&runoff), None, Some(weighted_area));
+    let (sum_q, sum_qw) = (hy.q.iter().sum::<f64>(), hy.qw.iter().sum::<f64>());
+    lap("conservation check");
+    // The probe reads f64; the widened copy exists only while a probe is installed.
+    let widened: Vec<f64> = if probe::enabled() { (0..z.len()).map(|c| z.at(c)).collect() } else { Vec::new() };
+    probe::emit(probe::Stage::H1, |s| {
+        probe::StageView::new(s, grid)
+            .f64("area", probe::FieldKind::Area, &routing.area)
+            .f64("z", probe::FieldKind::Height, &widened)
+            .number("segments", hy.stats.segments as f64)
+            .number("basins", hy.stats.basins as f64)
+            .number("channel cells", hy.stats.channel_cells as f64)
+    });
+    let h1 = hy.stats.clone();
+    drop((routing, filled, runoff));
+    hy.q = Vec::new();
+    hy.qw = Vec::new();
+    mark("H1 result kept, discharges released");
+    // The lake records come after the release: they read the basins only, and the working set has its headroom here (D22).
+    let lakes =
+        Lakes { lakes: lake_records(grid, &hy), pieces: pre.pieces, dropped_cells: pre.dropped_cells, water: pre.water, ring: pre.ring };
+    lap("lakes");
+    mark("lakes");
+    H1Stage { hy, lakes, graph, h1, g_con, sum_q, sum_qw }
 }
 
 /// The complete resident build after the landmass: `z` is the landmass's heights on `grid` (a compact landmass), `outlet` its outlets, `climate` the climate of a cell. Returns the surface after the sediment pass and
@@ -197,51 +271,21 @@ pub fn build_resident(
     lap("rounds", &mut phases);
     mark("after the rounds");
 
-    // ---- H1: drivers, the weighted route, the filled surface, the hydrology
-    let (weight, runoff, evap) = drivers(&z, p.threads, climate);
-    lap("drivers", &mut phases);
-    mark("drivers");
-    // One flood: the weighted route's own filled surface is H1's (it was computed twice before the plan; the bits are the same).
-    let (routing, filled) = route_rules_filled(grid, &z, outlet, p.epsilon, p.seed, 0.0, Some(&weight), RoundRules::ROUND);
-    lap("weighted route and filled surface", &mut phases);
-    mark("routing and filled surface");
-    // The conservation check's reference for the area (the weighted sum of the cell areas) is taken now, so that the weights are not regenerated later.
-    let weighted_area = weighted_cell_area(grid, Some(&weight));
-    drop(weight);
-    mark("weight dropped");
-    let mut hy = hydrology(grid, &z, &filled, &routing, outlet, Some(&runoff), Some(&evap), &p.hydro);
-    lap("hydrology", &mut phases);
-    mark("hydrology");
-    // The pieces of the river segments carry `Q_w` at their ends: they are cut now and are the only part of the lake producer that reads the discharges (GEN-163, D22).
-    let pre = river_pieces(grid, &routing, &hy, &z);
-    let mut graph = ChannelGraph::from_hydro(grid, &routing, &hy, &z);
-    graph.set_cuts(pre.cuts.clone());
-    mark("channel graph");
-    lap("river pieces", &mut phases);
-    mark("river pieces");
-    // The open-water evaporation is H1's input only.
-    drop(evap);
-    let g_con = verify_with_area(grid, &hy, &routing, &filled, outlet, Some(&runoff), None, Some(weighted_area));
-    let (sum_q, sum_qw) = (hy.q.iter().sum::<f64>(), hy.qw.iter().sum::<f64>());
-    lap("conservation check", &mut phases);
-    probe::emit(probe::Stage::H1, |s| {
-        probe::StageView::new(s, grid)
-            .f64("area", probe::FieldKind::Area, &routing.area)
-            .f64("z", probe::FieldKind::Height, &z)
-            .number("segments", hy.stats.segments as f64)
-            .number("basins", hy.stats.basins as f64)
-            .number("channel cells", hy.stats.channel_cells as f64)
-    });
-    let h1 = hy.stats.clone();
-    drop((routing, filled, runoff));
-    hy.q = Vec::new();
-    hy.qw = Vec::new();
-    mark("H1 result kept, discharges released");
-    // The lake records come after the release: they read the basins only, and the working set has its headroom here (D22).
-    let lakes =
-        Lakes { lakes: lake_records(grid, &hy), pieces: pre.pieces, dropped_cells: pre.dropped_cells, water: pre.water, ring: pre.ring };
-    lap("lakes", &mut phases);
-    mark("lakes");
+    // ---- H1 on the rounds' surface; under `round_f32` the surface is stored f32 (half the bytes, exact) from here to the sediment pass (GEN-166 PR 2)
+    let st = if p.carve.round_f32 {
+        assert!(z.iter().all(|&h| f64::from(h as f32) == h), "the round surface is f32-representable under round_f32");
+        let z32: Vec<f32> = z.iter().map(|&h| h as f32).collect();
+        drop(std::mem::take(&mut z));
+        mark("heights stored f32");
+        let st = h1_stage(grid, &z32[..], outlet, p, climate, mark, &mut |name| lap(name, &mut phases));
+        z = z32.iter().map(|&h| f64::from(h)).collect();
+        drop(z32);
+        mark("heights widened");
+        st
+    } else {
+        h1_stage(grid, &z[..], outlet, p, climate, mark, &mut |name| lap(name, &mut phases))
+    };
+    let H1Stage { hy, lakes, graph, h1, g_con, sum_q, sum_qw } = st;
 
     // ---- the sediment pass on the surface read back
     let z_start = spill_read(&p.spill, n)?;

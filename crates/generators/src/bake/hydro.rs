@@ -16,7 +16,7 @@
 #![allow(clippy::needless_range_loop)]
 
 use super::route::{Routing, NONE};
-use super::Grid;
+use super::{Grid, Heights};
 use std::collections::HashMap;
 
 /// The number of level steps of a basin's area curve.
@@ -160,7 +160,7 @@ pub fn id_hash(body: u64, a: u64, b: u64) -> u64 {
 #[allow(clippy::too_many_arguments)]
 pub fn hydrology(
     grid: &Grid,
-    z: &[f64],
+    z: &(impl Heights + ?Sized),
     filled: &[f64],
     routing: &Routing,
     outlet: &[bool],
@@ -194,7 +194,7 @@ struct Found {
 #[allow(clippy::too_many_arguments)]
 pub fn hydrology_with(
     grid: &Grid,
-    z: &[f64],
+    z: &(impl Heights + ?Sized),
     filled: &[f64],
     routing: &Routing,
     outlet: &[bool],
@@ -277,7 +277,7 @@ pub fn hydrology_with(
 
     // ---- basins: the components of the cells under the filled surface
     let mut seen = vec![false; n];
-    let pit = |p: usize| grid.is_active(p) && !outlet[p] && filled[p] - z[p] > params.pit_min_m;
+    let pit = |p: usize| grid.is_active(p) && !outlet[p] && filled[p] - z.at(p) > params.pit_min_m;
     let mut found: Vec<Found> = Vec::new();
     let mut label = vec![NONE; n];
     let mut stack: Vec<u32> = Vec::new();
@@ -305,7 +305,7 @@ pub fn hydrology_with(
         // The floor: the lowest cell, ties by the cell index (the members are in index order, which is the global id order of a window).
         let mut floor = members[0] as usize;
         for &c in &members {
-            if z[c as usize] < z[floor] {
+            if z.at(c as usize) < z.at(floor) {
                 floor = c as usize;
             }
         }
@@ -324,7 +324,7 @@ pub fn hydrology_with(
             }
         }
         let spill = spill.expect("a basin has a rim");
-        let (floor_m, spill_m) = (z[floor], filled[spill].max(z[floor]));
+        let (floor_m, spill_m) = (z.at(floor), filled[spill].max(z.at(floor)));
         let named = intentional.is_some_and(|f| members.iter().any(|&c| f[c as usize]));
         if !named && spill_m - floor_m < params.pit_min_m {
             stats.ramps += 1;
@@ -339,7 +339,7 @@ pub fn hydrology_with(
         for (k, (ca, cv)) in curve_a.iter_mut().zip(curve_v.iter_mut()).enumerate() {
             let h = floor_m + (spill_m - floor_m) * (k + 1) as f64 / CURVE_STEPS as f64;
             for &c in &members {
-                let zc = z[c as usize];
+                let zc = z.at(c as usize);
                 if zc < h {
                     let a = grid.cell_area(c as usize);
                     *ca += a;

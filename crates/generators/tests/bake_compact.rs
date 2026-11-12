@@ -477,7 +477,7 @@ fn the_deposition_balances_per_catchment_and_per_round_on_a_compact_landmass() {
     assert_eq!(checked, 3);
 }
 
-// spec: GEN-158
+// spec: GEN-158, GEN-178, TEST-126
 #[test]
 fn the_phase_plan_is_the_steps_in_order_releases_what_it_should_and_does_not_move_a_bit_with_the_probe_on() {
     use planet_generators::bake::build::{build_resident, PlanParams};

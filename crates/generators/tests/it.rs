@@ -22,6 +22,8 @@ mod bake_fillgeom;
 mod bake_flats;
 #[path = "bake_h0.rs"]
 mod bake_h0;
+#[path = "bake_heights.rs"]
+mod bake_heights;
 #[path = "bake_hydro.rs"]
 mod bake_hydro;
 #[path = "bake_k7.rs"]
