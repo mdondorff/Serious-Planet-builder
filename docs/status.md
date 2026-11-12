@@ -29,6 +29,12 @@ Dormant (no near trigger; not asked now):
 | CP2 (about 12-01) | Rivers and lakes, G-RT frame time, the dam brief; then the gate (`docs/briefings/terrain-prototype.md`) | per lane |
 | Perf | Machine ready (preflight OK 2026-11-07): REND-052 verdicts, ground-detail and channel-read cost; TEST-099 waits for a perf authorisation; a current store first (MESH_VERSION 11) | bulldozer |
 | Store | All stores on disk refused by keys since #1218/#1225 (read-only references); in-memory `--world` runs only until a new store | all |
+| Audit batch C (approved by the owner 2026-11-10; queued 2026-11-12) | 72 open changes and 57 design/tasks files: a read-only table (finished changes: spec delta synced, tests active; archivable design/tasks files) in a docs PR; the architect syncs specs from it; nobody archives before | spikes, due 2026-11-13; architect |
+| Audit batch E | Waits on the owner's list (nothing to run) | owner |
+| A3 12.4 P0 (c) | Build-environment pin (toolchain, `Cargo.lock`, profile, flags, CPU features, FP settings; ADR 0114 point 6) and a Windows+Linux determinism CI fixture across thread counts | bulldozer, due 2026-11-14 |
+| A3 12.4 P1 | Thermal-dam investigation (after the k=2 dam count); compaction peak, temp disk and crash-safe replacement tests (G-STORE extension); a smaller and a larger body (G-SCALE) | explorer, after GEN-175 (due 2026-11-18) |
+| A3 12.4 P1 | Editor commit readiness, supersession, undo/replay with basin split/merge, latency of three levels | crusader, after ADR 0117 is accepted |
+| A3 12.4 P1 | Per-round convergence indicators | spikes, after SPIKE-109 (due 2026-11-18) |
 
 ## Tracked
 - **Thin-river thickening at the coarse level** (REND-059, crusader, 2026-11-12): a river 1.2 samples wide is drawn 3.5x heavier at the coarse level than at the fine one (per-node strength), a possible pop at a level change; reported, not gated; judged in the owner's look review of a flight-out (one thin river crossing a level change); gate if visible.
