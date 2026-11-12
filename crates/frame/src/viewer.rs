@@ -808,6 +808,7 @@ pub fn lit_warm_plan(camera: crate::camera::Camera, size: (u32, u32), cells: u32
         nodes: Vec::new(),
         lit: Some(lit),
         water: None,
+        rivers: None,
     }
 }
 

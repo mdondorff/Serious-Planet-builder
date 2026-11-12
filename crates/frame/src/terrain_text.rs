@@ -57,6 +57,7 @@ impl TerrainPlan {
             nodes: _,
             lit: _,
             water: _,
+            rivers: _,
         } = self;
         let Camera { position: _, forward: _, up: _, fov_y_rad: _, aspect: _, near_m: _ } = self.camera;
         let c = &self.camera;
@@ -94,6 +95,11 @@ impl TerrainPlan {
         // Likewise the water lines exist only for a plan with water.
         if let Some(water) = &self.water {
             s += &water.to_text();
+            s.push('\n');
+        }
+        // The river lines exist only for a plan with rivers.
+        if let Some(rivers) = &self.rivers {
+            s += &rivers.to_text();
             s.push('\n');
         }
         for n in &self.nodes {
@@ -159,6 +165,7 @@ impl TerrainPlan {
         let mut lit = None;
         let mut shore_ramp_per_m = 0.0f32;
         let mut water_lines: Vec<Vec<&str>> = Vec::new();
+        let mut river_lines: Vec<Vec<&str>> = Vec::new();
         for line in lines.filter(|l| !l.trim().is_empty()) {
             let t: Vec<&str> = line.split_whitespace().collect();
             let int = |s: &str| s.parse::<u32>().map_err(|e| format!("bad number '{s}' in '{line}': {e}"));
@@ -186,6 +193,7 @@ impl TerrainPlan {
                 ["shore_ramp_per_m", v] => shore_ramp_per_m = p32(v)?,
                 ["lit", rest @ ..] => lit = Some(crate::look::LitPlan::from_tokens(rest)?),
                 ["water", ..] | ["liquid", ..] | ["wnode", ..] => water_lines.push(t.clone()),
+                ["rivers", ..] | ["rnode", ..] => river_lines.push(t.clone()),
                 ["node", id, "level", level, "origin", ox, oy, oz, "rel", rx, ry, rz, "morph", m, ms, me, "color", r, g, b, a, "mesh_key", key, tail @ ..] =>
                 {
                     // `shore_ramp <h32>` ended a node line from the first REND-030 until the ramp followed the fragment's distance: read
@@ -233,6 +241,7 @@ impl TerrainPlan {
             nodes,
             lit,
             water: if water_lines.is_empty() { None } else { Some(crate::water::WaterPlan::from_lines(&water_lines)?) },
+            rivers: if river_lines.is_empty() { None } else { Some(crate::river::RiverPlan::from_lines(&river_lines)?) },
         })
     }
 

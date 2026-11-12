@@ -95,6 +95,7 @@ fn the_edge_masks_hold_the_vertices_of_an_edge_to_the_coarse_or_the_own_grid_and
         nodes,
         lit: None,
         water: None,
+        rivers: None,
     };
     let tiles = [&cd, &fd];
     let bare = render(&ctx, &tiles, &plan(vec![draw(capped, &cd, &camera, 0, 0), draw(finer, &fd, &camera, 0, 0)]));

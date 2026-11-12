@@ -641,6 +641,7 @@ mod tests {
             nodes: tiles.iter().map(|t| draw(*t, &camera)).collect(),
             lit: None,
             water: None,
+            rivers: None,
         }
     }
 
