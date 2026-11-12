@@ -199,6 +199,8 @@ pub struct ClassSource {
     shelf: ShelfProfile,
     /// The distance to the coast of the field on a lattice (GEN-136), built on the first read of a sea point.
     coast: std::sync::OnceLock<std::sync::Arc<CoastLattice>>,
+    /// The coast lattice of the coast tilt (GEN-180): the same field with its own cap, the tilt's `D` (the shelf's lattice is capped at the shelf and slope width, 170 km on Earth, so a longer ramp would saturate early). Built on the first land read with the tilt on; `D` is its key.
+    tilt_coast: std::sync::Mutex<Option<(u64, std::sync::Arc<CoastLattice>)>>,
     /// The threads the coast lattice is built on (0: the machine's, at most 16); the bytes do not depend on it.
     coast_threads: usize,
 }
@@ -221,6 +223,7 @@ impl ClassSource {
                 plate_draw: t,
                 shelf: ShelfProfile::earth(),
                 coast: std::sync::OnceLock::new(),
+                tilt_coast: std::sync::Mutex::new(None),
                 coast_threads: 0,
             };
             let score =
@@ -279,6 +282,28 @@ impl ClassSource {
             memo.push((key, lattice.clone()));
             lattice
         })
+    }
+
+    /// The coast lattice of the tilt for the distance `d_km` (GEN-180): signed distance to the coast of the field up to `d_km`, built once per `D` on the machine's threads (the bytes do not depend on the count).
+    fn tilt_lattice(&self, d_km: f64) -> std::sync::Arc<CoastLattice> {
+        let mut guard = self.tilt_coast.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((bits, lattice)) = guard.as_ref() {
+            if *bits == d_km.to_bits() {
+                return lattice.clone();
+            }
+        }
+        let threads =
+            if self.coast_threads > 0 { self.coast_threads } else { std::thread::available_parallelism().map_or(1, |n| n.get()).min(16) };
+        let lattice = std::sync::Arc::new(CoastLattice::build(
+            &|d| crate::global::continent_land_depth(self.seed, d),
+            &|_| 0.0,
+            self.shelf.coast_lattice_cells,
+            d_km,
+            self.radius_m / 1000.0,
+            threads,
+        ));
+        *guard = Some((d_km.to_bits(), lattice.clone()));
+        lattice
     }
 
     fn build_coast_lattice(&self) -> CoastLattice {
@@ -555,8 +580,10 @@ impl ClassSource {
         let weights = class_weights(&terms, e_smooth, rolling);
         // The coast tilt (GEN-180): a rise of the coast plains with the distance inland, weighted by the plain and rolling-plain weights (mountains, plateaus and hills get none).
         let e0 = if tilt.is_on() && t.land_depth > 0.0 {
-            let (signed_km, _) = self.coast_read(d);
-            (e0 + tilt.height_m((-signed_km).max(0.0), weights[PLAIN] + weights[ROLLING])).clamp(MIN_ELEVATION_M, MAX_ELEVATION_M)
+            let (signed_km, _) = self.tilt_lattice(tilt.d_km).read(d);
+            // Faded in over the true coast ramp of the field, so that the lattice's coast (within a cell of the field's) leaves no step at the shore.
+            let fade = smoothstep(0.0, TRUE_COAST_RAMP, t.land_depth);
+            (e0 + tilt.height_m((-signed_km).max(0.0), fade * (weights[PLAIN] + weights[ROLLING]))).clamp(MIN_ELEVATION_M, MAX_ELEVATION_M)
         } else {
             e0
         };

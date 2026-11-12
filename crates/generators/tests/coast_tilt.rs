@@ -84,6 +84,35 @@ fn the_tilt_lifts_land_only_within_its_bound_and_moves_no_class() {
 }
 
 // spec: GEN-180, TEST-128
+/// The ramp is not cut short by the shelf's coast lattice (170 km): with D = 400 km the lift of a plain deep inland reaches nearly t x D; and the tilt is faded in at the field's coast, so that the shore has no step.
+#[test]
+fn the_ramp_reaches_its_full_height_inland_and_leaves_no_step_at_the_shore() {
+    let src = ClassSource::new(14);
+    let tilt = CoastTilt { t_m_per_km: 4.0, d_km: 400.0 };
+    let limit = tilt.t_m_per_km * tilt.d_km;
+    let (mut best, mut shore, mut shore_worst) = (0.0f64, 0, 0.0f64);
+    for k in 0..30_000 {
+        let n = 30_000;
+        let z = 1.0 - 2.0 * (f64::from(k) + 0.5) / f64::from(n);
+        let r = libm::sqrt(1.0 - z * z);
+        let a = f64::from(k) * 2.399_963_229_728_653;
+        let d = Vec3::new(r * libm::cos(a), r * libm::sin(a), z);
+        let (off, on) = (src.eval(d), src.eval_with(d, &tilt));
+        let w = off.weights[PLAIN] + off.weights[ROLLING];
+        let up = on.e0 - off.e0;
+        if off.land_depth > 0.0 && w > 0.9 {
+            best = best.max(up / (w * limit));
+        }
+        if off.land_depth > 0.0 && off.land_depth < 0.01 {
+            shore += 1;
+            shore_worst = shore_worst.max(up / limit);
+        }
+    }
+    assert!(best > 0.9, "a plain far inland gains {best} of t x D (the shelf lattice's cap would stop it at 0.67)");
+    assert!(shore >= 5 && shore_worst < 0.03, "{shore} points within 0.01 of the field's coast gain at most {shore_worst} of t x D");
+}
+
+// spec: GEN-180, TEST-128
 #[test]
 fn the_identity_word_moves_only_with_the_tilt_on() {
     let w = 0xfeed_f00d_u64;
