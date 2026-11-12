@@ -1,0 +1,26 @@
+15:36:42 repeat 1 per-draw: 2,6 s wall, cpu 1,8 s, exit 0
+15:36:44 repeat 1 indirect: 1,9 s wall, cpu 1,9 s, exit 0
+15:36:46 repeat 1 indirect-stream: 2 s wall, cpu 1,9 s, exit 0
+15:36:48 repeat 1 indirect-pipelined: 2,9 s wall, cpu 9,1 s, exit 0
+15:36:51 repeat 1 per-draw-pipelined: 2,7 s wall, cpu 11 s, exit 0
+15:36:53 repeat 2 per-draw: 2 s wall, cpu 1,8 s, exit 0
+15:36:55 repeat 2 indirect: 2 s wall, cpu 2 s, exit 0
+15:36:57 repeat 2 indirect-stream: 2,1 s wall, cpu 2 s, exit 0
+15:37:00 repeat 2 indirect-pipelined: 2,8 s wall, cpu 8,4 s, exit 0
+15:37:03 repeat 2 per-draw-pipelined: 2,9 s wall, cpu 12,2 s, exit 0
+15:37:05 repeat 3 per-draw: 2 s wall, cpu 1,8 s, exit 0
+15:37:07 repeat 3 indirect: 2 s wall, cpu 1,8 s, exit 0
+15:37:09 repeat 3 indirect-stream: 2 s wall, cpu 1,9 s, exit 0
+15:37:12 repeat 3 indirect-pipelined: 2,8 s wall, cpu 8,8 s, exit 0
+15:37:15 repeat 3 per-draw-pipelined: 2,8 s wall, cpu 12,4 s, exit 0
+15:37:17 repeat 4 per-draw: 2,4 s wall, cpu 1,8 s, exit 0
+15:37:19 repeat 4 indirect: 2 s wall, cpu 1,8 s, exit 0
+15:37:21 repeat 4 indirect-stream: 2 s wall, cpu 1,9 s, exit 0
+15:37:24 repeat 4 indirect-pipelined: 2,9 s wall, cpu 10,3 s, exit 0
+15:37:27 repeat 4 per-draw-pipelined: 3 s wall, cpu 11,4 s, exit 0
+15:37:29 repeat 5 per-draw: 2,3 s wall, cpu 1,9 s, exit 0
+15:37:31 repeat 5 indirect: 2,1 s wall, cpu 1,9 s, exit 0
+15:37:33 repeat 5 indirect-stream: 2,2 s wall, cpu 2 s, exit 0
+15:37:36 repeat 5 indirect-pipelined: 2,8 s wall, cpu 8,6 s, exit 0
+15:37:39 repeat 5 per-draw-pipelined: 2,8 s wall, cpu 10,9 s, exit 0
+done
