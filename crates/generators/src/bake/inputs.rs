@@ -163,6 +163,7 @@ impl BakeInputs {
         CLASS_K.iter().chain(CLASS_CARVE.iter()).for_each(|v| put(v.to_bits()));
         // The turned lattices of the bands (GEN-140): the word is unchanged while the switch is off.
         let h = rules.fold(h);
+        let h = crate::classes::coast_tilt().fold(h);
         crate::height::turned_noise_word(h)
     }
 }
