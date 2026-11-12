@@ -1,0 +1,37 @@
+== window face 1 cells 12288 seed 14: i 7856-8875 j 560-1579 = 1020 x 1020; box i 8056-8675 j 760-1379; land 69.4 %; base sampled in 44.6 s
+-- [R1h] round 1's breach alone (the sweeps off) on the start surface, one round under RoundRules::ROUND; basins as in the depression table (U-routed flood, over 30 cells, interior)
+  cells lowered by at least 0.5 m in the box: 50540; of them within a basin's footprint (basin plus 2 steps) 41352 (81.8 %), inside a basin's lifted cells 39493 (78.1 %); lowering volume (m x cells) in the footprints 93.3 % of the box's
+  depth bin | basins | cells | max lowering in the footprint p50 / p95 / max (m) | lowering over half the fill depth: basins | cells lowered >= 0.5 m per basin p50
+  BREACHBIN | R1h | under 1 m | 0 | 0 | - | - | -
+  BREACHBIN | R1h | 1-10 m | 60 | 3820 | 9.6 / 376.5 / 500.0 | 34 | 16
+  BREACHBIN | R1h | 10-100 m | 517 | 58289 | 0.0 / 193.9 / 500.0 | 225 | 0
+  BREACHBIN | R1h | 100-300 m | 205 | 33598 | 0.0 / 281.4 / 500.0 | 48 | 0
+  BREACHBIN | R1h | over 300 m | 214 | 154216 | 0.0 / 500.0 / 500.0 | 50 | 0
+  the 10 deepest basins: fill 1321 m / 451 cells -> lowering max 0.0 m (0 cells); fill 1241 m / 1124 cells -> lowering max 0.0 m (0 cells); fill 1215 m / 1975 cells -> lowering max 0.0 m (0 cells); fill 1201 m / 1933 cells -> lowering max 0.0 m (0 cells); fill 1149 m / 858 cells -> lowering max 0.0 m (0 cells); fill 1147 m / 1370 cells -> lowering max 0.0 m (0 cells); fill 1131 m / 374 cells -> lowering max 0.0 m (0 cells); fill 1123 m / 222 cells -> lowering max 0.0 m (0 cells); fill 1107 m / 1027 cells -> lowering max 0.0 m (0 cells); fill 1091 m / 502 cells -> lowering max 0.0 m (0 cells)
+  correlation of ln(1 + fill depth) with ln(1 + max lowering in the footprint) over 996 basins: -0.09
+  DIAG basin fill 1321 m / 451 cells: lowest cell window (26, 207) face (7882, 767), z0 850.0 filled(U) 2171.1 filled(ROUND) 2171.1
+    path: [0] z0 850 fill 2171 after 850 in; [40] z0 1766 fill 1893 after 1266 out; [80] z0 960 fill 1587 after 736 out; [120] z0 1296 fill 1329 after 818 out; [160] z0 634 fill 1321 after 631 out; [200] z0 1047 fill 1225 after 808 out; [240] z0 1053 fill 1124 after 775 out; [280] z0 1009 fill 1017 after 740 out; [320] z0 880 fill 884 after 707 out; [360] z0 810 fill 824 after 674 out; [400] z0 786 fill 786 after 640 out; [440] z0 723 fill 735 after 256 out; [480] z0 696 fill 735 after 220 out; [520] z0 669 fill 702 after 218 out; [560] z0 669 fill 680 after 182 out; [600] z0 652 fill 653 after 167 out; [640] z0 641 fill 644 after 143 out; [680] z0 614 fill 618 after 118 out; [720] z0 376 fill 381 after 87 out; [760] z0 32 fill 102 after 32 out; [800] z0 26 fill 26 after 0 out; [840] z0 11 fill 15 after 0 out; [880] z0 7 fill 9 after 0 out; [908] z0 -0 fill -0 after -0 out
+  DIAG basin fill 1241 m / 1124 cells: lowest cell window (65, 195) face (7921, 755), z0 816.4 filled(U) 2057.7 filled(ROUND) 2057.7
+    path: [0] z0 816 fill 2058 after 816 in; [40] z0 1066 fill 2003 after 1066 out; [77] z0 1744 fill 1744 after 1744 out
+  DIAG basin fill 1215 m / 1975 cells: lowest cell window (971, 95) face (8827, 655), z0 1041.8 filled(U) 2257.3 filled(ROUND) 2257.3
+    path: [0] z0 1042 fill 2257 after 1042 in; [40] z0 2154 fill 2257 after 1731 in; [80] z0 2017 fill 2257 after 1708 in; [120] z0 2006 fill 2113 after 1552 out; [139] z0 1600 fill 1600 after 1600 out
+  PATHS | R1h | the receiver paths pit -> sill -> pit level of 996 basins hold 7483 of the 50540 cells lowered (>= 0.5 m) in the box (14.8 %) and 31.0 % of the lowering volume
+  depth bin | basins | path length cells p50 / p95 | sill over pit p50 / p95 (m) | path cells cut p50 / p95 | max cut on the path p50 / p95 / max (m) | cut volume per basin p50 (million m3) | basins with the cut at the 500 m round limit
+  PATHBIN | R1h | 1-10 m | 60 | 3820 cells | 13 / 23 | 6 / 10 | 2 / 20 | 14.7 / 376.5 / 500.0 | 4.54 | 2
+  PATHBIN | R1h | 10-100 m | 517 | 58289 cells | 17 / 52 | 56 / 93 | 0 / 30 | 76.9 / 279.2 / 500.0 | 0.00 | 6
+  PATHBIN | R1h | 100-300 m | 205 | 33598 cells | 21 / 88 | 173 / 288 | 0 / 21 | 237.9 / 444.2 / 500.0 | 0.00 | 4
+  PATHBIN | R1h | over 300 m | 214 | 154216 cells | 38 / 248 | 579 / 1052 | 0 / 92 | 500.0 / 500.0 / 500.0 | 0.00 | 140
+  PATHCORR | R1h | correlation of ln(1 + fill depth) with ln(1 + max cut on the path) over 996 basins: 0.77
+  the 8 deepest basins by path: fill 1321 m, path 95 cells, sill over pit 1321 m, max cut 500 m; fill 1241 m, path 78 cells, sill over pit 1241 m, max cut 500 m; fill 1215 m, path 140 cells, sill over pit 1215 m, max cut 500 m; fill 1201 m, path 167 cells, sill over pit 1201 m, max cut 500 m; fill 1149 m, path 376 cells, sill over pit 1149 m, max cut 500 m; fill 1147 m, path 25 cells, sill over pit 1147 m, max cut 500 m; fill 1131 m, path 102 cells, sill over pit 1131 m, max cut 500 m; fill 1123 m, path 118 cells, sill over pit 1123 m, max cut 500 m
+  basins [after round 1's breach alone]: land cells of the box 267717; lifted 5.51 %; depressions of 1-30 cells 0.15 %; over 30 cells interior 5.35 %, touching the window ring 0.00 % (counted apart); over 300 cells interior 4.37 % (56 depressions)
+    interior depressions over 30 cells by largest fill depth (% of land): under 1 m 1.17, 1-10 m 0.04, 10-100 m 0.45, over 100 m 3.69
+    the deepest depressions over 30 cells (fill depth / cells): 933 m / 2096 cells; 825 m / 228 cells; 721 m / 1220 cells; 707 m / 1004 cells; 689 m / 2058 cells; 666 m / 4844 cells; 655 m / 399 cells; 647 m / 1786 cells
+    interior depressions over 30 cells: 162 ; largest fill depth p50 190.0 m, p90 534.7 m, max 933.3 m
+BASINRAW | after round 1's breach alone | lifted 5.51 | small 0.15 | over30 5.35 | over300 4.37 | n30 162 | depth p50 190.0 p95 624.9 max 933.3 | deeper100 3.69 | cells p50 157 p95 1374 max 6597
+  cells of the box at 0.001 m (the breach's floor) after the breach alone: 4970; at 5.001 m: 0
+  basins [after 4 rounds]: land cells of the box 267717; lifted 1.73 %; depressions of 1-30 cells 0.24 %; over 30 cells interior 1.48 %, touching the window ring 0.00 % (counted apart); over 300 cells interior 0.76 % (25 depressions)
+    interior depressions over 30 cells by largest fill depth (% of land): under 1 m 0.70, 1-10 m 0.78, 10-100 m 0.00, over 100 m 0.00
+    the deepest depressions over 30 cells (fill depth / cells): 959 m / 2804 cells; 714 m / 8399 cells; 696 m / 7175 cells; 664 m / 5576 cells; 595 m / 1820 cells; 529 m / 1612 cells; 523 m / 963 cells; 503 m / 2736 cells
+    interior depressions over 30 cells: 66 ; largest fill depth p50 15.9 m, p90 503.3 m, max 959.0 m
+BASINRAW | after 4 rounds | lifted 1.73 | small 0.24 | over30 1.48 | over300 0.76 | n30 66 | depth p50 15.9 p95 595.1 max 959.0 | deeper100 0.00 | cells p50 188 p95 3334 max 10336
+FIVEBASE | R1h | cells of the box at 5.001 m after 4 rounds 1208 | at 0.001 m 1166 | at 5.001 m after the breach alone 0
