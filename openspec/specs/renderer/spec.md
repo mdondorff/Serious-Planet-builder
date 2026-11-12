@@ -841,13 +841,13 @@ Source: Architect 2026-11-11 (item 15 PR 8), GEN-165, GEN-168
 - **WHEN** a segment widens from one cell to 32 cells and is burnt and coded
 - **THEN** every burnt cell is within 0.75 cell of the coded edge and every cell half a cell inside the edge is burnt (the edge is the envelope of the burn's discs)
 
-### Requirement: REND-061 The plan chooses which nodes get a river layer
-The terrain plan SHALL carry the river coverage as an optional part (`rivers`; `None` keeps the plan's text and hash). The renderer SHALL hold coverages in one 8-bit texture array of at most 256 layers; when more nodes have a river the nearest keep theirs (ties by node index) and the dropped count is in the plan's text and the frame's stats.
+### Requirement: REND-061 The plan chooses which nodes get a river slot
+The terrain plan SHALL carry the river coverage as an optional part (`rivers`; `None` keeps the plan's text and hash). The renderer SHALL hold coverages in one 2D atlas of `RIVER_SLOTS` 8-bit slots; when more nodes have a river, the nearest keep theirs (ties by node index) and the dropped count is in the plan's text and the frame's stats.
 - The scale of a code is cells, not metres (CON-11).
-- Neighbouring nodes agree on shared edge samples; across a level boundary the largest in-between difference is reported.
-- Sampling clamps inside a layer.
+- Across a level boundary the largest in-between difference is reported.
+- A slot is its samples inside a one-texel border repeating its edges: no read takes another slot's texel.
+- A G-RT flight asserts no river was dropped.
 - With no river node every lit golden is bit-identical.
-
 Verify: A, C
 Status: active
 Source: Architect 2026-11-12 (REND-059 part C), REND-059, CON-03, CON-11

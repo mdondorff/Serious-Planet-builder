@@ -33,8 +33,7 @@ pub use gpu_timing::{GpuPass, PassTimes};
 pub use lit::{lit_post_shaders, ExposureState, LitPath};
 pub use terrain::{
     execute_terrain_tiles, execute_terrain_tiles_preview, execute_terrain_tiles_preview_split, CpuPhases, DrawMode, FirstUse, FrameTiming,
-    InitCounts, MeasureVariant, TerrainRenderer, TerrainStats, UploadCounters, UploadMode, UploadTimes, RING_SETS, RIVER_LAYERS,
-    WARM_NODES,
+    InitCounts, MeasureVariant, TerrainRenderer, TerrainStats, UploadCounters, UploadMode, UploadTimes, RING_SETS, RIVER_SLOTS, WARM_NODES,
 };
 pub use ui::{UiFrame, UiPainter};
 pub use water::water_shaders;

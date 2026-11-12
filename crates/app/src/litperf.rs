@@ -744,6 +744,7 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
     let mut results: Vec<ViewResult> = Vec::new();
     // A river flight whose plans carry no river node measures nothing of the river path: it fails the scene (a gate figure over it would mean nothing).
     let mut river_empty: Vec<String> = Vec::new();
+    let mut river_dropped: Vec<String> = Vec::new();
     let first_camera = views[0].cameras[0];
     // The run's clock and its phases (the views and flights): a run that stops on a timeout shows, in the output and in `stall::phase_report`, which one it was in.
     crate::stall::run_clock_start();
@@ -786,6 +787,10 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
                     crate::riverperf::report(&setup.river, setup.river_cov.as_ref().map(|c| c.counters()), out)?;
                     if setup.river.nodes_max == 0 {
                         river_empty.push(path.clone());
+                    }
+                    // No river is dropped for want of a slot: a dropped river is a held-back tile under G-RT (REND-061).
+                    if setup.river.dropped_max > 0 {
+                        river_dropped.push(format!("{path} ({} dropped)", setup.river.dropped_max));
                     }
                     continue;
                 }
@@ -923,6 +928,13 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
     .map_err(err)?;
     for f in &failed {
         writeln!(out, "{f}").map_err(err)?;
+    }
+    if !river_dropped.is_empty() {
+        return Err(format!(
+            "FAIL: the river flight(s) {} dropped rivers for want of a coverage slot ({} slots): a dropped river is a held-back tile (REND-061)",
+            river_dropped.join(", "),
+            planet_render::RIVER_SLOTS
+        ));
     }
     if !river_empty.is_empty() {
         return Err(format!(

@@ -1,0 +1,1 @@
+- 2026-11-12 **river-atlas**: the river coverage array of 256 layers is a 2D atlas of 2,048 slots (REND-061: slots, a G-RT flight asserts no river dropped); bit-identical to the array on the river goldens candidate.

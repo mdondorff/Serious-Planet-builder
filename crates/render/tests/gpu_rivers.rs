@@ -13,7 +13,7 @@ use planet_frame::{plan_terrain_field, Camera, LodParams, TerrainPlan, TerrainRe
 use planet_generators::bake::k7::{Channel, QUnit, WidthLaw};
 use planet_generators::compact::compact_tile_field;
 use planet_generators::height::{HeightField, Reference};
-use planet_render::{AdapterPolicy, GpuContext, TerrainRenderer, RIVER_LAYERS};
+use planet_render::{AdapterPolicy, GpuContext, TerrainRenderer, RIVER_SLOTS};
 use planet_streaming::PoolConfig;
 
 const R: f64 = 6_371_000.0;
@@ -218,7 +218,7 @@ fn lum(p: &[f32; 4]) -> f32 {
 fn a_river_plan_darkens_the_pixels_of_its_water_and_changes_no_others_and_the_next_frame_is_clean() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let (plan, field) = scene();
-    let rp = river_plan(&plan, RIVER_LAYERS as usize);
+    let rp = river_plan(&plan, RIVER_SLOTS as usize);
     assert!(!rp.nodes.is_empty(), "the pose has a node with the river in range");
     let mut r = renderer(&ctx, &plan, &field);
     // The ring has more than one set: cycle it so that every set has been drawn with and without rivers.
@@ -261,7 +261,7 @@ fn a_river_plan_darkens_the_pixels_of_its_water_and_changes_no_others_and_the_ne
 fn more_river_nodes_than_layers_draw_the_nearest_and_the_stats_count_the_rest() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let (plan, field) = scene();
-    let all = river_plan(&plan, RIVER_LAYERS as usize);
+    let all = river_plan(&plan, RIVER_SLOTS as usize);
     assert!(all.nodes.len() >= 2, "the pose has at least two river nodes ({}): the cap case needs two", all.nodes.len());
     let one = river_plan(&plan, 1);
     assert_eq!(one.nodes.len(), 1);
@@ -288,7 +288,7 @@ fn project(plan: &TerrainPlan, field: &Reference, tile: planet_core::TileId, i: 
 fn the_coverage_lands_where_its_samples_are_along_both_axes_of_the_node() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let (plan, field) = scene();
-    let rp = river_plan(&plan, RIVER_LAYERS as usize);
+    let rp = river_plan(&plan, RIVER_SLOTS as usize);
     let node = rp.nodes[0].node;
     let tile = plan.nodes[node as usize].tile;
     let mut r = renderer(&ctx, &plan, &field);
@@ -325,7 +325,7 @@ fn a_river_plan_the_array_cannot_hold_is_an_error_and_a_later_frame_without_rive
     use planet_render::ExecError;
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let (plan, field) = scene();
-    let rp = river_plan(&plan, RIVER_LAYERS as usize);
+    let rp = river_plan(&plan, RIVER_SLOTS as usize);
     let mut r = renderer(&ctx, &plan, &field);
     let (base, _) = frame(&ctx, &mut r, &plan, None);
     let mut p = plan.clone();
@@ -336,7 +336,7 @@ fn a_river_plan_the_array_cannot_hold_is_an_error_and_a_later_frame_without_rive
         (RiverPlan { nodes: vec![node(0, size + 1)], dropped: 0 }, "a coverage of another size"),
         (RiverPlan { nodes: vec![node(plan.nodes.len() as u32, size)], dropped: 0 }, "a node the plan does not have"),
         (RiverPlan { nodes: vec![node(0, size), node(0, size)], dropped: 0 }, "a node twice"),
-        (RiverPlan { nodes: (0..=RIVER_LAYERS).map(|_| node(0, size)).collect(), dropped: 0 }, "more nodes than layers"),
+        (RiverPlan { nodes: (0..=RIVER_SLOTS).map(|_| node(0, size)).collect(), dropped: 0 }, "more nodes than layers"),
         (
             RiverPlan { nodes: vec![RiverNode { node: 0, size: size as u32, coverage: vec![0; 3], fade: 255 }], dropped: 0 },
             "a short coverage",
@@ -369,7 +369,7 @@ fn a_river_plan_the_array_cannot_hold_is_an_error_and_a_later_frame_without_rive
 fn river_water_adds_no_geometry_the_frame_submits_the_draws_and_triangles_it_did_without_rivers() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let (plan, field) = scene();
-    let rp = river_plan(&plan, RIVER_LAYERS as usize);
+    let rp = river_plan(&plan, RIVER_SLOTS as usize);
     let mut r = renderer(&ctx, &plan, &field);
     let (_, without) = frame(&ctx, &mut r, &plan, None);
     let (_, with) = frame(&ctx, &mut r, &plan, Some(&rp));
@@ -443,7 +443,7 @@ fn the_river_scene_has_smooth_banks_at_the_near_pose_and_no_pop_between_two_leve
     // The near pose: low, pitched down, a river 10 cells wide through the finest node nearest to the camera.
     let (plan, field) = scene_at(25.0, 40.0, 4.0);
     let src = make_river(&plan, 10.0);
-    let rp = plan_river_over(&plan, &src, RIVER_LAYERS as usize);
+    let rp = plan_river_over(&plan, &src, RIVER_SLOTS as usize);
     assert!(!rp.nodes.is_empty(), "the near pose has river nodes");
     let mut r = renderer(&ctx, &plan, &field);
     let (base, _) = frame(&ctx, &mut r, &plan, None);
@@ -476,7 +476,7 @@ fn the_river_scene_has_smooth_banks_at_the_near_pose_and_no_pop_between_two_leve
     let (coarse_plan, _) = scene_capped(25.0, 40.0, 4.0, finest - 1);
     let coarse_nodes = coarse_plan.nodes.len();
     assert_eq!(coarse_plan.nodes.iter().map(|n| n.level).max().unwrap(), finest - 1);
-    let rp_coarse = plan_river_over(&coarse_plan, &src, RIVER_LAYERS as usize);
+    let rp_coarse = plan_river_over(&coarse_plan, &src, RIVER_SLOTS as usize);
     let mut rc = renderer(&ctx, &coarse_plan, &field);
     let (base_c, _) = frame(&ctx, &mut rc, &coarse_plan, None);
     let (with_c, _) = frame(&ctx, &mut rc, &coarse_plan, Some(&rp_coarse));
@@ -500,7 +500,7 @@ fn flying_out_a_river_fades_with_its_width_in_samples_and_its_wet_pixels_fall() 
         let scale = (0..k).fold(1.0, |a, _| a * 1.4);
         let alt = 25.0 * scale;
         let (plan, _) = scene_backed(25.0, 40.0, 4.0, scale);
-        let rp = plan_river_over(&plan, &src, RIVER_LAYERS as usize);
+        let rp = plan_river_over(&plan, &src, RIVER_SLOTS as usize);
         let mut r = renderer(&ctx, &plan, &field);
         let (base, _) = frame(&ctx, &mut r, &plan, None);
         let (with, _) = frame(&ctx, &mut r, &plan, Some(&rp));
@@ -620,7 +620,7 @@ fn wetness_mass(base: &[[f32; 4]], with: &[[f32; 4]]) -> f64 {
 fn the_strength_of_a_node_scales_its_river_in_the_shader_and_a_river_narrower_than_the_coarse_level_is_reported_across_levels() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let (plan, field) = scene();
-    let full = river_plan(&plan, RIVER_LAYERS as usize);
+    let full = river_plan(&plan, RIVER_SLOTS as usize);
     let half = RiverPlan { nodes: full.nodes.iter().map(|n| RiverNode { fade: 128, ..n.clone() }).collect(), dropped: 0 };
     let mut r = renderer(&ctx, &plan, &field);
     let (base, _) = frame(&ctx, &mut r, &plan, None);
@@ -634,7 +634,7 @@ fn the_strength_of_a_node_scales_its_river_in_the_shader_and_a_river_narrower_th
     let finest = plan.nodes.iter().map(|n| n.level).max().unwrap();
     let (coarse_plan, _) = scene_capped(25.0, 40.0, 4.0, finest - 1);
     let src = make_river(&plan, 2.4);
-    let (fine, coarse) = (plan_river_over(&plan, &src, RIVER_LAYERS as usize), plan_river_over(&coarse_plan, &src, RIVER_LAYERS as usize));
+    let (fine, coarse) = (plan_river_over(&plan, &src, RIVER_SLOTS as usize), plan_river_over(&coarse_plan, &src, RIVER_SLOTS as usize));
     let mut rc = renderer(&ctx, &coarse_plan, &field);
     let (base_c, _) = frame(&ctx, &mut rc, &coarse_plan, None);
     let (with_c, _) = frame(&ctx, &mut rc, &coarse_plan, Some(&coarse));

@@ -130,7 +130,7 @@ struct Node {
 // The river coverage of the frame (REND-059, REND-061; bindings 2 and 3 are the water pass's): per node the layer of the coverage array it reads (`0xffffffff`: none), the array of 8-bit signed-distance codes, one layer a river
 // node, and its sampler (clamped, bilinear). Only the lit fragment stages read them.
 @group(0) @binding(4) var<storage, read> river_layers: array<u32>;
-@group(0) @binding(5) var river_cov: texture_2d_array<f32>;
+@group(0) @binding(5) var river_cov: texture_2d<f32>;
 @group(0) @binding(6) var river_samp: sampler;
 "#,
     r#"
@@ -764,13 +764,20 @@ fn fs_lit(in: VsOut) -> LitOut {
 // The share of the fragment that is river water (REND-059): the coverage code of its node's layer, interpolated over the node's samples (the code is `128 + 32 d`, `d` the signed distance in cells to the river's edge, so water
 // where it is at or under 128), with the edge smoothed over one code step of the screen (no cell staircase). The scale of the code is in cells, not metres (CON-11). Derivatives are taken in uniform control flow.
 fn river_wet(node_index: u32, aux: vec2<f32>) -> f32 {
-    // The node's word: the layer of the coverage array in the low 16 bits and the strength of its river in the next 8 (the plan's `fade`: the width in samples of the node between the minimum and full, REND-059); `0xffffffff`: none.
+    // The node's word: the slot of the coverage atlas in the low 16 bits, the strength of its river in the next 8 (the plan's `fade`: the width in samples of the node between the minimum and full, REND-059) and the samples a side of a slot in the top 8; `0xffffffff`: none.
+    // A slot is `(cells + 1)` texels a side inside a one-texel border that repeats the slot's edge texels, so the hardware's bilinear read never takes a texel of the next slot (REND-061).
     let word = river_layers[node_index];
-    let layer = word & 0xffffu;
+    let slot = word & 0xffffu;
     let strength = f32((word >> 16u) & 0xffu) / 255.0;
-    let edge = f32(textureDimensions(river_cov).x - 1u);
-    let uv = (clamp(aux, vec2<f32>(0.0), vec2<f32>(1.0)) * edge + 0.5) / (edge + 1.0);
-    let c = textureSampleLevel(river_cov, river_samp, uv, i32(min(layer, 255u)), 0.0).r * 255.0;
+    // A node with no river reads a harmless texel (the guards keep every division defined); its result is dropped by the select below.
+    let size = max((word >> 24u) & 0xffu, 2u);
+    let dims = textureDimensions(river_cov);
+    let edge = f32(size - 1u);
+    let stride = size + 2u;
+    let cols = max(dims.x / stride, 1u);
+    let origin = vec2<f32>(f32((slot % cols) * stride + 1u), f32((slot / cols) * stride + 1u));
+    let uv = (origin + clamp(aux, vec2<f32>(0.0), vec2<f32>(1.0)) * edge + 0.5) / vec2<f32>(dims);
+    let c = textureSampleLevel(river_cov, river_samp, uv, 0.0).r * 255.0;
     let w = max(fwidth(c), 1.0);
     let wet = 1.0 - smoothstep(128.0 - 0.5 * w, 128.0 + 0.5 * w, c);
     return select(0.0, wet * strength, word != 0xffffffffu);
@@ -1060,7 +1067,34 @@ struct FrameSet {
 }
 
 /// The layers of the river coverage array (REND-061): the most river nodes a frame draws; the plan chooses which get one and counts the rest.
-pub const RIVER_LAYERS: u32 = 256;
+/// The columns and rows of the river coverage atlas: [`RIVER_SLOTS`] slots in a near-square grid.
+pub(crate) fn river_atlas_grid() -> (u32, u32) {
+    let cols = (f64::from(RIVER_SLOTS)).sqrt().ceil() as u32;
+    (cols, RIVER_SLOTS.div_ceil(cols))
+}
+
+/// The atlas texture's size for nodes of `cells` cells: a slot is `cells + 3` texels a side (the node's `cells + 1` samples and a border of one).
+pub(crate) fn river_atlas_size(cells: u32) -> (u32, u32) {
+    let (cols, rows) = river_atlas_grid();
+    (cols * (cells + 3), rows * (cells + 3))
+}
+
+/// `codes` (`size` x `size`, row-major) inside a border of one texel that repeats the edge texels.
+pub(crate) fn pad_coverage(codes: &[u8], size: usize) -> Vec<u8> {
+    let stride = size + 2;
+    let mut out = vec![0u8; stride * stride];
+    for y in 0..stride {
+        let sy = y.saturating_sub(1).min(size - 1);
+        for x in 0..stride {
+            let sx = x.saturating_sub(1).min(size - 1);
+            out[y * stride + x] = codes[sy * size + sx];
+        }
+    }
+    out
+}
+
+/// Slots of the river coverage atlas (REND-061): a node with a river takes one; the plan's `max_layers` is this number, the plan never drops a river for want of a slot while its nodes fit (G-RT asserts none dropped).
+pub const RIVER_SLOTS: u32 = 2048;
 
 /// A resident tile: its mesh key and the slot of the pool it sits in.
 #[derive(Clone, Copy, Debug)]
@@ -1502,7 +1536,7 @@ impl TerrainRenderer {
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        view_dimension: wgpu::TextureViewDimension::D2,
                         multisampled: false,
                     },
                     count: None,
@@ -1732,9 +1766,11 @@ impl TerrainRenderer {
                         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                     },
                 );
+                // The coverage atlas (REND-061): `RIVER_SLOTS` slots of `(cells + 1)` texels a side, each inside a one-texel border, in a grid of columns.
+                let (atlas_w, atlas_h) = river_atlas_size(cells);
                 let river_array = device.create_texture(&wgpu::TextureDescriptor {
                     label: Some("river-coverage"),
-                    size: wgpu::Extent3d { width: cells + 1, height: cells + 1, depth_or_array_layers: RIVER_LAYERS },
+                    size: wgpu::Extent3d { width: atlas_w, height: atlas_h, depth_or_array_layers: 1 },
                     mip_level_count: 1,
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
@@ -1742,10 +1778,7 @@ impl TerrainRenderer {
                     usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                     view_formats: &[],
                 });
-                let river_view = river_array.create_view(&wgpu::TextureViewDescriptor {
-                    dimension: Some(wgpu::TextureViewDimension::D2Array),
-                    ..Default::default()
-                });
+                let river_view = river_array.create_view(&wgpu::TextureViewDescriptor::default());
                 let bind = Self::make_bind(
                     device,
                     bgl,
@@ -2573,9 +2606,9 @@ impl TerrainRenderer {
                 ));
             }
             let size = self.cells + 1;
-            if r.nodes.len() > RIVER_LAYERS as usize {
+            if r.nodes.len() > RIVER_SLOTS as usize {
                 return Err(ExecError::BadRiverPlan(format!(
-                    "the plan has {} river nodes, the coverage array holds {RIVER_LAYERS}",
+                    "the plan has {} river nodes, the coverage atlas holds {RIVER_SLOTS} slots",
                     r.nodes.len()
                 )));
             }
@@ -2688,19 +2721,23 @@ impl TerrainRenderer {
             Some(r) => {
                 let size = self.cells + 1;
                 let mut layers = vec![0xffu8; 4 * self.node_capacity.max(1)];
+                let stride = size + 2;
+                let (cols, _) = river_atlas_grid();
                 for (used, node) in r.nodes.iter().enumerate() {
                     layers[4 * node.node as usize..4 * node.node as usize + 4]
-                        .copy_from_slice(&((used as u32) | (u32::from(node.fade) << 16)).to_le_bytes());
+                        .copy_from_slice(&((used as u32) | (u32::from(node.fade) << 16) | (size << 24)).to_le_bytes());
+                    // The slot with its border: the node's codes with the edge texels repeated, so the hardware's bilinear read at an edge sees what a clamped read of the node would.
+                    let padded = pad_coverage(&node.coverage, size as usize);
                     ctx.queue.write_texture(
                         wgpu::TexelCopyTextureInfo {
                             texture: &set.river_array,
                             mip_level: 0,
-                            origin: wgpu::Origin3d { x: 0, y: 0, z: used as u32 },
+                            origin: wgpu::Origin3d { x: (used as u32 % cols) * stride, y: (used as u32 / cols) * stride, z: 0 },
                             aspect: wgpu::TextureAspect::All,
                         },
-                        &node.coverage,
-                        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(size), rows_per_image: Some(size) },
-                        wgpu::Extent3d { width: size, height: size, depth_or_array_layers: 1 },
+                        &padded,
+                        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(stride), rows_per_image: Some(stride) },
+                        wgpu::Extent3d { width: stride, height: stride, depth_or_array_layers: 1 },
                     );
                 }
                 ctx.queue.write_buffer(&set.river_layers, 0, &layers);
@@ -3376,5 +3413,32 @@ mod one_shot_tests {
             assert!(pool.main_slots() as usize >= nodes, "{nodes} nodes at cells {cells}: {} slots", pool.main_slots());
             assert!(pool.block_bytes() <= planet_frame::pool::COMPACT_BLOCK_BYTES);
         }
+    }
+}
+
+#[cfg(test)]
+mod river_atlas_tests {
+    use super::*;
+
+    // spec: REND-061
+    #[test]
+    fn the_atlas_holds_every_slot_with_its_border_and_a_padded_slot_repeats_its_edges() {
+        let (cols, rows) = river_atlas_grid();
+        assert!(cols * rows >= RIVER_SLOTS && (cols - 1) * rows < RIVER_SLOTS + rows, "{cols} x {rows} for {RIVER_SLOTS} slots");
+        let (w, h) = river_atlas_size(32);
+        assert_eq!((w, h), (cols * 35, rows * 35));
+        assert!(w <= 8192 && h <= 8192, "the atlas fits the portable texture size: {w} x {h}");
+        // The slot index and the size fit the node's word: 16 bits of slot, 8 of strength, 8 of size.
+        const { assert!(RIVER_SLOTS <= 0xffff) };
+        // A 3 x 3 slot padded by one texel: the corners repeat the corner codes, the edges the edge codes.
+        let codes: Vec<u8> = (1..=9).collect();
+        let p = pad_coverage(&codes, 3);
+        assert_eq!(p.len(), 25);
+        let row = |y: usize| p[y * 5..y * 5 + 5].to_vec();
+        assert_eq!(row(0), vec![1, 1, 2, 3, 3]);
+        assert_eq!(row(1), vec![1, 1, 2, 3, 3]);
+        assert_eq!(row(2), vec![4, 4, 5, 6, 6]);
+        assert_eq!(row(3), vec![7, 7, 8, 9, 9]);
+        assert_eq!(row(4), vec![7, 7, 8, 9, 9]);
     }
 }
