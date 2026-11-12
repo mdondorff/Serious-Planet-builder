@@ -15,6 +15,7 @@ use planet_generators::bake::hydro::{hydrology, HydroParams};
 use planet_generators::bake::k7::{K7Params, RegionField};
 use planet_generators::bake::lakes::lakes_from_hydro;
 use planet_generators::bake::metric::Metric;
+use planet_generators::bake::precision::{WorldPrecision, EPSILON_MAX_M};
 use planet_generators::bake::round::solve_rounds;
 use planet_generators::bake::route::{route_rules, RoundRules};
 use planet_generators::bake::tile::{tile_has_land, TileGrid, TileId};
@@ -56,6 +57,8 @@ pub struct RegionSpec {
     pub res: u32,
     pub base_id: u64,
     pub inputs_id: u64,
+    /// The world's height bounds `(lo, hi)` in metres above the sea level: the base heights plus the profile's largest uplift (GEN-175). The rounds' flood epsilon, its f32 or f64 choice and the check that no height leaves the bounds come from them (`WorldPrecision`); Earth's span is `(-11_000.0, 9_000.0)`.
+    pub height_bounds: (f64, f64),
     /// Keep the channels the bake burnt in the report (a test's: they are millions on a real region).
     pub keep_channels: bool,
 }
@@ -64,6 +67,11 @@ impl RegionSpec {
     /// L tiles (and graph blocks, which are the L tiles: the reader files a block under its L tile's index) a face edge.
     pub fn tiles_per_edge(&self) -> u32 {
         (self.local() / self.tile.max(1)) as u32
+    }
+
+    /// The world's precision (GEN-175): the flood epsilon every stage of the bake takes (the carve's, H1's route and fill, K7's), and whether the rounds are f32.
+    pub fn precision(&self) -> WorldPrecision {
+        WorldPrecision::new(self.height_bounds.0, self.height_bounds.1, CarveParams::default().epsilon, EPSILON_MAX_M)
     }
 
     /// The identity the keys carry for this region: the caller's `inputs_id` with everything the regional solve and the hydrology depend on besides the base and the climate (the window, the rounds, the carve), so two regions or
@@ -84,6 +92,8 @@ impl RegionSpec {
             self.halo as u64,
             self.seed,
             self.radius_m.to_bits(),
+            self.height_bounds.0.to_bits(),
+            self.height_bounds.1.to_bits(),
         ] {
             put(v);
         }
@@ -117,6 +127,10 @@ impl RegionSpec {
         }
         if i0 < self.margin || j0 < self.margin || i1 + self.margin >= self.regional || j1 + self.margin >= self.regional {
             return Err(format!("the margin of {} cells takes the window outside the face's {} cells", self.margin, self.regional));
+        }
+        let (lo, hi) = self.height_bounds;
+        if !(lo.is_finite() && hi.is_finite() && lo <= hi) {
+            return Err(format!("the world's height bounds ({lo}, {hi}) are not finite and ordered"));
         }
         let blocks = self.tiles_per_edge();
         if self.tile == 0 || !self.local().is_multiple_of(self.tile) || blocks == 0 || !blocks.is_power_of_two() {
@@ -159,6 +173,60 @@ pub struct RegionReport {
     pub channels: Vec<planet_generators::bake::k7::Channel>,
 }
 
+/// The regional solve of a region (GEN-175): the base and the solved surface on the window's regional cells, with the world's precision applied.
+#[derive(Clone, Debug)]
+pub struct RegionSolve {
+    pub face_spec: FaceSpec,
+    pub grid: Grid,
+    pub outlet: Vec<bool>,
+    pub zb: Vec<f64>,
+    pub zs: Vec<f64>,
+    pub stream: u64,
+    pub ri0: usize,
+    pub rj0: usize,
+    pub rw: usize,
+    pub rh: usize,
+    pub precision: WorldPrecision,
+}
+
+/// Solves the regional surface of the region: the first stage of [`bake_region`], public so that a test (or a tool) can run it without the rest.
+pub fn solve_region(spec: &RegionSpec, base: &(dyn Fn(Vec3) -> f64 + Sync)) -> Result<RegionSolve, String> {
+    spec.check()?;
+    let (i0, i1, j0, j1) = spec.region;
+    let (ri0, rj0) = (i0 - spec.margin, j0 - spec.margin);
+    let (rw, rh) = (i1 + spec.margin - ri0 + 1, j1 + spec.margin - rj0 + 1);
+    let n = rw * rh;
+    let face_spec = FaceSpec { face: spec.face, cells: spec.regional, radius_m: spec.radius_m, sea_level: 0.0, seed: spec.seed, halo: 0 };
+    let dir_of = |c: usize| face_spec.halo_direction((ri0 + c % rw) as i64, (rj0 + c / rw) as i64);
+    let precision = spec.precision();
+
+    // The regional solve from B read at the regional cells' centres, under the world's precision (GEN-175): its epsilon and f32 choice, and no height outside its bounds before or after the rounds.
+    let zb: Vec<f64> = (0..n).map(|c| base(dir_of(c))).collect();
+    let grid = Grid::new(rw, rh, face_spec.dx()).with_origin((ri0 as u32, rj0 as u32)).with_metric(Metric::cube_face(
+        spec.regional,
+        spec.radius_m,
+        (ri0 as i64, rj0 as i64),
+        rw,
+        rh,
+    ));
+    precision.check_within_radius(&grid, &zb, |c| grid.global_id(c)).map_err(|e| format!("the base of the region: {e}"))?;
+    let outlet = grid.outlets(&zb, 0.0);
+    let mut carve = CarveParams {
+        steps: 5 * spec.rounds,
+        reroute_every: 5,
+        round_rules: RoundRules::ROUND,
+        cell_metric: true,
+        window_cut: true,
+        ..CarveParams::default()
+    };
+    precision.apply(&mut carve);
+    let stream = face_spec.stream();
+    let mut zs = zb.clone();
+    solve_rounds(&grid, &mut zs, &outlet, &carve, spec.rounds, &spec.threads, stream);
+    precision.check_within_radius(&grid, &zs, |c| grid.global_id(c)).map_err(|e| format!("after the rounds of the region: {e}"))?;
+    Ok(RegionSolve { face_spec, grid, outlet, zb, zs, stream, ri0, rj0, rw, rh, precision })
+}
+
 /// Bakes the region into `dir` as a commit with a channel graph. `base` is the base height (the bake's `B`), `climate` the runoff of the land.
 pub fn bake_region(
     world: &GlobalWorld,
@@ -168,35 +236,18 @@ pub fn bake_region(
     dir: &Path,
 ) -> Result<(Commit, RegionReport), String> {
     spec.check()?;
-    let (i0, i1, j0, j1) = spec.region;
-    let (ri0, rj0) = (i0 - spec.margin, j0 - spec.margin);
-    let (rw, rh) = (i1 + spec.margin - ri0 + 1, j1 + spec.margin - rj0 + 1);
+    // The K7 of the commit is the standard one: a world whose flood epsilon is not the profile's cannot be committed yet (the commit spec records no epsilon), and it is refused before any work is done.
+    let precision = spec.precision();
+    if precision.epsilon_w != CarveParams::default().epsilon {
+        return Err(format!(
+            "the world's flood epsilon is {} m, not the profile's {} m (GEN-175): the commit spec records no flood epsilon, so a commit of such a world could not be read back with the keys it was made under: a format question for the architect (CON-10)",
+            precision.epsilon_w,
+            CarveParams::default().epsilon
+        ));
+    }
+    let RegionSolve { face_spec, grid, outlet, zb, zs, stream, ri0, rj0, rw, rh, precision } = solve_region(spec, base)?;
     let n = rw * rh;
-    let face_spec = FaceSpec { face: spec.face, cells: spec.regional, radius_m: spec.radius_m, sea_level: 0.0, seed: spec.seed, halo: 0 };
     let dir_of = |c: usize| face_spec.halo_direction((ri0 + c % rw) as i64, (rj0 + c / rw) as i64);
-
-    // The regional solve from B read at the regional cells' centres.
-    let zb: Vec<f64> = (0..n).map(|c| base(dir_of(c))).collect();
-    let grid = Grid::new(rw, rh, face_spec.dx()).with_origin((ri0 as u32, rj0 as u32)).with_metric(Metric::cube_face(
-        spec.regional,
-        spec.radius_m,
-        (ri0 as i64, rj0 as i64),
-        rw,
-        rh,
-    ));
-    let outlet = grid.outlets(&zb, 0.0);
-    let carve = CarveParams {
-        steps: 5 * spec.rounds,
-        reroute_every: 5,
-        round_rules: RoundRules::ROUND,
-        round_f32: true,
-        cell_metric: true,
-        window_cut: true,
-        ..CarveParams::default()
-    };
-    let stream = face_spec.stream();
-    let mut zs = zb.clone();
-    solve_rounds(&grid, &mut zs, &outlet, &carve, spec.rounds, &spec.threads, stream);
     let change: Vec<f32> = zs.iter().zip(&zb).map(|(s, b)| (s - b) as f32).collect();
     let regional_field = RegionField::new(spec.face, spec.regional, (ri0 as i64, rj0 as i64), rw, rh, change);
     let regional = |d: Vec3| regional_field.at(d);
@@ -209,8 +260,8 @@ pub fn bake_region(
         evap[c] = ev as f32;
         weight[c] = w as f32;
     }
-    let routing = route_rules(&grid, &zs, &outlet, 1e-3, stream, 0.0, Some(&weight), RoundRules::ROUND);
-    let filled = priority_flood_with(&grid, &zs, &outlet, 1e-3, true);
+    let routing = route_rules(&grid, &zs, &outlet, precision.epsilon_w, stream, 0.0, Some(&weight), RoundRules::ROUND);
+    let filled = priority_flood_with(&grid, &zs, &outlet, precision.epsilon_w, true);
     let hydro = hydrology(&grid, &zs, &filled, &routing, &outlet, Some(&runoff), Some(&evap), &HydroParams::default());
     let lakes = lakes_from_hydro(&grid, &routing, &hydro, &zs);
     let graph = ChannelGraph::from_hydro(&grid, &routing, &hydro, &zs);
@@ -312,6 +363,7 @@ pub fn determinism_fixture(threads: usize) -> Result<u64, String> {
         res: 64,
         base_id: 7,
         inputs_id: 11,
+        height_bounds: (-11_000.0, 9_000.0),
         keep_channels: false,
     };
     let base = |d: Vec3| 500.0 - 2400.0 * (d.x - 0.1) + 120.0 * libm::sin(40.0 * d.z);

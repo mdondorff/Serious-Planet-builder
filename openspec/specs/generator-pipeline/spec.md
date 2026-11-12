@@ -1485,6 +1485,8 @@ Source: Architect 2026-11-10, design section 13
 A region bake SHALL take a rectangle of regional cells of one face, a base, a climate and a size spec, solve the regional surface, find the hydrology, produce the lakes and the channel graph, and write the L tiles of the land tiles, the basin tables, the graph blocks and the commit through the writer.
 - A region within 4 regional cells of a face edge is refused.
 - The result is the same bytes at any thread count and on a second run.
+- Every flood epsilon of the bake and the f32 choice of its rounds come from the world's precision (`WorldPrecision` of the world's height bounds, GEN-175), never a literal; a height outside the bounds is refused, naming the cell.
+- A world whose epsilon is not the profile's is refused before any work at the commit (the commit spec records none).
 - No store format changes.
 
 Verify: A

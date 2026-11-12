@@ -115,6 +115,8 @@ fn main() {
         res: LATTICE as u32,
         base_id: 0x6c61_7474_6963_6531 ^ (LATTICE as u64),
         inputs_id: class_inputs_key(&def, seed),
+        // Earth's span (the default world's base heights plus the profile's largest uplift): its flood epsilon is the profile's, so the bake is the one it was.
+        height_bounds: (-11_000.0, 9_000.0),
         keep_channels: false,
     };
     std::fs::create_dir_all(&out).expect("the output folder");
