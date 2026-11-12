@@ -4,6 +4,7 @@
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
+pub mod annotate;
 pub mod atmosphere;
 pub mod burn;
 pub mod compact;

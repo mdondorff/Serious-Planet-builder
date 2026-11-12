@@ -1,0 +1,1 @@
+- 2026-11-12 **review-scale-bar**: owner-facing review pictures (stills and flight frames) carry a scale bar and the pose, drawn on the target/review copy only (TEST-126; ADR 0118 point 5).

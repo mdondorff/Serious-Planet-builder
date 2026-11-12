@@ -272,6 +272,52 @@ fn heading_vector(at: Vec3, heading_deg: f64) -> Vec3 {
     (north * libm::cos(h) + east * libm::sin(h)).normalized()
 }
 
+/// The distance along the view axis from the eye to the ground or the sea (the higher) at the centre of the picture, or `None` when the axis meets none within 600 km (the sky, space). The ray is marched in steps that grow
+/// with the distance and the crossing refined by bisection: a scale for the review images' bar (ADR 0118 point 5), not a measurement.
+pub fn centre_distance_m(camera: &Camera, ground_m: &dyn Fn(Vec3) -> f64, radius_m: f64, level_m: f64) -> Option<f64> {
+    let (eye, fwd) = (camera.position.0, camera.forward);
+    let below = |t: f64| {
+        let p = eye + fwd * t;
+        let r = p.length();
+        r - radius_m <= ground_m(p * (1.0 / r)).max(level_m)
+    };
+    if below(0.0) {
+        return Some(0.0);
+    }
+    let (mut lo, mut t) = (0.0f64, 1.0f64);
+    while t < 600_000.0 {
+        if below(t) {
+            // Bisection between the last step above and this one below.
+            let mut hi = t;
+            for _ in 0..40 {
+                let mid = 0.5 * (lo + hi);
+                if below(mid) {
+                    hi = mid;
+                } else {
+                    lo = mid;
+                }
+            }
+            return Some(hi);
+        }
+        lo = t;
+        t += (0.02 * t).max(1.0);
+    }
+    None
+}
+
+/// The pose label of a review picture (ADR 0118 point 5): the altitude of the eye over the ground below it, the pitch of the view axis below the horizon, the field of view and the distance along the axis to the ground.
+pub fn pose_label(camera: &Camera, ground_m: &dyn Fn(Vec3) -> f64, radius_m: f64, level_m: f64) -> planet_render::annotate::PoseLabel {
+    let eye = camera.position.0;
+    let up = eye.normalized();
+    let alt = eye.length() - radius_m - ground_m(up).max(level_m);
+    planet_render::annotate::PoseLabel {
+        altitude_m: alt,
+        pitch_deg: -libm::asin(camera.forward.dot(up).clamp(-1.0, 1.0)).to_degrees(),
+        fov_deg: camera.fov_y_rad.to_degrees(),
+        centre_distance_m: centre_distance_m(camera, ground_m, radius_m, level_m),
+    }
+}
+
 /// The camera of a pose: the eye on the great circle `back_m` behind `anchor` against the heading, `altitude_m` above the ground or the
 /// sea there (the higher), looking along the heading pitched down. `ground_m` is the height above the reference sphere.
 pub fn pose_camera(
@@ -748,7 +794,10 @@ fn run_stills(
             let sun64 = Vec3::new(f64::from(sun[0]), f64::from(sun[1]), f64::from(sun[2]));
             rows.push(measure_layer1(ctx, &mut r, m, &camera, sun64, &lit, &pose.name)?);
         }
-        r.read_color(ctx).write_png(&dir.join(format!("{}.png", pose.name))).map_err(|e| format!("writing {}: {e}", pose.name))?;
+        // The owner's copy carries the scale bar and the pose (ADR 0118 point 5): drawn on this review picture, never on a golden.
+        let mut shot = r.read_color(ctx);
+        planet_render::annotate::annotate(&mut shot, &pose_label(&camera, &|d| field.height(d), radius_m, setup.level_m));
+        shot.write_png(&dir.join(format!("{}.png", pose.name))).map_err(|e| format!("writing {}: {e}", pose.name))?;
         let (eye_lat, _) = camera.position.0.lat_lon();
         let height = camera.position.0.length() - radius_m;
         writeln!(
@@ -1628,5 +1677,36 @@ min_area_m2 = 1e9",
         // The sea is the floor of the ground: over deep water the eye keeps `altitude_m` above the level.
         let sea = pose_camera(anchor, &pose, &|_| -4000.0, radius, 0.0, 1.0, 1.0);
         assert!((sea.position.0.length() - radius - 300.0).abs() < 1e-6);
+    }
+
+    // spec: TEST-126
+    #[test]
+    fn the_centre_distance_of_a_view_is_the_range_to_the_ground_along_its_axis_and_none_for_the_sky() {
+        let r = 6_371_000.0;
+        // A flat ground 100 m up: an eye 400 m above it looking 30 degrees down meets it after 400 / sin(30 deg) = 800 m.
+        let eye = Vec3::new(1.0, 0.0, 0.0) * (r + 500.0);
+        let cam =
+            Camera::at_surface_point(PlanetFixed(eye), Vec3::new(0.0, 1.0, 0.0), 30f64.to_radians(), 60f64.to_radians(), 16.0 / 9.0, 0.1);
+        let d = centre_distance_m(&cam, &|_| 100.0, r, 0.0).expect("the axis meets the ground");
+        assert!((d - 800.0).abs() < 1.0, "{d}");
+        // The sea level is the floor under a lower ground: the same eye over a ground at -50 m meets the sea at 0 m: 500 / sin(30 deg) = 1000 m.
+        let d = centre_distance_m(&cam, &|_| -50.0, r, 0.0).expect("the sea");
+        assert!((d - 1000.0).abs() < 1.5, "{d}");
+        // Looking up: no ground. The label of such a view says so and the pitch is negative.
+        let up = Camera::at_surface_point(
+            PlanetFixed(eye),
+            Vec3::new(0.0, 1.0, 0.0),
+            (-10f64).to_radians(),
+            60f64.to_radians(),
+            16.0 / 9.0,
+            0.1,
+        );
+        assert_eq!(centre_distance_m(&up, &|_| 100.0, r, 0.0), None);
+        let label = pose_label(&cam, &|_| 100.0, r, 0.0);
+        assert!(
+            (label.altitude_m - 400.0).abs() < 1e-6 && (label.pitch_deg - 30.0).abs() < 1e-6 && (label.fov_deg - 60.0).abs() < 1e-9,
+            "{label:?}"
+        );
+        assert!(pose_label(&up, &|_| 100.0, r, 0.0).pitch_deg < 0.0);
     }
 }
