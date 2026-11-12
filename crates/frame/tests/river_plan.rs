@@ -4,7 +4,9 @@
 use std::sync::{Arc, Mutex};
 
 use planet_core::{Face, TileId};
-use planet_frame::river::{node_window, plan_rivers, river_distance_grid, RiverGrid, RiverRequest, RiverSource, RANGE_CELLS};
+use planet_frame::river::{
+    node_window, plan_rivers, river_distance_grid, RiverGrid, RiverRequest, RiverSource, FULL_RIVER_SAMPLES, MIN_RIVER_SAMPLES, RANGE_CELLS,
+};
 use planet_generators::bake::k7::{Channel, QUnit, WidthLaw, DISC_RADIUS_MAX};
 
 const LAW: WidthLaw = WidthLaw::STANDARD;
@@ -51,8 +53,8 @@ impl RiverSource for Source {
     }
 }
 
-fn request<'a>(source: &'a dyn RiverSource, res: u32, max_step_cells: f64) -> RiverRequest<'a> {
-    RiverRequest { source, law: &LAW, res, max_step_cells, max_layers: 256 }
+fn request<'a>(source: &'a dyn RiverSource, res: u32) -> RiverRequest<'a> {
+    RiverRequest { source, law: &LAW, res, min_samples: MIN_RIVER_SAMPLES, full_samples: FULL_RIVER_SAMPLES, max_layers: 256 }
 }
 
 fn tile(face: u8, level: u8, x: u32, y: u32) -> TileId {
@@ -89,7 +91,7 @@ fn a_node_with_a_river_in_range_carries_the_coverage_of_its_samples_and_one_with
     let src = Source::new(vec![river.clone()]);
     let on = tile(2, 3, 1, 1); // cells 32..64 on each axis: the river passes through it
     let off = tile(2, 3, 6, 6); // far from it
-    let plan = plan_rivers(&request(&src, 32, 2.0), &[(7, on, 0.0), (9, off, 0.0)]).expect("plans");
+    let plan = plan_rivers(&request(&src, 32), &[(7, on, 0.0), (9, off, 0.0)]).expect("plans");
     assert_eq!(plan.nodes.len(), 1, "the node with no river within range carries none");
     let n = &plan.nodes[0];
     assert_eq!(n.node, 7, "the node index of the terrain plan");
@@ -105,19 +107,78 @@ fn a_node_with_a_river_in_range_carries_the_coverage_of_its_samples_and_one_with
 
 // spec: REND-059
 #[test]
-fn nodes_coarser_than_the_limit_carry_no_coverage_and_the_limit_is_a_parameter() {
-    let src = Source::new(vec![channel(&[(100.0, 100.0), (150.0, 120.0)], q_for(8.0))]);
-    // A level 1 tile is 128 L cells wide: with 32 samples that is 4 cells a sample.
-    let coarse = tile(2, 1, 0, 0);
-    let (_, step) = node_window(coarse, 32, GRID.cells);
+fn a_node_carries_a_river_from_half_a_sample_wide_and_fades_linearly_to_one_sample() {
+    // A river 8 cells wide. A level 1 tile is 128 L cells over 32 samples: 4 cells a sample (two samples wide), level 0 is 8 cells a sample (one sample wide): both at full strength.
+    let src = Source::new(vec![channel(&[(60.0, 100.0), (200.0, 120.0)], q_for(8.0))]);
+    let at = |src: &Source, level: u8, x: u32, y: u32| {
+        let t = tile(2, level, x, y);
+        let (_, step) = node_window(t, 32, GRID.cells);
+        (plan_rivers(&request(src, 32), &[(0, t, 0.0)]).unwrap(), step)
+    };
+    let (two, step) = at(&src, 1, 0, 0);
     assert_eq!(step, 4.0);
-    assert!(plan_rivers(&request(&src, 32, 2.0), &[(0, coarse, 0.0)]).unwrap().nodes.is_empty());
-    assert!(src.reads.lock().unwrap().is_empty(), "a refused node reads no tile");
+    assert_eq!((two.nodes.len(), two.nodes[0].fade), (1, 255), "two samples wide: full strength");
+    let (one, step) = at(&src, 0, 0, 0);
+    assert_eq!(step, 8.0);
+    assert_eq!((one.nodes.len(), one.nodes[0].fade), (1, 255), "one sample wide: full strength");
+    // Between half a sample and one: linear, 5 cells at 8 cells a sample is 0.625 samples: a quarter of the way (63.75 rounds to 64).
+    let src5 = Source::new(vec![channel(&[(60.0, 100.0), (200.0, 120.0)], q_for(5.0))]);
+    assert_eq!(at(&src5, 0, 0, 0).0.nodes[0].fade, 64, "0.625 samples wide: a quarter");
+    // Half a sample or less: not drawn.
+    let src4 = Source::new(vec![channel(&[(60.0, 100.0), (200.0, 120.0)], q_for(4.0))]);
+    assert!(at(&src4, 0, 0, 0).0.nodes.is_empty(), "exactly half a sample wide: nothing");
+    let src2 = Source::new(vec![channel(&[(60.0, 100.0), (200.0, 120.0)], q_for(2.0))]);
+    assert!(at(&src2, 0, 0, 0).0.nodes.is_empty(), "a quarter of a sample wide: nothing");
+    // A node whose samples are so far apart that even the widest river (32 cells) is under half a sample reads no tile.
+    struct Big(Source);
+    impl RiverSource for Big {
+        fn grid(&self) -> RiverGrid {
+            RiverGrid { cells: 16 * GRID.cells, tile: GRID.tile, cell_m: GRID.cell_m }
+        }
+        fn tile_channels(&self, f: Face, i: u32, j: u32) -> Result<Arc<Vec<Channel>>, String> {
+            self.0.tile_channels(f, i, j)
+        }
+    }
+    let big = Big(Source::new(vec![channel(&[(60.0, 100.0), (200.0, 120.0)], q_for(30.0))]));
+    let (_, wide_step) = node_window(tile(2, 0, 0, 0), 32, 16 * GRID.cells);
+    assert!(wide_step > 64.0, "{wide_step}");
+    assert!(plan_rivers(&request(&big, 32), &[(0, tile(2, 0, 0, 0), 0.0)]).unwrap().nodes.is_empty());
+    assert!(big.0.reads.lock().unwrap().is_empty(), "no tile is read for a node that cannot carry the widest river");
+}
+
+// spec: REND-059
+#[test]
+fn a_river_plan_with_a_strength_other_than_full_round_trips_through_its_text() {
+    let plan = planet_frame::river::RiverPlan {
+        nodes: vec![planet_frame::river::RiverNode { node: 4, size: 2, coverage: vec![0, 128, 255, 7], fade: 64 }],
+        dropped: 2,
+    };
+    let text = plan.to_text();
     assert_eq!(
-        plan_rivers(&request(&src, 32, 4.0), &[(0, coarse, 0.0)]).unwrap().nodes.len(),
-        1,
-        "with the limit at 4 cells it carries one"
+        text,
+        "rivers 2
+rnode 4 64 0080ff07"
     );
+    let lines: Vec<Vec<&str>> = text.lines().map(|l| l.split_whitespace().collect()).collect();
+    assert_eq!(planet_frame::river::RiverPlan::from_lines(&lines).unwrap(), plan);
+}
+
+// spec: REND-059
+#[test]
+fn a_channel_with_a_discharge_that_is_not_finite_is_an_error_naming_the_tile_at_every_distance() {
+    for (level, x, y) in [(3u8, 1u32, 1u32), (0, 0, 0)] {
+        for bad in [f64::NAN, f64::INFINITY] {
+            let mut c = channel(&[(40.0, 40.0), (60.0, 40.0)], q_for(3.0));
+            c.q[1] = bad;
+            let src = Source::new(vec![c]);
+            let e = plan_rivers(&request(&src, 32), &[(0, tile(2, level, x, y), 0.0)]).err();
+            // A node too coarse for any river reads nothing, so it has nothing to refuse; the others name the tile.
+            let (_, step) = node_window(tile(2, level, x, y), 32, GRID.cells);
+            if step <= 64.0 {
+                assert!(e.is_some_and(|e| e.contains("river tile 2/") && e.contains("not finite")), "level {level}, q {bad}");
+            }
+        }
+    }
 }
 
 // spec: REND-059, CON-30
@@ -127,14 +188,14 @@ fn a_channel_that_two_l_tiles_hand_out_counts_once_and_the_same_plan_twice_is_th
     let river = channel(&[(50.0, 40.0), (80.0, 44.0)], q_for(6.0));
     let src = Source::new(vec![river.clone()]);
     let t = tile(2, 3, 1, 1); // cells 32..64: touches L tile 0 and (within reach) tile 1
-    let plan = plan_rivers(&request(&src, 32, 2.0), &[(3, t, 0.0)]).unwrap();
+    let plan = plan_rivers(&request(&src, 32), &[(3, t, 0.0)]).unwrap();
     let reads = src.reads.lock().unwrap().clone();
     assert!(reads.len() >= 2, "the node needs more than one L tile: {reads:?}");
     let (origin, step) = node_window(t, 32, GRID.cells);
     let once = river_coverage_grid(&[river], origin, step);
     assert_eq!(plan.nodes[0].coverage, once, "the duplicates change nothing");
     // The same plan twice gives the same bytes.
-    let again = plan_rivers(&request(&src, 32, 2.0), &[(3, t, 0.0)]).unwrap();
+    let again = plan_rivers(&request(&src, 32), &[(3, t, 0.0)]).unwrap();
     assert_eq!(again, plan);
 }
 
@@ -150,11 +211,11 @@ fn river_coverage_grid(channels: &[Channel], origin: (f64, f64), step: f64) -> V
 fn a_failed_read_is_an_error_naming_the_tile_and_a_node_at_a_face_edge_reads_only_tiles_of_the_face() {
     let mut src = Source::new(vec![channel(&[(40.0, 60.0), (80.0, 70.0)], q_for(5.0))]);
     src.fail = Some((2, 0, 0));
-    let e = plan_rivers(&request(&src, 32, 2.0), &[(7, tile(2, 3, 1, 1), 0.0)]).unwrap_err();
+    let e = plan_rivers(&request(&src, 32), &[(7, tile(2, 3, 1, 1), 0.0)]).unwrap_err();
     assert!(e.contains("river tile 2/0/0"), "{e}");
     // A node at the corner of the face reads tiles 0 and up only: never an index outside 0..4.
     let src = Source::new(vec![channel(&[(2.0, 2.0), (20.0, 10.0)], q_for(3.0))]);
-    plan_rivers(&request(&src, 32, 2.0), &[(0, tile(2, 3, 0, 0), 0.0), (1, tile(2, 3, 7, 7), 0.0)]).unwrap();
+    plan_rivers(&request(&src, 32), &[(0, tile(2, 3, 0, 0), 0.0), (1, tile(2, 3, 7, 7), 0.0)]).unwrap();
     assert!(src.reads.lock().unwrap().iter().all(|&(_, ti, tj)| ti < 4 && tj < 4), "{:?}", src.reads.lock().unwrap());
     assert_eq!(RANGE_CELLS, 4.0);
 }
@@ -165,7 +226,7 @@ fn a_node_and_its_child_give_the_same_codes_at_the_positions_they_share() {
     // A river across the area of the level 3 node (1, 1); its level 4 child (2, 2) covers its lower-left quarter. The child's samples at even indices are the parent's samples: the codes agree bit for bit.
     let src = Source::new(vec![channel(&[(30.0, 36.0), (70.0, 52.0)], q_for(5.0))]);
     let (parent, child) = (tile(2, 3, 1, 1), tile(2, 4, 2, 2));
-    let p = plan_rivers(&request(&src, 32, 2.0), &[(0, parent, 0.0), (1, child, 0.0)]).unwrap();
+    let p = plan_rivers(&request(&src, 32), &[(0, parent, 0.0), (1, child, 0.0)]).unwrap();
     let (pc, cc) = (&p.nodes[0].coverage, &p.nodes[1].coverage);
     let mut shared = 0;
     for l in 0..=16usize {
@@ -186,7 +247,7 @@ fn two_rivers_that_share_a_start_and_a_length_are_both_drawn() {
     let b = channel(&[(40.0, 40.0), (40.0, 62.0)], q_for(3.0));
     let src = Source::new(vec![a.clone(), b.clone()]);
     let t = tile(2, 3, 1, 1);
-    let both = plan_rivers(&request(&src, 32, 2.0), &[(0, t, 0.0)]).unwrap();
+    let both = plan_rivers(&request(&src, 32), &[(0, t, 0.0)]).unwrap();
     let (origin, step) = node_window(t, 32, GRID.cells);
     let want = river_coverage_grid(&[a.clone(), b.clone()], origin, step);
     assert_eq!(both.nodes[0].coverage, want, "the second piece is not dropped as a duplicate of the first");
@@ -196,8 +257,11 @@ fn two_rivers_that_share_a_start_and_a_length_are_both_drawn() {
 #[test]
 fn a_plan_with_nothing_to_sample_or_a_bad_grid_is_an_error_not_a_panic() {
     let src = Source::new(Vec::new());
-    for (res, limit) in [(0u32, 2.0), (32, f64::NAN), (32, f64::INFINITY), (32, 0.0)] {
-        assert!(plan_rivers(&request(&src, res, limit), &[(0, tile(2, 3, 1, 1), 0.0)]).is_err(), "res {res}, limit {limit}");
+    assert!(plan_rivers(&request(&src, 0), &[(0, tile(2, 3, 1, 1), 0.0)]).is_err(), "res 0");
+    for (min, full) in [(f64::NAN, 2.0), (1.0, f64::INFINITY), (0.0, 2.0), (2.0, 1.0), (1.0, 1.0)] {
+        let mut req = request(&src, 32);
+        (req.min_samples, req.full_samples) = (min, full);
+        assert!(plan_rivers(&req, &[(0, tile(2, 3, 1, 1), 0.0)]).is_err(), "min {min}, full {full}");
     }
 }
 
@@ -220,10 +284,10 @@ fn more_nodes_with_a_river_than_layers_keep_the_nearest_and_count_the_rest_never
             .iter()
             .map(|&(i, x, d)| (i, tile(2, 3, x, 1), d))
             .collect();
-    let all = plan_rivers(&request(&src, 32, 2.0), &nodes).unwrap();
+    let all = plan_rivers(&request(&src, 32), &nodes).unwrap();
     assert_eq!(all.nodes.len(), 6, "every node has the river in range");
     assert_eq!(all.dropped, 0);
-    let mut req = request(&src, 32, 2.0);
+    let mut req = request(&src, 32);
     req.max_layers = 3;
     let few = plan_rivers(&req, &nodes).unwrap();
     // The nearest are 15 (50 m), then 12 and 13 (both 100 m: the tie goes to the lower node index, both fit); in node order.
@@ -253,8 +317,7 @@ fn more_nodes_with_a_river_than_layers_keep_the_nearest_and_count_the_rest_never
 fn neighbouring_nodes_of_one_level_hold_the_same_codes_on_their_shared_edge() {
     let src = Source::new(vec![channel(&[(40.0, 20.0), (100.0, 100.0)], q_for(6.0))]);
     // Level 3 tiles (1, 1) and (2, 1): the first one's last column is the second one's first.
-    let p = plan_rivers(&request(&src, 32, 2.0), &[(0, tile(2, 3, 1, 1), 0.0), (1, tile(2, 3, 2, 1), 0.0), (2, tile(2, 3, 1, 0), 0.0)])
-        .unwrap();
+    let p = plan_rivers(&request(&src, 32), &[(0, tile(2, 3, 1, 1), 0.0), (1, tile(2, 3, 2, 1), 0.0), (2, tile(2, 3, 1, 0), 0.0)]).unwrap();
     assert_eq!(p.nodes.len(), 3);
     let (a, b, c) = (&p.nodes[0].coverage, &p.nodes[1].coverage, &p.nodes[2].coverage);
     for y in 0..33usize {
@@ -271,8 +334,7 @@ fn neighbouring_nodes_of_one_level_hold_the_same_codes_on_their_shared_edge() {
 fn across_a_level_boundary_the_shared_samples_agree_and_the_in_between_ones_are_reported() {
     let src = Source::new(vec![channel(&[(20.0, 40.0), (120.0, 52.0)], q_for(6.0))]);
     // The coarse tile (1, 1) of level 3 meets the finer tiles (4, 2) and (4, 3) of level 4 on its right edge (x = 64).
-    let p = plan_rivers(&request(&src, 32, 2.0), &[(0, tile(2, 3, 1, 1), 0.0), (1, tile(2, 4, 4, 2), 0.0), (2, tile(2, 4, 4, 3), 0.0)])
-        .unwrap();
+    let p = plan_rivers(&request(&src, 32), &[(0, tile(2, 3, 1, 1), 0.0), (1, tile(2, 4, 4, 2), 0.0), (2, tile(2, 4, 4, 3), 0.0)]).unwrap();
     let (coarse, fine_low) = (&p.nodes[0].coverage, &p.nodes[1].coverage);
     // The coarse right column (rows 0..=32 over 32 cells) against the lower fine tile's left column (rows 0..=32 over 16 cells): the fine sample at row 2j is the coarse sample at row j of the lower half... the
     // fine tile (4, 2) starts at the cell row 32 of the face, the coarse tile (1, 1) at 32 too, so the fine rows 0, 2, 4.. are the coarse rows 0, 1, 2.. at x = 64 only where the lattices coincide.

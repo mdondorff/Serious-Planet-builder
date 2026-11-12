@@ -115,7 +115,7 @@ fn two_windows_of_one_river_give_the_same_texels_where_they_overlap() {
     }
 }
 
-// spec: REND-059
+// spec: REND-059, REND-060
 #[test]
 fn the_coverage_agrees_with_the_burn_on_which_cells_are_the_river() {
     // The burn lowers the cells within w / 2 of a straight line (and the line's own cells): the cells the coverage puts half a cell inside the edge are all burnt, and a burnt cell outside the coverage is within
