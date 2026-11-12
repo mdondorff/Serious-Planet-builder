@@ -8,7 +8,9 @@ Item 15 PR 8 (river drawing), part 1 (architect, 2026-11-11, design section 18):
 
 ## Not in this change
 - A river within 4 cells of a cube face edge: the stored channels of a neighbouring face are not in this face's plane (PR 7 limit), so the coverage of a node near the edge ignores them and jumps along the edge; a river crossing the edge has a notch. Reported as a Tracked item; the fix needs the cube-edge resolver of PR 7 on the reader side.
-- The river plan node, the texture upload and the shader (REND-059's C verification), the water level of the river (REND-060), the draw scene and its goldens (TEST-117), the flight scene cache peak.
+- The water level of the river (REND-060), the draw scene and its goldens (TEST-117), the flight scene cache peak.
+
+- Render side (REND-059 C, REND-061): `TerrainRenderer` holds an R8Unorm array of `RIVER_LAYERS` (256) layers of `cells + 1` square codes per ring set, a per-node layer buffer and a clamping bilinear sampler at group 0 bindings 4 to 6 (2 and 3 are the water pass's); the lit fragment stages (`fs_lit_view`, `fs_lit_atmo_view`) darken and tint the ground where the interpolated code is at or under 128 (a placeholder look until REND-060); `TerrainStats.river_nodes/river_dropped`; a frame without rivers clears the layer buffer. Tier C: `crates/render/tests/gpu_rivers.rs`.
 
 ## Impact
 - `frame::river` plan part (REND-059): `river_distance_grid` (any sample lattice), `node_window` (a terrain node's samples in face cell-index space), `RiverSource`, `plan_rivers` (nodes within a step limit and with a river in range; the whole channel is the dedupe key; errors name the tile), tests in `crates/frame/tests/river_plan.rs`.

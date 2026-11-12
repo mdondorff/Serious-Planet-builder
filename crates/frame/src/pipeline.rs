@@ -445,6 +445,7 @@ pub fn draw_plan_states(
             nodes,
             lit: None,
             water: None,
+            rivers: None,
         },
     };
     Ok(DrawPlan { plan, kind, substituted, blank, preview: all, preview_delta_len: preview.len(), preview_radius_m: req.lod.radius_m })

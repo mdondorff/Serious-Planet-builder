@@ -143,6 +143,8 @@ pub struct RiverRequest<'a> {
     pub res: u32,
     /// A node whose samples are farther apart than this many L cells carries no coverage (its rivers are narrower than its samples): the draw's limit, a parameter.
     pub max_step_cells: f64,
+    /// The layers of the coverage array a frame holds (the texture array's depth): when more nodes have a river, the nearest keep theirs and the rest are counted in [`RiverPlan::dropped`].
+    pub max_layers: usize,
 }
 
 /// The river coverage of one terrain node: `size * size` codes (row-major, `size = res + 1`), one a sample of the node.
@@ -158,6 +160,8 @@ pub struct RiverNode {
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct RiverPlan {
     pub nodes: Vec<RiverNode>,
+    /// Nodes with a river that got no layer because the array was full (never silent: the plan text and the frame's stats carry it).
+    pub dropped: u32,
 }
 
 /// Where the samples of terrain node `tile` (`res` cells an edge, `res + 1` samples) lie in the face's cell-index space on an L grid of `cells` cells an edge: the first sample's position and the distance between
@@ -172,9 +176,9 @@ pub fn node_window(tile: planet_core::TileId, res: u32, cells: u32) -> ((f64, f6
 
 /// The river coverage of the nodes `nodes` (index in the terrain plan and tile): a node whose samples are farther apart than the request's limit, or with no river within range of a sample, carries none. The
 /// channels come from the L tiles the node's window meets widened by the widest trench and the code's range; a channel handed out by two tiles counts once. An error names the tile that failed.
-pub fn plan_rivers(req: &RiverRequest<'_>, nodes: &[(u32, planet_core::TileId)]) -> Result<RiverPlan, String> {
+pub fn plan_rivers(req: &RiverRequest<'_>, nodes: &[(u32, planet_core::TileId, f64)]) -> Result<RiverPlan, String> {
     let grid = req.source.grid();
-    if req.res == 0 || !(req.max_step_cells.is_finite() && req.max_step_cells > 0.0) {
+    if req.res == 0 || req.max_layers == 0 || !(req.max_step_cells.is_finite() && req.max_step_cells > 0.0) {
         return Err(format!(
             "the river plan needs a node of at least one cell and a finite positive step limit (res {}, limit {})",
             req.res, req.max_step_cells
@@ -186,8 +190,8 @@ pub fn plan_rivers(req: &RiverRequest<'_>, nodes: &[(u32, planet_core::TileId)])
     let per_edge = i64::from(grid.cells / grid.tile);
     let reach = crate::river::reach_cells();
     let size = req.res as usize + 1;
-    let mut out = Vec::new();
-    for &(index, tile) in nodes {
+    let mut out: Vec<(f64, RiverNode)> = Vec::new();
+    for &(index, tile, distance_m) in nodes {
         let (origin, step) = node_window(tile, req.res, grid.cells);
         if step > req.max_step_cells {
             continue;
@@ -229,12 +233,72 @@ pub fn plan_rivers(req: &RiverRequest<'_>, nodes: &[(u32, planet_core::TileId)])
         if coverage.iter().all(|&c| c == 255) {
             continue;
         }
-        out.push(RiverNode { node: index, size: size as u32, coverage });
+        out.push((distance_m, RiverNode { node: index, size: size as u32, coverage }));
     }
-    Ok(RiverPlan { nodes: out })
+    // More nodes than layers: the nearest keep theirs (ties by node index: deterministic, CON-03); the rest are counted, never silent.
+    let total = out.len();
+    if total > req.max_layers {
+        out.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.node.cmp(&b.1.node)));
+        out.truncate(req.max_layers);
+        out.sort_by_key(|(_, n)| n.node);
+    }
+    Ok(RiverPlan { nodes: out.into_iter().map(|(_, n)| n).collect(), dropped: (total - req.max_layers.min(total)) as u32 })
 }
 
 /// How far from a node's window a channel can matter: the widest half trench and the code's range.
 pub fn reach_cells() -> f64 {
     planet_generators::bake::k7::DISC_RADIUS_MAX as f64 + RANGE_CELLS
+}
+
+impl RiverPlan {
+    /// The plan as lines of text: `rivers <dropped>` and one `rnode <node> <hex of the codes>` a node (the coverage is part of the plan's text, so a recorded frame replays the same pixels).
+    pub fn to_text(&self) -> String {
+        let mut s = format!(
+            "rivers {}
+",
+            self.dropped
+        );
+        for n in &self.nodes {
+            let hex: String = n.coverage.iter().map(|c| format!("{c:02x}")).collect();
+            s += &format!(
+                "rnode {} {hex}
+",
+                n.node
+            );
+        }
+        // No trailing newline: the caller adds the separators.
+        s.pop();
+        s
+    }
+
+    /// Reads the lines [`to_text`](RiverPlan::to_text) writes (the first is the `rivers` line).
+    pub fn from_lines(lines: &[Vec<&str>]) -> Result<RiverPlan, String> {
+        let mut plan: Option<RiverPlan> = None;
+        for t in lines {
+            match t.as_slice() {
+                ["rivers", dropped] => {
+                    plan = Some(RiverPlan {
+                        nodes: Vec::new(),
+                        dropped: dropped.parse().map_err(|e| format!("bad dropped count '{dropped}': {e}"))?,
+                    })
+                }
+                ["rnode", node, hex] => {
+                    let p = plan.as_mut().ok_or("an rnode line before the rivers line")?;
+                    if hex.len() % 2 != 0 {
+                        return Err(format!("rnode {node}: an odd number of hex digits"));
+                    }
+                    let coverage = (0..hex.len() / 2)
+                        .map(|i| u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).map_err(|e| format!("rnode {node}: bad hex: {e}")))
+                        .collect::<Result<Vec<u8>, String>>()?;
+                    let size = libm::round(libm::sqrt(coverage.len() as f64)) as u32;
+                    if (size as usize) * (size as usize) != coverage.len() {
+                        return Err(format!("rnode {node}: {} codes are not a square", coverage.len()));
+                    }
+                    p.nodes.push(RiverNode { node: node.parse().map_err(|e| format!("bad node index '{node}': {e}"))?, size, coverage });
+                }
+                other => return Err(format!("cannot parse river line {other:?}")),
+            }
+        }
+        plan.ok_or_else(|| "no rivers line".to_string())
+    }
 }

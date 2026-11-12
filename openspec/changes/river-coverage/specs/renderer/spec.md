@@ -17,3 +17,18 @@ Source: Architect 2026-11-11 (item 15 PR 8), GEN-165, GEN-168
 #### Scenario: A widening river
 - **WHEN** a segment widens from one cell to 32 cells and is burnt and coded
 - **THEN** every burnt cell is within 0.75 cell of the coded edge and every cell half a cell inside the edge is burnt (the edge is the envelope of the burn's discs)
+
+### Requirement: REND-061 The plan chooses which nodes get a river layer
+The terrain plan SHALL carry the river coverage as an optional part (`rivers`): `None` keeps the plan's text and hash as they were. The renderer SHALL hold the coverages in one 8-bit texture array of at most 256 layers (a parameter), a node's layer index in its record, and the plan SHALL choose the nodes that get a layer when more have a river: the nearest by node distance first, ties by node index, in node order; the number of nodes dropped SHALL be in the plan's text and the frame's stats, never silent.
+- The scale of a code is in cells, not metres (CON-11).
+- Neighbouring nodes of one level hold the same codes on their shared edge samples; across a level boundary the shared samples agree and the largest difference of an in-between sample is reported.
+- Sampling clamps inside a layer: no bleed between layers.
+- With no river node every lit golden is bit-identical.
+
+Verify: A, C
+Status: planned
+Source: Architect 2026-11-12 (REND-059 part C), REND-059, CON-03, CON-11
+
+#### Scenario: Layer overflow
+- **WHEN** six nodes have a river and the array holds three layers
+- **THEN** the three nearest keep theirs, the text says three were dropped, and the same plan results from any input order

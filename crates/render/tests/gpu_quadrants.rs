@@ -122,6 +122,7 @@ fn a_node_drawn_over_some_quadrants_covers_exactly_those_quadrants_of_its_tile()
         nodes: vec![node(quadrants)],
         lit: None,
         water: None,
+        rivers: None,
     };
     let lit = |quadrants: u8| lit_pixels(&ctx, &[&data], &plan(quadrants));
     let whole = lit(0b1111);

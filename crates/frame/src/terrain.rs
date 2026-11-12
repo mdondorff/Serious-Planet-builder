@@ -159,6 +159,8 @@ pub struct TerrainPlan {
     /// The water of this frame (ADR 0041 points 4 to 6, lit path only): `None` draws none, and the plan's text and hash are what they were
     /// before the water pass existed.
     pub water: Option<crate::water::WaterPlan>,
+    /// The river coverage of this frame (REND-059, lit path only): `None` draws none, and the plan's text and hash are what they were before the rivers existed.
+    pub rivers: Option<crate::river::RiverPlan>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -370,6 +372,7 @@ pub(crate) fn plan_terrain_keyed(
         nodes,
         lit: None,
         water: None,
+        rivers: None,
     })
 }
 
