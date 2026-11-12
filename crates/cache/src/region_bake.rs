@@ -507,22 +507,14 @@ pub fn lattice_direction(face: Face, nodes: usize, i: usize, j: usize) -> Vec3 {
     face_to_direction(&TangentWarp, face, 2.0 * i as f64 / nodes as f64 - 1.0, 2.0 * j as f64 / nodes as f64 - 1.0)
 }
 
-/// The determinism fixture of the cross-OS manifest (BUILD-051): a small analytic face (a ridge that falls to the sea, constant runoff) baked
-/// to a commit with a channel graph at `threads` threads, and a 64-bit hash of every file the bake wrote (path and bytes, in path order).
-/// The manifest lines of one process hold the hash at one thread twice and at eight threads: a thread count or a repeat that changes a byte
-/// changes a line, and a platform whose float results differ changes the same line on one operating system against the other.
-pub fn determinism_fixture(threads: usize) -> Result<u64, String> {
-    use planet_world_def::WorldDefinition;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    const RADIUS_M: f64 = 6_371_000.0;
-    static N: AtomicUsize = AtomicUsize::new(0);
-    let world = GlobalWorld::from_definition(&WorldDefinition::single_planet(RADIUS_M, 3))
-        .map_err(|e| format!("the fixture world: {e:?}"))?
-        .with_block_limit(4);
-    let spec = RegionSpec {
+const FIXTURE_RADIUS_M: f64 = 6_371_000.0;
+
+/// The region of the fixture face of BUILD-051 and BUILD-052: 24 by 24 regional cells of face 2, tiles of 64 cells with a halo of 24.
+fn fixture_spec(threads: usize) -> RegionSpec {
+    RegionSpec {
         seed: 3,
         face: Face(2),
-        radius_m: RADIUS_M,
+        radius_m: FIXTURE_RADIUS_M,
         regional: 64,
         region: (16, 39, 16, 39),
         margin: 6,
@@ -535,7 +527,28 @@ pub fn determinism_fixture(threads: usize) -> Result<u64, String> {
         inputs_id: 11,
         height_bounds: (-11_000.0, 9_000.0),
         keep_channels: false,
-    };
+    }
+}
+
+/// The layout report of the fixture (BUILD-052): the fixture's layout (tile 64, halo 24) against the alternative of 32-cell tiles with a halo of 12, at `threads` threads.
+pub fn layout_fixture(threads: usize) -> Result<LayoutDiff, String> {
+    let base = |d: Vec3| 500.0 - 2400.0 * (d.x - 0.1) + 120.0 * libm::sin(40.0 * d.z);
+    let climate = |_: Vec3| (1.0e-8, 0.0, 1.0);
+    layout_difference(&fixture_spec(threads), &base, &climate, (32, 12))
+}
+
+/// The determinism fixture of the cross-OS manifest (BUILD-051): a small analytic face (a ridge that falls to the sea, constant runoff) baked
+/// to a commit with a channel graph at `threads` threads, and a 64-bit hash of every file the bake wrote (path and bytes, in path order).
+/// The manifest lines of one process hold the hash at one thread twice and at eight threads: a thread count or a repeat that changes a byte
+/// changes a line, and a platform whose float results differ changes the same line on one operating system against the other.
+pub fn determinism_fixture(threads: usize) -> Result<u64, String> {
+    use planet_world_def::WorldDefinition;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static N: AtomicUsize = AtomicUsize::new(0);
+    let world = GlobalWorld::from_definition(&WorldDefinition::single_planet(FIXTURE_RADIUS_M, 3))
+        .map_err(|e| format!("the fixture world: {e:?}"))?
+        .with_block_limit(4);
+    let spec = fixture_spec(threads);
     let base = |d: Vec3| 500.0 - 2400.0 * (d.x - 0.1) + 120.0 * libm::sin(40.0 * d.z);
     let climate = |_: Vec3| (1.0e-8, 0.0, 1.0);
     let dir = std::env::temp_dir().join(format!("planet-det-fixture-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
