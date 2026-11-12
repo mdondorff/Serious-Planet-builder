@@ -1,0 +1,132 @@
+
+== tile N27_00_E086_00: lat 27.5, 3600 x 3600 px -> 120 x 138 cells of 822 x 803 m (blocks 30 x 26); land 96.9 %; read 0.2 s
+  relief [N27_00_E086_00]: 3x3 relief p50 614 p95 1105 m; steepest neighbour slope p50 0.3984 p95 0.6870 (11800 cells)
+  skipped: slope p95 0.6870 outside 0.03..0.14
+
+== tile N31_00_W004_00: lat 31.5, 3600 x 3600 px -> 116 x 138 cells of 816 x 803 m (blocks 31 x 26); land 96.9 %; read 0.2 s
+  relief [N31_00_W004_00]: 3x3 relief p50 16 p95 103 m; steepest neighbour slope p50 0.0098 p95 0.0780 (11328 cells)
+  (a) flats [N31_00_W004_00 routed U]: land cells 11328; raw flat or pit (no strictly lower neighbour) 0.85 %; lifted by the fill >= 0.5 mm 1.69 %, >= 1 m 1.00 %, >= 10 m 0.04 %
+      lifted components 109: size p50 1 p95 7 max 32 cells; the 5 largest hold 27.9 % of the lifted cells; level rule (lowest neighbour + epsilon) holds for 35.938 % of lifted cells; receiver step is a pure epsilon step for 35.4 %
+      lifted cells: z p5/p50/p95 855/1070/1143 m against all land 802/990/1138 m; receiver direction shares (W,E,N,S,NW,NE,SW,SE) of lifted cells: 0.073 0.250 0.026 0.224 0.021 0.104 0.083 0.219
+    N31_00_W004_00 routed U: land 11328 cells, channel steps 666 (635 km of length); chords 8: 503 / 16: 383
+      chord  8: share within 2.5 deg of 0/45/90/135: 0.1312 (axis 0.0835, diagonal 0.0477); within 5 deg: 0.1968 (axis 0.0835, diagonal 0.1133); uniform 0.0889 / 0.2222
+      chord 16: share within 2.5 deg of 0/45/90/135: 0.0731 (axis 0.0261, diagonal 0.0470); within 5 deg: 0.2245 (axis 0.0966, diagonal 0.1279); uniform 0.0889 / 0.2222
+      straight runs (one D8 direction): channel length in runs > 10 cells 0.0180, > 20 cells 0.0000; diagonal share of channel length 0.4971; steps on lifted flats 0.0556 of channel steps (their length in runs > 10: 0.0000)
+  (a) flats [N31_00_W004_00 routed C]: land cells 11328; raw flat or pit (no strictly lower neighbour) 0.85 %; lifted by the fill >= 0.5 mm 1.69 %, >= 1 m 1.00 %, >= 10 m 0.04 %
+      lifted components 109: size p50 1 p95 7 max 32 cells; the 5 largest hold 27.9 % of the lifted cells; level rule (lowest neighbour + epsilon) holds for 35.938 % of lifted cells; receiver step is a pure epsilon step for 35.4 %
+      lifted cells: z p5/p50/p95 855/1070/1143 m against all land 802/990/1138 m; receiver direction shares (W,E,N,S,NW,NE,SW,SE) of lifted cells: 0.073 0.250 0.026 0.224 0.021 0.104 0.083 0.219
+    N31_00_W004_00 routed C: land 11328 cells, channel steps 656 (626 km of length); chords 8: 528 / 16: 440
+      chord  8: share within 2.5 deg of 0/45/90/135: 0.1383 (axis 0.0928, diagonal 0.0455); within 5 deg: 0.1989 (axis 0.0928, diagonal 0.1061); uniform 0.0889 / 0.2222
+      chord 16: share within 2.5 deg of 0/45/90/135: 0.0659 (axis 0.0273, diagonal 0.0386); within 5 deg: 0.2023 (axis 0.0932, diagonal 0.1091); uniform 0.0889 / 0.2222
+      straight runs (one D8 direction): channel length in runs > 10 cells 0.0182, > 20 cells 0.0000; diagonal share of channel length 0.5020; steps on lifted flats 0.0549 of channel steps (their length in runs > 10: 0.0000)
+
+== tile N35_00_W076_00: lat 35.5, 3600 x 3600 px -> 112 x 138 cells of 805 x 803 m (blocks 32 x 26); land 12.5 %; read 0.2 s
+  relief [N35_00_W076_00]: 3x3 relief p50 4 p95 11 m; steepest neighbour slope p50 0.0029 p95 0.0082 (1340 cells)
+  skipped: slope p95 0.0082 outside 0.03..0.14
+
+== tile N40_00_W078_00: lat 40.5, 3600 x 3600 px -> 102 x 138 cells of 822 x 803 m (blocks 35 x 26); land 96.6 %; read 0.3 s
+  relief [N40_00_W078_00]: 3x3 relief p50 107 p95 302 m; steepest neighbour slope p50 0.0802 p95 0.2170 (9676 cells)
+  skipped: slope p95 0.2170 outside 0.03..0.14
+
+== tile N41_00_W096_00: lat 41.5, 3600 x 3600 px -> 102 x 138 cells of 810 x 803 m (blocks 35 x 26); land 96.6 %; read 0.2 s
+  relief [N41_00_W096_00]: 3x3 relief p50 28 p95 50 m; steepest neighbour slope p50 0.0208 p95 0.0368 (9676 cells)
+  (a) flats [N41_00_W096_00 routed U]: land cells 9676; raw flat or pit (no strictly lower neighbour) 3.81 %; lifted by the fill >= 0.5 mm 8.27 %, >= 1 m 5.95 %, >= 10 m 0.08 %
+      lifted components 447: size p50 1 p95 6 max 62 cells; the 5 largest hold 20.1 % of the lifted cells; level rule (lowest neighbour + epsilon) holds for 24.875 % of lifted cells; receiver step is a pure epsilon step for 23.9 %
+      lifted cells: z p5/p50/p95 298/338/397 m against all land 315/375/421 m; receiver direction shares (W,E,N,S,NW,NE,SW,SE) of lifted cells: 0.079 0.006 0.005 0.486 0.018 0.005 0.336 0.065
+    N41_00_W096_00 routed U: land 9676 cells, channel steps 986 (947 km of length); chords 8: 961 / 16: 913
+      chord  8: share within 2.5 deg of 0/45/90/135: 0.1155 (axis 0.0853, diagonal 0.0302); within 5 deg: 0.1696 (axis 0.0853, diagonal 0.0843); uniform 0.0889 / 0.2222
+      chord 16: share within 2.5 deg of 0/45/90/135: 0.0504 (axis 0.0361, diagonal 0.0142); within 5 deg: 0.1906 (axis 0.1358, diagonal 0.0548); uniform 0.0889 / 0.2222
+      straight runs (one D8 direction): channel length in runs > 10 cells 0.0000, > 20 cells 0.0000; diagonal share of channel length 0.5193; steps on lifted flats 0.5527 of channel steps (their length in runs > 10: 0.0000)
+  (a) flats [N41_00_W096_00 routed C]: land cells 9676; raw flat or pit (no strictly lower neighbour) 3.81 %; lifted by the fill >= 0.5 mm 8.27 %, >= 1 m 5.95 %, >= 10 m 0.08 %
+      lifted components 447: size p50 1 p95 6 max 62 cells; the 5 largest hold 20.1 % of the lifted cells; level rule (lowest neighbour + epsilon) holds for 24.875 % of lifted cells; receiver step is a pure epsilon step for 23.9 %
+      lifted cells: z p5/p50/p95 298/338/397 m against all land 315/375/421 m; receiver direction shares (W,E,N,S,NW,NE,SW,SE) of lifted cells: 0.079 0.006 0.005 0.486 0.018 0.005 0.336 0.065
+    N41_00_W096_00 routed C: land 9676 cells, channel steps 985 (946 km of length); chords 8: 961 / 16: 912
+      chord  8: share within 2.5 deg of 0/45/90/135: 0.1145 (axis 0.0843, diagonal 0.0302); within 5 deg: 0.1686 (axis 0.0843, diagonal 0.0843); uniform 0.0889 / 0.2222
+      chord 16: share within 2.5 deg of 0/45/90/135: 0.0504 (axis 0.0362, diagonal 0.0143); within 5 deg: 0.1908 (axis 0.1360, diagonal 0.0548); uniform 0.0889 / 0.2222
+      straight runs (one D8 direction): channel length in runs > 10 cells 0.0000, > 20 cells 0.0000; diagonal share of channel length 0.5197; steps on lifted flats 0.5533 of channel steps (their length in runs > 10: 0.0000)
+
+== tile N42_00_W123_00: lat 42.5, 3600 x 3600 px -> 100 x 138 cells of 820 x 803 m (blocks 36 x 26); land 96.6 %; read 0.2 s
+  relief [N42_00_W123_00]: 3x3 relief p50 203 p95 427 m; steepest neighbour slope p50 0.1316 p95 0.2750 (9440 cells)
+  skipped: slope p95 0.2750 outside 0.03..0.14
+
+== tile N43_00_W102_00: lat 43.5, 3600 x 3600 px -> 100 x 138 cells of 807 x 803 m (blocks 36 x 26); land 96.6 %; read 0.2 s
+  relief [N43_00_W102_00]: 3x3 relief p50 29 p95 63 m; steepest neighbour slope p50 0.0197 p95 0.0452 (9440 cells)
+  (a) flats [N43_00_W102_00 routed U]: land cells 9440; raw flat or pit (no strictly lower neighbour) 1.43 %; lifted by the fill >= 0.5 mm 2.34 %, >= 1 m 1.42 %, >= 10 m 0.02 %
+      lifted components 193: size p50 1 p95 4 max 11 cells; the 5 largest hold 12.6 % of the lifted cells; level rule (lowest neighbour + epsilon) holds for 33.032 % of lifted cells; receiver step is a pure epsilon step for 33.0 %
+      lifted cells: z p5/p50/p95 638/839/970 m against all land 682/818/987 m; receiver direction shares (W,E,N,S,NW,NE,SW,SE) of lifted cells: 0.054 0.176 0.317 0.023 0.136 0.163 0.009 0.122
+    N43_00_W102_00 routed U: land 9440 cells, channel steps 630 (596 km of length); chords 8: 566 / 16: 521
+      chord  8: share within 2.5 deg of 0/45/90/135: 0.1572 (axis 0.1307, diagonal 0.0265); within 5 deg: 0.1837 (axis 0.1307, diagonal 0.0530); uniform 0.0889 / 0.2222
+      chord 16: share within 2.5 deg of 0/45/90/135: 0.0557 (axis 0.0461, diagonal 0.0096); within 5 deg: 0.1900 (axis 0.1612, diagonal 0.0288); uniform 0.0889 / 0.2222
+      straight runs (one D8 direction): channel length in runs > 10 cells 0.0260, > 20 cells 0.0000; diagonal share of channel length 0.4753; steps on lifted flats 0.2095 of channel steps (their length in runs > 10: 0.0065)
+  (a) flats [N43_00_W102_00 routed C]: land cells 9440; raw flat or pit (no strictly lower neighbour) 1.43 %; lifted by the fill >= 0.5 mm 2.34 %, >= 1 m 1.42 %, >= 10 m 0.02 %
+      lifted components 193: size p50 1 p95 4 max 11 cells; the 5 largest hold 12.6 % of the lifted cells; level rule (lowest neighbour + epsilon) holds for 33.032 % of lifted cells; receiver step is a pure epsilon step for 33.0 %
+      lifted cells: z p5/p50/p95 638/839/970 m against all land 682/818/987 m; receiver direction shares (W,E,N,S,NW,NE,SW,SE) of lifted cells: 0.054 0.176 0.317 0.023 0.136 0.163 0.009 0.122
+    N43_00_W102_00 routed C: land 9440 cells, channel steps 632 (598 km of length); chords 8: 568 / 16: 523
+      chord  8: share within 2.5 deg of 0/45/90/135: 0.1567 (axis 0.1303, diagonal 0.0264); within 5 deg: 0.1831 (axis 0.1303, diagonal 0.0528); uniform 0.0889 / 0.2222
+      chord 16: share within 2.5 deg of 0/45/90/135: 0.0554 (axis 0.0459, diagonal 0.0096); within 5 deg: 0.1893 (axis 0.1606, diagonal 0.0287); uniform 0.0889 / 0.2222
+      straight runs (one D8 direction): channel length in runs > 10 cells 0.0259, > 20 cells 0.0000; diagonal share of channel length 0.4774; steps on lifted flats 0.2104 of channel steps (their length in runs > 10: 0.0064)
+
+== tile N45_00_E014_00: lat 45.5, 3600 x 3600 px -> 94 x 138 cells of 823 x 803 m (blocks 38 x 26); land 87.3 %; read 0.2 s
+  relief [N45_00_E014_00]: 3x3 relief p50 171 p95 440 m; steepest neighbour slope p50 0.1227 p95 0.2953 (7851 cells)
+  skipped: slope p95 0.2953 outside 0.03..0.14
+
+== tile N47_00_E011_00: lat 47.5, 3600 x 3600 px -> 92 x 138 cells of 814 x 803 m (blocks 39 x 26); land 96.4 %; read 0.2 s
+  relief [N47_00_E011_00]: 3x3 relief p50 394 p95 876 m; steepest neighbour slope p50 0.2824 p95 0.5911 (8496 cells)
+  skipped: slope p95 0.5911 outside 0.03..0.14
+
+== tile N48_00_E008_00: lat 48.5, 3600 x 3600 px -> 90 x 138 cells of 819 x 803 m (blocks 40 x 26); land 96.4 %; read 0.3 s
+  relief [N48_00_E008_00]: 3x3 relief p50 100 p95 298 m; steepest neighbour slope p50 0.0730 p95 0.2165 (8260 cells)
+  skipped: slope p95 0.2165 outside 0.03..0.14
+
+== tile N52_00_E012_00: lat 52.5, 2400 x 3600 px -> 82 x 138 cells of 818 x 803 m (blocks 29 x 26); land 96.1 %; read 0.2 s
+  relief [N52_00_E012_00]: 3x3 relief p50 13 p95 37 m; steepest neighbour slope p50 0.0098 p95 0.0268 (7316 cells)
+  skipped: slope p95 0.0268 outside 0.03..0.14
+
+== tile N57_00_W005_00: lat 57.5, 2400 x 3600 px -> 72 x 138 cells of 821 x 803 m (blocks 33 x 26); land 93.7 %; read 0.2 s
+  relief [N57_00_W005_00]: 3x3 relief p50 153 p95 345 m; steepest neighbour slope p50 0.1065 p95 0.2418 (6055 cells)
+  skipped: slope p95 0.2418 outside 0.03..0.14
+
+== tile N61_00_E006_00: lat 61.5, 1800 x 3600 px -> 64 x 138 cells of 825 x 803 m (blocks 28 x 26); land 90.6 %; read 0.1 s
+  relief [N61_00_E006_00]: 3x3 relief p50 488 p95 958 m; steepest neighbour slope p50 0.3505 p95 0.6788 (4881 cells)
+  skipped: slope p95 0.6788 outside 0.03..0.14
+
+== tile N70_00_W154_00: lat 70.5, 1200 x 3600 px -> 46 x 138 cells of 804 x 803 m (blocks 26 x 26); land 67.9 %; read 0.1 s
+  relief [N70_00_W154_00]: 3x3 relief p50 7 p95 16 m; steepest neighbour slope p50 0.0054 p95 0.0131 (2206 cells)
+  skipped: slope p95 0.0131 outside 0.03..0.14
+
+== tile S25_00_E015_00: lat -24.5, 3600 x 3600 px -> 124 x 138 cells of 815 x 803 m (blocks 29 x 26); land 97.0 %; read 0.4 s
+  relief [S25_00_E015_00]: 3x3 relief p50 56 p95 137 m; steepest neighbour slope p50 0.0452 p95 0.1127 (12272 cells)
+  (a) flats [S25_00_E015_00 routed U]: land cells 12272; raw flat or pit (no strictly lower neighbour) 6.63 %; lifted by the fill >= 0.5 mm 16.63 %, >= 1 m 15.28 %, >= 10 m 6.56 %
+      lifted components 808: size p50 2 p95 10 max 97 cells; the 5 largest hold 7.9 % of the lifted cells; level rule (lowest neighbour + epsilon) holds for 21.117 % of lifted cells; receiver step is a pure epsilon step for 20.9 %
+      lifted cells: z p5/p50/p95 509/729/974 m against all land 540/789/1028 m; receiver direction shares (W,E,N,S,NW,NE,SW,SE) of lifted cells: 0.110 0.012 0.227 0.275 0.139 0.040 0.155 0.041
+    S25_00_E015_00 routed U: land 12272 cells, channel steps 1177 (1131 km of length); chords 8: 1017 / 16: 982
+      chord  8: share within 2.5 deg of 0/45/90/135: 0.1219 (axis 0.0708, diagonal 0.0511); within 5 deg: 0.1622 (axis 0.0708, diagonal 0.0914); uniform 0.0889 / 0.2222
+      chord 16: share within 2.5 deg of 0/45/90/135: 0.0723 (axis 0.0356, diagonal 0.0367); within 5 deg: 0.1955 (axis 0.1039, diagonal 0.0916); uniform 0.0889 / 0.2222
+      straight runs (one D8 direction): channel length in runs > 10 cells 0.0094, > 20 cells 0.0000; diagonal share of channel length 0.5230; steps on lifted flats 0.3611 of channel steps (their length in runs > 10: 0.0204)
+  (a) flats [S25_00_E015_00 routed C]: land cells 12272; raw flat or pit (no strictly lower neighbour) 6.63 %; lifted by the fill >= 0.5 mm 16.63 %, >= 1 m 15.28 %, >= 10 m 6.56 %
+      lifted components 808: size p50 2 p95 10 max 97 cells; the 5 largest hold 7.9 % of the lifted cells; level rule (lowest neighbour + epsilon) holds for 21.117 % of lifted cells; receiver step is a pure epsilon step for 20.9 %
+      lifted cells: z p5/p50/p95 509/729/974 m against all land 540/789/1028 m; receiver direction shares (W,E,N,S,NW,NE,SW,SE) of lifted cells: 0.110 0.012 0.227 0.275 0.139 0.040 0.155 0.041
+    S25_00_E015_00 routed C: land 12272 cells, channel steps 1172 (1127 km of length); chords 8: 1043 / 16: 1018
+      chord  8: share within 2.5 deg of 0/45/90/135: 0.1227 (axis 0.0709, diagonal 0.0518); within 5 deg: 0.1659 (axis 0.0709, diagonal 0.0949); uniform 0.0889 / 0.2222
+      chord 16: share within 2.5 deg of 0/45/90/135: 0.0697 (axis 0.0334, diagonal 0.0363); within 5 deg: 0.1916 (axis 0.0992, diagonal 0.0923); uniform 0.0889 / 0.2222
+      straight runs (one D8 direction): channel length in runs > 10 cells 0.0087, > 20 cells 0.0000; diagonal share of channel length 0.5231; steps on lifted flats 0.3584 of channel steps (their length in runs > 10: 0.0206)
+
+== pooled DEM (4 tiles, slope p95 in 0.03..0.14)
+    pooled, routed U: land 42716 cells, channel steps 3459 (3308 km of length); chords 8: 3047 / 16: 2799
+      chord  8: share within 2.5 deg of 0/45/90/135: 0.1280 (axis 0.0886, diagonal 0.0394); within 5 deg: 0.1743 (axis 0.0886, diagonal 0.0857); uniform 0.0889 / 0.2222
+      chord 16: share within 2.5 deg of 0/45/90/135: 0.0622 (axis 0.0364, diagonal 0.0257); within 5 deg: 0.1969 (axis 0.1240, diagonal 0.0729); uniform 0.0889 / 0.2222
+      straight runs (one D8 direction): channel length in runs > 10 cells 0.0113, > 20 cells 0.0000; diagonal share of channel length 0.5084; steps on lifted flats 0.3293 of channel steps (their length in runs > 10: 0.0083)
+  pits [pooled DEM, routed U]: lifted 7.62 % of 42716 land cells; share of lifted cells by component size (rows) and largest fill depth (columns), % of land:
+           size |      <1 m    1-10 m  10-100 m    >100 m
+            1-3 |      0.56      2.00      0.81      0.00   components: 307 / 738 / 207 / 0
+           4-30 |      0.02      1.03      2.51      0.07   components: 7 / 112 / 179 / 1
+         31-300 |      0.00      0.15      0.47      0.00   components: 0 / 2 / 4 / 0
+       301-3000 |      0.00      0.00      0.00      0.00   components: 0 / 0 / 0 / 0
+          >3000 |      0.00      0.00      0.00      0.00   components: 0 / 0 / 0 / 0
+DEMBASINS | demmid | depressions over 30 cells 6 (touching a tile edge included) | depth p50 10.1 p95 17.1 max 42.1 | cells p50 40 p95 62 max 97
+    pooled, routed C: land 42716 cells, channel steps 3445 (3296 km of length); chords 8: 3100 / 16: 2893
+      chord  8: share within 2.5 deg of 0/45/90/135: 0.1290 (axis 0.0897, diagonal 0.0394); within 5 deg: 0.1755 (axis 0.0897, diagonal 0.0858); uniform 0.0889 / 0.2222
+      chord 16: share within 2.5 deg of 0/45/90/135: 0.0605 (axis 0.0356, diagonal 0.0249); within 5 deg: 0.1925 (axis 0.1210, diagonal 0.0716); uniform 0.0889 / 0.2222
+      straight runs (one D8 direction): channel length in runs > 10 cells 0.0111, > 20 cells 0.0000; diagonal share of channel length 0.5098; steps on lifted flats 0.3292 of channel steps (their length in runs > 10: 0.0084)
+RAW demmid | pooled U | chords8 [109, 0, 0, 0, 0, 0, 0, 67, 7, 1, 0, 7, 0, 43, 0, 8, 0, 0, 9, 0, 28, 6, 18, 0, 0, 0, 30, 0, 0, 19, 10, 18, 0, 13, 0, 11, 8, 0, 8, 14, 9, 0, 0, 0, 38, 0, 0, 0, 13, 25, 10, 0, 7, 3, 26, 10, 1, 29, 4, 26, 4, 0, 0, 57, 0, 0, 18, 0, 0, 55, 0, 8, 0, 23, 0, 86, 0, 0, 1, 0, 2, 17, 108, 0, 0, 0, 0, 0, 0, 0, 161, 0, 0, 0, 0, 0, 0, 199, 17, 7, 0, 0, 0, 0, 241, 0, 26, 0, 7, 0, 122, 2, 1, 53, 0, 0, 114, 0, 0, 45, 5, 13, 67, 16, 19, 49, 0, 32, 6, 15, 47, 14, 0, 0, 0, 82, 0, 0, 0, 33, 20, 7, 0, 22, 31, 0, 25, 0, 29, 13, 33, 0, 0, 72, 0, 0, 11, 15, 4, 82, 0, 12, 0, 0, 27, 0, 106, 0, 3, 0, 9, 17, 102, 0, 0, 0, 0, 0, 0, 0] | chords16 [46, 0, 0, 27, 1, 6, 0, 25, 4, 0, 18, 9, 5, 17, 5, 2, 3, 2, 6, 2, 5, 4, 2, 5, 2, 0, 10, 5, 2, 7, 3, 7, 1, 16, 2, 8, 12, 10, 7, 10, 2, 7, 8, 0, 24, 0, 1, 19, 4, 8, 9, 13, 9, 14, 17, 3, 16, 7, 24, 7, 10, 19, 0, 9, 12, 2, 7, 11, 4, 18, 2, 12, 18, 4, 11, 31, 0, 5, 8, 25, 1, 3, 57, 2, 2, 10, 51, 0, 0, 0, 56, 0, 0, 67, 22, 1, 0, 88, 13, 2, 94, 22, 7, 6, 86, 16, 20, 63, 38, 16, 46, 42, 12, 56, 7, 33, 48, 0, 31, 38, 7, 31, 29, 20, 13, 33, 28, 13, 21, 18, 24, 5, 24, 9, 0, 38, 0, 10, 16, 5, 12, 21, 13, 15, 12, 20, 15, 13, 19, 15, 10, 31, 11, 20, 0, 32, 13, 6, 22, 23, 6, 25, 42, 1, 3, 17, 48, 10, 13, 60, 7, 6, 70, 0, 5, 11, 56, 0, 0, 0]
+RAW demmid | pooled C | chords8 [111, 0, 0, 0, 0, 0, 0, 67, 9, 1, 0, 7, 0, 43, 0, 8, 0, 0, 9, 0, 28, 6, 17, 0, 0, 0, 30, 0, 0, 20, 10, 18, 0, 14, 0, 11, 8, 0, 8, 15, 9, 0, 0, 0, 39, 0, 0, 0, 13, 24, 10, 0, 7, 3, 28, 11, 1, 30, 4, 25, 4, 0, 0, 60, 0, 0, 20, 0, 0, 63, 0, 8, 0, 19, 0, 88, 0, 0, 1, 0, 2, 12, 111, 0, 0, 0, 0, 0, 0, 0, 167, 0, 0, 0, 0, 0, 0, 202, 17, 7, 0, 0, 0, 0, 242, 0, 28, 0, 7, 0, 123, 2, 1, 58, 0, 0, 116, 0, 0, 45, 8, 14, 69, 16, 19, 49, 0, 32, 6, 16, 51, 14, 0, 0, 0, 83, 0, 0, 0, 33, 20, 7, 0, 22, 31, 0, 27, 0, 29, 14, 33, 0, 0, 70, 0, 0, 11, 16, 5, 82, 0, 13, 0, 0, 29, 0, 104, 0, 1, 0, 9, 18, 102, 0, 0, 0, 0, 0, 0, 0] | chords16 [46, 0, 0, 27, 1, 6, 0, 25, 4, 0, 18, 9, 5, 17, 5, 2, 3, 2, 6, 2, 5, 4, 2, 5, 2, 0, 10, 5, 2, 7, 3, 7, 1, 16, 1, 8, 12, 9, 7, 10, 2, 7, 8, 0, 23, 0, 1, 19, 4, 8, 9, 13, 9, 14, 19, 4, 17, 7, 24, 7, 10, 20, 0, 9, 12, 2, 7, 7, 4, 25, 2, 8, 34, 4, 7, 48, 0, 5, 9, 38, 1, 3, 61, 2, 2, 10, 53, 0, 0, 0, 57, 0, 0, 67, 22, 1, 0, 87, 13, 2, 93, 22, 7, 6, 86, 16, 20, 63, 38, 16, 46, 42, 12, 56, 8, 35, 48, 0, 31, 39, 8, 31, 29, 20, 13, 34, 27, 13, 23, 17, 24, 5, 27, 9, 0, 39, 0, 10, 17, 4, 13, 23, 13, 14, 12, 21, 19, 13, 22, 17, 10, 38, 16, 24, 0, 35, 12, 7, 23, 23, 6, 25, 42, 1, 5, 17, 48, 10, 13, 60, 8, 6, 70, 0, 5, 11, 56, 0, 0, 0]

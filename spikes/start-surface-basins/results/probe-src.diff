@@ -1,0 +1,130 @@
+diff --git a/crates/generators/src/bake/inputs.rs b/crates/generators/src/bake/inputs.rs
+index 36e21bf7..348c4482 100644
+--- a/crates/generators/src/bake/inputs.rs
++++ b/crates/generators/src/bake/inputs.rs
+@@ -98,7 +98,8 @@ impl BakeInputs {
+     /// The base elevation at a direction: the class source's, with the class-blended relief driver.
+     pub fn base(&self, d: Vec3) -> f64 {
+         let p = self.source.eval(d);
+-        self.source.elevation_m(d, &p, blended_k(&self.weights_at(d)))
++        let w = if crate::classes::probe_off() & (1 << 16) != 0 { p.weights } else { self.weights_at(d) };
++        self.source.elevation_m(d, &p, blended_k(&w))
+     }
+ 
+     /// The carve factor of GEN-097 at a direction.
+diff --git a/crates/generators/src/bake/round.rs b/crates/generators/src/bake/round.rs
+index 40d691d6..865eb6ac 100644
+--- a/crates/generators/src/bake/round.rs
++++ b/crates/generators/src/bake/round.rs
+@@ -67,6 +67,7 @@ pub fn catchment_round(inp: &mut CatchmentInputs, p: &CarveParams, steps: usize)
+             z[rec] = want.max(z[rec] - breach_limit(p, z[rec])).max(start - breach_limit(p, start));
+         }
+     }
++    let steps = if PROBE_BREACH_ONLY.load(std::sync::atomic::Ordering::Relaxed) { 0 } else { steps };
+     for _ in 0..steps {
+         for c in 0..z.len() {
+             let rec = inp.receiver[c];
+@@ -503,3 +504,6 @@ pub fn solve_rounds_memo(
+     }
+     (report, work)
+ }
++
++/// Probe (spikes lane, never merged): a catchment's round does the breach only, no sweeps.
++pub static PROBE_BREACH_ONLY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+diff --git a/crates/generators/src/classes.rs b/crates/generators/src/classes.rs
+index aaf0f3d9..4ee4ffbf 100644
+--- a/crates/generators/src/classes.rs
++++ b/crates/generators/src/classes.rs
+@@ -551,20 +551,41 @@ impl ClassSource {
+     /// The elevation of GEN-096 at `d` given the untapered blended `k` there: `e0` plus the class hill band (GEN-098), clamped. `point` is `eval(d)`.
+     pub fn elevation_m(&self, d: Vec3, point: &ClassPoint, k: f64) -> f64 {
+         let t = terrain(self.seed, d);
+-        let wm = point.weights[MOUNTAINS] + point.weights[HIGH_MOUNTAINS];
+-        let band = if t.land_depth <= 0.0 {
++        let off = probe_off();
++        let wm = if off & (1 << 17) != 0 { 0.0 } else { point.weights[MOUNTAINS] + point.weights[HIGH_MOUNTAINS] };
++        let band = if t.land_depth <= 0.0 || off & (1 << 8) != 0 {
+             0.0
+         } else {
+             // On the mountain classes (blended by their weight) the band is x4.5 as high, ridged, and centred on its mean (GEN-098, SPIKE-101).
+-            let amp = hill_amplitude_for_k(k) * (1.0 + (MOUNTAIN_BAND_SCALE - 1.0) * wm);
++            let scale = if off & (1 << 14) != 0 { 1.0 } else { MOUNTAIN_BAND_SCALE };
++            let base_amp = if off & (1 << 15) != 0 { 30.0 } else { hill_amplitude_for_k(k) };
++            let amp = base_amp * (1.0 + (scale - 1.0) * wm);
+             let turned = turned_noise();
+             let noise = wm * ridged_octaves(self.seed, &t, turned) + (1.0 - wm) * hill_octaves_with(self.seed, &t, turned)
+                 - MOUNTAIN_BAND_CENTRE * wm;
+             amp * noise * smoothstep(0.0, 0.1, t.land_depth)
+         };
++        // Probe (spikes lane, never merged): the components of e0 switched off by `off` (bits 9 to 13), applied here so that the climate and the class weights do not move.
++        let mut e0 = point.e0;
++        if off & ((1 << 9) | (1 << 10) | (1 << 11) | (1 << 12) | (1 << 13)) != 0 {
++            let terms = &point.terms;
++            let ridge = ridge_at(self.seed, t.warped);
++            let belt = BELT_AMPLITUDE_M * terms.core * (0.5 + 0.5 * ridge);
++            let belt_variant = if off & (1 << 10) != 0 { 0.0 } else if off & (1 << 9) != 0 { BELT_AMPLITUDE_M * terms.core * 0.75 } else { belt };
++            e0 += belt_variant - belt;
++            if off & (1 << 11) != 0 {
++                e0 -= 2000.0 * terms.back_arc;
++            }
++            if off & (1 << 12) != 0 {
++                e0 -= 200.0 * terms.old_margin.max(0.5 * terms.flank);
++            }
++            if off & (1 << 13) != 0 {
++                e0 -= PLATEAU_UPLIFT_M * terms.plateau_field;
++            }
++        }
+         // The centred band can be negative: land stays land (the shore of the continent stage is kept), at least 1 m above the sea where the base is.
+-        let e = point.e0 + band;
+-        let e = if t.land_depth > 0.0 { e.max(point.e0.min(MIN_LAND_M)) } else { e };
++        let e = e0 + band;
++        let e = if t.land_depth > 0.0 { e.max(e0.min(MIN_LAND_M)) } else { e };
+         e.clamp(MIN_ELEVATION_M, MAX_ELEVATION_M)
+     }
+ }
+@@ -591,11 +612,14 @@ pub const MOUNTAIN_BAND_CENTRE: f64 = 0.45;
+ /// previous one's ridge so that the ridges stay connected (Musgrave).
+ fn ridged_octaves(seed: u64, t: &Terrain, turned: bool) -> f64 {
+     let (mut sum, mut amp, mut norm, mut freq, mut weight) = (0.0, 1.0, 0.0, 398.0, 1.0);
++    let off = probe_off();
+     for o in 0..5u32 {
+         let n = layer_noise_t(turned, seed, LAYER_RIDGED, o, t.warped * freq);
+         let r = (1.0 - libm::fabs(n)).max(0.0);
+         let sig = r * r * weight;
+-        sum += amp * sig;
++        if off & (1 << o) == 0 {
++            sum += amp * sig;
++        }
+         norm += amp;
+         weight = (sig * 2.0).clamp(0.0, 1.0);
+         amp *= 0.5;
+@@ -851,3 +875,14 @@ impl ClassLattice {
+         face_to_direction(&TangentWarp, face, 2.0 * i as f64 / n - 1.0, 2.0 * j as f64 / n - 1.0)
+     }
+ }
++
++/// Probe (spikes lane, never merged): the components of the base switched off, the bits of `PLANET_BASE_OFF` (decimal): bits 0 to 4 the ridged octaves of 16, 8, 4, 2 and 1 km, 5 to 7 the hill octaves of 8, 4 and 2 km, 8 the whole band,
++/// 9 the belt's ridge factor replaced by its mean, 10 the belts, 11 the back-arc, 12 the old margin and the flank, 13 the plateau, 14 the mountain band scale (x4.5) to 1, 15 the class amplitude to 30 m, 17 the ridged band replaced by the hill band.
++static PROBE_OFF: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
++pub fn probe_off() -> u64 {
++    PROBE_OFF.load(std::sync::atomic::Ordering::Relaxed)
++}
++/// Sets the mask (bit 16: the class weights read directly from the source, not from the lattice with the arid blend).
++pub fn set_probe_off(v: u64) {
++    PROBE_OFF.store(v, std::sync::atomic::Ordering::Relaxed);
++}
+diff --git a/crates/generators/src/global.rs b/crates/generators/src/global.rs
+index d214f82d..50132f7a 100644
+--- a/crates/generators/src/global.rs
++++ b/crates/generators/src/global.rs
+@@ -350,7 +350,9 @@ pub(crate) fn hill_octaves_with(seed: u64, t: &Terrain, turned: bool) -> f64 {
+     for o in 0..HILL_BAND_OCTAVES {
+         let n = layer_noise_t(turned, seed, LAYER_HILL, o, t.warped * freq);
+         let r = 1.0 - libm::fabs(n);
+-        sum += amp * r * r;
++        if crate::classes::probe_off() & (1 << (5 + o)) == 0 {
++            sum += amp * r * r;
++        }
+         norm += amp;
+         amp *= 0.5;
+         freq *= 2.0;

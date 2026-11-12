@@ -1,0 +1,2299 @@
+#![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
+//! SPIKE-108 probe (spike branch only, never merged): do the generator's channels favour 0/45/90 degree shapes more than real terrain does?
+//! Reads library APIs only. Modes: `shapes_check gen [threads]` (a generator window: start surface and the surface after the rounds, routed under U and C) and
+//! `shapes_check dem [dir]` (GLO-30 tiles block-averaged to 814 m, routed with the same code). Env: `PLANET_WIN=face,cells,i0,i1,j0,j1,seed`, `PLANET_MARGIN`, `PLANET_ROUNDS`,
+//! `PLANET_OUT` (PNG directory), `PLANET_SLOPE=lo,hi` (dem: only tiles whose 3x3 slope p95 is inside), `PLANET_TAG` (names the images).
+use planet_core::par::{self, Par};
+use planet_core::{Face, Vec3};
+use planet_generators::bake::carve::CarveParams;
+use planet_generators::bake::face::FaceSpec;
+use planet_generators::bake::inputs::BakeInputs;
+use planet_generators::bake::metric::Metric;
+use planet_generators::bake::round::{catchment_round, cut_in, gather_with, Drivers};
+use planet_generators::bake::route::{route_rules_filled, MfdClip, RoundRules, NONE};
+use planet_generators::bake::{Grid, NEIGHBOURS};
+use std::time::Instant;
+
+const R: f64 = 6_371_000.0;
+const INIT: f64 = 75.0e6;
+const U_RULES: RoundRules = RoundRules { clip_mfd: MfdClip::Off, canonical_flood: true };
+const EPS: f64 = 1e-3;
+
+#[derive(Clone)]
+struct Acc {
+    /// Chords of 8 and 16 steps along channel cells, by 1 degree of the axis orientation [0, 180).
+    chords: [[u64; 180]; 2],
+    steps: u64,
+    len: f64,
+    len10: f64,
+    len20: f64,
+    /// Length of channel steps by direction (axis, diagonal).
+    axis_len: f64,
+    diag_len: f64,
+    land: u64,
+    flat_steps: u64,
+    flat_len: f64,
+    flat_len10: f64,
+}
+
+impl Acc {
+    fn new() -> Acc {
+        Acc { chords: [[0; 180]; 2], steps: 0, len: 0.0, len10: 0.0, len20: 0.0, axis_len: 0.0, diag_len: 0.0, land: 0, flat_steps: 0, flat_len: 0.0, flat_len10: 0.0 }
+    }
+    fn add(&mut self, o: &Acc) {
+        for k in 0..2 {
+            for b in 0..180 {
+                self.chords[k][b] += o.chords[k][b];
+            }
+        }
+        self.steps += o.steps;
+        self.len += o.len;
+        self.len10 += o.len10;
+        self.len20 += o.len20;
+        self.axis_len += o.axis_len;
+        self.diag_len += o.diag_len;
+        self.land += o.land;
+        self.flat_steps += o.flat_steps;
+        self.flat_len += o.flat_len;
+        self.flat_len10 += o.flat_len10;
+    }
+    /// Share of chords within `tol` degrees of a multiple of 45 (`kind` 0: all four, 1: axis 0/90, 2: diagonal 45/135).
+    fn near(&self, k: usize, tol: f64, kind: usize) -> f64 {
+        let (mut hit, mut all) = (0u64, 0u64);
+        for b in 0..180 {
+            let c = b as f64 + 0.5;
+            all += self.chords[k][b];
+            let m = (c / 45.0).round() as i64; // nearest multiple
+            let dev = (c - m as f64 * 45.0).abs();
+            let is_axis = m % 2 == 0;
+            if dev < tol && (kind == 0 || (kind == 1 && is_axis) || (kind == 2 && !is_axis)) {
+                hit += self.chords[k][b];
+            }
+        }
+        hit as f64 / all.max(1) as f64
+    }
+    fn n(&self, k: usize) -> u64 {
+        self.chords[k].iter().sum()
+    }
+    fn report(&self, label: &str) {
+        println!(
+            "    {label}: land {} cells, channel steps {} ({:.0} km of length); chords 8: {} / 16: {}",
+            self.land,
+            self.steps,
+            self.len * 0.814,
+            self.n(0),
+            self.n(1)
+        );
+        for k in 0..2 {
+            println!(
+                "      chord {:>2}: share within 2.5 deg of 0/45/90/135: {:.4} (axis {:.4}, diagonal {:.4}); within 5 deg: {:.4} (axis {:.4}, diagonal {:.4}); uniform 0.0889 / 0.2222",
+                [8, 16][k],
+                self.near(k, 2.5, 0),
+                self.near(k, 2.5, 1),
+                self.near(k, 2.5, 2),
+                self.near(k, 5.0, 0),
+                self.near(k, 5.0, 1),
+                self.near(k, 5.0, 2)
+            );
+        }
+        println!(
+            "      straight runs (one D8 direction): channel length in runs > 10 cells {:.4}, > 20 cells {:.4}; diagonal share of channel length {:.4}; steps on lifted flats {:.4} of channel steps (their length in runs > 10: {:.4})",
+            self.len10 / self.len.max(1e-9),
+            self.len20 / self.len.max(1e-9),
+            self.diag_len / (self.axis_len + self.diag_len).max(1e-9),
+            self.flat_steps as f64 / self.steps.max(1) as f64,
+            self.flat_len10 / self.flat_len.max(1e-9)
+        );
+    }
+}
+
+/// Everything the measures need about one routed surface.
+struct Surf<'a> {
+    grid: &'a Grid,
+    w: usize,
+    h: usize,
+    z: &'a [f64],
+    outlet: &'a [bool],
+    /// Window cell dimensions in metres (east-west, north-south), for angles.
+    dims: (f64, f64),
+    /// Cells counted.
+    inbox: &'a dyn Fn(usize) -> bool,
+}
+
+struct Routed {
+    receiver: Vec<u32>,
+    order: Vec<u32>,
+    area: Vec<f64>,
+    filled: Vec<f64>,
+}
+
+fn route(grid: &Grid, z: &[f64], outlet: &[bool], rules: RoundRules, seed: u64) -> Routed {
+    let (r, filled) = route_rules_filled(grid, z, outlet, EPS, seed, 0.0, None, rules);
+    Routed { receiver: r.receiver, order: r.order, area: r.area, filled }
+}
+
+fn dir_of(grid: &Grid, p: usize, q: usize) -> usize {
+    (0..8).find(|&d| grid.neighbour(p, d) == Some(q)).expect("the receiver is a neighbour")
+}
+
+/// The channel measures of one routed surface (the cells inside the box).
+fn measure(s: &Surf, r: &Routed, lifted: &[bool]) -> Acc {
+    let n = s.z.len();
+    let ch: Vec<bool> = (0..n).map(|p| !s.outlet[p] && r.area[p] >= INIT).collect();
+    let mut dir = vec![9u8; n];
+    for p in 0..n {
+        if ch[p] && r.receiver[p] != NONE {
+            dir[p] = dir_of(s.grid, p, r.receiver[p] as usize) as u8;
+        }
+    }
+    let mut a = Acc::new();
+    a.land = (0..n).filter(|&p| !s.outlet[p] && (s.inbox)(p)).count() as u64;
+    // chords along the receiver chain through channel cells
+    for p in 0..n {
+        if !ch[p] || !(s.inbox)(p) {
+            continue;
+        }
+        let (mut q, mut di, mut dj, mut k) = (p, 0i64, 0i64, 0usize);
+        while k < 16 && dir[q] != 9 {
+            let (ni, nj) = NEIGHBOURS[dir[q] as usize];
+            di += ni;
+            dj += nj;
+            let nq = r.receiver[q] as usize;
+            k += 1;
+            if k == 8 || k == 16 {
+                let ang = libm::atan2(dj as f64 * s.dims.1, di as f64 * s.dims.0).to_degrees().rem_euclid(180.0);
+                a.chords[k / 8 - 1][(ang as usize).min(179)] += 1;
+            }
+            if !ch[nq] {
+                break;
+            }
+            q = nq;
+        }
+    }
+    // runs of one direction: u = steps ending at p, d = steps from p downstream
+    let mut u = vec![1u32; n];
+    for &c in r.order.iter().rev() {
+        let p = c as usize;
+        let rec = r.receiver[p];
+        if rec != NONE && dir[p] != 9 && ch[rec as usize] && dir[rec as usize] == dir[p] {
+            u[rec as usize] = u[rec as usize].max(u[p] + 1);
+        }
+    }
+    let mut d = vec![1u32; n];
+    for &c in &r.order {
+        let p = c as usize;
+        let rec = r.receiver[p];
+        if rec != NONE && dir[p] != 9 && ch[rec as usize] && dir[rec as usize] == dir[p] {
+            d[p] = d[rec as usize] + 1;
+        }
+    }
+    for p in 0..n {
+        if dir[p] == 9 || !(s.inbox)(p) {
+            continue;
+        }
+        let len = if dir[p] < 4 { 1.0 } else { std::f64::consts::SQRT_2 };
+        let run = u[p] + d[p] - 1;
+        a.steps += 1;
+        a.len += len;
+        if dir[p] < 4 {
+            a.axis_len += len;
+        } else {
+            a.diag_len += len;
+        }
+        if run > 10 {
+            a.len10 += len;
+        }
+        if run > 20 {
+            a.len20 += len;
+        }
+        if lifted[p] {
+            a.flat_steps += 1;
+            a.flat_len += len;
+            if run > 10 {
+                a.flat_len10 += len;
+            }
+        }
+    }
+    a
+}
+
+fn pct(v: &mut [f64], q: f64) -> f64 {
+    if v.is_empty() {
+        return f64::NAN;
+    }
+    v.sort_by(|a, b| a.total_cmp(b));
+    v[((v.len() - 1) as f64 * q) as usize]
+}
+
+/// (a): the flats of the filled surface. A cell is raw-flat when none of its neighbours is strictly lower in `z`; lifted when the fill raised it by at least `min_m`.
+fn flats(s: &Surf, r: &Routed, tag: &str) -> Vec<bool> {
+    let n = s.z.len();
+    let land: Vec<usize> = (0..n).filter(|&p| !s.outlet[p] && (s.inbox)(p)).collect();
+    let nl = land.len().max(1) as f64;
+    let raw_flat = |p: usize| !(0..8).any(|d| s.grid.neighbour(p, d).is_some_and(|q| s.z[q] < s.z[p]));
+    let rf = land.iter().filter(|&&p| raw_flat(p)).count();
+    let lift = |p: usize, m: f64| r.filled[p] - s.z[p] >= m;
+    let l001 = land.iter().filter(|&&p| lift(p, 0.0005)).count();
+    let l1 = land.iter().filter(|&&p| lift(p, 1.0)).count();
+    let l10 = land.iter().filter(|&&p| lift(p, 10.0)).count();
+    let mask: Vec<bool> = (0..n).map(|p| !s.outlet[p] && lift(p, 0.0005)).collect();
+    // components of the lifted cells (8-neighbour)
+    let mut comp = vec![u32::MAX; n];
+    let mut sizes: Vec<f64> = Vec::new();
+    for p in 0..n {
+        if !mask[p] || comp[p] != u32::MAX {
+            continue;
+        }
+        let id = sizes.len() as u32;
+        let mut stack = vec![p];
+        comp[p] = id;
+        let mut cnt = 0usize;
+        while let Some(c) = stack.pop() {
+            cnt += 1;
+            for d in 0..8 {
+                if let Some(q) = s.grid.neighbour(c, d) {
+                    if mask[q] && comp[q] == u32::MAX {
+                        comp[q] = id;
+                        stack.push(q);
+                    }
+                }
+            }
+        }
+        sizes.push(cnt as f64);
+    }
+    // the structural rule: a lifted cell's level is its lowest neighbour's level plus epsilon (the chessboard step), for the share of lifted cells
+    let mut rule = 0usize;
+    let mut tot = 0usize;
+    for &p in &land {
+        if !mask[p] {
+            continue;
+        }
+        let lo = (0..8).filter_map(|d| s.grid.neighbour(p, d)).map(|q| r.filled[q]).fold(f64::INFINITY, f64::min);
+        tot += 1;
+        if (r.filled[p] - (lo + EPS)).abs() < 1e-9 {
+            rule += 1;
+        }
+    }
+    // where: elevation and distance to the sea or window edge of the lifted cells (against all land)
+    let mut zl: Vec<f64> = land.iter().filter(|&&p| mask[p]).map(|&p| s.z[p]).collect();
+    let mut za: Vec<f64> = land.iter().map(|&p| s.z[p]).collect();
+    let mut tilt = 0usize; // lifted cells whose receiver step is a pure tilt step (level drops by exactly epsilon)
+    for &p in &land {
+        let rc = r.receiver[p];
+        if mask[p] && rc != NONE && ((r.filled[p] - r.filled[rc as usize]) - EPS).abs() < 1e-9 {
+            tilt += 1;
+        }
+    }
+    let mut dirs = [0usize; 8];
+    for &p in &land {
+        if mask[p] && r.receiver[p] != NONE {
+            dirs[dir_of(s.grid, p, r.receiver[p] as usize)] += 1;
+        }
+    }
+    let dsum: usize = dirs.iter().sum();
+    sizes.sort_by(|a, b| a.total_cmp(b));
+    println!(
+        "  (a) flats [{tag}]: land cells {}; raw flat or pit (no strictly lower neighbour) {:.2} %; lifted by the fill >= 0.5 mm {:.2} %, >= 1 m {:.2} %, >= 10 m {:.2} %",
+        land.len(),
+        100.0 * rf as f64 / nl,
+        100.0 * l001 as f64 / nl,
+        100.0 * l1 as f64 / nl,
+        100.0 * l10 as f64 / nl
+    );
+    if !sizes.is_empty() {
+        let tot_cells: f64 = sizes.iter().sum();
+        let big: f64 = sizes.iter().rev().take(5).sum();
+        println!(
+            "      lifted components {}: size p50 {:.0} p95 {:.0} max {:.0} cells; the 5 largest hold {:.1} % of the lifted cells; level rule (lowest neighbour + epsilon) holds for {:.3} % of lifted cells; receiver step is a pure epsilon step for {:.1} %",
+            sizes.len(),
+            sizes[(sizes.len() - 1) / 2],
+            pct(&mut sizes.clone(), 0.95),
+            sizes[sizes.len() - 1],
+            100.0 * big / tot_cells,
+            100.0 * rule as f64 / tot.max(1) as f64,
+            100.0 * tilt as f64 / tot.max(1) as f64
+        );
+        println!(
+            "      lifted cells: z p5/p50/p95 {:.0}/{:.0}/{:.0} m against all land {:.0}/{:.0}/{:.0} m; receiver direction shares (W,E,N,S,NW,NE,SW,SE) of lifted cells: {}",
+            pct(&mut zl, 0.05),
+            pct(&mut zl, 0.5),
+            pct(&mut zl, 0.95),
+            pct(&mut za, 0.05),
+            pct(&mut za, 0.5),
+            pct(&mut za, 0.95),
+            dirs.iter().map(|c| format!("{:.3}", *c as f64 / dsum.max(1) as f64)).collect::<Vec<_>>().join(" ")
+        );
+    }
+    mask
+}
+
+/// The 3x3 relief and slope of the land of the box, p50 and p95.
+fn relief(s: &Surf, tag: &str) {
+    let n = s.z.len();
+    let (mut rel, mut slope) = (Vec::new(), Vec::new());
+    for p in 0..n {
+        if s.outlet[p] || !(s.inbox)(p) || s.z[p] <= 0.0 {
+            continue;
+        }
+        let (mut lo, mut hi, mut smax) = (s.z[p], s.z[p], 0.0f64);
+        for d in 0..8 {
+            if let Some(q) = s.grid.neighbour(p, d) {
+                lo = lo.min(s.z[q]);
+                hi = hi.max(s.z[q]);
+                smax = smax.max((s.z[q] - s.z[p]).abs() / s.grid.distance(d));
+            }
+        }
+        rel.push(hi - lo);
+        slope.push(smax);
+    }
+    println!(
+        "  relief [{tag}]: 3x3 relief p50 {:.0} p95 {:.0} m; steepest neighbour slope p50 {:.4} p95 {:.4} ({} cells)",
+        pct(&mut rel, 0.5),
+        pct(&mut rel, 0.95),
+        pct(&mut slope.clone(), 0.5),
+        pct(&mut slope, 0.95),
+        rel.len()
+    );
+}
+
+fn png(path: &std::path::Path, w: usize, h: usize, rgb: &[u8]) {
+    let mut enc = png::Encoder::new(std::io::BufWriter::new(std::fs::File::create(path).unwrap()), w as u32, h as u32);
+    enc.set_color(png::ColorType::Rgb);
+    enc.set_depth(png::BitDepth::Eight);
+    enc.write_header().unwrap().write_image_data(rgb).unwrap();
+}
+
+/// The histogram of chord orientations (5 degree bins) of several series as a bar chart: one group per bin, one bar per series (colours: U, C, DEM).
+fn hist_png(path: &std::path::Path, k: usize, series: &[(&str, &Acc)]) {
+    let colors: [[u8; 3]; 4] = [[200, 60, 40], [40, 100, 200], [60, 160, 60], [120, 120, 120]];
+    let bw = 5usize;
+    let gw = series.len() * bw + 3;
+    let (w, h) = (36 * gw + 4, 260usize);
+    let mut img = vec![255u8; w * h * 3];
+    let shares: Vec<Vec<f64>> = series
+        .iter()
+        .map(|(_, a)| {
+            let tot = a.n(k).max(1) as f64;
+            (0..36).map(|b| (0..5).map(|j| a.chords[k][b * 5 + j]).sum::<u64>() as f64 / tot).collect()
+        })
+        .collect();
+    let maxv = shares.iter().flatten().cloned().fold(0.0, f64::max).max(1e-9);
+    for b in 0..36 {
+        // faint guide on the multiples of 45 degrees
+        if (b * 5) % 45 == 0 {
+            for y in 0..h {
+                for x in 0..gw {
+                    let o = (y * w + 2 + b * gw + x) * 3;
+                    img[o] = 235;
+                    img[o + 1] = 235;
+                    img[o + 2] = 235;
+                }
+            }
+        }
+        for (si, sh) in shares.iter().enumerate() {
+            let bh = (sh[b] / maxv * (h - 8) as f64) as usize;
+            for y in 0..bh {
+                for x in 0..bw {
+                    let o = ((h - 4 - y) * w + 2 + b * gw + si * bw + x) * 3;
+                    img[o..o + 3].copy_from_slice(&colors[si % 4]);
+                }
+            }
+        }
+    }
+    png(path, w, h, &img);
+}
+
+fn rounds(grid: &Grid, z0: &[f64], outlet: &[bool], rules: RoundRules, p0: &CarveParams, rounds_n: usize, seed: u64, threads: usize) -> Vec<f64> {
+    let mut p = *p0;
+    p.round_rules = rules;
+    let mut z = z0.to_vec();
+    let taper: Vec<f32> = z.iter().map(|h| planet_core::smoothstep(0.0, p.uplift_taper_m, h - p.sea_level) as f32).collect();
+    let drivers = Drivers::default();
+    for _ in 0..rounds_n {
+        let (r, _) = route_rules_filled(grid, &z, outlet, p.epsilon, seed, 0.0, None, rules);
+        let cuts = cut_in(Some(grid), &r);
+        let mut queue: Vec<usize> = (0..cuts.members.len()).filter(|&k| cuts.members[k].len() > 1).collect();
+        queue.sort_by_key(|&k| (std::cmp::Reverse(cuts.members[k].len()), k));
+        let zr: &[f64] = &z;
+        let tp: &dyn Par = &threads;
+        let done = par::map(tp, queue.len(), &|q| {
+            let mut inp = gather_with(grid, zr, outlet, &r, &cuts, &taper, &drivers, &p, queue[q]);
+            catchment_round(&mut inp, &p, p.reroute_every);
+            inp.z
+        });
+        for (&k, zk) in queue.iter().zip(done) {
+            for (&c, val) in cuts.members[k].iter().zip(zk) {
+                z[c as usize] = val;
+            }
+        }
+    }
+    z
+}
+
+/// (e): the longest single-direction diagonal runs of the channel network, with the mechanism evidence for each.
+fn long_runs(s: &Surf, r: &Routed, z0: &[f64], lifted: &[bool], lifted0: &[bool], tag: &str, origin: (usize, usize), img: Option<(&std::path::Path, (usize, usize, usize, usize))>) {
+    let n = s.z.len();
+    let ch: Vec<bool> = (0..n).map(|p| !s.outlet[p] && r.area[p] >= INIT).collect();
+    let mut dir = vec![9u8; n];
+    for p in 0..n {
+        if ch[p] && r.receiver[p] != NONE {
+            dir[p] = dir_of(s.grid, p, r.receiver[p] as usize) as u8;
+        }
+    }
+    // for each cell, the run that ends at it going down: follow the chain; report runs whose first cell has no same-direction donor
+    let mut has_same_donor = vec![false; n];
+    for p in 0..n {
+        if dir[p] != 9 {
+            let rc = r.receiver[p] as usize;
+            if dir[rc] == dir[p] {
+                has_same_donor[rc] = true;
+            }
+        }
+    }
+    let mut runs: Vec<(usize, usize, usize)> = Vec::new(); // (length, start cell, direction)
+    for p in 0..n {
+        if dir[p] == 9 || has_same_donor[p] || !(s.inbox)(p) {
+            continue;
+        }
+        let (mut q, mut len) = (p, 0usize);
+        while dir[q] != 9 && dir[q] == dir[p] {
+            len += 1;
+            q = r.receiver[q] as usize;
+        }
+        runs.push((len, p, dir[p] as usize));
+    }
+    runs.sort_by_key(|&(l, p, _)| (std::cmp::Reverse(l), p));
+    println!("  (e) longest single-direction runs of channel [{tag}] (window cell -> global cell i,j; D8 direction 0..7 = W,E,N,S,NW,NE,SW,SE): evidence per run");
+    let mut marks: Vec<(usize, usize)> = Vec::new(); // cells of the diagonal runs of 15 or more, for the image
+    let mut shown = 0;
+    let mut diag_runs_15 = 0;
+    for &(len, p, d) in &runs {
+        if d >= 4 && len >= 15 {
+            diag_runs_15 += 1;
+        }
+    }
+    let nonlifted_total = runs.iter().filter(|&&(l, _, _)| l >= 15).count();
+    println!("      runs of >= 15 cells: {} (diagonal {}, axis {}); of >= 25 cells: {}", nonlifted_total, diag_runs_15, nonlifted_total - diag_runs_15, runs.iter().filter(|&&(l, _, _)| l >= 25).count());
+    {
+        // all runs of >= 15 cells: how many lie on lifted flats (half or more of their cells), and the agreement of the raw start surface's steepest descent with the run (chance: 3/8)
+        let (mut on_flat, mut carved, mut agree, mut cellsn, mut c_cells, mut c_flat0) = (0usize, 0usize, 0usize, 0usize, 0usize, 0usize);
+        for &(len, p, d) in &runs {
+            if len < 15 {
+                continue;
+            }
+            let mut q = p;
+            let mut fl = 0usize;
+            let mut cl = Vec::new();
+            while dir[q] == d as u8 {
+                if lifted[q] {
+                    fl += 1;
+                }
+                cl.push(q);
+                q = r.receiver[q] as usize;
+            }
+            if fl * 2 >= len {
+                on_flat += 1;
+            } else {
+                carved += 1;
+                for &c in &cl {
+                    c_cells += 1;
+                    if lifted0[c] {
+                        c_flat0 += 1;
+                    }
+                }
+            }
+            for &c in &cl {
+                let mut best = (0.0f64, 9usize);
+                for k in 0..8 {
+                    if let Some(qq) = s.grid.neighbour(c, k) {
+                        let sl = (z0[c] - z0[qq]) / s.grid.distance(k);
+                        if sl > best.0 {
+                            best = (sl, k);
+                        }
+                    }
+                }
+                let ang = |k: usize| {
+                    let (di, dj) = NEIGHBOURS[k];
+                    libm::atan2(dj as f64, di as f64).to_degrees()
+                };
+                if best.1 != 9 {
+                    let mut x = (ang(best.1) - ang(d)).abs();
+                    if x > 180.0 {
+                        x = 360.0 - x;
+                    }
+                    if x <= 45.5 {
+                        agree += 1;
+                    }
+                }
+                cellsn += 1;
+            }
+        }
+        println!(
+            "      of the {} runs of >= 15 cells: {} lie on lifted flats (half or more of their cells), {} elsewhere (carved); raw start surface's steepest descent within 45 deg of the run on {:.1} % of their cells (chance 37.5 %)",
+            on_flat + carved,
+            on_flat,
+            carved,
+            100.0 * agree as f64 / cellsn.max(1) as f64
+        );
+        println!("      cells of the carved runs that lay on lifted flats of the start surface z0: {} of {} ({:.1} %)", c_flat0, c_cells, 100.0 * c_flat0 as f64 / c_cells.max(1) as f64);
+    }
+    for &(len, p, d) in &runs {
+        if shown >= 24 || len < 12 {
+            break;
+        }
+        // cells of the run
+        let mut cells = Vec::new();
+        let mut q = p;
+        while dir[q] == d as u8 {
+            cells.push(q);
+            q = r.receiver[q] as usize;
+        }
+        let in_flat = cells.iter().filter(|&&c| lifted[c]).count();
+        // the downhill aspect of the start surface and of the surface at the cells: the steepest-descent direction over the 8 neighbours of the raw (unfilled) heights
+        let aspect = |zz: &[f64], c: usize| -> Option<usize> {
+            let mut best = (0.0f64, None);
+            for k in 0..8 {
+                if let Some(q) = s.grid.neighbour(c, k) {
+                    let sl = (zz[c] - zz[q]) / s.grid.distance(k);
+                    if sl > best.0 {
+                        best = (sl, Some(k));
+                    }
+                }
+            }
+            best.1
+        };
+        let same = |zz: &[f64]| cells.iter().filter(|&&c| aspect(zz, c) == Some(d)).count();
+        let near = |zz: &[f64]| {
+            // within one 45-degree step of the run's direction (adjacent direction among the 8: the step's two neighbours in angle)
+            let adj = |a: usize, b: usize| -> bool {
+                let ang = |k: usize| {
+                    let (di, dj) = NEIGHBOURS[k];
+                    libm::atan2(dj as f64, di as f64).to_degrees()
+                };
+                let mut x = (ang(a) - ang(b)).abs();
+                if x > 180.0 {
+                    x = 360.0 - x;
+                }
+                x <= 45.5
+            };
+            cells.iter().filter(|&&c| aspect(zz, c).is_some_and(|k| adj(k, d))).count()
+        };
+        let (a0, a1) = (near(z0), near(s.z));
+        let slope: f64 = cells.iter().map(|&c| (s.z[c] - s.z[r.receiver[c] as usize]).abs() / s.grid.distance(d)).sum::<f64>() / cells.len() as f64;
+        let gi = origin.0 + p % s.w;
+        let gj = origin.1 + p / s.w;
+        println!(
+            "      run {:>2}: {} cells {} from window ({}, {}) = global ({}, {}); cells on lifted flats {}/{}; steepest-descent aspect of the raw start surface within 45 deg of the run: {}/{}, of the final surface: {}/{}; exactly the run's direction on the final surface {}/{}; mean slope along the run {:.4}; mean area start {:.0} km2",
+            shown + 1,
+            len,
+            if d >= 4 { "diagonal" } else { "axis" },
+            p % s.w,
+            p / s.w,
+            gi,
+            gj,
+            in_flat,
+            cells.len(),
+            a0,
+            cells.len(),
+            a1,
+            cells.len(),
+            same(s.z),
+            cells.len(),
+            slope,
+            r.area[p] / 1e6
+        );
+        if d >= 4 && len >= 15 {
+            marks.extend(cells.iter().map(|&c| (c % s.w, c / s.w)));
+        }
+        shown += 1;
+    }
+    if let Some((path, (x0, x1, y0, y1))) = img {
+        // log-area image of the window with the diagonal runs of >= 15 cells in red and the lifted flats tinted
+        let (w, h) = (x1 - x0 + 1, y1 - y0 + 1);
+        let mut rgb = vec![0u8; w * h * 3];
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                let p = y * s.w + x;
+                let o = ((y - y0) * w + (x - x0)) * 3;
+                if s.outlet[p] {
+                    rgb[o..o + 3].copy_from_slice(&[10, 20, 60]);
+                    continue;
+                }
+                let v = ((r.area[p] / 6.6e5).max(1.0).log10() / 5.0).clamp(0.0, 1.0);
+                let g = (30.0 + 220.0 * v) as u8;
+                rgb[o..o + 3].copy_from_slice(&[g, g, g]);
+                if lifted[p] && r.area[p] < INIT {
+                    rgb[o..o + 3].copy_from_slice(&[(g / 2), (g / 2), g.saturating_add(60)]);
+                }
+            }
+        }
+        for &(x, y) in &marks {
+            if x >= x0 && x <= x1 && y >= y0 && y <= y1 {
+                let o = ((y - y0) * w + (x - x0)) * 3;
+                rgb[o..o + 3].copy_from_slice(&[255, 40, 40]);
+            }
+        }
+        png(path, w, h, &rgb);
+        println!("      image {} (log10 area, lifted flats blue, diagonal runs >= 15 cells red; window cells {x0}-{x1} x {y0}-{y1})", path.display());
+    }
+}
+
+struct GenWin {
+    grid: Grid,
+    z0: Vec<f64>,
+    outlet: Vec<bool>,
+    w: usize,
+    h: usize,
+    origin: (usize, usize),
+    boxx: (usize, usize, usize, usize),
+    stream: u64,
+}
+
+fn gen_setup(threads: usize) -> GenWin {
+    let win = std::env::var("PLANET_WIN").expect("PLANET_WIN=face,cells,i0,i1,j0,j1,seed");
+    let v: Vec<u64> = win.split(',').map(|x| x.trim().parse().expect("integers")).collect();
+    let (face, cells, i0b, i1b, j0b, j1b, seed) = (v[0] as u8, v[1] as usize, v[2] as usize, v[3] as usize, v[4] as usize, v[5] as usize, v[6]);
+    let margin: usize = std::env::var("PLANET_MARGIN").ok().map_or(200, |s| s.parse().unwrap());
+    let (i0, i1) = (i0b.saturating_sub(margin), (i1b + margin).min(cells - 1));
+    let (j0, j1) = (j0b.saturating_sub(margin), (j1b + margin).min(cells - 1));
+    let (w, h) = (i1 - i0 + 1, j1 - j0 + 1);
+    let spec = FaceSpec { face: Face(face), cells, radius_m: R, sea_level: 0.0, seed, halo: 0 };
+    let t = Instant::now();
+    let inputs = BakeInputs::new(seed, threads);
+    let mut z0 = vec![0.0f64; w * h];
+    let rows = h.div_ceil(threads);
+    std::thread::scope(|s| {
+        for (k, chunk) in z0.chunks_mut(rows * w).enumerate() {
+            let (inputs, spec) = (&inputs, &spec);
+            s.spawn(move || {
+                for (c, v) in chunk.iter_mut().enumerate() {
+                    let p = k * rows * w + c;
+                    let d: Vec3 = spec.halo_direction((i0 + p % w) as i64, (j0 + p / w) as i64);
+                    *v = inputs.base(d);
+                }
+            });
+        }
+    });
+    let grid = Grid::new(w, h, spec.dx()).with_origin((i0 as u32, j0 as u32)).with_metric(Metric::cube_face(cells, R, (i0 as i64, j0 as i64), w, h));
+    let outlet = grid.outlets(&z0, 0.0);
+    println!(
+        "== window face {face} cells {cells} seed {seed}: i {i0}-{i1} j {j0}-{j1} = {w} x {h}; box i {i0b}-{i1b} j {j0b}-{j1b}; land {:.1} %; base sampled in {:.1} s",
+        100.0 * outlet.iter().filter(|o| !**o).count() as f64 / (w * h) as f64,
+        t.elapsed().as_secs_f64()
+    );
+    GenWin { grid, z0, outlet, w, h, origin: (i0, j0), boxx: (i0b - i0, i1b - i0, j0b - j0, j1b - j0), stream: spec.stream() }
+}
+
+fn run_gen(threads: usize) {
+    let g = gen_setup(threads);
+    let out = std::path::PathBuf::from(std::env::var("PLANET_OUT").unwrap_or_else(|_| "target/review/shapes-check".into()));
+    std::fs::create_dir_all(&out).unwrap();
+    let tag = std::env::var("PLANET_TAG").unwrap_or_else(|_| "gen".into());
+    let rounds_n: usize = std::env::var("PLANET_ROUNDS").ok().map_or(4, |s| s.parse().unwrap());
+    let p = CarveParams { steps: rounds_n * 5, reroute_every: 5, round_rules: RoundRules::ROUND, cell_metric: true, window_cut: true, ..CarveParams::default() };
+    let (bx0, bx1, by0, by1) = g.boxx;
+    let w = g.w;
+    let inbox = move |q: usize| {
+        let (i, j) = (q % w, q / w);
+        i >= bx0 && i <= bx1 && j >= by0 && j <= by1
+    };
+    let dx = g.grid.dx();
+    let imgbox = match std::env::var("PLANET_IMG") {
+        Ok(s) => {
+            let v: Vec<usize> = s.split(',').map(|x| x.trim().parse().unwrap()).collect();
+            (v[0], v[1], v[2], v[3])
+        }
+        Err(_) => (bx0, bx1, by0, by1),
+    };
+    let mut accs: Vec<(String, Acc)> = Vec::new();
+    // the start surface under U, then the surfaces after the rounds under U and C
+    let t = Instant::now();
+    let zu = rounds(&g.grid, &g.z0, &g.outlet, U_RULES, &p, rounds_n, g.stream, threads);
+    println!("  rounds U {:.1} s", t.elapsed().as_secs_f64());
+    let t = Instant::now();
+    let zc = rounds(&g.grid, &g.z0, &g.outlet, RoundRules::ROUND, &p, rounds_n, g.stream, threads);
+    println!("  rounds C {:.1} s", t.elapsed().as_secs_f64());
+    let lifted0: Vec<bool> = {
+        let r0 = route(&g.grid, &g.z0, &g.outlet, U_RULES, g.stream);
+        (0..g.z0.len()).map(|p| !g.outlet[p] && r0.filled[p] - g.z0[p] >= 0.0005).collect()
+    };
+    for (name, z, rules) in [("z0 routed U", &g.z0, U_RULES), ("U rounds, routed U", &zu, U_RULES), ("C rounds, routed C", &zc, RoundRules::ROUND), ("z0 routed C", &g.z0, RoundRules::ROUND)] {
+        println!("\n-- [{tag}] {name}");
+        let s = Surf { grid: &g.grid, w: g.w, h: g.h, z: z, outlet: &g.outlet, dims: (dx, dx), inbox: &inbox };
+        relief(&s, name);
+        let r = route(&g.grid, z, &g.outlet, rules, g.stream);
+        let lifted = flats(&s, &r, name);
+        let a = measure(&s, &r, &lifted);
+        a.report(name);
+        let img = (name == "U rounds, routed U" || name == "C rounds, routed C").then(|| (out.join(format!("{tag}-{}-area-runs.png", if name.starts_with('U') { "U" } else { "C" })), imgbox));
+        long_runs(&s, &r, &g.z0, &lifted, &lifted0, name, g.origin, img.as_ref().map(|(p, b)| (p.as_path(), *b)));
+        accs.push((name.to_string(), a));
+    }
+    // histograms: U, C against each other (the DEM overlay is made by the dem mode with the same bins)
+    for k in 0..2 {
+        let u = &accs[1].1;
+        let c = &accs[2].1;
+        hist_png(&out.join(format!("{tag}-orient-chord{}.png", [8, 16][k])), k, &[("U", u), ("C", c)]);
+    }
+    // the raw bins for later pooling
+    for (name, a) in &accs {
+        println!("RAW {tag} | {name} | chords8 {:?} | chords16 {:?}", &a.chords[0][..], &a.chords[1][..]);
+    }
+}
+
+fn run_dem(dir: &str) {
+    let tag = std::env::var("PLANET_TAG").unwrap_or_else(|_| "dem".into());
+    let out = std::path::PathBuf::from(std::env::var("PLANET_OUT").unwrap_or_else(|_| "target/review/shapes-check".into()));
+    std::fs::create_dir_all(&out).unwrap();
+    let slope_band: Option<(f64, f64)> = std::env::var("PLANET_SLOPE").ok().map(|s| {
+        let v: Vec<f64> = s.split(',').map(|x| x.parse().unwrap()).collect();
+        (v[0], v[1])
+    });
+    let mut tifs: Vec<std::path::PathBuf> = Vec::new();
+    for e in std::fs::read_dir(dir).unwrap() {
+        let p = e.unwrap().path();
+        if p.is_dir() {
+            for f in std::fs::read_dir(&p).unwrap() {
+                let f = f.unwrap().path();
+                if f.extension().is_some_and(|x| x == "tif") {
+                    tifs.push(f);
+                }
+            }
+        } else if p.extension().is_some_and(|x| x == "tif") {
+            tifs.push(p);
+        }
+    }
+    tifs.sort();
+    let mut pooled = [Acc::new(), Acc::new()]; // U rules, C rules
+    let mut pits = PitAcc::new();
+    let mut used = 0;
+    for path in &tifs {
+        let name = path.file_name().unwrap().to_string_lossy().replace("Copernicus_DSM_COG_10_", "").replace("_DEM.tif", "");
+        let t = Instant::now();
+        let tile = planet_testkit::glo30::read(path).unwrap();
+        let lat = tile.geo.origin_lat - tile.geo.scale_lat * tile.height as f64 / 2.0;
+        let dy_m = tile.geo.scale_lat.to_radians() * R;
+        let dx_m = tile.geo.scale_lon.to_radians() * R * lat.to_radians().cos();
+        let (by, bx) = (((814.0 / dy_m).round() as usize).max(1), ((814.0 / dx_m).round() as usize).max(1));
+        let (w, h) = (tile.width / bx, tile.height / by);
+        let mut z = vec![0.0f64; w * h];
+        for j in 0..h {
+            for i in 0..w {
+                let (mut sum, mut cnt) = (0.0f64, 0usize);
+                for dj in 0..by {
+                    for di in 0..bx {
+                        let v = tile.sample(j * by + dj, i * bx + di);
+                        if !v.is_nan() {
+                            sum += v as f64;
+                            cnt += 1;
+                        }
+                    }
+                }
+                z[j * w + i] = if cnt * 2 >= bx * by { (sum / cnt as f64).max(0.0) } else { 0.0 };
+            }
+        }
+        let dims = (bx as f64 * dx_m, by as f64 * dy_m);
+        let grid = Grid::new(w, h, 814.0);
+        let outlet = grid.outlets(&z, 0.0);
+        let edge = 10usize;
+        let inbox = move |q: usize| {
+            let (i, j) = (q % w, q / w);
+            i >= edge && i + edge < w && j >= edge && j + edge < h
+        };
+        let s = Surf { grid: &grid, w, h, z: &z, outlet: &outlet, dims, inbox: &inbox };
+        println!("\n== tile {name}: lat {lat:.1}, {} x {} px -> {w} x {h} cells of {:.0} x {:.0} m (blocks {bx} x {by}); land {:.1} %; read {:.1} s", tile.width, tile.height, dims.0, dims.1, 100.0 * outlet.iter().filter(|o| !**o).count() as f64 / (w * h) as f64, t.elapsed().as_secs_f64());
+        // slope p95 for the matching of the relief
+        let mut sl: Vec<f64> = Vec::new();
+        for p in 0..w * h {
+            if outlet[p] || !inbox(p) || z[p] <= 0.0 {
+                continue;
+            }
+            let mut m = 0.0f64;
+            for d in 0..8 {
+                if let Some(q) = grid.neighbour(p, d) {
+                    m = m.max((z[q] - z[p]).abs() / grid.distance(d));
+                }
+            }
+            sl.push(m);
+        }
+        let sp95 = pct(&mut sl, 0.95);
+        relief(&s, &name);
+        if let Some((lo, hi)) = slope_band {
+            if !(sp95 >= lo && sp95 <= hi) {
+                println!("  skipped: slope p95 {sp95:.4} outside {lo}..{hi}");
+                continue;
+            }
+        }
+        used += 1;
+        for (k, rules) in [U_RULES, RoundRules::ROUND].into_iter().enumerate() {
+            let r = route(&grid, &z, &outlet, rules, 7);
+            if k == 0 {
+                pits.add(&pit_table(&s, &r));
+            }
+            let tg = format!("{name} {}", ["routed U", "routed C"][k]);
+            let lifted = flats(&s, &r, &tg);
+            let a = measure(&s, &r, &lifted);
+            a.report(&tg);
+            pooled[k].add(&a);
+        }
+    }
+    println!("\n== pooled DEM ({used} tiles{})", slope_band.map_or(String::new(), |b| format!(", slope p95 in {}..{}", b.0, b.1)));
+    pooled[0].report("pooled, routed U");
+    pits.print("pooled DEM, routed U");
+    {
+        let mut b = DEM_BASINS.lock().unwrap().clone();
+        b.sort_by(|a, c| a.1.total_cmp(&c.1));
+        let mut sz: Vec<usize> = b.iter().map(|x| x.0).collect();
+        sz.sort_unstable();
+        if !b.is_empty() {
+            let q = |f: f64| b[((b.len() - 1) as f64 * f) as usize].1;
+            let sq = |f: f64| sz[((sz.len() - 1) as f64 * f) as usize];
+            println!("DEMBASINS | {tag} | depressions over 30 cells {} (touching a tile edge included) | depth p50 {:.1} p95 {:.1} max {:.1} | cells p50 {} p95 {} max {}", b.len(), q(0.5), q(0.95), q(1.0), sq(0.5), sq(0.95), sq(1.0));
+        }
+    }
+    pooled[1].report("pooled, routed C");
+    for k in 0..2 {
+        hist_png(&out.join(format!("{tag}-orient-chord{}.png", [8, 16][k])), k, &[("DEM", &pooled[0])]);
+    }
+    println!("RAW {tag} | pooled U | chords8 {:?} | chords16 {:?}", &pooled[0].chords[0][..], &pooled[0].chords[1][..]);
+    println!("RAW {tag} | pooled C | chords8 {:?} | chords16 {:?}", &pooled[1].chords[0][..], &pooled[1].chords[1][..]);
+}
+
+fn run_hist(a: &[String]) {
+    // hist <out.png> <k: 0 chord 8 | 1 chord 16> <file>#<row name> ...   (RAW lines of the gen and dem modes)
+    let out = std::path::PathBuf::from(&a[2]);
+    let k: usize = a[3].parse().unwrap();
+    let mut accs: Vec<(String, Acc)> = Vec::new();
+    for spec in &a[4..] {
+        let (file, row) = spec.split_once('#').unwrap();
+        let text = std::fs::read_to_string(file).unwrap();
+        let line = text.lines().find(|l| l.starts_with("RAW ") && l.contains(&format!("| {row} |"))).unwrap_or_else(|| panic!("no RAW row {row} in {file}"));
+        let key = ["chords8 [", "chords16 ["][k];
+        let start = line.find(key).unwrap() + key.len();
+        let end = start + line[start..].find(']').unwrap();
+        let mut acc = Acc::new();
+        for (b, v) in line[start..end].split(',').enumerate() {
+            acc.chords[k][b] = v.trim().parse().unwrap();
+        }
+        accs.push((row.to_string(), acc));
+    }
+    let series: Vec<(&str, &Acc)> = accs.iter().map(|(n, a)| (n.as_str(), a)).collect();
+    hist_png(&out, k, &series);
+}
+
+/// SPIKE-108 addendum: the breach chains. The breach of one round (the loop of `catchment_round`, region-wide here, in the receivers-first order reversed) on the surface at the start of
+/// round `r`, under the routing of `rules` (U: no exit base; C: the exit base of the chain's outlet above the sea). Lowered cells form chains along their D8 receivers; reports the share of
+/// chain length in straight single-direction runs, by exit class (a window cut: the root outlet is land; the sea: the root outlet is at or below the sea level).
+fn breach_chains(g: &GenWin, z: &[f64], rules: RoundRules, p: &CarveParams, seed: u64, round: usize, inbox: &dyn Fn(usize) -> bool, label: &str) {
+    let n = z.len();
+    let (r, _filled) = route_rules_filled(&g.grid, z, &g.outlet, p.epsilon, seed, 0.0, None, rules);
+    let floor = p.sea_level + p.epsilon;
+    // exit base along each chain that ends in an outlet above the sea level (C only)
+    let base: Option<Vec<f64>> = (rules.clip_mfd == MfdClip::Local).then(|| {
+        let mut b = vec![f64::NEG_INFINITY; n];
+        for &c in &r.order {
+            let c = c as usize;
+            b[c] = if r.receiver[c] == NONE {
+                if z[c] > p.sea_level { z[c] } else { f64::NEG_INFINITY }
+            } else {
+                b[r.receiver[c] as usize]
+            };
+        }
+        b
+    });
+    let mut zz = z.to_vec();
+    let mut lowered = vec![false; n];
+    let mut depth = vec![0.0f64; n];
+    for &c in r.order.iter().rev() {
+        let c = c as usize;
+        let rec = r.receiver[c];
+        if rec == NONE || g.outlet[rec as usize] {
+            continue;
+        }
+        let rec = rec as usize;
+        let d = dir_of(&g.grid, c, rec);
+        let mut want = (zz[c] - p.breach_slope * g.grid.distance_at(c, d)).max(floor);
+        if let Some(b) = &base {
+            want = want.max(b[rec]);
+        }
+        if zz[rec] > want {
+            let nz = want.max(zz[rec] - p.breach_max_m);
+            lowered[rec] = true;
+            depth[rec] += zz[rec] - nz;
+            zz[rec] = nz;
+        }
+    }
+    // the root of each cell: a land cut or the sea
+    let root = planet_generators::bake::route::catchment_roots(&r.receiver, &r.order);
+    let cut = |c: usize| z[root[c] as usize] > 0.0;
+    let mut dir = vec![9u8; n];
+    for c in 0..n {
+        if lowered[c] && r.receiver[c] != NONE && lowered[r.receiver[c] as usize] {
+            dir[c] = dir_of(&g.grid, c, r.receiver[c] as usize) as u8;
+        }
+    }
+    let mut u = vec![1u32; n];
+    for &c in r.order.iter().rev() {
+        let c = c as usize;
+        let rc = r.receiver[c];
+        if dir[c] != 9 && dir[rc as usize] == dir[c] {
+            u[rc as usize] = u[rc as usize].max(u[c] + 1);
+        }
+    }
+    let mut d = vec![1u32; n];
+    for &c in &r.order {
+        let c = c as usize;
+        let rc = r.receiver[c];
+        if dir[c] != 9 && dir[rc as usize] == dir[c] {
+            d[c] = d[rc as usize] + 1;
+        }
+    }
+    // per class: lowered cells in the box, chain steps, their length in runs over 10 and 20, the runs' orientation, the depth
+    for class in ["cut", "sea"] {
+        let want_cut = class == "cut";
+        let (mut cells, mut steps, mut len, mut l10, mut l20, mut longest) = (0usize, 0usize, 0.0f64, 0.0f64, 0.0f64, 0u32);
+        let mut dsum = 0.0f64;
+        let mut dmax = 0.0f64;
+        let (mut axis, mut back, mut fwd) = (0usize, 0usize, 0usize);
+        let mut near_edge = 0usize;
+        let mut ends = 0usize;
+        let (mut d10, mut c10, mut dmax10) = (0.0f64, 0usize, 0.0f64);
+        for c in 0..n {
+            if !lowered[c] || !inbox(c) || cut(c) != want_cut {
+                continue;
+            }
+            cells += 1;
+            dsum += depth[c];
+            dmax = dmax.max(depth[c]);
+            if dir[c] == 9 {
+                continue;
+            }
+            let w = if dir[c] < 4 { 1.0 } else { std::f64::consts::SQRT_2 };
+            let run = u[c] + d[c] - 1;
+            steps += 1;
+            len += w;
+            if run > 10 {
+                l10 += w;
+            }
+            if run > 20 {
+                l20 += w;
+            }
+            longest = longest.max(run);
+            if run > 10 {
+                d10 += depth[c];
+                c10 += 1;
+                dmax10 = dmax10.max(depth[c]);
+                if d[c] == 1 {
+                    let e = r.receiver[c] as usize;
+                    let (x, y) = (e % g.w, e / g.w);
+                    if x < 10 || y < 10 || x + 10 >= g.w || y + 10 >= g.h {
+                        near_edge += 1;
+                    }
+                }
+            }
+            // count each run once: at its head (no same-direction donor): u == 1
+            if run > 10 && u[c] == 1 {
+                ends += 1;
+                match dir[c] {
+                    0..=3 => axis += 1,
+                    4 | 7 => back += 1,
+                    _ => fwd += 1,
+                }
+            }
+        }
+        println!(
+            "    [{label} round {round}] exit {class}: lowered cells {cells} (depth mean {:.1} max {:.0} m); chain steps {steps}, length in straight runs > 10 cells {:.3}, > 20 cells {:.3}, longest {longest}; runs > 10: {ends} (axis {axis}, diagonal NW-SE {back}, diagonal NE-SW {fwd}), run ends within 10 cells of the window edge {near_edge}; lowering in runs > 10: mean {:.1} max {:.0} m",
+            dsum / cells.max(1) as f64,
+            dmax,
+            l10 / len.max(1e-9),
+            l20 / len.max(1e-9),
+            d10 / c10.max(1) as f64,
+            dmax10
+        );
+    }
+}
+
+fn run_breach(threads: usize) {
+    let g = gen_setup(threads);
+    let rounds_n: usize = std::env::var("PLANET_ROUNDS").ok().map_or(4, |s| s.parse().unwrap());
+    let p = CarveParams { steps: rounds_n * 5, reroute_every: 5, round_rules: RoundRules::ROUND, cell_metric: true, window_cut: true, ..CarveParams::default() };
+    let (bx0, bx1, by0, by1) = g.boxx;
+    let w = g.w;
+    let inbox = move |q: usize| {
+        let (i, j) = (q % w, q / w);
+        i >= bx0 && i <= bx1 && j >= by0 && j <= by1
+    };
+    let tag = std::env::var("PLANET_TAG").unwrap_or_else(|_| "gen".into());
+    println!("-- [{tag}] breach chains per round (the box counts; 'window edge' = the window's own border)");
+    for (label, rules) in [("U", U_RULES), ("C", RoundRules::ROUND)] {
+        for round in 1..=rounds_n {
+            // the surface at the start of the round: the solved surface after round - 1 rounds under the same rules
+            let z = if round == 1 { g.z0.clone() } else { rounds(&g.grid, &g.z0, &g.outlet, rules, &p, round - 1, g.stream, threads) };
+            breach_chains(&g, &z, rules, &p, g.stream, round, &inbox, label);
+        }
+    }
+}
+
+/// Lifted cells (the depression fill raised them by at least 0.5 mm) by the size of their 8-connected component and the component's largest fill depth: counts of cells in the box.
+struct PitAcc {
+    cells: [[u64; 4]; 5],
+    comps: [[u64; 4]; 5],
+    land: u64,
+}
+
+const SIZE_CLASSES: [&str; 5] = ["1-3", "4-30", "31-300", "301-3000", ">3000"];
+const DEPTH_CLASSES: [&str; 4] = ["<1 m", "1-10 m", "10-100 m", ">100 m"];
+
+impl PitAcc {
+    fn new() -> PitAcc {
+        PitAcc { cells: [[0; 4]; 5], comps: [[0; 4]; 5], land: 0 }
+    }
+    fn add(&mut self, o: &PitAcc) {
+        for i in 0..5 {
+            for j in 0..4 {
+                self.cells[i][j] += o.cells[i][j];
+                self.comps[i][j] += o.comps[i][j];
+            }
+        }
+        self.land += o.land;
+    }
+    fn print(&self, label: &str) {
+        let lifted: u64 = self.cells.iter().flatten().sum();
+        println!("  pits [{label}]: lifted {:.2} % of {} land cells; share of lifted cells by component size (rows) and largest fill depth (columns), % of land:", 100.0 * lifted as f64 / self.land.max(1) as f64, self.land);
+        println!("      {:>9} | {}", "size", DEPTH_CLASSES.iter().map(|d| format!("{d:>9}")).collect::<Vec<_>>().join(" "));
+        for i in 0..5 {
+            println!(
+                "      {:>9} | {}   components: {}",
+                SIZE_CLASSES[i],
+                (0..4).map(|j| format!("{:>9.2}", 100.0 * self.cells[i][j] as f64 / self.land.max(1) as f64)).collect::<Vec<_>>().join(" "),
+                (0..4).map(|j| self.comps[i][j].to_string()).collect::<Vec<_>>().join(" / ")
+            );
+        }
+    }
+}
+
+static DEM_BASINS: std::sync::Mutex<Vec<(usize, f64)>> = std::sync::Mutex::new(Vec::new());
+
+fn pit_table(s: &Surf, r: &Routed) -> PitAcc {
+    let n = s.z.len();
+    let mask: Vec<bool> = (0..n).map(|p| !s.outlet[p] && r.filled[p] - s.z[p] >= 0.0005).collect();
+    let mut acc = PitAcc::new();
+    acc.land = (0..n).filter(|&p| !s.outlet[p] && (s.inbox)(p)).count() as u64;
+    let mut seen = vec![false; n];
+    for p in 0..n {
+        if !mask[p] || seen[p] {
+            continue;
+        }
+        let mut stack = vec![p];
+        seen[p] = true;
+        let (mut cnt, mut inb, mut dmax) = (0usize, 0u64, 0.0f64);
+        while let Some(c) = stack.pop() {
+            cnt += 1;
+            if (s.inbox)(c) {
+                inb += 1;
+            }
+            dmax = dmax.max(r.filled[c] - s.z[c]);
+            for d in 0..8 {
+                if let Some(q) = s.grid.neighbour(c, d) {
+                    if mask[q] && !seen[q] {
+                        seen[q] = true;
+                        stack.push(q);
+                    }
+                }
+            }
+        }
+        let si = match cnt {
+            0..=3 => 0,
+            4..=30 => 1,
+            31..=300 => 2,
+            301..=3000 => 3,
+            _ => 4,
+        };
+        if cnt > 30 {
+            DEM_BASINS.lock().unwrap().push((cnt, dmax));
+        }
+        let di = if dmax < 1.0 { 0 } else if dmax < 10.0 { 1 } else if dmax < 100.0 { 2 } else { 3 };
+        acc.cells[si][di] += inb;
+        acc.comps[si][di] += 1;
+    }
+    acc
+}
+
+/// One breach pass of a round on `z` (as in `catchment_round`, region-wide, U rules): lowers the receivers that stand higher than their donor allows; returns the lowered surface.
+fn breach_once(g: &GenWin, z: &[f64], p: &CarveParams, seed: u64) -> Vec<f64> {
+    let (r, _) = route_rules_filled(&g.grid, z, &g.outlet, p.epsilon, seed, 0.0, None, U_RULES);
+    let floor = p.sea_level + p.epsilon;
+    let mut zz = z.to_vec();
+    for &c in r.order.iter().rev() {
+        let c = c as usize;
+        let rec = r.receiver[c];
+        if rec == NONE || g.outlet[rec as usize] {
+            continue;
+        }
+        let rec = rec as usize;
+        let d = dir_of(&g.grid, c, rec);
+        let want = (zz[c] - p.breach_slope * g.grid.distance_at(c, d)).max(floor);
+        if zz[rec] > want {
+            zz[rec] = want.max(zz[rec] - p.breach_max_m);
+        }
+    }
+    zz
+}
+
+fn run_pits(threads: usize) {
+    let g = gen_setup(threads);
+    let tag = std::env::var("PLANET_TAG").unwrap_or_else(|_| "gen".into());
+    let p = CarveParams { steps: 20, reroute_every: 5, round_rules: RoundRules::ROUND, cell_metric: true, window_cut: true, ..CarveParams::default() };
+    let (bx0, bx1, by0, by1) = g.boxx;
+    let w = g.w;
+    let inbox = move |q: usize| {
+        let (i, j) = (q % w, q / w);
+        i >= bx0 && i <= bx1 && j >= by0 && j <= by1
+    };
+    let dx = g.grid.dx();
+    let s0 = Surf { grid: &g.grid, w: g.w, h: g.h, z: &g.z0, outlet: &g.outlet, dims: (dx, dx), inbox: &inbox };
+    let r0 = route(&g.grid, &g.z0, &g.outlet, U_RULES, g.stream);
+    println!("-- [{tag}] the lifted cells of the start surface by depression size and depth");
+    pit_table(&s0, &r0).print("z0");
+    // the round-0 breach: k passes on z0 (re-routed between passes), then the 4 rounds from there
+    let mut base_final: Option<Vec<f64>> = None;
+    {
+        let seed2 = g.stream ^ 0x5EED_1234_ABCD_EF01;
+        let za = rounds(&g.grid, &g.z0, &g.outlet, U_RULES, &p, 4, g.stream, threads);
+        let zb = rounds(&g.grid, &g.z0, &g.outlet, U_RULES, &p, 4, seed2, threads);
+        let mut d: Vec<f64> = (0..za.len()).filter(|&c| inbox(c) && !g.outlet[c]).map(|c| (za[c] - zb[c]).abs()).collect();
+        println!("noise floor, final surface without a round-0 breach under two jitter seeds: |dz| p50 {:.2} p95 {:.2} max {:.0} m", pct(&mut d.clone(), 0.5), pct(&mut d, 0.95), d.iter().cloned().fold(0.0, f64::max));
+    }
+    for k in [0usize, 1, 3] {
+        let mut z = g.z0.clone();
+        for _ in 0..k {
+            z = breach_once(&g, &z, &p, g.stream);
+        }
+        let lowered: Vec<f64> = (0..z.len()).filter(|&c| (inbox)(c) && !g.outlet[c]).map(|c| g.z0[c] - z[c]).filter(|d| *d > 0.0).collect();
+        let s = Surf { grid: &g.grid, w: g.w, h: g.h, z: &z, outlet: &g.outlet, dims: (dx, dx), inbox: &inbox };
+        let r = route(&g.grid, &z, &g.outlet, U_RULES, g.stream);
+        println!("\n-- [{tag}] z0 after {k} round-0 breach pass(es): lowered cells {} (mean {:.1} m, max {:.0} m)", lowered.len(), lowered.iter().sum::<f64>() / lowered.len().max(1) as f64, lowered.iter().cloned().fold(0.0, f64::max));
+        pit_table(&s, &r).print(&format!("z0 + {k} passes"));
+        let zf = rounds(&g.grid, &z, &g.outlet, U_RULES, &p, 4, g.stream, threads);
+        let sf = Surf { grid: &g.grid, w: g.w, h: g.h, z: &zf, outlet: &g.outlet, dims: (dx, dx), inbox: &inbox };
+        let rf = route(&g.grid, &zf, &g.outlet, U_RULES, g.stream);
+        let lifted = flats(&sf, &rf, &format!("after 4 rounds from z0 + {k} passes"));
+        let a = measure(&sf, &rf, &lifted);
+        a.report(&format!("after 4 rounds from z0 + {k} passes, routed U"));
+        relief(&sf, &format!("after 4 rounds, {k} passes"));
+        match &base_final {
+            None => base_final = Some(zf.clone()),
+            Some(b) => {
+                let mut d: Vec<f64> = (0..zf.len()).filter(|&c| inbox(c) && !g.outlet[c]).map(|c| (zf[c] - b[c]).abs()).collect();
+                let mean: f64 = (0..zf.len()).filter(|&c| inbox(c) && !g.outlet[c]).map(|c| zf[c] - b[c]).sum::<f64>() / d.len().max(1) as f64;
+                println!("      displacement of the final surface against the final surface without a round-0 breach: |dz| p50 {:.2} p95 {:.2} max {:.0} m, mean dz {:+.2} m", pct(&mut d.clone(), 0.5), pct(&mut d, 0.95), d.iter().cloned().fold(0.0, f64::max), mean);
+            }
+        }
+        println!("RAW {tag} | breach{k} | chords8 {:?} | chords16 {:?}", &a.chords[0][..], &a.chords[1][..]);
+    }
+}
+
+/// Hypsometry of the box land (z0 above the sea level, not an outlet) after the rounds: U, C and U under the second jitter seed.
+fn run_hyps(threads: usize) {
+    let g = gen_setup(threads);
+    let tag = std::env::var("PLANET_TAG").unwrap_or_else(|_| "gen".into());
+    let p = CarveParams { steps: 20, reroute_every: 5, round_rules: RoundRules::ROUND, cell_metric: true, window_cut: true, ..CarveParams::default() };
+    let (bx0, bx1, by0, by1) = g.boxx;
+    let cells: Vec<usize> = (by0..=by1).flat_map(|j| (bx0..=bx1).map(move |i| (i, j))).map(|(i, j)| j * g.w + i).filter(|&k| g.z0[k] > 0.0 && !g.outlet[k]).collect();
+    let seed2 = g.stream ^ 0x5EED_1234_ABCD_EF01;
+    let zu = rounds(&g.grid, &g.z0, &g.outlet, U_RULES, &p, 4, g.stream, threads);
+    let zc = rounds(&g.grid, &g.z0, &g.outlet, RoundRules::ROUND, &p, 4, g.stream, threads);
+    let zb = rounds(&g.grid, &g.z0, &g.outlet, U_RULES, &p, 4, seed2, threads);
+    let qs = [0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95];
+    println!("-- [{tag}] hypsometry of the box land ({} cells), height in m, after 4 rounds", cells.len());
+    println!("  quantile | {}", qs.iter().map(|q| format!("{:>9}", format!("p{:.0}", q * 100.0))).collect::<Vec<_>>().join(" "));
+    let row = |name: &str, z: &[f64]| -> Vec<f64> {
+        let mut v: Vec<f64> = cells.iter().map(|&k| z[k]).collect();
+        let r: Vec<f64> = qs.iter().map(|&q| pct(&mut v, q)).collect();
+        println!("  {:>8} | {}", name, r.iter().map(|x| format!("{x:>9.2}")).collect::<Vec<_>>().join(" "));
+        r
+    };
+    let r0 = row("z0", &g.z0);
+    let ru = row("U", &zu);
+    let rc = row("C", &zc);
+    let rb = row("U seed B", &zb);
+    let _ = r0;
+    let d = |a: &[f64], b: &[f64]| -> Vec<f64> { a.iter().zip(b).map(|(x, y)| x - y).collect() };
+    let (cu, bu) = (d(&rc, &ru), d(&rb, &ru));
+    println!("  {:>8} | {}", "C - U", cu.iter().map(|x| format!("{x:>+9.2}")).collect::<Vec<_>>().join(" "));
+    println!("  {:>8} | {}", "B - U", bu.iter().map(|x| format!("{x:>+9.2}")).collect::<Vec<_>>().join(" "));
+    println!("  max |C - U| over the quantiles {:.2} m, max |U seed B - U| {:.2} m", cu.iter().fold(0.0f64, |m, x| m.max(x.abs())), bu.iter().fold(0.0f64, |m, x| m.max(x.abs())));
+}
+
+/// Counts per D8 direction of the channel steps and of the runs over 10 cells (one per run, at its head), and the length share of the channel in runs over 10 cells per direction.
+#[derive(Clone)]
+struct DirAcc {
+    steps: [u64; 8],
+    runs: [u64; 8],
+    run_len: [f64; 8],
+    flat_steps: [u64; 8],
+    flat_run_len: [f64; 8],
+    len: f64,
+    vx: f64,
+    vy: f64,
+}
+
+impl DirAcc {
+    fn new() -> DirAcc {
+        DirAcc { steps: [0; 8], runs: [0; 8], run_len: [0.0; 8], flat_steps: [0; 8], flat_run_len: [0.0; 8], len: 0.0, vx: 0.0, vy: 0.0 }
+    }
+    fn add(&mut self, o: &DirAcc) {
+        for d in 0..8 {
+            self.steps[d] += o.steps[d];
+            self.runs[d] += o.runs[d];
+            self.run_len[d] += o.run_len[d];
+            self.flat_steps[d] += o.flat_steps[d];
+            self.flat_run_len[d] += o.flat_run_len[d];
+        }
+        self.len += o.len;
+        self.vx += o.vx;
+        self.vy += o.vy;
+    }
+    fn print(&self, label: &str) {
+        const NAMES: [&str; 8] = ["W", "E", "N", "S", "NW", "NE", "SW", "SE"];
+        let st: u64 = self.steps.iter().sum();
+        let rn: u64 = self.runs.iter().sum();
+        println!("    [{label}] channel steps {st}, runs over 10 cells {rn}");
+        println!("      direction      | {}", NAMES.iter().map(|n| format!("{n:>7}")).collect::<Vec<_>>().join(" "));
+        println!("      steps, share   | {}", self.steps.iter().map(|c| format!("{:>7.3}", *c as f64 / st.max(1) as f64)).collect::<Vec<_>>().join(" "));
+        println!("      runs, count    | {}", self.runs.iter().map(|c| format!("{c:>7}")).collect::<Vec<_>>().join(" "));
+        println!("      steps on lifted cells, share of the direction | {}", (0..8).map(|d| format!("{:>7.3}", self.flat_steps[d] as f64 / self.steps[d].max(1) as f64)).collect::<Vec<_>>().join(" "));
+        println!("      run length on lifted cells / run length | {}", (0..8).map(|d| format!("{:>7.3}", self.flat_run_len[d] / self.run_len[d].max(1e-9))).collect::<Vec<_>>().join(" "));
+        println!("      run length / channel length | {}", self.run_len.iter().map(|c| format!("{:>7.4}", c / self.len.max(1e-9))).collect::<Vec<_>>().join(" "));
+        let s = &self.steps;
+        let (h, v, back, fwd) = (s[0] + s[1], s[2] + s[3], s[4] + s[7], s[5] + s[6]);
+        let (rh, rv, rb, rf) = (self.runs[0] + self.runs[1], self.runs[2] + self.runs[3], self.runs[4] + self.runs[7], self.runs[5] + self.runs[6]);
+        println!(
+            "      steps: horizontal {:.3}, vertical {:.3}, diagonal NW-SE {:.3}, diagonal NE-SW {:.3}; runs: horizontal {rh}, vertical {rv}, NW-SE {rb}, NE-SW {rf}; mean step vector ({:+.3}, {:+.3}) cells (i right, j down)",
+            h as f64 / st.max(1) as f64,
+            v as f64 / st.max(1) as f64,
+            back as f64 / st.max(1) as f64,
+            fwd as f64 / st.max(1) as f64,
+            self.vx / st.max(1) as f64,
+            self.vy / st.max(1) as f64
+        );
+    }
+}
+
+fn dir_table(s: &Surf, r: &Routed, lifted: &[bool]) -> DirAcc {
+    let n = s.z.len();
+    let ch: Vec<bool> = (0..n).map(|p| !s.outlet[p] && r.area[p] >= INIT).collect();
+    let mut dir = vec![9u8; n];
+    for p in 0..n {
+        if ch[p] && r.receiver[p] != NONE {
+            dir[p] = dir_of(s.grid, p, r.receiver[p] as usize) as u8;
+        }
+    }
+    let mut u = vec![1u32; n];
+    for &c in r.order.iter().rev() {
+        let p = c as usize;
+        let rec = r.receiver[p];
+        if rec != NONE && dir[p] != 9 && ch[rec as usize] && dir[rec as usize] == dir[p] {
+            u[rec as usize] = u[rec as usize].max(u[p] + 1);
+        }
+    }
+    let mut d = vec![1u32; n];
+    for &c in &r.order {
+        let p = c as usize;
+        let rec = r.receiver[p];
+        if rec != NONE && dir[p] != 9 && ch[rec as usize] && dir[rec as usize] == dir[p] {
+            d[p] = d[rec as usize] + 1;
+        }
+    }
+    let mut a = DirAcc::new();
+    for p in 0..n {
+        if dir[p] == 9 || !(s.inbox)(p) {
+            continue;
+        }
+        let k = dir[p] as usize;
+        let w = if k < 4 { 1.0 } else { std::f64::consts::SQRT_2 };
+        let run = u[p] + d[p] - 1;
+        a.steps[k] += 1;
+        if lifted[p] {
+            a.flat_steps[k] += 1;
+        }
+        a.len += w;
+        a.vx += NEIGHBOURS[k].0 as f64;
+        a.vy += NEIGHBOURS[k].1 as f64;
+        if run > 10 {
+            a.run_len[k] += w;
+            if lifted[p] {
+                a.flat_run_len[k] += w;
+            }
+            if u[p] == 1 {
+                a.runs[k] += 1;
+            }
+        }
+    }
+    a
+}
+
+fn run_dirs(threads: usize) {
+    let g = gen_setup(threads);
+    let tag = std::env::var("PLANET_TAG").unwrap_or_else(|_| "gen".into());
+    let p = CarveParams { steps: 20, reroute_every: 5, round_rules: RoundRules::ROUND, cell_metric: true, window_cut: true, ..CarveParams::default() };
+    let (bx0, bx1, by0, by1) = g.boxx;
+    let w = g.w;
+    let inbox = move |q: usize| {
+        let (i, j) = (q % w, q / w);
+        i >= bx0 && i <= bx1 && j >= by0 && j <= by1
+    };
+    let dx = g.grid.dx();
+    let zu = rounds(&g.grid, &g.z0, &g.outlet, U_RULES, &p, 4, g.stream, threads);
+    let zc = rounds(&g.grid, &g.z0, &g.outlet, RoundRules::ROUND, &p, 4, g.stream, threads);
+    println!("-- [{tag}] channel steps and straight runs per D8 direction (directions as (di, dj): W (-1,0), E (1,0), N (0,-1), S (0,1), NW (-1,-1), NE (1,-1), SW (-1,1), SE (1,1); j grows downwards)");
+    for (name, z, rules) in [("z0 routed U", &g.z0, U_RULES), ("U rounds, routed U", &zu, U_RULES), ("C rounds, routed C", &zc, RoundRules::ROUND)] {
+        let s = Surf { grid: &g.grid, w: g.w, h: g.h, z, outlet: &g.outlet, dims: (dx, dx), inbox: &inbox };
+        let r = route(&g.grid, z, &g.outlet, rules, g.stream);
+        let lifted: Vec<bool> = (0..z.len()).map(|p| !g.outlet[p] && r.filled[p] - z[p] >= 0.0005).collect();
+        dir_table(&s, &r, &lifted).print(name);
+    }
+}
+
+fn run_dirs_dem(dir: &str) {
+    let slope_band: Option<(f64, f64)> = std::env::var("PLANET_SLOPE").ok().map(|s| {
+        let v: Vec<f64> = s.split(',').map(|x| x.parse().unwrap()).collect();
+        (v[0], v[1])
+    });
+    let mut tifs: Vec<std::path::PathBuf> = Vec::new();
+    for e in std::fs::read_dir(dir).unwrap() {
+        let p = e.unwrap().path();
+        if p.is_dir() {
+            for f in std::fs::read_dir(&p).unwrap() {
+                let f = f.unwrap().path();
+                if f.extension().is_some_and(|x| x == "tif") {
+                    tifs.push(f);
+                }
+            }
+        } else if p.extension().is_some_and(|x| x == "tif") {
+            tifs.push(p);
+        }
+    }
+    tifs.sort();
+    let mut pooled = DirAcc::new();
+    let mut used = 0;
+    for path in &tifs {
+        let tile = planet_testkit::glo30::read(path).unwrap();
+        let lat = tile.geo.origin_lat - tile.geo.scale_lat * tile.height as f64 / 2.0;
+        let dy_m = tile.geo.scale_lat.to_radians() * R;
+        let dx_m = tile.geo.scale_lon.to_radians() * R * lat.to_radians().cos();
+        let (by, bx) = (((814.0 / dy_m).round() as usize).max(1), ((814.0 / dx_m).round() as usize).max(1));
+        let (w, h) = (tile.width / bx, tile.height / by);
+        let mut z = vec![0.0f64; w * h];
+        for j in 0..h {
+            for i in 0..w {
+                let (mut sum, mut cnt) = (0.0f64, 0usize);
+                for dj in 0..by {
+                    for di in 0..bx {
+                        let v = tile.sample(j * by + dj, i * bx + di);
+                        if !v.is_nan() {
+                            sum += v as f64;
+                            cnt += 1;
+                        }
+                    }
+                }
+                z[j * w + i] = if cnt * 2 >= bx * by { (sum / cnt as f64).max(0.0) } else { 0.0 };
+            }
+        }
+        let grid = Grid::new(w, h, 814.0);
+        let outlet = grid.outlets(&z, 0.0);
+        let edge = 10usize;
+        let inbox = move |q: usize| {
+            let (i, j) = (q % w, q / w);
+            i >= edge && i + edge < w && j >= edge && j + edge < h
+        };
+        let s = Surf { grid: &grid, w, h, z: &z, outlet: &outlet, dims: (bx as f64 * dx_m, by as f64 * dy_m), inbox: &inbox };
+        let mut sl: Vec<f64> = Vec::new();
+        for p in 0..w * h {
+            if outlet[p] || !inbox(p) || z[p] <= 0.0 {
+                continue;
+            }
+            let mut m = 0.0f64;
+            for d in 0..8 {
+                if let Some(q) = grid.neighbour(p, d) {
+                    m = m.max((z[q] - z[p]).abs() / grid.distance(d));
+                }
+            }
+            sl.push(m);
+        }
+        let sp95 = pct(&mut sl, 0.95);
+        if let Some((lo, hi)) = slope_band {
+            if !(sp95 >= lo && sp95 <= hi) {
+                continue;
+            }
+        }
+        used += 1;
+        let r = route(&grid, &z, &outlet, U_RULES, 7);
+        let lifted: Vec<bool> = (0..z.len()).map(|p| !outlet[p] && r.filled[p] - z[p] >= 0.0005).collect();
+        pooled.add(&dir_table(&s, &r, &lifted));
+    }
+    println!("-- pooled DEM ({used} tiles{})", slope_band.map_or(String::new(), |b| format!(", slope p95 in {}..{}", b.0, b.1)));
+    pooled.print("pooled DEM, routed U");
+}
+
+/// The breach of round 1 on z0 (U rules, region-wide emulation as in `breach_chains`): the distribution of the lowering of the lowered cells (box) by the size of the depression they lie in,
+/// and the cells with the largest lowering with the evidence for it (fill depth, number of lowering events, the lowest donor, the sill and its neighbours).
+fn run_breach1(threads: usize) {
+    let g = gen_setup(threads);
+    let tag = std::env::var("PLANET_TAG").unwrap_or_else(|_| "gen".into());
+    let p = CarveParams { steps: 20, reroute_every: 5, round_rules: RoundRules::ROUND, cell_metric: true, window_cut: true, ..CarveParams::default() };
+    let (bx0, bx1, by0, by1) = g.boxx;
+    let w = g.w;
+    let inbox = move |q: usize| {
+        let (i, j) = (q % w, q / w);
+        i >= bx0 && i <= bx1 && j >= by0 && j <= by1
+    };
+    let n = g.z0.len();
+    let (r, filled) = route_rules_filled(&g.grid, &g.z0, &g.outlet, p.epsilon, g.stream, 0.0, None, U_RULES);
+    let floor = p.sea_level + p.epsilon;
+    let mut zz = g.z0.clone();
+    let mut events = vec![0u32; n];
+    let mut lowest_donor = vec![f64::INFINITY; n];
+    let mut donor_cell = vec![usize::MAX; n];
+    let mut capped = vec![0u32; n];
+    for &c in r.order.iter().rev() {
+        let c = c as usize;
+        let rec = r.receiver[c];
+        if rec == NONE || g.outlet[rec as usize] {
+            continue;
+        }
+        let rec = rec as usize;
+        let d = dir_of(&g.grid, c, rec);
+        let want = (zz[c] - p.breach_slope * g.grid.distance_at(c, d)).max(floor);
+        if zz[rec] > want {
+            let nz = want.max(zz[rec] - p.breach_max_m);
+            if nz > want {
+                capped[rec] += 1;
+            }
+            events[rec] += 1;
+            if zz[c] < lowest_donor[rec] {
+                lowest_donor[rec] = zz[c];
+                donor_cell[rec] = c;
+            }
+            zz[rec] = nz;
+        }
+    }
+    // the depression of each cell (8-connected lifted components of z0), its size and largest depth
+    let mask: Vec<bool> = (0..n).map(|q| !g.outlet[q] && filled[q] - g.z0[q] >= 0.0005).collect();
+    let mut comp = vec![u32::MAX; n];
+    let mut info: Vec<(usize, f64)> = Vec::new();
+    for q in 0..n {
+        if !mask[q] || comp[q] != u32::MAX {
+            continue;
+        }
+        let id = info.len() as u32;
+        let mut stack = vec![q];
+        comp[q] = id;
+        let (mut cnt, mut dmax) = (0usize, 0.0f64);
+        while let Some(c) = stack.pop() {
+            cnt += 1;
+            dmax = dmax.max(filled[c] - g.z0[c]);
+            for d in 0..8 {
+                if let Some(x) = g.grid.neighbour(c, d) {
+                    if mask[x] && comp[x] == u32::MAX {
+                        comp[x] = id;
+                        stack.push(x);
+                    }
+                }
+            }
+        }
+        info.push((cnt, dmax));
+    }
+    let lowered: Vec<usize> = (0..n).filter(|&q| inbox(q) && !g.outlet[q] && zz[q] < g.z0[q]).collect();
+    let land = (0..n).filter(|&q| inbox(q) && !g.outlet[q]).count();
+    println!("-- [{tag}] round-1 breach of z0 (U): lowered cells {} of {} land cells ({:.2} %)", lowered.len(), land, 100.0 * lowered.len() as f64 / land.max(1) as f64);
+    let mut dep: Vec<f64> = lowered.iter().map(|&q| g.z0[q] - zz[q]).collect();
+    println!("   lowering of the lowered cells: p10 {:.2} p25 {:.2} p50 {:.2} p75 {:.2} p90 {:.2} p95 {:.2} p99 {:.2} p99.9 {:.1} max {:.1} m; cells lowered by more than 10 m {}, 100 m {}, 500 m {}", pct(&mut dep.clone(), 0.1), pct(&mut dep.clone(), 0.25), pct(&mut dep.clone(), 0.5), pct(&mut dep.clone(), 0.75), pct(&mut dep.clone(), 0.9), pct(&mut dep.clone(), 0.95), pct(&mut dep.clone(), 0.99), pct(&mut dep.clone(), 0.999), pct(&mut dep, 1.0), lowered.iter().filter(|&&q| g.z0[q] - zz[q] > 10.0).count(), lowered.iter().filter(|&&q| g.z0[q] - zz[q] > 100.0).count(), lowered.iter().filter(|&&q| g.z0[q] - zz[q] > 500.0).count());
+    // by the size of the depression the cell lies in (0: not in a depression)
+    let classes = [("not lifted", 0usize, 0usize), ("1-30 cells", 1, 30), ("31-300", 31, 300), ("301-3000", 301, 3000), ("over 3000", 3001, usize::MAX)];
+    for (name, lo, hi) in classes {
+        let mut v: Vec<f64> = lowered
+            .iter()
+            .filter(|&&q| {
+                let sz = if comp[q] == u32::MAX { 0 } else { info[comp[q] as usize].0 };
+                if lo == 0 { sz == 0 } else { sz >= lo && sz <= hi }
+            })
+            .map(|&q| g.z0[q] - zz[q])
+            .collect();
+        if v.is_empty() {
+            continue;
+        }
+        println!("   cells in {name}: {} lowered, lowering p50 {:.2} p90 {:.2} p99 {:.2} max {:.1} m", v.len(), pct(&mut v.clone(), 0.5), pct(&mut v.clone(), 0.9), pct(&mut v.clone(), 0.99), pct(&mut v, 1.0));
+    }
+    // the cells with the largest lowering
+    let mut top = lowered.clone();
+    top.sort_by(|&a, &b| (g.z0[b] - zz[b]).total_cmp(&(g.z0[a] - zz[a])));
+    println!("   the {} cells with the largest lowering (window cell, global cell, z0, z after, lowering, fill depth at the cell, lowering events, capped events, lowest donor z, receiver of the cell, depression size / depth):", 8.min(top.len()));
+    for &q in top.iter().take(8) {
+        let (x, y) = (q % g.w, q / g.w);
+        let (cnt, dmax) = if comp[q] == u32::MAX { (0, 0.0) } else { info[comp[q] as usize] };
+        let rc = r.receiver[q];
+        let ds = if donor_cell[q] == usize::MAX { f64::NAN } else { g.z0[donor_cell[q]] };
+        println!(
+            "     ({x}, {y}) = global ({}, {}): z0 {:.1}, after {:.1}, lowering {:.1} m, fill depth {:.1} m, events {}, capped {}, lowest donor z0 {:.1} m, receiver z0 {}, depression {} cells / {:.0} m deep",
+            g.origin.0 + x,
+            g.origin.1 + y,
+            g.z0[q],
+            zz[q],
+            g.z0[q] - zz[q],
+            filled[q] - g.z0[q],
+            events[q],
+            capped[q],
+            ds,
+            if rc == NONE { "none".to_string() } else { format!("{:.1} m", g.z0[rc as usize]) },
+            cnt,
+            dmax
+        );
+    }
+}
+
+/// The grade of the flats on one surface: runs `priority_flood_ungraded` and `regrade_flats` (the two halves of the production canonical flood) and reports what the grade did.
+fn flat_grade_report(g: &GenWin, z: &[f64], inbox: &dyn Fn(usize) -> bool, label: &str) {
+    use planet_generators::bake::flood::{priority_flood_ungraded, regrade_flats, FLAT_BOUND};
+    let n = z.len();
+    let before = priority_flood_ungraded(&g.grid, z, &g.outlet, EPS, true);
+    let mut filled = before.clone();
+    let infos = regrade_flats(&g.grid, z, &g.outlet, EPS, FLAT_BOUND, &mut filled);
+    let lifted = |q: usize| !g.outlet[q] && before[q] > z[q];
+    let in_box_lifted = (0..n).filter(|&q| inbox(q) && lifted(q)).count();
+    let in_box_changed = (0..n).filter(|&q| inbox(q) && lifted(q) && filled[q] != before[q]).count();
+    let graded: Vec<_> = infos.iter().filter(|f| f.graded).collect();
+    let (cells_all, cells_graded): (usize, usize) = (infos.iter().map(|f| f.cells).sum(), graded.iter().map(|f| f.cells).sum());
+    let big = infos.iter().filter(|f| !f.graded && !f.touches_border && f.diameter > FLAT_BOUND).count();
+    let border = infos.iter().filter(|f| !f.graded && f.touches_border).count();
+    let big_cells: usize = infos.iter().filter(|f| !f.graded && !f.touches_border && f.diameter > FLAT_BOUND).map(|f| f.cells).sum();
+    let border_cells: usize = infos.iter().filter(|f| !f.graded && f.touches_border).map(|f| f.cells).sum();
+    println!(
+        "    [{label}] is_cube {}; canonical flood regraded: flats {} (window), graded {} ({} cells of {}: {:.1} %); not graded: diameter over {} {} flats ({} cells), touching the grid border {} flats ({} cells); lifted cells in the box {}, of them with a changed level {} ({:.1} %)",
+        g.grid.is_cube(),
+        infos.len(),
+        graded.len(),
+        cells_graded,
+        cells_all,
+        100.0 * cells_graded as f64 / cells_all.max(1) as f64,
+        FLAT_BOUND,
+        big,
+        big_cells,
+        border,
+        border_cells,
+        in_box_lifted,
+        in_box_changed,
+        100.0 * in_box_changed as f64 / in_box_lifted.max(1) as f64
+    );
+    let mut sizes: Vec<usize> = infos.iter().filter(|f| !f.graded).map(|f| f.cells).collect();
+    sizes.sort_unstable_by(|a, b| b.cmp(a));
+    println!("      the largest ungraded flats (cells): {:?}", &sizes[..sizes.len().min(8)]);
+}
+
+/// The production round path: `solve_rounds` under `RoundRules::ROUND` with the cube-face metric of the window, the window cut flag, margin and inner box as `region_scale` sets them.
+fn run_prod(threads: usize) {
+    let g = gen_setup(threads);
+    let tag = std::env::var("PLANET_TAG").unwrap_or_else(|_| "gen".into());
+    let p = CarveParams { steps: 20, reroute_every: 5, round_rules: RoundRules::ROUND, cell_metric: true, window_cut: true, pre_breach: if std::env::var("PLANET_PREBREACH").is_ok_and(|v| v == "0") { None } else { Some(planet_generators::bake::breach::PreBreach::PROFILE) }, ..CarveParams::default() };
+    let (bx0, bx1, by0, by1) = g.boxx;
+    let w = g.w;
+    let inbox = move |q: usize| {
+        let (i, j) = (q % w, q / w);
+        i >= bx0 && i <= bx1 && j >= by0 && j <= by1
+    };
+    let dx = g.grid.dx();
+    let mut zc = g.z0.clone();
+    let rep = planet_generators::bake::round::solve_rounds(&g.grid, &mut zc, &g.outlet, &p, 4, &threads, g.stream);
+    let zp = zc.clone();
+    let mut cut: Vec<bool> = Vec::new();
+    println!("  round-0 breach (GEN-174, PreBreach::PROFILE) in solve_rounds: {:?}", rep.pre_breach);
+    if p.pre_breach.is_none() {
+        println!("  round-0 breach OFF (PLANET_PREBREACH=0): the rounds alone");
+        basin_table(&g, &g.z0, &inbox, "z0");
+        basin_table(&g, &zc, &inbox, "after 4 rounds, no breach");
+        cut = vec![false; zc.len()];
+    } else {
+        // the passes one at a time on a copy of z0 (one `breach_basins` call with a cap of 1 is one pass): the basins drained, the cells cut and the basins left per pass, to 16 passes
+        {
+            let mut zq = g.z0.clone();
+            for pass in 1..=16u32 {
+                let one = planet_generators::bake::breach::PreBreach { passes: 1, ..planet_generators::bake::breach::PreBreach::PROFILE };
+                let rep1 = planet_generators::bake::breach::breach_basins(&g.grid, &mut zq, &g.outlet, EPS, &one);
+                println!(
+                    "  breach pass {pass}: basins considered {}, drained {}, kept bound {}, kept lake {}, cells cut {}, cells in kept lakes {}",
+                    rep1.basins, rep1.drained, rep1.kept_bound, rep1.kept_lake, rep1.cells_cut, rep1.cells_in_kept_lakes
+                );
+                if rep1.drained == 0 {
+                    println!("  breach: a pass drained nothing after {} passes (fixed point)", pass - 1);
+                    break;
+                }
+            }
+        }
+        let mut zb = g.z0.clone();
+        let br = planet_generators::bake::breach::breach_basins(&g.grid, &mut zb, &g.outlet, EPS, &planet_generators::bake::breach::PreBreach::PROFILE);
+        println!("  breach alone on z0: {br:?}; cells lowered {}", (0..zb.len()).filter(|&q| zb[q] != g.z0[q]).count());
+        basin_table(&g, &g.z0, &inbox, "z0");
+        basin_table(&g, &zb, &inbox, "z0 after the round-0 breach");
+        basin_table(&g, &zc, &inbox, "after 4 rounds with the breach");
+        cut = (0..zb.len()).map(|q| zb[q] != g.z0[q]).collect();
+    }
+    runs_on_cuts(&g, &zc, &cut, &inbox, "after 4 rounds with the breach");
+    println!("-- [{tag}] production path: solve_rounds, RoundRules::ROUND, cell_metric true, window_cut true, grid has_metric {}, is_cube {}; {} rounds; the probe's own round loop differs in {} cells", g.grid.has_metric(), g.grid.is_cube(), rep.rounds.len(), zc.iter().zip(&zp).filter(|(a, b)| a.to_bits() != b.to_bits()).count());
+    for (name, z) in [("z0", &g.z0), ("after 4 rounds", &zc)] {
+        println!("\n  == {name}");
+        flat_grade_report(&g, z, &inbox, name);
+        let s = Surf { grid: &g.grid, w: g.w, h: g.h, z, outlet: &g.outlet, dims: (dx, dx), inbox: &inbox };
+        let r = route(&g.grid, z, &g.outlet, RoundRules::ROUND, g.stream);
+        let lifted: Vec<bool> = (0..z.len()).map(|q| !g.outlet[q] && r.filled[q] - z[q] >= 0.0005).collect();
+        let a = measure(&s, &r, &lifted);
+        a.report(&format!("{name}, routed under ROUND"));
+        dir_table(&s, &r, &lifted).print(&format!("{name}, routed under ROUND"));
+    }
+}
+
+
+/// SPIKE-109 (spikes lane, never merged): the glyphs of a scale bar's label (5 x 7, row bits from the left).
+fn glyph(c: char) -> [u8; 7] {
+    match c {
+        '0' => [0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110],
+        '1' => [0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110],
+        '2' => [0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111],
+        '3' => [0b11110, 0b00001, 0b00001, 0b01110, 0b00001, 0b00001, 0b11110],
+        '4' => [0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010],
+        '5' => [0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110],
+        '6' => [0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110],
+        '7' => [0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000],
+        '8' => [0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110],
+        '9' => [0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100],
+        'k' => [0b10000, 0b10000, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010],
+        'm' => [0b00000, 0b00000, 0b11010, 0b10101, 0b10101, 0b10101, 0b10101],
+        _ => [0; 7],
+    }
+}
+
+/// A scale bar in the lower left of an rgb image: `len_m` metres at `m_per_px`, white with a black outline, ticks every quarter, and its label in 2x glyphs.
+fn scale_bar(rgb: &mut [u8], iw: usize, ih: usize, m_per_px: f64, len_m: f64, label: &str) {
+    let len = (len_m / m_per_px).round() as usize;
+    let (x0, y0) = (12usize, ih.saturating_sub(34));
+    let mut put = |x: usize, y: usize, c: [u8; 3]| {
+        if x < iw && y < ih {
+            rgb[(y * iw + x) * 3..(y * iw + x) * 3 + 3].copy_from_slice(&c);
+        }
+    };
+    for y in y0 - 2..y0 + 8 {
+        for x in x0 - 2..x0 + len + 3 {
+            put(x, y, [0, 0, 0]);
+        }
+    }
+    for y in y0..y0 + 6 {
+        for x in x0..=x0 + len {
+            put(x, y, [255, 255, 255]);
+        }
+    }
+    for q in 0..=4 {
+        let x = x0 + len * q / 4;
+        for y in y0 - 2..y0 + 8 {
+            put(x, y, [0, 0, 0]);
+            if q % 4 == 0 {
+                put(x + 1, y, [0, 0, 0]);
+            }
+        }
+    }
+    // the label above the bar on a black strip
+    let (tw, th) = (label.len() * 12 + 4, 18);
+    let ty = y0 - 2 - th;
+    for y in ty..ty + th {
+        for x in x0 - 2..x0 - 2 + tw {
+            put(x, y, [0, 0, 0]);
+        }
+    }
+    for (n, ch) in label.chars().enumerate() {
+        let gl = glyph(ch);
+        for (r, bits) in gl.iter().enumerate() {
+            for cidx in 0..5 {
+                if bits & (1 << (4 - cidx)) != 0 {
+                    for dy in 0..2 {
+                        for dx in 0..2 {
+                            put(x0 + n * 12 + cidx * 2 + dx, ty + 2 + r * 2 + dy, [255, 255, 255]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// SPIKE-109: the component sweep: for each mask of `PLANET_MASKS` (comma list of decimal masks, see `classes::probe_off`) the start surface of the window is sampled and its depression table printed
+/// (`BASINRAW | <mask> ...`) with the land elevation percentiles of the box and the share of land.
+fn run_z0sweep(threads: usize) {
+    let masks: Vec<u64> = std::env::var("PLANET_MASKS").expect("PLANET_MASKS=0,1,2,...").split(',').map(|s| s.trim().parse().unwrap()).collect();
+    for m in masks {
+        planet_generators::classes::set_probe_off(m);
+        let g = gen_setup(threads);
+        let (bx0, bx1, by0, by1) = g.boxx;
+        let w = g.w;
+        let inbox = move |q: usize| {
+            let (i, j) = (q % w, q / w);
+            i >= bx0 && i <= bx1 && j >= by0 && j <= by1
+        };
+        let mut land: Vec<f64> = (0..g.z0.len()).filter(|&q| inbox(q) && !g.outlet[q]).map(|q| g.z0[q]).collect();
+        land.sort_by(f64::total_cmp);
+        let pc = |f: f64| land[((land.len() - 1) as f64 * f) as usize];
+        println!("MASK {m}: land cells {} of the box; land elevation p5 {:.0} p50 {:.0} p95 {:.0} max {:.0} m", land.len(), pc(0.05), pc(0.5), pc(0.95), pc(1.0));
+        basin_table(&g, &g.z0, &inbox, &format!("mask {m}"));
+    }
+}
+
+/// SPIKE-109 (e), (f): the start surface's depressions against the lowering round 1's breach makes there (the breach alone: `PROBE_BREACH_ONLY`, one round under `RoundRules::ROUND`), and the cells held at
+/// 5.001 m after the 4 rounds. A depression is as in `basin_table` (the lifted cells of the U-routed flood, 8-connected, over 30 cells, not touching the window ring); its footprint is the depression and the
+/// cells within 2 steps of it (a breach lowers the sill and the stretch downstream, outside the lifted cells).
+fn run_z0breach(threads: usize) {
+    use planet_generators::bake::round;
+    let g = gen_setup(threads);
+    let tag = std::env::var("PLANET_TAG").unwrap_or_else(|_| "z0".into());
+    let (bx0, bx1, by0, by1) = g.boxx;
+    let (w, h) = (g.w, g.h);
+    let inbox = move |q: usize| {
+        let (i, j) = (q % w, q / w);
+        i >= bx0 && i <= bx1 && j >= by0 && j <= by1
+    };
+    let n = g.z0.len();
+    let r0 = route(&g.grid, &g.z0, &g.outlet, U_RULES, g.stream);
+    let lifted: Vec<bool> = (0..n).map(|q| !g.outlet[q] && r0.filled[q] - g.z0[q] >= 0.0005).collect();
+    // components
+    let mut lab = vec![u32::MAX; n];
+    let mut comps: Vec<(usize, bool, f64)> = Vec::new(); // size, touches the ring, depth
+    for s in 0..n {
+        if !lifted[s] || lab[s] != u32::MAX {
+            continue;
+        }
+        let id = comps.len() as u32;
+        let (mut size, mut ring, mut depth) = (0usize, false, 0.0f64);
+        let mut stack = vec![s];
+        lab[s] = id;
+        while let Some(p) = stack.pop() {
+            size += 1;
+            let (i, j) = (p % w, p / w);
+            ring |= i == 0 || j == 0 || i == w - 1 || j == h - 1;
+            depth = depth.max(r0.filled[p] - g.z0[p]);
+            for d in 0..8 {
+                if let Some(q) = g.grid.neighbour(p, d) {
+                    if lifted[q] && lab[q] == u32::MAX {
+                        lab[q] = id;
+                        stack.push(q);
+                    }
+                }
+            }
+        }
+        comps.push((size, ring, depth));
+    }
+    // round 1's breach alone
+    let p1 = CarveParams { steps: 5, reroute_every: 5, round_rules: RoundRules::ROUND, cell_metric: true, window_cut: true, ..CarveParams::default() };
+    round::PROBE_BREACH_ONLY.store(true, std::sync::atomic::Ordering::Relaxed);
+    let mut z1 = g.z0.clone();
+    round::solve_rounds(&g.grid, &mut z1, &g.outlet, &p1, 1, &threads, g.stream);
+    round::PROBE_BREACH_ONLY.store(false, std::sync::atomic::Ordering::Relaxed);
+    let low: Vec<f64> = (0..n).map(|q| (g.z0[q] - z1[q]).max(0.0)).collect();
+    let lowered: Vec<bool> = (0..n).map(|q| low[q] >= 0.5).collect();
+    // footprints: multi-source breadth-first over 8-neighbours to 2 steps, a cell taken by the first (largest-depth last) basin reaching it; only basins over 30 cells, interior
+    let big: Vec<bool> = comps.iter().map(|c| c.0 > 30 && !c.1).collect();
+    let mut owner = vec![u32::MAX; n];
+    let mut frontier: Vec<usize> = Vec::new();
+    for q in 0..n {
+        if lab[q] != u32::MAX && big[lab[q] as usize] {
+            owner[q] = lab[q];
+            frontier.push(q);
+        }
+    }
+    for _ in 0..2 {
+        let mut next = Vec::new();
+        for &p in &frontier {
+            for d in 0..8 {
+                if let Some(q) = g.grid.neighbour(p, d) {
+                    if owner[q] == u32::MAX {
+                        owner[q] = owner[p];
+                        next.push(q);
+                    }
+                }
+            }
+        }
+        frontier = next;
+    }
+    let nb = comps.len();
+    let (mut low_max, mut low_cells, mut low_sum) = (vec![0.0f64; nb], vec![0usize; nb], vec![0.0f64; nb]);
+    let (mut all_lowered, mut in_fp, mut in_basin) = (0usize, 0usize, 0usize);
+    let (mut vol_all, mut vol_fp) = (0.0f64, 0.0f64);
+    for q in 0..n {
+        if !inbox(q) || g.outlet[q] {
+            continue;
+        }
+        vol_all += low[q];
+        if lowered[q] {
+            all_lowered += 1;
+        }
+        let o = owner[q];
+        if o != u32::MAX {
+            let o = o as usize;
+            low_max[o] = low_max[o].max(low[q]);
+            low_sum[o] += low[q];
+            vol_fp += low[q];
+            if lowered[q] {
+                low_cells[o] += 1;
+                in_fp += 1;
+                in_basin += usize::from(lab[q] != u32::MAX);
+            }
+        }
+    }
+    println!("-- [{tag}] round 1's breach alone (the sweeps off) on the start surface, one round under RoundRules::ROUND; basins as in the depression table (U-routed flood, over 30 cells, interior)");
+    println!(
+        "  cells lowered by at least 0.5 m in the box: {all_lowered}; of them within a basin's footprint (basin plus 2 steps) {in_fp} ({:.1} %), inside a basin's lifted cells {in_basin} ({:.1} %); lowering volume (m x cells) in the footprints {:.1} % of the box's",
+        100.0 * in_fp as f64 / all_lowered.max(1) as f64,
+        100.0 * in_basin as f64 / all_lowered.max(1) as f64,
+        100.0 * vol_fp / vol_all.max(1e-9)
+    );
+    let bins: [(f64, f64, &str); 5] = [(0.0, 1.0, "under 1 m"), (1.0, 10.0, "1-10 m"), (10.0, 100.0, "10-100 m"), (100.0, 300.0, "100-300 m"), (300.0, f64::INFINITY, "over 300 m")];
+    println!("  depth bin | basins | cells | max lowering in the footprint p50 / p95 / max (m) | lowering over half the fill depth: basins | cells lowered >= 0.5 m per basin p50");
+    for (lo, hi, name) in bins {
+        let ids: Vec<usize> = (0..nb).filter(|&k| big[k] && comps[k].2 >= lo && comps[k].2 < hi).collect();
+        if ids.is_empty() {
+            println!("  BREACHBIN | {tag} | {name} | 0 | 0 | - | - | -");
+            continue;
+        }
+        let mut lm: Vec<f64> = ids.iter().map(|&k| low_max[k]).collect();
+        lm.sort_by(f64::total_cmp);
+        let half = ids.iter().filter(|&&k| low_max[k] >= 0.5 * comps[k].2).count();
+        let mut lc: Vec<usize> = ids.iter().map(|&k| low_cells[k]).collect();
+        lc.sort_unstable();
+        let cells: usize = ids.iter().map(|&k| comps[k].0).sum();
+        println!(
+            "  BREACHBIN | {tag} | {name} | {} | {cells} | {:.1} / {:.1} / {:.1} | {half} | {}",
+            ids.len(),
+            lm[(lm.len() - 1) / 2],
+            lm[((lm.len() - 1) as f64 * 0.95) as usize],
+            lm[lm.len() - 1],
+            lc[(lc.len() - 1) / 2]
+        );
+    }
+    let mut ord: Vec<usize> = (0..nb).filter(|&k| big[k]).collect();
+    ord.sort_by(|&a, &b| comps[b].2.total_cmp(&comps[a].2));
+    let top: Vec<String> = ord.iter().take(10).map(|&k| format!("fill {:.0} m / {} cells -> lowering max {:.1} m ({} cells)", comps[k].2, comps[k].0, low_max[k], low_cells[k])).collect();
+    println!("  the 10 deepest basins: {}", top.join("; "));
+    // Pearson on log depth and log (1 + lowering max)
+    let (xs, ys): (Vec<f64>, Vec<f64>) = ord.iter().map(|&k| ((1.0 + comps[k].2).ln(), (1.0 + low_max[k]).ln())).unzip();
+    let m = |v: &[f64]| v.iter().sum::<f64>() / v.len().max(1) as f64;
+    let (mx, my) = (m(&xs), m(&ys));
+    let cov: f64 = xs.iter().zip(&ys).map(|(a, b)| (a - mx) * (b - my)).sum();
+    let (vx, vy): (f64, f64) = (xs.iter().map(|a| (a - mx).powi(2)).sum(), ys.iter().map(|b| (b - my).powi(2)).sum());
+    println!("  correlation of ln(1 + fill depth) with ln(1 + max lowering in the footprint) over {} basins: {:.2}", ord.len(), cov / (vx * vy).sqrt().max(1e-12));
+    let _ = low_sum;
+    // diagnosis: the three deepest basins: the lowest cell, the ROUND-routed path from it (receivers), z0 / filled / after the breach along it
+    {
+        let rr = route(&g.grid, &g.z0, &g.outlet, RoundRules::ROUND, g.stream);
+        for &k in ord.iter().take(3) {
+            let mut pit = usize::MAX;
+            for q in 0..n {
+                if lab[q] == k as u32 && (pit == usize::MAX || g.z0[q] < g.z0[pit]) {
+                    pit = q;
+                }
+            }
+            let (ox, oy) = g.origin;
+            println!("  DIAG basin fill {:.0} m / {} cells: lowest cell window ({}, {}) face ({}, {}), z0 {:.1} filled(U) {:.1} filled(ROUND) {:.1}", comps[k].2, comps[k].0, pit % w, pit / w, pit % w + ox, pit / w + oy, g.z0[pit], r0.filled[pit], rr.filled[pit]);
+            let mut q = pit;
+            let mut line = Vec::new();
+            for step in 0..4000 {
+                if step % 40 == 0 || rr.receiver[q] == u32::MAX {
+                    line.push(format!("[{step}] z0 {:.0} fill {:.0} after {:.0} {}", g.z0[q], rr.filled[q], z1[q], if lab[q] != u32::MAX && lab[q] == k as u32 { "in" } else { "out" }));
+                }
+                if rr.receiver[q] == u32::MAX || g.outlet[q] {
+                    break;
+                }
+                q = rr.receiver[q] as usize;
+            }
+            println!("    path: {}", line.join("; "));
+        }
+    }
+    // (e), by drainage path: from the lowest cell of each basin along the ROUND-routed receivers until the ground is at or below the pit (or the sea / a window cut / 6000 steps): the cells the breach has to cut
+    {
+        let rr = route(&g.grid, &g.z0, &g.outlet, RoundRules::ROUND, g.stream);
+        let dx = g.grid.dx();
+        let mut taken = vec![false; n];
+        struct P { depth: f64, cells: usize, len: usize, sill_over: f64, cut_cells: usize, cut_max: f64, cut_vol: f64 }
+        let mut rows: Vec<P> = Vec::new();
+        let (mut path_cut_cells, mut path_cut_vol) = (0usize, 0.0f64);
+        let mut order: Vec<usize> = (0..nb).filter(|&k| big[k]).collect();
+        order.sort_by(|&a, &b| comps[b].2.total_cmp(&comps[a].2));
+        let mut pit_of = vec![usize::MAX; nb];
+        for q in 0..n {
+            let k = lab[q];
+            if k != u32::MAX && big[k as usize] && (pit_of[k as usize] == usize::MAX || g.z0[q] < g.z0[pit_of[k as usize]]) {
+                pit_of[k as usize] = q;
+            }
+        }
+        for &k in &order {
+            let pit = pit_of[k];
+            let zp = g.z0[pit];
+            let (mut q, mut len, mut top) = (pit, 0usize, zp);
+            let (mut cc, mut cm, mut cv) = (0usize, 0.0f64, 0.0f64);
+            loop {
+                len += 1;
+                top = top.max(g.z0[q]);
+                if len > 1 && !taken[q] {
+                    taken[q] = true;
+                    if inbox(q) && lowered[q] {
+                        cc += 1;
+                        cv += low[q];
+                        path_cut_cells += 1;
+                        path_cut_vol += low[q];
+                    }
+                }
+                cm = cm.max(low[q]);
+                let rec = rr.receiver[q];
+                if rec == NONE || g.outlet[q] || len >= 6000 || (len > 1 && g.z0[q] <= zp) {
+                    break;
+                }
+                q = rec as usize;
+            }
+            rows.push(P { depth: comps[k].2, cells: comps[k].0, len, sill_over: top - zp, cut_cells: cc, cut_max: cm, cut_vol: cv * dx * dx });
+        }
+        let total_vol: f64 = (0..n).filter(|&q| inbox(q) && !g.outlet[q]).map(|q| low[q]).sum();
+        println!(
+            "  PATHS | {tag} | the receiver paths pit -> sill -> pit level of {} basins hold {} of the {all_lowered} cells lowered (>= 0.5 m) in the box ({:.1} %) and {:.1} % of the lowering volume",
+            rows.len(), path_cut_cells, 100.0 * path_cut_cells as f64 / all_lowered.max(1) as f64, 100.0 * path_cut_vol / total_vol.max(1e-9)
+        );
+        let pq = |v: &mut Vec<f64>, f: f64| if v.is_empty() { f64::NAN } else { v.sort_by(f64::total_cmp); v[((v.len() - 1) as f64 * f) as usize] };
+        println!("  depth bin | basins | path length cells p50 / p95 | sill over pit p50 / p95 (m) | path cells cut p50 / p95 | max cut on the path p50 / p95 / max (m) | cut volume per basin p50 (million m3) | basins with the cut at the 500 m round limit");
+        for (lo, hi, name) in bins {
+            let sel: Vec<&P> = rows.iter().filter(|r| r.depth >= lo && r.depth < hi).collect();
+            if sel.is_empty() {
+                continue;
+            }
+            let mut len: Vec<f64> = sel.iter().map(|r| r.len as f64).collect();
+            let mut so: Vec<f64> = sel.iter().map(|r| r.sill_over).collect();
+            let mut cc: Vec<f64> = sel.iter().map(|r| r.cut_cells as f64).collect();
+            let mut cm: Vec<f64> = sel.iter().map(|r| r.cut_max).collect();
+            let mut cv: Vec<f64> = sel.iter().map(|r| r.cut_vol / 1e6).collect();
+            let at_limit = sel.iter().filter(|r| r.cut_max >= 499.0).count();
+            let cells: usize = sel.iter().map(|r| r.cells).sum();
+            println!(
+                "  PATHBIN | {tag} | {name} | {} | {cells} cells | {:.0} / {:.0} | {:.0} / {:.0} | {:.0} / {:.0} | {:.1} / {:.1} / {:.1} | {:.2} | {at_limit}",
+                sel.len(), pq(&mut len, 0.5), pq(&mut len, 0.95), pq(&mut so, 0.5), pq(&mut so, 0.95), pq(&mut cc, 0.5), pq(&mut cc, 0.95), pq(&mut cm, 0.5), pq(&mut cm, 0.95), pq(&mut cm, 1.0), pq(&mut cv, 0.5)
+            );
+        }
+        let (xs, ys): (Vec<f64>, Vec<f64>) = rows.iter().map(|r| ((1.0 + r.depth).ln(), (1.0 + r.cut_max).ln())).unzip();
+        let m = |v: &[f64]| v.iter().sum::<f64>() / v.len().max(1) as f64;
+        let (mx, my) = (m(&xs), m(&ys));
+        let cov: f64 = xs.iter().zip(&ys).map(|(a, b)| (a - mx) * (b - my)).sum();
+        let (vx, vy): (f64, f64) = (xs.iter().map(|a| (a - mx).powi(2)).sum(), ys.iter().map(|b| (b - my).powi(2)).sum());
+        println!("  PATHCORR | {tag} | correlation of ln(1 + fill depth) with ln(1 + max cut on the path) over {} basins: {:.2}", rows.len(), cov / (vx * vy).sqrt().max(1e-12));
+        let top: Vec<String> = rows.iter().take(8).map(|r| format!("fill {:.0} m, path {} cells, sill over pit {:.0} m, max cut {:.0} m", r.depth, r.len, r.sill_over, r.cut_max)).collect();
+        println!("  the 8 deepest basins by path: {}", top.join("; "));
+    }
+    basin_table(&g, &z1, &inbox, "after round 1's breach alone");
+    // (f) the 5.001 m cells: after the breach alone and after the 4 rounds
+    let count_at = |z: &[f64], v: f64| (0..n).filter(|&q| inbox(q) && !g.outlet[q] && (z[q] - v).abs() < 2e-5).count();
+    println!("  cells of the box at 0.001 m (the breach's floor) after the breach alone: {}; at 5.001 m: {}", count_at(&z1, 0.001), count_at(&z1, 5.001));
+    if std::env::var("PLANET_ROUNDS4").is_ok() {
+        let p4 = CarveParams { steps: 20, reroute_every: 5, round_rules: RoundRules::ROUND, cell_metric: true, window_cut: true, ..CarveParams::default() };
+        let mut z4 = g.z0.clone();
+        round::solve_rounds(&g.grid, &mut z4, &g.outlet, &p4, 4, &threads, g.stream);
+        basin_table(&g, &z4, &inbox, "after 4 rounds");
+        println!("FIVEBASE | {tag} | cells of the box at 5.001 m after 4 rounds {} | at 0.001 m {} | at 5.001 m after the breach alone {}", count_at(&z4, 5.001), count_at(&z4, 0.001), count_at(&z1, 5.001));
+    }
+}
+
+fn main() {
+    let a: Vec<String> = std::env::args().collect();
+    match a.get(1).map(String::as_str) {
+        Some("gen") => run_gen(a.get(2).map_or(8, |s| s.parse().unwrap())),
+        Some("hist") => run_hist(&a),
+        Some("breach") => run_breach(a.get(2).map_or(8, |s| s.parse().unwrap())),
+        Some("dirs") => run_dirs(a.get(2).map_or(8, |s| s.parse().unwrap())),
+        Some("dirsdem") => run_dirs_dem(a.get(2).map_or("C:/DEV/SeriousPlanetData/dem/glo30-samples", String::as_str)),
+        Some("breach1") => run_breach1(a.get(2).map_or(8, |s| s.parse().unwrap())),
+        Some("prod") => run_prod(a.get(2).map_or(8, |s| s.parse().unwrap())),
+        Some("z0basins") => run_z0basins(a.get(2).map_or(8, |s| s.parse().unwrap())),
+        Some("z0sweep") => run_z0sweep(a.get(2).map_or(8, |s| s.parse().unwrap())),
+        Some("z0breach") => run_z0breach(a.get(2).map_or(8, |s| s.parse().unwrap())),
+        Some("hyps") => run_hyps(a.get(2).map_or(8, |s| s.parse().unwrap())),
+        Some("pits") => run_pits(a.get(2).map_or(8, |s| s.parse().unwrap())),
+        Some("dem") => run_dem(a.get(2).map_or("C:/DEV/SeriousPlanetData/dem/glo30-samples", String::as_str)),
+        _ => eprintln!("usage: shapes_check gen [threads] | dem [dir]"),
+    }
+}
+
+/// GEN-174 re-measure: the lifted cells (fill depth at least 0.5 mm, U routing, canonical flood) as depressions (8-connected components of the window), counted over the box land: depressions of 1 to 30 cells, over 30 cells
+/// (interior: no cell on the window's outer ring; those touching the ring counted apart), over 300 cells, by their largest fill depth, and the deepest depressions.
+fn basin_table(g: &GenWin, z: &[f64], inbox: &dyn Fn(usize) -> bool, label: &str) {
+    let r = route(&g.grid, z, &g.outlet, U_RULES, g.stream);
+    let n = z.len();
+    let (w, h) = (g.w, g.h);
+    let lifted: Vec<bool> = (0..n).map(|q| !g.outlet[q] && r.filled[q] - z[q] >= 0.0005).collect();
+    let land_box = (0..n).filter(|&q| inbox(q) && !g.outlet[q]).count();
+    let mut seen = vec![false; n];
+    let mut lab = vec![u32::MAX; n];
+    struct Comp {
+        size: usize,
+        in_box: usize,
+        ring: bool,
+        depth: f64,
+    }
+    let mut comps: Vec<Comp> = Vec::new();
+    for s in 0..n {
+        if !lifted[s] || seen[s] {
+            continue;
+        }
+        let mut c = Comp { size: 0, in_box: 0, ring: false, depth: 0.0 };
+        let mut stack = vec![s];
+        seen[s] = true;
+        while let Some(p) = stack.pop() {
+            c.size += 1;
+            lab[p] = comps.len() as u32;
+            c.in_box += usize::from(inbox(p));
+            let (i, j) = (p % w, p / w);
+            c.ring |= i == 0 || j == 0 || i == w - 1 || j == h - 1;
+            c.depth = c.depth.max(r.filled[p] - z[p]);
+            for d in 0..8 {
+                if let Some(q) = g.grid.neighbour(p, d) {
+                    if lifted[q] && !seen[q] {
+                        seen[q] = true;
+                        stack.push(q);
+                    }
+                }
+            }
+        }
+        comps.push(c);
+    }
+    let pc = |cells: usize| 100.0 * cells as f64 / land_box.max(1) as f64;
+    let sum = |f: &dyn Fn(&Comp) -> bool| comps.iter().filter(|c| f(c)).map(|c| c.in_box).sum::<usize>();
+    let total = sum(&|_| true);
+    let small = sum(&|c| c.size <= 30);
+    let over30_int = sum(&|c| c.size > 30 && !c.ring);
+    let over30_ring = sum(&|c| c.size > 30 && c.ring);
+    let over300_int = sum(&|c| c.size > 300 && !c.ring);
+    let n300 = comps.iter().filter(|c| c.size > 300 && !c.ring).count();
+    println!(
+        "  basins [{label}]: land cells of the box {land_box}; lifted {:.2} %; depressions of 1-30 cells {:.2} %; over 30 cells interior {:.2} %, touching the window ring {:.2} % (counted apart); over 300 cells interior {:.2} % ({n300} depressions)",
+        pc(total), pc(small), pc(over30_int), pc(over30_ring), pc(over300_int)
+    );
+    let dep = |lo: f64, hi: f64| sum(&|c| c.size > 30 && !c.ring && c.depth >= lo && c.depth < hi);
+    println!(
+        "    interior depressions over 30 cells by largest fill depth (% of land): under 1 m {:.2}, 1-10 m {:.2}, 10-100 m {:.2}, over 100 m {:.2}",
+        pc(dep(0.0, 1.0)),
+        pc(dep(1.0, 10.0)),
+        pc(dep(10.0, 100.0)),
+        pc(dep(100.0, f64::INFINITY))
+    );
+    let mut deep: Vec<&Comp> = comps.iter().filter(|c| c.size > 30).collect();
+    deep.sort_by(|a, b| b.depth.total_cmp(&a.depth));
+    let top: Vec<String> = deep.iter().take(8).map(|c| format!("{:.0} m / {} cells{}", c.depth, c.size, if c.ring { " (ring)" } else { "" })).collect();
+    println!("    the deepest depressions over 30 cells (fill depth / cells): {}", top.join("; "));
+    let mut depths: Vec<f64> = comps.iter().filter(|c| c.size > 30 && !c.ring).map(|c| c.depth).collect();
+    depths.sort_by(f64::total_cmp);
+    if !depths.is_empty() {
+        println!(
+            "    interior depressions over 30 cells: {} ; largest fill depth p50 {:.1} m, p90 {:.1} m, max {:.1} m",
+            depths.len(),
+            depths[(depths.len() - 1) / 2],
+            depths[((depths.len() - 1) as f64 * 0.9) as usize],
+            depths[depths.len() - 1]
+        );
+    }
+    // the machine line of SPIKE-109: lifted, 1-30, over 30 interior, over 300 interior, count over 30, depth p50, p95, max, share deeper than 100 m, the largest cell count
+    let q = |f: f64| if depths.is_empty() { f64::NAN } else { depths[((depths.len() - 1) as f64 * f) as usize] };
+    let mut sizes: Vec<usize> = comps.iter().filter(|c| c.size > 30 && !c.ring).map(|c| c.size).collect();
+    sizes.sort_unstable();
+    let sq = |f: f64| if sizes.is_empty() { 0 } else { sizes[((sizes.len() - 1) as f64 * f) as usize] };
+    println!(
+        "BASINRAW | {label} | lifted {:.2} | small {:.2} | over30 {:.2} | over300 {:.2} | n30 {} | depth p50 {:.1} p95 {:.1} max {:.1} | deeper100 {:.2} | cells p50 {} p95 {} max {}",
+        pc(total), pc(small), pc(over30_int), pc(over300_int), depths.len(), q(0.5), q(0.95), q(1.0), pc(dep(100.0, f64::INFINITY)), sq(0.5), sq(0.95), sq(1.0)
+    );
+    if let Ok(path) = std::env::var("PLANET_BASIN_IMG") {
+        // z0 shaded from the north-west with the depressions over 30 cells outlined (red: interior, orange: touching the window ring); the box only
+        let (bx0, bx1, by0, by1) = g.boxx;
+        let (iw, ih) = (bx1 - bx0 + 1, by1 - by0 + 1);
+        let mut rgb = vec![0u8; iw * ih * 3];
+        let at = |i: isize, j: isize| -> f64 { z[(j.clamp(0, h as isize - 1) as usize) * w + i.clamp(0, w as isize - 1) as usize] };
+        for y in 0..ih {
+            for x in 0..iw {
+                let (i, j) = ((bx0 + x) as isize, (by0 + y) as isize);
+                let p = (by0 + y) * w + bx0 + x;
+                let shade = (at(i - 1, j - 1) - at(i + 1, j + 1)) / (2.0 * g.grid.dx() * 0.7071);
+                let l = (150.0 + 400.0 * shade).clamp(30.0, 235.0) as u8;
+                let mut c = if g.outlet[p] { [20u8, 40, 90] } else { [l, l, l] };
+                let id = lab[p];
+                if id != u32::MAX && comps[id as usize].size > 30 {
+                    let edge = (0..8).any(|k| g.grid.neighbour(p, k).is_none_or(|q| lab[q] != id));
+                    let col = if comps[id as usize].ring { [255u8, 150, 0] } else { [230u8, 20, 20] };
+                    if edge {
+                        c = col;
+                    } else {
+                        c = [(c[0] as u16 / 2 + col[0] as u16 / 2) as u8, (c[1] as u16 / 2 + col[1] as u16 / 2) as u8, (c[2] as u16 / 2 + col[2] as u16 / 2) as u8];
+                    }
+                }
+                rgb[(y * iw + x) * 3..(y * iw + x) * 3 + 3].copy_from_slice(&c);
+            }
+        }
+        scale_bar(&mut rgb, iw, ih, g.grid.dx(), 100_000.0, "100 km");
+        png(std::path::Path::new(&path), iw, ih, &rgb);
+        println!("  image {path}");
+    }
+}
+
+/// SPIKE-109: the start surface of a generator window: the depression table of z0 (and the image when `PLANET_BASIN_IMG` names a path).
+fn run_z0basins(threads: usize) {
+    if let Ok(m) = std::env::var("PLANET_BASE_OFF") {
+        planet_generators::classes::set_probe_off(m.trim().parse().unwrap());
+    }
+    let g = gen_setup(threads);
+    let tag = std::env::var("PLANET_TAG").unwrap_or_else(|_| "z0".into());
+    let (bx0, bx1, by0, by1) = g.boxx;
+    let w = g.w;
+    let inbox = move |q: usize| {
+        let (i, j) = (q % w, q / w);
+        i >= bx0 && i <= bx1 && j >= by0 && j <= by1
+    };
+    basin_table(&g, &g.z0, &inbox, &tag);
+}
+
+/// GEN-174: where the straight runs lie against the cells the round-0 breach lowered (`cut`): the channel steps of the box in runs over 10 and over 20 cells, and how many are on a cut cell; the same for all channel steps.
+fn runs_on_cuts(g: &GenWin, z: &[f64], cut: &[bool], inbox: &dyn Fn(usize) -> bool, label: &str) {
+    let r = route(&g.grid, z, &g.outlet, RoundRules::ROUND, g.stream);
+    let n = z.len();
+    let ch: Vec<bool> = (0..n).map(|p| !g.outlet[p] && r.area[p] >= INIT).collect();
+    let mut dir = vec![9u8; n];
+    for p in 0..n {
+        if ch[p] && r.receiver[p] != NONE {
+            dir[p] = dir_of(&g.grid, p, r.receiver[p] as usize) as u8;
+        }
+    }
+    let same = |p: usize, rec: u32| rec != NONE && dir[p] != 9 && ch[rec as usize] && dir[rec as usize] == dir[p];
+    let mut u = vec![1u32; n];
+    for &c in r.order.iter().rev() {
+        let p = c as usize;
+        let rec = r.receiver[p];
+        if same(p, rec) {
+            u[rec as usize] = u[rec as usize].max(u[p] + 1);
+        }
+    }
+    let mut d = vec![1u32; n];
+    for &c in &r.order {
+        let p = c as usize;
+        let rec = r.receiver[p];
+        if same(p, rec) {
+            d[p] = d[rec as usize] + 1;
+        }
+    }
+    // a cell is near a cut when it or one of its 8 neighbours was lowered by the breach
+    let near_cut = |p: usize| cut[p] || (0..8).any(|k| g.grid.neighbour(p, k).is_some_and(|q| cut[q]));
+    let (mut all, mut all_cut, mut all_near) = (0usize, 0usize, 0usize);
+    let mut rows = [(0usize, 0usize, 0usize, 0usize); 3]; // runs over 10, over 20, diagonal over 10: steps, on cut, near cut, diagonal steps
+    let (mut diag_all, mut diag_cut) = (0usize, 0usize);
+    for p in 0..n {
+        if dir[p] == 9 || !inbox(p) {
+            continue;
+        }
+        let len = (u[p] + d[p] - 1) as usize;
+        let diag = matches!(dir[p], 4..=7);
+        all += 1;
+        all_cut += usize::from(cut[p]);
+        all_near += usize::from(near_cut(p));
+        diag_all += usize::from(diag);
+        diag_cut += usize::from(diag && cut[p]);
+        if len > 10 {
+            rows[0].0 += 1;
+            rows[0].1 += usize::from(cut[p]);
+            rows[0].2 += usize::from(near_cut(p));
+            rows[0].3 += usize::from(diag);
+            if diag {
+                rows[2].0 += 1;
+                rows[2].1 += usize::from(cut[p]);
+                rows[2].2 += usize::from(near_cut(p));
+            }
+        }
+        if len > 20 {
+            rows[1].0 += 1;
+            rows[1].1 += usize::from(cut[p]);
+            rows[1].2 += usize::from(near_cut(p));
+            rows[1].3 += usize::from(diag);
+        }
+    }
+    // the longest runs: the head cell (no same-direction donor), the direction, the length, the end cell; in window cells, face cells and (for the 620-cell prototype region at margin 200) sheet pixels of `region_scale` (margin 400, origin i 7656 j 360)
+    {
+        const NAMES: [&str; 8] = ["W", "E", "N", "S", "NW", "NE", "SW", "SE"];
+        let mut heads: Vec<(u32, usize)> = (0..n).filter(|&p| dir[p] != 9 && u[p] == 1 && inbox(p)).map(|p| (d[p], p)).collect();
+        heads.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+        for &(len, p) in heads.iter().take(12) {
+            let mut q = p;
+            let mut on_cut = 0;
+            for _ in 1..len {
+                on_cut += usize::from(cut[q]);
+                q = r.receiver[q] as usize;
+            }
+            let (ox, oy) = g.origin;
+            let face = |c: usize| ((c % g.w) + ox, (c / g.w) + oy);
+            let sheet = |c: usize| (face(c).0 as i64 - 7656, face(c).1 as i64 - 360);
+            println!(
+                "    run of {len} steps {}: head face cell {:?} (sheet px {:?}) to end {:?} (sheet px {:?}); {on_cut} of its cells on cut cells",
+                NAMES[dir[p] as usize], face(p), sheet(p), face(q), sheet(q)
+            );
+        }
+    }
+    // PLANET_LINE=x0,y0,x1,y1 (sheet pixels of region_scale, margin 400): the cells along the line, their receiver direction, the fill depth (flat), the cut flag and the area
+    if let Ok(s) = std::env::var("PLANET_LINE") {
+        const NAMES: [&str; 8] = ["W", "E", "N", "S", "NW", "NE", "SW", "SE"];
+        let v: Vec<i64> = s.split(',').map(|x| x.trim().parse().unwrap()).collect();
+        let (ox, oy) = (g.origin.0 as i64, g.origin.1 as i64);
+        let steps = (v[2] - v[0]).abs().max((v[3] - v[1]).abs());
+        let mut counts = [0usize; 9];
+        let (mut flat, mut cutn, mut tot) = (0usize, 0usize, 0usize);
+        let mut lines: Vec<String> = Vec::new();
+        for k in 0..=steps {
+            let (x, y) = (v[0] + (v[2] - v[0]) * k / steps, v[1] + (v[3] - v[1]) * k / steps);
+            let (wi, wj) = (x + 7656 - ox, y + 360 - oy);
+            if wi < 0 || wj < 0 || wi >= g.w as i64 || wj >= g.h as i64 {
+                continue;
+            }
+            // the nearest channel cell within 2 cells of the line point
+            let mut best: Option<usize> = None;
+            for dj in -2i64..=2 {
+                for di in -2i64..=2 {
+                    let (ci, cj) = (wi + di, wj + dj);
+                    if ci < 0 || cj < 0 || ci >= g.w as i64 || cj >= g.h as i64 {
+                        continue;
+                    }
+                    let p = cj as usize * g.w + ci as usize;
+                    if ch[p] && best.is_none_or(|b| r.area[p] > r.area[b]) {
+                        best = Some(p);
+                    }
+                }
+            }
+            if let Some(p) = best {
+                tot += 1;
+                counts[dir[p] as usize] += 1;
+                let depth = r.filled[p] - z[p];
+                flat += usize::from(depth >= 0.0005);
+                cutn += usize::from(cut[p]);
+                if k % 6 == 0 {
+                    lines.push(format!("sheet px ({x}, {y}): channel cell dir {} area {:.2e} m2 fill depth {:.3} m cut {}", if dir[p] == 9 { "none" } else { NAMES[dir[p] as usize] }, r.area[p], depth, cut[p]));
+                }
+            }
+        }
+        println!("  LINE {s}: {tot} channel cells within 2 cells of the {steps}-step line; directions W E N S NW NE SW SE none {:?}; in a flat (fill depth >= 0.5 mm) {flat}; on a cut cell {cutn}", counts);
+        for l in lines {
+            println!("    {l}");
+        }
+    }
+    let box_cut = (0..n).filter(|&p| inbox(p) && cut[p]).count();
+    println!(
+        "  runs against the breach's cut cells [{label}]: cells the breach lowered in the box {box_cut}; channel steps in the box {all}, on a cut cell {all_cut} ({:.2} %), on or next to one {all_near} ({:.2} %); diagonal steps {diag_all}, on a cut cell {diag_cut}",
+        100.0 * all_cut as f64 / all.max(1) as f64,
+        100.0 * all_near as f64 / all.max(1) as f64
+    );
+    for (name, (s, c, nr, dg)) in [("runs over 10 cells", rows[0]), ("runs over 20 cells", rows[1]), ("diagonal runs over 10 cells", rows[2])] {
+        println!(
+            "    {name}: {s} steps, {dg} diagonal; on a cut cell {c} ({:.1} %), on or next to a cut cell {nr} ({:.1} %)",
+            100.0 * c as f64 / s.max(1) as f64,
+            100.0 * nr as f64 / s.max(1) as f64
+        );
+    }
+}
