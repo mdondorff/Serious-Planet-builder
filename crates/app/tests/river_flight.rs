@@ -12,7 +12,7 @@ use planet_cache::graph_store::GraphSpec;
 use planet_cache::l_writer::{bake_l, ChannelFeed, GraphInput, LBake};
 use planet_cache::layer_l::LTileSpec;
 use planet_cache::pack::TileStore;
-use planet_cache::river_read::{RiverReader, DEFAULT_CACHE_BYTES};
+use planet_cache::river_read::RiverReader;
 use planet_core::{Face, TileId, Vec3};
 use planet_generators::bake::channel_graph::{channels_from_graph, ChannelGraph};
 use planet_generators::bake::flood::priority_flood_with;
@@ -29,6 +29,8 @@ const R: f64 = 6_371_000.0;
 const RES: u32 = 64;
 /// The node's cells an edge in the flight (the terrain's own `cells`).
 const NODE_CELLS: u32 = 32;
+/// A bound a little under the flight's unbounded peak (about 743 kB), so that the reader's eviction runs and the assertion can fail.
+const CACHE_BOUND: usize = 400_000;
 
 struct Memory(Vec<Channel>);
 
@@ -117,7 +119,7 @@ fn a_flight_over_a_one_face_world_with_a_channel_graph_plans_its_rivers_through_
     assert!(!commit.graph.is_empty(), "the commit holds the graph");
 
     let store = Arc::new(TileStore::open(&dir.0, world.params()).unwrap());
-    let reader = RiverReader::new(store, commit, DEFAULT_CACHE_BYTES).expect("the reader of the commit");
+    let reader = RiverReader::new(store, commit, CACHE_BOUND).expect("the reader of the commit");
     let src = ReaderRiverSource::new(Arc::new(reader));
     let cells = f64::from(src.reader().grid_dims().0);
 
@@ -161,8 +163,20 @@ fn a_flight_over_a_one_face_world_with_a_channel_graph_plans_its_rivers_through_
     let decodes = src.reader().decodes();
     println!(
         "river flight: {asked} nodes asked, {with_river} carry a river (levels {:?}); reader cache peak {} B of {} B, {decodes} decodes",
-        drawn_px_levels, peak, DEFAULT_CACHE_BYTES
+        drawn_px_levels, peak, CACHE_BOUND
     );
+    // A negative control: the position farthest from every channel point (on a 32 x 32 sample grid) at the finest level carries no river.
+    let far = (0..32)
+        .flat_map(|i| (0..32).map(move |j| (8.0 * f64::from(i) + 4.0, 8.0 * f64::from(j) + 4.0)))
+        .max_by(|a, b| {
+            let d = |q: &(f64, f64)| {
+                channels.iter().flat_map(|c| c.points.iter()).map(|p| (p.0 - q.0).hypot(p.1 - q.1)).fold(f64::MAX, f64::min)
+            };
+            d(a).total_cmp(&d(b))
+        })
+        .unwrap();
+    let control = plan_nodes_rivers(&src, NODE_CELLS, &[(0, tile_at(14, to_face(far.0), to_face(far.1)), 0.0)]).expect("the control plan");
+    assert!(control.nodes.is_empty(), "a node at {far:?}, far from every channel, carries no river");
     assert!(with_river > 0, "some node of the flight carries a river");
-    assert!(peak <= DEFAULT_CACHE_BYTES, "the reader holds {peak} B, its bound is {DEFAULT_CACHE_BYTES} B");
+    assert!(peak <= CACHE_BOUND, "the reader holds {peak} B, its bound is {CACHE_BOUND} B");
 }
