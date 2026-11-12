@@ -13,6 +13,7 @@ One row per measurement of a gate of `docs/design/terrain-target.md` section 12.
 | G-CON | 14 | prototype landmass, production phase plan, two k=4 runs | 12,288 cells/face edge, 149.3e6 cells | 1094d82a | hydro::verify at k=4: Q at outlets 1.2e-14, Q_w closure 1.5e-14, confluences 5.7e-16 and 4.4e-16, A_d at outlets 5.4e-13, 0 disconnected, broken or miscovered; identical in both runs | pass | explorer |
 | G-CON | - | prototype landmass | 3.26 km | 4fa17ae5 | exact on the landmass (hydrology-h1 log) | pass | explorer |
 | G-PROFILE | - | - | - | - | no measurement on main | not run | - |
+| G-SEAM | - | - | - | - | gate added by ADR 0119 (owner, 2026-11-12); no measurement on main | not run | - |
 | G-LOCAL | - | - | - | - | no measurement on main | not run | - |
 | G-ROUND | 14 | prototype region | 12,288 cells/face edge | 2e5453ea | 0 cells differ on windows of 1e6 to 44e6 cells | pass | explorer |
 | G-ROUND | 14 and 15 | prototype region and four hills-and-plains windows | 12,288 cells/face edge | e4c03141 | 0 cells differ, 20 steps of 5 and 12 steps of 4, 1, 2, 5 and 8 threads | pass | spikes |
