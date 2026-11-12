@@ -1,0 +1,1 @@
+- 2026-11-13 lake-water-source archived: the water field answers a commit's lakes after the sea (REND-058, item 15 PR 4a); a lake tile takes the lake's level for the whole tile until PR 4b masks the drawn cells.
