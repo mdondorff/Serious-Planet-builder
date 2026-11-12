@@ -104,3 +104,103 @@ fn the_spacing_and_the_choice_handle_every_edge() {
     let w = WorldPrecision::new(-1e39, 1e39, EPS, EPSILON_MAX_M);
     assert!(w.f64_rounds, "a span that does not fit an f32 runs in f64");
 }
+
+// spec: GEN-175, TEST-122
+#[test]
+fn apply_plan_sets_every_epsilon_that_acts_on_an_f32_surface() {
+    use planet_generators::bake::build::PlanParams;
+    let spill = std::path::PathBuf::from("unused.f64");
+    // Earth: today's plan, with the world remembered
+    let earth = WorldPrecision::new(-11_000.0, 9_000.0, EPS, EPSILON_MAX_M);
+    let (std, e) = (PlanParams::standard(5, 1, spill.clone()), PlanParams::standard_for(5, 1, spill.clone(), &earth));
+    assert_eq!(
+        (e.epsilon, e.carve.epsilon, e.sediment.carve.epsilon, e.carve.round_f32),
+        (std.epsilon, std.carve.epsilon, std.sediment.carve.epsilon, std.carve.round_f32)
+    );
+    assert_eq!(e.precision, Some(earth));
+    assert_eq!(std.precision, None, "the plain standard plan checks no bounds");
+    // 60 km: the carve, H1's fill and pass 2 (the sediment pass and K7) flood with epsilon_w; pass 2 never takes the f32 flag
+    let w = WorldPrecision::new(-10_000.0, 50_000.0, EPS, EPSILON_MAX_M);
+    let p = PlanParams::standard_for(5, 1, spill.clone(), &w);
+    assert!(w.epsilon_w > EPS);
+    assert_eq!((p.epsilon, p.carve.epsilon, p.sediment.carve.epsilon), (w.epsilon_w, w.epsilon_w, w.epsilon_w));
+    assert!(p.carve.round_f32 && !p.sediment.carve.round_f32);
+    // above epsilon_max: f64 rounds, the profile epsilon everywhere
+    let big = WorldPrecision::new(-200_000.0, 200_000.0, EPS, EPSILON_MAX_M);
+    let q = PlanParams::standard_for(5, 1, spill, &big);
+    assert!(!q.carve.round_f32 && q.epsilon == EPS && q.carve.epsilon == EPS && q.sediment.carve.epsilon == EPS);
+}
+
+// spec: GEN-175, TEST-122
+#[test]
+fn a_height_outside_the_bounds_is_refused_naming_the_cell() {
+    use planet_generators::bake::build::{build_resident, PlanParams};
+    let w = WorldPrecision::new(-11_000.0, 9_000.0, EPS, EPSILON_MAX_M);
+    let mut z = vec![100.0; 16];
+    assert!(w.check_within_radius(&z, |c| c as u64 + 1000).is_ok());
+    z[5] = -11_000.5;
+    let e = w.check_within_radius(&z, |c| c as u64 + 1000).unwrap_err();
+    assert!(e.contains("cell 5") && e.contains("global id 1005") && e.contains("-11000.5") && e.contains("R = 11000"), "{e}");
+    z[5] = f64::NAN;
+    assert!(w.check_within_radius(&z, |c| c as u64).is_err(), "a NaN is outside the bounds");
+    // through the plan: a 50 km summit in a world declared as Earth's span is refused after the rounds
+    const N: usize = 32;
+    let g = Grid::new(N, N, 800.0);
+    let mut z0 = vec![0.0; N * N];
+    for j in 4..N - 4 {
+        for i in 4..N - 4 {
+            z0[j * N + i] = 50_000.0 + jitter(3, (j * N + i) as u64, 0);
+        }
+    }
+    let outlet = g.outlets(&z0, 0.0);
+    let mut p = PlanParams::standard_for(5, 1, std::env::temp_dir().join(format!("planet-wire-{}.f64", std::process::id())), &w);
+    p.rounds = 1;
+    p.carve.steps = 5;
+    let e = build_resident(&g, z0, &outlet, &p, &|_| (900.0, 12.0), &|_| {}).err().expect("the plan refuses the surface");
+    assert!(e.to_string().contains("GEN-175") && e.to_string().contains("global id"), "{e}");
+}
+
+// spec: GEN-175, TEST-122
+/// H1's flood on the 60 km world: a crater floor at 39 km under a rim at 40 km fills to the rim and is graded (GEN-173) by steps of at least epsilon / sqrt 2. H1 reads the f32 surface and floods it in f64: every
+/// lifted cell stands strictly above its receiver with epsilon_w. A copy of that fill narrowed to f32 would collapse unless its epsilon is sqrt 2 x the spacing: recorded here, so that a stored f32 fill takes the factor.
+#[test]
+fn h1s_fill_descends_strictly_on_the_60_km_world() {
+    use planet_generators::bake::carve::narrow_f32;
+    use planet_generators::bake::route::{route_rules_filled, NONE};
+    const N: usize = 40;
+    let g = Grid::new(N, N, 800.0);
+    let mut z = vec![0.0; N * N];
+    for j in 0..N {
+        for i in 0..N {
+            let ring = (i as f64 - 19.5).abs().max((j as f64 - 19.5).abs());
+            z[j * N + i] = if ring < 6.0 {
+                39_000.0
+            } else if ring < 7.0 {
+                40_000.0
+            } else {
+                (40_000.0 - 3_000.0 * (ring - 6.0)).max(1.0)
+            };
+        }
+    }
+    narrow_f32(&mut z);
+    let outlet = g.outlets(&z, 0.0);
+    let w = WorldPrecision::new(-10_000.0, 50_000.0, EPS, EPSILON_MAX_M);
+    // (lifted cells, those not above their receiver, the same on the fill narrowed to f32)
+    let ties = |eps: f64| {
+        let (r, mut filled) = route_rules_filled(&g, &z, &outlet, eps, 5, 0.0, None, RoundRules::ROUND);
+        let lifted: Vec<usize> = (0..N * N).filter(|&c| filled[c] > z[c] && r.receiver[c] != NONE).collect();
+        let count = |f: &[f64]| lifted.iter().filter(|&&c| f[c] <= f[r.receiver[c] as usize]).count();
+        let wide = count(&filled);
+        narrow_f32(&mut filled);
+        (lifted.len(), wide, count(&filled))
+    };
+    let (lifted, f64_ties, _) = ties(w.epsilon_w);
+    assert!(lifted > 50, "the crater floor is lifted: {lifted} cells");
+    assert_eq!(f64_ties, 0, "H1 floods in f64: every lifted cell stands above its receiver with epsilon_w");
+    let (_, _, narrowed_ties) = ties(w.epsilon_w);
+    assert!(
+        narrowed_ties > 0,
+        "the grade steps by epsilon / sqrt 2: a fill narrowed to f32 collapses at epsilon_w (the fixture has teeth)"
+    );
+    assert_eq!(ties(w.epsilon_w * std::f64::consts::SQRT_2 * 1.001).2, 0, "with sqrt 2 x the spacing a narrowed fill descends strictly");
+}

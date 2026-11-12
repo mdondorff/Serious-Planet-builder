@@ -13,6 +13,7 @@ use super::carve::CarveParams;
 use super::channel_graph::ChannelGraph;
 use super::hydro::{hydrology, verify_with_area, weighted_cell_area, Hydro, HydroParams, HydroStats, Verify};
 use super::lakes::{lake_records, river_pieces, Lakes};
+use super::precision::WorldPrecision;
 use super::probe;
 use super::round::{solve_rounds, RoundReport};
 use super::route::{route_rules_filled, RoundRules};
@@ -40,6 +41,8 @@ pub struct PlanParams {
     /// The epsilon of the weighted route and the filled surface of H1.
     pub epsilon: f64,
     pub sediment: Pass2Params,
+    /// The world's precision (GEN-175), when the plan was made for known height bounds: the epsilons that act on an f32 surface are its `epsilon_w` and the heights after the rounds are checked against its `R`. `None`: no check (the epsilons are the caller's).
+    pub precision: Option<WorldPrecision>,
     /// Where the pre-carve surface waits (created and deleted by the plan).
     pub spill: PathBuf,
 }
@@ -57,8 +60,19 @@ impl PlanParams {
             hydro: HydroParams::default(),
             epsilon: 1e-3,
             sediment,
+            precision: None,
             spill,
         }
+    }
+}
+
+impl PlanParams {
+    /// [`PlanParams::standard`] for a world with known height bounds (GEN-175): the carve, H1's fill and pass 2 (K7 and the sediment pass) flood with the world's `epsilon_w`, the rounds are f32 or f64 as the world chooses,
+    /// and `build_resident` refuses a surface whose heights leave the bounds.
+    pub fn standard_for(seed: u64, threads: usize, spill: PathBuf, world: &WorldPrecision) -> PlanParams {
+        let mut p = PlanParams::standard(seed, threads, spill);
+        world.apply_plan(&mut p);
+        p
     }
 }
 
@@ -196,6 +210,9 @@ pub fn build_resident(
     let rounds = solve_rounds(grid, &mut z, outlet, &p.carve, p.rounds, &p.threads, p.seed);
     lap("rounds", &mut phases);
     mark("after the rounds");
+    if let Some(w) = &p.precision {
+        w.check_within_radius(&z, |c| grid.global_id(c)).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    }
 
     // ---- H1: drivers, the weighted route, the filled surface, the hydrology
     let (weight, runoff, evap) = drivers(&z, p.threads, climate);
