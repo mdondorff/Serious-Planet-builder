@@ -625,7 +625,8 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
     }
     let size = if smoke { (640u32, 360u32) } else { (2560u32, 1440u32) };
     // A smoke run keeps the real tolerance in pixels where the frame allows it (the plan needs viewport / tau above about 64 for 32 cells).
-    let tau = if smoke { o.tau.min(f64::from(size.1) / 72.0) } else { o.tau };
+    // The river scene's smoke resolves its rivers: at 360 px a tolerance of 5 px keeps the plan at levels 6 to 7 (nodes of 2 km), 2.5 px reaches level 17.
+    let tau = if smoke { o.tau.min(f64::from(size.1) / 72.0).min(if river { 2.5 } else { f64::MAX }) } else { o.tau };
     let max_level = o.finest_level_for(o.cells);
     let lod = LodParams {
         cells: o.cells,

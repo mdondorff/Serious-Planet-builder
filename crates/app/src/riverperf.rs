@@ -44,6 +44,9 @@ fn face_coord(p: f64, cells: f64) -> f64 {
     2.0 * (p + 0.5) / cells - 1.0
 }
 
+/// The ground height above which a point of the course counts as land.
+const LAND_MIN_M: f64 = 20.0;
+
 /// The two flights over the commit's rivers: `frames` cameras each. The course is the longest channel's points inside the commit's tiles shrunk by one tile (the flight stays a tile from the edge of the commit's
 /// tiles, where the exact base and L end: the fixture's seam).
 pub fn views(
@@ -70,7 +73,9 @@ pub fn views(
     if x1 <= x0 || y1 <= y0 {
         return Err("the commit's tiles leave no interior a tile from their edge".into());
     }
-    let inside = |p: &(f64, f64)| p.0 >= x0 && p.0 < x1 && p.1 >= y0 && p.1 < y1;
+    let dir_of = |p: (f64, f64)| face_to_direction(&TangentWarp, face, face_coord(p.0, cells), face_coord(p.1, cells));
+    // On land: the burned beds are floored at the sea level, so a course in the coastal plain flies over the sea (a camera over water draws no river).
+    let inside = |p: &(f64, f64)| p.0 >= x0 && p.0 < x1 && p.1 >= y0 && p.1 < y1 && field.height(dir_of(*p)) > LAND_MIN_M;
     // The interior run of each channel (its longest stretch of consecutive points inside), the longest of all.
     let mut best: Vec<(f64, f64)> = Vec::new();
     for &(f, ti, tj) in commit.tiles.keys() {
@@ -94,7 +99,6 @@ pub fn views(
     if best.len() < 8 {
         return Err(format!("no channel runs 8 points inside the commit's tiles a tile from their edge (the longest has {})", best.len()));
     }
-    let dir_of = |p: (f64, f64)| face_to_direction(&TangentWarp, face, face_coord(p.0, cells), face_coord(p.1, cells));
     // A position along the course by parameter `u` in `[0, 1]` (linear between points, by point index).
     let at = |u: f64| -> (f64, f64) {
         let x = u.clamp(0.0, 1.0) * (best.len() - 1) as f64;
