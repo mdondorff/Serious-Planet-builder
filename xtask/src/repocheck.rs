@@ -328,4 +328,55 @@ mod tests {
         assert!(!block.contains("slow-timeout") && !block.contains("retries"), "no limit and no retry changes: {block}");
         assert!(toml.contains("warp-heavy = { max-threads = 1 }"), "the group runs one test at a time");
     }
+
+    fn pinned_channel() -> String {
+        let toml = std::fs::read_to_string(repo_root().join("rust-toolchain.toml")).expect("rust-toolchain.toml");
+        let line = toml.lines().find(|l| l.trim_start().starts_with("channel")).expect("a `channel` line in rust-toolchain.toml");
+        line.split('"').nth(1).expect("a quoted channel").to_string()
+    }
+
+    // spec: BUILD-050
+    #[test]
+    fn the_rust_toolchain_is_one_exact_release_and_every_ci_job_installs_that_release() {
+        let channel = pinned_channel();
+        let parts: Vec<&str> = channel.split('.').collect();
+        assert!(
+            parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit())),
+            "rust-toolchain.toml pins an exact release (X.Y.Z), not `{channel}` (ADR 0114 point 6)"
+        );
+        let w = workflow();
+        assert!(!w.contains("rust-toolchain@stable"), "ci.yml installs a moving `stable`: pin it to {channel}");
+        let jobs = w.matches("dtolnay/rust-toolchain@").count();
+        let pinned = w.matches(&format!("toolchain: {channel}")).count();
+        assert!(jobs > 0 && jobs == pinned, "every toolchain step of ci.yml names `toolchain: {channel}` ({pinned} of {jobs} do)");
+        assert!(!w.contains("toolchain: stable") && !w.contains("toolchain: nightly"), "ci.yml names a moving toolchain");
+    }
+
+    // spec: BUILD-050
+    #[test]
+    fn cargo_lock_is_committed_and_no_compiler_flag_or_cpu_feature_changes_the_float_results() {
+        let root = repo_root();
+        assert!(root.join("Cargo.lock").is_file(), "Cargo.lock is committed (ADR 0114 point 6)");
+        let ignore = std::fs::read_to_string(root.join(".gitignore")).unwrap_or_default();
+        assert!(!ignore.lines().any(|l| l.trim() == "Cargo.lock"), "Cargo.lock must not be ignored");
+        // No target CPU, no fast-math style flag, no RUSTFLAGS in any file that sets the build.
+        let mut files = vec![root.join(".cargo/config.toml"), root.join("Cargo.toml"), root.join(".github/workflows/ci.yml")];
+        if let Ok(rd) = std::fs::read_dir(root.join("crates")) {
+            for e in rd.flatten() {
+                files.push(e.path().join("Cargo.toml"));
+            }
+        }
+        files.push(root.join("xtask/Cargo.toml"));
+        for f in files {
+            let Ok(text) = std::fs::read_to_string(&f) else { continue };
+            for needle in ["target-cpu", "target-feature", "fast-math", "ffast-math", "RUSTFLAGS", "opt-level = \"z\""] {
+                let hits: Vec<&str> = text.lines().filter(|l| !l.trim_start().starts_with('#') && l.contains(needle)).collect();
+                assert!(
+                    hits.is_empty(),
+                    "{} sets `{needle}`: the build settings stay the profile's defaults (ADR 0114 point 6): {hits:?}",
+                    f.display()
+                );
+            }
+        }
+    }
 }
