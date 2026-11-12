@@ -91,6 +91,31 @@ fn scene_capped(alt: f64, pitch_deg: f64, tau_px: f64, max_level: u8) -> (Terrai
     (plan, field)
 }
 
+/// The near pose seen from `k` times as far along its own line of sight: the camera backs away from the point its axis meets on the ground (so the river stays in view), the heading and the pitch kept.
+fn scene_backed(alt: f64, pitch_deg: f64, tau_px: f64, k: f64) -> (TerrainPlan, Reference) {
+    let field = Reference(1);
+    let d = highland();
+    let heading = Vec3::new(0.0, 0.0, 1.0).cross(d).normalized();
+    let ground = d * (R + field.height(d));
+    let target = ground + heading * (alt / libm::tan(pitch_deg.to_radians()));
+    let near = d * (R + field.height(d) + alt);
+    let pos = target + (near - target) * k;
+    let camera = Camera::at_surface_point(PlanetFixed(pos), heading, pitch_deg.to_radians(), 60f64.to_radians(), 1.6, 0.1);
+    let plan = plan_terrain_field(
+        &TerrainRequest {
+            camera,
+            size: SIZE,
+            view: TerrainView::Level,
+            lod: LodParams { tau_px, ..lod() },
+            face_mapping: "tangent-v1".into(),
+            seed: 1,
+        },
+        &field,
+    )
+    .unwrap();
+    (plan, field)
+}
+
 fn scene() -> (TerrainPlan, Reference) {
     scene_at(40.0, 25.0, 4.0)
 }
@@ -471,9 +496,10 @@ fn flying_out_a_river_fades_with_its_width_in_samples_and_its_wet_pixels_fall() 
     let (near, field) = scene_at(25.0, 40.0, 4.0);
     let src = make_river(&near, 10.0);
     let mut series: Vec<(f64, u8, usize, u8, f64)> = Vec::new();
-    for k in 0..8 {
-        let alt = 25.0 * (0..k).fold(1.0, |a, _| a * 1.4);
-        let (plan, _) = scene_at(alt, 40.0, 4.0);
+    for k in 0..11 {
+        let scale = (0..k).fold(1.0, |a, _| a * 1.4);
+        let alt = 25.0 * scale;
+        let (plan, _) = scene_backed(25.0, 40.0, 4.0, scale);
         let rp = plan_river_over(&plan, &src, RIVER_LAYERS as usize);
         let mut r = renderer(&ctx, &plan, &field);
         let (base, _) = frame(&ctx, &mut r, &plan, None);
@@ -481,6 +507,14 @@ fn flying_out_a_river_fades_with_its_width_in_samples_and_its_wet_pixels_fall() 
         let mass: f64 = wetness_mass(&base, &with);
         let finest = plan.nodes.iter().map(|n| n.level).max().unwrap();
         let fade = rp.nodes.iter().map(|n| n.fade).max().unwrap_or(0);
+        let (parts, gaps) = connected_parts(&wetness(&base, &with));
+        println!("flight-out: altitude {alt:8.1} m: {parts} connected part(s) with one pixel of gap allowed, {gaps} without");
+        if mass > 20.0 {
+            assert_eq!(
+                parts, 1,
+                "the river is broken into {parts} parts at {alt} m (wet mass {mass:.1}, {gaps} parts without the one pixel of gap)"
+            );
+        }
         series.push((alt, finest, rp.nodes.len(), fade, mass));
     }
     for (alt, finest, nodes, fade, mass) in &series {
@@ -501,13 +535,121 @@ fn flying_out_a_river_fades_with_its_width_in_samples_and_its_wet_pixels_fall() 
         );
     }
     assert!(series[0].4 > 200.0 && series[series.len() - 1].4 == 0.0);
-    // Normalised by the perspective (the pixels of a river fall with the square of the altitude): reported for the owner's look review, with the sequence above.
-    let norm: Vec<String> = series.iter().map(|s| format!("{:.2e}", s.4 * s.0 * s.0)).collect();
-    println!("flight-out: wet mass times altitude squared: {}", norm.join(" "));
+    // Normalised by the perspective (the pixels of a river fall with the square of the altitude): while the plan's strongest fade is full no step lowers it by more than half, and inside the fade it falls (architect, 2026-11-12).
+    let norm: Vec<f64> = series.iter().map(|s| s.4 * s.0 * s.0).collect();
+    println!("flight-out: wet mass times altitude squared: {}", norm.iter().map(|v| format!("{v:.2e}")).collect::<Vec<_>>().join(" "));
+    for (w, n) in series.windows(2).zip(norm.windows(2)) {
+        // While the river is resolved (at least 50 wet pixels at the nearer pose: a river under about two pixels wide moves by whole pixels from pose to pose, 188 m to 263 m measures a fall of 56 % on the pixel grid alone).
+        if w[0].3 == 255 && w[1].3 == 255 && w[0].4 >= 50.0 {
+            assert!(
+                n[1] >= 0.5 * n[0],
+                "at full strength the normalised mass falls from {:.3e} to {:.3e} between {} m and {} m",
+                n[0],
+                n[1],
+                w[0].0,
+                w[1].0
+            );
+        }
+        if w[0].3 < 255 && w[0].3 > 0 && w[1].3 > 0 {
+            assert!(
+                n[1] <= n[0] * 1.05 + 1.0,
+                "inside the fade the normalised mass grows from {:.3e} to {:.3e} between {} m and {} m",
+                n[0],
+                n[1],
+                w[0].0,
+                w[1].0
+            );
+        }
+    }
+}
+
+/// The 8-connected parts of the wet pixels (wetness over a half): with a gap of one pixel allowed (the mask grown by one pixel) and without. A river that is one line has one part.
+fn connected_parts(w: &[f32]) -> (usize, usize) {
+    let (width, height) = (SIZE.0 as usize, SIZE.1 as usize);
+    let wet: Vec<bool> = w.iter().map(|v| *v > 0.5).collect();
+    let grown: Vec<bool> = (0..width * height)
+        .map(|k| {
+            let (x, y) = ((k % width) as i64, (k / width) as i64);
+            (-1..=1).any(|dy| {
+                (-1..=1).any(|dx| {
+                    let (px, py) = (x + dx, y + dy);
+                    px >= 0 && py >= 0 && (px as usize) < width && (py as usize) < height && wet[py as usize * width + px as usize]
+                })
+            })
+        })
+        .collect();
+    let count = |mask: &[bool]| {
+        let mut seen = vec![false; mask.len()];
+        let mut parts = 0;
+        for start in 0..mask.len() {
+            if !mask[start] || seen[start] {
+                continue;
+            }
+            parts += 1;
+            let mut stack = vec![start];
+            seen[start] = true;
+            while let Some(k) = stack.pop() {
+                let (x, y) = ((k % width) as i64, (k / width) as i64);
+                for dy in -1..=1i64 {
+                    for dx in -1..=1i64 {
+                        let (px, py) = (x + dx, y + dy);
+                        if px >= 0 && py >= 0 && (px as usize) < width && (py as usize) < height {
+                            let n = py as usize * width + px as usize;
+                            if mask[n] && !seen[n] {
+                                seen[n] = true;
+                                stack.push(n);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        parts
+    };
+    (count(&grown), count(&wet))
 }
 
 /// The river's wet mass of a frame: the sum over its pixels of how much the river darkened them, in pixels (a pixel half darkened counts a half).
 fn wetness_mass(base: &[[f32; 4]], with: &[[f32; 4]]) -> f64 {
     let w = wetness(base, with);
     w.iter().map(|v| f64::from(*v)).sum()
+}
+
+// spec: REND-059
+#[test]
+fn the_strength_of_a_node_scales_its_river_in_the_shader_and_a_river_narrower_than_the_coarse_level_is_reported_across_levels() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let (plan, field) = scene();
+    let full = river_plan(&plan, RIVER_LAYERS as usize);
+    let half = RiverPlan { nodes: full.nodes.iter().map(|n| RiverNode { fade: 128, ..n.clone() }).collect(), dropped: 0 };
+    let mut r = renderer(&ctx, &plan, &field);
+    let (base, _) = frame(&ctx, &mut r, &plan, None);
+    let (with_full, _) = frame(&ctx, &mut r, &plan, Some(&full));
+    let (with_half, _) = frame(&ctx, &mut r, &plan, Some(&half));
+    let (m_full, m_half) = (darkening(&base, &with_full), darkening(&base, &with_half));
+    let ratio = m_half / m_full;
+    println!("strength 128 against 255: darkening {m_half:.1} against {m_full:.1}: ratio {ratio:.3}");
+    assert!((ratio - 128.0 / 255.0).abs() < 0.03, "half strength darkens {ratio:.3} of full strength");
+    // Across two levels with a river narrower than the coarse level's step (a width of 1.2 times a coarse sample, 0.6 of it at the fine level's): reported, not gated (the fade is per node and is not morphed).
+    let finest = plan.nodes.iter().map(|n| n.level).max().unwrap();
+    let (coarse_plan, _) = scene_capped(25.0, 40.0, 4.0, finest - 1);
+    let src = make_river(&plan, 2.4);
+    let (fine, coarse) = (plan_river_over(&plan, &src, RIVER_LAYERS as usize), plan_river_over(&coarse_plan, &src, RIVER_LAYERS as usize));
+    let mut rc = renderer(&ctx, &coarse_plan, &field);
+    let (base_c, _) = frame(&ctx, &mut rc, &coarse_plan, None);
+    let (with_c, _) = frame(&ctx, &mut rc, &coarse_plan, Some(&coarse));
+    let (base_f, _) = frame(&ctx, &mut r, &plan, None);
+    let (with_f, _) = frame(&ctx, &mut r, &plan, Some(&fine));
+    let (df, dc) = (darkening(&base_f, &with_f), darkening(&base_c, &with_c));
+    println!(
+        "level pop of a thin river (2.4 cells): fine level fade {:?}, coarse level fade {:?}; darkening {df:.1} (fine) against {dc:.1} (coarse): ratio {:.2}",
+        fine.nodes.iter().map(|n| n.fade).max(),
+        coarse.nodes.iter().map(|n| n.fade).max(),
+        dc / df.max(1e-6)
+    );
+}
+
+/// How much the river darkened a frame: the sum over its pixels of the relative luminance lost.
+fn darkening(base: &[[f32; 4]], with: &[[f32; 4]]) -> f64 {
+    base.iter().zip(with).map(|(a, b)| f64::from((lum(a) - lum(b)).max(0.0) / lum(a).max(1e-6))).sum()
 }

@@ -107,47 +107,78 @@ fn a_node_with_a_river_in_range_carries_the_coverage_of_its_samples_and_one_with
 
 // spec: REND-059
 #[test]
-fn a_node_carries_a_river_while_it_is_at_least_a_sample_wide_and_fades_linearly_to_two_samples() {
-    // A river 8 cells wide. A level 1 tile is 128 L cells over 32 samples: 4 cells a sample (two samples wide), level 0 is 8 (one sample), and between them the strength is linear in the width in samples.
+fn a_node_carries_a_river_from_half_a_sample_wide_and_fades_linearly_to_one_sample() {
+    // A river 8 cells wide. A level 1 tile is 128 L cells over 32 samples: 4 cells a sample (two samples wide), level 0 is 8 cells a sample (one sample wide): both at full strength.
     let src = Source::new(vec![channel(&[(60.0, 100.0), (200.0, 120.0)], q_for(8.0))]);
-    let at = |level: u8, x: u32, y: u32| {
+    let at = |src: &Source, level: u8, x: u32, y: u32| {
         let t = tile(2, level, x, y);
         let (_, step) = node_window(t, 32, GRID.cells);
-        (plan_rivers(&request(&src, 32), &[(0, t, 0.0)]).unwrap(), step)
+        (plan_rivers(&request(src, 32), &[(0, t, 0.0)]).unwrap(), step)
     };
-    let (full, step) = at(1, 0, 0);
+    let (two, step) = at(&src, 1, 0, 0);
     assert_eq!(step, 4.0);
-    assert_eq!((full.nodes.len(), full.nodes[0].fade), (1, 255), "two samples wide: full strength");
-    let (finer, _) = at(2, 1, 1);
-    assert_eq!(finer.nodes[0].fade, 255, "wider than two samples: full strength");
-    let (none, step) = at(0, 0, 0);
+    assert_eq!((two.nodes.len(), two.nodes[0].fade), (1, 255), "two samples wide: full strength");
+    let (one, step) = at(&src, 0, 0, 0);
     assert_eq!(step, 8.0);
-    assert!(none.nodes.is_empty(), "one sample wide: nothing is drawn (the strength is zero)");
-    // Between: a river 6 cells wide at 4 cells a sample is 1.5 samples: half strength (the rounding of 127.5).
-    let src6 = Source::new(vec![channel(&[(60.0, 100.0), (200.0, 120.0)], q_for(6.0))]);
-    let p = plan_rivers(&request(&src6, 32), &[(0, tile(2, 1, 0, 0), 0.0)]).unwrap();
-    assert_eq!(p.nodes[0].fade, 128, "1.5 samples wide: halfway");
-    // Narrower than one sample: not drawn, and a node far too coarse reads no tile at all.
+    assert_eq!((one.nodes.len(), one.nodes[0].fade), (1, 255), "one sample wide: full strength");
+    // Between half a sample and one: linear, 5 cells at 8 cells a sample is 0.625 samples: a quarter of the way (63.75 rounds to 64).
+    let src5 = Source::new(vec![channel(&[(60.0, 100.0), (200.0, 120.0)], q_for(5.0))]);
+    assert_eq!(at(&src5, 0, 0, 0).0.nodes[0].fade, 64, "0.625 samples wide: a quarter");
+    // Half a sample or less: not drawn.
+    let src4 = Source::new(vec![channel(&[(60.0, 100.0), (200.0, 120.0)], q_for(4.0))]);
+    assert!(at(&src4, 0, 0, 0).0.nodes.is_empty(), "exactly half a sample wide: nothing");
     let src2 = Source::new(vec![channel(&[(60.0, 100.0), (200.0, 120.0)], q_for(2.0))]);
-    assert!(plan_rivers(&request(&src2, 32), &[(0, tile(2, 1, 0, 0), 0.0)]).unwrap().nodes.is_empty(), "half a sample wide");
-    assert!(plan_rivers(&request(&src, 32), &[(0, tile(2, 0, 0, 0), 0.0)]).unwrap().nodes.is_empty());
-    let reads = src.reads.lock().unwrap().len();
-    // A node whose samples are 40 cells apart (more than the widest river's 32 cells) reads no tile.
-    let (_, wide_step) = node_window(tile(2, 0, 0, 0), 32, 5 * GRID.cells);
-    assert!(wide_step > 32.0);
+    assert!(at(&src2, 0, 0, 0).0.nodes.is_empty(), "a quarter of a sample wide: nothing");
+    // A node whose samples are so far apart that even the widest river (32 cells) is under half a sample reads no tile.
     struct Big(Source);
     impl RiverSource for Big {
         fn grid(&self) -> RiverGrid {
-            RiverGrid { cells: 5 * GRID.cells, tile: GRID.tile, cell_m: GRID.cell_m }
+            RiverGrid { cells: 16 * GRID.cells, tile: GRID.tile, cell_m: GRID.cell_m }
         }
         fn tile_channels(&self, f: Face, i: u32, j: u32) -> Result<Arc<Vec<Channel>>, String> {
             self.0.tile_channels(f, i, j)
         }
     }
     let big = Big(Source::new(vec![channel(&[(60.0, 100.0), (200.0, 120.0)], q_for(30.0))]));
+    let (_, wide_step) = node_window(tile(2, 0, 0, 0), 32, 16 * GRID.cells);
+    assert!(wide_step > 64.0, "{wide_step}");
     assert!(plan_rivers(&request(&big, 32), &[(0, tile(2, 0, 0, 0), 0.0)]).unwrap().nodes.is_empty());
     assert!(big.0.reads.lock().unwrap().is_empty(), "no tile is read for a node that cannot carry the widest river");
-    let _ = reads;
+}
+
+// spec: REND-059
+#[test]
+fn a_river_plan_with_a_strength_other_than_full_round_trips_through_its_text() {
+    let plan = planet_frame::river::RiverPlan {
+        nodes: vec![planet_frame::river::RiverNode { node: 4, size: 2, coverage: vec![0, 128, 255, 7], fade: 64 }],
+        dropped: 2,
+    };
+    let text = plan.to_text();
+    assert_eq!(
+        text,
+        "rivers 2
+rnode 4 64 0080ff07"
+    );
+    let lines: Vec<Vec<&str>> = text.lines().map(|l| l.split_whitespace().collect()).collect();
+    assert_eq!(planet_frame::river::RiverPlan::from_lines(&lines).unwrap(), plan);
+}
+
+// spec: REND-059
+#[test]
+fn a_channel_with_a_discharge_that_is_not_finite_is_an_error_naming_the_tile_at_every_distance() {
+    for (level, x, y) in [(3u8, 1u32, 1u32), (0, 0, 0)] {
+        for bad in [f64::NAN, f64::INFINITY] {
+            let mut c = channel(&[(40.0, 40.0), (60.0, 40.0)], q_for(3.0));
+            c.q[1] = bad;
+            let src = Source::new(vec![c]);
+            let e = plan_rivers(&request(&src, 32), &[(0, tile(2, level, x, y), 0.0)]).err();
+            // A node too coarse for any river reads nothing, so it has nothing to refuse; the others name the tile.
+            let (_, step) = node_window(tile(2, level, x, y), 32, GRID.cells);
+            if step <= 64.0 {
+                assert!(e.is_some_and(|e| e.contains("river tile 2/") && e.contains("not finite")), "level {level}, q {bad}");
+            }
+        }
+    }
 }
 
 // spec: REND-059, CON-30

@@ -136,8 +136,8 @@ pub trait RiverSource {
 }
 
 /// The width, in samples of a node, below which a river is not drawn in it, and from which it is drawn at full strength.
-pub const MIN_RIVER_SAMPLES: f64 = 1.0;
-pub const FULL_RIVER_SAMPLES: f64 = 2.0;
+pub const MIN_RIVER_SAMPLES: f64 = 0.5;
+pub const FULL_RIVER_SAMPLES: f64 = 1.0;
 
 /// What the river plan needs.
 pub struct RiverRequest<'a> {
@@ -230,6 +230,9 @@ pub fn plan_rivers(req: &RiverRequest<'_>, nodes: &[(u32, planet_core::TileId, f
                         .chain(c.q.iter().map(|q| q.to_bits()))
                         .chain(c.levels.iter().map(|l| l.to_bits()))
                         .collect();
+                    if c.q.iter().any(|q| !q.is_finite()) {
+                        return Err(format!("river tile {}/{ti}/{tj}: a channel carries a discharge that is not finite", tile.face().0));
+                    }
                     if seen.insert(key) {
                         channels.push(c.clone());
                     }

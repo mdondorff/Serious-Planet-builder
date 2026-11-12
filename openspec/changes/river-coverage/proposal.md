@@ -16,3 +16,7 @@ Item 15 PR 8 (river drawing), part 1 (architect, 2026-11-11, design section 18):
 - `frame::river` plan part (REND-059): `river_distance_grid` (any sample lattice), `node_window` (a terrain node's samples in face cell-index space), `RiverSource`, `plan_rivers` (nodes within a step limit and with a river in range; the whole channel is the dedupe key; errors name the tile), tests in `crates/frame/tests/river_plan.rs`.
 - Code: `generators::bake::k7` (one function extracted, no value moves; the burn tests pass), `frame::{river, lib}`, tests. No key, record or golden moves.
 - Requirement REND-059 added.
+
+## Notes
+- The river part of the plan text has a strength field: `rnode <node> <fade> <hex>` (a plan recorded before has three fields and no longer parses: old recordings need not stay compatible, owner 2026-11-05).
+- Known limits recorded with the far-end rule (reported to the architect, not gated): the strength is per node, set by the widest river in it; a river only a little wider than a coarse node's samples is drawn heavier at the coarse level (bilinear thickening) and can pop at a level change.
