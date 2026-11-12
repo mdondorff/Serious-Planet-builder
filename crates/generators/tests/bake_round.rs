@@ -432,6 +432,9 @@ fn catchment_key_holds_every_parameter_the_round_reads() {
     // the outlet kind of the catchment is read by the round (GEN-172)
     let cut = CatchmentInputs { exit_window_cut: true, ..inp.clone() };
     assert_ne!(key, catchment_key(&grid, &cells, &cut, &p), "the outlet kind must change the catchment key");
+    // the f32 round surface (GEN-166)
+    let f32p = CarveParams { round_f32: true, ..p };
+    assert_ne!(key, catchment_key(&grid, &cells, &inp, &f32p), "the f32 round surface must change the catchment key");
 }
 
 // spec: GEN-146

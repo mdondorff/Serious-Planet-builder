@@ -51,6 +51,7 @@ fn variants() -> Vec<(&'static str, CarveParams)> {
         ("no taper", CarveParams { uplift_taper_m: 0.0, ..base }),
         ("no uplift", CarveParams { u_over_k: 0.0, ..base }),
         ("window cut", CarveParams { window_cut: true, ..base }),
+        ("f32 round surface", CarveParams { round_f32: true, ..base }),
     ]
 }
 

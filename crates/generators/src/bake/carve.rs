@@ -42,6 +42,8 @@ pub struct CarveParams {
     pub round_rules: RoundRules,
     /// The land outlets on the border of the grid are window cuts (GEN-172): the region goes on beyond them at an unknown, lower level, so the exit height is no base for a breach (`exit_base` skips their chains). An outlet in the interior (a basin's rim) keeps its base. Set by the caller that solves a window; off by default (every land outlet keeps its base).
     pub window_cut: bool,
+    /// The round surface is stored f32 (GEN-166): the heights are narrowed to f32 (round to nearest, ties to even) once at the end of every round and read widened by the next round, K6 and K7; the round computes in f64. Off by default (f64 rounds); the callers of the round rules turn it on.
+    pub round_f32: bool,
     /// How a round visits the cells (GEN-141): execution only, the result is the same bits (a sweep reads a cell and its receiver, which share a catchment); not part of any key.
     pub schedule: Schedule,
 }
@@ -78,6 +80,7 @@ impl Default for CarveParams {
             cell_metric: false,
             round_rules: RoundRules { clip_mfd: super::route::MfdClip::Off, canonical_flood: false },
             window_cut: false,
+            round_f32: false,
             schedule: Schedule::Region,
         }
     }
@@ -175,6 +178,10 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
     let mut grouped: Vec<u32> = Vec::new();
     for step in 0..p.steps {
         if step % p.reroute_every == 0 {
+            // GEN-166: the heights of the round that ended are narrowed before the next routing reads them.
+            if p.round_f32 && step > 0 {
+                narrow_f32(z);
+            }
             // The previous routing is dropped before the next is built: two live routings of a face would not fit its memory budget.
             drop(routing.take());
             let r = route_rules(grid, z, outlet, p.epsilon, seed, p.max_area, rock.runoff, p.round_rules);
@@ -274,7 +281,19 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
             z[c] = if p.incise_only { new.min(z[c]) } else { new };
         }
     }
+    if p.round_f32 {
+        narrow_f32(z);
+    }
     routing.expect("a carve has at least one step")
+}
+
+/// The heights as f32 widened again (GEN-166): `z = f64::from(z as f32)`, round to nearest, ties to even; idempotent on a value that is already f32. A height that does not fit an f32 is refused.
+pub fn narrow_f32(z: &mut [f64]) {
+    for v in z.iter_mut() {
+        let n = *v as f32;
+        assert!(n.is_finite(), "the height {v} does not fit an f32");
+        *v = f64::from(n);
+    }
 }
 
 /// The distance between two neighbouring cells.

@@ -56,6 +56,7 @@ fn main() {
         steps: 20,
         reroute_every: 5,
         round_rules: RoundRules::ROUND,
+        round_f32: true,
         cell_metric: true,
         window_cut: true,
         ..CarveParams::default()

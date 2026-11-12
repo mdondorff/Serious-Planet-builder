@@ -38,6 +38,8 @@ mod bake_probe;
 mod bake_rock;
 #[path = "bake_round.rs"]
 mod bake_round;
+#[path = "bake_round_f32.rs"]
+mod bake_round_f32;
 #[path = "bake_rounds.rs"]
 mod bake_rounds;
 #[path = "bake_runoff.rs"]

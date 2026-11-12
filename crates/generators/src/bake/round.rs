@@ -270,6 +270,9 @@ pub fn solve_rounds_with(
                 z[c as usize] = v;
             }
         }
+        if p.round_f32 {
+            super::carve::narrow_f32(z);
+        }
         report.rounds.push(RoundStats {
             catchments: cuts.members.len(),
             largest: cuts.members.iter().map(Vec::len).max().unwrap_or(0),
@@ -378,7 +381,8 @@ pub fn catchment_key(grid: &Grid, cells: &[u32], inp: &CatchmentInputs, p: &Carv
             | (u64::from(p.incise_only) << 1)
             | ((p.reroute_every as u64) << 2)
             | (u64::from(p.round_rules.clip_mfd == MfdClip::Local) << 63)
-            | (u64::from(inp.exit_window_cut) << 62),
+            | (u64::from(inp.exit_window_cut) << 62)
+            | (u64::from(p.round_f32) << 61),
     );
     h.word(cells.len() as u64);
     for (k, &c) in cells.iter().enumerate() {
@@ -462,6 +466,9 @@ pub fn solve_rounds_memo(
                     cache.catchments.insert(key, zk);
                 }
             }
+        }
+        if p.round_f32 {
+            super::carve::narrow_f32(z);
         }
         let (e, b) = cache.evict();
         (w.evicted, w.evicted_bytes) = (w.evicted + e, w.evicted_bytes + b);
