@@ -1,5 +1,5 @@
 //! Tier A, GEN-179 (TEST-127): the band rules of the start surface, switched off by default. The slope cap holds each band octave to `c x slope(e0) x wavelength / 2`; the 8 km hill octave has its own weight; with
-//! both off every elevation and every key is the build before the rule. Its own test binary: the switches are process-wide (as the turned lattices of GEN-140), so the tests that set them hold one lock.
+//! both off every elevation and every key is the build before the rule. The switches are process-wide (as the turned lattices of GEN-140): no test here sets them (a test that did would race with the class fingerprint tests of the same binary); the rules are passed as values (`elevation_m_with`, `BakeInputs::id_with_rules`).
 
 use planet_core::Vec3;
 use planet_generators::bake::inputs::BakeInputs;
@@ -134,10 +134,16 @@ fn the_identity_word_moves_only_with_a_rule_on() {
         a.fold(w) != w && b.fold(w) != a.fold(w) && c.fold(w) != w && c.fold(w) != a.fold(w),
         "each rule and each value gives its own word"
     );
-    // the process's switches are off: the inputs identity is the one before the rule
+    // the inputs identity: unchanged with both rules off, moved by each rule and value
+    let id = |r: &BandRules| BakeInputs::id_with_rules(1, 1, 1.0, 1, r);
+    assert_eq!(id(&BandRules::OFF), BakeInputs::id_with_rules(1, 1, 1.0, 1, &BandRules::OFF));
+    assert!(
+        id(&a) != id(&BandRules::OFF) && id(&b) != id(&a) && id(&c) != id(&BandRules::OFF) && id(&c) != id(&a),
+        "the inputs identity moves with each rule and value"
+    );
+    // the process's switches are off: the identity is the one before the rule
     assert!(!planet_generators::classes::band_rules_on());
     assert_eq!(planet_generators::classes::band_rules_word(w), w);
-    let _ = BakeInputs::id();
 }
 
 // spec: GEN-179, TEST-127
@@ -152,4 +158,49 @@ fn a_negative_cap_is_refused() {
 #[should_panic(expected = "8 km hill octave")]
 fn a_weight_over_one_is_refused() {
     planet_generators::classes::set_hill8_weight(1.5);
+}
+
+// spec: GEN-179, TEST-127
+/// The slope estimate has no seam: two directions 0.6 m apart give the same slope to within the estimate's curvature error, on a ring across the old axis change (|x| = 0.9) and over the sphere.
+#[test]
+fn the_slope_estimate_has_no_seam() {
+    let src = ClassSource::new(14);
+    let mut checked = 0;
+    let mut pairs: Vec<(Vec3, Vec3)> = Vec::new();
+    for k in 0..400 {
+        let a = f64::from(k) * 0.0157 + 0.3;
+        let (y, z) = (libm::cos(a), libm::sin(a));
+        let r = libm::sqrt(1.0 - 0.81);
+        pairs.push((Vec3::new(0.9 - 1e-7, r * y, r * z).normalized(), Vec3::new(0.9 + 1e-7, r * y, r * z).normalized()));
+    }
+    for d in directions() {
+        pairs.push((d, Vec3::new(d.x + 1e-7, d.y, d.z).normalized()));
+    }
+    for (p, q) in pairs {
+        let (s0, s1) = (src.e0_slope(p), src.e0_slope(q));
+        if s0.max(s1) < 1e-4 {
+            continue;
+        }
+        checked += 1;
+        assert!((s0 - s1).abs() <= 0.02 * s0.max(s1) + 1e-6, "slope {s0} against {s1} across two directions 0.6 m apart");
+    }
+    assert!(checked >= 60, "the fixture finds slopes: {checked}");
+}
+
+// spec: GEN-179, TEST-127
+/// A flat base (slope exactly 0) has no band whatever `c` is (stated in GEN-179); a base with a slope under a cap that never binds has the plain band.
+#[test]
+fn a_cap_that_never_binds_keeps_the_band_wherever_the_base_has_a_slope() {
+    let src = ClassSource::new(14);
+    let never = BandRules { slope_cap_c: 1e12, hill8_weight: 1.0 };
+    let (mut with_slope, mut checked) = (0, 0);
+    for &d in &directions() {
+        let p = src.eval(d);
+        if src.e0_slope(d) > 0.0 {
+            with_slope += 1;
+            assert_eq!(src.elevation_m_with(d, &p, 3.0, &never).to_bits(), src.elevation_m_with(d, &p, 3.0, &BandRules::OFF).to_bits());
+        }
+        checked += 1;
+    }
+    assert!(with_slope > 100 && checked == 600, "{with_slope} of {checked} directions have a slope");
 }

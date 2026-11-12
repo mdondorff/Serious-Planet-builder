@@ -550,17 +550,19 @@ impl ClassSource {
         ClassPoint { terms, land_depth: t.land_depth, e0, weights: class_weights(&terms, e_smooth, rolling) }
     }
 
-    /// The slope of the base elevation `e0` at `d` in metres per metre (GEN-179): the length of the forward differences of `e0` along two tangents, [`SLOPE_STEP_M`] apart, over the step.
+    /// The slope of the base elevation `e0` at `d` in metres per metre (GEN-179): the length of the central differences of `e0` along two tangents, [`SLOPE_STEP_M`] either side of `d`, over twice the step.
+    /// Central differences along a tangent frame that turns smoothly with `d` (no seam).
     pub fn e0_slope(&self, d: Vec3) -> f64 {
         let ang = SLOPE_STEP_M / self.radius_m;
-        let axis = if libm::fabs(d.x) < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
-        let u = d.cross(axis).normalized();
+        // One fixed axis, (1, 2, 3) / sqrt 14: the tangent frame turns smoothly with `d` and is singular only at the two points of that axis (a seam would run along a circle if the axis changed with `d`).
+        let axis = Vec3::new(0.267_261_241_912_424_4, 0.534_522_483_824_848_8, 0.801_783_725_737_273_2);
+        let cross = d.cross(axis);
+        let u = if cross.length() > 1e-9 { cross.normalized() } else { d.cross(Vec3::new(1.0, 0.0, 0.0)).normalized() };
         let v = d.cross(u);
         let (c, s) = (libm::cos(ang), libm::sin(ang));
-        let e0 = self.eval(d).e0;
-        let du = self.eval((d * c + u * s).normalized()).e0 - e0;
-        let dv = self.eval((d * c + v * s).normalized()).e0 - e0;
-        libm::sqrt(du * du + dv * dv) / SLOPE_STEP_M
+        let at = |t: Vec3, sign: f64| self.eval((d * c + t * (s * sign)).normalized()).e0;
+        let (du, dv) = (at(u, 1.0) - at(u, -1.0), at(v, 1.0) - at(v, -1.0));
+        libm::sqrt(du * du + dv * dv) / (2.0 * SLOPE_STEP_M)
     }
 
     /// The band's noise under the rules of GEN-179 (the slope cap and the weight of the 8 km hill octave): the mountain share `wm` of the ridged band and the rest of the hill band, each
@@ -570,19 +572,13 @@ impl ClassSource {
         let slope = if c > 0.0 { self.e0_slope(d) } else { 0.0 };
         let scale = self.radius_m / EARTH_RADIUS_M;
         // The mountain band is centred on its mean: under the cap the mean falls with the octaves' heights, so the centre falls with it (the band stays zero-mean instead of sinking by the whole centre).
-        let (ridged, centre) = if wm > 0.0 {
-            let w: Vec<f64> = RIDGED_WAVELENGTHS_M.iter().map(|l| l * scale).collect();
-            let kept = capped_band_noise(&[1.0; 5], &w, &[1.0; 5], amp, slope, c);
-            (capped_band_noise(&ridged_octave_signals(self.seed, t, turned), &w, &[1.0; 5], amp, slope, c), MOUNTAIN_BAND_CENTRE * kept)
-        } else {
-            (0.0, 0.0)
-        };
-        let hill = if wm < 1.0 {
-            let w: Vec<f64> = HILL_WAVELENGTHS_M.iter().map(|l| l * scale).collect();
-            capped_band_noise(&hill_octave_signals(self.seed, t, turned), &w, &[rules.hill8_weight, 1.0, 1.0], amp, slope, c)
-        } else {
-            0.0
-        };
+        // Both terms are always computed, as the plain path does, so that a mountain share that rounds to 1 + 2^-52 gives the same bits.
+        let wr = RIDGED_WAVELENGTHS_M.map(|l| l * scale);
+        let wh = HILL_WAVELENGTHS_M.map(|l| l * scale);
+        let kept = capped_band_noise(&[1.0; 5], &wr, &[1.0; 5], amp, slope, c);
+        let centre = MOUNTAIN_BAND_CENTRE * kept;
+        let ridged = capped_band_noise(&ridged_octave_signals(self.seed, t, turned), &wr, &[1.0; 5], amp, slope, c);
+        let hill = capped_band_noise(&hill_octave_signals(self.seed, t, turned), &wh, &[rules.hill8_weight, 1.0, 1.0], amp, slope, c);
         wm * ridged + (1.0 - wm) * hill - wm * centre
     }
 

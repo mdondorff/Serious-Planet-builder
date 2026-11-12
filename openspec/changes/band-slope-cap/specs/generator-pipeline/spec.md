@@ -13,5 +13,6 @@ Source: Architect, 2026-11-12 (SPIKE-109 verdict: the start-surface fix at the s
 #### Scenario: Details of the rules
 - **WHEN** the rules are read
 - **THEN** the octave wavelengths are 16, 8, 4, 2 and 1 km (ridged) and 8, 4 and 2 km (hill) on a body of Earth's radius and scale with the radius
-- **AND** the signals of the octaves are those of the band without a rule; a cap that never binds gives the same bits as no cap
+- **AND** the signals of the octaves are those of the band without a rule; a cap that never binds gives the same bits as no cap wherever the base has a slope; where the slope is exactly 0 (a saturated plain) any `c` leaves no band
+- **AND** the slope is the length of the central differences of `e0` along two tangents, `SLOPE_STEP_M` either side, so the choice of the tangents is no seam
 - **AND** the rules are process-wide switches like the turned lattices (GEN-140): a run sets them once at its start, before any field is read

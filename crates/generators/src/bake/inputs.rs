@@ -137,6 +137,17 @@ impl BakeInputs {
 
     /// [`BakeInputs::id`] for the given lithology and uplift versions and K scale (a test of what a change of each re-keys).
     pub fn id_with(lithology_version: u32, uplift_version: u32, k_scale: f64, runoff_version: u32) -> u64 {
+        Self::id_with_rules(lithology_version, uplift_version, k_scale, runoff_version, &crate::classes::band_rules())
+    }
+
+    /// [`BakeInputs::id_with`] under the given band rules (GEN-179): the identity moves with each rule and its value, and is unchanged while both are off.
+    pub fn id_with_rules(
+        lithology_version: u32,
+        uplift_version: u32,
+        k_scale: f64,
+        runoff_version: u32,
+        rules: &crate::classes::BandRules,
+    ) -> u64 {
         let mut h = 0xCBF2_9CE4_8422_2325u64;
         let mut put = |v: u64| h = (h ^ v).wrapping_mul(0x0000_0100_0000_01B3);
         put(u64::from(CLASS_SOURCE_VERSION));
@@ -151,7 +162,7 @@ impl BakeInputs {
         put(crate::runoff::constants_identity());
         CLASS_K.iter().chain(CLASS_CARVE.iter()).for_each(|v| put(v.to_bits()));
         // The turned lattices of the bands (GEN-140): the word is unchanged while the switch is off.
-        let h = crate::classes::band_rules_word(h);
+        let h = rules.fold(h);
         crate::height::turned_noise_word(h)
     }
 }
