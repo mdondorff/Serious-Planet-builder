@@ -149,14 +149,18 @@ pub fn views(
 }
 
 /// The lines about the river plans of a run (after each flight): the plan's CPU time, the nodes carried and dropped, the reader's cache peak.
-pub(crate) fn report(c: &crate::litperf::RiverCounters, out: &mut dyn Write) -> Result<(), String> {
+pub(crate) fn report(
+    c: &crate::litperf::RiverCounters,
+    cache: Option<planet_frame::river::CacheCounters>,
+    out: &mut dyn Write,
+) -> Result<(), String> {
     if c.plans == 0 {
         return writeln!(out, "  river plans: none (the world has no river source)").map_err(err);
     }
     writeln!(
         out,
         "  terrain plan nodes: levels {} to {}, up to {} at the finest
-  river plans: {} frames, CPU {:.3} ms mean, {:.3} ms max; river nodes up to {}, dropped up to {}; reader cache peak {} B of {} B",
+  river plans (a lookup in the coverage cache): {} frames, CPU {:.3} ms mean, {:.3} ms max; river nodes up to {}, dropped up to {}, NOT READY up to {} a frame ({} in all); coverage cache {} B at most; reader cache peak {} B of {} B",
         c.level_min,
         c.level_max,
         c.finest_nodes_max,
@@ -165,10 +169,18 @@ pub(crate) fn report(c: &crate::litperf::RiverCounters, out: &mut dyn Write) -> 
         c.plan_ns_max as f64 / 1.0e6,
         c.nodes_max,
         c.dropped_max,
+        c.not_ready_max,
+        c.not_ready_total,
+        c.cache_bytes_max,
         c.reader_peak_bytes,
         planet_cache::river_read::DEFAULT_CACHE_BYTES
     )
-    .map_err(err)
+    .map_err(err)?;
+    if let Some(k) = cache {
+        writeln!(out, "  coverage cache: {} hits, {} misses, {} tiles built, {} evicted", k.hits, k.misses, k.builds, k.evictions)
+            .map_err(err)?;
+    }
+    Ok(())
 }
 
 /// Checks the options of the scene: the fixture is named by the environment, never by a store option.
