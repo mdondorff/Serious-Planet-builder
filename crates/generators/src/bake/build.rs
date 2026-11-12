@@ -53,14 +53,7 @@ impl PlanParams {
             seed,
             threads,
             rounds: 4,
-            carve: CarveParams {
-                steps: 20,
-                reroute_every: 5,
-                round_rules: RoundRules::ROUND,
-                round_f32: true,
-                pre_breach: Some(super::breach::PreBreach::PROFILE),
-                ..CarveParams::default()
-            },
+            carve: CarveParams { steps: 20, reroute_every: 5, round_rules: RoundRules::ROUND, round_f32: true, ..CarveParams::default() },
             hydro: HydroParams::default(),
             epsilon: 1e-3,
             sediment,

@@ -594,14 +594,7 @@ fn main() {
     // ---- the rounds, resident
     let mut z_start =
         if a.get(3).is_some_and(|x| x == "sed" || x == "sedround" || x == "dump" || x == "full") { z.clone() } else { Vec::new() };
-    let p = CarveParams {
-        steps: 20,
-        reroute_every: 5,
-        round_rules: RoundRules::ROUND,
-        round_f32: true,
-        pre_breach: Some(planet_generators::bake::breach::PreBreach::PROFILE),
-        ..CarveParams::default()
-    };
+    let p = CarveParams { steps: 20, reroute_every: 5, round_rules: RoundRules::ROUND, round_f32: true, ..CarveParams::default() };
     let t = Instant::now();
     let mode = a.get(3).map_or("", |x| x.as_str());
     if mode == "plan" {
