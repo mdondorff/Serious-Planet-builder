@@ -31,6 +31,7 @@ pub mod horizon;
 pub mod horizon_lookup;
 pub mod ice;
 pub mod ice_preview;
+pub mod lake_water;
 pub mod lithology;
 pub mod lithology_preview;
 pub mod manifest;

@@ -34,6 +34,8 @@ mod l_graph;
 mod l_layer;
 #[path = "l_writer.rs"]
 mod l_writer;
+#[path = "lake_read.rs"]
+mod lake_read;
 #[path = "layer_channels.rs"]
 mod layer_channels;
 #[path = "layer_fill.rs"]
