@@ -88,6 +88,7 @@ mod climate;
 mod coast;
 #[path = "coast_tilt.rs"]
 mod coast_tilt;
+mod plateau_rim;
 #[path = "compact.rs"]
 mod compact;
 #[path = "continents.rs"]

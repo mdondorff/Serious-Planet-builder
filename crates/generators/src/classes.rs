@@ -201,6 +201,8 @@ pub struct ClassSource {
     coast: std::sync::OnceLock<std::sync::Arc<CoastLattice>>,
     /// The coast lattice of the coast tilt (GEN-180): the same field with its own cap, the tilt's `D` (the shelf's lattice is capped at the shelf and slope width, 170 km on Earth, so a longer ramp would saturate early). Built on the first land read with the tilt on; `D` is its key.
     tilt_coast: std::sync::Mutex<Option<(u64, std::sync::Arc<CoastLattice>)>>,
+    /// The rim lattice of the plateau rim rule (GEN-183): the signed distance to the 0.5 contour of the plateau field with the cap `W`; `W` is its key. Built on the first land read with the rule on.
+    rim_lattice: std::sync::Mutex<Option<(u64, std::sync::Arc<CoastLattice>)>>,
     /// The threads the coast lattice is built on (0: the machine's, at most 16); the bytes do not depend on it.
     coast_threads: usize,
 }
@@ -224,6 +226,7 @@ impl ClassSource {
                 shelf: ShelfProfile::earth(),
                 coast: std::sync::OnceLock::new(),
                 tilt_coast: std::sync::Mutex::new(None),
+                rim_lattice: std::sync::Mutex::new(None),
                 coast_threads: 0,
             };
             let score =
@@ -303,6 +306,31 @@ impl ClassSource {
             threads,
         ));
         *guard = Some((d_km.to_bits(), lattice.clone()));
+        lattice
+    }
+
+    /// The rim lattice of the plateau rim rule for the width `w_km` (GEN-183): the signed distance to the 0.5 contour of the plateau field (inside negative) up to `w_km`, built once per `W` on the machine's threads.
+    fn rim_lattice(&self, w_km: f64) -> std::sync::Arc<CoastLattice> {
+        let mut guard = self.rim_lattice.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((bits, lattice)) = guard.as_ref() {
+            if *bits == w_km.to_bits() {
+                return lattice.clone();
+            }
+        }
+        let threads =
+            if self.coast_threads > 0 { self.coast_threads } else { std::thread::available_parallelism().map_or(1, |n| n.get()).min(16) };
+        let lattice = std::sync::Arc::new(CoastLattice::build(
+            &|d| {
+                let t = terrain(self.seed, d);
+                self.mask_terms(d, t.land_depth, t.inland).plateau_field - 0.5
+            },
+            &|_| 0.0,
+            self.shelf.coast_lattice_cells,
+            w_km,
+            self.radius_m / 1000.0,
+            threads,
+        ));
+        *guard = Some((w_km.to_bits(), lattice.clone()));
         lattice
     }
 
@@ -555,6 +583,11 @@ impl ClassSource {
 
     /// [`ClassSource::eval`] under the given coast tilt (GEN-180): the tilt is added to `e0` after the class weights are decided, so it moves no class.
     pub fn eval_with(&self, d: Vec3, tilt: &CoastTilt) -> ClassPoint {
+        self.eval_rules(d, tilt, &plateau_rim())
+    }
+
+    /// [`ClassSource::eval_with`] under the given plateau rim rule (GEN-183) as well: the plateau's uplift is replaced by its rim-distance form after the class weights are decided, so it moves no class.
+    pub fn eval_rules(&self, d: Vec3, tilt: &CoastTilt, rim: &PlateauRim) -> ClassPoint {
         let t = terrain(self.seed, d);
         let terms = self.mask_terms(d, t.land_depth, t.inland);
         let coast = if t.land_depth < 0.0 {
@@ -584,6 +617,13 @@ impl ClassSource {
             // Faded in over the true coast ramp of the field, so that the lattice's coast (within a cell of the field's) leaves no step at the shore.
             let fade = smoothstep(0.0, TRUE_COAST_RAMP, t.land_depth);
             (e0 + tilt.height_m((-signed_km).max(0.0), fade * (weights[PLAIN] + weights[ROLLING]))).clamp(MIN_ELEVATION_M, MAX_ELEVATION_M)
+        } else {
+            e0
+        };
+        // The plateau rim rule (GEN-183): the uplift rises monotonically from the rim to the interior.
+        let e0 = if rim.is_on() && t.land_depth > 0.0 {
+            let (signed_km, _) = self.rim_lattice(rim.w_km).read(d);
+            (e0 + PLATEAU_UPLIFT_M * (rim.share(-signed_km) - terms.plateau_field)).clamp(MIN_ELEVATION_M, MAX_ELEVATION_M)
         } else {
             e0
         };
@@ -1109,4 +1149,55 @@ pub fn coast_tilt() -> CoastTilt {
         t_m_per_km: f64::from_bits(COAST_TILT_T.load(std::sync::atomic::Ordering::Relaxed)),
         d_km: f64::from_bits(COAST_TILT_D.load(std::sync::atomic::Ordering::Relaxed)),
     }
+}
+
+// ---- the plateau rim rule (GEN-183): plateau uplift rising monotonically from the rim to the interior, off by default ----
+
+/// The rule's width `W` in km as the bits of an f64: 0 is off. A process-wide switch like the coast tilt (GEN-180).
+static PLATEAU_RIM_W: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The plateau rim rule of GEN-183: the uplift share at the signed distance `x` km inside the 0.5 contour of the plateau field is `smoothstep(-W, W, x)` (0.5 on the contour, where the field's own share is 0.5), so
+/// the uplift never falls toward the interior of a plateau (no bowl), and is 0 beyond `W` outside.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PlateauRim {
+    /// `W` in km; 0 is off.
+    pub w_km: f64,
+}
+
+impl PlateauRim {
+    /// The rule off: the build before GEN-183.
+    pub const OFF: PlateauRim = PlateauRim { w_km: 0.0 };
+
+    /// Whether the rule is on.
+    pub fn is_on(&self) -> bool {
+        self.w_km > 0.0
+    }
+
+    /// The fold of the rule into an identity word: unchanged while off, mixed with `W` while on.
+    pub fn fold(&self, identity: u64) -> u64 {
+        if self.is_on() {
+            planet_core::hash::hash_u64s(0x706c_6174_0001, &[identity, self.w_km.to_bits()])
+        } else {
+            identity
+        }
+    }
+
+    /// The uplift share in `[0, 1]` at `x_km` inside the contour (negative outside): `smoothstep(-W, W, x)`; 0 when off.
+    pub fn share(&self, x_km: f64) -> f64 {
+        if !self.is_on() {
+            return 0.0;
+        }
+        smoothstep(-self.w_km, self.w_km, x_km)
+    }
+}
+
+/// Sets the plateau rim rule of the process (GEN-183): `w_km` km wide (0 switches it off).
+pub fn set_plateau_rim(w_km: f64) {
+    assert!(w_km.is_finite() && w_km >= 0.0, "the plateau rim width W is finite and not negative, not {w_km}");
+    PLATEAU_RIM_W.store(w_km.to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The plateau rim rule the process runs with (GEN-183).
+pub fn plateau_rim() -> PlateauRim {
+    PlateauRim { w_km: f64::from_bits(PLATEAU_RIM_W.load(std::sync::atomic::Ordering::Relaxed)) }
 }
