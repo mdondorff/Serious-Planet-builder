@@ -44,6 +44,8 @@ pub struct CarveParams {
     pub window_cut: bool,
     /// The round surface is stored f32 (GEN-166): the heights are narrowed to f32 (round to nearest, ties to even) once at the end of every round and read widened by the next round, K6 and K7; the round computes in f64. Off by default (f64 rounds); the callers of the round rules turn it on.
     pub round_f32: bool,
+    /// The round-0 breach of the closed basins (GEN-174): one pass before the first round drains each closed basin by the cheapest path to a lower cell within the depth and the length of the profile (`breach::PreBreach`); off (`None`) by default.
+    pub pre_breach: Option<super::breach::PreBreach>,
     /// How a round visits the cells (GEN-141): execution only, the result is the same bits (a sweep reads a cell and its receiver, which share a catchment); not part of any key.
     pub schedule: Schedule,
 }
@@ -60,6 +62,16 @@ pub enum Schedule {
 
 /// The breach limit of a cell at the sea level when the limit scales with height (the former default).
 pub const BREACH_MIN_M: f64 = 50.0;
+
+/// The most a breach event may lower a cell standing at height `h` (`breach_max_m`, or the height-scaled limit when `breach_height_scale_m` is set).
+pub(super) fn breach_limit(p: &CarveParams, h: f64) -> f64 {
+    if p.breach_height_scale_m > 0.0 {
+        p.breach_max_m.min(BREACH_MIN_M)
+            + (p.breach_max_m - BREACH_MIN_M).max(0.0) * planet_core::smoothstep(0.0, p.breach_height_scale_m, h - p.sea_level)
+    } else {
+        p.breach_max_m
+    }
+}
 
 impl Default for CarveParams {
     fn default() -> CarveParams {
@@ -81,6 +93,7 @@ impl Default for CarveParams {
             round_rules: RoundRules { clip_mfd: super::route::MfdClip::Off, canonical_flood: false },
             window_cut: false,
             round_f32: false,
+            pre_breach: None,
             schedule: Schedule::Region,
         }
     }
@@ -156,6 +169,9 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
     assert!(p.steps > 0 && p.reroute_every > 0, "a carve has steps and a re-route interval");
     assert!(p.max_area >= 0.0 && p.max_area.is_finite(), "the area cap is finite and not negative, not {}", p.max_area);
     assert_finite("the heights", z);
+    if let Some(pb) = &p.pre_breach {
+        super::breach::breach_basins(grid, z, outlet, p.epsilon, pb);
+    }
     if let Some(f) = factor {
         assert_eq!(f.len(), grid.len(), "one carve factor per cell");
         assert!(f.iter().all(|v| v.is_finite() && *v >= 0.0), "the carve factors are finite and not negative");
@@ -195,6 +211,8 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
                     grouped.sort_by_key(|&c| root[c as usize]);
                 }
             }
+            // The height each breached cell had at the start of the round (recorded at its first event: nothing else moves a height in the breach loop).
+            let mut round_start: std::collections::HashMap<usize, f64> = std::collections::HashMap::new();
             let visit: &[u32] = if grouped.is_empty() { &r.order } else { &grouped };
             let base = if p.round_rules.clip_mfd != super::route::MfdClip::Local {
                 None
@@ -213,14 +231,9 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
                     want = want.max(b[rec]);
                 }
                 if z[rec] > want {
-                    let limit = if p.breach_height_scale_m > 0.0 {
-                        p.breach_max_m.min(BREACH_MIN_M)
-                            + (p.breach_max_m - BREACH_MIN_M).max(0.0)
-                                * planet_core::smoothstep(0.0, p.breach_height_scale_m, z[rec] - p.sea_level)
-                    } else {
-                        p.breach_max_m
-                    };
-                    z[rec] = want.max(z[rec] - limit);
+                    // GEN-174: the round's total lowering of a cell is at most the limit at its height at the start of the round, however many donors breach it.
+                    let start = *round_start.entry(rec).or_insert(z[rec]);
+                    z[rec] = want.max(z[rec] - breach_limit(p, z[rec])).max(start - breach_limit(p, start));
                 }
             }
             routing = Some(r);

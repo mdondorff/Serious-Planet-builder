@@ -80,6 +80,14 @@ impl LayerSpec {
         if c.round_f32 {
             b.push(0xC6);
         }
+        // The round-0 breach of the basins (GEN-174) likewise: a byte and its three parameters only when on.
+        if let Some(pb) = c.pre_breach {
+            b.push(0xC7);
+            b.extend(u64::from(pb.passes).to_le_bytes());
+            b.extend((pb.halo as u64).to_le_bytes());
+            b.extend(pb.max_depth_m.to_bits().to_le_bytes());
+            b.extend(pb.min_lift_m.to_bits().to_le_bytes());
+        }
         b.extend((c.steps as u64).to_le_bytes());
         b.extend((c.reroute_every as u64).to_le_bytes());
         b.extend(self.inputs_id.to_le_bytes());
@@ -288,6 +296,14 @@ mod tests {
             CarveParams { cell_metric: true, ..base.carve },
             CarveParams { window_cut: true, ..base.carve },
             CarveParams { round_f32: true, ..base.carve },
+            CarveParams {
+                pre_breach: Some(planet_generators::bake::breach::PreBreach { passes: 1, halo: 128, max_depth_m: 500.0, min_lift_m: 0.5 }),
+                ..base.carve
+            },
+            CarveParams {
+                pre_breach: Some(planet_generators::bake::breach::PreBreach { passes: 3, halo: 128, max_depth_m: 100.0, min_lift_m: 0.5 }),
+                ..base.carve
+            },
             CarveParams { round_rules: planet_generators::bake::route::RoundRules::ROUND, ..base.carve },
             CarveParams {
                 round_rules: planet_generators::bake::route::RoundRules { canonical_flood: true, ..Default::default() },

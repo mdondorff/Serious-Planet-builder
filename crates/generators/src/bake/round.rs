@@ -5,7 +5,7 @@
 //! definition (G-EQ) with only the work of what changed (G-INC).
 //! Behind a switch: nothing in pass 1 or pass 2 calls it.
 
-use super::carve::{distance, CarveParams, BREACH_MIN_M};
+use super::carve::{breach_limit, distance, CarveParams};
 use super::memo::Memo;
 use super::partition::{partitioned_route_weighted, Hash, PartCache};
 use super::probe;
@@ -51,6 +51,7 @@ pub fn catchment_round(inp: &mut CatchmentInputs, p: &CarveParams, steps: usize)
     } else {
         super::carve::exit_base(p.sea_level, 0..z.len(), &inp.receiver, z, &|_| window_cut)
     };
+    let mut round_start: std::collections::HashMap<usize, f64> = std::collections::HashMap::new();
     for c in (0..z.len()).rev() {
         let rec = inp.receiver[c];
         if rec == NONE || inp.receiver_is_outlet[c] {
@@ -62,13 +63,8 @@ pub fn catchment_round(inp: &mut CatchmentInputs, p: &CarveParams, steps: usize)
             want = want.max(b[rec]);
         }
         if z[rec] > want {
-            let limit = if p.breach_height_scale_m > 0.0 {
-                p.breach_max_m.min(BREACH_MIN_M)
-                    + (p.breach_max_m - BREACH_MIN_M).max(0.0) * planet_core::smoothstep(0.0, p.breach_height_scale_m, z[rec] - p.sea_level)
-            } else {
-                p.breach_max_m
-            };
-            z[rec] = want.max(z[rec] - limit);
+            let start = *round_start.entry(rec).or_insert(z[rec]);
+            z[rec] = want.max(z[rec] - breach_limit(p, z[rec])).max(start - breach_limit(p, start));
         }
     }
     for _ in 0..steps {
@@ -194,6 +190,8 @@ pub fn gather_with(
 #[derive(Clone, Debug, Default)]
 pub struct RoundReport {
     pub rounds: Vec<RoundStats>,
+    /// The round-0 breach of the basins (GEN-174), when the solve ran it: the passes, the basins drained and kept, and whether the fixed point was reached (false: the cap was hit, reported in the MARK line).
+    pub pre_breach: Option<super::breach::BreachReport>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -251,8 +249,11 @@ pub fn solve_rounds_with(
     drivers: &Drivers,
 ) -> RoundReport {
     check(grid, z, p, rounds, drivers);
-    let taper = taper_of(z, p, drivers);
     let mut report = RoundReport::default();
+    if let Some(pb) = &p.pre_breach {
+        report.pre_breach = Some(super::breach::breach_basins(grid, z, outlet, p.epsilon, pb));
+    }
+    let taper = taper_of(z, p, drivers);
     for round in 0..rounds {
         let r = route_rules(grid, z, outlet, p.epsilon, seed, p.max_area, drivers.runoff, p.round_rules);
         let cuts = cut_in(Some(grid), &r);
@@ -415,8 +416,11 @@ pub fn solve_rounds_memo(
 ) -> (RoundReport, Vec<RoundWork>) {
     check(grid, z, p, rounds, drivers);
     assert!(p.round_rules.canonical_flood, "the memoised solve routes in tiles: the canonical flood is required");
-    let taper = taper_of(z, p, drivers);
     let (mut report, mut work) = (RoundReport::default(), Vec::new());
+    if let Some(pb) = &p.pre_breach {
+        report.pre_breach = Some(super::breach::breach_basins(grid, z, outlet, p.epsilon, pb));
+    }
+    let taper = taper_of(z, p, drivers);
     // The data this solve uses is pinned until it completes (GEN-153).
     cache.part.begin_solve();
     cache.pin = Some(cache.catchments.tick() + 1);

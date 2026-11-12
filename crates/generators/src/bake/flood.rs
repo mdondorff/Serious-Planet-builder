@@ -100,17 +100,55 @@ const FLAT_STEP: f64 = 1e-6;
 /// is the Euclidean distance in cells to the nearest lower rim cell (propagated offsets, Dijkstra by (d squared, cell id)); each cell stays strictly above its parent. A larger flat keeps the
 /// chessboard grade. The result depends only on the cells of the flat and its rim, never on a tiling. Cube grids are left as they are.
 pub fn regrade_flats(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64, bound: usize, filled: &mut [f64]) -> Vec<FlatInfo> {
-    let mut infos = Vec::new();
+    let flats = lifted_flats(grid, z, outlet, epsilon, filled);
+    let mut infos = Vec::with_capacity(flats.len());
+    // The levels are written after every flat is read, so the rim of a flat is always the chessboard surface: no neighbouring flat decides a bit.
+    let mut writes: Vec<(u32, f64)> = Vec::new();
+    for f in &flats {
+        let small = !f.touches_border && f.diameter <= bound;
+        infos.push(FlatInfo {
+            cells: f.cells.len(),
+            diameter: f.diameter,
+            touches_border: f.touches_border,
+            graded: small,
+            max_lift_m: f.max_lift_m,
+        });
+        if small {
+            regrade_one(grid, z, epsilon, &f.cells, f.base, filled, &mut writes);
+        }
+    }
+    for (q, v) in writes {
+        filled[q as usize] = v;
+    }
+    infos
+}
+
+/// A flat of a canonical filled surface: the lifted cells (the fill raised them) of one pour level that are connected, in the order a breadth-first walk from the cell of the lowest level
+/// (then the lowest id) finds them; `base` is the pour level, `diameter` the Chebyshev diameter in cells (`max(x1 - x0, y1 - y0)`), `touches_border` whether a cell lies on or beside the border of the grid,
+/// `max_lift_m` the deepest lift in metres.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Flat {
+    pub cells: Vec<u32>,
+    pub base: f64,
+    pub diameter: usize,
+    pub touches_border: bool,
+    pub max_lift_m: f64,
+}
+
+/// The flats of the canonical filled surface `filled` of `z` (planar grids; none for a cube grid), in the order of their lowest cell by (level, id). A cell is lifted when `filled > z`; its parent
+/// is the neighbour whose level plus `epsilon` is its level (the lowest by (level, id)); the base of a cell is the level of the non-lifted cell its parent chain ends at; a flat is a connected set
+/// of lifted cells of one base. Used by the grade of the flats (GEN-173) and the breach of the basins (GEN-174).
+pub fn lifted_flats(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64, filled: &[f64]) -> Vec<Flat> {
+    let mut out = Vec::new();
     if grid.is_cube() {
-        return infos;
+        return out;
     }
     let n = grid.len();
-    let lifted = |q: usize, f: &[f64]| !outlet[q] && grid.is_active(q) && f[q] > z[q];
-    let mut ids: Vec<u32> = (0..n).filter(|&q| lifted(q, filled)).map(|q| q as u32).collect();
+    let lifted = |q: usize| !outlet[q] && grid.is_active(q) && filled[q] > z[q];
+    let mut ids: Vec<u32> = (0..n).filter(|&q| lifted(q)).map(|q| q as u32).collect();
     if ids.is_empty() {
-        return infos;
+        return out;
     }
-    // Parent chains, in order of level: the base of a cell is the level of the non-lifted cell its chain ends at.
     ids.sort_unstable_by(|&a, &b| filled[a as usize].total_cmp(&filled[b as usize]).then(a.cmp(&b)));
     let mut slot = vec![u32::MAX; n];
     for (k, &q) in ids.iter().enumerate() {
@@ -132,17 +170,13 @@ pub fn regrade_flats(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64, boun
             None => f64::NAN,
         };
     }
-    // Flats: connected lifted cells of one base.
-    let mut flat = vec![u32::MAX; ids.len()];
-    let mut count = 0u32;
-    // The levels are written after every flat is read, so the rim of a flat is always the chessboard surface: no neighbouring flat decides a bit.
-    let mut writes: Vec<(u32, f64)> = Vec::new();
+    let mut seen = vec![false; ids.len()];
     for k0 in 0..ids.len() {
-        if flat[k0] != u32::MAX || base[k0].is_nan() {
+        if seen[k0] || base[k0].is_nan() {
             continue;
         }
         let mut members = vec![k0];
-        flat[k0] = count;
+        seen[k0] = true;
         let (mut x0, mut x1, mut y0, mut y1) = (usize::MAX, 0, usize::MAX, 0);
         let mut touches = false;
         let mut i = 0;
@@ -154,36 +188,25 @@ pub fn regrade_flats(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64, boun
             // On the grid border or beside it: the border cells of a window are outlets, so a flat cut by the window ends one cell inside.
             touches |= x <= 1 || y <= 1 || x + 2 >= grid.w() || y + 2 >= grid.h();
             for d in 0..8 {
-                match grid.neighbour(p, d) {
-                    None => {}
-                    Some(q) => {
-                        let kq = slot[q];
-                        if kq != u32::MAX && flat[kq as usize] == u32::MAX && base[kq as usize] == base[k0] {
-                            flat[kq as usize] = count;
-                            members.push(kq as usize);
-                        }
+                if let Some(q) = grid.neighbour(p, d) {
+                    let kq = slot[q];
+                    if kq != u32::MAX && !seen[kq as usize] && base[kq as usize] == base[k0] {
+                        seen[kq as usize] = true;
+                        members.push(kq as usize);
                     }
                 }
             }
         }
-        let small = !touches && (x1 - x0).max(y1 - y0) <= bound;
-        let depth = members.iter().map(|&k| filled[ids[k] as usize] - z[ids[k] as usize]).fold(0.0f64, f64::max);
-        infos.push(FlatInfo {
-            cells: members.len(),
+        let max_lift_m = members.iter().map(|&k| filled[ids[k] as usize] - z[ids[k] as usize]).fold(0.0f64, f64::max);
+        out.push(Flat {
+            cells: members.iter().map(|&k| ids[k]).collect(),
+            base: base[k0],
             diameter: (x1 - x0).max(y1 - y0),
             touches_border: touches,
-            graded: small,
-            max_lift_m: depth,
+            max_lift_m,
         });
-        if small {
-            regrade_one(grid, z, epsilon, &ids, &members, base[k0], filled, &mut writes);
-        }
-        count += 1;
     }
-    for (q, v) in writes {
-        filled[q as usize] = v;
-    }
-    infos
+    out
 }
 
 /// One flat seen by [`regrade_flats`]: its size, whether it was graded, and its deepest lift in metres (a lake bed is deep, a plain is a fraction of a metre).
@@ -198,20 +221,11 @@ pub struct FlatInfo {
 
 /// One flat's Euclidean grade (see [`regrade_flats`]).
 #[allow(clippy::too_many_arguments)]
-fn regrade_one(
-    grid: &Grid,
-    z: &[f64],
-    epsilon: f64,
-    ids: &[u32],
-    members: &[usize],
-    base: f64,
-    filled: &[f64],
-    writes: &mut Vec<(u32, f64)>,
-) {
-    let m = members.len();
+fn regrade_one(grid: &Grid, z: &[f64], epsilon: f64, cells: &[u32], base: f64, filled: &[f64], writes: &mut Vec<(u32, f64)>) {
+    let m = cells.len();
     let mut local = std::collections::HashMap::with_capacity(m);
-    for (j, &k) in members.iter().enumerate() {
-        local.insert(ids[k] as usize, j);
+    for (j, &c) in cells.iter().enumerate() {
+        local.insert(c as usize, j);
     }
     let mut best = vec![u64::MAX; m];
     let mut off = vec![(0i32, 0i32); m];
@@ -219,8 +233,8 @@ fn regrade_one(
     let mut rank = vec![0.0f64; m];
     let mut done = vec![false; m];
     let mut heap: BinaryHeap<Reverse<(u64, u32)>> = BinaryHeap::new();
-    for (j, &k) in members.iter().enumerate() {
-        let q = ids[k] as usize;
+    for (j, &c) in cells.iter().enumerate() {
+        let q = c as usize;
         for d in 0..8 {
             let Some(s) = grid.neighbour(q, d) else { continue };
             if local.contains_key(&s) || filled[s] > base {
@@ -265,9 +279,9 @@ fn regrade_one(
             }
         }
     }
-    assert!(done.iter().all(|&d| d), "a flat of {m} cells at {base} m has a cell its lower rim does not reach (cell {})", ids[members[0]]);
-    for (j, &k) in members.iter().enumerate() {
-        writes.push((ids[k], base + epsilon * rank[j]));
+    assert!(done.iter().all(|&d| d), "a flat of {m} cells at {base} m has a cell its lower rim does not reach (cell {})", cells[0]);
+    for (j, &c) in cells.iter().enumerate() {
+        writes.push((c, base + epsilon * rank[j]));
     }
 }
 

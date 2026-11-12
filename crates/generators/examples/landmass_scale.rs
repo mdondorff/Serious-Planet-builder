@@ -594,7 +594,14 @@ fn main() {
     // ---- the rounds, resident
     let mut z_start =
         if a.get(3).is_some_and(|x| x == "sed" || x == "sedround" || x == "dump" || x == "full") { z.clone() } else { Vec::new() };
-    let p = CarveParams { steps: 20, reroute_every: 5, round_rules: RoundRules::ROUND, round_f32: true, ..CarveParams::default() };
+    let p = CarveParams {
+        steps: 20,
+        reroute_every: 5,
+        round_rules: RoundRules::ROUND,
+        round_f32: true,
+        pre_breach: Some(planet_generators::bake::breach::PreBreach::PROFILE),
+        ..CarveParams::default()
+    };
     let t = Instant::now();
     let mode = a.get(3).map_or("", |x| x.as_str());
     if mode == "plan" {
@@ -723,6 +730,12 @@ fn main() {
         println!("4 rounds, {threads} threads: {:.1} s", t.elapsed().as_secs_f64());
         rep
     };
+    if let Some(b) = &rep.pre_breach {
+        println!(
+            "MARK round-0 breach: {} passes drained basins, {} drained, {} kept as lakes ({} cells), {} beside the border, cut {} cells; fixed point {}",
+            b.passes_run, b.drained, b.kept_lake, b.cells_in_kept_lakes, b.kept_bound, b.cells_cut, if b.fixed_point { "reached" } else { "NOT reached (the cap of the passes was hit)" }
+        );
+    }
     for (r, s) in rep.rounds.iter().enumerate() {
         println!(
             "  round {}: {} catchments, largest {} cells, {} cells in catchments of 1,000 or more",

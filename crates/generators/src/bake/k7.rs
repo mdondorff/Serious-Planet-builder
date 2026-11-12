@@ -592,7 +592,10 @@ pub fn k7_tile(
 ) -> K7Result {
     g.check().expect("a usable tile geometry");
     let q = &p.pass2;
-    assert!(q.carve.round_rules.is_default() && !q.carve.cell_metric && !q.carve.round_f32, "K7 runs the plane kernels of pass 2, in f64");
+    assert!(
+        q.carve.round_rules.is_default() && !q.carve.cell_metric && !q.carve.round_f32 && q.carve.pre_breach.is_none(),
+        "K7 runs the plane kernels of pass 2, in f64, without the breach of the basins"
+    );
     let grid = window_grid(g, id);
     let b = sample_window(g, id, base, threads);
     let dr = sample_window(g, id, regional, threads);

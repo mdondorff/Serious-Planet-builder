@@ -293,3 +293,12 @@ fn pass_two_refuses_the_f32_round_surface() {
     p.carve.round_f32 = true;
     pass2_tile(&grid(), tile(1, 1), &base, &nothing, None, &p, 1);
 }
+
+// spec: GEN-174, TEST-121 (pass 2 has no window-safe breach and no key byte for it)
+#[test]
+#[should_panic(expected = "pass 2 does not take the round-0 breach")]
+fn pass_two_refuses_the_breach_of_the_basins() {
+    let mut p = Pass2Params::standard(9, 0.0);
+    p.carve.pre_breach = Some(planet_generators::bake::breach::PreBreach::PROFILE);
+    pass2_tile(&grid(), tile(1, 1), &base, &nothing, None, &p, 1);
+}
