@@ -7,7 +7,7 @@ The profile runs the breach to the fixed point (cap 8 passes), architect 2026-11
 - Architect, 2026-11-12: one constrained least-cost breach pass at round 0 (Lindsay); a basin that cannot be drained stays a lake.
 
 ## What
-- `bake::breach::breach_basins` (planar grids): the rule of GEN-174; `PreBreach { passes, halo, max_depth_m, min_lift_m }`, `PreBreach::PROFILE` (1 pass, halo 128, 500 m, 0.5 m); `flood::lifted_flats` (the flats of a filled surface as cell lists, shared with the grade of GEN-173).
+- `bake::breach::breach_basins` (planar grids): the rule of GEN-174; `PreBreach { passes, halo, max_depth_m, min_lift_m }`, `PreBreach::PROFILE` (to the fixed point, cap 8 passes, halo 128, 500 m, 0.5 m); `flood::lifted_flats` (the flats of a filled surface as cell lists, shared with the grade of GEN-173).
 - `CarveParams::pre_breach` (default `None`), called by `carve_rock`, `solve_rounds_with` and `solve_rounds_memo` before the first round; layer key byte 0xC7 and its parameters only when set; the default `PlanParams` and the examples that run the round rules turn it on.
 - The bound rule: path length at most `halo - 1 - diameter`, so basin and path lie inside the halo of every tile of its cells (as GEN-173); a basin touching the border ring stays a lake.
 
