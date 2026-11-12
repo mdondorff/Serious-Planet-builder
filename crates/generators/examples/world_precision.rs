@@ -45,8 +45,8 @@ fn main() {
     let mut z0 = vec![0.0; n * n];
     for j in 0..n {
         for i in 0..n {
-            let r = ((i as f64 - c).powi(2) + (j as f64 - c).powi(2)).sqrt() / (c * 0.9);
-            let cone = amp * (1.0 - r).max(0.0).powf(1.3);
+            let r = ((i as f64 - c) * (i as f64 - c) + (j as f64 - c) * (j as f64 - c)).sqrt() / (c * 0.9);
+            let cone = amp * libm::pow((1.0 - r).max(0.0), 1.3);
             let ridge = 600.0 * libm::sin(i as f64 * 0.09) * libm::cos(j as f64 * 0.07) + 150.0 * jitter(5, (j * n + i) as u64, 0);
             let edge = (i.min(j).min(n - 1 - i).min(n - 1 - j) as f64 / 10.0).min(1.0);
             z0[j * n + i] = (cone + ridge * (cone / 4000.0).min(1.0)) * edge + 2.0 + -10_000.0 * (1.0 - edge);

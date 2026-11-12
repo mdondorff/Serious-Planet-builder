@@ -65,10 +65,10 @@ fn one_round_in_f32_is_the_f64_round_to_within_the_spacing() {
     let mut z0 = vec![0.0; N * N];
     for j in 0..N {
         for i in 0..N {
-            let r = (((i as f64 - c).powi(2) + (j as f64 - c).powi(2)).sqrt() / (c * 0.9)).min(1.0);
+            let r = (((i as f64 - c) * (i as f64 - c) + (j as f64 - c) * (j as f64 - c)).sqrt() / (c * 0.9)).min(1.0);
             let edge = (i.min(j).min(N - 1 - i).min(N - 1 - j) as f64 / 6.0).min(1.0);
             z0[j * N + i] =
-                (40_000.0 * (1.0 - r).powf(1.3) + 200.0 * jitter(5, (j * N + i) as u64, 0)) * edge + 2.0 - 10_000.0 * (1.0 - edge);
+                (40_000.0 * libm::pow(1.0 - r, 1.3) + 200.0 * jitter(5, (j * N + i) as u64, 0)) * edge + 2.0 - 10_000.0 * (1.0 - edge);
         }
     }
     let w = WorldPrecision::new(-10_000.0, 50_000.0, EPS, EPSILON_MAX_M);
@@ -94,10 +94,10 @@ fn one_round_in_f32_is_the_f64_round_to_within_the_spacing() {
 #[test]
 fn the_spacing_and_the_choice_handle_every_edge() {
     assert_eq!((f32_spacing(0.0), f32_spacing(-0.0)), (0.0, 0.0));
-    assert_eq!(f32_spacing(1.0), 2f64.powi(-23));
-    assert_eq!(f32_spacing(16_384.0), 2f64.powi(-9), "at a power of two the spacing is the one above it");
-    assert_eq!(f32_spacing(16_383.0), 2f64.powi(-10));
-    assert_eq!(f32_spacing(-16_383.0), 2f64.powi(-10));
+    assert_eq!(f32_spacing(1.0), libm::pow(2.0, -23.0));
+    assert_eq!(f32_spacing(16_384.0), libm::pow(2.0, -9.0), "at a power of two the spacing is the one above it");
+    assert_eq!(f32_spacing(16_383.0), libm::pow(2.0, -10.0));
+    assert_eq!(f32_spacing(-16_383.0), libm::pow(2.0, -10.0));
     for bad in [1e39, f64::INFINITY, f64::NAN] {
         assert!(f32_spacing(bad).is_infinite(), "{bad} does not fit an f32");
     }
