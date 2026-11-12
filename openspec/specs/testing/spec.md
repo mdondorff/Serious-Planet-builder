@@ -1715,7 +1715,7 @@ A tier-C scene SHALL draw a river over the lit terrain at a near pose and check:
 - The report gives the REND-061 boundary difference and a thin river across two levels (not gated).
 
 Verify: C
-Status: planned
+Status: active
 Source: Architect 2026-11-12 (REND-059 part C), REND-059, REND-061, ADR 0017
 
 #### Scenario: Banks and levels
