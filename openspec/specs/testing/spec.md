@@ -1724,6 +1724,7 @@ Source: Architect 2026-11-12 (REND-059 part C), REND-059, REND-061, ADR 0017
 
 ### Requirement: TEST-123 The flight over a graph world stays within the reader's cache bound
 A flight over a small one-face world baked with a channel graph SHALL plan rivers through the reader at levels 6 to 14 along the longest channel, twice, and the reader's cache SHALL hold at most its byte bound at every step; the flight reports the peak bytes and the decodes.
+- An ignored variant flies a stored region named by `PLANET_RIVER_STORE` and reports the peak and the time.
 
 Verify: A
 Status: active
