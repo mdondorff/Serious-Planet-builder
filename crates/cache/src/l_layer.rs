@@ -96,6 +96,11 @@ impl CommitLayer {
         crate::river_read::RiverReader::new(self.store.clone(), self.commit.clone(), capacity_bytes)
     }
 
+    /// The lakes of this commit (REND-058): the basin tables and the tiles' lake masks, read under the same commit as the tiles and the rivers (CON-22), with `capacity` decoded masks cached.
+    pub fn lakes(&self, capacity: usize) -> Result<crate::lake_read::CommitLakes, String> {
+        crate::lake_read::CommitLakes::new(self.store.clone(), self.world.clone(), self.commit.clone(), capacity)
+    }
+
     /// Whether the record of a tile the commit names is in the store (a tile the commit does not name is no land: present).
     pub fn tile_present(&self, id: PassTile) -> Result<bool, String> {
         let Some(&key) = self.commit.tiles.get(&(id.face.0, id.ti, id.tj)) else { return Ok(true) };

@@ -213,6 +213,8 @@ pub struct WorldTerrain {
     erosion_note: String,
     /// The river source of the new chain's commit when it holds a channel graph (STRM-086): the frame's river plan reads the channels through it.
     rivers: Option<Arc<crate::rivers::ReaderRiverSource>>,
+    /// The lakes of the same commit (REND-058): the water field answers a lake's level where the commit's lake mask is wet.
+    lakes: Option<Arc<planet_cache::lake_read::CommitLakes>>,
     /// What the base is, for a world opened by `open_fixture` (empty otherwise).
     fixture_note: String,
     /// The lattice the water field reads when it is not the height field's (a fixture world: the in-memory coarse bake, whose ocean channel the water field is built over).
@@ -333,6 +335,7 @@ impl WorldTerrain {
             erosion: None,
             erosion_note: String::new(),
             rivers: None,
+            lakes: None,
             fixture_note: String::new(),
             water_src: None,
         })
@@ -437,6 +440,7 @@ impl WorldTerrain {
             erosion: None,
             erosion_note: String::new(),
             rivers: None,
+            lakes: None,
             fixture_note: String::new(),
             water_src: None,
         })
@@ -694,13 +698,17 @@ impl WorldTerrain {
             .rivers(planet_cache::river_read::DEFAULT_CACHE_BYTES)
             .ok()
             .map(|r| Arc::new(crate::rivers::ReaderRiverSource::new(Arc::new(r))));
+        // The lakes are read under the same commit (CON-22): its basin tables and the tiles' lake masks.
+        self.lakes = Some(Arc::new(
+            layer.lakes(planet_cache::lake_read::DEFAULT_MASK_TILES).map_err(|e| format!("--erosion: the lakes of the commit: {e}"))?,
+        ));
         let layer = planet_generators::erosion_layer::ErosionLayer::new(Arc::new(layer)).map_err(|e| format!("--erosion: {e}"))?;
         let sea_level_m = def.sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
         self.kind = HeightFieldKind::ErodedC1;
         self.erosion_note = format!(
             "erosion layer {} (commit {commit_id:016x} of the new chain, L with no fill, {}, seed {seed}, coast fade {} m over the sea level {sea_level_m} m, crease band on, relief channels off, C1 base)",
             commit_dir.display(),
-            if self.rivers.is_some() { "rivers from its channel graph" } else { "no channel graph" },
+            if self.rivers.is_some() { "lakes from its basin tables and masks, rivers from its channel graph" } else { "lakes from its basin tables and masks, no channel graph" },
             planet_generators::erosion_layer::COAST_FADE_M
         );
         self.source = format!("{} + {}", self.source, self.erosion_note);
@@ -947,7 +955,13 @@ impl WorldTerrain {
             producer = producer.with_floor(floor);
         }
         let src: &dyn LatticeSource = self.water_src.as_deref().unwrap_or(self.src.as_ref());
-        let field = WaterField::new(&TangentWarp, src, vec![&producer]);
+        // The lakes of the commit come after the sea: the sea wins where both answer (REND-058).
+        let lakes = self.lakes.as_deref().map(|l| planet_generators::lake_water::LakeProducer::new(&TangentWarp, l, sea.liquid));
+        let mut producers: Vec<&dyn planet_generators::water::WaterProducer> = vec![&producer];
+        if let Some(l) = lakes.as_ref() {
+            producers.push(l);
+        }
+        let field = WaterField::new(&TangentWarp, src, producers);
         Ok(Some(f(&field)))
     }
 
