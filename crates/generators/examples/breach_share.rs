@@ -85,7 +85,7 @@ fn main() {
         let mut z = g.z0.clone();
         for pass in 1..=6 {
             let rep =
-                breach_basins(&g.grid, &mut z, &g.outlet, EPS, &PreBreach { passes: 1, halo: 128, max_depth_m: 500.0, min_lift_m: 0.5 });
+                breach_basins(&g.grid, &mut z, &g.outlet, EPS, &PreBreach { passes: 8, halo: 128, max_depth_m: 500.0, min_lift_m: 0.5 });
             let (all, big, cells) = closed_share(&g, &z, 30);
             println!("pass {pass}: basins {}, drained {}, kept {} (+{} bound); after: closed basins {all}, over 30 cells {big} = {:.1} % of land", rep.basins, rep.drained, rep.kept_lake, rep.kept_bound, 100.0 * cells as f64 / land as f64);
         }

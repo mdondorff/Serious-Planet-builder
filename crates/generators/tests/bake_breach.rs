@@ -134,9 +134,10 @@ fn the_breach_is_the_same_bits_in_the_carve_the_round_solver_on_any_thread_count
     let g = Grid::new(N, N, 800.0);
     let z0 = terraced(3);
     let outlet = g.outlets(&z0, 0.0);
-    let pre = PreBreach { passes: 1, halo: 40, max_depth_m: 500.0, min_lift_m: 0.5 };
+    let pre = PreBreach { passes: 8, halo: 40, max_depth_m: 500.0, min_lift_m: 0.5 };
     let mut probe = z0.clone();
     let rep = breach_basins(&g, &mut probe, &outlet, EPS, &pre);
+    assert!(rep.fixed_point, "the cap of 8 passes was not reached: {rep:?}");
     assert!(rep.drained >= 1, "the fixture has basins to drain: {rep:?}");
     let p = CarveParams {
         steps: 20,
@@ -239,6 +240,36 @@ fn an_outlet_above_the_floor_is_never_cut() {
     for c in 0..n * n {
         if outlet[c] {
             assert_eq!(z[c].to_bits(), z0[c].to_bits(), "outlet {c} was cut");
+        }
+    }
+}
+
+// spec: GEN-174, TEST-121 (the profile runs to the fixed point: the result is N passes where pass N+1 drains nothing)
+#[test]
+fn the_fixed_point_is_the_result_of_n_passes_after_which_one_more_drains_nothing() {
+    let g = Grid::new(N, N, 800.0);
+    for salt in [3u64, 5, 9] {
+        let z0 = terraced(salt);
+        let outlet = g.outlets(&z0, 0.0);
+        let with = |passes: u32, z: &mut Vec<f64>| {
+            breach_basins(&g, z, &outlet, EPS, &PreBreach { passes, halo: 40, max_depth_m: 500.0, min_lift_m: 0.5 })
+        };
+        let mut fixed = z0.clone();
+        let rep = with(8, &mut fixed);
+        assert!(rep.fixed_point, "salt {salt}: the cap was reached: {rep:?}");
+        let n = rep.passes_run.max(1);
+        let mut by_n = z0.clone();
+        with(n, &mut by_n);
+        assert!(
+            by_n.iter().zip(&fixed).all(|(a, b)| a.to_bits() == b.to_bits()),
+            "salt {salt}: the fixed point is the result of {n} passes"
+        );
+        let again = with(1, &mut by_n);
+        assert_eq!(again.drained, 0, "salt {salt}: pass {} drains nothing", n + 1);
+        // and a cap below the number of passes needed is reported, not hidden
+        if rep.passes_run >= 2 {
+            let capped = with(rep.passes_run - 1, &mut z0.clone());
+            assert!(!capped.fixed_point, "salt {salt}: a cap below the passes needed is reported");
         }
     }
 }

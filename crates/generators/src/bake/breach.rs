@@ -19,7 +19,7 @@ use std::collections::BinaryHeap;
 /// The parameters of the pass: the profile's halo in cells (the bound of the path), the deepest cut of one cell in metres (the profile's breach limit) and the shallowest basin that is breached.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PreBreach {
-    /// Passes: each pass drains the basins that the earlier one left (a nested basin whose ridge the first path did not cut); a pass that drains nothing ends the loop. 1 is the architect's single pass.
+    /// The cap of the passes: each pass drains the basins the earlier one left (a nested basin whose ridge the first path did not cut) and the loop ends at the fixed point, a pass that drains none. The profile's cap is 8.
     pub passes: u32,
     pub halo: usize,
     pub max_depth_m: f64,
@@ -27,8 +27,8 @@ pub struct PreBreach {
 }
 
 impl PreBreach {
-    /// The production profile (GEN-174): one pass, a path inside the halo of 128 cells (`halo - 1 - diameter` cells), a cut of at most the profile's breach limit (500 m) a cell, basins lifted by at least 0.5 m (H1's pit limit).
-    pub const PROFILE: PreBreach = PreBreach { passes: 1, halo: 128, max_depth_m: 500.0, min_lift_m: 0.5 };
+    /// The production profile (GEN-174): to the fixed point (cap 8 passes), a path inside the halo of 128 cells (`halo - 1 - diameter` cells), a cut of at most the profile's breach limit (500 m) a cell, basins lifted by at least 0.5 m (H1's pit limit).
+    pub const PROFILE: PreBreach = PreBreach { passes: 8, halo: 128, max_depth_m: 500.0, min_lift_m: 0.5 };
 }
 
 /// What the pass did.
@@ -45,6 +45,10 @@ pub struct BreachReport {
     /// The volume cut, in metres of height summed over the cells (times the cell area for m3).
     pub cut_m_cells: f64,
     pub cells_in_kept_lakes: usize,
+    /// Passes that drained at least one basin.
+    pub passes_run: u32,
+    /// Whether a pass drained no basin (the fixed point). False means the cap of `passes` was reached with basins still draining: the profile reports it (the MARK line) and a tier A fixture treats it as an error.
+    pub fixed_point: bool,
 }
 
 fn key(v: f64) -> u64 {
@@ -56,25 +60,24 @@ fn key(v: f64) -> u64 {
     }
 }
 
-/// Drains the closed basins of `z` (see the module), `p.passes` times at most. `outlet` are the cells that keep their height; `epsilon` the flood's.
+/// Drains the closed basins of `z` (see the module) to the fixed point: passes repeat until one drains no basin, at most `p.passes` (the cap; `BreachReport::fixed_point` is false if it was reached). `outlet` are the cells that keep their height; `epsilon` the flood's.
 pub fn breach_basins(grid: &Grid, z: &mut [f64], outlet: &[bool], epsilon: f64, p: &PreBreach) -> BreachReport {
     assert!(p.passes >= 1, "a breach has at least one pass");
-    let mut total = breach_pass(grid, z, outlet, epsilon, p);
-    for _ in 1..p.passes {
-        if total.drained == 0 {
-            break;
-        }
+    let mut total = BreachReport::default();
+    for pass in 1..=p.passes {
         let next = breach_pass(grid, z, outlet, epsilon, p);
-        if next.drained == 0 {
-            break;
-        }
-        total.drained += next.drained;
-        total.cells_cut += next.cells_cut;
-        total.cut_m_cells += next.cut_m_cells;
         total.basins = next.basins;
         total.kept_bound = next.kept_bound;
         total.kept_lake = next.kept_lake;
         total.cells_in_kept_lakes = next.cells_in_kept_lakes;
+        if next.drained == 0 {
+            total.fixed_point = true;
+            break;
+        }
+        total.passes_run = pass;
+        total.drained += next.drained;
+        total.cells_cut += next.cells_cut;
+        total.cut_m_cells += next.cut_m_cells;
     }
     total
 }

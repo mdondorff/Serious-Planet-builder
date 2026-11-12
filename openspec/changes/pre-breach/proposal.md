@@ -1,5 +1,7 @@
 # pre-breach (GEN-174, TEST-121)
 
+The profile runs the breach to the fixed point (cap 8 passes), architect 2026-11-12; R3b: three passes of 0.45 s (share of land in basins over 30 cells 21.3 % to 4.9 % at three passes, 3.8 % at six).
+
 ## Why
 - SPIKE-108 follow-up: the start surface holds large closed basins on 21 to 32 % of the land (R3b: 21.3 % in basins over 30 cells; the DEM 3.3 %); the fill turns each into a flat and the carve incises along the flat's routes.
 - Architect, 2026-11-12: one constrained least-cost breach pass at round 0 (Lindsay); a basin that cannot be drained stays a lake.

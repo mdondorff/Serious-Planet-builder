@@ -190,6 +190,8 @@ pub fn gather_with(
 #[derive(Clone, Debug, Default)]
 pub struct RoundReport {
     pub rounds: Vec<RoundStats>,
+    /// The round-0 breach of the basins (GEN-174), when the solve ran it: the passes, the basins drained and kept, and whether the fixed point was reached (false: the cap was hit, reported in the MARK line).
+    pub pre_breach: Option<super::breach::BreachReport>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -247,11 +249,11 @@ pub fn solve_rounds_with(
     drivers: &Drivers,
 ) -> RoundReport {
     check(grid, z, p, rounds, drivers);
+    let mut report = RoundReport::default();
     if let Some(pb) = &p.pre_breach {
-        super::breach::breach_basins(grid, z, outlet, p.epsilon, pb);
+        report.pre_breach = Some(super::breach::breach_basins(grid, z, outlet, p.epsilon, pb));
     }
     let taper = taper_of(z, p, drivers);
-    let mut report = RoundReport::default();
     for round in 0..rounds {
         let r = route_rules(grid, z, outlet, p.epsilon, seed, p.max_area, drivers.runoff, p.round_rules);
         let cuts = cut_in(Some(grid), &r);
@@ -414,11 +416,11 @@ pub fn solve_rounds_memo(
 ) -> (RoundReport, Vec<RoundWork>) {
     check(grid, z, p, rounds, drivers);
     assert!(p.round_rules.canonical_flood, "the memoised solve routes in tiles: the canonical flood is required");
+    let (mut report, mut work) = (RoundReport::default(), Vec::new());
     if let Some(pb) = &p.pre_breach {
-        super::breach::breach_basins(grid, z, outlet, p.epsilon, pb);
+        report.pre_breach = Some(super::breach::breach_basins(grid, z, outlet, p.epsilon, pb));
     }
     let taper = taper_of(z, p, drivers);
-    let (mut report, mut work) = (RoundReport::default(), Vec::new());
     // The data this solve uses is pinned until it completes (GEN-153).
     cache.part.begin_solve();
     cache.pin = Some(cache.catchments.tick() + 1);

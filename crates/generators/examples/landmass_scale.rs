@@ -730,6 +730,12 @@ fn main() {
         println!("4 rounds, {threads} threads: {:.1} s", t.elapsed().as_secs_f64());
         rep
     };
+    if let Some(b) = &rep.pre_breach {
+        println!(
+            "MARK round-0 breach: {} passes drained basins, {} drained, {} kept as lakes ({} cells), {} beside the border, cut {} cells; fixed point {}",
+            b.passes_run, b.drained, b.kept_lake, b.cells_in_kept_lakes, b.kept_bound, b.cells_cut, if b.fixed_point { "reached" } else { "NOT reached (the cap of the passes was hit)" }
+        );
+    }
     for (r, s) in rep.rounds.iter().enumerate() {
         println!(
             "  round {}: {} catchments, largest {} cells, {} cells in catchments of 1,000 or more",
