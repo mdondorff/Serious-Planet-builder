@@ -8,6 +8,7 @@ pub mod editperf;
 pub mod editscale;
 pub mod editwin;
 pub mod envelopeperf;
+pub mod fixturebase;
 pub mod gate;
 pub mod globalperf;
 pub mod horizonstep;
