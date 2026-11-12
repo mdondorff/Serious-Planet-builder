@@ -1,0 +1,34 @@
+== window face 2 cells 12288 seed 15: i 9568-10987 j 7904-9323 = 1420 x 1420; box i 9768-10787 j 8104-9123; land 79.1 %; base sampled in 43.0 s
+-- [R3b] production path: solve_rounds, RoundRules::ROUND, cell_metric true, window_cut true, grid has_metric true, is_cube false; 4 rounds; the probe's own round loop differs in 0 cells
+
+  == z0
+    [z0] is_cube false; canonical flood regraded: flats 16845 (window), graded 16703 (350390 cells of 422571: 82.9 %); not graded: diameter over 127 6 flats (60161 cells), touching the grid border 136 flats (12020 cells); lifted cells in the box 236129, of them with a changed level 177137 (75.0 %)
+      the largest ungraded flats (cells): [23185, 14810, 9744, 6877, 6289, 5869, 3131, 600]
+    z0, routed under ROUND: land 883645 cells, channel steps 131685 (127843 km of length); chords 8: 117679 / 16: 113434
+      chord  8: share within 2.5 deg of 0/45/90/135: 0.1390 (axis 0.0962, diagonal 0.0428); within 5 deg: 0.1893 (axis 0.0962, diagonal 0.0931); uniform 0.0889 / 0.2222
+      chord 16: share within 2.5 deg of 0/45/90/135: 0.0798 (axis 0.0551, diagonal 0.0247); within 5 deg: 0.2474 (axis 0.1610, diagonal 0.0864); uniform 0.0889 / 0.2222
+      straight runs (one D8 direction): channel length in runs > 10 cells 0.0143, > 20 cells 0.0025; diagonal share of channel length 0.5515; steps on lifted flats 0.7343 of channel steps (their length in runs > 10: 0.0188)
+    [z0, routed under ROUND] channel steps 131685, runs over 10 cells 144
+      direction      |       W       E       N       S      NW      NE      SW      SE
+      steps, share   |   0.024   0.317   0.079   0.116   0.016   0.192   0.062   0.195
+      runs, count    |       1      65      13      23       1      19       6      16
+      steps on lifted cells, share of the direction |   0.595   0.816   0.605   0.675   0.474   0.711   0.692   0.764
+      run length on lifted cells / run length |   0.909   0.976   0.933   0.997   1.000   0.935   0.904   0.968
+      run length / channel length |  0.0001  0.0051  0.0010  0.0018  0.0001  0.0029  0.0007  0.0025
+      steps: horizontal 0.341, vertical 0.194, diagonal NW-SE 0.211, diagonal NE-SW 0.254; runs: horizontal 66, vertical 36, NW-SE 17, NE-SW 25; mean step vector (+0.602, +0.086) cells (i right, j down)
+
+  == after 4 rounds
+    [after 4 rounds] is_cube false; canonical flood regraded: flats 660 (window), graded 615 (13288 cells of 65700: 20.2 %); not graded: diameter over 127 8 flats (3787 cells), touching the grid border 37 flats (48625 cells); lifted cells in the box 26300, of them with a changed level 6384 (24.3 %)
+      the largest ungraded flats (cells): [37634, 4208, 3171, 818, 751, 604, 602, 571]
+    after 4 rounds, routed under ROUND: land 883645 cells, channel steps 62091 (60909 km of length); chords 8: 56753 / 16: 55050
+      chord  8: share within 2.5 deg of 0/45/90/135: 0.1381 (axis 0.0867, diagonal 0.0515); within 5 deg: 0.2082 (axis 0.0867, diagonal 0.1215); uniform 0.0889 / 0.2222
+      chord 16: share within 2.5 deg of 0/45/90/135: 0.0808 (axis 0.0471, diagonal 0.0337); within 5 deg: 0.2516 (axis 0.1381, diagonal 0.1136); uniform 0.0889 / 0.2222
+      straight runs (one D8 direction): channel length in runs > 10 cells 0.0207, > 20 cells 0.0045; diagonal share of channel length 0.5811; steps on lifted flats 0.2633 of channel steps (their length in runs > 10: 0.0424)
+    [after 4 rounds, routed under ROUND] channel steps 62091, runs over 10 cells 88
+      direction      |       W       E       N       S      NW      NE      SW      SE
+      steps, share   |   0.032   0.258   0.099   0.116   0.028   0.221   0.091   0.155
+      runs, count    |       0      25      11      11       1      24       2      14
+      steps on lifted cells, share of the direction |   0.066   0.360   0.295   0.191   0.302   0.224   0.102   0.320
+      run length on lifted cells / run length |   0.000   0.498   0.613   0.336   1.000   0.694   0.000   0.377
+      run length / channel length |  0.0000  0.0042  0.0017  0.0018  0.0003  0.0077  0.0007  0.0044
+      steps: horizontal 0.290, vertical 0.215, diagonal NW-SE 0.184, diagonal NE-SW 0.312; runs: horizontal 25, vertical 22, NW-SE 15, NE-SW 26; mean step vector (+0.483, +0.014) cells (i right, j down)
