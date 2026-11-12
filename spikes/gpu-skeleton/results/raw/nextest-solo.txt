@@ -1,0 +1,8 @@
+    Finished `test` profile [optimized + debuginfo] target(s) in 0.21s
+────────────
+ Nextest run ID 015a8054-a1fb-4944-ad69-a6daad777b37 with nextest profile: default
+    Starting 2 tests across 1 binary (58 tests skipped)
+        PASS [  15.276s] (1/2) planet::gpu_all gpu_skeleton::the_draw_flag_selects_the_path_and_every_loop_draws_the_same_frame_on_either
+        PASS [  16.135s] (2/2) planet::gpu_all gpu_skeleton::the_upload_flag_selects_the_write_path_and_the_batched_loop_draws_the_same_frames_in_fewer_calls
+────────────
+     Summary [  16.172s] 2 tests run: 2 passed, 58 skipped
