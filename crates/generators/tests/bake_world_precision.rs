@@ -125,6 +125,9 @@ fn apply_plan_sets_every_epsilon_that_acts_on_an_f32_surface() {
     assert!(w.epsilon_w > EPS);
     assert_eq!((p.epsilon, p.carve.epsilon, p.sediment.carve.epsilon), (w.epsilon_w, w.epsilon_w, w.epsilon_w));
     assert!(p.carve.round_f32 && !p.sediment.carve.round_f32);
+    let mut k7 = planet_generators::bake::k7::K7Params::standard(5, 0.0);
+    w.apply_k7(&mut k7);
+    assert_eq!(k7.pass2.carve.epsilon, w.epsilon_w, "K7 floods with the world's epsilon through apply_k7");
     // above epsilon_max: f64 rounds, the profile epsilon everywhere
     let big = WorldPrecision::new(-200_000.0, 200_000.0, EPS, EPSILON_MAX_M);
     let q = PlanParams::standard_for(5, 1, spill, &big);
@@ -136,13 +139,16 @@ fn apply_plan_sets_every_epsilon_that_acts_on_an_f32_surface() {
 fn a_height_outside_the_bounds_is_refused_naming_the_cell() {
     use planet_generators::bake::build::{build_resident, PlanParams};
     let w = WorldPrecision::new(-11_000.0, 9_000.0, EPS, EPSILON_MAX_M);
+    let grid = Grid::new(4, 4, 800.0);
     let mut z = vec![100.0; 16];
-    assert!(w.check_within_radius(&z, |c| c as u64 + 1000).is_ok());
+    assert!(w.check_within_radius(&grid, &z, |c| c as u64 + 1000).is_ok());
     z[5] = -11_000.5;
-    let e = w.check_within_radius(&z, |c| c as u64 + 1000).unwrap_err();
+    let e = w.check_within_radius(&grid, &z, |c| c as u64 + 1000).unwrap_err();
     assert!(e.contains("cell 5") && e.contains("global id 1005") && e.contains("-11000.5") && e.contains("R = 11000"), "{e}");
     z[5] = f64::NAN;
-    assert!(w.check_within_radius(&z, |c| c as u64).is_err(), "a NaN is outside the bounds");
+    assert!(w.check_within_radius(&grid, &z, |c| c as u64).is_err(), "a NaN is outside the bounds");
+    let masked = Grid::new(4, 4, 800.0).with_active((0..16).map(|c| c != 5).collect());
+    assert!(w.check_within_radius(&masked, &z, |c| c as u64).is_ok(), "an inactive cell is not checked");
     // through the plan: a 50 km summit in a world declared as Earth's span is refused after the rounds
     const N: usize = 32;
     let g = Grid::new(N, N, 800.0);
@@ -157,12 +163,16 @@ fn a_height_outside_the_bounds_is_refused_naming_the_cell() {
     p.rounds = 1;
     p.carve.steps = 5;
     let e = build_resident(&g, z0, &outlet, &p, &|_| (900.0, 12.0), &|_| {}).err().expect("the plan refuses the surface");
-    assert!(e.to_string().contains("GEN-175") && e.to_string().contains("global id"), "{e}");
+    assert_eq!(e.kind(), std::io::ErrorKind::InvalidData);
+    assert!(
+        e.to_string().starts_with("the landmass:") && e.to_string().contains("GEN-175") && e.to_string().contains("global id"),
+        "the input is checked before the rounds: {e}"
+    );
 }
 
 // spec: GEN-175, TEST-122
-/// H1's flood on the 60 km world: a crater floor at 39 km under a rim at 40 km fills to the rim and is graded (GEN-173) by steps of at least epsilon / sqrt 2. H1 reads the f32 surface and floods it in f64: every
-/// lifted cell stands strictly above its receiver with epsilon_w. A copy of that fill narrowed to f32 would collapse unless its epsilon is sqrt 2 x the spacing: recorded here, so that a stored f32 fill takes the factor.
+/// H1's flood on the 60 km world: a crater floor at 39 km under a rim at 40 km fills to the rim and is graded (GEN-173) by steps below epsilon. H1 reads the f32 surface and floods it in f64: every
+/// lifted cell stands strictly above its receiver with epsilon_w. A copy of that fill narrowed to f32 collapses (the grade steps by a fraction of epsilon): recorded here, so that nothing stores a narrowed fill (it is re-flooded in f64).
 #[test]
 fn h1s_fill_descends_strictly_on_the_60_km_world() {
     use planet_generators::bake::carve::narrow_f32;
@@ -194,13 +204,31 @@ fn h1s_fill_descends_strictly_on_the_60_km_world() {
         narrow_f32(&mut filled);
         (lifted.len(), wide, count(&filled))
     };
-    let (lifted, f64_ties, _) = ties(w.epsilon_w);
+    let (lifted, f64_ties, narrowed_ties) = ties(w.epsilon_w);
     assert!(lifted > 50, "the crater floor is lifted: {lifted} cells");
     assert_eq!(f64_ties, 0, "H1 floods in f64: every lifted cell stands above its receiver with epsilon_w");
-    let (_, _, narrowed_ties) = ties(w.epsilon_w);
     assert!(
         narrowed_ties > 0,
-        "the grade steps by epsilon / sqrt 2: a fill narrowed to f32 collapses at epsilon_w (the fixture has teeth)"
+        "the grade steps by a fraction of epsilon: a fill narrowed to f32 collapses at epsilon_w (the fixture has teeth)"
     );
-    assert_eq!(ties(w.epsilon_w * std::f64::consts::SQRT_2 * 1.001).2, 0, "with sqrt 2 x the spacing a narrowed fill descends strictly");
+}
+
+// spec: GEN-175, TEST-122
+/// A round refuses a surface whose f32 spacing is not under its epsilon, wherever it runs (the regional bake, the plan): the chains would collapse near the summit.
+#[test]
+#[should_panic(expected = "GEN-175")]
+fn a_round_with_an_epsilon_under_the_spacing_of_its_summit_is_refused() {
+    use planet_generators::bake::carve::narrow_f32_checked;
+    narrow_f32_checked(&mut [10.0, 40_000.0, -3.0], EPS);
+}
+
+// spec: GEN-175, TEST-122
+#[test]
+fn a_round_with_the_world_epsilon_narrows_the_summit() {
+    use planet_generators::bake::carve::narrow_f32_checked;
+    let w = WorldPrecision::new(-10_000.0, 50_000.0, EPS, EPSILON_MAX_M);
+    let mut z = [10.0, 40_000.000_1, -3.0];
+    narrow_f32_checked(&mut z, w.epsilon_w);
+    assert_eq!(z[1], f64::from(40_000.000_1f64 as f32));
+    narrow_f32_checked(&mut [16_000.0, -11_000.0], EPS);
 }

@@ -71,8 +71,17 @@ impl PlanParams {
     /// and `build_resident` refuses a surface whose heights leave the bounds.
     pub fn standard_for(seed: u64, threads: usize, spill: PathBuf, world: &WorldPrecision) -> PlanParams {
         let mut p = PlanParams::standard(seed, threads, spill);
-        world.apply_plan(&mut p);
+        p.apply_precision(world);
         p
+    }
+
+    /// Set every epsilon of the plan that acts on an f32 surface to the world's (GEN-175): the carve (and its f32 flag), H1's fill and weighted route (`epsilon`) and the sediment pass (`sediment.carve.epsilon`;
+    /// pass 2 never takes the f32 flag). K7 has its own parameters: `WorldPrecision::apply_k7`. The plan remembers the world so that `build_resident` checks the heights against `R`.
+    pub fn apply_precision(&mut self, world: &WorldPrecision) {
+        world.apply(&mut self.carve);
+        self.epsilon = world.epsilon_w;
+        self.sediment.carve.epsilon = world.epsilon_w;
+        self.precision = Some(*world);
     }
 }
 
@@ -200,6 +209,10 @@ pub fn build_resident(
     });
     mark("landmass");
 
+    if let Some(w) = &p.precision {
+        w.check_within_radius(grid, &z, |c| grid.global_id(c))
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("the landmass: {e}")))?;
+    }
     // ---- the pre-carve surface waits on disk
     let guard = SpillGuard(p.spill.clone());
     let spill_bytes = spill_write(&p.spill, &z)?;
@@ -211,7 +224,8 @@ pub fn build_resident(
     lap("rounds", &mut phases);
     mark("after the rounds");
     if let Some(w) = &p.precision {
-        w.check_within_radius(&z, |c| grid.global_id(c)).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        w.check_within_radius(grid, &z, |c| grid.global_id(c))
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("after the rounds: {e}")))?;
     }
 
     // ---- H1: drivers, the weighted route, the filled surface, the hydrology

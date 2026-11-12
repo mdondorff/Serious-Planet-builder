@@ -6,8 +6,9 @@
 //! The choice depends on the world's definition only (CON-30): never on a window, a tile or the heights found there. The bounds passed in must hold every height a round can produce
 //! (the base heights plus the profile's largest uplift).
 
-use super::build::PlanParams;
 use super::carve::CarveParams;
+use super::k7::K7Params;
+use super::Grid;
 
 /// The largest `epsilon_w` the f32 rounds accept (a named parameter, metres). Above it the world's rounds run in f64. 0.01 m keeps f32 up to `R` = 131 km.
 pub const EPSILON_MAX_M: f64 = 0.01;
@@ -68,19 +69,15 @@ impl WorldPrecision {
         c.round_f32 = !self.f64_rounds;
     }
 
-    /// Set every epsilon of a plan that acts on an f32 surface to the world's (GEN-175): the carve (and its f32 flag), H1's fill and weighted route (`PlanParams.epsilon`), and pass 2's flood
-    /// (`sediment.carve.epsilon`, read by the sediment pass and K7); the plan remembers the world so that `build_resident` checks the heights against `R`. Pass 2 never takes the f32 flag.
-    pub fn apply_plan(&self, p: &mut PlanParams) {
-        self.apply(&mut p.carve);
-        p.epsilon = self.epsilon_w;
-        p.sediment.carve.epsilon = self.epsilon_w;
-        p.precision = Some(*self);
+    /// Set K7's flood epsilon (pass 2's, read by its pit statistics, incising carve and deposition sweep) to the world's (GEN-175).
+    pub fn apply_k7(&self, k: &mut K7Params) {
+        k.pass2.carve.epsilon = self.epsilon_w;
     }
 
     /// Refuse a surface whose heights leave the world's bounds: `max |h| <= R` (GEN-175; the bounds hold the base heights plus the profile's largest uplift). The error names the first
-    /// offending cell (`cell_id` maps a cell index to its global id), its height and `R`, and says what to do.
-    pub fn check_within_radius(&self, z: &[f64], cell_id: impl Fn(usize) -> u64) -> Result<(), String> {
-        match z.iter().position(|h| h.is_nan() || h.abs() > self.radius) {
+    /// offending active cell (`cell_id` maps a cell index to its global id), its height and `R`, and says what to do.
+    pub fn check_within_radius(&self, grid: &Grid, z: &[f64], cell_id: impl Fn(usize) -> u64) -> Result<(), String> {
+        match (0..z.len()).find(|&c| grid.is_active(c) && (z[c].is_nan() || z[c].abs() > self.radius)) {
             None => Ok(()),
             Some(c) => Err(format!(
                 "cell {c} (global id {}) stands at {} m, outside the world's height bounds R = {} m (GEN-175): the epsilon {} m was chosen for |h| <= R; widen the bounds (the base heights plus the profile's largest uplift) and rebuild",
