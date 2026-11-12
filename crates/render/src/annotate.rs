@@ -239,7 +239,7 @@ mod tests {
         PoseLabel { altitude_m: 300.0, pitch_deg: 15.0, fov_deg: 60.0, centre_distance_m: Some(1159.0) }
     }
 
-    // spec: TEST-126
+    // spec: TEST-128
     #[test]
     fn the_metres_per_pixel_follow_from_the_distance_the_field_of_view_and_the_height() {
         // 2 d tan(30 deg) / 720 px: a 1,159 m distance gives 1.86 m a pixel.
@@ -251,7 +251,7 @@ mod tests {
         assert!(PoseLabel { centre_distance_m: None, ..pose() }.text(720).ends_with("no ground at centre"));
     }
 
-    // spec: TEST-126
+    // spec: TEST-128
     #[test]
     fn the_bar_is_a_round_length_under_a_quarter_of_the_width_and_named() {
         for (max, want) in
@@ -267,7 +267,7 @@ mod tests {
         assert_eq!(nice_length_m(f64::NAN), 0.0);
     }
 
-    // spec: TEST-126
+    // spec: TEST-128
     #[test]
     fn annotating_draws_a_bar_of_the_stated_length_and_changes_only_the_bottom_left() {
         let (w, h) = (640u32, 360u32);
@@ -302,7 +302,7 @@ mod tests {
         assert_eq!(again.rgba, img.rgba);
     }
 
-    // spec: TEST-126
+    // spec: TEST-128
     /// A sample picture for the eye (not a golden): a gradient ground with the bar and the label, in `target/review/annotate-sample.png`.
     #[test]
     fn a_sample_annotated_picture_is_written_for_the_eye() {

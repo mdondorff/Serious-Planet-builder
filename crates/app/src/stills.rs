@@ -1679,7 +1679,7 @@ min_area_m2 = 1e9",
         assert!((sea.position.0.length() - radius - 300.0).abs() < 1e-6);
     }
 
-    // spec: TEST-126
+    // spec: TEST-128
     #[test]
     fn the_centre_distance_of_a_view_is_the_range_to_the_ground_along_its_axis_and_none_for_the_sky() {
         let r = 6_371_000.0;

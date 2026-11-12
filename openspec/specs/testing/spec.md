@@ -1812,9 +1812,9 @@ Source: GEN-176, architect 2026-11-12
 - **THEN** each of (a) to (d) has an assertion that cites GEN-176
 - **AND** (a) starts at -4 to +20 m and fails without the floor; (b) fails without the fixed cells, the deposition ledger closes, and pit spreading leaves fixed cells alone and keeps the volume; (c) an unbounded carry reports no burn cutoff and K7 reports both counts; (d) the rise stays under 0.25 m along and across tile borders, no cutoff is over 0.25 m, cutoff_binds is 0 on the shallow fixture, and the non-vacuity is restated (channel steps, tiles with a burned channel, steps across a tile border; the deep fixture holds holes farther upstream than the carry so that a genuine cutoff rise exists and the final pass has work)
 
-### Requirement: TEST-126 Owner-facing review images carry a scale bar and the pose
-Every owner-facing review picture written by the review tooling SHALL carry a scale bar (the longest round length of 1, 2 or 5 times a power of ten that fits a quarter of the width, in metres or km) and the pose (altitude over the ground, pitch, vertical field of view, metres per pixel at the centre), drawn on the copy under `target/review`, never on a golden.
-- The metres per pixel are `2 d tan(fov / 2) / height_px` for the distance `d` along the view axis to the ground or the sea at the centre.
+### Requirement: TEST-128 Owner-facing review images carry a scale bar and the pose
+Every owner-facing review picture written by the review tooling SHALL carry a scale bar (the longest round length of 1, 2 or 5 times a power of ten that fits a quarter of the width, in metres or km) and the pose (altitude, pitch, vertical field of view, metres per pixel at the centre), drawn on the `target/review` copy, never on a golden.
+- The metres per pixel are `2 d tan(fov / 2) / height_px` for the distance `d` along the axis to the ground or sea.
 - A view whose axis meets no ground has the label and no bar.
 - Golden-review's difference sheets carry no pose and are not annotated.
 
