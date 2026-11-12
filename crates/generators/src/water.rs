@@ -245,7 +245,7 @@ pub struct PlanWater {
 }
 
 impl<'a> WaterField<'a> {
-    /// `producers` are consulted in order: list the most specific first and the sea last.
+    /// `producers` are consulted in order and the first answer wins: the viewer lists the sea first, then a commit's lakes (REND-058).
     pub fn new(map: &'a (dyn FaceMapping + Sync), bake: &'a dyn LatticeSource, producers: Vec<&'a dyn WaterProducer>) -> WaterField<'a> {
         WaterField { map, bake, producers }
     }

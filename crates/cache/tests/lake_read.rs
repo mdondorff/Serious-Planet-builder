@@ -68,3 +68,16 @@ fn the_lake_producer_maps_a_direction_to_its_cell_and_names_the_lake_as_its_body
     }
     assert!(wet > 0, "a probe cell is in the lake");
 }
+
+// spec: REND-058
+#[test]
+fn a_tile_without_lake_water_keeps_no_mask() {
+    let d = Dir::new("lake-dry");
+    let l = lakes_of(&d);
+    let dry = tiles().into_iter().find(|id| expected(id.ti, id.tj).iter().all(|&x| x == NO_LAKE)).expect("a dry tile in the fixture");
+    assert_eq!(l.lake_at(Face(2), i64::from(dry.ti) * T as i64, i64::from(dry.tj) * T as i64).unwrap(), None);
+    assert_eq!(l.masks_held(), 0, "the dry tile is cached without a mask");
+    let wet = tiles().into_iter().find(|id| expected(id.ti, id.tj).iter().any(|&x| x != NO_LAKE)).unwrap();
+    l.lake_at(Face(2), i64::from(wet.ti) * T as i64, i64::from(wet.tj) * T as i64).unwrap();
+    assert_eq!(l.masks_held(), 1);
+}

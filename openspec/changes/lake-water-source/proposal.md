@@ -6,6 +6,8 @@ What (4a): `planet_generators::lake_water::LakeProducer`, a `WaterProducer` over
 
 Limit until 4b: a tile that holds a lake cell takes the lake's level for the whole tile's grid (the one-level-a-tile limit of `water.rs`), so the water is drawn wherever the ground is under the level inside that tile. 4b draws only the masked cells.
 
+Behaviour change: `--erosion` now refuses a commit whose basin tables do not read under the keys its spec makes (the rivers stay optional): a commit always holds its tables (the writer writes them first), so a refusal is a damaged or foreign store.
+
 Out of scope: the water pass's mask texture (4b), a lake liquid kind (a schema change after CP2), lakes across a face edge (no region crosses one).
 
 Requirement ID: REND-058 (reserved, design section 15 decision 1). Source: architect 2026-11-11 (PR 4 decisions), lead 2026-11-12 (E1 order).

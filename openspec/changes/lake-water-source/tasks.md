@@ -7,5 +7,5 @@
 - [x] 1.4 Tier A tests (REND-058): the fixture commit's cells; the producer's cell mapping; body ids.
 
 ## 2. Close
-- [ ] 2.1 spec-lint, prepush, verifier, numerics-reviewer (generators), spec-guardian.
-- [ ] 2.2 Archive (sync REND-058), delete tasks.md, log fragment, PR, merge on green.
+- [x] 2.1 spec-lint, prepush, verifier, numerics-reviewer (generators), spec-guardian.
+- [x] 2.2 Archive (sync REND-058), delete tasks.md, log fragment, PR, merge on green.

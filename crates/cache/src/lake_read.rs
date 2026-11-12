@@ -20,7 +20,9 @@ use crate::pack::TileStore;
 /// Decoded tile masks kept by default (a mask is 8 bytes a cell: 4.7 MB for a tile of 768 cells).
 pub const DEFAULT_MASK_TILES: usize = 32;
 
-type Masks = (HashMap<PassTile, Arc<Vec<u64>>>, VecDeque<PassTile>);
+/// A tile's decoded mask: `None` for a tile whose water section is empty (no lake: nothing is decoded or kept but the entry).
+type Mask = Option<Arc<Vec<u64>>>;
+type Masks = (HashMap<PassTile, Mask>, VecDeque<PassTile>);
 
 /// The lakes of one commit.
 pub struct CommitLakes {
@@ -75,14 +77,14 @@ impl CommitLakes {
         &self.tables[usize::from(face.0) % 6]
     }
 
-    /// The decoded mask of a tile (`tile x tile` lake ids, [`NO_LAKE`] for a dry cell); `None` when the commit does not hold the tile.
-    pub fn mask(&self, id: PassTile) -> Result<Option<Arc<Vec<u64>>>, String> {
+    /// The decoded mask of a tile (`tile x tile` lake ids, [`NO_LAKE`] for a dry cell); `None` when the commit does not hold the tile or the tile holds no lake water (an empty section).
+    pub fn mask(&self, id: PassTile) -> Result<Mask, String> {
         {
             let mut g = self.masks.lock().expect("mask lock");
             if let Some(m) = g.0.get(&id).cloned() {
                 g.1.retain(|x| *x != id);
                 g.1.push_back(id);
-                return Ok(Some(m));
+                return Ok(m);
             }
         }
         let Some(tile) =
@@ -90,10 +92,14 @@ impl CommitLakes {
         else {
             return Ok(None);
         };
-        let m = Arc::new(
-            decode(&tile.water, self.spec.grid.tile)
-                .map_err(|e| format!("L tile {}/{}/{} of commit {:016x}: {e}", id.face.0, id.ti, id.tj, self.commit.id))?,
-        );
+        let m = if tile.water.is_empty() {
+            None
+        } else {
+            Some(Arc::new(
+                decode(&tile.water, self.spec.grid.tile)
+                    .map_err(|e| format!("L tile {}/{}/{} of commit {:016x}: {e}", id.face.0, id.ti, id.tj, self.commit.id))?,
+            ))
+        };
         let mut g = self.masks.lock().expect("mask lock");
         if g.0.insert(id, m.clone()).is_none() {
             g.1.push_back(id);
@@ -103,7 +109,12 @@ impl CommitLakes {
                 g.0.remove(&old);
             }
         }
-        Ok(Some(m))
+        Ok(m)
+    }
+
+    /// Masks held now (a tile without lake water holds none).
+    pub fn masks_held(&self) -> usize {
+        self.masks.lock().expect("mask lock").0.values().filter(|m| m.is_some()).count()
     }
 
     /// The table and index of a lake id: its own face's table first, then the others (a lake is filed under the face of its floor cell).

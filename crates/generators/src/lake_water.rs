@@ -88,4 +88,51 @@ mod tests {
         assert_eq!(lake_of_body(WaterBodyId(WaterBodyId::LABEL_BIT | 5)), None);
         assert_ne!(lake_body(Face(0), 1), lake_body(Face(1), 1), "the face is part of the body");
     }
+
+    struct Dry(usize);
+    impl LakeMaskSource for Dry {
+        fn cells(&self) -> usize {
+            self.0
+        }
+        fn lake_at(&self, _: Face, _: i64, _: i64) -> Result<Option<LakeCell>, ReadError> {
+            Ok(None)
+        }
+    }
+
+    // spec: REND-058
+    #[test]
+    fn border_cells_cube_edges_and_corners_map_to_a_cell_of_their_face_at_production_size() {
+        use planet_core::{TangentWarp, Vec3};
+        let n = 98_304usize;
+        let src = Dry(n);
+        let p = LakeProducer::new(&TangentWarp, &src, LiquidKindId::WATER);
+        let g = crate::bake::tile::TileGrid { cells: n, tile: 768, halo: 64, radius_m: 6_371_000.0 };
+        let ks = [0i64, 1, n as i64 / 2, n as i64 - 2, n as i64 - 1];
+        for f in 0..6u8 {
+            for &i in &ks {
+                for &j in &ks {
+                    assert_eq!(p.cell_of(g.direction(Face(f), i, j)), (Face(f), i, j), "face {f} cell ({i}, {j})");
+                }
+            }
+        }
+        // The 12 edge midpoints and 8 corners: a border cell of the face the mapping gives.
+        let mut dirs = Vec::new();
+        for a in [-1.0f64, 0.0, 1.0] {
+            for b in [-1.0f64, 0.0, 1.0] {
+                for c in [-1.0f64, 0.0, 1.0] {
+                    let zeros = [a, b, c].iter().filter(|&&x| x == 0.0).count();
+                    if zeros <= 1 {
+                        dirs.push(Vec3::new(a, b, c).normalized());
+                    }
+                }
+            }
+        }
+        assert_eq!(dirs.len(), 20);
+        let last = n as i64 - 1;
+        for d in dirs {
+            let (_, i, j) = p.cell_of(d);
+            assert!(i == 0 || i == last || j == 0 || j == last, "{d:?} maps to an inner cell ({i}, {j})");
+            assert!((0..=last).contains(&i) && (0..=last).contains(&j));
+        }
+    }
 }
