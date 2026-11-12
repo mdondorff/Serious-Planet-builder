@@ -120,3 +120,9 @@ Scope: project (GEN-165, GEN-145, A3 5.5)
 What happened: `hydrology(.., runoff None, ..)` makes `Q` and `Q_w` true areas in m2 (every local term is 1); `k7_region` called it that way and passed `hy.qw` to the width law `w = 7.2 Q^0.5` (m3/s), which cut trenches of tens to hundreds of km and 95,820,316 lowerings; the G-SURF-I bisect (ea6b1b2b..760bf0e7) found the first commit, 59a7deaa. With the runoff in m/s the widest channel of the prototype tile is 93.5 m (0.92 cells), the burn count is 4,631 again and the G-SURF-I numbers equal the old row.
 Assumption it changes: that a `Q` read from H1 is a discharge. `Hydro.q_unit` records which it is; the width law (`burn_channels_wide`) refuses a channel whose `q_unit` is an area.
 Obsolete when: H1 has no path without the runoff.
+
+## 2026-11-12 The carve amplifies sub-millimetre differences at large relief
+Scope: project (GEN-175, GEN-166)
+What happened: on a synthetic 60 km world (40 km cone, 384 x 384 cells of 800 m, 4 rounds) f64 at flood epsilon 1.95e-3 m against 1e-3 m differs by a p99 of 77 m, and a 0.2 mm random perturbation of the f64 start by 1,400 m (p50 3.6 m; 4 km control: p99 104 m); a midpoint datum (f32 about 20 km) made f32 differ from f64 by a p99 of 75 m after 4 rounds because it coarsened the rounding grid near the sea (1 mm instead of 1e-7 m), where the ties are; in the sea frame f32 against f64 at the same epsilon is within 0.011 m (p99) after 4 rounds. Differences between runs grow from round 3 as cascades of breach and flat routes.
+Assumption it changes: that an f32 against f64 difference over several rounds measures the rounding; it measures the carve's sensitivity. Compare one round, or a perturbation control.
+Obsolete when: the carve is stable under start-surface noise.
