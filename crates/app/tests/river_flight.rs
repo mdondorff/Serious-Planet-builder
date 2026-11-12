@@ -170,7 +170,7 @@ fn a_flight_over_a_one_face_world_with_a_channel_graph_plans_its_rivers_through_
         .flat_map(|i| (0..32).map(move |j| (8.0 * f64::from(i) + 4.0, 8.0 * f64::from(j) + 4.0)))
         .max_by(|a, b| {
             let d = |q: &(f64, f64)| {
-                channels.iter().flat_map(|c| c.points.iter()).map(|p| (p.0 - q.0).hypot(p.1 - q.1)).fold(f64::MAX, f64::min)
+                channels.iter().flat_map(|c| c.points.iter()).map(|p| libm::hypot(p.0 - q.0, p.1 - q.1)).fold(f64::MAX, f64::min)
             };
             d(a).total_cmp(&d(b))
         })
