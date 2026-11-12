@@ -1073,7 +1073,12 @@ pub fn capture_flights(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
                     r.set_shadow_frame(m.frame(camera, sun, k));
                 }
                 r.render(ctx, &lit, false).map_err(|e| e.to_string())?;
-                let image = r.read_color(ctx);
+                // The owner's frames carry the scale bar and the pose (ADR 0118 point 5), drawn on these review pictures only.
+                let mut image = r.read_color(ctx);
+                planet_render::annotate::annotate(
+                    &mut image,
+                    &crate::stills::pose_label(camera, &|d| rig.field.height(d), radius_m, setup.level_m),
+                );
                 image.write_png(&sub.join(format!("frame_{k:04}.png"))).map_err(|e| format!("writing frame {k} of {name}: {e}"))?;
                 if k % 40 == 39 {
                     writeln!(out, "{name}: {} of {} frames", k + 1, view.cameras.len()).map_err(err)?;

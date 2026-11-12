@@ -32,6 +32,7 @@ egui-wgpu.workspace = true
 pollster.workspace = true
 raw-window-handle.workspace = true
 png.workspace = true
+libm.workspace = true
 
 planet-generators.workspace = true
 
@@ -39,7 +40,6 @@ planet-generators.workspace = true
 planet-generators = { workspace = true, features = ["stress"] }
 planet-testkit.workspace = true
 planet-world-def.workspace = true
-libm.workspace = true
 # Test builds enable the test-only reference renderer (REND-031); no non-dev dependency edge may.
 planet-render = { workspace = true, features = ["reference-renderer"] }
 
