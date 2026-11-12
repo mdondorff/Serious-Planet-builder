@@ -4,6 +4,9 @@
 use planet_core::Vec3;
 use planet_generators::classes::{ClassSource, CoastTilt, PlateauRim};
 
+/// The plateau uplift of GEN-096 in metres (as built).
+const U: f64 = 600.0;
+
 /// A spiral of directions over the sphere (golden angle).
 fn directions() -> Vec<Vec3> {
     let n = 600;
@@ -64,4 +67,36 @@ fn the_identity_word_is_unchanged_while_off_and_moves_with_the_width() {
 #[should_panic(expected = "plateau rim width")]
 fn a_negative_width_is_refused() {
     planet_generators::classes::set_plateau_rim(-1.0);
+}
+
+// spec: GEN-183, TEST-132
+#[test]
+fn with_the_rule_on_the_share_follows_the_distance_not_the_field_and_the_shore_has_no_step() {
+    let src = ClassSource::new(14).with_coast_threads(4);
+    let rim = PlateauRim { w_km: 100.0 };
+    let (mut inside, mut outside, mut shore) = (0, 0, 0);
+    for d in directions() {
+        let (off, on) = (src.eval_rules(d, &CoastTilt::OFF, &PlateauRim::OFF), src.eval_rules(d, &CoastTilt::OFF, &rim));
+        assert_eq!(off.weights.map(f64::to_bits), on.weights.map(f64::to_bits), "no class moves");
+        if off.land_depth <= 0.0 {
+            assert_eq!(off.e0.to_bits(), on.e0.to_bits(), "the sea is untouched");
+            continue;
+        }
+        let field = off.terms.plateau_field;
+        let fade_one = off.land_depth >= 0.2;
+        let share_implied = (on.e0 - off.e0) / U + field;
+        if fade_one && field >= 0.99 {
+            inside += 1;
+            assert!(share_implied >= 0.5 - 1e-6, "deep in the field the share is at least half: {share_implied}");
+        }
+        if fade_one && field == 0.0 {
+            outside += 1;
+            assert!((-1e-9..=1.0).contains(&share_implied), "share in [0, 1]: {share_implied}");
+        }
+        if off.land_depth < 0.02 {
+            shore += 1;
+            assert!((on.e0 - off.e0).abs() <= 0.1 * U + 1e-9, "at the shore the rule adds little: {} m", on.e0 - off.e0);
+        }
+    }
+    assert!(inside > 0 && outside > 0 && shore > 0, "the spiral reaches plateau interiors ({inside}), land outside them ({outside}) and the shore ({shore})");
 }

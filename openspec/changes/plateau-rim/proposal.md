@@ -1,6 +1,6 @@
 ## Why
 - SPIKE-109 (2026-11-12): the base without the band holds 11 to 12 % of the land in large shallow basins; part of them are plateau bowls (the plateau field is a thresholded noise: its interior dips where the noise dips).
-- Architect, 2026-11-12 (D111 item 3): plateau uplift monotone from the rim to the interior (smoothstep of the distance to the edge), built at the source, switched off until previewed (ADR 0118 points 2 and 4).
+- Architect, 2026-11-12: plateau uplift monotone from the rim to the interior (smoothstep of the distance to the edge), built at the source, switched off until previewed (ADR 0118 points 2 and 4).
 
 ## What changes
 - GEN-183: the plateau's uplift `U x plateau_field` is replaced, when the rule is on, by `U x smoothstep(-W, W, x)` with `x` the signed distance in km inside the 0.5 contour of the plateau field (a lattice of its own with the cap `W`); applied to `e0` after the class weights are decided (no class moves). Off by default: every `e0` and every key is the build before.

@@ -244,6 +244,9 @@ impl ClassSource {
     pub fn with_shelf(mut self, shelf: ShelfProfile) -> ClassSource {
         self.shelf = ShelfProfile::new(shelf);
         self.coast = std::sync::OnceLock::new();
+        // The rule lattices read the shelf's cell count: drop them with the coast lattice.
+        *self.tilt_coast.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        *self.rim_lattice.lock().unwrap_or_else(|e| e.into_inner()) = None;
         self
     }
 
@@ -623,7 +626,9 @@ impl ClassSource {
         // The plateau rim rule (GEN-183): the uplift rises monotonically from the rim to the interior.
         let e0 = if rim.is_on() && t.land_depth > 0.0 {
             let (signed_km, _) = self.rim_lattice(rim.w_km).read(d);
-            (e0 + PLATEAU_UPLIFT_M * (rim.share(-signed_km) - terms.plateau_field)).clamp(MIN_ELEVATION_M, MAX_ELEVATION_M)
+            // Faded in over the true coast ramp, as the tilt is, so that a rim near the shore leaves no step between land and sea.
+            let fade = smoothstep(0.0, TRUE_COAST_RAMP, t.land_depth);
+            (e0 + fade * PLATEAU_UPLIFT_M * (rim.share(-signed_km) - terms.plateau_field)).clamp(MIN_ELEVATION_M, MAX_ELEVATION_M)
         } else {
             e0
         };
