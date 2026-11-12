@@ -16,6 +16,7 @@ mod logcmd;
 mod package;
 mod perfab;
 mod perfwindow;
+mod plancmd;
 mod prbody;
 mod prepush;
 mod preview;
@@ -78,6 +79,7 @@ const USAGE: &str = "cargo xtask <command>
   terrain-score [--store DIR] [--dem DIR] [--sites FILE] [--out DIR] [--maps]   the terrain scorecard (TEST-079, BUILD-029): seven descriptors on nine GLO-30 tiles and the generator's two matched sites each (world.field() of the store, read only), distances and a phone-readable report.md and report.json in target/review/terrain-score/<date>/ with the Copernicus notice; CPU only, about 1 minute; --maps adds one 512 px PNG per descriptor per raster
   pr-body-check        the pr-gate check (BUILD-044): reads PR_BODY, BASE_SHA and HEAD_SHA; a PR with a non-docs path needs `Verifier: PASS <sha>` of a commit of the PR in its body
   lanes                per lane of docs/lanes.txt the last commit and its age, the open PR, the latest inbox number and the running cargo or example processes (BUILD-043)
+  plan                 the current milestone's exit items (docs/milestones/, Status line `active`) with their state, queue rows (docs/status.md) and open PRs naming them; fails for a queue row off the milestone and for an open item without a row (BUILD-053)
   stages [--update]    the stage manifest (BUILD-047): runs the stage probe's fixture and checks docs/stages/manifest.txt against it (a stale manifest fails naming the stage, field and column); --update rewrites it from the run; the sheets go to target/review/stages/ci/
   gates                the gate ledger (BUILD-041): per gate of A3 12.1 the newest verdict, rows and lanes from docs/gates/ledger.md; spec-lint rejects a gate with no row
   worktrees [--prune] [--no-size]   every git worktree with size, branch, uncommitted count, last commit and merged PR (BUILD-039); --prune removes with `git worktree remove` (never --force) only the clean ones whose PR is merged or that are detached at an ancestor of origin/main, never the current one or the root; prepush warns above 12 worktrees; prepush, store and bake refuse below 20 GB free on the drive and warn below 50 GB
@@ -119,6 +121,7 @@ fn main() -> ExitCode {
         Some("terrain-score") => heavy::with("terrain-score", || terrainscore::run_cmd(&root, &args[1..])),
         Some("pr-body-check") => prbody::run(&root),
         Some("lanes") => lanes::run(&root),
+        Some("plan") => plancmd::run(&root),
         Some("gates") => gates::run(&root),
         Some("stages") => heavy::with(&format!("stages {}", args[1..].join(" ")), || stages::run_cmd(&root, &args[1..])),
         Some("worktrees") => worktrees::run(&root, &args[1..]),
