@@ -63,13 +63,43 @@ The e0 of the window is averaged over `cf` x `cf` cells, routed there (the same 
 - Without the tilt the plains lose the drainage as the lattice coarsens (R3a 7.56 -> 11.2 / 16.4 / 20.4 %, R3b 10.3 -> 10.8 / 12.1 / 15.2 %): the fine tree's gradient toward the channels needs the fine distance.
 - Storage of the lattice (an estimate, not built): a cube face of 98,304 local cells a side is 10,000 km; at cf 4 (3.3 km) 3,070 cells a side, 9.4 million cells a face, 57 million cells for six faces, three tiers of a distance in u16: about 340 MB; at cf 2 four times that. The tier distances could be one field each of a coarse order-weighted distance (1 value a cell: 115 MB at cf 4). Not measured; the lattice would be computed once per world from e0 (a band-free smooth surface) by a routing pass over the 57 million cells: about 60 seconds at the probe's 1.1 us a cell.
 
+## Result 5: the gain on the coarse lattice (R1h; share % / depth p95 (m) / relief p50 p95 (m); spec `tree:16:0.6:<gain>:0.5:<cf>`)
+Bars of the order: share at most 7 %, depth p95 at most 270 m, 5 x 5 relief at least 90 % / 75 % of the plain band at the same tilt (tilt 4: plain 101.8 / 656.1 m, so at least 91.6 / 492; tilt 0: plain 94.1 / 654.8, so at least 84.7 / 491).
+| cf | gain | Tilt 4: share / depth p95 / relief | Tilt 0: share / depth p95 / relief |
+|---|---|---|---|
+| 4 | 1.0 | 6.99 / 236 / 62.0 368 (61 %, 56 %) | 15.02 / 237 / 52.3 354 |
+| 4 | 1.3 | 7.33 / 299 / 70.9 457 (70 %, 70 %) | 15.48 / 287 / 60.8 447 |
+| 4 | 1.5 | 7.50 / 337 / 76.2 518 (75 %, 79 %) | 15.73 / 320 / 66.0 510 |
+| 4 | 1.7 | 7.69 / 349 / 81.5 576 (80 %, 88 %) | 15.98 / 352 / 70.8 573 |
+| 4 | 2.0 | 7.87 / 411 / 89.0 668 (87 %, 102 %) | 16.31 / 403 / 77.7 668 (83 %, 102 %) |
+| 2 | 1.0 | 7.34 / 268 / 76.7 430 (75 %, 66 %) | 13.66 / 271 / 68.1 420 |
+| 2 | 1.5 | 7.76 / 373 / 98.6 617 (97 %, 94 %) | 14.15 / 368 / 89.2 615 |
+| 2 | 2.0 | 8.05 / 492 / 118.4 811 (116 %, 124 %) | 14.47 / 477 / 108.4 810 |
+- No gain at cf 4 meets the bars together. Relief p95 reaches 75 % at gain 1.5 and p50 90 % at about gain 2.1, but depth p95 passes the 270 m bar already at gain 1.3 (299 m) and share at tilt 4 passes 7 % at gain 1.3 (7.33 %). At gain 1.0 the share and depth bars hold (6.99 %, 236 m) and the relief is 61 % / 56 % of the plain band.
+- The same holds at cf 2 (relief 90 % at about gain 1.35, where depth p95 is about 330 m).
+- Depth p95 grows with the gain at about 100 m a unit of gain at cf 4 (236 -> 299 -> 337 -> 349 -> 411 m): the depressions that remain (the plateau and belt terms of e0 and the closed floors) get deeper as the relief on them grows. This is a reading of the numbers, not traced.
+- On this form relief and depth p95 move together; a route to relief that leaves the residual basins as deep as at gain 1.0 was not found in this time-box.
+
+## Result 6: the plains without a tilt (the lattice alone, D126's reading; share % / depth p95 (m) / relief p50 p95 (m); tilt 0)
+| Window | Plain band | cf 2, gain 1.0 | cf 4, gain 1.0 | cf 2, gain 2.0 | cf 4, gain 2.0 |
+|---|---|---|---|---|---|
+| R3a | 21.97 / 16 / 14.3 167 | 11.20 / 13 / 17.4 173 | 16.35 / 18 / 16.3 174 | 12.07 / 21 / 30.2 181 | 18.50 / 24 / 27.9 182 |
+| R3b | 22.52 / 15 / 11.7 28.4 | 10.81 / 14 / 12.0 31.8 | 12.11 / 18 / 10.8 30.6 | 12.43 / 20 / 20.2 47.1 | 13.91 / 21 / 17.6 43.0 |
+- Without a tilt the lattice carries neither plain window to the 7 % bar: R3a 11.2 % (cf 2) and 16.4 % (cf 4), R3b 10.8 % and 12.1 %, at gain 1.0; gain 2.0 changes the share by +1 to +2 points. Depth p95 holds everywhere (at most 24 m). The plain band is 22 %.
+- The lattice drains about as far as the band-off floor of SPIKE-109 (R3a 12.2 %, R3b 11.8 %, R1h 10.9 %): the remainder is the plateau and coast terms of e0, (a reading, not traced: a tree read from e0 does not drain the pits of e0 itself). The finding for the owner's brief: the lattice alone does not fix the plains; the plateau terms of e0 do. The images show the residual basins as broad flats (`images/R3b-lattice-cf4-gain1.0-tilt0-crop.png`).
+- cf 2 holds the plains better than cf 4 (R3a 11.2 against 16.4 %) (a reading, not traced: the distance read from a 3.3 km lattice is smoother than the fine one, so it carries less gradient toward the channels at 800 m cells).
+
+## Face edges
+The build of the lattice across the six cube faces as one routed graph is written in `lattice-build.md` (n = 3,072 cells a face edge at cf 4, 56.6 million cells, about 2 GB while building, 3 to 5 minutes on one thread; no code).
+
 ## Look
+- Gain 1.0 and 2.0 at cf 4 (new in this pass; the crops of R1h at tilt 0 and 4, the oblique of the same pose, R3b crops at tilt 0): `images/R1h-lattice-cf4-gain{1.0,2.0}-tilt{0,4}-{crop,obl}.png`, `images/R3b-lattice-cf4-gain{1.0,2.0}-tilt0-crop.png`. In the R1h crop at tilt 0 the flat valley floors are large and level, a straight-edged rectangular strip at the middle right and another at the lower right (the straight-run flats of e0 again; the artefact of the first cut is not removed), the ridge relief is on the edges of the floors; gain 2.0 shows the same layout with steeper ridges (the red closed floors look similar). The oblique at gain 2.0 reads as smooth rolling dunes-like ground with a long shadowed flank; one faint straight line across the plain at the left (the same straight edge).
 - Top-down crops (3 x magnified, 200 x 200 cells = 163 km a side, 20 km bar; NW light): `images/R1h-plain-band-tilt4-crop.png` against `images/R1h-tree-tilt4-crop.png`; boxes `R1h-*-box.png` (505 km, 100 km bar); R3b crops. Basins outlined in red.
 - The plain band is ridge-rings everywhere (every crest closes a basin); the tree surface has broad valley floors with fine dendritic ridges on the slopes, much as a drained mountain land looks; the residual basins are the plateau and belt terms of e0 and a few closed floors. Artefacts: a straight horizontal edge at the left of the R1h crop (a flat of e0 routed along a row: the flats' straight-run flow of SPIKE-108 is inherited by the tree), and valley floors at the channels' flat width.
 - Low-sun oblique, R1h: `images/R1h-plain-band-tilt4-oblique.png` and `R1h-tree-tilt4-oblique.png`: pinhole camera at face 1 cell (8526, 960) (window cell (670, 400)), 1,500 m above the ground, azimuth 350 deg (north-north-west, clockwise from up the image), pitch -7 deg, horizontal field of view 70 deg, sun from 80 deg (east) at 14 deg elevation with cast shadows; 26.0 m (plain band) and 19.5 m (tree) per pixel at the screen centre (18.6 and 13.9 km away); the scale bar is the bar at the lower left at the centre's scale. A simple height-field ray marcher over the 814 m cells (no texture; hard grid-scale shadow edges): relief is modest at this scale (R1h's 5 x 5 relief p95 is 0.5 to 0.7 km), the tree surface reads as broad valleys with smooth slopes, the plain band as lumpy ridges.
 
-## Not done in this cut (the time-box has 1.4 days left)
-- The order of a channel (Strahler) instead of the area tiers, tributary junction smoothing, a valley-floor width law, a gain that restores the relief on the coarse lattices, the lattice computed across face edges (the probe averages and routes inside one window).
+## Not done (the time-box closed with Results 5 and 6; per the lead's order of 2026-11-12 nothing further on the starting surface until the owner's decision)
+- The order of a channel (Strahler) instead of the area tiers, tributary junction smoothing, a valley-floor width law, the straight-edge artefact of flats, more seeds on R1h; the lattice across face edges is written (`lattice-build.md`), not coded.
 - The plateau fix and the bounded tilt (the bars are read with my S-tilt stand-in at 4 m/km, +1.0 to +1.5 km of height at the medians; refused as a fix); the effect on the erosion bake; hypsometry (the relief is positive on a floor: the median height falls by the plain band's mean, like SPIKE-110's variants); class weights.
 - More windows and seeds (three fixtures only), a second look pass.
 

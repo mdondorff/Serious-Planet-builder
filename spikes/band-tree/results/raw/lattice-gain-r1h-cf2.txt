@@ -1,0 +1,37 @@
+== window face 1 cells 12288 seed 14: i 7856-8875 j 560-1579 = 1020 x 1020; box i 8056-8675 j 760-1379; land 69.4 %; base sampled in 28.6 s
+  amp, plain surface and S sampled (32.9 s)
+  e0 routed (2.4 s)
+  tier 0: coarse lattice 510 x 510 (cf 2), area >= 16 km2, distance read at the fine cells in 0.02 s
+  tier 1: coarse lattice 510 x 510 (cf 2), area >= 64 km2, distance read at the fine cells in 0.02 s
+  tier 2: coarse lattice 510 x 510 (cf 2), area >= 256 km2, distance read at the fine cells in 0.03 s
+SPEC tree:16:0.6:1.5:0.5:2 tilt 0
+  basins [tree:16:0.6:1.5:0.5:2 tilt 0]: land cells of the box 267717; lifted 16.90 %; depressions of 1-30 cells 2.75 %; over 30 cells interior 14.15 %, touching the window ring 0.00 % (counted apart); over 300 cells interior 10.47 % (49 depressions)
+    interior depressions over 30 cells by largest fill depth (% of land): under 1 m 0.18, 1-10 m 1.26, 10-100 m 3.36, over 100 m 9.35
+    the deepest depressions over 30 cells (fill depth / cells): 671 m / 379 cells; 652 m / 204 cells; 638 m / 904 cells; 530 m / 1756 cells; 528 m / 275 cells; 506 m / 598 cells; 467 m / 91 cells; 462 m / 34 cells
+    interior depressions over 30 cells: 462 ; largest fill depth p50 78.1 m, p90 287.6 m, max 671.4 m
+BASINRAW | tree:16:0.6:1.5:0.5:2 tilt 0 | lifted 16.90 | small 2.75 | over30 14.15 | over300 10.47 | n30 462 | depth p50 78.1 p95 368.0 max 671.4 | deeper100 9.35 | cells p50 62 p95 560 max 10816
+RELIEF | tree:16:0.6:1.5:0.5:2 tilt 0 | land cells 267717 | slope p50 0.0192 p95 0.1634 | relief5 p50 89.2 p95 614.5 m
+SPEC tree:16:0.6:1.5:0.5:2 tilt 4
+  basins [tree:16:0.6:1.5:0.5:2 tilt 4]: land cells of the box 267717; lifted 9.80 %; depressions of 1-30 cells 2.04 %; over 30 cells interior 7.76 %, touching the window ring 0.00 % (counted apart); over 300 cells interior 5.18 % (46 depressions)
+    interior depressions over 30 cells by largest fill depth (% of land): under 1 m 0.00, 1-10 m 0.02, 10-100 m 2.28, over 100 m 5.45
+    the deepest depressions over 30 cells (fill depth / cells): 665 m / 374 cells; 649 m / 200 cells; 616 m / 832 cells; 616 m / 2416 cells; 522 m / 264 cells; 512 m / 622 cells; 468 m / 34 cells; 457 m / 87 cells
+    interior depressions over 30 cells: 403 ; largest fill depth p50 93.8 m, p90 304.2 m, max 665.1 m
+BASINRAW | tree:16:0.6:1.5:0.5:2 tilt 4 | lifted 9.80 | small 2.04 | over30 7.76 | over300 5.18 | n30 403 | depth p50 93.8 p95 373.0 max 665.1 | deeper100 5.45 | cells p50 63 p95 492 max 5029
+RELIEF | tree:16:0.6:1.5:0.5:2 tilt 4 | land cells 267717 | slope p50 0.0210 p95 0.1681 | relief5 p50 98.6 p95 616.9 m
+  tier 0: coarse lattice 510 x 510 (cf 2), area >= 16 km2, distance read at the fine cells in 0.02 s
+  tier 1: coarse lattice 510 x 510 (cf 2), area >= 64 km2, distance read at the fine cells in 0.02 s
+  tier 2: coarse lattice 510 x 510 (cf 2), area >= 256 km2, distance read at the fine cells in 0.01 s
+SPEC tree:16:0.6:2.0:0.5:2 tilt 0
+  basins [tree:16:0.6:2.0:0.5:2 tilt 0]: land cells of the box 267717; lifted 17.42 %; depressions of 1-30 cells 2.95 %; over 30 cells interior 14.47 %, touching the window ring 0.00 % (counted apart); over 300 cells interior 10.47 % (55 depressions)
+    interior depressions over 30 cells by largest fill depth (% of land): under 1 m 0.21, 1-10 m 1.22, 10-100 m 3.26, over 100 m 9.79
+    the deepest depressions over 30 cells (fill depth / cells): 898 m / 383 cells; 876 m / 205 cells; 862 m / 949 cells; 709 m / 277 cells; 667 m / 773 cells; 625 m / 89 cells; 614 m / 34 cells; 611 m / 217 cells
+    interior depressions over 30 cells: 485 ; largest fill depth p50 96.0 m, p90 370.0 m, max 897.8 m
+BASINRAW | tree:16:0.6:2.0:0.5:2 tilt 0 | lifted 17.42 | small 2.95 | over30 14.47 | over300 10.47 | n30 485 | depth p50 96.0 p95 476.8 max 897.8 | deeper100 9.79 | cells p50 64 p95 555 max 10256
+RELIEF | tree:16:0.6:2.0:0.5:2 tilt 0 | land cells 267717 | slope p50 0.0231 p95 0.2159 | relief5 p50 108.4 p95 810.3 m
+SPEC tree:16:0.6:2.0:0.5:2 tilt 4
+  basins [tree:16:0.6:2.0:0.5:2 tilt 4]: land cells of the box 267717; lifted 10.37 %; depressions of 1-30 cells 2.31 %; over 30 cells interior 8.05 %, touching the window ring 0.00 % (counted apart); over 300 cells interior 5.27 % (50 depressions)
+    interior depressions over 30 cells by largest fill depth (% of land): under 1 m 0.00, 1-10 m 0.02, 10-100 m 2.00, over 100 m 6.04
+    the deepest depressions over 30 cells (fill depth / cells): 891 m / 379 cells; 873 m / 203 cells; 838 m / 862 cells; 703 m / 274 cells; 655 m / 630 cells; 622 m / 91 cells; 620 m / 34 cells; 612 m / 2172 cells
+    interior depressions over 30 cells: 419 ; largest fill depth p50 117.6 m, p90 387.0 m, max 891.2 m
+BASINRAW | tree:16:0.6:2.0:0.5:2 tilt 4 | lifted 10.37 | small 2.31 | over30 8.05 | over300 5.27 | n30 419 | depth p50 117.6 p95 492.0 max 891.2 | deeper100 6.04 | cells p50 67 p95 552 max 4990
+RELIEF | tree:16:0.6:2.0:0.5:2 tilt 4 | land cells 267717 | slope p50 0.0248 p95 0.2203 | relief5 p50 118.4 p95 811.1 m
