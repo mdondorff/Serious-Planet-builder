@@ -28,6 +28,7 @@ pub mod preflightperf;
 pub mod previewjob;
 pub mod reproworld;
 pub mod reserveload;
+pub mod rivers;
 pub mod shadowrig;
 pub mod sheet;
 pub mod skeleton;
@@ -2059,7 +2060,7 @@ mod tests {
         assert_eq!(b.height(v).to_bits(), c.height(v).to_bits(), "the heights are the layer's, channels or not");
     }
 
-    // spec: STRM-083
+    // spec: STRM-083, STRM-086
     #[test]
     fn the_erosion_layer_of_a_commit_of_the_new_chain_is_read_through_its_commit_and_refuses_the_old_channels() {
         use planet_cache::global_store::GlobalWorld;
@@ -2127,6 +2128,8 @@ mod tests {
         assert!(e.contains("holds a commit of the new chain") && e.contains("--channels off"), "{e}");
         let on = open().with_erosion(&options(false)).unwrap();
         assert!(on.erosion_note().contains(&format!("commit {:016x}", commit.id)), "{}", on.erosion_note());
+        // A commit with no channel graph has no river source, and the note says so (STRM-086).
+        assert!(on.rivers().is_none() && on.erosion_note().contains("no channel graph"), "{}", on.erosion_note());
         assert!(on.describe().contains("erosion layer"), "{}", on.describe());
     }
 
