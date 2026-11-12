@@ -251,6 +251,7 @@ fn main() {
             let t = Instant::now();
             let r: K7Result = k7_tile(&g, id, &base, &regional, ch, &params, threads);
             println!("K7 {label}: {:.1} s, {} cells burned", t.elapsed().as_secs_f64(), r.burned);
+            println!("MARK {}", r.mark_line());
             if compare {
                 let plain = K7Params { canonical_flood: false, ..params };
                 let r0: K7Result = k7_tile(&g, id, &base, &regional, ch, &plain, threads);

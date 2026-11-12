@@ -355,7 +355,7 @@ fn k7_rises(
     regional: &(dyn Fn(planet_core::Vec3) -> f64 + Sync),
     id: PassTile,
     step: f64,
-) -> (usize, usize, f64, planet_generators::bake::k7::FinalPass) {
+) -> (usize, usize, f64, planet_generators::bake::k7::FinalPass, usize, f64) {
     use planet_generators::bake::k7::{k7_tile, line_cells, upstream_first};
     let g = spec().grid;
     let (win, h, t) = (g.window() as i64, g.halo as i64, g.tile as i64);
@@ -378,7 +378,23 @@ fn k7_rises(
             }
         }
     }
-    (n, over, worst, r.final_pass)
+    (n, over, worst, r.final_pass, r.burned, r.burn_cutoff_diff.max)
+}
+
+/// A lattice of deep holes along the valley of the H1 channels (GEN-176): 1,200 m deep, 5 cells wide every 20 cells of the face, over the rows the channels run in. A hole is lower than the beds
+/// (500-900 m), so the burn carries it down the line only `carry` steps: the cells farther downstream stand higher than the hole, a genuine cutoff rise that the final pass cannot remove.
+fn deep_holes(d: planet_core::Vec3) -> f64 {
+    let face = Face(2);
+    let n = 256.0;
+    let w = d.dot(face.normal());
+    let plane = |u: f64| libm::atan(u) / core::f64::consts::FRAC_PI_4;
+    let (s, t) = (plane(d.dot(face.u_axis()) / w), plane(d.dot(face.v_axis()) / w));
+    let (x, y) = ((s + 1.0) * 0.5 * n - 0.5, (t + 1.0) * 0.5 * n - 0.5);
+    if (112.0..152.0).contains(&y) && x >= 0.0 && libm::fmod(x, 20.0) < 5.0 {
+        -1200.0
+    } else {
+        0.0
+    }
 }
 
 // spec: TEST-116, GEN-169
@@ -396,17 +412,28 @@ fn g_profile_on_a_fixture_whose_burn_stays_within_the_carry_has_no_cutoff_and_no
         let store = Arc::new(TileStore::open(d.path(), w.params()).unwrap());
         let feed = ChannelGraphFeed::new(store, c).unwrap();
         // K7 own heights: the profile holds in every tile core and the cutoff never binds.
-        let (mut steps, mut binds, mut worked_tiles) = (0, 0, 0);
+        // Non-vacuity (GEN-176, architect 2026-11-12): the burn now holds the profile by itself (the channel cells are fixed after it), so the final pass has no work on this fixture and "the pass works
+        // in more than 4 tiles" no longer holds; the fixture must still have channel steps, burned channels in more than 4 tiles and line steps across a tile border. The deep fixture below makes the pass work.
+        let (mut steps, mut binds, mut burned_tiles) = (0, 0, 0);
         for id in tiles() {
-            let (n, over, worst, fp) = k7_rises(&feed, &shallow_base, regional, id, step);
+            let (n, over, worst, fp, burned, burn_diff) = k7_rises(&feed, &shallow_base, regional, id, step);
+            assert!(burn_diff <= step, "{name}: tile ({}, {}): the burn's cutoff changes a height by {burn_diff} m", id.ti, id.tj);
             assert_eq!(over, 0, "{name}: tile ({}, {}) has {over} rises over {step} m (largest {worst} m)", id.ti, id.tj);
+            // GATED (architect, 2026-11-12): wherever a cutoff binds, the bounded target is within the store's 0.25 m step of the unbounded one.
+            assert!(
+                fp.cutoff_diff.max <= step,
+                "{name}: tile ({}, {}): a cutoff changes a height by {} m",
+                id.ti,
+                id.tj,
+                fp.cutoff_diff.max
+            );
             steps += n;
             binds += fp.cutoff_binds;
-            worked_tiles += usize::from(fp.lowered > 0);
+            burned_tiles += usize::from(burned > 0);
         }
         assert!(
-            steps > 1000 && worked_tiles > 4,
-            "{name}: the fixture has channel steps ({steps}) and the pass works in {worked_tiles} tiles"
+            steps > 1000 && burned_tiles > 4,
+            "{name}: the fixture has channel steps ({steps}) and burned channels in {burned_tiles} tiles"
         );
         assert_eq!(binds, 0, "{name}: the carry holds the profile everywhere: no cutoff binds");
         // Through the stored read (B + L): the same along every stored piece, tile borders included.
@@ -422,7 +449,7 @@ fn g_profile_on_a_fixture_whose_burn_stays_within_the_carry_has_no_cutoff_and_no
             let (li, lj) = ((i % t) as usize, (j % t) as usize);
             bs[&(ti, tj)][(lj + g.halo) * g.window() + li + g.halo] + f64::from(tile.cell(li, lj))
         };
-        let (mut cells, mut worst, mut border) = (0usize, f64::NEG_INFINITY, f64::NEG_INFINITY);
+        let (mut cells, mut worst, mut border, mut border_steps) = (0usize, f64::NEG_INFINITY, f64::NEG_INFINITY, 0usize);
         for tj in 0..4u32 {
             for ti in 0..4u32 {
                 for ch in rivers.tile_channels(Face(2), ti, tj).unwrap().iter() {
@@ -436,13 +463,14 @@ fn g_profile_on_a_fixture_whose_burn_stays_within_the_carry_has_no_cutoff_and_no
                         worst = worst.max(rise);
                         if a / t != c / t || b / t != e / t {
                             border = border.max(rise);
+                            border_steps += 1;
                         }
                     }
                 }
             }
         }
         println!("G-PROFILE {name}: {cells} stored steps, largest rise {worst:.4} m, across a tile border {border:.4} m");
-        assert!(cells > 1000);
+        assert!(cells > 1000 && border_steps > 0, "{name}: {cells} stored steps, {border_steps} across a tile border");
         assert!(worst <= step, "{name}: the stored surface rises {worst} m downstream along a piece (limit {step} m)");
         assert!(border <= step, "{name}: the step across a tile border is {border} m (limit {step} m)");
     }
@@ -452,12 +480,14 @@ fn g_profile_on_a_fixture_whose_burn_stays_within_the_carry_has_no_cutoff_and_no
 #[test]
 fn on_the_deep_fixture_every_rise_over_a_step_is_reported_by_the_cutoff_count() {
     let w = world();
-    let (d, c, _h) = baked("profile-deep", &zero);
+    // Restated (GEN-176, architect 2026-11-12): the rises this fixture used to show came from the defects of K7 (a sub-sea trench under a land cell, trenches filled after the burn), not from the carry; with those fixed the
+    // plain deep fixture has none. "Deep" now means a hole farther upstream than the carry (`deep_holes`), so a genuine carry cutoff and rise exist, the per-tile asserts below stay, and the final pass has work.
+    let (d, c, _h) = baked("profile-deep", &deep_holes);
     let store = Arc::new(TileStore::open(d.path(), w.params()).unwrap());
     let feed = ChannelGraphFeed::new(store, c).unwrap();
     let (mut rises, mut binds) = (0usize, 0usize);
     for id in tiles() {
-        let (_, over, _, fp) = k7_rises(&feed, &base, &zero, id, 0.25);
+        let (_, over, _, fp, _, _) = k7_rises(&feed, &base, &deep_holes, id, 0.25);
         // A rise exists only where the pass reports a cutoff, and the report counts at least every rise.
         assert!(over == 0 || fp.cutoff_binds > 0, "tile ({}, {}): {over} rises over 0.25 m and no cutoff reported", id.ti, id.tj);
         assert!(over <= fp.cutoff_binds, "tile ({}, {}): {over} rises over 0.25 m but {} cutoff cells", id.ti, id.tj, fp.cutoff_binds);
