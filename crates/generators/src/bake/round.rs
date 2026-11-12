@@ -251,6 +251,9 @@ pub fn solve_rounds_with(
     drivers: &Drivers,
 ) -> RoundReport {
     check(grid, z, p, rounds, drivers);
+    if let Some(pb) = &p.pre_breach {
+        super::breach::breach_basins(grid, z, outlet, p.epsilon, pb);
+    }
     let taper = taper_of(z, p, drivers);
     let mut report = RoundReport::default();
     for round in 0..rounds {
@@ -415,6 +418,9 @@ pub fn solve_rounds_memo(
 ) -> (RoundReport, Vec<RoundWork>) {
     check(grid, z, p, rounds, drivers);
     assert!(p.round_rules.canonical_flood, "the memoised solve routes in tiles: the canonical flood is required");
+    if let Some(pb) = &p.pre_breach {
+        super::breach::breach_basins(grid, z, outlet, p.epsilon, pb);
+    }
     let taper = taper_of(z, p, drivers);
     let (mut report, mut work) = (RoundReport::default(), Vec::new());
     // The data this solve uses is pinned until it completes (GEN-153).

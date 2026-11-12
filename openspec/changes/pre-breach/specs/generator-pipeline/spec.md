@@ -1,0 +1,11 @@
+## ADDED Requirements
+### Requirement: GEN-174 The closed basins of the start surface are breached once at round 0
+When `CarveParams::pre_breach` is set, the carve, the round solver and the memoised solve SHALL, before the first round and before the taper is read, drain each closed basin of the start surface by one pass of constrained least-cost breaching. A basin is a flat of the canonical filled surface (GEN-173) lifted by at least `min_lift_m` (0.5 m, the pit limit of H1); its floor is its lowest cell by (height, id). From the floor the path SHALL run over the 8 neighbours by least cost, entering a cell costing `max(0, z - floor)`, never entering a cell more than `max_depth_m` (the profile's breach limit, 500 m) above the floor, with at most `halo - 1 - diameter` cells (`halo` the profile's halo, 128 cells; `diameter` the basin's Chebyshev diameter in cells), ending at the first cell outside the basin that stands below the floor (or an outlet at or below it); ties break by (cost, cells, id). Every path cell above the floor SHALL be lowered to the floor; the exit is not touched; nothing is raised. A basin that touches or lies beside the border of the grid, has no path length left, or has no path within the depth and the length SHALL stay filled (a lake) and untouched. Basins are processed in order of (floor height, floor id), each on the surface the earlier ones left. The result SHALL be a function of the cells only: the same bits in the whole-region carve, the round solver on any thread count and the memoised solve on any tile size; a closed bowl with no lower cell (GEN-162) SHALL be unchanged. `passes` (default 1) repeats the pass on the basins the earlier one left, ending when a pass drains none. Planar grids only. With the flag off every result and key SHALL be the bits of the build before this requirement; the layer key SHALL hold the parameters (byte 0xC7) only when set.
+
+Verify: A
+Status: planned
+Source: Architect, 2026-11-12 (SPIKE-108 follow-up: the start surface's closed basins)
+
+#### Scenario: A noise basin and a deep basin
+- **WHEN** a pit of 8 m on a slope and a pit deeper than the breach limit are breached
+- **THEN** the first is drained by the two rim cells west of its floor and no closed basin is left, and the second is not touched

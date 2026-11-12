@@ -11,6 +11,7 @@ pub const BAKE_KERNEL_VERSION: u32 = 6;
 /// Version of pass 2's behaviour (the window and the face-change blend of `map::change_at`, the local carve, thermal, deposition, the quantisation): part of every tile's key. History: 1 = PR 3b/5; 2 = the pass-1 change read by Catmull-Rom (C1) instead of bilinear, and the multiple-flow-direction area in the local carve and the deposition sweep; 3 = the base sampled every 4 cells and interpolated (Catmull-Rom) in a window, thermal 300 passes of 1/8 (SPIKE-98), halo 128; 4 = the depression fill capped by the receiver and the one-cell pits spread over their neighbours (volume kept). 5 = pass 1 keeps its pits (GEN-120); 6 = the K7 burn targets the lowest of the level and the heights found within the halo upstream along the channel tree (GEN-169), the width of a trench is capped at 32 cells, and a final channel pass lowers the path cells to the lowest height within the halo upstream (architect, 2026-11-11); 7 = the flats of the canonical flood graded by Euclidean distance (GEN-173, architect, 2026-11-12).
 pub const PASS2_KERNEL_VERSION: u32 = 7;
 
+pub mod breach;
 pub mod build;
 pub mod carve;
 pub mod channel_graph;

@@ -106,7 +106,13 @@ pub fn regrade_flats(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64, boun
     let mut writes: Vec<(u32, f64)> = Vec::new();
     for f in &flats {
         let small = !f.touches_border && f.diameter <= bound;
-        infos.push(FlatInfo { cells: f.cells.len(), diameter: f.diameter, touches_border: f.touches_border, graded: small, max_lift_m: f.max_lift_m });
+        infos.push(FlatInfo {
+            cells: f.cells.len(),
+            diameter: f.diameter,
+            touches_border: f.touches_border,
+            graded: small,
+            max_lift_m: f.max_lift_m,
+        });
         if small {
             regrade_one(grid, z, epsilon, &f.cells, f.base, filled, &mut writes);
         }
@@ -192,7 +198,13 @@ pub fn lifted_flats(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64, fille
             }
         }
         let max_lift_m = members.iter().map(|&k| filled[ids[k] as usize] - z[ids[k] as usize]).fold(0.0f64, f64::max);
-        out.push(Flat { cells: members.iter().map(|&k| ids[k]).collect(), base: base[k0], diameter: (x1 - x0).max(y1 - y0), touches_border: touches, max_lift_m });
+        out.push(Flat {
+            cells: members.iter().map(|&k| ids[k]).collect(),
+            base: base[k0],
+            diameter: (x1 - x0).max(y1 - y0),
+            touches_border: touches,
+            max_lift_m,
+        });
     }
     out
 }
@@ -209,15 +221,7 @@ pub struct FlatInfo {
 
 /// One flat's Euclidean grade (see [`regrade_flats`]).
 #[allow(clippy::too_many_arguments)]
-fn regrade_one(
-    grid: &Grid,
-    z: &[f64],
-    epsilon: f64,
-    cells: &[u32],
-    base: f64,
-    filled: &[f64],
-    writes: &mut Vec<(u32, f64)>,
-) {
+fn regrade_one(grid: &Grid, z: &[f64], epsilon: f64, cells: &[u32], base: f64, filled: &[f64], writes: &mut Vec<(u32, f64)>) {
     let m = cells.len();
     let mut local = std::collections::HashMap::with_capacity(m);
     for (j, &c) in cells.iter().enumerate() {

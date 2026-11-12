@@ -44,6 +44,8 @@ pub struct CarveParams {
     pub window_cut: bool,
     /// The round surface is stored f32 (GEN-166): the heights are narrowed to f32 (round to nearest, ties to even) once at the end of every round and read widened by the next round, K6 and K7; the round computes in f64. Off by default (f64 rounds); the callers of the round rules turn it on.
     pub round_f32: bool,
+    /// The round-0 breach of the closed basins (GEN-174): one pass before the first round drains each closed basin by the cheapest path to a lower cell within the depth and the length of the profile (`breach::PreBreach`); off (`None`) by default.
+    pub pre_breach: Option<super::breach::PreBreach>,
     /// How a round visits the cells (GEN-141): execution only, the result is the same bits (a sweep reads a cell and its receiver, which share a catchment); not part of any key.
     pub schedule: Schedule,
 }
@@ -81,6 +83,7 @@ impl Default for CarveParams {
             round_rules: RoundRules { clip_mfd: super::route::MfdClip::Off, canonical_flood: false },
             window_cut: false,
             round_f32: false,
+            pre_breach: None,
             schedule: Schedule::Region,
         }
     }
@@ -156,6 +159,9 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
     assert!(p.steps > 0 && p.reroute_every > 0, "a carve has steps and a re-route interval");
     assert!(p.max_area >= 0.0 && p.max_area.is_finite(), "the area cap is finite and not negative, not {}", p.max_area);
     assert_finite("the heights", z);
+    if let Some(pb) = &p.pre_breach {
+        super::breach::breach_basins(grid, z, outlet, p.epsilon, pb);
+    }
     if let Some(f) = factor {
         assert_eq!(f.len(), grid.len(), "one carve factor per cell");
         assert!(f.iter().all(|v| v.is_finite() && *v >= 0.0), "the carve factors are finite and not negative");
