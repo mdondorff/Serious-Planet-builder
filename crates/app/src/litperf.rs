@@ -693,6 +693,8 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
     )
     .map_err(err)?;
     let mut results: Vec<ViewResult> = Vec::new();
+    // A river flight whose plans carry no river node measures nothing of the river path: it fails the scene (a gate figure over it would mean nothing).
+    let mut river_empty: Vec<String> = Vec::new();
     let first_camera = views[0].cameras[0];
     // The run's clock and its phases (the views and flights): a run that stops on a timeout shows, in the output and in `stall::phase_report`, which one it was in.
     crate::stall::run_clock_start();
@@ -716,6 +718,9 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
                 if river {
                     // The river flights run once (the shore filter is the water scenes' inspection) and report their river plans.
                     crate::riverperf::report(&setup.river, out)?;
+                    if setup.river.nodes_max == 0 {
+                        river_empty.push(path.clone());
+                    }
                     continue;
                 }
                 let other = if default == 0.0 { 1.0 } else { 0.0 };
@@ -852,6 +857,12 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
     .map_err(err)?;
     for f in &failed {
         writeln!(out, "{f}").map_err(err)?;
+    }
+    if !river_empty.is_empty() {
+        return Err(format!(
+            "FAIL: the river flight(s) {} carried no river node at any frame: the scene measured nothing of the river path (the camera is not over a river the finest nodes resolve)",
+            river_empty.join(", ")
+        ));
     }
     Ok(())
 }
