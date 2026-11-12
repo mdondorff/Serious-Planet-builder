@@ -1191,6 +1191,9 @@ impl PlateauRim {
     }
 }
 
+/// The named width `W` in km that a switch-on takes (GEN-183): a placeholder, not tuned; the value is the owner's look call on the picture sheet.
+pub const PLATEAU_RIM_W_KM: f64 = 100.0;
+
 /// Sets the plateau rim rule of the process (GEN-183): `w_km` km wide (0 switches it off).
 pub fn set_plateau_rim(w_km: f64) {
     assert!(w_km.is_finite() && w_km >= 0.0, "the plateau rim width W is finite and not negative, not {w_km}");
