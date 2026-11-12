@@ -415,3 +415,141 @@ fn the_wet_width_of_a_thin_river_over_coarse_samples_is_reported_against_its_own
     assert!(rows.iter().all(|x| x.3 <= 1.1), "no thickening: {rows:?}");
     assert!(rows.iter().filter(|x| x.0 >= 1.2).all(|x| x.1 >= 0.8), "a river of 1.2 samples or more keeps its width: {rows:?}");
 }
+
+/// A river source with several rivers of different widths over level 3 and 4 nodes, and the nodes of a small flight: `frames` sets of nodes that overlap from one frame to the next.
+fn flight_source() -> Source {
+    Source::new(vec![
+        channel(&[(10.0, 60.0), (90.0, 70.0), (180.0, 90.0)], q_for(6.0)),
+        channel(&[(100.0, 10.0), (110.0, 100.0), (120.0, 200.0)], q_for(3.0)),
+        channel(&[(30.0, 200.0), (150.0, 190.0), (240.0, 180.0)], q_for(9.0)),
+    ])
+}
+
+fn flight_frames() -> Vec<Vec<(u32, TileId, f64)>> {
+    let mut frames = Vec::new();
+    for f in 0..6u32 {
+        let mut nodes: Vec<(u32, TileId, f64)> = Vec::new();
+        for (k, (x, y)) in [(f, 1u32), (f + 1, 1), (f, 2), (f + 1, 2), (f + 2, 3), (7 - f, 6)].into_iter().enumerate() {
+            nodes.push((k as u32, tile(2, 3, x.min(7), y), f64::from(k as u32) * 10.0 + f64::from(f)));
+        }
+        // Finer nodes over the first river, and one node of another face.
+        nodes.push((6, tile(2, 4, 2 + f, 3), 1.0));
+        nodes.push((7, tile(2, 5, 6 + f, 7), 2.0));
+        nodes.push((8, tile(0, 3, 1, 1), 3.0));
+        frames.push(nodes);
+    }
+    frames
+}
+
+// spec: REND-064
+#[test]
+fn a_cached_plan_is_the_fresh_plan_bit_for_bit_over_a_flight_and_the_second_pass_builds_nothing() {
+    let src = flight_source();
+    let req = request(&src, 32);
+    let mut cache = planet_frame::river::RiverCache::new(1 << 20);
+    let mut any_river = false;
+    for nodes in flight_frames() {
+        let fresh = plan_rivers(&req, &nodes).unwrap();
+        let cached = planet_frame::river::plan_rivers_cached(&req, &nodes, &mut cache).unwrap();
+        assert_eq!(cached, fresh, "the cached plan is the fresh plan");
+        any_river |= !fresh.nodes.is_empty();
+    }
+    assert!(any_river, "the flight meets rivers");
+    let built = cache.counters().builds;
+    assert!(built > 0 && !cache.is_empty() && cache.bytes() <= 1 << 20);
+    // The same flight again: every node is a hit, nothing is built.
+    for nodes in flight_frames() {
+        assert_eq!(planet_frame::river::plan_rivers_cached(&req, &nodes, &mut cache).unwrap(), plan_rivers(&req, &nodes).unwrap());
+    }
+    assert_eq!(cache.counters().builds, built, "the second pass builds no node");
+    assert!(cache.counters().hits > 0);
+}
+
+// spec: REND-064
+#[test]
+fn a_cache_held_to_a_few_tiles_evicts_and_rebuilds_the_same_bits_within_its_byte_bound() {
+    let src = flight_source();
+    let req = request(&src, 32);
+    // 33 x 33 codes and the overhead: room for about three entries.
+    let cap = 3 * (33 * 33 + 64) + 10;
+    let mut cache = planet_frame::river::RiverCache::new(cap);
+    for _ in 0..2 {
+        for nodes in flight_frames() {
+            assert_eq!(planet_frame::river::plan_rivers_cached(&req, &nodes, &mut cache).unwrap(), plan_rivers(&req, &nodes).unwrap());
+            assert!(cache.bytes() <= cap, "{} bytes against {cap}", cache.bytes());
+        }
+    }
+    assert!(cache.counters().evictions > 0, "the bound was reached");
+    // A cache smaller than one entry keeps nothing and still gives the fresh plan.
+    let mut tiny = planet_frame::river::RiverCache::new(10);
+    for nodes in flight_frames() {
+        assert_eq!(planet_frame::river::plan_rivers_cached(&req, &nodes, &mut tiny).unwrap(), plan_rivers(&req, &nodes).unwrap());
+    }
+    assert_eq!((tiny.len(), tiny.bytes()), (0, 0));
+}
+
+// spec: REND-064
+#[test]
+fn a_lookup_plan_lists_what_is_missing_and_after_the_fill_it_is_the_fresh_plan() {
+    use planet_frame::river::{fill_river_cache, plan_rivers_lookup, RiverCache};
+    let src = flight_source();
+    let req = request(&src, 32);
+    let mut cache = RiverCache::new(1 << 20);
+    let nodes = &flight_frames()[2];
+    let first = plan_rivers_lookup(&req, nodes, &mut cache).unwrap();
+    assert!(
+        first.plan.nodes.is_empty() && first.not_ready > 0,
+        "nothing is built: no river this frame, {} nodes not ready",
+        first.not_ready
+    );
+    assert!(!first.missing.is_empty() && first.missing.len() <= nodes.len());
+    let mut sorted = first.missing.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(sorted.len(), first.missing.len(), "each missing tile once");
+    fill_river_cache(&req, &mut cache, &first.missing).unwrap();
+    let second = plan_rivers_lookup(&req, nodes, &mut cache).unwrap();
+    assert_eq!((second.not_ready, second.missing.len()), (0, 0));
+    assert_eq!(second.plan, plan_rivers(&req, nodes).unwrap(), "after the fill the lookup is the fresh plan");
+    assert!(!second.plan.nodes.is_empty());
+}
+
+// spec: REND-064
+#[test]
+fn another_request_or_source_clears_the_cache() {
+    use planet_frame::river::{plan_rivers_cached, RiverCache};
+    struct Other(Source, u64);
+    impl RiverSource for Other {
+        fn grid(&self) -> RiverGrid {
+            GRID
+        }
+        fn tile_channels(&self, f: Face, i: u32, j: u32) -> Result<Arc<Vec<Channel>>, String> {
+            self.0.tile_channels(f, i, j)
+        }
+        fn id(&self) -> u64 {
+            self.1
+        }
+    }
+    let (a, b) = (Other(flight_source(), 1), Other(flight_source(), 2));
+    let nodes = &flight_frames()[0];
+    let mut cache = RiverCache::new(1 << 20);
+    plan_rivers_cached(&request(&a, 32), nodes, &mut cache).unwrap();
+    assert!(!cache.is_empty());
+    // The same request over another commit identity starts empty; so do other limits, node size and law.
+    let builds = cache.counters().builds;
+    plan_rivers_cached(&request(&b, 32), nodes, &mut cache).unwrap();
+    assert!(cache.counters().builds > builds, "another commit builds again");
+    let mut tighter = request(&b, 32);
+    tighter.min_samples = 0.6;
+    let before = cache.counters().builds;
+    plan_rivers_cached(&tighter, nodes, &mut cache).unwrap();
+    assert!(cache.counters().builds > before, "other limits build again");
+    // A bad request is refused by the cache's adoption too.
+    assert!(plan_rivers_cached(&request(&b, 0), nodes, &mut cache).is_err());
+    // The layer count is not part of the stamp: the same entries serve another layer cap, and the drops follow the cap.
+    let mut few = request(&b, 32);
+    few.max_layers = 1;
+    let plan = plan_rivers_cached(&few, nodes, &mut RiverCache::new(1 << 20)).unwrap();
+    assert!(plan.nodes.len() <= 1);
+    assert_eq!(plan_rivers_cached(&few, nodes, &mut cache).unwrap(), plan);
+}

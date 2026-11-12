@@ -34,6 +34,10 @@ impl RiverSource for ReaderRiverSource {
     fn tile_channels(&self, face: Face, ti: u32, tj: u32) -> Result<Arc<Vec<Channel>>, String> {
         self.reader.tile_channels(face, ti, tj)
     }
+
+    fn id(&self) -> u64 {
+        self.reader.commit_id()
+    }
 }
 
 /// The river plan of a frame (REND-062): every node of the terrain plan with its tile and the distance of its origin from the camera, the nearest

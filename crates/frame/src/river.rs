@@ -133,6 +133,10 @@ pub trait RiverSource {
     fn grid(&self) -> RiverGrid;
     /// The channels that can touch the core of L tile `(ti, tj)` of `face`, in the face's cell-index space.
     fn tile_channels(&self, face: planet_core::Face, ti: u32, tj: u32) -> Result<std::sync::Arc<Vec<Channel>>, String>;
+    /// The identity of what the source reads (the commit of a reader): a cache built over another identity is cleared. 0 for a source with no identity.
+    fn id(&self) -> u64 {
+        0
+    }
 }
 
 /// The width, in samples of a node, below which a river is not drawn in it, and from which it is drawn at full strength.
@@ -182,9 +186,8 @@ pub fn node_window(tile: planet_core::TileId, res: u32, cells: u32) -> ((f64, f6
     (((s0 + 1.0) * half - 0.5, (t0 + 1.0) * half - 0.5), step)
 }
 
-/// The river coverage of the nodes `nodes` (index in the terrain plan and tile): a node whose widest river is narrower than the request's minimum of samples, or with no river within range of a sample, carries none. The
-/// channels come from the L tiles the node's window meets widened by the widest trench and the code's range; a channel handed out by two tiles counts once. An error names the tile that failed.
-pub fn plan_rivers(req: &RiverRequest<'_>, nodes: &[(u32, planet_core::TileId, f64)]) -> Result<RiverPlan, String> {
+/// The checks of a river request; the grid it reads.
+fn check_request(req: &RiverRequest<'_>) -> Result<RiverGrid, String> {
     let grid = req.source.grid();
     if req.res == 0
         || req.max_layers == 0
@@ -198,78 +201,335 @@ pub fn plan_rivers(req: &RiverRequest<'_>, nodes: &[(u32, planet_core::TileId, f
     if grid.tile == 0 || grid.cells == 0 || !grid.cells.is_multiple_of(grid.tile) {
         return Err(format!("the river grid of {} cells a face edge is not a whole number of tiles of {} cells", grid.cells, grid.tile));
     }
+    Ok(grid)
+}
+
+/// The river of one terrain node: its coverage codes (`(res + 1)^2`, row-major) and its strength. A function of the node's tile, the request and the channels alone (CON-30): never of the camera or the frame.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NodeCoverage {
+    pub coverage: Vec<u8>,
+    pub fade: u8,
+}
+
+/// Whether a node of this tile can carry no river whatever the channels are: the widest river is `2 * DISC_RADIUS_MAX` cells, and a node whose samples are farther apart than that over the minimum reads no tile.
+fn cannot_carry(req: &RiverRequest<'_>, grid: &RiverGrid, tile: planet_core::TileId) -> bool {
+    let (_, step) = node_window(tile, req.res, grid.cells);
+    ((2 * planet_generators::bake::k7::DISC_RADIUS_MAX) as f64) < req.min_samples * step
+}
+
+/// The coverage of terrain node `tile`, or `None` when it carries no river (narrower than the request's minimum of samples, or no river within range of a sample). The channels come from the L tiles the node's window
+/// meets widened by the widest trench and the code's range; a channel handed out by two tiles counts once. An error names the tile that failed.
+fn node_coverage(req: &RiverRequest<'_>, grid: &RiverGrid, tile: planet_core::TileId) -> Result<Option<NodeCoverage>, String> {
     let per_edge = i64::from(grid.cells / grid.tile);
-    let reach = crate::river::reach_cells();
+    let reach = reach_cells();
     let size = req.res as usize + 1;
-    let mut out: Vec<(f64, RiverNode)> = Vec::new();
-    for &(index, tile, distance_m) in nodes {
-        let (origin, step) = node_window(tile, req.res, grid.cells);
-        // The widest river is 2 * DISC_RADIUS_MAX cells: a node whose samples are farther apart than that over the minimum cannot carry one, and reads no tile.
-        let widest_possible = (2 * planet_generators::bake::k7::DISC_RADIUS_MAX) as f64;
-        if widest_possible < req.min_samples * step {
-            continue;
-        }
-        let span = f64::from(req.res) * step;
-        // The tile of a position is its floor; a cell centre `i` owns `[i - 1/2, i + 1/2)`, so near a tile's upper edge this can pick the tile below: harmless because the reader widens a tile by the widest trench.
-        let range = |o: f64| {
-            let lo = (libm::floor((o - reach) / f64::from(grid.tile)) as i64).clamp(0, per_edge - 1);
-            let hi = (libm::floor((o + span + reach) / f64::from(grid.tile)) as i64).clamp(0, per_edge - 1);
-            (lo, hi)
-        };
-        let ((ti0, ti1), (tj0, tj1)) = (range(origin.0), range(origin.1));
-        let mut seen = std::collections::HashSet::new();
-        let mut channels: Vec<Channel> = Vec::new();
-        for tj in tj0..=tj1 {
-            for ti in ti0..=ti1 {
-                for c in req.source.tile_channels(tile.face(), ti as u32, tj as u32)?.iter() {
-                    // The whole channel is the key: two pieces that share a start and a length are still two rivers.
-                    let key: Vec<u64> = c
-                        .points
-                        .iter()
-                        .flat_map(|p| [p.0.to_bits(), p.1.to_bits()])
-                        .chain(c.q.iter().map(|q| q.to_bits()))
-                        .chain(c.levels.iter().map(|l| l.to_bits()))
-                        .collect();
-                    if c.q.iter().any(|q| !q.is_finite()) {
-                        return Err(format!("river tile {}/{ti}/{tj}: a channel carries a discharge that is not finite", tile.face().0));
-                    }
-                    if seen.insert(key) {
-                        channels.push(c.clone());
-                    }
+    let (origin, step) = node_window(tile, req.res, grid.cells);
+    if cannot_carry(req, grid, tile) {
+        return Ok(None);
+    }
+    let span = f64::from(req.res) * step;
+    // The tile of a position is its floor; a cell centre `i` owns `[i - 1/2, i + 1/2)`, so near a tile's upper edge this can pick the tile below: harmless because the reader widens a tile by the widest trench.
+    let range = |o: f64| {
+        let lo = (libm::floor((o - reach) / f64::from(grid.tile)) as i64).clamp(0, per_edge - 1);
+        let hi = (libm::floor((o + span + reach) / f64::from(grid.tile)) as i64).clamp(0, per_edge - 1);
+        (lo, hi)
+    };
+    let ((ti0, ti1), (tj0, tj1)) = (range(origin.0), range(origin.1));
+    let mut seen = std::collections::HashSet::new();
+    let mut channels: Vec<Channel> = Vec::new();
+    for tj in tj0..=tj1 {
+        for ti in ti0..=ti1 {
+            for c in req.source.tile_channels(tile.face(), ti as u32, tj as u32)?.iter() {
+                // The whole channel is the key: two pieces that share a start and a length are still two rivers.
+                let key: Vec<u64> = c
+                    .points
+                    .iter()
+                    .flat_map(|p| [p.0.to_bits(), p.1.to_bits()])
+                    .chain(c.q.iter().map(|q| q.to_bits()))
+                    .chain(c.levels.iter().map(|l| l.to_bits()))
+                    .collect();
+                if c.q.iter().any(|q| !q.is_finite()) {
+                    return Err(format!("river tile {}/{ti}/{tj}: a channel carries a discharge that is not finite", tile.face().0));
+                }
+                if seen.insert(key) {
+                    channels.push(c.clone());
                 }
             }
         }
-        // A river narrower than a sample of the node is not drawn in it; the node's strength follows its widest river: linear in the width in samples between the two limits.
-        let widest = |c: &Channel| {
-            if c.q.is_empty() {
-                1.0
-            } else {
-                c.q.iter().map(|&q| drawn_width_cells(req.law, grid.cell_m, q)).fold(1.0, f64::max)
-            }
-        };
-        channels.retain(|c| widest(c) >= req.min_samples * step);
-        let ratio = channels.iter().map(|c| widest(c) / step).fold(0.0, f64::max);
-        let fade = (libm::round(255.0 * ((ratio - req.min_samples) / (req.full_samples - req.min_samples)).clamp(0.0, 1.0))) as u8;
-        if channels.is_empty() || fade == 0 {
-            continue;
-        }
-        let coverage: Vec<u8> = river_distance_grid(&channels, origin, step, (size, size), req.law, grid.cell_m)
-            .into_iter()
-            .map(|d| if d.is_finite() { distance_code(d) } else { 255 })
-            .collect();
-        if coverage.iter().all(|&c| c == 255) {
-            continue;
-        }
-        out.push((distance_m, RiverNode { node: index, size: size as u32, coverage, fade }));
     }
-    // More nodes than layers: the nearest keep theirs (ties by node index: deterministic, CON-03); the rest are counted, never silent.
+    // A river narrower than a sample of the node is not drawn in it; the node's strength follows its widest river: linear in the width in samples between the two limits.
+    let widest = |c: &Channel| {
+        if c.q.is_empty() {
+            1.0
+        } else {
+            c.q.iter().map(|&q| drawn_width_cells(req.law, grid.cell_m, q)).fold(1.0, f64::max)
+        }
+    };
+    channels.retain(|c| widest(c) >= req.min_samples * step);
+    let ratio = channels.iter().map(|c| widest(c) / step).fold(0.0, f64::max);
+    let fade = (libm::round(255.0 * ((ratio - req.min_samples) / (req.full_samples - req.min_samples)).clamp(0.0, 1.0))) as u8;
+    if channels.is_empty() || fade == 0 {
+        return Ok(None);
+    }
+    let coverage: Vec<u8> = river_distance_grid(&channels, origin, step, (size, size), req.law, grid.cell_m)
+        .into_iter()
+        .map(|d| if d.is_finite() { distance_code(d) } else { 255 })
+        .collect();
+    if coverage.iter().all(|&c| c == 255) {
+        return Ok(None);
+    }
+    Ok(Some(NodeCoverage { coverage, fade }))
+}
+
+/// More nodes than layers: the nearest keep theirs (ties by node index: deterministic, CON-03); the rest are counted, never silent.
+fn choose_layers(req: &RiverRequest<'_>, mut out: Vec<(f64, RiverNode)>) -> RiverPlan {
     let total = out.len();
     if total > req.max_layers {
         out.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.node.cmp(&b.1.node)));
         out.truncate(req.max_layers);
         out.sort_by_key(|(_, n)| n.node);
     }
-    Ok(RiverPlan { nodes: out.into_iter().map(|(_, n)| n).collect(), dropped: (total - req.max_layers.min(total)) as u32 })
+    RiverPlan { nodes: out.into_iter().map(|(_, n)| n).collect(), dropped: (total - req.max_layers.min(total)) as u32 }
+}
+
+/// The river coverage of the nodes `nodes` (index in the terrain plan, tile and distance from the camera): a node whose widest river is narrower than the request's minimum of samples, or with no river within range of a
+/// sample, carries none. An error names the tile that failed. Every node is computed afresh: the reference of [`plan_rivers_cached`].
+pub fn plan_rivers(req: &RiverRequest<'_>, nodes: &[(u32, planet_core::TileId, f64)]) -> Result<RiverPlan, String> {
+    let grid = check_request(req)?;
+    let size = req.res + 1;
+    let mut out: Vec<(f64, RiverNode)> = Vec::new();
+    for &(index, tile, distance_m) in nodes {
+        if let Some(c) = node_coverage(req, &grid, tile)? {
+            out.push((distance_m, RiverNode { node: index, size, coverage: c.coverage, fade: c.fade }));
+        }
+    }
+    Ok(choose_layers(req, out))
+}
+
+/// What a cached lookup of one tile found.
+#[derive(Clone, Debug)]
+pub enum Lookup {
+    /// The tile's coverage is known: `None` for a node that carries no river.
+    Ready(Option<std::sync::Arc<NodeCoverage>>),
+    /// Not built yet.
+    Missing,
+}
+
+/// What the cache has done (reported per frame by the viewer and the scenes).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CacheCounters {
+    pub hits: u64,
+    pub misses: u64,
+    pub builds: u64,
+    pub evictions: u64,
+}
+
+struct CacheEntry {
+    value: Option<std::sync::Arc<NodeCoverage>>,
+    tick: u64,
+    bytes: usize,
+}
+
+/// The coverage of terrain nodes by tile (REND-064): a node's coverage is a function of its tile alone, so a frame is a lookup. Bounded in bytes (the least recently used tile goes first; a tile larger than the bound is not
+/// kept); negative results are kept too (most nodes carry no river). The cache is stamped with the source and the request (`adopt`): another commit, grid, width law, limits or node size clears it.
+pub struct RiverCache {
+    entries: std::collections::HashMap<planet_core::TileId, CacheEntry>,
+    order: std::collections::BTreeMap<u64, planet_core::TileId>,
+    tick: u64,
+    bytes: usize,
+    cap_bytes: usize,
+    stamp: Option<u64>,
+    counters: CacheCounters,
+}
+
+/// The bytes an entry costs: the codes and a fixed overhead (a negative result costs the overhead).
+const ENTRY_OVERHEAD: usize = 64;
+
+impl RiverCache {
+    pub fn new(cap_bytes: usize) -> RiverCache {
+        RiverCache {
+            entries: std::collections::HashMap::new(),
+            order: std::collections::BTreeMap::new(),
+            tick: 0,
+            bytes: 0,
+            cap_bytes,
+            stamp: None,
+            counters: CacheCounters::default(),
+        }
+    }
+
+    pub fn bytes(&self) -> usize {
+        self.bytes
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn counters(&self) -> CacheCounters {
+        self.counters
+    }
+
+    /// The identity of what a request's results depend on: the source (its commit), the grid, the width law, the limits and the node size. The layer count is not part of it (it only chooses among nodes).
+    fn stamp_of(req: &RiverRequest<'_>, grid: &RiverGrid) -> u64 {
+        let mut h = 0xcbf2_9ce4_8422_2325u64;
+        let mut put = |v: u64| h = (h ^ v).wrapping_mul(0x0000_0100_0000_01b3);
+        for v in [
+            req.source.id(),
+            u64::from(grid.cells),
+            u64::from(grid.tile),
+            grid.cell_m.to_bits(),
+            req.law.a.to_bits(),
+            req.law.b.to_bits(),
+            req.min_samples.to_bits(),
+            req.full_samples.to_bits(),
+            u64::from(req.res),
+        ] {
+            put(v);
+        }
+        h
+    }
+
+    /// Clears the cache when the request is not the one its entries were built for.
+    pub fn adopt(&mut self, req: &RiverRequest<'_>) -> Result<(), String> {
+        let grid = check_request(req)?;
+        let stamp = Self::stamp_of(req, &grid);
+        if self.stamp != Some(stamp) {
+            self.entries.clear();
+            self.order.clear();
+            self.bytes = 0;
+            self.stamp = Some(stamp);
+        }
+        Ok(())
+    }
+
+    /// The coverage of `tile` if the cache holds it (and it counts as used).
+    pub fn lookup(&mut self, tile: planet_core::TileId) -> Lookup {
+        self.tick += 1;
+        let tick = self.tick;
+        match self.entries.get_mut(&tile) {
+            Some(e) => {
+                self.order.remove(&e.tick);
+                e.tick = tick;
+                self.order.insert(tick, tile);
+                self.counters.hits += 1;
+                Lookup::Ready(e.value.clone())
+            }
+            None => {
+                self.counters.misses += 1;
+                Lookup::Missing
+            }
+        }
+    }
+
+    /// Keeps the coverage of `tile` (replacing an older entry), evicting the least recently used tiles over the byte bound.
+    pub fn insert(&mut self, tile: planet_core::TileId, value: Option<std::sync::Arc<NodeCoverage>>) {
+        let bytes = ENTRY_OVERHEAD + value.as_ref().map_or(0, |c| c.coverage.len());
+        if let Some(old) = self.entries.remove(&tile) {
+            self.order.remove(&old.tick);
+            self.bytes -= old.bytes;
+        }
+        if bytes > self.cap_bytes {
+            return;
+        }
+        self.tick += 1;
+        self.order.insert(self.tick, tile);
+        self.entries.insert(tile, CacheEntry { value, tick: self.tick, bytes });
+        self.bytes += bytes;
+        while self.bytes > self.cap_bytes {
+            let Some((&oldest, &victim)) = self.order.iter().next() else { break };
+            self.order.remove(&oldest);
+            if let Some(e) = self.entries.remove(&victim) {
+                self.bytes -= e.bytes;
+                self.counters.evictions += 1;
+            }
+        }
+    }
+}
+
+/// The result of a lookup-only plan: the plan of the nodes whose coverage is known, the tiles whose coverage is not built yet (a node without it draws no river this frame) and how many nodes that is.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LookupPlan {
+    pub plan: RiverPlan,
+    pub missing: Vec<planet_core::TileId>,
+    pub not_ready: u32,
+}
+
+/// The plan of a frame from the cache only (REND-064): no coverage is computed. A tile that is not in the cache is listed in `missing` (once, in node order) for the background fill ([`fill_river_cache`]) and its node
+/// carries no river until it is built.
+pub fn plan_rivers_lookup(
+    req: &RiverRequest<'_>,
+    nodes: &[(u32, planet_core::TileId, f64)],
+    cache: &mut RiverCache,
+) -> Result<LookupPlan, String> {
+    let grid = check_request(req)?;
+    cache.adopt(req)?;
+    let size = req.res + 1;
+    let (mut out, mut missing, mut not_ready) = (Vec::new(), Vec::new(), 0u32);
+    for &(index, tile, distance_m) in nodes {
+        if cannot_carry(req, &grid, tile) {
+            continue;
+        }
+        match cache.lookup(tile) {
+            Lookup::Ready(Some(c)) => out.push((distance_m, RiverNode { node: index, size, coverage: c.coverage.clone(), fade: c.fade })),
+            Lookup::Ready(None) => {}
+            Lookup::Missing => {
+                not_ready += 1;
+                if !missing.contains(&tile) {
+                    missing.push(tile);
+                }
+            }
+        }
+    }
+    Ok(LookupPlan { plan: choose_layers(req, out), missing, not_ready })
+}
+
+/// Builds the coverage of `tiles` and keeps it in the cache (the body of the background fill). Returns how many were built. An error names the tile that failed.
+pub fn fill_river_cache(req: &RiverRequest<'_>, cache: &mut RiverCache, tiles: &[planet_core::TileId]) -> Result<usize, String> {
+    let grid = check_request(req)?;
+    cache.adopt(req)?;
+    let mut built = 0;
+    for &tile in tiles {
+        let value = node_coverage(req, &grid, tile)?.map(std::sync::Arc::new);
+        cache.insert(tile, value);
+        cache.counters.builds += 1;
+        built += 1;
+    }
+    Ok(built)
+}
+
+/// [`plan_rivers`] through the cache: a node's coverage is looked up and, when missing, built and kept at once. The same plan as [`plan_rivers`] bit for bit, whatever the cache held, evicted or never held.
+pub fn plan_rivers_cached(
+    req: &RiverRequest<'_>,
+    nodes: &[(u32, planet_core::TileId, f64)],
+    cache: &mut RiverCache,
+) -> Result<RiverPlan, String> {
+    let grid = check_request(req)?;
+    cache.adopt(req)?;
+    let size = req.res + 1;
+    let mut out: Vec<(f64, RiverNode)> = Vec::new();
+    for &(index, tile, distance_m) in nodes {
+        if cannot_carry(req, &grid, tile) {
+            continue;
+        }
+        let value = match cache.lookup(tile) {
+            Lookup::Ready(v) => v,
+            Lookup::Missing => {
+                let v = node_coverage(req, &grid, tile)?.map(std::sync::Arc::new);
+                cache.insert(tile, v.clone());
+                cache.counters.builds += 1;
+                v
+            }
+        };
+        if let Some(c) = value {
+            out.push((distance_m, RiverNode { node: index, size, coverage: c.coverage.clone(), fade: c.fade }));
+        }
+    }
+    Ok(choose_layers(req, out))
 }
 
 /// How far from a node's window a channel can matter: the widest half trench and the code's range.
