@@ -59,3 +59,39 @@ Experiment: the breach of a round (the loop of `catchment_round`, region-wide, U
 - One seed per region; the breach is emulated region-wide in the receivers-first order; R3b's rounds here run on the library before GEN-172, so its window-cut trenches are in the "without" and "with" columns alike.
 - The DEM tiles are small, so large basins cannot be seen in them; their 1.0 % over 300 cells is a statement about 15 tiles of 1 x 1 degree.
 - "Depth" is the largest fill depth of a depression, not its mean.
+
+## 4. Addendum: the round-1 breach, its depth distribution and the deepest cells (architect, 2026-11-12)
+
+Added on the bulldozer's order. Probe `shapes_check breach1` (local branch `spike/spike-108-rerun`, never pushed), on main 1041d28c: the breach of round 1 on z0 under U (the loop of `catchment_round`, region-wide, leaves first, up to 500 m per lowering event; a receiver is lowered towards its donor's current level minus 0.001 times the distance, so a lowered cell lowers its own receiver next). The lowering of a cell is the sum of its events. Cells of the box. Raw: `raw/breach1-*.txt`.
+
+| Fixture | Lowered cells (% of land) | p10 / p25 / p50 / p75 / p90 / p95 / p99 (m) | p99.9 / max (m) | Cells lowered by > 10 m / > 100 m / > 500 m |
+|---|---|---|---|---|
+| R1h | 55,716 (20.81 %) | 0.56 / 3.59 / 20.22 / 76.61 / 215.56 / 338.35 / 498.03 | 578.2 / 794.1 | 34,486 / 11,413 / 215 |
+| R3a | 159,595 (21.95 %) | 0.19 / 0.56 / 1.85 / 6.04 / 14.60 / 23.50 / 92.03 | 291.7 / 476.0 | 25,103 / 1,490 / 0 |
+| R3b | 195,596 (22.14 %) | 0.26 / 0.87 / 3.07 / 9.67 / 26.56 / 59.21 / 295.77 | 389.9 / 433.5 | 47,584 / 6,829 / 0 |
+
+By the size of the depression the lowered cell lies in (z0; p50 / p90 / p99 of the lowering, m):
+
+| Depression | R1h | R3a | R3b |
+|---|---|---|---|
+| not lifted (a receiver outside any depression) | 1.08 / 60.7 / 462.5 (11,743 cells) | 0.55 / 5.1 / 28.2 (54,337) | 1.02 / 14.5 / 227.1 (60,138) |
+| 1 to 30 cells | 5.20 / 67.0 / 384.3 (4,218) | 1.61 / 9.0 / 38.4 (13,195) | 2.00 / 15.6 / 254.7 (21,248) |
+| 31 to 300 | 16.29 / 102.6 / 463.3 (11,263) | 3.22 / 14.3 / 38.8 (26,413) | 3.35 / 19.8 / 270.3 (41,103) |
+| 301 to 3,000 | 47.63 / 306.3 / 500.0 (18,061) | 4.52 / 20.8 / 45.5 (24,515) | 5.20 / 36.2 / 285.0 (28,110) |
+| over 3,000 | 51.66 / 248.6 / 487.8 (10,431) | 3.51 / 23.3 / 182.9 (41,135) | 6.88 / 49.6 / 348.7 (44,997) |
+
+The deepest cells of R1h (window cell = global cell - (7856, 560); z0 and z after the breach in m; lowering events by different donors):
+
+| Global cell | z0 | After | Lowering | Fill depth at the cell | Events (capped) | Lowest donor z0 | Depression (cells / depth) |
+|---|---|---|---|---|---|---|---|
+| (8478, 771) | 969.0 | 174.9 | 794.1 | 10.6 | 2 (1) | 935.7 | 1,268 / 810 m |
+| (8478, 770) | 935.7 | 175.7 | 760.0 | 43.9 | 2 (1) | 790.3 | 1,268 / 810 m |
+| (8656, 855) | 1,207.7 | 465.0 | 742.7 | 9.6 | 2 (1) | 988.8 | 301 / 785 m |
+| (8597, 916) | 859.4 | 127.5 | 731.8 | 91.7 | 2 (1) | 592.4 | 678 / 852 m |
+| (8596, 917) | 843.1 | 126.6 | 716.5 | 108.0 | 2 (0) | 859.4 | 678 / 852 m |
+| (8374, 873) | 713.5 | 0.0 | 713.5 | 13.7 | 2 (1) | 580.1 | 18,191 / 726 m |
+
+- The cell of 717 m (the maximum lowering inside the straight runs of `results.md`/the breach chains of its section 10) is (8596, 917) = window cell (740, 357) at margin 200: z0 843.1 m, lowered to 126.6 m (716.5 m), two events, neither capped; it lies in a depression of 678 cells whose deepest fill is 852 m. The deepest cell of the box is (8478, 771), 794.1 m, in a depression of 1,268 cells 810 m deep.
+- Why: these cells are the sills and the slopes of the rims of closed basins of the uneroded base (basins of 726 to 858 m depth). The breach cuts a trench from the rim to the level of the donors below: a cell is lowered to its donor's current level minus 0.001 times the distance, the donor having been lowered before it (leaves first), so the lowering of a cell is its height above the lowest cell downstream in the chain. One event is limited to 500 m; a cell lowered by two donors can pass 500 m (215 cells in R1h do).
+- In R3a and R3b the deepest cells (R3a 476.0 m at (1102, 4520) and its neighbours, R3b 433.5 m at (10094, 8497)) are plateau cells at 435 to 476 m cut down to about 0 to 3 m: in R3a the cells lie in or next to a depression of 16,475 cells and 454 m depth, in R3b outside any depression; the chain below them was already cut to the floor (0.001 m above the sea level), so the lowering equals the plateau height above the sea. The probe did not trace the chains further.
+- Median lowering is 20 m in R1h, 1.9 m in R3a and 3.1 m in R3b; the heavy tail (p99 498 m in R1h, 296 m in R3b) is the rims of the deep basins.
