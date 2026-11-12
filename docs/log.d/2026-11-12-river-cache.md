@@ -1,0 +1,1 @@
+- 2026-11-12 **river-cache** PR 1: the river coverage of a node is cached by its tile in a byte-bounded cache; the cached plan equals the fresh plan bit for bit (REND-064; the background fill and the viewer follow).

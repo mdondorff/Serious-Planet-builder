@@ -19,6 +19,7 @@ use planet_perf::lit::{metrics_of, LitFrame};
 use planet_perf::{summarize, Protocol, RunReport};
 use planet_render::{GpuContext, TerrainRenderer};
 use std::io::Write;
+use std::sync::Arc;
 use std::time::Instant;
 
 /// `" [run +12.3 s]"` in a smoke run (the seconds since the run started), `""` otherwise: a run that stops on a CI timeout shows how far it got and how long each view took.
@@ -54,6 +55,9 @@ pub(crate) struct LitSetup {
     ground_file: Option<planet_frame::look::file::GroundLook>,
     /// What the river plans of a run cost and carried (worlds with a river source only; nothing is counted without one).
     pub(crate) river: RiverCounters,
+    /// The river coverage cache of the run (REND-064), made on the first plan of a world with a river source; its background builds run on `river_share` (a scene's own job system) or, without one, in the call.
+    pub(crate) river_cov: Option<crate::rivers::RiverCoverage>,
+    pub(crate) river_share: Option<(Arc<planet_streaming::jobs::JobSystem>, planet_streaming::jobs::Share)>,
 }
 
 /// The river plans of a run (REND-062): the CPU time of each, the nodes they carried and dropped, the reader's cache.
@@ -64,6 +68,10 @@ pub(crate) struct RiverCounters {
     pub plan_ns_max: u64,
     pub nodes_max: usize,
     pub dropped_max: u32,
+    /// The nodes whose coverage was not built yet, at the worst frame and summed, and the cache's bytes at the most.
+    pub not_ready_max: u32,
+    pub not_ready_total: u64,
+    pub cache_bytes_max: usize,
     pub reader_peak_bytes: usize,
     /// The finest and coarsest level of the terrain plans' nodes, and the nodes of the finest level (a river is seen only by nodes whose samples are narrower than it).
     pub level_max: u8,
@@ -103,7 +111,29 @@ impl LitSetup {
             ground_detail: std::env::var("PLANET_GROUND_DETAIL").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0),
             ground_file: o.look.is_some().then_some(look.ground),
             river: RiverCounters::default(),
+            river_cov: None,
+            river_share: None,
         })
+    }
+
+    /// Plans the river coverage of `plan` and, when the coverage is built off the frame path, waits for the builds (a scene's warm-up before its measured frames: the tiles of a flight are built outside them). Returns the
+    /// tiles queued by this call.
+    pub(crate) fn warm_rivers(&mut self, world: &WorldTerrain, plan: &TerrainPlan) -> Result<u32, String> {
+        let Some(src) = world.rivers() else { return Ok(0) };
+        let share = self.river_share.clone();
+        let cov = self.river_cov.get_or_insert_with(|| {
+            crate::rivers::RiverCoverage::new(
+                src.clone(),
+                crate::rivers::COVERAGE_CACHE_BYTES,
+                share.as_ref().map(|(_, s)| s.clone()),
+                share.map(|(sys, _)| sys),
+            )
+        });
+        let frame = cov.plan(plan)?;
+        if !cov.wait_idle(std::time::Duration::from_secs(900)) {
+            return Err("the river coverage builds did not finish within 15 minutes".into());
+        }
+        Ok(frame.queued)
     }
 
     /// The cut counters of the last water plan: horizon, height, of which the exact minimum, and nodes with no minimum (ATMO-020).
@@ -173,21 +203,33 @@ impl LitSetup {
         }
         // The rivers of the frame (REND-062): timed, with the nodes carried and dropped and the reader's cache.
         if let Some(src) = world.rivers() {
+            let share = self.river_share.clone();
+            let cov = self.river_cov.get_or_insert_with(|| {
+                crate::rivers::RiverCoverage::new(
+                    src.clone(),
+                    crate::rivers::COVERAGE_CACHE_BYTES,
+                    share.as_ref().map(|(_, s)| s.clone()),
+                    share.map(|(sys, _)| sys),
+                )
+            });
             let t = Instant::now();
-            let rivers = crate::rivers::plan_frame_rivers(src, &plan)?;
+            let frame = cov.plan(&plan)?;
             let ns = u64::try_from(t.elapsed().as_nanos()).unwrap_or(u64::MAX);
             let c = &mut self.river;
             c.plans += 1;
+            c.plan_ns_total += ns;
+            c.plan_ns_max = c.plan_ns_max.max(ns);
             let (lo, hi) = (plan.nodes.iter().map(|n| n.level).min().unwrap_or(0), plan.nodes.iter().map(|n| n.level).max().unwrap_or(0));
             c.level_min = if c.plans == 1 { lo } else { c.level_min.min(lo) };
             c.level_max = c.level_max.max(hi);
             c.finest_nodes_max = c.finest_nodes_max.max(plan.nodes.iter().filter(|n| n.level == hi).count());
-            c.plan_ns_total += ns;
-            c.plan_ns_max = c.plan_ns_max.max(ns);
-            c.nodes_max = c.nodes_max.max(rivers.nodes.len());
-            c.dropped_max = c.dropped_max.max(rivers.dropped);
+            c.nodes_max = c.nodes_max.max(frame.plan.nodes.len());
+            c.dropped_max = c.dropped_max.max(frame.plan.dropped);
+            c.not_ready_max = c.not_ready_max.max(frame.not_ready);
+            c.not_ready_total += u64::from(frame.not_ready);
+            c.cache_bytes_max = c.cache_bytes_max.max(frame.cache_bytes);
             c.reader_peak_bytes = c.reader_peak_bytes.max(src.reader().bytes());
-            plan.rivers = Some(rivers);
+            plan.rivers = Some(frame.plan);
         }
         Ok(plan)
     }
@@ -641,6 +683,12 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
     lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, tau))?;
     let aspect = f64::from(size.0) / f64::from(size.1);
     let mut setup = LitSetup::new(o, &world, &lod)?;
+    if river {
+        // The river coverage is built off the frame path, on a job system of the scene (a share of two threads at the normal priority): the viewer builds it on the terrain share.
+        let system = Arc::new(planet_streaming::jobs::JobSystem::new(2, planet_streaming::Priority::Normal));
+        let share = system.share("river-coverage", 2);
+        setup.river_share = Some((system, share));
+    }
     let is_sea = |d: planet_core::Vec3| carries_sea(&world, d);
     let flight_frames = if smoke && !o.given.contains("--flight-frames") { 4 } else { o.flight_frames };
     let mut views = if river {
@@ -713,12 +761,29 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
                 // Both settings of the shore filter, the look's default first (ATMO-017; the inspection of the gate).
                 let default = setup.look.water.shore_filter;
                 crate::stall::phase_mark_owned(format!("{path} flight start"));
+                if river {
+                    // The coverage of the flight's nodes is built before its measured frames, off the frame path (REND-064): the warm-up is reported, the frames then find it ready.
+                    let started = Instant::now();
+                    let mut queued = 0u32;
+                    let mut cache = SelectionCache::new();
+                    for camera in &view.cameras {
+                        let plan =
+                            planet_frame::plan_terrain_cached(&request(&rig, *camera), rig.field, &mut cache).map_err(|e| e.to_string())?;
+                        queued += setup.warm_rivers(rig.world, &plan)?;
+                    }
+                    writeln!(
+                        out,
+                        "  river coverage warmed: {queued} tiles built off the frame path in {:.1} s ({path})",
+                        started.elapsed().as_secs_f64()
+                    )
+                    .map_err(err)?;
+                }
                 setup.river = RiverCounters::default();
                 results.push(measure_flight(&rig, &mut r, &mut setup, view, &path, out)?);
                 crate::stall::phase_mark_owned(format!("{path} flight end"));
                 if river {
                     // The river flights run once (the shore filter is the water scenes' inspection) and report their river plans.
-                    crate::riverperf::report(&setup.river, out)?;
+                    crate::riverperf::report(&setup.river, setup.river_cov.as_ref().map(|c| c.counters()), out)?;
                     if setup.river.nodes_max == 0 {
                         river_empty.push(path.clone());
                     }

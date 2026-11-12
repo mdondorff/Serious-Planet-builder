@@ -62,9 +62,8 @@ fn tile_at(face: Face, level: u8, s: f64, t: f64) -> TileId {
     TileId::new(face, level, ix as u32, iy as u32).expect("a tile")
 }
 
-// spec: TEST-123, STRM-086, REND-062
-#[test]
-fn a_flight_over_a_one_face_world_with_a_channel_graph_plans_its_rivers_through_the_reader_within_the_cache_bound() {
+/// The fixture of the flights: a one-face world with a channel graph baked into a scratch folder (alive as long as the returned guard), the source over the reader of its commit and the channels that were burnt.
+fn baked(tag: &str, cache_bound: usize) -> (Scratch, ReaderRiverSource, Vec<Channel>) {
     let world = GlobalWorld::from_definition(&WorldDefinition::single_planet(R, 3)).unwrap().with_block_limit(4);
     let g = Grid::new(W, W, 800.0);
     let z: Vec<f64> = (0..W * W).map(|p| 500.0 + 10.0 * (p % W) as f64 + 3.0 * ((p / W) as f64 - 16.0).abs()).collect();
@@ -80,7 +79,7 @@ fn a_flight_over_a_one_face_world_with_a_channel_graph_plans_its_rivers_through_
     let channels = channels_from_graph(&graph, &g, &to_local);
     assert!(channels.len() > 100, "the fixture has a river network ({} channels)", channels.len());
 
-    let dir = Scratch(std::env::temp_dir().join(format!("planet-river-flight-{}", std::process::id())));
+    let dir = Scratch(std::env::temp_dir().join(format!("planet-river-flight-{tag}-{}", std::process::id())));
     let _ = std::fs::remove_dir_all(&dir.0);
     let basin = BasinSpec { hydro: HydroParams::default(), tile_cells: 64, tiles_per_edge: 4, base_id: 7, inputs_id: 11 };
     let spec = LTileSpec {
@@ -119,8 +118,15 @@ fn a_flight_over_a_one_face_world_with_a_channel_graph_plans_its_rivers_through_
     assert!(!commit.graph.is_empty(), "the commit holds the graph");
 
     let store = Arc::new(TileStore::open(&dir.0, world.params()).unwrap());
-    let reader = RiverReader::new(store, commit, CACHE_BOUND).expect("the reader of the commit");
+    let reader = RiverReader::new(store, commit, cache_bound).expect("the reader of the commit");
     let src = ReaderRiverSource::new(Arc::new(reader));
+    (dir, src, channels)
+}
+
+// spec: TEST-123, STRM-086, REND-062
+#[test]
+fn a_flight_over_a_one_face_world_with_a_channel_graph_plans_its_rivers_through_the_reader_within_the_cache_bound() {
+    let (_dir, src, channels) = baked("flight", CACHE_BOUND);
     let cells = f64::from(src.reader().grid_dims().0);
 
     // The course: the points of the longest channel, as face coordinates.
@@ -250,4 +256,123 @@ fn a_flight_over_a_stored_region_with_a_channel_graph_reports_the_readers_cache_
     );
     assert!(with_river > 0, "some node of the flight carries a river");
     assert!(peak <= DEFAULT_CACHE_BYTES, "the reader holds {peak} B, its bound is {DEFAULT_CACHE_BYTES} B");
+}
+
+// spec: REND-064
+/// The coverage cache of the app over a reader: the first frame of a flight finds nothing built (the nodes draw no river, the tiles are queued for the background share), after the builds the plan is the fresh plan bit for
+/// bit and the second pass builds nothing; without a share the call builds what it misses.
+#[test]
+fn the_river_coverage_is_built_off_the_frame_path_and_a_later_frame_is_the_fresh_plan() {
+    use planet::rivers::{RiverCoverage, COVERAGE_CACHE_BYTES};
+    use planet_streaming::jobs::JobSystem;
+    let (_dir, src, channels) = baked("cache", planet_cache::river_read::DEFAULT_CACHE_BYTES);
+    let src = Arc::new(src);
+    let cells = f64::from(src.reader().grid_dims().0);
+    let to_face = |p: f64| 2.0 * (p + 0.5) / cells - 1.0;
+    // The nodes of a flight over the longest channel: 3 x 3 rings at levels 8 to 13 over every 12th point.
+    let course = channels.iter().max_by_key(|c| c.points.len()).expect("a channel");
+    let mut frames: Vec<Vec<(u32, TileId, f64)>> = Vec::new();
+    for &(px, py) in course.points.iter().step_by(12) {
+        let mut nodes = Vec::new();
+        for level in 8u8..=13 {
+            let centre = tile_at(Face(2), level, to_face(px), to_face(py));
+            for dy in -1i64..=1 {
+                for dx in -1i64..=1 {
+                    let (x, y) = (i64::from(centre.x()) + dx, i64::from(centre.y()) + dy);
+                    if (0..(1i64 << level)).contains(&x) && (0..(1i64 << level)).contains(&y) {
+                        nodes.push((nodes.len() as u32, TileId::new(Face(2), level, x as u32, y as u32).unwrap(), f64::from(level)));
+                    }
+                }
+            }
+        }
+        frames.push(nodes);
+    }
+    let fresh = |nodes: &[(u32, TileId, f64)]| plan_nodes_rivers(&src, NODE_CELLS, nodes).expect("the fresh plan");
+
+    // With a share: the first frame is a lookup that finds nothing and queues the builds; they finish off the call.
+    let system = Arc::new(JobSystem::new(2, planet_streaming::Priority::Normal));
+    let share = system.share("river-coverage-test", 2);
+    let cov = RiverCoverage::new(src.clone(), COVERAGE_CACHE_BYTES, Some(share), Some(system));
+    let first = cov.plan_nodes(NODE_CELLS, &frames[0]).expect("the first frame");
+    assert!(
+        first.not_ready > 0 && first.queued > 0,
+        "a cold frame has nodes not ready ({}) and queues builds ({})",
+        first.not_ready,
+        first.queued
+    );
+    assert!(first.plan.nodes.is_empty(), "a node whose coverage is not built draws no river");
+    assert!(cov.wait_idle(std::time::Duration::from_secs(120)), "the builds finish");
+    for nodes in &frames {
+        cov.plan_nodes(NODE_CELLS, nodes).expect("a frame");
+    }
+    assert!(cov.wait_idle(std::time::Duration::from_secs(120)));
+    let builds = cov.counters().builds;
+    let mut carried = 0;
+    for nodes in &frames {
+        let got = cov.plan_nodes(NODE_CELLS, nodes).expect("a frame");
+        assert_eq!((got.not_ready, got.queued), (0, 0), "every tile of the flight is built");
+        assert_eq!(got.plan, fresh(nodes), "the cached plan is the fresh plan");
+        carried += got.plan.nodes.len();
+    }
+    assert!(carried > 0, "the flight meets rivers");
+    assert_eq!(cov.counters().builds, builds, "the second pass builds nothing");
+
+    // Without a share the call builds what it misses: the first frame is already the fresh plan.
+    let sync = RiverCoverage::new(src.clone(), COVERAGE_CACHE_BYTES, None, None);
+    let got = sync.plan_nodes(NODE_CELLS, &frames[1]).expect("a frame");
+    assert_eq!((got.not_ready, sync.pending()), (0, 0));
+    assert_eq!(got.plan, fresh(&frames[1]));
+}
+
+/// A river source that fails (an error or a panic) on every tile.
+struct Failing {
+    panic: bool,
+}
+
+impl planet_frame::river::RiverSource for Failing {
+    fn grid(&self) -> planet_frame::river::RiverGrid {
+        planet_frame::river::RiverGrid { cells: 98_304, tile: 768, cell_m: 100.0 }
+    }
+    fn tile_channels(&self, _: Face, _: u32, _: u32) -> Result<Arc<Vec<planet_generators::bake::k7::Channel>>, String> {
+        if self.panic {
+            panic!("a damaged block");
+        }
+        Err("river tile: a damaged block".into())
+    }
+}
+
+// spec: REND-064
+/// A failed build is never silent and never stuck: without a share the call that hit it returns the error; with a share an error or a panic of a background build leaves `inflight` and is returned by the next call.
+#[test]
+fn a_failed_or_panicking_coverage_build_returns_its_error_and_leaves_no_tile_stuck() {
+    use planet::rivers::RiverCoverage;
+    use planet_streaming::jobs::JobSystem;
+    let nodes = vec![(0u32, tile_at(Face(2), 12, 0.0, 0.0), 1.0)];
+    for panic in [false, true] {
+        let src: Arc<dyn planet_frame::river::RiverSource + Send + Sync> = Arc::new(Failing { panic });
+        let sync = RiverCoverage::with_source(src.clone(), 1 << 20, None, None);
+        if panic {
+            // Without a share a panic is the caller's (the build runs in the call); only the share path catches it.
+            continue;
+        }
+        let e = sync.plan_nodes(NODE_CELLS, &nodes).expect_err("the sync call returns the error of its build");
+        assert!(e.contains("damaged block"), "{e}");
+        assert_eq!(sync.pending(), 0);
+        let system = Arc::new(JobSystem::new(1, planet_streaming::Priority::Normal));
+        let share = system.share("river-coverage-failing", 1);
+        let cov = RiverCoverage::with_source(src, 1 << 20, Some(share), Some(system));
+        let first = cov.plan_nodes(NODE_CELLS, &nodes).expect("the first frame only queues");
+        assert!(first.queued > 0);
+        assert!(cov.wait_idle(std::time::Duration::from_secs(30)), "the failed build left the queue");
+        assert!(cov.plan_nodes(NODE_CELLS, &nodes).is_err(), "the next call returns the error of the background build");
+    }
+    // A panic in a background build is caught, named, and leaves nothing stuck.
+    let src: Arc<dyn planet_frame::river::RiverSource + Send + Sync> = Arc::new(Failing { panic: true });
+    let system = Arc::new(JobSystem::new(1, planet_streaming::Priority::Normal));
+    let share = system.share("river-coverage-panicking", 1);
+    let cov = RiverCoverage::with_source(src, 1 << 20, Some(share), Some(system));
+    cov.plan_nodes(NODE_CELLS, &nodes).expect("the first frame only queues");
+    assert!(cov.wait_idle(std::time::Duration::from_secs(30)), "a panicking build leaves the queue");
+    let e = cov.plan_nodes(NODE_CELLS, &nodes).expect_err("the panic is returned");
+    assert!(e.contains("panicked") && e.contains("damaged block"), "{e}");
 }

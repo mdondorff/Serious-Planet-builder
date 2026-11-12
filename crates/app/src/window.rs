@@ -341,6 +341,10 @@ struct Running {
     counts: SmokeCounts,
     /// The per-tile answers of the water selection query (ADR 0051 point 6, option 1), kept for the life of the run.
     water_cache: WaterTileCache,
+    /// The river coverage cache of the run (REND-064): built from the world's river source on the first lit frame, filled by prefetch jobs of the terrain share.
+    river_cov: Option<crate::rivers::RiverCoverage>,
+    /// The nodes of the last lit frame whose river coverage was not built yet (they drew no river).
+    river_not_ready: u32,
     /// The scale references in the world (VIEW-050) and whether they are dropped.
     scale_refs: Vec<planet_frame::scalerefs::RefBox>,
     scale_refs_on: bool,
@@ -611,6 +615,8 @@ impl App<'_> {
             atmosphere: cfg.atmosphere,
             counts: SmokeCounts::default(),
             water_cache: WaterTileCache::with_book(self.world.water_book()),
+            river_cov: None,
+            river_not_ready: 0,
             scale_refs: Vec::new(),
             scale_refs_on: false,
             coupled_asked: None,
@@ -1121,7 +1127,22 @@ impl App<'_> {
                 // The rivers of the frame (REND-062): when the stored world's commit holds a channel graph, the nodes with a river in range
                 // (the plan reads the channels through the commit's reader); a world without one draws none.
                 if let Some(src) = self.world.rivers() {
-                    plan.rivers = Some(crate::rivers::plan_frame_rivers(src.as_ref(), &plan)?);
+                    // The plan is a lookup in the coverage cache (REND-064); missing tiles are built off the frame path on the terrain share.
+                    // A coverage built over another source (another commit) is dropped with its cache.
+                    if st.river_cov.as_ref().is_some_and(|c| Arc::as_ptr(c.source()).cast::<()>() != Arc::as_ptr(src).cast::<()>()) {
+                        st.river_cov = None;
+                    }
+                    let cov = st.river_cov.get_or_insert_with(|| {
+                        crate::rivers::RiverCoverage::new(
+                            src.clone(),
+                            crate::rivers::COVERAGE_CACHE_BYTES,
+                            Some(st.rig.terrain.clone()),
+                            None,
+                        )
+                    });
+                    let frame = cov.plan(&plan)?;
+                    st.river_not_ready = frame.not_ready;
+                    plan.rivers = Some(frame.plan);
                 }
                 Some(plan)
             } else {
