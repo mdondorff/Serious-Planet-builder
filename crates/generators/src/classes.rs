@@ -983,13 +983,18 @@ pub const SLOPE_STEP_M: f64 = 3_000.0;
 /// what the slope of the base can drain across half a wavelength. `c = 0` is no cap.
 pub fn capped_band_noise(signals: &[f64], wavelengths_m: &[f64], weights: &[f64], amp: f64, slope: f64, c: f64) -> f64 {
     assert!(signals.len() == wavelengths_m.len() && signals.len() == weights.len(), "one wavelength and one weight an octave");
-    let norm: f64 = (0..signals.len()).map(|o| 0.5f64.powi(o as i32)).sum();
+    let (mut norm, mut a) = (0.0, 1.0);
+    for _ in 0..signals.len() {
+        norm += a;
+        a *= 0.5;
+    }
     let mut sum = 0.0;
+    let mut a = 1.0;
     for o in 0..signals.len() {
-        let a = 0.5f64.powi(o as i32);
         let peak = amp * a / norm;
         let keep = if c > 0.0 && peak > 0.0 { (c * slope * wavelengths_m[o] / 2.0 / peak).min(1.0) } else { 1.0 };
         sum += a * weights[o] * keep * signals[o];
+        a *= 0.5;
     }
     sum / norm
 }

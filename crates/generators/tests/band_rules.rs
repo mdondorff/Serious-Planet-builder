@@ -23,8 +23,8 @@ fn directions() -> Vec<Vec3> {
 fn the_capped_noise_without_a_cap_or_weight_is_the_plain_sum() {
     let signals = [0.9, 0.4, 0.7, 0.2, 0.55];
     let amp = 1_400.0;
-    let norm: f64 = (0..5).map(|o| 0.5f64.powi(o)).sum();
-    let plain: f64 = (0..5).map(|o| 0.5f64.powi(o) * signals[o as usize]).sum::<f64>() / norm;
+    let norm: f64 = (0..5).map(|o| libm::pow(0.5, f64::from(o))).sum();
+    let plain: f64 = (0..5).map(|o| libm::pow(0.5, f64::from(o)) * signals[o as usize]).sum::<f64>() / norm;
     let got = capped_band_noise(&signals, &RIDGED_WAVELENGTHS_M, &[1.0; 5], amp, 0.3, 0.0);
     assert_eq!(got.to_bits(), plain.to_bits(), "c = 0 is the plain sum");
     let huge = capped_band_noise(&signals, &RIDGED_WAVELENGTHS_M, &[1.0; 5], amp, 0.3, 1e12);
@@ -35,14 +35,15 @@ fn the_capped_noise_without_a_cap_or_weight_is_the_plain_sum() {
 #[test]
 fn every_octave_is_held_to_its_cap_and_a_flat_base_has_no_band() {
     let amp = 780.0;
-    let norm: f64 = (0..5).map(|o| 0.5f64.powi(o)).sum();
+    let norm: f64 = (0..5).map(|o| libm::pow(0.5, f64::from(o))).sum();
     for (slope, c) in [(0.002, 1.0), (0.05, 0.5), (0.2, 2.0), (0.001, 4.0)] {
         for pattern in 0..32u32 {
             // the signals at their largest (1) or half, by the bits of the pattern
             let signals: Vec<f64> = (0..5).map(|o| if pattern >> o & 1 == 1 { 1.0 } else { 0.5 }).collect();
             let noise = capped_band_noise(&signals, &RIDGED_WAVELENGTHS_M, &[1.0; 5], amp, slope, c);
             // the height of the band is at most the sum of its octaves' heights, each at most min(its peak, its cap)
-            let bound: f64 = (0..5).map(|o| (amp * 0.5f64.powi(o) / norm).min(c * slope * RIDGED_WAVELENGTHS_M[o as usize] / 2.0)).sum();
+            let bound: f64 =
+                (0..5).map(|o| (amp * libm::pow(0.5, f64::from(o)) / norm).min(c * slope * RIDGED_WAVELENGTHS_M[o as usize] / 2.0)).sum();
             assert!(
                 amp * noise <= bound * (1.0 + 1e-12),
                 "slope {slope}, c {c}, pattern {pattern}: {} m over the cap sum {bound} m",
