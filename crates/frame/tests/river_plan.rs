@@ -209,7 +209,7 @@ fn a_channel_point_that_is_not_finite_is_refused_with_a_message() {
     river_distance_grid(&[ch], (0.0, 0.0), 1.0, (8, 8), &LAW, GRID.cell_m);
 }
 
-// spec: REND-059
+// spec: REND-061
 #[test]
 fn more_nodes_with_a_river_than_layers_keep_the_nearest_and_count_the_rest_never_silently() {
     // Six nodes along one long river (level 3, tiles 0..5 of the row 1), each with a distance; three layers.
@@ -248,7 +248,7 @@ fn more_nodes_with_a_river_than_layers_keep_the_nearest_and_count_the_rest_never
     assert_eq!(planet_frame::river::RiverPlan::from_lines(&lines).unwrap(), few);
 }
 
-// spec: REND-059
+// spec: REND-061
 #[test]
 fn neighbouring_nodes_of_one_level_hold_the_same_codes_on_their_shared_edge() {
     let src = Source::new(vec![channel(&[(40.0, 20.0), (100.0, 100.0)], q_for(6.0))]);
@@ -266,7 +266,7 @@ fn neighbouring_nodes_of_one_level_hold_the_same_codes_on_their_shared_edge() {
     }
 }
 
-// spec: REND-059
+// spec: REND-061
 #[test]
 fn across_a_level_boundary_the_shared_samples_agree_and_the_in_between_ones_are_reported() {
     let src = Source::new(vec![channel(&[(20.0, 40.0), (120.0, 52.0)], q_for(6.0))]);
@@ -290,5 +290,7 @@ fn across_a_level_boundary_the_shared_samples_agree_and_the_in_between_ones_are_
         }
     }
     assert_eq!(identical, 17);
+    // Reported in the TEST-117 report; guarded here so that it cannot grow unnoticed (half a cell).
+    assert!(max_between <= 16, "an in-between sample differs from the coarse interpolation by {max_between} codes");
     println!("level boundary: largest code difference of an in-between sample against the coarse interpolation: {max_between} codes ({:.2} cells)", f64::from(max_between) / 32.0);
 }
