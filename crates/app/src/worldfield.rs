@@ -215,6 +215,8 @@ pub struct WorldTerrain {
     rivers: Option<Arc<crate::rivers::ReaderRiverSource>>,
     /// What the base is, for a world opened by `open_fixture` (empty otherwise).
     fixture_note: String,
+    /// The lattice the water field reads when it is not the height field's (a fixture world: the in-memory coarse bake, whose ocean channel the water field is built over).
+    water_src: Option<Arc<dyn LatticeSource + Send>>,
     /// Scoped threads of one horizon bake (0: the cores, at most 4).
     horizon_threads: std::sync::atomic::AtomicUsize,
     /// Cells per chunk edge of the horizon lattice (0: the default of [`crate::horizonworld::HORIZON_CELL_M`]); a test sets a coarse one to stay quick.
@@ -332,6 +334,7 @@ impl WorldTerrain {
             erosion_note: String::new(),
             rivers: None,
             fixture_note: String::new(),
+            water_src: None,
         })
     }
 
@@ -435,6 +438,7 @@ impl WorldTerrain {
             erosion_note: String::new(),
             rivers: None,
             fixture_note: String::new(),
+            water_src: None,
         })
     }
 
@@ -722,7 +726,9 @@ impl WorldTerrain {
         let res = spec.res;
         let (i1, j1) = (rect.0 as usize + rect.2 - 1, rect.1 as usize + rect.3 - 1);
         let mut world = WorldTerrain::open(def.clone(), MAX_RUN_BAKE_RES)?;
-        let coarse = std::mem::replace(&mut world.src, Box::new(NoBake));
+        let coarse: Arc<dyn LatticeSource + Send> = Arc::from(std::mem::replace(&mut world.src, Box::new(NoBake)));
+        // The water field reads the coarse lattice (its ocean channel and floors are of the in-memory bake); the height field reads the fixture lattice.
+        world.water_src = Some(coarse.clone());
         let inputs = planet_cache::global_store::class_inputs(&def, seed, threads);
         let direction = |i: u32, j: u32| planet_cache::region_bake::lattice_direction(face, res as usize, i as usize, j as usize);
         let fixture = crate::fixturebase::FixtureLattice::sample(res, face, rect, &direction, &|d| inputs.base(d), coarse, threads)?;
@@ -940,7 +946,8 @@ impl WorldTerrain {
         if let Some(floor) = self.floor.as_deref() {
             producer = producer.with_floor(floor);
         }
-        let field = WaterField::new(&TangentWarp, self.src.as_ref(), vec![&producer]);
+        let src: &dyn LatticeSource = self.water_src.as_deref().unwrap_or(self.src.as_ref());
+        let field = WaterField::new(&TangentWarp, src, vec![&producer]);
         Ok(Some(f(&field)))
     }
 

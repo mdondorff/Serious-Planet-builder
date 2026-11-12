@@ -3,6 +3,8 @@
 //! lattice (`BakeInputs::base` at the nodes, f32 as stored) sampled once, before the first frame, and everywhere else the coarse in-memory lattice, read bilinearly at the finer node. A fixture, not the world: the
 //! rectangle's edge is a seam between exact and coarse ground, far from the flight over the region (the output says so).
 
+use std::sync::Arc;
+
 use planet_core::{par, Face, Vec3};
 use planet_generators::global::{GlobalSample, LatticeSource, ReadError};
 
@@ -15,7 +17,7 @@ pub struct FixtureLattice {
     w: usize,
     h: usize,
     z: Vec<f32>,
-    coarse: Box<dyn LatticeSource + Send>,
+    coarse: Arc<dyn LatticeSource + Send>,
 }
 
 impl FixtureLattice {
@@ -27,7 +29,7 @@ impl FixtureLattice {
         rect: (u32, u32, usize, usize),
         direction: &(dyn Fn(u32, u32) -> Vec3 + Sync),
         base: &(dyn Fn(Vec3) -> f64 + Sync),
-        coarse: Box<dyn LatticeSource + Send>,
+        coarse: Arc<dyn LatticeSource + Send>,
         threads: usize,
     ) -> Result<FixtureLattice, String> {
         let (i0, j0, w, h) = rect;
@@ -113,7 +115,7 @@ mod tests {
     }
 
     fn lattice(threads: usize) -> FixtureLattice {
-        FixtureLattice::sample(64, Face(2), (16, 24, 10, 6), &direction, &base, Box::new(Coarse), threads).unwrap()
+        FixtureLattice::sample(64, Face(2), (16, 24, 10, 6), &direction, &base, Arc::new(Coarse), threads).unwrap()
     }
 
     // spec: GEN-177
@@ -150,10 +152,10 @@ mod tests {
     fn the_sampling_is_the_same_on_one_and_eight_threads_and_bad_rectangles_are_refused() {
         let (a, b) = (lattice(1), lattice(8));
         assert!(a.z.iter().zip(&b.z).all(|(x, y)| x.to_bits() == y.to_bits()));
-        let bad = |rect| FixtureLattice::sample(64, Face(2), rect, &direction, &base, Box::new(Coarse), 1).is_err();
+        let bad = |rect| FixtureLattice::sample(64, Face(2), rect, &direction, &base, Arc::new(Coarse), 1).is_err();
         assert!(bad((60, 0, 10, 4)), "past the edge");
         assert!(bad((0, 0, 0, 4)), "empty");
-        assert!(FixtureLattice::sample(60, Face(2), (0, 0, 2, 2), &direction, &base, Box::new(Coarse), 1).is_err(), "8 does not divide 60");
+        assert!(FixtureLattice::sample(60, Face(2), (0, 0, 2, 2), &direction, &base, Arc::new(Coarse), 1).is_err(), "8 does not divide 60");
     }
 }
 
