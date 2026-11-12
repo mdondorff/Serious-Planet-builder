@@ -408,6 +408,14 @@ fn the_river_scene_has_smooth_banks_at_the_near_pose_and_no_pop_between_two_leve
     assert!(!rp.nodes.is_empty(), "the near pose has river nodes");
     let mut r = renderer(&ctx, &plan, &field);
     let (base, _) = frame(&ctx, &mut r, &plan, None);
+    // The picture without the river, for the eye next to the golden candidate (not a golden).
+    let dir = planet_testkit::repo_root().join("target").join("review").join("river-near");
+    std::fs::create_dir_all(&dir).unwrap();
+    let without_img = {
+        let f = r.read_color(&ctx);
+        planet_testkit::Image::new(f.width, f.height, f.rgba)
+    };
+    planet_testkit::write_png(&dir.join("without.png"), &without_img).unwrap();
     let (with, stats) = frame(&ctx, &mut r, &plan, Some(&rp));
     let near_img = {
         let f = r.read_color(&ctx);
