@@ -1,0 +1,48 @@
+== window face 2 cells 12288 seed 15: i 9568-10987 j 7904-9323 = 1420 x 1420; box i 9768-10787 j 8104-9123; land 79.1 %; base sampled in 44.2 s
+SPEC none
+  basins [none]: land cells of the box 883645; lifted 26.71 %; depressions of 1-30 cells 4.18 %; over 30 cells interior 22.52 %, touching the window ring 0.00 % (counted apart); over 300 cells interior 14.20 % (139 depressions)
+    interior depressions over 30 cells by largest fill depth (% of land): under 1 m 0.01, 1-10 m 6.56, 10-100 m 15.22, over 100 m 0.74
+    the deepest depressions over 30 cells (fill depth / cells): 130 m / 3689 cells; 101 m / 2825 cells; 81 m / 769 cells; 77 m / 2232 cells; 74 m / 7023 cells; 72 m / 791 cells; 66 m / 2191 cells; 56 m / 6877 cells
+    interior depressions over 30 cells: 1960 ; largest fill depth p50 6.8 m, p90 12.5 m, max 130.0 m
+BASINRAW | none | lifted 26.71 | small 4.18 | over30 22.52 | over300 14.20 | n30 1960 | depth p50 6.8 p95 14.5 max 130.0 | deeper100 0.74 | cells p50 63 p95 385 max 23185
+RELIEF | none | land cells 883645 | slope p50 0.0029 p95 0.0081 | relief5 p50 11.7 p95 28.4 m
+== window face 2 cells 12288 seed 15: i 9568-10987 j 7904-9323 = 1420 x 1420; box i 9768-10787 j 8104-9123; land 79.1 %; base sampled in 96.7 s
+SPEC cap:1
+  basins [cap:1]: land cells of the box 883645; lifted 10.65 %; depressions of 1-30 cells 1.55 %; over 30 cells interior 9.10 %, touching the window ring 0.00 % (counted apart); over 300 cells interior 8.04 % (57 depressions)
+    interior depressions over 30 cells by largest fill depth (% of land): under 1 m 0.24, 1-10 m 1.91, 10-100 m 6.34, over 100 m 0.62
+    the deepest depressions over 30 cells (fill depth / cells): 124 m / 2821 cells; 113 m / 2618 cells; 73 m / 6687 cells; 72 m / 559 cells; 71 m / 562 cells; 66 m / 1759 cells; 60 m / 1322 cells; 49 m / 10055 cells
+    interior depressions over 30 cells: 249 ; largest fill depth p50 2.5 m, p90 16.4 m, max 124.2 m
+BASINRAW | cap:1 | lifted 10.65 | small 1.55 | over30 9.10 | over300 8.04 | n30 249 | depth p50 2.5 p95 27.7 max 124.2 | deeper100 0.62 | cells p50 66 p95 2186 max 16516
+RELIEF | cap:1 | land cells 883645 | slope p50 0.0013 p95 0.0074 | relief5 p50 5.8 p95 28.7 m
+== window face 2 cells 12288 seed 15: i 9568-10987 j 7904-9323 = 1420 x 1420; box i 9768-10787 j 8104-9123; land 79.1 %; base sampled in 31.8 s
+SPEC bump:0.6:1:1
+  basins [bump:0.6:1:1]: land cells of the box 883645; lifted 16.28 %; depressions of 1-30 cells 2.48 %; over 30 cells interior 13.80 %, touching the window ring 0.00 % (counted apart); over 300 cells interior 11.67 % (87 depressions)
+    interior depressions over 30 cells by largest fill depth (% of land): under 1 m 0.10, 1-10 m 2.91, 10-100 m 10.05, over 100 m 0.74
+    the deepest depressions over 30 cells (fill depth / cells): 126 m / 3476 cells; 111 m / 3086 cells; 82 m / 889 cells; 73 m / 7228 cells; 66 m / 2507 cells; 66 m / 778 cells; 60 m / 1959 cells; 55 m / 13541 cells
+    interior depressions over 30 cells: 591 ; largest fill depth p50 3.7 m, p90 10.2 m, max 126.3 m
+BASINRAW | bump:0.6:1:1 | lifted 16.28 | small 2.48 | over30 13.80 | over300 11.67 | n30 591 | depth p50 3.7 p95 17.2 max 126.3 | deeper100 0.74 | cells p50 65 p95 1124 max 19740
+RELIEF | bump:0.6:1:1 | land cells 883645 | slope p50 0.0026 p95 0.0082 | relief5 p50 10.6 p95 28.8 m
+== window face 2 cells 12288 seed 15: i 9568-10987 j 7904-9323 = 1420 x 1420; box i 9768-10787 j 8104-9123; land 79.1 %; base sampled in 29.9 s
+SPEC bump:0.7:1:1
+  basins [bump:0.7:1:1]: land cells of the box 883645; lifted 15.10 %; depressions of 1-30 cells 2.05 %; over 30 cells interior 13.05 %, touching the window ring 0.00 % (counted apart); over 300 cells interior 11.28 % (81 depressions)
+    interior depressions over 30 cells by largest fill depth (% of land): under 1 m 0.12, 1-10 m 2.39, 10-100 m 9.82, over 100 m 0.73
+    the deepest depressions over 30 cells (fill depth / cells): 123 m / 3321 cells; 111 m / 3098 cells; 83 m / 894 cells; 71 m / 7087 cells; 67 m / 2394 cells; 66 m / 787 cells; 61 m / 1983 cells; 53 m / 12890 cells
+    interior depressions over 30 cells: 470 ; largest fill depth p50 3.4 m, p90 10.9 m, max 123.3 m
+BASINRAW | bump:0.7:1:1 | lifted 15.10 | small 2.05 | over30 13.05 | over300 11.28 | n30 470 | depth p50 3.4 p95 20.5 max 123.3 | deeper100 0.73 | cells p50 72 p95 1373 max 19956
+RELIEF | bump:0.7:1:1 | land cells 883645 | slope p50 0.0025 p95 0.0086 | relief5 p50 10.5 p95 29.4 m
+== window face 2 cells 12288 seed 15: i 9568-10987 j 7904-9323 = 1420 x 1420; box i 9768-10787 j 8104-9123; land 79.1 %; base sampled in 33.8 s
+SPEC bump:0.8:1:1
+  basins [bump:0.8:1:1]: land cells of the box 883645; lifted 13.70 %; depressions of 1-30 cells 1.41 %; over 30 cells interior 12.28 %, touching the window ring 0.00 % (counted apart); over 300 cells interior 11.04 % (73 depressions)
+    interior depressions over 30 cells by largest fill depth (% of land): under 1 m 0.14, 1-10 m 2.23, 10-100 m 9.19, over 100 m 0.71
+    the deepest depressions over 30 cells (fill depth / cells): 121 m / 3259 cells; 110 m / 3059 cells; 82 m / 900 cells; 71 m / 7277 cells; 66 m / 2228 cells; 66 m / 793 cells; 61 m / 2008 cells; 49 m / 11577 cells
+    interior depressions over 30 cells: 322 ; largest fill depth p50 3.5 m, p90 14.7 m, max 121.2 m
+BASINRAW | bump:0.8:1:1 | lifted 13.70 | small 1.41 | over30 12.28 | over300 11.04 | n30 322 | depth p50 3.5 p95 25.6 max 121.2 | deeper100 0.71 | cells p50 95 p95 1819 max 18258
+RELIEF | bump:0.8:1:1 | land cells 883645 | slope p50 0.0023 p95 0.0092 | relief5 p50 10.2 p95 30.6 m
+== window face 2 cells 12288 seed 15: i 9568-10987 j 7904-9323 = 1420 x 1420; box i 9768-10787 j 8104-9123; land 79.1 %; base sampled in 30.3 s
+SPEC bump:0.7:1.3:1
+  basins [bump:0.7:1.3:1]: land cells of the box 883645; lifted 15.85 %; depressions of 1-30 cells 2.39 %; over 30 cells interior 13.46 %, touching the window ring 0.00 % (counted apart); over 300 cells interior 11.29 % (84 depressions)
+    interior depressions over 30 cells by largest fill depth (% of land): under 1 m 0.14, 1-10 m 2.58, 10-100 m 10.01, over 100 m 0.73
+    the deepest depressions over 30 cells (fill depth / cells): 125 m / 3317 cells; 113 m / 3125 cells; 85 m / 923 cells; 71 m / 7056 cells; 70 m / 2609 cells; 66 m / 780 cells; 61 m / 1949 cells; 54 m / 13009 cells
+    interior depressions over 30 cells: 557 ; largest fill depth p50 3.9 m, p90 11.1 m, max 124.5 m
+BASINRAW | bump:0.7:1.3:1 | lifted 15.85 | small 2.39 | over30 13.46 | over300 11.29 | n30 557 | depth p50 3.9 p95 19.9 max 124.5 | deeper100 0.73 | cells p50 66 p95 1159 max 21533
+RELIEF | bump:0.7:1.3:1 | land cells 883645 | slope p50 0.0030 p95 0.0101 | relief5 p50 12.6 p95 33.3 m

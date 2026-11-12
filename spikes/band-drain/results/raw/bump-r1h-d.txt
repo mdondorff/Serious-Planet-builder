@@ -1,0 +1,36 @@
+== window face 1 cells 12288 seed 14: i 7856-8875 j 560-1579 = 1020 x 1020; box i 8056-8675 j 760-1379; land 69.4 %; base sampled in 27.2 s
+SPEC bump:0.8:1:5
+  basins [bump:0.8:1:5]: land cells of the box 267717; lifted 21.18 %; depressions of 1-30 cells 4.19 %; over 30 cells interior 17.00 %, touching the window ring 0.00 % (counted apart); over 300 cells interior 13.09 % (64 depressions)
+    interior depressions over 30 cells by largest fill depth (% of land): under 1 m 0.03, 1-10 m 0.83, 10-100 m 4.94, over 100 m 11.19
+    the deepest depressions over 30 cells (fill depth / cells): 674 m / 201 cells; 608 m / 387 cells; 595 m / 1845 cells; 581 m / 2373 cells; 468 m / 2277 cells; 439 m / 4492 cells; 431 m / 71 cells; 429 m / 92 cells
+    interior depressions over 30 cells: 478 ; largest fill depth p50 40.6 m, p90 223.2 m, max 673.9 m
+BASINRAW | bump:0.8:1:5 | lifted 21.18 | small 4.19 | over30 17.00 | over300 13.09 | n30 478 | depth p50 40.6 p95 324.5 max 673.9 | deeper100 11.19 | cells p50 67 p95 1296 max 11339
+  image target/review/spike110-img/z0-R1h-bump_0.8_1_5.png
+RELIEF | bump:0.8:1:5 | land cells 267717 | slope p50 0.0162 p95 0.1730 | relief5 p50 73.5 p95 638.4 m
+== window face 1 cells 12288 seed 14: i 7856-8875 j 560-1579 = 1020 x 1020; box i 8056-8675 j 760-1379; land 69.4 %; base sampled in 26.4 s
+SPEC bump:0.9:1:5
+  basins [bump:0.9:1:5]: land cells of the box 267717; lifted 17.70 %; depressions of 1-30 cells 3.48 %; over 30 cells interior 14.23 %, touching the window ring 0.00 % (counted apart); over 300 cells interior 11.11 % (62 depressions)
+    interior depressions over 30 cells by largest fill depth (% of land): under 1 m 0.01, 1-10 m 1.10, 10-100 m 4.61, over 100 m 8.51
+    the deepest depressions over 30 cells (fill depth / cells): 607 m / 58 cells; 585 m / 2347 cells; 569 m / 64 cells; 464 m / 2451 cells; 458 m / 236 cells; 450 m / 372 cells; 439 m / 4518 cells; 437 m / 38 cells
+    interior depressions over 30 cells: 347 ; largest fill depth p50 28.3 m, p90 163.1 m, max 606.9 m
+BASINRAW | bump:0.9:1:5 | lifted 17.70 | small 3.48 | over30 14.23 | over300 11.11 | n30 347 | depth p50 28.3 p95 319.4 max 606.9 | deeper100 8.51 | cells p50 69 p95 955 max 9663
+  image target/review/spike110-img/z0-R1h-bump_0.9_1_5.png
+RELIEF | bump:0.9:1:5 | land cells 267717 | slope p50 0.0131 p95 0.1831 | relief5 p50 62.8 p95 690.8 m
+== window face 1 cells 12288 seed 14: i 7856-8875 j 560-1579 = 1020 x 1020; box i 8056-8675 j 760-1379; land 69.4 %; base sampled in 26.4 s
+SPEC bump:0.9:1:9
+  basins [bump:0.9:1:9]: land cells of the box 267717; lifted 21.48 %; depressions of 1-30 cells 5.00 %; over 30 cells interior 16.49 %, touching the window ring 0.00 % (counted apart); over 300 cells interior 11.89 % (84 depressions)
+    interior depressions over 30 cells by largest fill depth (% of land): under 1 m 0.00, 1-10 m 0.71, 10-100 m 5.94, over 100 m 9.84
+    the deepest depressions over 30 cells (fill depth / cells): 603 m / 2819 cells; 590 m / 409 cells; 584 m / 188 cells; 581 m / 45 cells; 577 m / 290 cells; 573 m / 85 cells; 565 m / 222 cells; 545 m / 42 cells
+    interior depressions over 30 cells: 534 ; largest fill depth p50 46.3 m, p90 225.9 m, max 603.1 m
+BASINRAW | bump:0.9:1:9 | lifted 21.48 | small 5.00 | over30 16.49 | over300 11.89 | n30 534 | depth p50 46.3 p95 345.1 max 603.1 | deeper100 9.84 | cells p50 67 p95 1020 max 5359
+  image target/review/spike110-img/z0-R1h-bump_0.9_1_9.png
+RELIEF | bump:0.9:1:9 | land cells 267717 | slope p50 0.0169 p95 0.2139 | relief5 p50 78.0 p95 743.4 m
+== window face 1 cells 12288 seed 14: i 7856-8875 j 560-1579 = 1020 x 1020; box i 8056-8675 j 760-1379; land 69.4 %; base sampled in 26.3 s
+SPEC bump:0.85:1:3
+  basins [bump:0.85:1:3]: land cells of the box 267717; lifted 16.61 %; depressions of 1-30 cells 2.95 %; over 30 cells interior 13.66 %, touching the window ring 0.00 % (counted apart); over 300 cells interior 10.70 % (49 depressions)
+    interior depressions over 30 cells by largest fill depth (% of land): under 1 m 0.00, 1-10 m 1.02, 10-100 m 4.04, over 100 m 8.59
+    the deepest depressions over 30 cells (fill depth / cells): 576 m / 2277 cells; 512 m / 40 cells; 461 m / 2470 cells; 439 m / 4526 cells; 415 m / 43 cells; 379 m / 4301 cells; 364 m / 34 cells; 342 m / 42 cells
+    interior depressions over 30 cells: 321 ; largest fill depth p50 23.4 m, p90 125.7 m, max 576.5 m
+BASINRAW | bump:0.85:1:3 | lifted 16.61 | small 2.95 | over30 13.66 | over300 10.70 | n30 321 | depth p50 23.4 p95 190.1 max 576.5 | deeper100 8.59 | cells p50 73 p95 978 max 10299
+  image target/review/spike110-img/z0-R1h-bump_0.85_1_3.png
+RELIEF | bump:0.85:1:3 | land cells 267717 | slope p50 0.0123 p95 0.1589 | relief5 p50 58.7 p95 614.6 m
