@@ -1,0 +1,26 @@
+== L5 R1: face 1 seed 14 window i 7856-8875 j 560-1579 = 1020 x 1020 = 1040400 cells
+catchments of more than one cell: 2541
+L5 key, clip_mfd Local -> Off: 0 of 2541 catchment keys unchanged
+L5 key, canonical_flood true -> false: 2541 of 2541 catchment keys unchanged
+L5 key, k_dt x (1 + 1e-9): 0 of 2541 catchment keys unchanged
+L5 key, u_over_k x (1 + 1e-9): 0 of 2541 catchment keys unchanged
+L5 key, epsilon x (1 + 1e-9): 0 of 2541 catchment keys unchanged
+L5 key, breach_slope x (1 + 1e-9): 0 of 2541 catchment keys unchanged
+L5 key, breach_max_m x (1 + 1e-9): 0 of 2541 catchment keys unchanged
+L5 key, breach_height_scale_m 0 -> 100: 0 of 2541 catchment keys unchanged
+L5 key, sea_level 0 -> 1e-3: 0 of 2541 catchment keys unchanged
+L5 key, keep_pits flipped: 0 of 2541 catchment keys unchanged
+L5 key, incise_only flipped: 0 of 2541 catchment keys unchanged
+L5 key, reroute_every 5 -> 4 (sweeps per round): 0 of 2541 catchment keys unchanged
+L5 key, steps 20 -> 24 (rounds): 2541 of 2541 catchment keys unchanged
+L5 key, uplift_taper_m 60 -> 61 (enters through the taper input): 2541 of 2541 catchment keys unchanged
+L5 key, max_area 0 -> 1e9 (enters through A_d): 2541 of 2541 catchment keys unchanged
+L5 key, cell_metric flipped (enters through the distances): 2541 of 2541 catchment keys unchanged
+L5 key, round_f32 flipped (GEN-166): 0 of 2541 catchment keys unchanged
+L5 the sweeps of a round (5 against 6) change the result of 2130 of 2541 catchments; the key holds `reroute_every`, the sweeps per round
+fresh solves, Local against Off: 585986 of 1040400 cells differ
+memoised solve, Local on an empty cache: 16.5 s, catchments carved 8500, answered by the memo 1571, cells carved 2893939; against the fresh solve of the same rules: 0 of 1040400 cells differ
+memoised solve, Local again: 12.0 s, catchments carved 0, answered by the memo 10071, cells carved 0; against the fresh solve of the same rules: 0 of 1040400 cells differ
+memoised solve, Off on the cache of Local: 14.3 s, catchments carved 9900, answered by the memo 9, cells carved 2897146; against the fresh solve of the same rules: 0 of 1040400 cells differ
+memoised solve, Off again: 12.0 s, catchments carved 0, answered by the memo 9909, cells carved 0; against the fresh solve of the same rules: 0 of 1040400 cells differ
+memoised solve, Local after Off: 11.9 s, catchments carved 0, answered by the memo 10071, cells carved 0; against the fresh solve of the same rules: 0 of 1040400 cells differ
