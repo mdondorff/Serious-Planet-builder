@@ -231,6 +231,10 @@ pub fn run(root: &Path) -> Res {
             return Err(e);
         }
     }
+    if changed.iter().any(|p| crate::k7layout::touches_k7(p)) {
+        eprintln!("prepush: a K7 file changed, so the layout report runs (BUILD-052; the PR body carries its lines)");
+        crate::k7layout::run(root, &[])?;
+    }
     eprintln!("{}", verdict_line(&steps, !with_gpu));
     Ok(())
 }
