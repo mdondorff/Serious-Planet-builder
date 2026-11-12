@@ -59,3 +59,25 @@ cargo build --release -p planet-generators --example mfd_compare     # from spik
 PLANET_MARGIN=200 PLANET_WIN=4,12288,168,1187,4520,5539,15 mfd_compare 8     # R3a
 PLANET_MARGIN=200 PLANET_WIN=2,12288,9768,10787,8104,9123,15 mfd_compare 8   # R3b (PLANET_CROP=120,0 for the cells of the trenches; PLANET_WINCUT=0 for the control)
 ```
+
+## 5. Addendum: hypsometry of the box land (architect's G-MFD row)
+
+Added 2026-11-12 on the bulldozer's order: p5 to p95 of height on the land of the inner box (margin 200) for U, C and U under the second jitter seed, R3a and R3b. The probe's earlier output held p10, p50 and p90 only and no surfaces were kept, so the three round loops were run again (U, C and U seed B only, the same window, parameters and seeds as sections 1 to 4: U p10 / p50 / p90 below equal the `raw-rerun` values, R3a 0 / 34 / 631 m and R3b 18 / 313 / 451 m). Land = start height above the sea level and not an outlet; R3a 727,199 cells, R3b 883,645. Heights in metres after 4 rounds. Probe: `shapes_check hyps` on the local branch `spike/spike-108-rerun` (never pushed). Raw: `raw-rerun/hyps-R3a.txt`, `raw-rerun/hyps-R3b.txt`.
+
+| Fixture | Row | p5 | p10 | p25 | p50 | p75 | p90 | p95 |
+|---|---|---|---|---|---|---|---|---|
+| R3a | start surface z0 | 1.04 | 3.63 | 16.83 | 35.09 | 275.77 | 650.00 | 684.44 |
+| R3a | U | 0.01 | 0.46 | 7.90 | 33.89 | 220.55 | 630.98 | 690.89 |
+| R3a | C | 0.02 | 0.48 | 7.91 | 33.89 | 220.64 | 630.88 | 690.88 |
+| R3a | U seed B | 0.01 | 0.46 | 7.91 | 33.87 | 220.44 | 630.40 | 690.86 |
+| R3a | C - U | +0.00 | +0.02 | +0.01 | +0.01 | +0.09 | -0.10 | -0.01 |
+| R3a | U seed B - U | +0.00 | +0.00 | +0.01 | -0.02 | -0.11 | -0.58 | -0.03 |
+| R3b | start surface z0 | 13.79 | 30.48 | 209.96 | 344.67 | 403.47 | 446.11 | 468.40 |
+| R3b | U | 5.00 | 17.75 | 152.87 | 312.58 | 402.39 | 451.28 | 475.16 |
+| R3b | C | 5.00 | 17.76 | 152.92 | 312.59 | 402.40 | 451.29 | 475.16 |
+| R3b | U seed B | 5.00 | 17.77 | 153.14 | 312.94 | 402.63 | 451.48 | 475.20 |
+| R3b | C - U | +0.00 | +0.01 | +0.05 | +0.02 | +0.01 | +0.01 | +0.00 |
+| R3b | U seed B - U | +0.00 | +0.02 | +0.27 | +0.37 | +0.23 | +0.20 | +0.04 |
+
+- The largest absolute C - U over the seven quantiles is 0.10 m (R3a) and 0.05 m (R3b); the largest absolute U seed B - U is 0.58 m and 0.37 m.
+- Quantile by quantile |C - U| is at or below |U seed B - U| except at R3a p5 and p10 (0.00 and 0.02 m against 0.00 m after rounding; U, C and seed B are 0.01, 0.02 and 0.01 m at p5 and 0.46, 0.48 and 0.46 m at p10).
