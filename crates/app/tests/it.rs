@@ -12,6 +12,8 @@ mod live_definition;
 mod real_store;
 #[path = "residency_headroom.rs"]
 mod residency_headroom;
+#[path = "river_flight.rs"]
+mod river_flight;
 #[path = "shadow_rig.rs"]
 mod shadow_rig;
 #[path = "site_descent.rs"]

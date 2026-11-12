@@ -1118,6 +1118,11 @@ impl App<'_> {
                 if let Some(w) = water {
                     plan.water = Some(w.map_err(|e| e.to_string())?);
                 }
+                // The rivers of the frame (REND-062): when the stored world's commit holds a channel graph, the nodes with a river in range
+                // (the plan reads the channels through the commit's reader); a world without one draws none.
+                if let Some(src) = self.world.rivers() {
+                    plan.rivers = Some(crate::rivers::plan_frame_rivers(src.as_ref(), &plan)?);
+                }
                 Some(plan)
             } else {
                 None

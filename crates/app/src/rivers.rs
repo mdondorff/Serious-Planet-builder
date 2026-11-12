@@ -35,3 +35,39 @@ impl RiverSource for ReaderRiverSource {
         self.reader.tile_channels(face, ti, tj)
     }
 }
+
+/// The river plan of a frame (REND-062): every node of the terrain plan with its tile and the distance of its origin from the camera, the nearest
+/// keeping a layer when the array is full. The width law is the bake's standard one.
+pub fn plan_frame_rivers(
+    src: &ReaderRiverSource,
+    plan: &planet_frame::terrain::TerrainPlan,
+) -> Result<planet_frame::river::RiverPlan, String> {
+    let nodes: Vec<(u32, planet_core::TileId, f64)> = plan
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(i, n)| (i as u32, n.tile, n.camera_relative_origin.iter().map(|v| f64::from(*v) * f64::from(*v)).sum::<f64>().sqrt()))
+        .collect();
+    plan_nodes_rivers(src, plan.cells, &nodes)
+}
+
+/// [`plan_frame_rivers`] over a list of `(index, tile, distance)` nodes of `res` cells an edge.
+pub fn plan_nodes_rivers(
+    src: &ReaderRiverSource,
+    res: u32,
+    nodes: &[(u32, planet_core::TileId, f64)],
+) -> Result<planet_frame::river::RiverPlan, String> {
+    use planet_frame::river::{plan_rivers, RiverRequest, FULL_RIVER_SAMPLES, MIN_RIVER_SAMPLES};
+    let law = planet_generators::bake::k7::WidthLaw::STANDARD;
+    plan_rivers(
+        &RiverRequest {
+            source: src,
+            law: &law,
+            res,
+            min_samples: MIN_RIVER_SAMPLES,
+            full_samples: FULL_RIVER_SAMPLES,
+            max_layers: planet_render::RIVER_LAYERS as usize,
+        },
+        nodes,
+    )
+}
