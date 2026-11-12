@@ -910,7 +910,7 @@ Source: Architect 2026-11-11 (item 15 PR 4 decisions), lead 2026-11-12 (E1), CON
 - **THEN** it differs from the sea's, has bit 63 clear and gives back its face and index
 
 ### Requirement: REND-065 The water pass draws a lake node only where the commit's lake mask is wet
-The water plan SHALL give each node whose water is a lake (REND-058) a mask of the node's samples, each read at its nearest cell of the commit's lake grid (clamped to the face); a node none of whose samples is the lake's SHALL carry no water. The water pass SHALL discard a lake node's fragment where the mask interpolated over the node is under one half; a node without a mask (the sea) is drawn wherever `W - h_morph > 0`.
+The water plan SHALL give each lake node (REND-058) a mask of its samples, each read at its nearest cell of the commit's lake grid; a node none of whose samples is the lake's SHALL carry no water. The water pass SHALL discard a lake node's fragment where the mask interpolated over the node is under one half; the sea has no mask.
 - The masks share the river coverage atlas (REND-061 layout), in the slots after the rivers'; a mask with no slot left is drawn without it and counted in the frame stats.
 - The masks are part of the plan's text form.
 
