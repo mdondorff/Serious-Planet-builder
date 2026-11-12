@@ -1,0 +1,88 @@
+seed 15 face 2 region cells i 9768..10787 j 8104..9123; solved window 1420 x 1420 regional cells (margin 200); 1 production tiles (3072, halo 128) inside the window with their core meeting the region: [(26, 22)]
+lattice 1899 x 1899 nodes sampled (36.9 s)
+regional window solved (57.6 s)
+H1: 147172 channel cells, 43854 segments (64.7 s)
+TILE (26, 22): 128 s; 3168 channel segments in the window; 81000 line steps in the core; own heights: 13 rises over 0.25 m (largest 1.3809 m); stored B+L: 17 rises over 0.25 m (largest 1.2041 m); final pass: 14837 lowered, 3487 over 1 m, largest 20.77 m; cutoff_binds 5966
+  piece segment 4255297501913117112: own rise 0.2688 m, stored rise 0.4610 m, at cell (81505, 70652)
+  piece segment 4913789505655150934: own rise 1.3809 m, stored rise 1.2041 m, at cell (80529, 69567)
+  piece segment 16849225316102937411: own rise 0.6819 m, stored rise 0.8915 m, at cell (82921, 68879)
+  piece segment 2542400721177802470: own rise 0.1577 m, stored rise 0.2531 m, at cell (81945, 70212)
+  piece segment 15880625672994133918: own rise 1.0067 m, stored rise 0.9689 m, at cell (80458, 69996)
+  piece segment 2587097182963667779: own rise 0.2872 m, stored rise 0.4704 m, at cell (80542, 70346)
+  piece segment 13950159734839584496: own rise 0.0365 m, stored rise 0.2519 m, at cell (82137, 70297)
+  piece segment 4754251738571159797: own rise 0.2967 m, stored rise 0.3822 m, at cell (80912, 68828)
+  piece segment 7295481095281642672: own rise 0.5326 m, stored rise 0.4143 m, at cell (82768, 68812)
+  piece segment 14515747725817551923: own rise 0.3832 m, stored rise 0.2938 m, at cell (80932, 68772)
+  piece segment 8820796763774010825: own rise 0.6172 m, stored rise 0.6976 m, at cell (80836, 69289)
+  piece segment 6479520646982458145: own rise 0.3868 m, stored rise 0.4337 m, at cell (81856, 69808)
+  piece segment 14886249130707128240: own rise 0.4393 m, stored rise 0.5060 m, at cell (81994, 69956)
+  piece segment 3675937700383452259: own rise 0.1229 m, stored rise 0.2627 m, at cell (82016, 70128)
+D84 step 1: carry of the final pass 128 steps; cutoff cells (line entries; a cell on two lines counts twice) 5966, of them in the core 5833; rises over 0.25 m on the final heights: 13
+  [S--B] rise segment 4255297501913117112 line index 140 cell (81505, 70652): 0.2688 m final, 0.2688 m before the final pass; cutoff at the upper cell false, at the lower cell false; nearest cutoff cell on the line none steps from the lower cell; upper cell: start 0.07, burn -0.44, carve -0.44, before the final pass -0.44, final -0.44; lower cell: start 0.06, burn -0.17, carve -0.17, before the final pass -0.17, final -0.17
+  [---B] rise segment 4913789505655150934 line index 4 cell (80529, 69567): 1.3809 m final, 1.0730 m before the final pass; cutoff at the upper cell false, at the lower cell false; nearest cutoff cell on the line none steps from the lower cell; upper cell: start 14.22, burn 12.61, carve 10.13, before the final pass 10.47, final 9.09; lower cell: start 13.17, burn 13.17, carve 11.54, before the final pass 11.54, final 10.47
+  [---B] rise segment 16849225316102937411 line index 4 cell (82921, 68879): 0.6819 m final, 1.4909 m before the final pass; cutoff at the upper cell false, at the lower cell false; nearest cutoff cell on the line none steps from the lower cell; upper cell: start 16.91, burn 14.73, carve 12.25, before the final pass 12.87, final 12.19; lower cell: start 15.12, burn 15.12, carve 14.37, before the final pass 14.37, final 12.87
+  [S-CB] rise segment 15880625672994133918 line index 13 cell (80458, 69996): 1.0067 m final, 1.0067 m before the final pass; cutoff at the upper cell false, at the lower cell true; nearest cutoff cell on the line 0 steps from the lower cell; upper cell: start 8.48, burn -1.00, carve -1.00, before the final pass -1.00, final -1.00; lower cell: start 8.54, burn 2.74, carve 0.00, before the final pass 0.00, final 0.00
+  [-FC-] rise segment 2587097182963667779 line index 181 cell (80542, 70346): 0.2872 m final, 0.0000 m before the final pass; cutoff at the upper cell true, at the lower cell true; nearest cutoff cell on the line 0 steps from the lower cell; upper cell: start 16.19, burn 2.74, carve 0.00, before the final pass 0.32, final 0.01; lower cell: start 12.86, burn 2.74, carve 0.00, before the final pass 0.32, final 0.30
+  [-FC-] rise segment 4754251738571159797 line index 43 cell (80912, 68828): 0.2967 m final, -0.0010 m before the final pass; cutoff at the upper cell true, at the lower cell true; nearest cutoff cell on the line 0 steps from the lower cell; upper cell: start 4.62, burn 3.21, carve 0.00, before the final pass 1.72, final 0.21; lower cell: start 4.53, burn 3.21, carve 0.00, before the final pass 1.71, final 0.51
+  [S--B] rise segment 7295481095281642672 line index 27 cell (82768, 68812): 0.5326 m final, 0.5337 m before the final pass; cutoff at the upper cell false, at the lower cell false; nearest cutoff cell on the line none steps from the lower cell; upper cell: start 4.89, burn -0.53, carve -0.53, before the final pass -0.53, final -0.53; lower cell: start 4.53, burn 0.17, carve 0.00, before the final pass 0.00, final 0.00
+  [-FC-] rise segment 14515747725817551923 line index 39 cell (80932, 68772): 0.3832 m final, 0.0010 m before the final pass; cutoff at the upper cell true, at the lower cell true; nearest cutoff cell on the line 0 steps from the lower cell; upper cell: start 5.02, burn 4.23, carve 0.07, before the final pass 1.64, final 0.09; lower cell: start 5.07, burn 4.23, carve 0.62, before the final pass 1.64, final 0.47
+  [-FC-] rise segment 8820796763774010825 line index 29 cell (80948, 68850): 0.3194 m final, 0.2150 m before the final pass; cutoff at the upper cell true, at the lower cell true; nearest cutoff cell on the line 0 steps from the lower cell; upper cell: start 4.75, burn 3.11, carve 0.33, before the final pass 1.50, final 0.57; lower cell: start 4.82, burn 3.11, carve 0.65, before the final pass 1.72, final 0.89
+  [-FC-] rise segment 8820796763774010825 line index 476 cell (80836, 69289): 0.6172 m final, 0.0000 m before the final pass; cutoff at the upper cell true, at the lower cell true; nearest cutoff cell on the line 0 steps from the lower cell; upper cell: start 7.51, burn 2.94, carve 0.00, before the final pass 0.89, final 0.27; lower cell: start 8.53, burn 2.94, carve 0.00, before the final pass 0.89, final 0.89
+  [S--B] rise segment 6479520646982458145 line index 11 cell (81856, 69808): 0.3868 m final, 0.3868 m before the final pass; cutoff at the upper cell false, at the lower cell false; nearest cutoff cell on the line none steps from the lower cell; upper cell: start 8.56, burn -0.82, carve -0.82, before the final pass -0.82, final -0.82; lower cell: start 8.01, burn -0.43, carve -0.43, before the final pass -0.43, final -0.43
+  [S--B] rise segment 14886249130707128240 line index 29 cell (81994, 69956): 0.4393 m final, 0.4393 m before the final pass; cutoff at the upper cell false, at the lower cell false; nearest cutoff cell on the line none steps from the lower cell; upper cell: start 0.20, burn -1.49, carve -1.49, before the final pass -1.49, final -1.49; lower cell: start 0.21, burn -1.05, carve -1.05, before the final pass -1.05, final -1.05
+  [S--B] rise segment 14886249130707128240 line index 30 cell (81995, 69956): 0.3008 m final, 0.3008 m before the final pass; cutoff at the upper cell false, at the lower cell false; nearest cutoff cell on the line none steps from the lower cell; upper cell: start 0.21, burn -1.05, carve -1.05, before the final pass -1.05, final -1.05; lower cell: start 0.21, burn -0.75, carve -0.75, before the final pass -0.75, final -0.75
+D84 step 1 sea levels: of 13 rises, the upper cell is at or under the sea level before the final pass in 6, the lower cell in 4; rises with no cutoff at either cell: 5 with the upper cell at or under sea level, 2 with the upper cell above it
+D85 classes of 13 rises, in the order sub-sea upper cell (S) > post-burn fill (F) > carry cutoff (C final pass within 3 steps, B burn column rises) > other: S 6, F 5, C or B 2, other 0; with overlaps (a rise counts in every class it has): S 6, F 5, C 6, B 8; flag combinations (S F C B): {"---B": 2, "-FC-": 5, "S--B": 5, "S-CB": 1}
+D85 criterion, final pass: 5833 cutoff cells in the core (5833 with a finite bounded target, 0 with no value within the carry); bounded minus unbounded target: p50 0.0005 m, p99 1.4054 m, max 1.5690 m; 1159 over 0.25 m
+  cutoff over the step: segment 8820796763774010825 line index 214 cell (80878, 69034): bounded 1.570 unbounded 0.001 (difference 1.569 m)
+  cutoff over the step: segment 8820796763774010825 line index 215 cell (80877, 69035): bounded 1.570 unbounded 0.001 (difference 1.569 m)
+  cutoff over the step: segment 8820796763774010825 line index 216 cell (80876, 69036): bounded 1.570 unbounded 0.001 (difference 1.569 m)
+  cutoff over the step: segment 8820796763774010825 line index 217 cell (80875, 69037): bounded 1.570 unbounded 0.001 (difference 1.569 m)
+  cutoff over the step: segment 8820796763774010825 line index 218 cell (80874, 69038): bounded 1.570 unbounded 0.001 (difference 1.569 m)
+  cutoff over the step: segment 8820796763774010825 line index 219 cell (80873, 69039): bounded 1.570 unbounded 0.001 (difference 1.569 m)
+  cutoff over the step: segment 8820796763774010825 line index 220 cell (80872, 69040): bounded 1.570 unbounded 0.001 (difference 1.569 m)
+  cutoff over the step: segment 8820796763774010825 line index 221 cell (80871, 69041): bounded 1.570 unbounded 0.001 (difference 1.569 m)
+  cutoff over the step: segment 8820796763774010825 line index 222 cell (80870, 69042): bounded 1.570 unbounded 0.001 (difference 1.569 m)
+  cutoff over the step: segment 8820796763774010825 line index 223 cell (80869, 69043): bounded 1.570 unbounded 0.001 (difference 1.569 m)
+  cutoff over the step: segment 8820796763774010825 line index 224 cell (80868, 69044): bounded 1.570 unbounded 0.001 (difference 1.569 m)
+  cutoff over the step: segment 8820796763774010825 line index 225 cell (80868, 69045): bounded 1.570 unbounded 0.001 (difference 1.569 m)
+  cutoff over the step: segment 8820796763774010825 line index 226 cell (80868, 69046): bounded 1.570 unbounded 0.001 (difference 1.569 m)
+  cutoff over the step: segment 8820796763774010825 line index 227 cell (80868, 69047): bounded 1.570 unbounded 0.001 (difference 1.569 m)
+  cutoff over the step: segment 8820796763774010825 line index 228 cell (80868, 69048): bounded 1.570 unbounded 0.001 (difference 1.569 m)
+D85 criterion, burn (carry 112): 8258 cutoff cells in the core; bounded minus unbounded target: p50 1.6814 m, p99 4.2305 m, max 5.2736 m; 7283 over 0.25 m
+  burn cutoff over the step: segment 9935893555060779955 line index 123 cell (80631, 70444): bounded 4.269 unbounded -1.004 (difference 5.274 m)
+  burn cutoff over the step: segment 9935893555060779955 line index 124 cell (80632, 70444): bounded 4.269 unbounded -1.004 (difference 5.274 m)
+  burn cutoff over the step: segment 9935893555060779955 line index 125 cell (80633, 70444): bounded 4.269 unbounded -1.004 (difference 5.274 m)
+  burn cutoff over the step: segment 9935893555060779955 line index 126 cell (80634, 70444): bounded 4.269 unbounded -1.004 (difference 5.274 m)
+  burn cutoff over the step: segment 9935893555060779955 line index 127 cell (80635, 70444): bounded 4.269 unbounded -1.004 (difference 5.274 m)
+  burn cutoff over the step: segment 9935893555060779955 line index 128 cell (80636, 70444): bounded 4.269 unbounded -1.004 (difference 5.274 m)
+  burn cutoff over the step: segment 15037422564826797917 line index 0 cell (80636, 70444): bounded 4.269 unbounded -1.004 (difference 5.274 m)
+  burn cutoff over the step: segment 15037422564826797917 line index 1 cell (80637, 70445): bounded 4.269 unbounded -1.004 (difference 5.274 m)
+  burn cutoff over the step: segment 15037422564826797917 line index 2 cell (80638, 70446): bounded 4.269 unbounded -1.004 (difference 5.274 m)
+  burn cutoff over the step: segment 15037422564826797917 line index 3 cell (80639, 70447): bounded 4.269 unbounded -1.004 (difference 5.274 m)
+  burn cutoff over the step: segment 15037422564826797917 line index 4 cell (80640, 70448): bounded 4.269 unbounded -1.004 (difference 5.274 m)
+  burn cutoff over the step: segment 15037422564826797917 line index 5 cell (80641, 70449): bounded 4.269 unbounded -1.004 (difference 5.274 m)
+  burn cutoff over the step: segment 15037422564826797917 line index 6 cell (80642, 70450): bounded 4.269 unbounded -1.004 (difference 5.274 m)
+  burn cutoff over the step: segment 15037422564826797917 line index 7 cell (80643, 70451): bounded 4.269 unbounded -1.004 (difference 5.274 m)
+  burn cutoff over the step: segment 15037422564826797917 line index 8 cell (80644, 70452): bounded 4.269 unbounded -1.004 (difference 5.274 m)
+D84 step 1 summary: of 13 rises: cutoff at the lower cell 6, at the upper cell only 0, a cutoff cell within 3 steps on the line 0, no cutoff cell within 3 steps 7
+  signed distance (cutoff cell index minus the lower cell's index) of the nearest cutoff cell on the line: {0: 6, 9223372036854775807: 7}
+D84 step 2: segment 4913789505655150934 (rise 1.3809 m, line index 4, upper cell (80528, 69568), lower cell (80529, 69567)): target at the lower cell 10.469 (unbounded 10.469), at the upper cell 10.469; final heights upper 9.089, lower 10.469; 6 cells upstream of the lower cell on its tree
+  the pit: segment 4913789505655150934 line index 4 cell (80528, 69568), 1 steps upstream of the lower cell (carry 128; the burn's carry 112); the lowest pre-pass height on the tree upstream, 10.469 m
+  at the pit: start 14.218, after the burn 12.610, after the incising carve 10.132, before the final pass 10.469, final 9.089; at the lower cell: start 13.172, burn 13.172, carve 11.542, before the final pass 11.542
+  along the 2 cells of the chain from the pit to the lower cell: highest start 14.218, burn 13.172, carve 11.542, before the final pass 11.542; lowest start 13.172, burn 12.610
+  chain profile (index from the pit: start/burn/carve/before-final-pass): 0:14/13/10/10 1:13/13/12/12
+  start surface: the pit cell is 0.0 m below the highest start cell of the chain; the burn lowered the pit cell by 1.61 m, the carve by a further 2.48 m, later stages by a further -0.34 m
+D84 step 2: segment 15880625672994133918 (rise 1.0067 m, line index 13, upper cell (80457, 69996), lower cell (80458, 69996)): target at the lower cell 0.003 (unbounded 0.001), at the upper cell 0.096; final heights upper -1.004, lower 0.003; 3122 cells upstream of the lower cell on its tree
+  the pit: segment 13267755260187619283 line index 34 cell (80332, 69958), 140 steps upstream of the lower cell (carry 128; the burn's carry 112); the lowest pre-pass height on the tree upstream, 0.001 m
+  at the pit: start 2.187, after the burn 2.187, after the incising carve 0.001, before the final pass 0.001, final 0.001; at the lower cell: start 8.538, burn 2.742, carve 0.001, before the final pass 0.003
+  along the 145 cells of the chain from the pit to the lower cell: highest start 67.612, burn 2.742, carve 0.001, before the final pass 0.003; lowest start -1.004, burn -1.004
+  chain profile (index from the pit: start/burn/carve/before-final-pass): 0:2/2/0/0 12:4/-0/-0/-0 24:4/-0/-0/-0 36:5/-1/-1/-1 48:5/-1/-1/-1 60:10/-1/-1/-1 72:5/-1/-1/-1 84:5/-1/-1/-1 96:5/-1/-1/-1 108:5/-1/-1/-1 120:5/-1/-1/-1 132:10/-1/-1/-1 144:9/3/0/0
+  start surface: the pit cell is 65.4 m below the highest start cell of the chain; the burn lowered the pit cell by 0.00 m, the carve by a further 2.19 m, later stages by a further 0.00 m
+D84 step 2: segment 16849225316102937411 (rise 0.6819 m, line index 4, upper cell (82920, 68880), lower cell (82921, 68879)): target at the lower cell 12.875 (unbounded 12.875), at the upper cell 12.875; final heights upper 12.193, lower 12.875; 6 cells upstream of the lower cell on its tree
+  the pit: segment 16849225316102937411 line index 4 cell (82920, 68880), 1 steps upstream of the lower cell (carry 128; the burn's carry 112); the lowest pre-pass height on the tree upstream, 12.875 m
+  at the pit: start 16.911, after the burn 14.733, after the incising carve 12.255, before the final pass 12.875, final 12.193; at the lower cell: start 15.124, burn 15.124, carve 14.366, before the final pass 14.366
+  along the 2 cells of the chain from the pit to the lower cell: highest start 16.911, burn 15.124, carve 14.366, before the final pass 14.366; lowest start 15.124, burn 14.733
+  chain profile (index from the pit: start/burn/carve/before-final-pass): 0:17/15/12/13 1:15/15/14/14
+  start surface: the pit cell is 0.0 m below the highest start cell of the chain; the burn lowered the pit cell by 2.18 m, the carve by a further 2.48 m, later stages by a further -0.62 m
+TOTAL: 81000 line steps, 13 rises over 0.25 m (own heights), 17 (stored), cutoff_binds 5966; across tile borders of the run: 0 steps, 0 over 0.25 m, largest 0.0000 m; 193 s
