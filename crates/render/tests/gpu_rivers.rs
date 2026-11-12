@@ -6,10 +6,9 @@ use std::sync::Arc;
 
 use planet_core::cube::TangentWarp;
 use planet_core::{Face, PlanetFixed, Vec3};
-use planet_frame::look::file::LookParams;
 use planet_frame::look::LitPlan;
 use planet_frame::pool::compact_format_pool_with;
-use planet_frame::river::{node_window, plan_rivers, RiverGrid, RiverPlan, RiverRequest, RiverSource};
+use planet_frame::river::{node_window, plan_rivers, RiverGrid, RiverNode, RiverPlan, RiverRequest, RiverSource};
 use planet_frame::{plan_terrain_field, Camera, LodParams, TerrainPlan, TerrainRequest, TerrainView};
 use planet_generators::bake::k7::{Channel, QUnit, WidthLaw};
 use planet_generators::compact::compact_tile_field;
@@ -196,15 +195,101 @@ fn more_river_nodes_than_layers_draw_the_nearest_and_the_stats_count_the_rest() 
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let (plan, field) = scene();
     let all = river_plan(&plan, RIVER_LAYERS as usize);
-    if all.nodes.len() < 2 {
-        println!("only {} river node(s) in the pose: the cap case needs two", all.nodes.len());
-        return;
-    }
+    assert!(all.nodes.len() >= 2, "the pose has at least two river nodes ({}): the cap case needs two", all.nodes.len());
     let one = river_plan(&plan, 1);
     assert_eq!(one.nodes.len(), 1);
     assert_eq!(one.dropped as usize, all.nodes.len() - 1);
     let mut r = renderer(&ctx, &plan, &field);
     let (_, stats) = frame(&ctx, &mut r, &plan, Some(&one));
     assert_eq!((stats.river_nodes, stats.river_dropped as usize), (1, all.nodes.len() - 1));
-    let _ = LookParams::default();
+}
+
+/// The pixel of the vertex `(i, j)` of a node's lattice (the compact tile's own: the direction of the sample on the reference field), or None behind the camera.
+fn project(plan: &TerrainPlan, field: &Reference, tile: planet_core::TileId, i: u32, j: u32) -> Option<(f64, f64)> {
+    let dir = tile.sample_direction(&TangentWarp, CELLS, i, j);
+    let pos = dir * (R + field.height(dir));
+    let cam = plan.camera.position.0;
+    let rel = [pos.x - cam.x, pos.y - cam.y, pos.z - cam.z];
+    let m = &plan.view_projection;
+    let row = |r: usize| f64::from(m[r]) * rel[0] + f64::from(m[4 + r]) * rel[1] + f64::from(m[8 + r]) * rel[2] + f64::from(m[12 + r]);
+    let (x, y, w) = (row(0), row(1), row(3));
+    (w > 1e-6).then(|| ((x / w * 0.5 + 0.5) * f64::from(SIZE.0), (1.0 - (y / w * 0.5 + 0.5)) * f64::from(SIZE.1)))
+}
+
+// spec: REND-059
+#[test]
+fn the_coverage_lands_where_its_samples_are_along_both_axes_of_the_node() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let (plan, field) = scene();
+    let rp = river_plan(&plan, RIVER_LAYERS as usize);
+    let node = rp.nodes[0].node;
+    let tile = plan.nodes[node as usize].tile;
+    let mut r = renderer(&ctx, &plan, &field);
+    let (base, _) = frame(&ctx, &mut r, &plan, None);
+    let size = (CELLS + 1) as usize;
+    // The strip coverage: water (code 0) on the samples with the low index along one axis, far outside elsewhere.
+    for axis in 0..2usize {
+        let coverage: Vec<u8> = (0..size * size).map(|k| if [k % size, k / size][axis] < 4 { 0 } else { 255 }).collect();
+        let strip = RiverPlan { nodes: vec![RiverNode { node, size: size as u32, coverage }], dropped: 0 };
+        let (with, _) = frame(&ctx, &mut r, &plan, Some(&strip));
+        let verts: Vec<((u32, u32), (f64, f64))> = (0..=CELLS)
+            .flat_map(|j| (0..=CELLS).map(move |i| (i, j)))
+            .filter_map(|(i, j)| project(&plan, &field, tile, i, j).map(|p| ((i, j), p)))
+            .collect();
+        let mut changed = 0;
+        for (k, (a, b)) in base.iter().zip(&with).enumerate() {
+            if a == b {
+                continue;
+            }
+            changed += 1;
+            let (x, y) = ((k as u32 % SIZE.0) as f64 + 0.5, (k as u32 / SIZE.0) as f64 + 0.5);
+            let d2 = |p: &((u32, u32), (f64, f64))| (p.1 .0 - x) * (p.1 .0 - x) + (p.1 .1 - y) * (p.1 .1 - y);
+            let nearest = verts.iter().min_by(|p, q| d2(p).total_cmp(&d2(q))).unwrap();
+            let index = [nearest.0 .0, nearest.0 .1][axis];
+            assert!(index <= 5, "axis {axis}: the pixel ({x}, {y}) darkened where the nearest lattice vertex has index {index} along the axis (the strip is the indices 0 to 3)");
+        }
+        assert!(changed > 5, "axis {axis}: the strip draws some pixels ({changed})");
+    }
+}
+
+// spec: REND-061
+#[test]
+fn a_river_plan_the_array_cannot_hold_is_an_error_and_a_later_frame_without_rivers_never_shows_a_stale_layer() {
+    use planet_render::ExecError;
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let (plan, field) = scene();
+    let rp = river_plan(&plan, RIVER_LAYERS as usize);
+    let mut r = renderer(&ctx, &plan, &field);
+    let (base, _) = frame(&ctx, &mut r, &plan, None);
+    let mut p = plan.clone();
+    p.lit = Some(LitPlan::fixed(EV));
+    let size = (CELLS + 1) as usize;
+    let node = |n: u32, side: usize| RiverNode { node: n, size: side as u32, coverage: vec![0; side * side] };
+    for (bad, what) in [
+        (RiverPlan { nodes: vec![node(0, size + 1)], dropped: 0 }, "a coverage of another size"),
+        (RiverPlan { nodes: vec![node(plan.nodes.len() as u32, size)], dropped: 0 }, "a node the plan does not have"),
+        (RiverPlan { nodes: vec![node(0, size), node(0, size)], dropped: 0 }, "a node twice"),
+        (RiverPlan { nodes: (0..=RIVER_LAYERS).map(|_| node(0, size)).collect(), dropped: 0 }, "more nodes than layers"),
+        (RiverPlan { nodes: vec![RiverNode { node: 0, size: size as u32, coverage: vec![0; 3] }], dropped: 0 }, "a short coverage"),
+    ] {
+        p.rivers = Some(bad);
+        assert!(matches!(r.render(&ctx, &p, false), Err(ExecError::BadRiverPlan(_))), "{what} is a plan error, not a panic");
+    }
+    // Stale tails: rivers on a large plan, then a smaller plan without rivers, then the large plan again without, on every set of the ring.
+    let small = {
+        let mut s = plan.clone();
+        s.nodes.truncate(plan.nodes.len() / 2);
+        s
+    };
+    for _ in 0..planet_render::RING_SETS {
+        frame(&ctx, &mut r, &plan, Some(&rp));
+    }
+    for _ in 0..planet_render::RING_SETS {
+        frame(&ctx, &mut r, &small, None);
+    }
+    for _ in 0..planet_render::RING_SETS {
+        let (after, stats) = frame(&ctx, &mut r, &plan, None);
+        assert_eq!(after, base, "no river of an earlier frame is drawn");
+        assert_eq!(stats.river_nodes, 0);
+    }
 }

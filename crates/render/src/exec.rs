@@ -86,6 +86,8 @@ pub enum ExecError {
     WaterNotEnabled,
     /// The plan's water part has values the renderer cannot use (the message names them).
     BadWaterPlan(String),
+    /// The plan's river part cannot be drawn: a coverage of another size than the array's layers, a node the plan does not have, a node twice or more nodes than layers (the message names it).
+    BadRiverPlan(String),
 }
 
 impl fmt::Display for ExecError {
@@ -117,6 +119,7 @@ impl fmt::Display for ExecError {
             }
             ExecError::BadLitPlan(m) => write!(f, "{m}"),
             ExecError::BadWaterPlan(m) => write!(f, "{m}"),
+            ExecError::BadRiverPlan(m) => write!(f, "{m}"),
             ExecError::WaterNotEnabled => {
                 write!(f, "the plan carries water but the renderer was not given the water pass; call TerrainRenderer::enable_water first")
             }

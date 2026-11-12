@@ -2563,6 +2563,42 @@ impl TerrainRenderer {
                 )));
             }
         }
+        if let Some(r) = &plan.rivers {
+            if plan.lit.is_none() {
+                return Err(ExecError::BadRiverPlan(
+                    "the plan carries rivers but no lit part: the river water belongs to the lit path".into(),
+                ));
+            }
+            let size = self.cells + 1;
+            if r.nodes.len() > RIVER_LAYERS as usize {
+                return Err(ExecError::BadRiverPlan(format!(
+                    "the plan has {} river nodes, the coverage array holds {RIVER_LAYERS}",
+                    r.nodes.len()
+                )));
+            }
+            let mut seen = std::collections::HashSet::new();
+            for n in &r.nodes {
+                if n.size != size || n.coverage.len() != (size * size) as usize {
+                    return Err(ExecError::BadRiverPlan(format!(
+                        "river node {}: {} codes, declared {}x{}, for layers of {size}x{size}",
+                        n.node,
+                        n.coverage.len(),
+                        n.size,
+                        n.size
+                    )));
+                }
+                if n.node as usize >= plan.nodes.len() {
+                    return Err(ExecError::BadRiverPlan(format!(
+                        "river node {} is not a node of the plan ({} nodes)",
+                        n.node,
+                        plan.nodes.len()
+                    )));
+                }
+                if !seen.insert(n.node) {
+                    return Err(ExecError::BadRiverPlan(format!("river node {} appears twice", n.node)));
+                }
+            }
+        }
         // A frame draws the water pass only when some node carries water.
         let water_frame = plan.lit.is_some() && plan.water.as_ref().is_some_and(|w| !w.nodes.is_empty());
         // The shadow pass reads the lit pass's depth after it: the depth is kept.
@@ -2644,42 +2680,32 @@ impl TerrainRenderer {
         let refs_phase = std::time::Instant::now();
         let mut stats = TerrainStats { node_record_bytes: nodes.len() as u64, ..Default::default() };
         // The river coverage (REND-059, REND-061): the plan's layers into the array, each node's layer index into the buffer the lit fragment reads. A frame without rivers clears what an earlier frame of this set left.
+        // Every entry of the buffer is written (the plan's node count is not the buffer's), so no layer of an earlier frame is left for a later plan with more nodes to read.
         match &plan.rivers {
             Some(r) => {
                 let size = self.cells + 1;
-                let mut layers = vec![0xffu8; 4 * plan.nodes.len().max(1)];
-                let mut used = 0u32;
-                for node in &r.nodes {
-                    // A coverage of another size than the array's layers, a node the plan does not have or more nodes than layers cannot be drawn: the plan chose them, so it is a plan error, not a silent skip.
-                    assert!(
-                        node.size == size && (node.node as usize) < plan.nodes.len() && used < RIVER_LAYERS,
-                        "the plan's river node {} does not fit the coverage array ({}x{} against {size}x{size}, {} layers)",
-                        node.node,
-                        node.size,
-                        node.size,
-                        RIVER_LAYERS
-                    );
-                    layers[4 * node.node as usize..4 * node.node as usize + 4].copy_from_slice(&used.to_le_bytes());
+                let mut layers = vec![0xffu8; 4 * self.node_capacity.max(1)];
+                for (used, node) in r.nodes.iter().enumerate() {
+                    layers[4 * node.node as usize..4 * node.node as usize + 4].copy_from_slice(&(used as u32).to_le_bytes());
                     ctx.queue.write_texture(
                         wgpu::TexelCopyTextureInfo {
                             texture: &set.river_array,
                             mip_level: 0,
-                            origin: wgpu::Origin3d { x: 0, y: 0, z: used },
+                            origin: wgpu::Origin3d { x: 0, y: 0, z: used as u32 },
                             aspect: wgpu::TextureAspect::All,
                         },
                         &node.coverage,
                         wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(size), rows_per_image: Some(size) },
                         wgpu::Extent3d { width: size, height: size, depth_or_array_layers: 1 },
                     );
-                    used += 1;
                 }
                 ctx.queue.write_buffer(&set.river_layers, 0, &layers);
-                set.rivers_live.set(used > 0);
-                stats.river_nodes = used;
+                set.rivers_live.set(!r.nodes.is_empty());
+                stats.river_nodes = r.nodes.len() as u32;
                 stats.river_dropped = r.dropped;
             }
             None if set.rivers_live.get() => {
-                ctx.queue.write_buffer(&set.river_layers, 0, &vec![0xffu8; 4 * plan.nodes.len().max(1)]);
+                ctx.queue.write_buffer(&set.river_layers, 0, &vec![0xffu8; 4 * self.node_capacity.max(1)]);
                 set.rivers_live.set(false);
             }
             None => {}
