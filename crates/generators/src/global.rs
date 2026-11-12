@@ -358,6 +358,19 @@ pub(crate) fn hill_octaves_with(seed: u64, t: &Terrain, turned: bool) -> f64 {
     sum / norm
 }
 
+/// The signal `(1 - |n|)^2` of each of the hill band's three octaves (8, 4 and 2 km), the terms [`hill_octaves_with`] sums with the amplitudes 1, 1/2, 1/4 over their sum (the band rules of GEN-179 cap and weight them one by one).
+pub(crate) fn hill_octave_signals(seed: u64, t: &Terrain, turned: bool) -> [f64; HILL_BAND_OCTAVES as usize] {
+    let mut out = [0.0; HILL_BAND_OCTAVES as usize];
+    let mut freq = HILL_BAND_FREQ;
+    for (o, s) in out.iter_mut().enumerate() {
+        let n = layer_noise_t(turned, seed, LAYER_HILL, o as u32, t.warped * freq);
+        let r = 1.0 - libm::fabs(n);
+        *s = r * r;
+        freq *= 2.0;
+    }
+    out
+}
+
 /// The hill band's noise in `[0, 1]` at the unit direction `d`, on the lattices turned per octave when `turned` (GEN-140).
 pub fn hill_octaves_at(seed: u64, d: Vec3, turned: bool) -> f64 {
     hill_octaves_with(seed, &terrain(seed, d), turned)

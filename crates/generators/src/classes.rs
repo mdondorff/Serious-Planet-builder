@@ -6,7 +6,9 @@
 //! lattice's geometry and is the one interface consumers read (ADR 0089 decision 1).
 
 use crate::coast::CoastLattice;
-use crate::global::{fbm, hill_octaves_with, ridge_at, terrain, Terrain, MAX_ELEVATION_M, MIN_ELEVATION_M, SEA_LEVEL_C};
+use crate::global::{
+    fbm, hill_octave_signals, hill_octaves_with, ridge_at, terrain, Terrain, MAX_ELEVATION_M, MIN_ELEVATION_M, SEA_LEVEL_C,
+};
 use crate::height::{layer_noise_t, turned_noise};
 use crate::shelf::ShelfProfile;
 use planet_core::cube::{direction_to_face, face_to_direction, TangentWarp};
@@ -548,8 +550,49 @@ impl ClassSource {
         ClassPoint { terms, land_depth: t.land_depth, e0, weights: class_weights(&terms, e_smooth, rolling) }
     }
 
+    /// The slope of the base elevation `e0` at `d` in metres per metre (GEN-179): the length of the forward differences of `e0` along two tangents, [`SLOPE_STEP_M`] apart, over the step.
+    pub fn e0_slope(&self, d: Vec3) -> f64 {
+        let ang = SLOPE_STEP_M / self.radius_m;
+        let axis = if libm::fabs(d.x) < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
+        let u = d.cross(axis).normalized();
+        let v = d.cross(u);
+        let (c, s) = (libm::cos(ang), libm::sin(ang));
+        let e0 = self.eval(d).e0;
+        let du = self.eval((d * c + u * s).normalized()).e0 - e0;
+        let dv = self.eval((d * c + v * s).normalized()).e0 - e0;
+        libm::sqrt(du * du + dv * dv) / SLOPE_STEP_M
+    }
+
+    /// The band's noise under the rules of GEN-179 (the slope cap and the weight of the 8 km hill octave): the mountain share `wm` of the ridged band and the rest of the hill band, each
+    /// octave capped by what the slope of e0 can drain, with the wavelengths scaled to the body's radius.
+    fn band_noise_ruled(&self, d: Vec3, t: &Terrain, turned: bool, amp: f64, wm: f64, rules: &BandRules) -> f64 {
+        let c = rules.slope_cap_c;
+        let slope = if c > 0.0 { self.e0_slope(d) } else { 0.0 };
+        let scale = self.radius_m / EARTH_RADIUS_M;
+        // The mountain band is centred on its mean: under the cap the mean falls with the octaves' heights, so the centre falls with it (the band stays zero-mean instead of sinking by the whole centre).
+        let (ridged, centre) = if wm > 0.0 {
+            let w: Vec<f64> = RIDGED_WAVELENGTHS_M.iter().map(|l| l * scale).collect();
+            let kept = capped_band_noise(&[1.0; 5], &w, &[1.0; 5], amp, slope, c);
+            (capped_band_noise(&ridged_octave_signals(self.seed, t, turned), &w, &[1.0; 5], amp, slope, c), MOUNTAIN_BAND_CENTRE * kept)
+        } else {
+            (0.0, 0.0)
+        };
+        let hill = if wm < 1.0 {
+            let w: Vec<f64> = HILL_WAVELENGTHS_M.iter().map(|l| l * scale).collect();
+            capped_band_noise(&hill_octave_signals(self.seed, t, turned), &w, &[rules.hill8_weight, 1.0, 1.0], amp, slope, c)
+        } else {
+            0.0
+        };
+        wm * ridged + (1.0 - wm) * hill - wm * centre
+    }
+
     /// The elevation of GEN-096 at `d` given the untapered blended `k` there: `e0` plus the class hill band (GEN-098), clamped. `point` is `eval(d)`.
     pub fn elevation_m(&self, d: Vec3, point: &ClassPoint, k: f64) -> f64 {
+        self.elevation_m_with(d, point, k, &band_rules())
+    }
+
+    /// [`ClassSource::elevation_m`] under the given band rules (GEN-179).
+    pub fn elevation_m_with(&self, d: Vec3, point: &ClassPoint, k: f64, rules: &BandRules) -> f64 {
         let t = terrain(self.seed, d);
         let wm = point.weights[MOUNTAINS] + point.weights[HIGH_MOUNTAINS];
         let band = if t.land_depth <= 0.0 {
@@ -558,8 +601,12 @@ impl ClassSource {
             // On the mountain classes (blended by their weight) the band is x4.5 as high, ridged, and centred on its mean (GEN-098, SPIKE-101).
             let amp = hill_amplitude_for_k(k) * (1.0 + (MOUNTAIN_BAND_SCALE - 1.0) * wm);
             let turned = turned_noise();
-            let noise = wm * ridged_octaves(self.seed, &t, turned) + (1.0 - wm) * hill_octaves_with(self.seed, &t, turned)
-                - MOUNTAIN_BAND_CENTRE * wm;
+            let noise = if rules.is_on() {
+                self.band_noise_ruled(d, &t, turned, amp, wm, rules)
+            } else {
+                wm * ridged_octaves(self.seed, &t, turned) + (1.0 - wm) * hill_octaves_with(self.seed, &t, turned)
+                    - MOUNTAIN_BAND_CENTRE * wm
+            };
             amp * noise * smoothstep(0.0, 0.1, t.land_depth)
         };
         // The centred band can be negative: land stays land (the shore of the continent stage is kept), at least 1 m above the sea where the base is.
@@ -850,4 +897,114 @@ impl ClassLattice {
         let n = self.cells as f64;
         face_to_direction(&TangentWarp, face, 2.0 * i as f64 / n - 1.0, 2.0 * j as f64 / n - 1.0)
     }
+}
+
+// ---- the band rules (GEN-179): a slope cap on every band octave and a weight on the 8 km hill octave, both off by default ----
+
+/// The cap constant `c` of GEN-179 as the bits of an f64: 0 is off. A process-wide switch like the turned lattices (GEN-140): a run sets it once at its start, before any field is read.
+static BAND_CAP_C: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// The weight of the 8 km hill octave as the bits of an f64: 1 is off.
+static HILL8_WEIGHT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0x3FF0_0000_0000_0000);
+
+/// Sets the slope cap `c` of the band (GEN-179): each band octave's amplitude is held to `c x slope(e0) x wavelength / 2`; 0 switches the cap off.
+pub fn set_band_slope_cap(c: f64) {
+    assert!(c.is_finite() && c >= 0.0, "the band's slope cap c is finite and not negative, not {c}");
+    BAND_CAP_C.store(c.to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The slope cap `c` of the band (GEN-179); 0 is off.
+pub fn band_slope_cap() -> f64 {
+    f64::from_bits(BAND_CAP_C.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// Sets the weight of the 8 km hill octave (GEN-179), in `[0, 1]`; 1 switches it off (the octave counts in full).
+pub fn set_hill8_weight(w: f64) {
+    assert!((0.0..=1.0).contains(&w), "the weight of the 8 km hill octave is in [0, 1], not {w}");
+    HILL8_WEIGHT.store(w.to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The weight of the 8 km hill octave (GEN-179); 1 is off.
+pub fn hill8_weight() -> f64 {
+    f64::from_bits(HILL8_WEIGHT.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// The band rules of GEN-179.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BandRules {
+    /// The cap constant `c`: each band octave is held to `c x slope(e0) x wavelength / 2`; 0 is no cap.
+    pub slope_cap_c: f64,
+    /// The weight of the 8 km hill octave in `[0, 1]`; 1 counts it in full.
+    pub hill8_weight: f64,
+}
+
+impl BandRules {
+    /// Both rules off: the build before GEN-179.
+    pub const OFF: BandRules = BandRules { slope_cap_c: 0.0, hill8_weight: 1.0 };
+
+    /// Whether either rule is on.
+    pub fn is_on(&self) -> bool {
+        self.slope_cap_c > 0.0 || self.hill8_weight != 1.0
+    }
+
+    /// The fold of the rules into an identity word: unchanged while both are off (so no key moves), mixed with their values while one is on.
+    pub fn fold(&self, identity: u64) -> u64 {
+        if self.is_on() {
+            planet_core::hash::hash_u64s(0x6261_6e64_0001, &[identity, self.slope_cap_c.to_bits(), self.hill8_weight.to_bits()])
+        } else {
+            identity
+        }
+    }
+}
+
+/// The band rules the process runs with (GEN-179).
+pub fn band_rules() -> BandRules {
+    BandRules { slope_cap_c: band_slope_cap(), hill8_weight: hill8_weight() }
+}
+
+/// Whether either band rule of GEN-179 is on in the process.
+pub fn band_rules_on() -> bool {
+    band_rules().is_on()
+}
+
+/// The fold of the process's band rules into an identity word (see [`BandRules::fold`]).
+pub fn band_rules_word(identity: u64) -> u64 {
+    band_rules().fold(identity)
+}
+
+/// The wavelengths in metres of the ridged octaves on a body of Earth's radius (16, 8, 4, 2 and 1 km; they scale with the radius).
+pub const RIDGED_WAVELENGTHS_M: [f64; 5] = [16_000.0, 8_000.0, 4_000.0, 2_000.0, 1_000.0];
+/// The wavelengths in metres of the hill octaves on a body of Earth's radius (8, 4 and 2 km).
+pub const HILL_WAVELENGTHS_M: [f64; 3] = [8_000.0, 4_000.0, 2_000.0];
+/// The distance in metres between the samples of e0 that give its slope (GEN-179).
+pub const SLOPE_STEP_M: f64 = 3_000.0;
+
+/// The noise of a band in `[0, 1]` from the signals of its octaves (GEN-179): `sum_o a_o f_o s_o / sum_o a_o` with the octave amplitudes `a_o = 1/2^o`, the signals `s_o` and the factor
+/// `f_o = weight_o x min(1, cap_o / peak_o)`, where `peak_o = amp a_o / sum a` is the octave's peak-to-trough height in metres for the band amplitude `amp`, and `cap_o = c x slope x wavelength_o / 2`
+/// what the slope of the base can drain across half a wavelength. `c = 0` is no cap.
+pub fn capped_band_noise(signals: &[f64], wavelengths_m: &[f64], weights: &[f64], amp: f64, slope: f64, c: f64) -> f64 {
+    assert!(signals.len() == wavelengths_m.len() && signals.len() == weights.len(), "one wavelength and one weight an octave");
+    let norm: f64 = (0..signals.len()).map(|o| 0.5f64.powi(o as i32)).sum();
+    let mut sum = 0.0;
+    for o in 0..signals.len() {
+        let a = 0.5f64.powi(o as i32);
+        let peak = amp * a / norm;
+        let keep = if c > 0.0 && peak > 0.0 { (c * slope * wavelengths_m[o] / 2.0 / peak).min(1.0) } else { 1.0 };
+        sum += a * weights[o] * keep * signals[o];
+    }
+    sum / norm
+}
+
+/// The signal `r^2 x weight` of each of the five ridged octaves (the terms [`ridged_octaves`] sums), the weight of an octave following the previous one's ridge.
+fn ridged_octave_signals(seed: u64, t: &Terrain, turned: bool) -> [f64; 5] {
+    let (mut weight, mut freq) = (1.0, 398.0);
+    let mut out = [0.0; 5];
+    for (o, s) in out.iter_mut().enumerate() {
+        let n = layer_noise_t(turned, seed, LAYER_RIDGED, o as u32, t.warped * freq);
+        let r = (1.0 - libm::fabs(n)).max(0.0);
+        let sig = r * r * weight;
+        *s = sig;
+        weight = (sig * 2.0).clamp(0.0, 1.0);
+        freq *= 2.0;
+    }
+    out
 }

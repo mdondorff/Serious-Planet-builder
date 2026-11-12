@@ -60,6 +60,8 @@ mod bake_tile;
 mod bake_water_mask;
 #[path = "bake_world_precision.rs"]
 mod bake_world_precision;
+#[path = "band_rules.rs"]
+mod band_rules;
 #[path = "block_order.rs"]
 mod block_order;
 #[path = "body_keys.rs"]
