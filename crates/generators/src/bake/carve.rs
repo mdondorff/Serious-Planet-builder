@@ -44,6 +44,8 @@ pub struct CarveParams {
     pub window_cut: bool,
     /// The round surface is stored f32 (GEN-166): the heights are narrowed to f32 (round to nearest, ties to even) once at the end of every round and read widened by the next round, K6 and K7; the round computes in f64. Off by default (f64 rounds); the callers of the round rules turn it on.
     pub round_f32: bool,
+    /// The world datum of the f32 rounds (GEN-175): the heights are narrowed about it (`datum + f32(h - datum)`), so the f32 spacing is the spacing at `R = max abs(h - datum)`, not at the height above the sea. 0 (the default) is the bits of GEN-166; set by `WorldPrecision::apply`.
+    pub datum: f64,
     /// The round-0 breach of the closed basins (GEN-174): one pass before the first round drains each closed basin by the cheapest path to a lower cell within the depth and the length of the profile (`breach::PreBreach`); off (`None`) by default.
     pub pre_breach: Option<super::breach::PreBreach>,
     /// How a round visits the cells (GEN-141): execution only, the result is the same bits (a sweep reads a cell and its receiver, which share a catchment); not part of any key.
@@ -93,6 +95,7 @@ impl Default for CarveParams {
             round_rules: RoundRules { clip_mfd: super::route::MfdClip::Off, canonical_flood: false },
             window_cut: false,
             round_f32: false,
+            datum: 0.0,
             pre_breach: None,
             schedule: Schedule::Region,
         }
@@ -226,7 +229,7 @@ pub fn carve_rock_fixed(
         if step % p.reroute_every == 0 {
             // GEN-166: the heights of the round that ended are narrowed before the next routing reads them.
             if p.round_f32 && step > 0 {
-                narrow_f32(z);
+                narrow_f32_about(z, p.datum);
             }
             // The previous routing is dropped before the next is built: two live routings of a face would not fit its memory budget.
             drop(routing.take());
@@ -331,7 +334,7 @@ pub fn carve_rock_fixed(
         }
     }
     if p.round_f32 {
-        narrow_f32(z);
+        narrow_f32_about(z, p.datum);
     }
     routing.expect("a carve has at least one step")
 }
@@ -342,6 +345,18 @@ pub fn narrow_f32(z: &mut [f64]) {
         let n = *v as f32;
         assert!(n.is_finite(), "the height {v} does not fit an f32");
         *v = f64::from(n);
+    }
+}
+
+/// `narrow_f32` about a datum (GEN-175): `z = datum + f64::from((z - datum) as f32)`; datum 0 is `narrow_f32` exactly (no add, so a `-0.0` stays).
+pub fn narrow_f32_about(z: &mut [f64], datum: f64) {
+    if datum == 0.0 {
+        return narrow_f32(z);
+    }
+    for v in z.iter_mut() {
+        let n = (*v - datum) as f32;
+        assert!(n.is_finite(), "the height {v} about the datum {datum} does not fit an f32");
+        *v = datum + f64::from(n);
     }
 }
 

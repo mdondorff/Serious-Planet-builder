@@ -272,7 +272,7 @@ pub fn solve_rounds_with(
             }
         }
         if p.round_f32 {
-            super::carve::narrow_f32(z);
+            super::carve::narrow_f32_about(z, p.datum);
         }
         report.rounds.push(RoundStats {
             catchments: cuts.members.len(),
@@ -377,6 +377,9 @@ pub fn catchment_key(grid: &Grid, cells: &[u32], inp: &CatchmentInputs, p: &Carv
     for v in [p.k_dt, p.u_over_k, p.epsilon, p.breach_slope, p.breach_max_m, p.breach_height_scale_m, p.sea_level] {
         h.word(v.to_bits());
     }
+    if p.datum != 0.0 {
+        h.word(p.datum.to_bits() ^ 0xDA70_0000_0000_0000);
+    }
     h.word(
         u64::from(p.keep_pits)
             | (u64::from(p.incise_only) << 1)
@@ -472,7 +475,7 @@ pub fn solve_rounds_memo(
             }
         }
         if p.round_f32 {
-            super::carve::narrow_f32(z);
+            super::carve::narrow_f32_about(z, p.datum);
         }
         let (e, b) = cache.evict();
         (w.evicted, w.evicted_bytes) = (w.evicted + e, w.evicted_bytes + b);

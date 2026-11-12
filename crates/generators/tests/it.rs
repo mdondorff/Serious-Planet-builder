@@ -56,6 +56,8 @@ mod bake_thermal;
 mod bake_tile;
 #[path = "bake_water_mask.rs"]
 mod bake_water_mask;
+#[path = "bake_world_precision.rs"]
+mod bake_world_precision;
 #[path = "block_order.rs"]
 mod block_order;
 #[path = "body_keys.rs"]

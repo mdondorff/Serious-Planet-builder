@@ -30,6 +30,7 @@ pub mod map;
 pub mod memo;
 pub mod metric;
 pub mod partition;
+pub mod precision;
 pub mod preview;
 pub mod probe;
 pub mod round;
