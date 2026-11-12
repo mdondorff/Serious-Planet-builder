@@ -1,0 +1,37 @@
+== window face 2 cells 12288 seed 15: i 9568-10987 j 7904-9323 = 1420 x 1420; box i 9768-10787 j 8104-9123; land 79.1 %; base sampled in 71.8 s
+TILTFIELD | S over the box land p5 0.069 p50 0.315 p95 0.437 max 0.488 | |grad S| per km p5 0.0003 p50 0.0008 p95 0.0013
+TILT 0 m/km (median gradient) -> T 0.0 m per unit S; adds p5 0.0 p50 0.0 p95 0.0 max 0.0 m over the box land
+  |grad z| of the tilted z0 over the box land (m per km): p5 0.61 p25 1.73 p50 2.92 p95 8.06
+  basins [tilt 0]: land cells of the box 883645; lifted 26.71 %; depressions of 1-30 cells 4.18 %; over 30 cells interior 22.52 %, touching the window ring 0.00 % (counted apart); over 300 cells interior 14.20 % (139 depressions)
+    interior depressions over 30 cells by largest fill depth (% of land): under 1 m 0.01, 1-10 m 6.56, 10-100 m 15.22, over 100 m 0.74
+    the deepest depressions over 30 cells (fill depth / cells): 130 m / 3689 cells; 101 m / 2825 cells; 81 m / 769 cells; 77 m / 2232 cells; 74 m / 7023 cells; 72 m / 791 cells; 66 m / 2191 cells; 56 m / 6877 cells
+    interior depressions over 30 cells: 1960 ; largest fill depth p50 6.8 m, p90 12.5 m, max 130.0 m
+BASINRAW | tilt 0 | lifted 26.71 | small 4.18 | over30 22.52 | over300 14.20 | n30 1960 | depth p50 6.8 p95 14.5 max 130.0 | deeper100 0.74 | cells p50 63 p95 385 max 23185
+TILT 1 m/km (median gradient) -> T 1210.4 m per unit S; adds p5 83.8 p50 380.9 p95 528.4 max 590.9 m over the box land
+  |grad z| of the tilted z0 over the box land (m per km): p5 0.78 p25 1.95 p50 3.20 p95 8.77
+  basins [tilt 1]: land cells of the box 883645; lifted 14.73 %; depressions of 1-30 cells 4.59 %; over 30 cells interior 10.14 %, touching the window ring 0.00 % (counted apart); over 300 cells interior 3.71 % (69 depressions)
+    interior depressions over 30 cells by largest fill depth (% of land): under 1 m 0.00, 1-10 m 5.25, 10-100 m 4.71, over 100 m 0.19
+    the deepest depressions over 30 cells (fill depth / cells): 107 m / 1676 cells; 56 m / 593 cells; 56 m / 537 cells; 56 m / 2106 cells; 53 m / 747 cells; 43 m / 427 cells; 40 m / 1115 cells; 33 m / 1760 cells
+    interior depressions over 30 cells: 1613 ; largest fill depth p50 6.8 m, p90 11.6 m, max 106.7 m
+BASINRAW | tilt 1 | lifted 14.73 | small 4.59 | over30 10.14 | over300 3.71 | n30 1613 | depth p50 6.8 p95 13.3 max 106.7 | deeper100 0.19 | cells p50 58 p95 263 max 9722
+TILT 2 m/km (median gradient) -> T 2420.9 m per unit S; adds p5 167.7 p50 761.9 p95 1056.8 max 1181.9 m over the box land
+  |grad z| of the tilted z0 over the box land (m per km): p5 0.96 p25 2.32 p50 3.72 p95 9.70
+  basins [tilt 2]: land cells of the box 883645; lifted 8.73 %; depressions of 1-30 cells 3.81 %; over 30 cells interior 4.91 %, touching the window ring 0.00 % (counted apart); over 300 cells interior 1.29 % (36 depressions)
+    interior depressions over 30 cells by largest fill depth (% of land): under 1 m 0.00, 1-10 m 2.68, 10-100 m 2.24, over 100 m 0.00
+    the deepest depressions over 30 cells (fill depth / cells): 81 m / 1077 cells; 50 m / 637 cells; 45 m / 417 cells; 40 m / 442 cells; 34 m / 8555 cells; 31 m / 319 cells; 27 m / 730 cells; 23 m / 1135 cells
+    interior depressions over 30 cells: 1096 ; largest fill depth p50 6.5 m, p90 10.9 m, max 81.2 m
+BASINRAW | tilt 2 | lifted 8.73 | small 3.81 | over30 4.91 | over300 1.29 | n30 1096 | depth p50 6.5 p95 12.7 max 81.2 | deeper100 0.00 | cells p50 53 p95 230 max 8555
+TILT 4 m/km (median gradient) -> T 4841.8 m per unit S; adds p5 335.3 p50 1523.8 p95 2113.6 max 2363.7 m over the box land
+  |grad z| of the tilted z0 over the box land (m per km): p5 1.36 p25 3.32 p50 5.22 p95 11.97
+  basins [tilt 4]: land cells of the box 883645; lifted 3.42 %; depressions of 1-30 cells 1.90 %; over 30 cells interior 1.52 %, touching the window ring 0.00 % (counted apart); over 300 cells interior 0.22 % (7 depressions)
+    interior depressions over 30 cells by largest fill depth (% of land): under 1 m 0.00, 1-10 m 1.06, 10-100 m 0.46, over 100 m 0.00
+    the deepest depressions over 30 cells (fill depth / cells): 63 m / 15953 cells; 51 m / 693 cells; 36 m / 314 cells; 29 m / 234 cells; 23 m / 265 cells; 22 m / 723 cells; 18 m / 196 cells; 15 m / 138 cells
+    interior depressions over 30 cells: 449 ; largest fill depth p50 6.3 m, p90 10.1 m, max 63.2 m
+BASINRAW | tilt 4 | lifted 3.42 | small 1.90 | over30 1.52 | over300 0.22 | n30 449 | depth p50 6.3 p95 11.9 max 63.2 | deeper100 0.00 | cells p50 49 p95 154 max 15953
+TILT 8 m/km (median gradient) -> T 9683.6 m per unit S; adds p5 670.6 p50 3047.5 p95 4227.2 max 4727.5 m over the box land
+  |grad z| of the tilted z0 over the box land (m per km): p5 2.54 p25 5.82 p50 8.84 p95 17.19
+  basins [tilt 8]: land cells of the box 883645; lifted 0.80 %; depressions of 1-30 cells 0.51 %; over 30 cells interior 0.29 %, touching the window ring 0.00 % (counted apart); over 300 cells interior 0.06 % (2 depressions)
+    interior depressions over 30 cells by largest fill depth (% of land): under 1 m 0.00, 1-10 m 0.19, 10-100 m 0.10, over 100 m 0.00
+    the deepest depressions over 30 cells (fill depth / cells): 136 m / 23544 cells; 18 m / 199 cells; 13 m / 162 cells; 12 m / 536 cells; 12 m / 91 cells; 10 m / 70 cells; 10 m / 55 cells; 9 m / 113 cells
+    interior depressions over 30 cells: 81 ; largest fill depth p50 6.3 m, p90 9.3 m, max 136.1 m
+BASINRAW | tilt 8 | lifted 0.80 | small 0.51 | over30 0.29 | over300 0.06 | n30 81 | depth p50 6.3 p95 12.0 max 136.1 | deeper100 0.00 | cells p50 48 p95 168 max 23544

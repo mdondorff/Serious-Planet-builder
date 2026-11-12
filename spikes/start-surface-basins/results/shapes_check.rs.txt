@@ -2013,6 +2013,7 @@ fn main() {
         Some("prod") => run_prod(a.get(2).map_or(8, |s| s.parse().unwrap())),
         Some("z0basins") => run_z0basins(a.get(2).map_or(8, |s| s.parse().unwrap())),
         Some("z0sweep") => run_z0sweep(a.get(2).map_or(8, |s| s.parse().unwrap())),
+        Some("z0tilt") => run_z0tilt(a.get(2).map_or(8, |s| s.parse().unwrap())),
         Some("z0breach") => run_z0breach(a.get(2).map_or(8, |s| s.parse().unwrap())),
         Some("hyps") => run_hyps(a.get(2).map_or(8, |s| s.parse().unwrap())),
         Some("pits") => run_pits(a.get(2).map_or(8, |s| s.parse().unwrap())),
@@ -2295,5 +2296,85 @@ fn runs_on_cuts(g: &GenWin, z: &[f64], cut: &[bool], inbox: &dyn Fn(usize) -> bo
             100.0 * c as f64 / s.max(1) as f64,
             100.0 * nr as f64 / s.max(1) as f64
         );
+    }
+}
+
+/// SPIKE-109 follow-up (the coast-plain tilt): z = z0 + T x S on land, S = the smooth land depth of the continent stage (`continents::continent_smooth` minus the sea level, at least 0), the one
+/// global sea-ward field the base already has (what the coast distance follows). T is set per target so that the median gradient of T x S over the box's land is the target (m per km, `PLANET_TILTS`);
+/// for each target the depression table of the tilted z0 and the metres the tilt adds. The sum is exact for the production form `e0 += T x S` except for the land floor (a raise never meets it) and the
+/// class weights (read from e_smooth, not moved here).
+fn run_z0tilt(threads: usize) {
+    if let Ok(m) = std::env::var("PLANET_BASE_OFF") {
+        planet_generators::classes::set_probe_off(m.trim().parse().unwrap());
+    }
+    use planet_generators::global::SEA_LEVEL_C;
+    let g = gen_setup(threads);
+    let win = std::env::var("PLANET_WIN").unwrap();
+    let v: Vec<u64> = win.split(',').map(|x| x.trim().parse().unwrap()).collect();
+    let (face, cells, seed) = (v[0] as u8, v[1] as usize, v[6]);
+    let spec = FaceSpec { face: Face(face), cells, radius_m: R, sea_level: 0.0, seed, halo: 0 };
+    let (w, h) = (g.w, g.h);
+    let (i0, j0) = g.origin;
+    let (bx0, bx1, by0, by1) = g.boxx;
+    let mut s = vec![0.0f64; w * h];
+    let rows = h.div_ceil(threads);
+    std::thread::scope(|sc| {
+        for (k, chunk) in s.chunks_mut(rows * w).enumerate() {
+            let spec = &spec;
+            sc.spawn(move || {
+                for (c, vv) in chunk.iter_mut().enumerate() {
+                    let p = k * rows * w + c;
+                    let d: Vec3 = spec.halo_direction((i0 + p % w) as i64, (j0 + p / w) as i64);
+                    *vv = (planet_generators::continents::continent_smooth(seed, d) - SEA_LEVEL_C).max(0.0);
+                }
+            });
+        }
+    });
+    let inbox = move |q: usize| {
+        let (i, j) = (q % w, q / w);
+        i >= bx0 && i <= bx1 && j >= by0 && j <= by1
+    };
+    let dx = g.grid.dx();
+    // the gradient of S per km over the box's land (central differences, cells with all four neighbours inside the window)
+    let mut grads: Vec<f64> = Vec::new();
+    let mut sv: Vec<f64> = Vec::new();
+    for q in 0..w * h {
+        if !inbox(q) || g.outlet[q] {
+            continue;
+        }
+        let (i, j) = (q % w, q / w);
+        if i == 0 || j == 0 || i + 1 == w || j + 1 == h {
+            continue;
+        }
+        let gx = (s[q + 1] - s[q - 1]) / (2.0 * dx);
+        let gy = (s[q + w] - s[q - w]) / (2.0 * dx);
+        grads.push((gx * gx + gy * gy).sqrt() * 1000.0);
+        sv.push(s[q]);
+    }
+    grads.sort_by(f64::total_cmp);
+    sv.sort_by(f64::total_cmp);
+    let pc = |a: &Vec<f64>, f: f64| a[((a.len() - 1) as f64 * f) as usize];
+    println!("TILTFIELD | S over the box land p5 {:.3} p50 {:.3} p95 {:.3} max {:.3} | |grad S| per km p5 {:.4} p50 {:.4} p95 {:.4}", pc(&sv, 0.05), pc(&sv, 0.5), pc(&sv, 0.95), pc(&sv, 1.0), pc(&grads, 0.05), pc(&grads, 0.5), pc(&grads, 0.95));
+    let g50 = pc(&grads, 0.5);
+    let targets: Vec<f64> = std::env::var("PLANET_TILTS").unwrap_or_else(|_| "0,0.25,0.5,1,2,4,8".into()).split(',').map(|x| x.trim().parse().unwrap()).collect();
+    for tg in targets {
+        let t = tg / g50;
+        let z: Vec<f64> = (0..w * h).map(|q| if g.outlet[q] { g.z0[q] } else { g.z0[q] + t * s[q] }).collect();
+        let add: Vec<f64> = { let mut a: Vec<f64> = (0..w * h).filter(|&q| inbox(q) && !g.outlet[q]).map(|q| t * s[q]).collect(); a.sort_by(f64::total_cmp); a };
+        println!("TILT {tg} m/km (median gradient) -> T {:.1} m per unit S; adds p5 {:.1} p50 {:.1} p95 {:.1} max {:.1} m over the box land", t, pc(&add, 0.05), pc(&add, 0.5), pc(&add, 0.95), pc(&add, 1.0));
+        {
+            let mut sl: Vec<f64> = Vec::new();
+            for q in 0..w * h {
+                if !inbox(q) || g.outlet[q] { continue; }
+                let (i, j) = (q % w, q / w);
+                if i == 0 || j == 0 || i + 1 == w || j + 1 == h { continue; }
+                let gx = (z[q + 1] - z[q - 1]) / (2.0 * dx);
+                let gy = (z[q + w] - z[q - w]) / (2.0 * dx);
+                sl.push((gx * gx + gy * gy).sqrt() * 1000.0);
+            }
+            sl.sort_by(f64::total_cmp);
+            println!("  |grad z| of the tilted z0 over the box land (m per km): p5 {:.2} p25 {:.2} p50 {:.2} p95 {:.2}", pc(&sl, 0.05), pc(&sl, 0.25), pc(&sl, 0.5), pc(&sl, 0.95));
+        }
+        basin_table(&g, &z, &inbox, &format!("tilt {tg}"));
     }
 }
