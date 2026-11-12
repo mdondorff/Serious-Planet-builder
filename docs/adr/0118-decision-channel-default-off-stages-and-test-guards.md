@@ -1,5 +1,5 @@
 # 0118 Decisions through one file; new generator stages land switched off; test guards and tolerances
-Status: accepted (owner, 2026-11-12: "lgtm" to the architect's three workflow changes; point 4 from the owner's challenge of the same morning)
+Status: accepted (owner, 2026-11-12: "lgtm" to the architect's three workflow changes; point 4 from the owner's challenge of the same morning); point 1 and point 5's bulldozer clauses superseded by ADR 0120 (owner, 2026-11-12)
 Date: 2026-11-12
 Source: `docs/routing.md`; constitution CON-31; ADR 0055
 
