@@ -56,6 +56,15 @@ pub struct Course {
     cell_m: f64,
 }
 
+/// Where a river camera stands: the course parameter, the height over the ground, the pitch down and the turn to the right of the river\u0027s direction.
+#[derive(Clone, Copy)]
+pub struct CameraAt {
+    pub u: f64,
+    pub alt_m: f64,
+    pub pitch_deg: f64,
+    pub yaw_deg: f64,
+}
+
 impl Course {
     /// The direction of the face-local cell-index position `p`.
     fn dir_of(&self, p: (f64, f64)) -> planet_core::Vec3 {
@@ -79,7 +88,8 @@ impl Course {
     }
 
     /// The camera at course parameter `u`, `alt_m` above the ground (and the sea), looking along the river turned by `yaw_deg` to the right, pitched `pitch_deg` down.
-    pub fn camera(&self, field: &dyn HeightField, radius_m: f64, level_m: f64, aspect: f64, u: f64, alt_m: f64, pitch_deg: f64, yaw_deg: f64) -> Camera {
+    pub fn camera(&self, field: &dyn HeightField, radius_m: f64, level_m: f64, aspect: f64, at: CameraAt) -> Camera {
+        let CameraAt { u, alt_m, pitch_deg, yaw_deg } = at;
         let ahead = 1.5 / (self.points.len() - 1) as f64;
         let (p, q) = (self.at(u), self.at((u + ahead).min(1.0)));
         let d = self.dir_of(p);
@@ -111,7 +121,7 @@ pub fn views(
 ) -> Result<Vec<LitView>, String> {
     let course = course(world, field)?;
     let n = frames.max(2);
-    let camera = |u: f64, alt_m: f64, pitch_deg: f64| course.camera(field, radius_m, level_m, aspect, u, alt_m, pitch_deg, 0.0);
+    let camera = |u: f64, alt_m: f64, pitch_deg: f64| course.camera(field, radius_m, level_m, aspect, CameraAt { u, alt_m, pitch_deg, yaw_deg: 0.0 });
     let run: Vec<Camera> = (0..n).map(|k| camera(k as f64 / (n - 1) as f64, 300.0, 15.0)).collect();
     // The descent over the course's middle: 3 km down to 30 m, log-spaced, looking along the river, 25 degrees down.
     let descent: Vec<Camera> = (0..n)
@@ -156,7 +166,7 @@ pub fn frame_poses(world: &WorldTerrain, field: &dyn HeightField, radius_m: f64,
                 for &u in us {
                     poses.push(FramePose {
                         name: format!("{vname}-alt{alt:.0}-u{:02.0}-{sun_tag}", u * 100.0),
-                        camera: course.camera(field, radius_m, level_m, aspect, u, alt, *pitch, *yaw),
+                        camera: course.camera(field, radius_m, level_m, aspect, CameraAt { u, alt_m: alt, pitch_deg: *pitch, yaw_deg: *yaw }),
                         sun_deg: sun,
                         drawn_width_m: course.drawn_width_m(u),
                     });
@@ -211,7 +221,7 @@ fn course(world: &WorldTerrain, field: &dyn HeightField) -> Result<Course, Strin
     if best.len() < 8 {
         return Err(format!("no channel runs 8 points inside the commit's tiles a tile from their edge (the longest has {})", best.len()));
     }
-    let course = Course { points: best.iter().map(|b| b.0).collect(), q: best.iter().map(|b| b.1).collect(), face, cells, cell_m: f64::from(cell_m) };
+    let course = Course { points: best.iter().map(|b| b.0).collect(), q: best.iter().map(|b| b.1).collect(), face, cells, cell_m };
     let (p0, p1) = (course.at(0.0), course.at(1.0));
     let km = libm::hypot(p1.0 - p0.0, p1.1 - p0.1) * 1.0e-3 * course.cell_m;
     println!(
