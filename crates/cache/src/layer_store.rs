@@ -80,11 +80,6 @@ impl LayerSpec {
         if c.round_f32 {
             b.push(0xC6);
         }
-        // The world datum (GEN-175) likewise: a byte and the datum only when it is not 0 (the epsilon is in the key above).
-        if c.datum != 0.0 {
-            b.push(0xC8);
-            b.extend(c.datum.to_bits().to_le_bytes());
-        }
         // The round-0 breach of the basins (GEN-174) likewise: a byte and its three parameters only when on.
         if let Some(pb) = c.pre_breach {
             b.push(0xC7);
