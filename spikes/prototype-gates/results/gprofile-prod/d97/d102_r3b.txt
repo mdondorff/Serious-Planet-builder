@@ -1,0 +1,155 @@
+seed 15 face 2 region cells i 9768..10787 j 8104..9123; solved window 1420 x 1420 regional cells (margin 200); 1 production tiles (3072, halo 128) inside the window with their core meeting the region: [(26, 22)]
+lattice 1899 x 1899 nodes sampled (211.8 s)
+regional window solved (230.6 s)
+lakes: 81 lakes, 49814 water cells; basins kept by H1: 81
+H1: 147172 channel cells, 43854 segments (236.6 s)
+REGIONAL: land cells lowered by more than 50 m by the rounds: 184325; with a height of exactly 5.000 m: 0; the most frequent heights (m: cells): 5.001: 4369, 7.783: 8, 5.656: 7, 5.977: 7, 5.997: 7, 9.847: 7, 9.894: 7, 13.817: 7, 14.813: 7, 17.604: 7
+TILE (26, 22): 135 s; 3168 channel segments in the window; 81000 line steps in the core; own heights: 120 rises over 0.25 m (largest 2.7421 m); stored B+L: 122 rises over 0.25 m (largest 2.7189 m); final pass: 4215 lowered, 2195 over 1 m, largest 3.77 m; cutoff_binds 6703
+  piece segment 3701410444679624422: own rise 0.2860 m, stored rise 0.2673 m, at cell (81980, 70203)
+  piece segment 4024535423735137945: own rise 0.8651 m, stored rise 0.7641 m, at cell (81745, 69807)
+  piece segment 4255297501913117112: own rise 0.6434 m, stored rise 0.7176 m, at cell (81428, 70586)
+  piece segment 4722594317725211654: own rise 0.2690 m, stored rise 0.3541 m, at cell (82748, 70162)
+  piece segment 5315544406960389612: own rise 0.6513 m, stored rise 0.4957 m, at cell (82076, 70028)
+  piece segment 6021583785801864237: own rise 0.6513 m, stored rise 0.5597 m, at cell (82028, 70116)
+  piece segment 7721357655857022566: own rise 1.4919 m, stored rise 1.4512 m, at cell (81963, 69948)
+  piece segment 8220639504544436313: own rise 0.5316 m, stored rise 0.7036 m, at cell (82660, 68808)
+  piece segment 8438801894702323280: own rise 0.5065 m, stored rise 0.3720 m, at cell (81835, 70203)
+  piece segment 8770175409619576263: own rise 0.3761 m, stored rise 0.3749 m, at cell (81933, 69843)
+  piece segment 10193162043084147885: own rise 0.6934 m, stored rise 0.6204 m, at cell (81195, 70627)
+  piece segment 10720368497896182271: own rise 0.1803 m, stored rise 0.3330 m, at cell (82724, 70179)
+  piece segment 13267755260187619283: own rise 0.3437 m, stored rise 0.4091 m, at cell (80332, 69961)
+  piece segment 14513753558196159278: own rise 0.2860 m, stored rise 0.4679 m, at cell (81988, 70243)
+  piece segment 8495182065950572314: own rise 0.1613 m, stored rise 0.3651 m, at cell (82868, 70202)
+  piece segment 15486400303968401039: own rise 0.2321 m, stored rise 0.2544 m, at cell (82012, 70300)
+  piece segment 16719848787588573338: own rise 0.3402 m, stored rise 0.3620 m, at cell (81491, 70155)
+  piece segment 16397124168841282436: own rise 0.3190 m, stored rise 0.2415 m, at cell (81556, 70189)
+  piece segment 15483567781688059444: own rise 2.3464 m, stored rise 2.3254 m, at cell (80155, 70612)
+  piece segment 5872806110944936763: own rise 1.2364 m, stored rise 1.0178 m, at cell (80522, 70534)
+  piece segment 11672239575754211523: own rise 0.7871 m, stored rise 0.7823 m, at cell (80186, 69948)
+  piece segment 17941451304116432811: own rise 0.3761 m, stored rise 0.4045 m, at cell (81932, 69843)
+  piece segment 6152265978652226062: own rise 0.2932 m, stored rise 0.4977 m, at cell (82596, 70195)
+  piece segment 1487934740981582966: own rise 0.5025 m, stored rise 0.5698 m, at cell (81740, 70236)
+  piece segment 11254199642267953760: own rise 0.1919 m, stored rise 0.2504 m, at cell (81851, 70213)
+  piece segment 6196915109063120908: own rise 0.5065 m, stored rise 0.5478 m, at cell (81859, 70219)
+  piece segment 15930645790236935516: own rise 0.5065 m, stored rise 0.4803 m, at cell (81898, 70230)
+  piece segment 2542400721177802470: own rise 0.5065 m, stored rise 0.5517 m, at cell (81924, 70212)
+  piece segment 14822548830736117859: own rise 0.4639 m, stored rise 0.4354 m, at cell (80303, 69964)
+  piece segment 2961791950499249494: own rise 1.0042 m, stored rise 0.9942 m, at cell (80354, 69978)
+  piece segment 15880625672994133918: own rise 2.7421 m, stored rise 2.7189 m, at cell (80458, 69996)
+  piece segment 2587097182963667779: own rise 1.3663 m, stored rise 1.4704 m, at cell (80542, 70346)
+  piece segment 13348634716632826624: own rise 0.2690 m, stored rise 0.3559 m, at cell (82742, 70164)
+  piece segment 13119774511810517109: own rise 0.2690 m, stored rise 0.4621 m, at cell (82670, 70242)
+  piece segment 13292723203851361168: own rise 0.3312 m, stored rise 0.4570 m, at cell (82052, 69948)
+  piece segment 12650514768441296308: own rise 0.2465 m, stored rise 0.3470 m, at cell (82260, 70052)
+  piece segment 5799148948560924785: own rise 0.2465 m, stored rise 0.3686 m, at cell (82230, 70100)
+  piece segment 13950159734839584496: own rise 0.1051 m, stored rise 0.2519 m, at cell (82139, 70299)
+  piece segment 16579429474585413327: own rise 0.2703 m, stored rise 0.2156 m, at cell (81017, 70612)
+  piece segment 13586041319725144800: own rise 0.2703 m, stored rise 0.4589 m, at cell (81081, 70601)
+MARK K7: 84192 cells burned, 112968 channel cells fixed, exported to fixed cells: thermal 1757060.3 m3, deposition 153591360.9 m3; burn cutoff 7503 (diff p50 1.686 p99 4.033 max 4.698 m); final pass cutoff 6703 (diff p50 1.298 p99 3.630 max 3.740 m), 4215 cells lowered, 2195 by more than 1 m, largest 3.774 m, 52722524.7 m3 removed
+G-PROFILE cells: 81025 line cells in the core; mid-line cells with a start height at or under the sea level 1037 (1.2798518975624806), of them with a final height under 0 m 1037; line cells with a final height under 0 m 1046 (lowest -1.492 m)
+G-PROFILE rises: 81000 line steps in the core; rises over 0.25 m on K7's own heights 120 (largest 2.7421 m), on the stored B + L 122 (largest 2.7189 m); of the 120: 87 touch a mid-line cell that was at or under the sea level before the burn, 88 have a cell at or under 0 m after K7
+  rise 2.7421 m, segment 15880625672994133918, upper cell (80457, 69996) (start 8.48, final 0.00), lower cell (80458, 69996) (start 8.54, final 2.74)
+  rise 2.3464 m, segment 15483567781688059444, upper cell (80154, 70612) (start 4.50, final 0.71), lower cell (80155, 70612) (start 4.72, final 3.05)
+  rise 1.8578 m, segment 14515747725817551923, upper cell (80932, 68786) (start 4.68, final 1.72), lower cell (80932, 68787) (start 5.03, final 3.58)
+  rise 1.7524 m, segment 16982800540561677476, upper cell (80330, 68868) (start 5.23, final 0.95), lower cell (80331, 68868) (start 5.03, final 2.70)
+  rise 1.4919 m, segment 7721357655857022566, upper cell (81962, 69948) (start -0.13, final -1.49), lower cell (81963, 69948) (start 0.11, final 0.00)
+  rise 1.4919 m, segment 1861298981923850349, upper cell (81948, 69867) (start -0.01, final -1.49), lower cell (81948, 69868) (start 0.38, final 0.00)
+  rise 1.4919 m, segment 1861298981923850349, upper cell (81956, 69882) (start -0.03, final -1.49), lower cell (81956, 69883) (start 0.11, final 0.00)
+  rise 1.4919 m, segment 1861298981923850349, upper cell (81942, 69914) (start -0.01, final -1.49), lower cell (81941, 69915) (start 0.09, final 0.00)
+  rise 1.4919 m, segment 1861298981923850349, upper cell (81940, 69922) (start -0.25, final -1.49), lower cell (81940, 69923) (start 0.08, final 0.00)
+  rise 1.4919 m, segment 6134161351916214616, upper cell (81951, 69935) (start -0.40, final -1.49), lower cell (81952, 69936) (start 0.03, final 0.00)
+  rise 1.4919 m, segment 6134161351916214616, upper cell (81963, 69947) (start -0.20, final -1.49), lower cell (81964, 69948) (start 0.51, final 0.00)
+  rise 1.4919 m, segment 14886249130707128240, upper cell (81977, 69956) (start -0.00, final -1.49), lower cell (81978, 69956) (start 0.03, final 0.00)
+  rise 1.4105 m, segment 4180460463519602343, upper cell (80908, 68601) (start 4.47, final 0.31), lower cell (80908, 68602) (start 4.43, final 1.72)
+  rise 1.3663 m, segment 2587097182963667779, upper cell (80543, 70345) (start 16.19, final 0.41), lower cell (80542, 70346) (start 12.86, final 1.78)
+  rise 1.2364 m, segment 5872806110944936763, upper cell (80521, 70535) (start 8.10, final 2.22), lower cell (80522, 70534) (start 6.96, final 3.46)
+  rise 1.1682 m, segment 8784609578120368181, upper cell (80130, 68754) (start 5.03, final 1.67), lower cell (80131, 68755) (start 4.94, final 2.84)
+  rise 1.0782 m, segment 3334387276806442455, upper cell (80953, 68356) (start 12.20, final 1.06), lower cell (80954, 68356) (start 12.20, final 2.14)
+  rise 1.0579 m, segment 13294862117860141593, upper cell (80807, 68305) (start 3.89, final 0.36), lower cell (80806, 68306) (start 3.65, final 1.42)
+  rise 1.0042 m, segment 2961791950499249494, upper cell (80353, 69977) (start -1.00, final -1.00), lower cell (80354, 69978) (start 2.74, final 0.00)
+  rise 0.9586 m, segment 2587097182963667779, upper cell (80542, 70346) (start 12.86, final 1.78), lower cell (80541, 70347) (start 9.17, final 2.74)
+G-PROFILE criterion: cutoffs (all path cells): burn 7503 (bounded minus unbounded p50 1.6862 p99 4.0325 max 4.6975 m), final pass 6703 (p50 1.2979 p99 3.6301 max 3.7398 m); gated: rises over 0.25 m 120, cutoff difference over 0.25 m YES (to the architect with the tile)
+D97.1 origin: 1037 mid-line cells in the core with a start height (B + regional change) at or under 0 m: B itself at or under 0 m (z0) 30 (2.9 %), B above 0 m and lowered below 0 m by the regional rounds 1007 (97.1 %)
+D97.1b regional change read (C1) against the four regional cells around each sub-sea cell: below the lowest of their changes by more than 0.25 m 0 (0.0 %), within 1037, above the highest by more than 0.25 m 0 (no regional cell in the window 0); the overshoot below: p50 NaN p99 NaN max 0.00 m; with the read clamped to the four cells the start height is still at or under 0 m for 1037 cells (100.0 %)
+D97.2 connection to the sea through cells at or under 0 m of the start surface: 139 local components hold a sub-sea mid-line cell (1 reach the continent stage's sea, 0 touch only the window border, 138 are closed inland)
+  origin z0 (B at or under 0 m): 30 cells: connected to the sea 30, window border only 0, closed inland 0; their regional cell: sea outlet (base at or under 0 m) 24, in a kept basin 0, in a lake's water 0, no basin: pit of 2 m or more 0 / 0.5 to 2 m 0 / under 0.5 m or none 6
+  origin regional rounds (B above 0 m): 1007 cells: connected to the sea 11, window border only 0, closed inland 996; their regional cell: sea outlet (base at or under 0 m) 3, in a kept basin 1, in a lake's water 1, no basin: pit of 2 m or more 0 / 0.5 to 2 m 0 / under 0.5 m or none 1003
+D97.3 closed inland sub-sea cells: 996 ; regional fill depth p50 0.00 p99 0.07 max 1.03 m (the keep thresholds of H1: a basin is kept at a fill depth over 0.5 m, an artefact under 4 cells and 2 m)
+    cell (80332, 69959) b 281.88 start -0.32: local component 4 cells at or under 0 m, no sea cell, regional cell (10041, 8744) base 280.26 after rounds 6.67 fill depth 0.00 m outlet false kept basin none lake water false
+    cell (80332, 69960) b 282.28 start -0.34: local component 4 cells at or under 0 m, no sea cell, regional cell (10041, 8745) base 283.58 after rounds 5.00 fill depth 0.09 m outlet false kept basin none lake water false
+    cell (80352, 69976) b 281.13 start -0.86: local component 14 cells at or under 0 m, no sea cell, regional cell (10044, 8747) base 277.74 after rounds 5.00 fill depth 0.09 m outlet false kept basin none lake water false
+    cell (80353, 69977) b 279.74 start -1.00: local component 14 cells at or under 0 m, no sea cell, regional cell (10044, 8747) base 277.74 after rounds 5.00 fill depth 0.09 m outlet false kept basin none lake water false
+    cell (80958, 70614) b 18.40 start -0.13: local component 7 cells at or under 0 m, no sea cell, regional cell (10119, 8826) base 19.91 after rounds 1.29 fill depth 0.00 m outlet false kept basin none lake water false
+    cell (80959, 70615) b 17.85 start -0.10: local component 7 cells at or under 0 m, no sea cell, regional cell (10119, 8826) base 19.91 after rounds 1.29 fill depth 0.00 m outlet false kept basin none lake water false
+    cell (81014, 70612) b 16.77 start -0.27: local component 14 cells at or under 0 m, no sea cell, regional cell (10126, 8826) base 17.87 after rounds 0.83 fill depth 0.07 m outlet false kept basin none lake water false
+    cell (81015, 70612) b 16.44 start -0.20: local component 14 cells at or under 0 m, no sea cell, regional cell (10126, 8826) base 17.87 after rounds 0.83 fill depth 0.07 m outlet false kept basin none lake water false
+    cell (81078, 70598) b 17.30 start -0.20: local component 26 cells at or under 0 m, no sea cell, regional cell (10134, 8824) base 18.18 after rounds 0.68 fill depth 0.00 m outlet false kept basin none lake water false
+    cell (81079, 70599) b 16.96 start -0.17: local component 26 cells at or under 0 m, no sea cell, regional cell (10134, 8824) base 18.18 after rounds 0.68 fill depth 0.00 m outlet false kept basin none lake water false
+    cell (81080, 70600) b 16.64 start -0.01: local component 26 cells at or under 0 m, no sea cell, regional cell (10135, 8825) base 15.83 after rounds 0.64 fill depth 0.00 m outlet false kept basin none lake water false
+    cell (81158, 70598) b 14.98 start -0.04: local component 68 cells at or under 0 m, no sea cell, regional cell (10144, 8824) base 15.53 after rounds 0.42 fill depth 0.00 m outlet false kept basin none lake water false
+    no sub-sea start cell: rise 0.550 m segment 15483567781688059444 upper (80153, 70612) (start 4.42 burn 3.40 carve 3.40 pre 3.40 final 0.16) lower (80154, 70612) (start 4.50 burn 3.40 carve 3.40 pre 3.40 final 0.71); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 2.346 m segment 15483567781688059444 upper (80154, 70612) (start 4.50 burn 3.40 carve 3.40 pre 3.40 final 0.71) lower (80155, 70612) (start 4.72 burn 3.40 carve 3.40 pre 3.40 final 3.05); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 0.347 m segment 15483567781688059444 upper (80155, 70612) (start 4.72 burn 3.40 carve 3.40 pre 3.40 final 3.05) lower (80156, 70612) (start 5.18 burn 3.40 carve 3.40 pre 3.40 final 3.40); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 0.810 m segment 5872806110944936763 upper (80520, 70536) (start 8.63 burn 3.46 carve 3.46 pre 3.46 final 1.41) lower (80521, 70535) (start 8.10 burn 3.46 carve 3.46 pre 3.46 final 2.22); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 1.236 m segment 5872806110944936763 upper (80521, 70535) (start 8.10 burn 3.46 carve 3.46 pre 3.46 final 2.22) lower (80522, 70534) (start 6.96 burn 3.46 carve 3.46 pre 3.46 final 3.46); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 0.787 m segment 11672239575754211523 upper (80185, 69948) (start 5.63 burn 2.43 carve 2.43 pre 2.43 final 1.16) lower (80186, 69948) (start 5.85 burn 2.43 carve 2.43 pre 2.43 final 1.95); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 0.464 m segment 14822548830736117859 upper (80302, 69964) (start 4.94 burn 2.77 carve 2.77 pre 2.77 final 1.95) lower (80303, 69964) (start 4.96 burn 2.77 carve 2.77 pre 2.77 final 2.41); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 2.742 m segment 15880625672994133918 upper (80457, 69996) (start 8.48 burn 0.00 carve 0.00 pre 0.00 final 0.00) lower (80458, 69996) (start 8.54 burn 2.74 carve 2.74 pre 2.74 final 2.74); class: burn column rise (the burn's profile)
+    no sub-sea start cell: rise 1.366 m segment 2587097182963667779 upper (80543, 70345) (start 16.19 burn 2.74 carve 2.74 pre 2.74 final 0.41) lower (80542, 70346) (start 12.86 burn 2.74 carve 2.74 pre 2.74 final 1.78); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 0.959 m segment 2587097182963667779 upper (80542, 70346) (start 12.86 burn 2.74 carve 2.74 pre 2.74 final 1.78) lower (80541, 70347) (start 9.17 burn 2.74 carve 2.74 pre 2.74 final 2.74); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 1.168 m segment 8784609578120368181 upper (80130, 68754) (start 5.03 burn 2.84 carve 2.84 pre 2.84 final 1.67) lower (80131, 68755) (start 4.94 burn 2.84 carve 2.84 pre 2.84 final 2.84); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 1.752 m segment 16982800540561677476 upper (80330, 68868) (start 5.23 burn 2.70 carve 2.70 pre 2.70 final 0.95) lower (80331, 68868) (start 5.03 burn 2.70 carve 2.70 pre 2.70 final 2.70); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 0.565 m segment 15789125524222778397 upper (80622, 68756) (start 4.83 burn 3.44 carve 3.44 pre 3.44 final 0.15) lower (80623, 68756) (start 4.77 burn 3.44 carve 3.44 pre 3.44 final 0.71); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 0.622 m segment 15789125524222778397 upper (80623, 68756) (start 4.77 burn 3.44 carve 3.44 pre 3.44 final 0.71) lower (80624, 68756) (start 4.71 burn 3.44 carve 3.44 pre 3.44 final 1.34); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 0.298 m segment 15789125524222778397 upper (80624, 68756) (start 4.71 burn 3.44 carve 3.44 pre 3.44 final 1.34) lower (80625, 68756) (start 4.66 burn 3.44 carve 3.44 pre 3.44 final 1.63); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 0.668 m segment 15789125524222778397 upper (80651, 68740) (start 8.27 burn 3.80 carve 3.80 pre 3.80 final 1.69) lower (80652, 68740) (start 18.54 burn 3.80 carve 3.80 pre 3.80 final 2.36); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 0.262 m segment 4754251738571159797 upper (80928, 68824) (start 37.00 burn 3.21 carve 3.21 pre 3.21 final 2.39) lower (80929, 68823) (start 33.47 burn 3.21 carve 3.21 pre 3.21 final 2.65); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 0.311 m segment 4754251738571159797 upper (80929, 68823) (start 33.47 burn 3.21 carve 3.21 pre 3.21 final 2.65) lower (80930, 68822) (start 25.64 burn 3.21 carve 3.21 pre 3.21 final 2.96); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 0.251 m segment 4754251738571159797 upper (80930, 68822) (start 25.64 burn 3.21 carve 3.21 pre 3.21 final 2.96) lower (80931, 68821) (start 17.58 burn 3.21 carve 3.21 pre 3.21 final 3.21); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 0.764 m segment 4566034981221411895 upper (82896, 68860) (start 4.65 burn 3.10 carve 3.10 pre 3.10 final 0.17) lower (82897, 68860) (start 4.79 burn 3.10 carve 3.10 pre 3.10 final 0.94); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 0.812 m segment 4566034981221411895 upper (82897, 68860) (start 4.79 burn 3.10 carve 3.10 pre 3.10 final 0.94) lower (82898, 68860) (start 4.95 burn 3.10 carve 3.10 pre 3.10 final 1.75); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 0.841 m segment 4566034981221411895 upper (82898, 68860) (start 4.95 burn 3.10 carve 3.10 pre 3.10 final 1.75) lower (82899, 68860) (start 5.12 burn 3.10 carve 3.10 pre 3.10 final 2.59); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 0.510 m segment 4566034981221411895 upper (82899, 68860) (start 5.12 burn 3.10 carve 3.10 pre 3.10 final 2.59) lower (82900, 68860) (start 4.71 burn 3.10 carve 3.10 pre 3.10 final 3.10); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 1.058 m segment 13294862117860141593 upper (80807, 68305) (start 3.89 burn 1.88 carve 1.88 pre 1.88 final 0.36) lower (80806, 68306) (start 3.65 burn 1.88 carve 1.88 pre 1.88 final 1.42); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 0.461 m segment 13294862117860141593 upper (80806, 68306) (start 3.65 burn 1.88 carve 1.88 pre 1.88 final 1.42) lower (80805, 68307) (start 3.87 burn 1.88 carve 1.88 pre 1.88 final 1.88); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 1.078 m segment 3334387276806442455 upper (80953, 68356) (start 12.20 burn 2.59 carve 2.59 pre 2.59 final 1.06) lower (80954, 68356) (start 12.20 burn 2.59 carve 2.59 pre 2.59 final 2.14); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 1.411 m segment 4180460463519602343 upper (80908, 68601) (start 4.47 burn 1.72 carve 1.72 pre 1.72 final 0.31) lower (80908, 68602) (start 4.43 burn 1.72 carve 1.72 pre 1.72 final 1.72); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 1.858 m segment 14515747725817551923 upper (80932, 68786) (start 4.68 burn 4.23 carve 4.23 pre 4.23 final 1.72) lower (80932, 68787) (start 5.03 burn 4.23 carve 4.23 pre 4.23 final 3.58); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 0.406 m segment 8820796763774010825 upper (80828, 69305) (start 4.72 burn 2.94 carve 2.94 pre 2.94 final 1.95) lower (80828, 69306) (start 4.83 burn 2.94 carve 2.94 pre 2.94 final 2.36); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 0.579 m segment 8820796763774010825 upper (80828, 69306) (start 4.83 burn 2.94 carve 2.94 pre 2.94 final 2.36) lower (80828, 69307) (start 4.89 burn 2.94 carve 2.94 pre 2.94 final 2.94); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 0.709 m segment 4251044515706595196 upper (80903, 69711) (start 5.58 burn 3.47 carve 3.47 pre 3.47 final 1.89) lower (80904, 69712) (start 5.64 burn 3.47 carve 3.47 pre 3.47 final 2.60); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 0.846 m segment 4251044515706595196 upper (80904, 69712) (start 5.64 burn 3.47 carve 3.47 pre 3.47 final 2.60) lower (80905, 69713) (start 5.56 burn 3.47 carve 3.47 pre 3.47 final 3.44); class: carry cutoff (a cutoff cell within 3 steps)
+    no sub-sea start cell: rise 0.568 m segment 2473622627063900725 upper (81454, 69868) (start 3.03 burn 1.57 carve 1.57 pre 1.57 final 0.82) lower (81455, 69868) (start 2.97 burn 1.57 carve 1.57 pre 1.57 final 1.39); class: carry cutoff (a cutoff cell within 3 steps)
+D97.4 rises over 0.25 m with no start cell at or under 0 m on either side: 33; by mechanism (first match): post-burn fill (lower cell raised after the carve): 0, carry cutoff (a cutoff cell within 3 steps): 32, burn column rise (the burn's profile): 1, sub-sea after K7 (a cell at or under 0 m at the end, start above): 0, other: 0
+D97.5 final pass cutoffs: 6177 in the core, of them 5581 on land line cells at least 10 steps from any sub-sea stretch (of 79994 such cells); bounded minus unbounded target there: p50 1.5199 p99 3.6301 max 3.7398 m; over 0.25 m: 4985
+    final-pass cutoff 3.740 m: segment 2587097182963667779 line index 183 cell (80541, 70347), 546 steps from a sub-sea cell
+    final-pass cutoff 3.740 m: segment 2587097182963667779 line index 184 cell (80540, 70348), 547 steps from a sub-sea cell
+    final-pass cutoff 3.740 m: segment 2587097182963667779 line index 185 cell (80541, 70349), 548 steps from a sub-sea cell
+    final-pass cutoff 3.740 m: segment 2587097182963667779 line index 186 cell (80542, 70350), 549 steps from a sub-sea cell
+    final-pass cutoff 3.740 m: segment 2587097182963667779 line index 187 cell (80543, 70351), 550 steps from a sub-sea cell
+    final-pass cutoff 3.740 m: segment 2587097182963667779 line index 188 cell (80544, 70352), 551 steps from a sub-sea cell
+    final-pass cutoff 3.740 m: segment 2587097182963667779 line index 189 cell (80545, 70353), 552 steps from a sub-sea cell
+    final-pass cutoff 3.740 m: segment 2587097182963667779 line index 190 cell (80546, 70354), 553 steps from a sub-sea cell
+    final-pass cutoff 3.740 m: segment 2587097182963667779 line index 191 cell (80547, 70355), 554 steps from a sub-sea cell
+    final-pass cutoff 3.740 m: segment 2587097182963667779 line index 192 cell (80548, 70356), 555 steps from a sub-sea cell
+    final-pass cutoff 3.740 m: segment 2587097182963667779 line index 193 cell (80548, 70357), 556 steps from a sub-sea cell
+    final-pass cutoff 3.740 m: segment 2587097182963667779 line index 194 cell (80548, 70358), 557 steps from a sub-sea cell
+D102(a) unreached pits of the 5581 far final-pass cutoff cells (pit = lowest pre-pass height upstream; check of the pit finder against the pass: 0 nodes differ): 13 distinct pits (0 outside the regional window or the core data); on a change-read undershoot cell 0 (0.0 %), on a height undershoot cell 9 (69.2 %), on either 9 (69.2 %); pits with a start height at or under 0 m 6; far cutoff cells whose pit is an undershoot cell: change 0 (0.0 %), height 4743 (85.0 %), either 4743 (85.0 %) of 5581
+    pit cell (80771, 68020) segment 3440249814639974484: 913 far cutoff cells on it; start 3.99 burn 0.20 before the final pass 0.20; change read undershoot false, height undershoot true
+    pit cell (82660, 68807) segment 8220639504544436313: 168 far cutoff cells on it; start -0.53 burn -0.53 before the final pass -0.53; change read undershoot false, height undershoot true
+    pit cell (80228, 68859) segment 8943324533196713709: 115 far cutoff cells on it; start 6.53 burn 0.95 before the final pass 0.95; change read undershoot false, height undershoot false
+    pit cell (80020, 70612) segment 11477999263510064982: 562 far cutoff cells on it; start 6.68 burn 0.16 before the final pass 0.16; change read undershoot false, height undershoot false
+    pit cell (80028, 69916) segment 13662277431801365316: 146 far cutoff cells on it; start 7.65 burn 1.16 before the final pass 1.16; change read undershoot false, height undershoot false
+    pit cell (81271, 70364) segment 14735139556532612790: 117 far cutoff cells on it; start -0.00 burn -0.00 before the final pass -0.00; change read undershoot false, height undershoot true
+    pit cell (80460, 68876) segment 1587848788436153174: 2161 far cutoff cells on it; start 4.46 burn 0.15 before the final pass 0.15; change read undershoot false, height undershoot true
+    pit cell (81489, 70153) segment 16719848787588573338: 122 far cutoff cells on it; start -0.34 burn -0.34 before the final pass -0.34; change read undershoot false, height undershoot true
+D97.5 burn cutoffs: 7193 in the core, of them 6888 on land line cells at least 10 steps from any sub-sea stretch; bounded minus unbounded target there: p50 1.7708 p99 4.0325 max 4.6975 m; over 0.25 m: 6153
+    burn cutoff 4.698 m: segment 17544901002207188475 line index 163 cell (80855, 68799), 1864 steps from a sub-sea cell
+    burn cutoff 4.698 m: segment 17544901002207188475 line index 164 cell (80856, 68800), 1863 steps from a sub-sea cell
+    burn cutoff 4.698 m: segment 17544901002207188475 line index 165 cell (80857, 68801), 1862 steps from a sub-sea cell
+    burn cutoff 4.698 m: segment 17544901002207188475 line index 166 cell (80858, 68802), 1861 steps from a sub-sea cell
+    burn cutoff 4.698 m: segment 17544901002207188475 line index 167 cell (80859, 68803), 1860 steps from a sub-sea cell
+    burn cutoff 4.540 m: segment 17544901002207188475 line index 162 cell (80854, 68798), 1865 steps from a sub-sea cell
+    burn cutoff 4.430 m: segment 17544901002207188475 line index 168 cell (80860, 68804), 1859 steps from a sub-sea cell
+    burn cutoff 4.389 m: segment 17544901002207188475 line index 152 cell (80844, 68796), 1875 steps from a sub-sea cell
+TOTAL: 81000 line steps, 120 rises over 0.25 m (own heights), 122 (stored), cutoff_binds 6703; across tile borders of the run: 0 steps, 0 over 0.25 m, largest 0.0000 m; 373 s
