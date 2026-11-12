@@ -228,6 +228,10 @@ pub fn pass1_face_rock(
         uplift: uplift.as_deref(),
         runoff: runoff.as_deref(),
     };
+    assert!(
+        params.pre_breach.is_none(),
+        "the round-0 breach of the basins needs arrays of the region's size: not for a face-scale carve (GEN-174)"
+    );
     let routing = carve_rock(&grid, &mut z, &outlet, &params, factors.as_deref(), &carve_rock_in, spec.stream());
     drop((uplift, runoff));
     let (m, h, cell_m2) = (spec.cells + 2 * spec.halo, spec.halo, spec.dx() * spec.dx());

@@ -5,7 +5,7 @@
 //! definition (G-EQ) with only the work of what changed (G-INC).
 //! Behind a switch: nothing in pass 1 or pass 2 calls it.
 
-use super::carve::{distance, CarveParams, BREACH_MIN_M};
+use super::carve::{breach_limit, distance, CarveParams};
 use super::memo::Memo;
 use super::partition::{partitioned_route_weighted, Hash, PartCache};
 use super::probe;
@@ -51,6 +51,7 @@ pub fn catchment_round(inp: &mut CatchmentInputs, p: &CarveParams, steps: usize)
     } else {
         super::carve::exit_base(p.sea_level, 0..z.len(), &inp.receiver, z, &|_| window_cut)
     };
+    let mut round_start: std::collections::HashMap<usize, f64> = std::collections::HashMap::new();
     for c in (0..z.len()).rev() {
         let rec = inp.receiver[c];
         if rec == NONE || inp.receiver_is_outlet[c] {
@@ -62,13 +63,8 @@ pub fn catchment_round(inp: &mut CatchmentInputs, p: &CarveParams, steps: usize)
             want = want.max(b[rec]);
         }
         if z[rec] > want {
-            let limit = if p.breach_height_scale_m > 0.0 {
-                p.breach_max_m.min(BREACH_MIN_M)
-                    + (p.breach_max_m - BREACH_MIN_M).max(0.0) * planet_core::smoothstep(0.0, p.breach_height_scale_m, z[rec] - p.sea_level)
-            } else {
-                p.breach_max_m
-            };
-            z[rec] = want.max(z[rec] - limit);
+            let start = *round_start.entry(rec).or_insert(z[rec]);
+            z[rec] = want.max(z[rec] - breach_limit(p, z[rec])).max(start - breach_limit(p, start));
         }
     }
     for _ in 0..steps {

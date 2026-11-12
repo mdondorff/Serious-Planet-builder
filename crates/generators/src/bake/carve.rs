@@ -63,6 +63,16 @@ pub enum Schedule {
 /// The breach limit of a cell at the sea level when the limit scales with height (the former default).
 pub const BREACH_MIN_M: f64 = 50.0;
 
+/// The most a breach event may lower a cell standing at height `h` (`breach_max_m`, or the height-scaled limit when `breach_height_scale_m` is set).
+pub(super) fn breach_limit(p: &CarveParams, h: f64) -> f64 {
+    if p.breach_height_scale_m > 0.0 {
+        p.breach_max_m.min(BREACH_MIN_M)
+            + (p.breach_max_m - BREACH_MIN_M).max(0.0) * planet_core::smoothstep(0.0, p.breach_height_scale_m, h - p.sea_level)
+    } else {
+        p.breach_max_m
+    }
+}
+
 impl Default for CarveParams {
     fn default() -> CarveParams {
         CarveParams {
@@ -201,6 +211,8 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
                     grouped.sort_by_key(|&c| root[c as usize]);
                 }
             }
+            // The height each breached cell had at the start of the round (recorded at its first event: nothing else moves a height in the breach loop).
+            let mut round_start: std::collections::HashMap<usize, f64> = std::collections::HashMap::new();
             let visit: &[u32] = if grouped.is_empty() { &r.order } else { &grouped };
             let base = if p.round_rules.clip_mfd != super::route::MfdClip::Local {
                 None
@@ -219,14 +231,9 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
                     want = want.max(b[rec]);
                 }
                 if z[rec] > want {
-                    let limit = if p.breach_height_scale_m > 0.0 {
-                        p.breach_max_m.min(BREACH_MIN_M)
-                            + (p.breach_max_m - BREACH_MIN_M).max(0.0)
-                                * planet_core::smoothstep(0.0, p.breach_height_scale_m, z[rec] - p.sea_level)
-                    } else {
-                        p.breach_max_m
-                    };
-                    z[rec] = want.max(z[rec] - limit);
+                    // GEN-174: the round's total lowering of a cell is at most the limit at its height at the start of the round, however many donors breach it.
+                    let start = *round_start.entry(rec).or_insert(z[rec]);
+                    z[rec] = want.max(z[rec] - breach_limit(p, z[rec])).max(start - breach_limit(p, start));
                 }
             }
             routing = Some(r);

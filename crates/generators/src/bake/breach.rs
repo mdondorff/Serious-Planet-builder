@@ -3,11 +3,11 @@
 //! each basin by the cheapest path to a lower cell, within a depth and a length that are formulas of the profile; a basin that cannot be drained stays filled (a lake).
 //!
 //! - **Basin.** A flat of the canonical filled surface (`flood::lifted_flats`) whose deepest lift is at least `min_lift_m`. Its floor is its lowest cell, by (height, id).
-//! - **Path.** From the floor, over the 8 neighbours, by least cost: entering a cell costs `max(0, z - floor)` (the depth the breach cuts there); a cell more than `max_depth_m` above the floor is not entered;
+//! - **Path.** From the floor, over the 8 neighbours, by the lexicographically least (cost, cells) label, pruned at the length bound (a dearer but shorter route to a cell the cheap long one reached first is not tried): entering a cell costs `max(0, z - floor)` (the depth the breach cuts there); a cell more than `max_depth_m` above the floor is not entered;
 //!   the path has at most `halo - 1 - diameter` cells (diameter: Chebyshev, in cells), so basin and path lie inside the halo of every tile of its cells (the bound of GEN-173); a basin that touches the
-//!   border of the grid, or has no such length, stays a lake. The path ends at the first cell outside the basin that stands below the floor (or an outlet at or below it). Order: (cost, cells, id).
+//!   border of the grid, or has no such length, stays a lake. The path ends at the first cell outside the basin whose filled level (on this pass's flood) and height stand below the floor, or an outlet at or below it; an outlet is never entered otherwise. Order: (cost, cells, id).
 //! - **Cut.** Every path cell above the floor is lowered to it; the exit is not touched.
-//! - **Order.** Basins in order of (floor height, floor id), each on the surface the earlier ones left: a function of the cells only, so the same bits on any thread count and any partition.
+//! - **Order.** Basins in order of (floor height, floor id), each on the surface the earlier ones left: a function of the region's cells only, so the same bits on any thread count and any partition of one solve (the whole region is breached before it is tiled or threaded). Two different windows of a region may differ near their borders: the pass is not run per window (pass 2 and K7 refuse it).
 //!
 //! Planar grids only (like the flat grade); a cube grid is left as it is.
 
@@ -91,7 +91,6 @@ fn breach_pass(grid: &Grid, z: &mut [f64], outlet: &[bool], epsilon: f64, p: &Pr
     let filled = priority_flood_ungraded(grid, z, outlet, epsilon, true);
     let mut basins: Vec<(f64, u32, usize)> = Vec::new();
     let flats = lifted_flats(grid, z, outlet, epsilon, &filled);
-    drop(filled);
     for (i, f) in flats.iter().enumerate() {
         if f.max_lift_m < p.min_lift_m {
             continue;
@@ -119,7 +118,8 @@ fn breach_pass(grid: &Grid, z: &mut [f64], outlet: &[bool], epsilon: f64, p: &Pr
         for &c in &flat.cells {
             stamp[c as usize] = fi as u32;
         }
-        let is_exit = |q: usize, z: &[f64]| stamp[q] != fi as u32 && (z[q] < zp || (outlet[q] && z[q] <= zp));
+        // An exit drains for certain: an outlet at or below the floor, or a cell whose filled level (on this pass's flood, which earlier cuts only lower) is below the floor.
+        let is_exit = |q: usize, z: &[f64]| stamp[q] != fi as u32 && if outlet[q] { z[q] <= zp } else { z[q] < zp && filled[q] < zp };
         let mut heap: BinaryHeap<Reverse<(u64, u32, u32)>> = BinaryHeap::new();
         best[floor as usize] = 0.0;
         cells[floor as usize] = 0;
@@ -142,7 +142,8 @@ fn breach_pass(grid: &Grid, z: &mut [f64], outlet: &[bool], epsilon: f64, p: &Pr
                 let Some(q) = grid.neighbour(cu, d) else { continue };
                 let exit = is_exit(q, z);
                 let up = z[q] - zp;
-                if !exit && up > p.max_depth_m {
+                // An outlet keeps its height: it is an exit or it is not entered.
+                if !exit && (up > p.max_depth_m || outlet[q]) {
                     continue;
                 }
                 let (nc, ns) = (best[cu] + if exit { 0.0 } else { up.max(0.0) }, steps + 1);

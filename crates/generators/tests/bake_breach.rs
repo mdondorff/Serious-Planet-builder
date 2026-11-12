@@ -138,7 +138,14 @@ fn the_breach_is_the_same_bits_in_the_carve_the_round_solver_on_any_thread_count
     let mut probe = z0.clone();
     let rep = breach_basins(&g, &mut probe, &outlet, EPS, &pre);
     assert!(rep.drained >= 1, "the fixture has basins to drain: {rep:?}");
-    let p = CarveParams { steps: 20, reroute_every: 5, round_rules: RoundRules::ROUND, pre_breach: Some(pre), ..CarveParams::default() };
+    let p = CarveParams {
+        steps: 20,
+        reroute_every: 5,
+        round_rules: RoundRules::ROUND,
+        pre_breach: Some(pre),
+        round_f32: true,
+        ..CarveParams::default()
+    };
     let mut want = z0.clone();
     carve(&g, &mut want, &outlet, &p, None, 3);
     let mut plain = z0.clone();
@@ -172,4 +179,66 @@ fn more_passes_leave_fewer_closed_basins_and_never_raise_a_cell() {
     assert!(lift_cells(&g, &four, &outlet, 0.5) <= lift_cells(&g, &one, &outlet, 0.5));
     assert!(lift_cells(&g, &one, &outlet, 0.5) < lift_cells(&g, &z0, &outlet, 0.5), "one pass drains basins");
     assert_eq!(run(4), four, "a rerun is the same bits");
+}
+
+// spec: GEN-174, TEST-121 (the cap of a breach is per cell per round: three donors that breach one sill stay within it)
+#[test]
+fn a_cell_breached_by_several_donors_in_one_round_is_lowered_by_at_most_the_cap() {
+    let g = Grid::new(7, 5, 100.0);
+    let mut z0 = vec![2000.0; 35];
+    let at = |x: usize, y: usize| y * 7 + x;
+    for y in 1..=3 {
+        for x in 1..=2 {
+            z0[at(x, y)] = 10.0;
+        }
+    }
+    z0[at(3, 2)] = 1000.0;
+    z0[at(4, 2)] = -1.0;
+    let outlet = g.outlets(&z0, 0.0);
+    // no sweep: the breach is the whole round
+    let p = CarveParams {
+        steps: 1,
+        reroute_every: 1,
+        k_dt: 1e-12,
+        u_over_k: 0.0,
+        breach_max_m: 500.0,
+        round_rules: RoundRules::ROUND,
+        ..CarveParams::default()
+    };
+    let mut z = z0.clone();
+    carve(&g, &mut z, &outlet, &p, None, 3);
+    assert!(z[at(3, 2)] >= 500.0 - 1e-6, "the sill was lowered from 1000 m by {} m, over the cap of 500 m", 1000.0 - z[at(3, 2)]);
+    assert!(z[at(3, 2)] < 1000.0, "and it was breached");
+    let mut r = z0.clone();
+    solve_rounds(&g, &mut r, &outlet, &p, 1, &1usize, 3);
+    assert!(r.iter().zip(&z).all(|(a, b)| a.to_bits() == b.to_bits()), "the round solver applies the same cap");
+}
+
+// spec: GEN-174, TEST-121 (numerics review: an outlet keeps its height; the breach neither enters it nor lowers it)
+#[test]
+fn an_outlet_above_the_floor_is_never_cut() {
+    // a basin (floor 10 m) whose only low neighbour is beyond a row of outlets standing above the floor
+    let n = 30;
+    let g = Grid::new(n, n, 100.0);
+    let mut z0 = vec![1000.0; n * n];
+    let mut outlet = vec![false; n * n];
+    for j in 10..16 {
+        for i in 10..16 {
+            z0[j * n + i] = 10.0;
+        }
+    }
+    // outlets at 12 m on the west side of the basin, then a cell at 5 m
+    for j in 10..16 {
+        z0[j * n + 9] = 12.0;
+        outlet[j * n + 9] = true;
+        z0[j * n + 8] = 5.0;
+        outlet[j * n + 8] = true;
+    }
+    let mut z = z0.clone();
+    breach_basins(&g, &mut z, &outlet, EPS, &pb(128));
+    for c in 0..n * n {
+        if outlet[c] {
+            assert_eq!(z[c].to_bits(), z0[c].to_bits(), "outlet {c} was cut");
+        }
+    }
 }
