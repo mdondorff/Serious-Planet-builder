@@ -107,14 +107,15 @@ fn main() {
         regional: REGIONAL,
         region,
         margin,
-        tile: 1024,
+        // 98,304 local cells are 128 tiles of 768: a power of two, so the tiles and the graph blocks (96 H1 cells each) are filed under quadtree ids; 1,024 would be 96 tiles.
+        tile: 768,
         halo: 64,
-        blocks_per_edge: 128,
         rounds: 4,
         threads,
         res: LATTICE as u32,
         base_id: 0x6c61_7474_6963_6531 ^ (LATTICE as u64),
         inputs_id: class_inputs_key(&def, seed),
+        keep_channels: false,
     };
     std::fs::create_dir_all(&out).expect("the output folder");
     let (commit, report) = bake_region(&world, &spec, &base, &climate, &out).unwrap_or_else(|e| panic!("the region bake: {e}"));

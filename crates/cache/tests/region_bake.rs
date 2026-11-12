@@ -23,12 +23,12 @@ fn spec(threads: usize) -> RegionSpec {
         margin: 6,
         tile: 64,
         halo: 24,
-        blocks_per_edge: 8,
         rounds: 2,
         threads,
         res: 64,
         base_id: 7,
         inputs_id: 11,
+        keep_channels: true,
     }
 }
 
@@ -72,17 +72,28 @@ fn a_fixture_region_bakes_to_a_commit_with_a_graph_whose_channels_lie_on_the_reg
     );
     assert!(report.segments > 0 && report.channel_cells > 0, "the fixture has rivers");
     assert!(!commit.graph.is_empty() && commit.graph_h1_cells == 64, "the commit names the graph");
-    assert_eq!(commit.tiles.len(), s.tiles().len(), "every tile the region meets is in the commit");
+    assert!(
+        !commit.tiles.is_empty() && commit.tiles.len() == report.tiles && report.tiles <= s.tiles().len(),
+        "every land tile the region meets is in the commit"
+    );
     let store = Arc::new(TileStore::open(d.path(), w.params()).unwrap());
     let reader = RiverReader::new(store, commit.clone(), 64 << 20).expect("a reader of the commit");
     let (ri0, rj0, ri1, rj1) = (s.region.0 - s.margin, s.region.2 - s.margin, s.region.1 + s.margin, s.region.3 + s.margin);
     let l = LOCAL_PER_REGIONAL as f64;
     let (mut points, mut channels) = (0usize, 0usize);
-    let tiles_per_edge = (s.local() / s.tile) as u32;
+    let tiles_per_edge = s.tiles_per_edge();
+    // Every step of a channel the reader gives is a step of a channel that was burnt: a one-cell error in the graph's cell mapping or in the burn's would break the steps.
+    let key = |a: (f64, f64), b: (f64, f64)| [a.0.to_bits(), a.1.to_bits(), b.0.to_bits(), b.1.to_bits()];
+    let steps: std::collections::HashSet<[u64; 4]> =
+        report.channels.iter().flat_map(|c| c.points.windows(2).map(|w| key(w[0], w[1]))).collect();
+    assert!(!steps.is_empty());
     for tj in 0..tiles_per_edge {
         for ti in 0..tiles_per_edge {
             for c in reader.tile_channels(Face(2), ti, tj).expect("a tile's channels").iter() {
                 channels += 1;
+                for w in c.points.windows(2) {
+                    assert!(steps.contains(&key(w[0], w[1])), "the step {:?} -> {:?} is not a step of a burnt channel", w[0], w[1]);
+                }
                 for &(x, y) in &c.points {
                     let (cx, cy) = ((x - (l - 1.0) / 2.0) / l, (y - (l - 1.0) / 2.0) / l);
                     points += 1;
@@ -97,7 +108,7 @@ fn a_fixture_region_bakes_to_a_commit_with_a_graph_whose_channels_lie_on_the_reg
         }
     }
     assert!(channels > 0 && points > 0, "the reader gives channels");
-    println!("region bake: the reader gives {channels} channel pieces with {points} points over {} tiles", s.tiles().len());
+    println!("region bake: the reader gives {channels} channel pieces with {points} points over {} tiles", report.tiles);
 }
 
 // spec: GEN-177, TEST-125
@@ -116,14 +127,55 @@ fn two_bakes_and_one_and_eight_threads_give_the_same_bytes() {
 
 // spec: GEN-177, TEST-125
 #[test]
-fn a_region_near_a_face_edge_or_with_a_bad_block_count_is_refused() {
+fn the_keys_name_the_region_and_its_margin() {
+    let w = world();
+    let (a, b) = (Dir::new("region-m6"), Dir::new("region-m7"));
+    let (ca, _) = bake_region(&w, &spec(2), &base, &climate, a.path()).unwrap();
+    let (cb, _) = bake_region(&w, &RegionSpec { margin: 7, ..spec(2) }, &base, &climate, b.path()).unwrap();
+    assert_ne!(ca.id, cb.id, "two margins are two bakes");
+    assert!(ca.tiles.iter().any(|(t, k)| cb.tiles.get(t).is_some_and(|o| o != k)), "some tile has another key");
+}
+
+// spec: GEN-177, TEST-125
+#[test]
+fn a_region_that_the_writer_or_the_reader_cannot_file_or_whose_tiles_leave_the_window_is_refused() {
     let w = world();
     let d = Dir::new("region-edge");
-    let near = RegionSpec { region: (2, 20, 16, 39), margin: 1, ..spec(1) };
-    let e = bake_region(&w, &near, &base, &climate, d.path()).expect_err("refused");
-    assert!(e.contains("face edge"), "{e}");
-    let blocks = RegionSpec { blocks_per_edge: 6, ..spec(1) };
-    let e = bake_region(&w, &blocks, &base, &climate, d.path()).expect_err("refused");
-    assert!(e.contains("power of two"), "{e}");
+    let refuse = |s: RegionSpec, what: &str| {
+        let e = bake_region(&w, &s, &base, &climate, d.path()).expect_err("refused");
+        assert!(e.contains(what), "{e}");
+    };
+    refuse(RegionSpec { region: (2, 20, 16, 39), margin: 1, ..spec(1) }, "face edge");
+    // 512 local cells in tiles of 128 are 4 a face edge, but 96 regional cells with tiles of 128 are 6: not a power of two.
+    refuse(RegionSpec { regional: 96, region: (24, 59, 24, 59), margin: 8, tile: 128, ..spec(1) }, "power of two");
+    refuse(RegionSpec { tile: 0, ..spec(1) }, "power of two");
+    // A region that is not tile-aligned with a margin too small for the first tile's halo.
+    refuse(RegionSpec { region: (17, 38, 17, 38), margin: 3, ..spec(1) }, "outside the solved window");
     assert!(planet_cache::l_writer::Commit::read(d.path()).unwrap().is_none(), "no commit after a refusal");
+}
+
+// spec: GEN-177, TEST-125
+#[test]
+fn the_production_constants_of_the_example_pass_the_checks_and_tiles_of_1024_do_not() {
+    // The prototype region R3a of face 1 as the example's defaults: 98,304 local cells in 128 tiles of 768 (graph blocks of 96 H1 cells).
+    let prod = RegionSpec {
+        seed: 14,
+        face: Face(1),
+        radius_m: R,
+        regional: 12_288,
+        region: (2014 * 4, 2168 * 4 + 3, 190 * 4, 344 * 4 + 3),
+        margin: 200,
+        tile: 768,
+        halo: 64,
+        rounds: 4,
+        threads: 4,
+        res: 16_384,
+        base_id: 1,
+        inputs_id: 2,
+        keep_channels: false,
+    };
+    prod.check().expect("the example's defaults are a bakeable spec");
+    assert_eq!(prod.tiles_per_edge(), 128);
+    let e = RegionSpec { tile: 1024, ..prod }.check().expect_err("96 tiles a face edge cannot be filed");
+    assert!(e.contains("power of two"), "{e}");
 }

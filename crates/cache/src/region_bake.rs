@@ -17,7 +17,7 @@ use planet_generators::bake::lakes::lakes_from_hydro;
 use planet_generators::bake::metric::Metric;
 use planet_generators::bake::round::solve_rounds;
 use planet_generators::bake::route::{route_rules, RoundRules};
-use planet_generators::bake::tile::{TileGrid, TileId};
+use planet_generators::bake::tile::{tile_has_land, TileGrid, TileId};
 use planet_generators::bake::Grid;
 
 use crate::basin_table::BasinSpec;
@@ -49,8 +49,6 @@ pub struct RegionSpec {
     /// The L tile side and halo in local cells.
     pub tile: usize,
     pub halo: usize,
-    /// Blocks of the graph and basin tables a face edge (a power of two that divides `regional`).
-    pub blocks_per_edge: u32,
     /// Rounds of the regional solve.
     pub rounds: usize,
     pub threads: usize,
@@ -58,9 +56,40 @@ pub struct RegionSpec {
     pub res: u32,
     pub base_id: u64,
     pub inputs_id: u64,
+    /// Keep the channels the bake burnt in the report (a test's: they are millions on a real region).
+    pub keep_channels: bool,
 }
 
 impl RegionSpec {
+    /// L tiles (and graph blocks, which are the L tiles: the reader files a block under its L tile's index) a face edge.
+    pub fn tiles_per_edge(&self) -> u32 {
+        (self.local() / self.tile.max(1)) as u32
+    }
+
+    /// The identity the keys carry for this region: the caller's `inputs_id` with everything the regional solve and the hydrology depend on besides the base and the climate (the window, the rounds, the carve), so two regions or
+    /// margins never share keys (the threads do not enter: the bake is the same at any count).
+    pub fn effective_inputs_id(&self) -> u64 {
+        let mut h = self.inputs_id ^ 0xcbf2_9ce4_8422_2325;
+        let mut put = |v: u64| h = (h ^ v).wrapping_mul(0x0000_0100_0000_01b3);
+        for v in [
+            u64::from(self.face.0),
+            self.regional as u64,
+            self.region.0 as u64,
+            self.region.1 as u64,
+            self.region.2 as u64,
+            self.region.3 as u64,
+            self.margin as u64,
+            self.rounds as u64,
+            self.tile as u64,
+            self.halo as u64,
+            self.seed,
+            self.radius_m.to_bits(),
+        ] {
+            put(v);
+        }
+        h
+    }
+
     pub fn local(&self) -> usize {
         self.regional * LOCAL_PER_REGIONAL
     }
@@ -73,7 +102,8 @@ impl RegionSpec {
         (tj0..=tj1).flat_map(|tj| (ti0..=ti1).map(move |ti| TileId { face: self.face, ti: ti as u32, tj: tj as u32 })).collect()
     }
 
-    fn check(&self) -> Result<(), String> {
+    /// Whether the spec can be baked (the same refusals `bake_region` makes, without the work).
+    pub fn check(&self) -> Result<(), String> {
         let (i0, i1, j0, j1) = self.region;
         if i0 > i1 || j0 > j1 || self.regional == 0 {
             return Err(format!("the region {:?} of {} regional cells is empty", self.region, self.regional));
@@ -88,17 +118,30 @@ impl RegionSpec {
         if i0 < self.margin || j0 < self.margin || i1 + self.margin >= self.regional || j1 + self.margin >= self.regional {
             return Err(format!("the margin of {} cells takes the window outside the face's {} cells", self.margin, self.regional));
         }
-        if self.blocks_per_edge == 0
-            || !self.blocks_per_edge.is_power_of_two()
-            || !self.regional.is_multiple_of(self.blocks_per_edge as usize)
-        {
+        let blocks = self.tiles_per_edge();
+        if self.tile == 0 || !self.local().is_multiple_of(self.tile) || blocks == 0 || !blocks.is_power_of_two() {
             return Err(format!(
-                "{} blocks a face edge are not a power of two that divides {} regional cells",
-                self.blocks_per_edge, self.regional
+                "the local grid of {} cells is {} tiles of {} cells a face edge: it must be a power of two (the tiles and the graph blocks are filed under quadtree ids)",
+                self.local(),
+                self.local() as f64 / self.tile.max(1) as f64,
+                self.tile
             ));
         }
-        if !self.local().is_multiple_of(self.blocks_per_edge as usize) || !self.local().is_multiple_of(self.tile) {
-            return Err(format!("the local grid of {} cells is not a whole number of blocks and of tiles of {}", self.local(), self.tile));
+        if !self.regional.is_multiple_of(blocks as usize) {
+            return Err(format!("{blocks} blocks a face edge do not divide {} regional cells", self.regional));
+        }
+        // Every tile with its halo lies inside the solved window (the regional change and the base read are not extended past it).
+        let (lo, hi) = (LOCAL_PER_REGIONAL * (self.region.0 - self.margin), LOCAL_PER_REGIONAL * (self.region.1 + self.margin + 1));
+        let (lo_j, hi_j) = (LOCAL_PER_REGIONAL * (self.region.2 - self.margin), LOCAL_PER_REGIONAL * (self.region.3 + self.margin + 1));
+        for id in self.tiles() {
+            let (a, b) = (id.ti as usize * self.tile, (id.ti as usize + 1) * self.tile);
+            let (c, d) = (id.tj as usize * self.tile, (id.tj as usize + 1) * self.tile);
+            if a < lo + self.halo || b + self.halo > hi || c < lo_j + self.halo || d + self.halo > hi_j {
+                return Err(format!(
+                    "tile ({}, {}) with its halo of {} cells reaches outside the solved window (margin {} regional cells): a larger margin",
+                    id.ti, id.tj, self.halo, self.margin
+                ));
+            }
         }
         Ok(())
     }
@@ -112,6 +155,8 @@ pub struct RegionReport {
     pub segments: usize,
     pub lakes: usize,
     pub tiles: usize,
+    /// The channels burnt, when the spec asked to keep them.
+    pub channels: Vec<planet_generators::bake::k7::Channel>,
 }
 
 /// Bakes the region into `dir` as a commit with a channel graph. `base` is the base height (the bake's `B`), `climate` the runoff of the land.
@@ -183,16 +228,16 @@ pub fn bake_region(
     let local = spec.local();
     let basin = BasinSpec {
         hydro: HydroParams::default(),
-        tile_cells: (local / spec.blocks_per_edge as usize) as u32,
-        tiles_per_edge: spec.blocks_per_edge,
+        tile_cells: spec.tile as u32,
+        tiles_per_edge: spec.tiles_per_edge(),
         base_id: spec.base_id,
-        inputs_id: spec.inputs_id,
+        inputs_id: spec.effective_inputs_id(),
     };
     let l_spec = LTileSpec {
         grid: TileGrid { cells: local, tile: spec.tile, halo: spec.halo, radius_m: spec.radius_m },
         k7: K7Params::standard(spec.seed, 0.0),
         base_id: spec.base_id,
-        inputs_id: spec.inputs_id,
+        inputs_id: spec.effective_inputs_id(),
     };
     // The H1 cells the graph reaches beyond its blocks: the tile halo in H1 cells, and one more (the writer refuses less: GEN-169).
     let mut graph_spec = GraphSpec { basin, h1_cells: spec.regional as u32, margin_h1: 0 };
@@ -203,7 +248,13 @@ pub fn bake_region(
         let (i, j) = (i - ri0 as i64, j - rj0 as i64);
         (f == face.0 && i >= 0 && j >= 0 && (i as usize) < rw && (j as usize) < rh).then(|| j as usize * rw + i as usize)
     };
-    let tiles: Vec<TileId> = spec.tiles();
+    // The tiles with land: sea-only tiles are not baked (K7 on one is minutes for nothing).
+    let tile_grid = l_spec.grid;
+    let surface = |d: Vec3| base(d) + regional(d);
+    let tiles: Vec<TileId> = spec.tiles().into_iter().filter(|&id| tile_has_land(&tile_grid, id, &surface, 0.0, 8)).collect();
+    if tiles.is_empty() {
+        return Err("the region holds no land tile".into());
+    }
     let b = LBake {
         world,
         res: spec.res,
@@ -226,6 +277,7 @@ pub fn bake_region(
         segments: hydro.stats.segments,
         lakes: lakes.lakes.len(),
         tiles: tiles.len(),
+        channels: if spec.keep_channels { feed.channels.clone() } else { Vec::new() },
     };
     Ok((commit, report))
 }
