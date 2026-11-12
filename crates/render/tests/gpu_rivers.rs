@@ -293,3 +293,36 @@ fn a_river_plan_the_array_cannot_hold_is_an_error_and_a_later_frame_without_rive
         assert_eq!(stats.river_nodes, 0);
     }
 }
+
+// spec: REND-060
+#[test]
+fn river_water_adds_no_geometry_the_frame_submits_the_draws_and_triangles_it_did_without_rivers() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let (plan, field) = scene();
+    let rp = river_plan(&plan, RIVER_LAYERS as usize);
+    let mut r = renderer(&ctx, &plan, &field);
+    let (_, without) = frame(&ctx, &mut r, &plan, None);
+    let (_, with) = frame(&ctx, &mut r, &plan, Some(&rp));
+    assert!(with.river_nodes > 0, "the frame has river nodes");
+    // The river is the ground where the coverage is wet (the burned bed): no surface of its own, so the same draws, triangles, vertex bytes and node records.
+    assert_eq!(
+        (
+            with.draw_calls,
+            with.triangles,
+            with.vertex_bytes,
+            with.encoded_draws,
+            with.node_record_bytes,
+            with.tile_ref_bytes,
+            with.water_draws
+        ),
+        (
+            without.draw_calls,
+            without.triangles,
+            without.vertex_bytes,
+            without.encoded_draws,
+            without.node_record_bytes,
+            without.tile_ref_bytes,
+            without.water_draws
+        )
+    );
+}

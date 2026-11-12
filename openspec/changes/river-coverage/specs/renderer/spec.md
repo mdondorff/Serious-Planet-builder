@@ -32,3 +32,15 @@ Source: Architect 2026-11-12 (REND-059 part C), REND-059, CON-03, CON-11
 #### Scenario: Layer overflow
 - **WHEN** six nodes have a river and the array holds three layers
 - **THEN** the three nearest keep theirs, the text says three were dropped, and the same plan results from any input order
+
+### Requirement: REND-060 River water is the ground at the burned bed
+River water SHALL have no geometry of its own: where the coverage is wet the terrain's own ground is drawn as water, and that ground is the trench K7 burned to the segment's profile, so the water level is the burned bed (GEN-165). A frame with rivers SHALL submit the same draws, triangles and node records as the frame without. A visible depth (a surface above the bed) is a look value, decided later (architect, 2026-11-12).
+- The cells the coverage calls water are cells the burn lowered, to within the line's rasterisation.
+
+Verify: A, C
+Status: planned
+Source: Architect 2026-11-12 (REND-059 part C), GEN-165, REND-059
+
+#### Scenario: No geometry
+- **WHEN** a frame is drawn with and without a river plan
+- **THEN** the draws, triangles, vertex bytes and node records are equal
