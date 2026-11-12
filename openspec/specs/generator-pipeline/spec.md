@@ -1482,9 +1482,11 @@ Source: Architect 2026-11-10, design section 13
 - **THEN** only the lake's own water and its ring are wet; the valley, its sides and the hollow are dry
 
 ### Requirement: GEN-177 A region of a face is baked to a commit with a channel graph
-A region bake SHALL take a rectangle of regional cells of one face, a base, a climate and a size spec, solve the regional surface, find the hydrology, produce the lakes and the channel graph, and write the L tiles of the land tiles, the basin tables, the graph blocks and the commit through the writer.
+A region bake SHALL take a rectangle of regional cells of one face, a base, a climate and a size spec, solve the regional surface, find the hydrology, and write the L tiles of the land tiles, the basin tables, the channel graph and the commit.
 - A region within 4 regional cells of a face edge is refused.
-- The result is the same bytes at any thread count and on a second run.
+- The bytes are the same at any thread count and on a second run.
+- Every flood epsilon and the f32 choice come from the world's precision (GEN-175); a height beyond its radius R is refused.
+- A world whose epsilon is not the profile's is refused before any work (the commit spec records none).
 - No store format changes.
 
 Verify: A
