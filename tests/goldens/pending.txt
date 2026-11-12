@@ -1,2 +1,1 @@
 # Goldens that are waiting for the owner's /bless (one name per line). /bless removes a line when it promotes the golden.
-river_lit_near.png

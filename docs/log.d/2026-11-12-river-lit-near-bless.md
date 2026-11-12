@@ -1,0 +1,1 @@
+- 2026-11-12 **river_lit_near** blessed by the owner (/bless): the first river golden (WARP, llvmpipe, RTX); TEST-117 active.
