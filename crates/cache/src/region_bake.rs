@@ -251,8 +251,8 @@ pub fn bake_region(
     let k7_epsilon = K7Params::standard(spec.seed, 0.0).pass2.carve.epsilon;
     if precision.epsilon_w != k7_epsilon {
         return Err(format!(
-            "the world's flood epsilon is {} m, not the profile's {} m (GEN-175): the commit spec records no flood epsilon, so a commit of such a world could not be read back with the keys it was made under: a format question for the architect (CON-10)",
-            precision.epsilon_w, k7_epsilon
+            "the world's height radius is R = {} m, which gives it the flood epsilon {} m, not the K7 epsilon {} m the commit spec describes (GEN-175): the commit spec records no flood epsilon, so a commit of such a world could not be read back with the keys it was made under: a format question for the owner (CON-10, decided with the ADR 0117 schema)",
+            precision.radius, precision.epsilon_w, k7_epsilon
         ));
     }
     let RegionSolve { face_spec, grid, outlet, zb, zs, stream, ri0, rj0, rw, rh, precision } = solve_region(spec, base)?;

@@ -210,7 +210,11 @@ fn a_sixty_kilometre_region_takes_its_epsilon_from_the_world_and_passes_the_narr
     let d = Dir::new("region-tall");
     let w = world();
     let e = bake_region(&w, &tall, &tall_base, &climate, d.path()).expect_err("not committable yet");
-    assert!(e.contains("records no flood epsilon"), "{e}");
+    // The message names R and both epsilons (the world's 3.9 mm and K7's 1 mm) and the question.
+    assert!(
+        e.contains("R = 60000 m") && e.contains("0.0039") && e.contains("K7 epsilon 0.001 m") && e.contains("records no flood epsilon"),
+        "{e}"
+    );
     assert!(planet_cache::l_writer::Commit::read(d.path()).unwrap().is_none());
 }
 
