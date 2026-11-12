@@ -683,6 +683,11 @@ impl WorldTerrain {
         &self.erosion_note
     }
 
+    /// The lake masks of the commit the layer is read under (REND-065): the water plan draws a lake node only where its mask is wet.
+    pub fn lake_masks(&self) -> Option<&dyn planet_generators::lake_water::LakeMaskSource> {
+        self.lakes.as_deref().map(|l| l as &dyn planet_generators::lake_water::LakeMaskSource)
+    }
+
     /// The river source of the commit the layer is read under, when the commit holds a channel graph (STRM-086).
     pub fn rivers(&self) -> Option<&Arc<crate::rivers::ReaderRiverSource>> {
         self.rivers.as_ref()

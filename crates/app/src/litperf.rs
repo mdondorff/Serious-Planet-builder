@@ -193,7 +193,17 @@ impl LitSetup {
         let cache = &mut self.cache;
         let water = world.with_water(|wf| {
             plan_water(
-                &WaterRequest { source: wf, map: &TangentWarp, liquids, look, lod, time_s, view: WaterView::Lit, cut: Some(field) },
+                &WaterRequest {
+                    source: wf,
+                    map: &TangentWarp,
+                    liquids,
+                    look,
+                    lod,
+                    time_s,
+                    view: WaterView::Lit,
+                    cut: Some(field),
+                    lakes: world.lake_masks(),
+                },
                 cache,
                 &plan,
             )

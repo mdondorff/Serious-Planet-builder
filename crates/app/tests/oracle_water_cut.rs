@@ -116,6 +116,7 @@ fn the_cut_water_nodes_cover_the_same_sea_pixels_as_the_full_selection_in_the_fo
                                 time_s: 2.0 + k as f64 / 60.0,
                                 view: WaterView::Lit,
                                 cut,
+                                lakes: None,
                             },
                             wc,
                             &plan,

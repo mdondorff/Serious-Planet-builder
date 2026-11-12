@@ -1118,6 +1118,7 @@ impl App<'_> {
                         time_s,
                         view: WaterView::Lit,
                         cut: Some(field),
+                        lakes: self.world.lake_masks(),
                     };
                     plan_water(&req, cache, &plan)
                 })?;

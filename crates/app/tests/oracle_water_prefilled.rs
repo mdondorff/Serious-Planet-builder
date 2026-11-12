@@ -109,6 +109,7 @@ fn the_job_of_a_prefilled_tile_leaves_the_minimum_of_the_tile_it_read_and_the_pl
                             time_s: 1.0,
                             view: WaterView::Lit,
                             cut: Some(field.as_ref()),
+                            lakes: None,
                         },
                         cache,
                         &plan,

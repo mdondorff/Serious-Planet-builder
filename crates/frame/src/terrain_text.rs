@@ -192,7 +192,7 @@ impl TerrainPlan {
                 ["height_range", a, b] => range = Some([p32(a)?, p32(b)?]),
                 ["shore_ramp_per_m", v] => shore_ramp_per_m = p32(v)?,
                 ["lit", rest @ ..] => lit = Some(crate::look::LitPlan::from_tokens(rest)?),
-                ["water", ..] | ["liquid", ..] | ["wnode", ..] => water_lines.push(t.clone()),
+                ["water", ..] | ["liquid", ..] | ["wnode", ..] | ["wmask", ..] | ["wmaskdropped", ..] => water_lines.push(t.clone()),
                 ["rivers", ..] | ["rnode", ..] => river_lines.push(t.clone()),
                 ["node", id, "level", level, "origin", ox, oy, oz, "rel", rx, ry, rz, "morph", m, ms, me, "color", r, g, b, a, "mesh_key", key, tail @ ..] =>
                 {

@@ -128,6 +128,8 @@ mod water_band;
 mod water_book;
 #[path = "water_cut.rs"]
 mod water_cut;
+#[path = "water_lake.rs"]
+mod water_lake;
 #[path = "water_plan.rs"]
 mod water_plan;
 #[path = "water_summary.rs"]

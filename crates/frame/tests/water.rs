@@ -217,6 +217,7 @@ fn the_argument_the_shader_adds_stays_small_wherever_a_wave_has_weight_on_real_p
                 time_s: 0.0,
                 view: WaterView::Lit,
                 cut: None,
+                lakes: None,
             },
             &mut WaterTileCache::new(),
             &plan,
@@ -308,7 +309,7 @@ fn lod16() -> LodParams {
 }
 
 fn request<'a>(src: &'a dyn WaterSource, table: &'a LiquidTable, look: &'a WaterLook, lod: &'a LodParams, t: f64) -> WaterRequest<'a> {
-    WaterRequest { source: src, map: &TangentWarp, liquids: table, look, lod, time_s: t, view: WaterView::Lit, cut: None }
+    WaterRequest { source: src, map: &TangentWarp, liquids: table, look, lod, time_s: t, view: WaterView::Lit, cut: None, lakes: None }
 }
 
 // spec: STRM-024

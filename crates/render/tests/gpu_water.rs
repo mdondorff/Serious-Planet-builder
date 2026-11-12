@@ -152,7 +152,17 @@ impl Scene<'_> {
 fn water_plan(plan: &TerrainPlan, source: &dyn WaterSource, table: &LiquidTable, size: (u32, u32), t: f64, view: WaterView) -> WaterPlan {
     let look = LookParams::default();
     plan_water(
-        &WaterRequest { source, map: &TangentWarp, liquids: table, look: &look.water, lod: &lod_for(size), time_s: t, view, cut: None },
+        &WaterRequest {
+            source,
+            map: &TangentWarp,
+            liquids: table,
+            look: &look.water,
+            lod: &lod_for(size),
+            time_s: t,
+            view,
+            cut: None,
+            lakes: None,
+        },
         &mut WaterTileCache::new(),
         plan,
     )
@@ -773,6 +783,7 @@ fn fly(
                 time_s: 100.0 + dt * k as f64,
                 view: WaterView::Class,
                 cut: None,
+                lakes: None,
             },
             &mut cache,
             &plan,
@@ -1358,4 +1369,92 @@ fn inferno(t: f32) -> [u8; 3] {
         }
     }
     [252, 255, 164]
+}
+
+/// The water of [`HeightSea`] named as the lake (face of the scene, index 0) instead of the sea.
+struct HeightLake<'a> {
+    sea: HeightSea<'a>,
+    body: WaterBodyId,
+}
+
+impl WaterSource for HeightLake<'_> {
+    fn water_at(&self, dir: Vec3) -> Result<Option<WaterSample>, ReadError> {
+        Ok(self.sea.water_at(dir)?.map(|w| WaterSample { body: self.body, ..w }))
+    }
+}
+
+/// A lake grid of 65,536 cells a face edge whose lake (`face`, index 0) holds every cell of its face (`stripe` 0), or the cells of the even stripes of `stripe` columns (about 150 m a cell).
+struct HalfLake {
+    face: planet_core::Face,
+    stripe: i64,
+}
+
+impl planet_generators::lake_water::LakeMaskSource for HalfLake {
+    fn cells(&self) -> usize {
+        1 << 16
+    }
+    fn lake_at(&self, face: planet_core::Face, i: i64, _j: i64) -> Result<Option<planet_generators::lake_water::LakeCell>, ReadError> {
+        Ok((face == self.face && (self.stripe == 0 || (i / self.stripe) % 2 == 0)).then_some(planet_generators::lake_water::LakeCell {
+            face: self.face,
+            index: 0,
+            level_m: 0.0,
+        }))
+    }
+}
+
+// spec: REND-065, TEST-133
+#[test]
+fn a_lake_node_draws_its_water_only_where_its_mask_is_wet() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let mut goldens = GoldenChecks::new(&ctx.adapter_key(), &ctx.driver_string());
+    let field = Reference(1);
+    let size = (256, 160);
+    let aspect = f64::from(size.0) / f64::from(size.1);
+    let (c, heading) = coast(&field, 0.0);
+    let (face, _, _) = planet_core::cube::direction_to_face(&TangentWarp, c);
+    let table = LiquidTable::earth();
+    let lake = HeightLake { sea: HeightSea { field: &field, level: 0.0 }, body: planet_generators::lake_water::lake_body(face, 0) };
+    let sea = HeightSea { field: &field, level: 0.0 };
+    let scene = Scene { camera: coast_camera(c, heading, 0.0, 2000.0, 4000.0, 0.0, 25.0, aspect), size, field: &field };
+    let plan = scene.terrain();
+    let look = LookParams::default();
+    let lod = lod_for(size);
+    let wplan = |src: &dyn WaterSource, lakes: Option<&dyn planet_generators::lake_water::LakeMaskSource>| {
+        let req = WaterRequest {
+            source: src,
+            map: &TangentWarp,
+            liquids: &table,
+            look: &look.water,
+            lod: &lod,
+            time_s: 0.0,
+            view: WaterView::Class,
+            cut: None,
+            lakes,
+        };
+        plan_water(&req, &mut WaterTileCache::new(), &plan).unwrap()
+    };
+    let mut r = new_renderer(&ctx, size);
+    upload_all(&ctx, &mut r, &plan, &field);
+    r.enable_water(&ctx);
+    let base = frame(&ctx, &mut r, &plan, None, false);
+    let wet_pixels = |w: &WaterPlan, r: &mut TerrainRenderer| -> Vec<bool> {
+        let with = frame(&ctx, r, &plan, Some(w), false);
+        class_map(&base, &with, size).class.iter().map(|c| *c != 0).collect()
+    };
+    let sea_wet = wet_pixels(&wplan(&sea, None), &mut r);
+    // A mask wet everywhere draws what the sea draws.
+    let all = HalfLake { face, stripe: 0 };
+    let full = wplan(&lake, Some(&all));
+    assert!(!full.masks.is_empty() && full.nodes.iter().all(|n| n.mask.is_some()));
+    assert_eq!(wet_pixels(&full, &mut r), sea_wet, "a mask wet everywhere changes no pixel");
+    // Stripes of 8 cells: the water ends at the mask's edges, a strict part of the sea's.
+    let half = HalfLake { face, stripe: 8 };
+    let hp = wplan(&lake, Some(&half));
+    let half_wet = wet_pixels(&hp, &mut r);
+    let (n_sea, n_half) = (sea_wet.iter().filter(|w| **w).count(), half_wet.iter().filter(|w| **w).count());
+    assert!(half_wet.iter().zip(&sea_wet).all(|(h, s)| !h || *s), "a masked pixel is wet only where the sea's is");
+    assert!(n_half > n_sea / 5 && n_half < n_sea * 4 / 5, "the striped mask keeps about half the water: {n_half} of {n_sea} px");
+    write_inspection("lake_mask_stripes_class", &image_of(&r, &ctx));
+    goldens.check("water_class_lake_mask_stripes", &image_of(&r, &ctx), Tolerance::Exact);
+    goldens.finish();
 }
