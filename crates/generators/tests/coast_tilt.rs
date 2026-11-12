@@ -1,4 +1,4 @@
-//! Tier A, GEN-180 (TEST-128): the coast tilt of the start surface, off by default. The added height is `weight x t x D x s(d / D)` with a ramp that saturates at 1, so it never exceeds `t x D`, is 0 at the
+//! Tier A, GEN-180 (TEST-131): the coast tilt of the start surface, off by default. The added height is `weight x t x D x s(d / D)` with a ramp that saturates at 1, so it never exceeds `t x D`, is 0 at the
 //! coast and over the sea, and moves no class; with the tilt off every `e0` and every key is the build before. The switch is process-wide (as the band rules of GEN-179): no test here sets it; the tilt is passed
 //! as a value (`eval_with`).
 
@@ -18,7 +18,7 @@ fn directions() -> Vec<Vec3> {
         .collect()
 }
 
-// spec: GEN-180, TEST-128
+// spec: GEN-180, TEST-131
 #[test]
 fn the_added_height_is_bounded_zero_at_the_coast_monotone_and_saturates() {
     for (t, d) in [(2.0, 100.0), (4.0, 200.0), (8.0, 400.0)] {
@@ -44,7 +44,7 @@ fn the_added_height_is_bounded_zero_at_the_coast_monotone_and_saturates() {
     assert!(!CoastTilt::OFF.is_on());
 }
 
-// spec: GEN-180, TEST-128
+// spec: GEN-180, TEST-131
 #[test]
 fn with_the_tilt_off_the_point_is_the_same_bits() {
     let src = ClassSource::new(14);
@@ -55,7 +55,7 @@ fn with_the_tilt_off_the_point_is_the_same_bits() {
     }
 }
 
-// spec: GEN-180, TEST-128
+// spec: GEN-180, TEST-131
 #[test]
 fn the_tilt_lifts_land_only_within_its_bound_and_moves_no_class() {
     let src = ClassSource::new(14);
@@ -83,7 +83,7 @@ fn the_tilt_lifts_land_only_within_its_bound_and_moves_no_class() {
     assert!(lifted > 20 && sea > 50, "the fixture has lifted land ({lifted}) and sea ({sea}); weightless land {weightless}");
 }
 
-// spec: GEN-180, TEST-128
+// spec: GEN-180, TEST-131
 /// The ramp is not cut short by the shelf's coast lattice (170 km): with D = 400 km the lift of a plain deep inland reaches nearly t x D; and the tilt is faded in at the field's coast, so that the shore has no step.
 #[test]
 fn the_ramp_reaches_its_full_height_inland_and_leaves_no_step_at_the_shore() {
@@ -112,7 +112,7 @@ fn the_ramp_reaches_its_full_height_inland_and_leaves_no_step_at_the_shore() {
     assert!(shore >= 5 && shore_worst < 0.03, "{shore} points within 0.01 of the field's coast gain at most {shore_worst} of t x D");
 }
 
-// spec: GEN-180, TEST-128
+// spec: GEN-180, TEST-131
 #[test]
 fn the_identity_word_moves_only_with_the_tilt_on() {
     let w = 0xfeed_f00d_u64;
@@ -126,14 +126,14 @@ fn the_identity_word_moves_only_with_the_tilt_on() {
     assert!(!planet_generators::classes::coast_tilt().is_on(), "the process runs with the tilt off");
 }
 
-// spec: GEN-180, TEST-128
+// spec: GEN-180, TEST-131
 #[test]
 #[should_panic(expected = "coast tilt t")]
 fn a_negative_tilt_is_refused() {
     planet_generators::classes::set_coast_tilt(-1.0, 100.0);
 }
 
-// spec: GEN-180, TEST-128
+// spec: GEN-180, TEST-131
 #[test]
 #[should_panic(expected = "coast tilt distance")]
 fn a_zero_distance_is_refused() {
