@@ -57,7 +57,8 @@ pub fn parse_exit_table(text: &str) -> Result<Vec<ExitItem>, String> {
         let Some(head) = cells(line) else { continue };
         let low: Vec<String> = head.iter().map(|c| c.to_lowercase()).collect();
         let col = |name: &str| low.iter().position(|c| c == name);
-        let (Some(i), Some(it), Some(dw), Some(la), Some(st)) = (col("#"), col("item"), col("done when"), col("lane"), col("state")) else {
+        let item_col = col("exit item").or_else(|| col("item"));
+        let (Some(i), Some(it), Some(dw), Some(la), Some(st)) = (col("#"), item_col, col("done when"), col("lane"), col("state")) else {
             continue;
         };
         let mut items = Vec::new();
@@ -199,16 +200,20 @@ fn open_prs(root: &Path) -> Vec<(u32, String)> {
 /// The current milestone: the name and the text of the file of `docs/milestones/` whose `Status:` starts with `active`.
 pub fn current_milestone(root: &Path) -> Res<(String, String)> {
     let dir = root.join("docs").join("milestones");
-    let mut active = Vec::new();
+    let mut files = Vec::new();
     for e in std::fs::read_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))?.flatten() {
         let p = e.path();
         if p.extension().is_some_and(|x| x == "md") {
             let text = std::fs::read_to_string(&p).map_err(|e| format!("{}: {e}", p.display()))?;
-            if is_active(&text) {
-                active.push((p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(), text));
-            }
+            files.push((p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(), text));
         }
     }
+    pick_active(files)
+}
+
+/// The one active milestone among `(name, text)` files; an error for none or for several.
+pub fn pick_active(files: Vec<(String, String)>) -> Res<(String, String)> {
+    let mut active: Vec<(String, String)> = files.into_iter().filter(|(_, t)| is_active(t)).collect();
     match active.len() {
         1 => Ok(active.remove(0)),
         0 => Err("no milestone file in docs/milestones/ has a Status line starting `active`".into()),
@@ -285,6 +290,28 @@ mod tests {
         assert!(out.contains("open PR: #1500 E5: xtask plan") && !out.contains("#1501") && !out.contains("#1502"), "{out}");
         assert!(out.contains("queue: xtask plan | explorer"), "{out}");
         assert!(names("E5: x", "E5") && names("fix (E5)", "E5") && !names("E55", "E5") && !names("XE5", "E5"));
+    }
+
+    // spec: BUILD-053
+    #[test]
+    fn the_real_header_of_a_milestone_file_is_read() {
+        let p1 = "# P1\n\nStatus: active (owner)\n\n## Exit items\n| # | Exit item | Done when | Lane | State |\n|---|---|---|---|---|\n| E1 | A flight | `x` | explorer | open |\n| E3 | Memory | y | explorer | done (#1447) |\n";
+        let items = parse_exit_table(p1).unwrap();
+        assert_eq!(
+            items.iter().map(|i| (i.id.as_str(), i.item.as_str(), i.is_open())).collect::<Vec<_>>(),
+            [("E1", "A flight", true), ("E3", "Memory", false)]
+        );
+    }
+
+    // spec: BUILD-053
+    #[test]
+    fn no_active_milestone_and_several_active_milestones_are_errors() {
+        let file = |n: &str, s: &str| (n.to_string(), format!("# {n}\nStatus: {s}\n"));
+        assert!(pick_active(vec![file("M9", "closed 2026-11-01")]).unwrap_err().contains("no milestone file"));
+        assert!(pick_active(vec![]).unwrap_err().contains("no milestone file"));
+        let two = pick_active(vec![file("P1", "active"), file("P2", "active (next)")]).unwrap_err();
+        assert!(two.contains("2 milestone files") && two.contains("P1") && two.contains("P2"), "{two}");
+        assert_eq!(pick_active(vec![file("M9", "closed"), file("P1", "active")]).unwrap().0, "P1");
     }
 
     // spec: BUILD-053
