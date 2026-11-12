@@ -135,14 +135,20 @@ pub trait RiverSource {
     fn tile_channels(&self, face: planet_core::Face, ti: u32, tj: u32) -> Result<std::sync::Arc<Vec<Channel>>, String>;
 }
 
+/// The width, in samples of a node, below which a river is not drawn in it, and from which it is drawn at full strength.
+pub const MIN_RIVER_SAMPLES: f64 = 1.0;
+pub const FULL_RIVER_SAMPLES: f64 = 2.0;
+
 /// What the river plan needs.
 pub struct RiverRequest<'a> {
     pub source: &'a dyn RiverSource,
     pub law: &'a WidthLaw,
     /// Cells a terrain node's edge (its samples are `res + 1` a side).
     pub res: u32,
-    /// A node whose samples are farther apart than this many L cells carries no coverage (its rivers are narrower than its samples): the draw's limit, a parameter.
-    pub max_step_cells: f64,
+    /// A node carries a river while its drawn width is at least this many of the node's samples (below it nothing is drawn) and from [`full_samples`](RiverRequest::full_samples) on at full strength; between the two the wetness
+    /// fades linearly with the width over the sample spacing (REND-059, architect 2026-11-12). Named parameters, [`MIN_RIVER_SAMPLES`] and [`FULL_RIVER_SAMPLES`]: the owner's look review tunes them.
+    pub min_samples: f64,
+    pub full_samples: f64,
     /// The layers of the coverage array a frame holds (the texture array's depth): when more nodes have a river, the nearest keep theirs and the rest are counted in [`RiverPlan::dropped`].
     pub max_layers: usize,
 }
@@ -154,6 +160,8 @@ pub struct RiverNode {
     pub node: u32,
     pub size: u32,
     pub coverage: Vec<u8>,
+    /// The strength of the node's river, 0 to 255 (255: full): the river's width in samples of the node between the request's two limits, linear.
+    pub fade: u8,
 }
 
 /// The rivers of one frame (REND-059): only nodes with a river within range.
@@ -174,14 +182,17 @@ pub fn node_window(tile: planet_core::TileId, res: u32, cells: u32) -> ((f64, f6
     (((s0 + 1.0) * half - 0.5, (t0 + 1.0) * half - 0.5), step)
 }
 
-/// The river coverage of the nodes `nodes` (index in the terrain plan and tile): a node whose samples are farther apart than the request's limit, or with no river within range of a sample, carries none. The
+/// The river coverage of the nodes `nodes` (index in the terrain plan and tile): a node whose widest river is narrower than the request's minimum of samples, or with no river within range of a sample, carries none. The
 /// channels come from the L tiles the node's window meets widened by the widest trench and the code's range; a channel handed out by two tiles counts once. An error names the tile that failed.
 pub fn plan_rivers(req: &RiverRequest<'_>, nodes: &[(u32, planet_core::TileId, f64)]) -> Result<RiverPlan, String> {
     let grid = req.source.grid();
-    if req.res == 0 || req.max_layers == 0 || !(req.max_step_cells.is_finite() && req.max_step_cells > 0.0) {
+    if req.res == 0
+        || req.max_layers == 0
+        || !(req.min_samples.is_finite() && req.min_samples > 0.0 && req.full_samples.is_finite() && req.full_samples > req.min_samples)
+    {
         return Err(format!(
-            "the river plan needs a node of at least one cell and a finite positive step limit (res {}, limit {})",
-            req.res, req.max_step_cells
+            "the river plan needs a node of at least one cell, a layer and 0 < min samples < full samples (res {}, layers {}, min {}, full {})",
+            req.res, req.max_layers, req.min_samples, req.full_samples
         ));
     }
     if grid.tile == 0 || grid.cells == 0 || !grid.cells.is_multiple_of(grid.tile) {
@@ -193,7 +204,9 @@ pub fn plan_rivers(req: &RiverRequest<'_>, nodes: &[(u32, planet_core::TileId, f
     let mut out: Vec<(f64, RiverNode)> = Vec::new();
     for &(index, tile, distance_m) in nodes {
         let (origin, step) = node_window(tile, req.res, grid.cells);
-        if step > req.max_step_cells {
+        // The widest river is 2 * DISC_RADIUS_MAX cells: a node whose samples are farther apart than that over the minimum cannot carry one, and reads no tile.
+        let widest_possible = (2 * planet_generators::bake::k7::DISC_RADIUS_MAX) as f64;
+        if widest_possible < req.min_samples * step {
             continue;
         }
         let span = f64::from(req.res) * step;
@@ -223,7 +236,18 @@ pub fn plan_rivers(req: &RiverRequest<'_>, nodes: &[(u32, planet_core::TileId, f
                 }
             }
         }
-        if channels.is_empty() {
+        // A river narrower than a sample of the node is not drawn in it; the node's strength follows its widest river: linear in the width in samples between the two limits.
+        let widest = |c: &Channel| {
+            if c.q.is_empty() {
+                1.0
+            } else {
+                c.q.iter().map(|&q| drawn_width_cells(req.law, grid.cell_m, q)).fold(1.0, f64::max)
+            }
+        };
+        channels.retain(|c| widest(c) >= req.min_samples * step);
+        let ratio = channels.iter().map(|c| widest(c) / step).fold(0.0, f64::max);
+        let fade = (libm::round(255.0 * ((ratio - req.min_samples) / (req.full_samples - req.min_samples)).clamp(0.0, 1.0))) as u8;
+        if channels.is_empty() || fade == 0 {
             continue;
         }
         let coverage: Vec<u8> = river_distance_grid(&channels, origin, step, (size, size), req.law, grid.cell_m)
@@ -233,7 +257,7 @@ pub fn plan_rivers(req: &RiverRequest<'_>, nodes: &[(u32, planet_core::TileId, f
         if coverage.iter().all(|&c| c == 255) {
             continue;
         }
-        out.push((distance_m, RiverNode { node: index, size: size as u32, coverage }));
+        out.push((distance_m, RiverNode { node: index, size: size as u32, coverage, fade }));
     }
     // More nodes than layers: the nearest keep theirs (ties by node index: deterministic, CON-03); the rest are counted, never silent.
     let total = out.len();
@@ -253,18 +277,10 @@ pub fn reach_cells() -> f64 {
 impl RiverPlan {
     /// The plan as lines of text: `rivers <dropped>` and one `rnode <node> <hex of the codes>` a node (the coverage is part of the plan's text, so a recorded frame replays the same pixels).
     pub fn to_text(&self) -> String {
-        let mut s = format!(
-            "rivers {}
-",
-            self.dropped
-        );
+        let mut s = format!("rivers {}\n", self.dropped);
         for n in &self.nodes {
             let hex: String = n.coverage.iter().map(|c| format!("{c:02x}")).collect();
-            s += &format!(
-                "rnode {} {hex}
-",
-                n.node
-            );
+            s += &format!("rnode {} {} {hex}\n", n.node, n.fade);
         }
         // No trailing newline: the caller adds the separators.
         s.pop();
@@ -282,7 +298,7 @@ impl RiverPlan {
                         dropped: dropped.parse().map_err(|e| format!("bad dropped count '{dropped}': {e}"))?,
                     })
                 }
-                ["rnode", node, hex] => {
+                ["rnode", node, fade, hex] => {
                     let p = plan.as_mut().ok_or("an rnode line before the rivers line")?;
                     if hex.len() % 2 != 0 {
                         return Err(format!("rnode {node}: an odd number of hex digits"));
@@ -294,7 +310,12 @@ impl RiverPlan {
                     if (size as usize) * (size as usize) != coverage.len() {
                         return Err(format!("rnode {node}: {} codes are not a square", coverage.len()));
                     }
-                    p.nodes.push(RiverNode { node: node.parse().map_err(|e| format!("bad node index '{node}': {e}"))?, size, coverage });
+                    p.nodes.push(RiverNode {
+                        node: node.parse().map_err(|e| format!("bad node index '{node}': {e}"))?,
+                        size,
+                        coverage,
+                        fade: fade.parse().map_err(|e| format!("bad fade '{fade}': {e}"))?,
+                    });
                 }
                 other => return Err(format!("cannot parse river line {other:?}")),
             }

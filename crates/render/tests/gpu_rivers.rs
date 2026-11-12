@@ -134,7 +134,7 @@ fn make_river(plan: &TerrainPlan, width_cells: f64) -> OneRiver {
 }
 
 /// The river plan of `plan` over `src`: nodes with a river in range whose samples are at most `max_step` cells apart.
-fn plan_river_over(plan: &TerrainPlan, src: &OneRiver, max_layers: usize, max_step: f64) -> RiverPlan {
+fn plan_river_over(plan: &TerrainPlan, src: &OneRiver, max_layers: usize) -> RiverPlan {
     let law = WidthLaw::STANDARD;
     let nodes: Vec<(u32, planet_core::TileId, f64)> = plan
         .nodes
@@ -142,11 +142,22 @@ fn plan_river_over(plan: &TerrainPlan, src: &OneRiver, max_layers: usize, max_st
         .enumerate()
         .map(|(i, n)| (i as u32, n.tile, n.camera_relative_origin.iter().map(|v| f64::from(*v) * f64::from(*v)).sum::<f64>().sqrt()))
         .collect();
-    plan_rivers(&RiverRequest { source: src, law: &law, res: CELLS, max_step_cells: max_step, max_layers }, &nodes).unwrap()
+    plan_rivers(
+        &RiverRequest {
+            source: src,
+            law: &law,
+            res: CELLS,
+            min_samples: planet_frame::river::MIN_RIVER_SAMPLES,
+            full_samples: planet_frame::river::FULL_RIVER_SAMPLES,
+            max_layers,
+        },
+        &nodes,
+    )
+    .unwrap()
 }
 
 fn river_plan(plan: &TerrainPlan, max_layers: usize) -> RiverPlan {
-    plan_river_over(plan, &make_river(plan, 6.0), max_layers, 2.0)
+    plan_river_over(plan, &make_river(plan, 6.0), max_layers)
 }
 
 fn renderer(ctx: &GpuContext, plan: &TerrainPlan, field: &Reference) -> TerrainRenderer {
@@ -261,7 +272,7 @@ fn the_coverage_lands_where_its_samples_are_along_both_axes_of_the_node() {
     // The strip coverage: water (code 0) on the samples with the low index along one axis, far outside elsewhere.
     for axis in 0..2usize {
         let coverage: Vec<u8> = (0..size * size).map(|k| if [k % size, k / size][axis] < 4 { 0 } else { 255 }).collect();
-        let strip = RiverPlan { nodes: vec![RiverNode { node, size: size as u32, coverage }], dropped: 0 };
+        let strip = RiverPlan { nodes: vec![RiverNode { node, size: size as u32, coverage, fade: 255 }], dropped: 0 };
         let (with, _) = frame(&ctx, &mut r, &plan, Some(&strip));
         let verts: Vec<((u32, u32), (f64, f64))> = (0..=CELLS)
             .flat_map(|j| (0..=CELLS).map(move |i| (i, j)))
@@ -295,13 +306,16 @@ fn a_river_plan_the_array_cannot_hold_is_an_error_and_a_later_frame_without_rive
     let mut p = plan.clone();
     p.lit = Some(LitPlan::fixed(EV));
     let size = (CELLS + 1) as usize;
-    let node = |n: u32, side: usize| RiverNode { node: n, size: side as u32, coverage: vec![0; side * side] };
+    let node = |n: u32, side: usize| RiverNode { node: n, size: side as u32, coverage: vec![0; side * side], fade: 255 };
     for (bad, what) in [
         (RiverPlan { nodes: vec![node(0, size + 1)], dropped: 0 }, "a coverage of another size"),
         (RiverPlan { nodes: vec![node(plan.nodes.len() as u32, size)], dropped: 0 }, "a node the plan does not have"),
         (RiverPlan { nodes: vec![node(0, size), node(0, size)], dropped: 0 }, "a node twice"),
         (RiverPlan { nodes: (0..=RIVER_LAYERS).map(|_| node(0, size)).collect(), dropped: 0 }, "more nodes than layers"),
-        (RiverPlan { nodes: vec![RiverNode { node: 0, size: size as u32, coverage: vec![0; 3] }], dropped: 0 }, "a short coverage"),
+        (
+            RiverPlan { nodes: vec![RiverNode { node: 0, size: size as u32, coverage: vec![0; 3], fade: 255 }], dropped: 0 },
+            "a short coverage",
+        ),
     ] {
         p.rivers = Some(bad);
         assert!(matches!(r.render(&ctx, &p, false), Err(ExecError::BadRiverPlan(_))), "{what} is a plan error, not a panic");
@@ -404,7 +418,7 @@ fn the_river_scene_has_smooth_banks_at_the_near_pose_and_no_pop_between_two_leve
     // The near pose: low, pitched down, a river 10 cells wide through the finest node nearest to the camera.
     let (plan, field) = scene_at(25.0, 40.0, 4.0);
     let src = make_river(&plan, 10.0);
-    let rp = plan_river_over(&plan, &src, RIVER_LAYERS as usize, 2.0);
+    let rp = plan_river_over(&plan, &src, RIVER_LAYERS as usize);
     assert!(!rp.nodes.is_empty(), "the near pose has river nodes");
     let mut r = renderer(&ctx, &plan, &field);
     let (base, _) = frame(&ctx, &mut r, &plan, None);
@@ -437,7 +451,7 @@ fn the_river_scene_has_smooth_banks_at_the_near_pose_and_no_pop_between_two_leve
     let (coarse_plan, _) = scene_capped(25.0, 40.0, 4.0, finest - 1);
     let coarse_nodes = coarse_plan.nodes.len();
     assert_eq!(coarse_plan.nodes.iter().map(|n| n.level).max().unwrap(), finest - 1);
-    let rp_coarse = plan_river_over(&coarse_plan, &src, RIVER_LAYERS as usize, 2.0);
+    let rp_coarse = plan_river_over(&coarse_plan, &src, RIVER_LAYERS as usize);
     let mut rc = renderer(&ctx, &coarse_plan, &field);
     let (base_c, _) = frame(&ctx, &mut rc, &coarse_plan, None);
     let (with_c, _) = frame(&ctx, &mut rc, &coarse_plan, Some(&rp_coarse));
@@ -448,4 +462,52 @@ fn the_river_scene_has_smooth_banks_at_the_near_pose_and_no_pop_between_two_leve
     println!("two levels: {wet_px} wet pixels (finest level {finest}, {} nodes) and {wet_c} (finest level {}, {coarse_nodes} nodes); {differ} pixels change wetness: {:.1} % of the wet pixels", plan.nodes.len(), finest - 1, share * 100.0);
     assert!(wet_c > 100, "the coarser plan still draws the river ({wet_c})");
     assert!(share <= 0.1, "the river pops between two levels of detail: {:.1} % of its pixels change wetness", share * 100.0);
+}
+
+// spec: TEST-117, REND-059
+#[test]
+fn flying_out_a_river_fades_with_its_width_in_samples_and_its_wet_pixels_fall() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let (near, field) = scene_at(25.0, 40.0, 4.0);
+    let src = make_river(&near, 10.0);
+    let mut series: Vec<(f64, u8, usize, u8, f64)> = Vec::new();
+    for k in 0..8 {
+        let alt = 25.0 * (0..k).fold(1.0, |a, _| a * 1.4);
+        let (plan, _) = scene_at(alt, 40.0, 4.0);
+        let rp = plan_river_over(&plan, &src, RIVER_LAYERS as usize);
+        let mut r = renderer(&ctx, &plan, &field);
+        let (base, _) = frame(&ctx, &mut r, &plan, None);
+        let (with, _) = frame(&ctx, &mut r, &plan, Some(&rp));
+        let mass: f64 = wetness_mass(&base, &with);
+        let finest = plan.nodes.iter().map(|n| n.level).max().unwrap();
+        let fade = rp.nodes.iter().map(|n| n.fade).max().unwrap_or(0);
+        series.push((alt, finest, rp.nodes.len(), fade, mass));
+    }
+    for (alt, finest, nodes, fade, mass) in &series {
+        println!(
+            "flight-out: altitude {alt:8.1} m, finest level {finest}, {nodes:3} river nodes, strongest fade {fade:3}, wet mass {mass:9.1}"
+        );
+    }
+    // The river leaves the picture as the camera rises: its wet mass falls (a tolerance of 5 % for the pixel grid), the plan's strongest fade never grows, and the river is seen at the first pose and gone at the last.
+    for w in series.windows(2) {
+        assert!(w[1].4 <= w[0].4 * 1.05 + 1.0, "the wet mass grows from {} to {} px between {} m and {} m", w[0].4, w[1].4, w[0].0, w[1].0);
+        assert!(
+            w[1].3 <= w[0].3 || w[0].2 == 0,
+            "the strongest fade grows from {} to {} between {} m and {} m",
+            w[0].3,
+            w[1].3,
+            w[0].0,
+            w[1].0
+        );
+    }
+    assert!(series[0].4 > 200.0 && series[series.len() - 1].4 == 0.0);
+    // Normalised by the perspective (the pixels of a river fall with the square of the altitude): reported for the owner's look review, with the sequence above.
+    let norm: Vec<String> = series.iter().map(|s| format!("{:.2e}", s.4 * s.0 * s.0)).collect();
+    println!("flight-out: wet mass times altitude squared: {}", norm.join(" "));
+}
+
+/// The river's wet mass of a frame: the sum over its pixels of how much the river darkened them, in pixels (a pixel half darkened counts a half).
+fn wetness_mass(base: &[[f32; 4]], with: &[[f32; 4]]) -> f64 {
+    let w = wetness(base, with);
+    w.iter().map(|v| f64::from(*v)).sum()
 }

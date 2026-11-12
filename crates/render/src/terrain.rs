@@ -764,13 +764,16 @@ fn fs_lit(in: VsOut) -> LitOut {
 // The share of the fragment that is river water (REND-059): the coverage code of its node's layer, interpolated over the node's samples (the code is `128 + 32 d`, `d` the signed distance in cells to the river's edge, so water
 // where it is at or under 128), with the edge smoothed over one code step of the screen (no cell staircase). The scale of the code is in cells, not metres (CON-11). Derivatives are taken in uniform control flow.
 fn river_wet(node_index: u32, aux: vec2<f32>) -> f32 {
-    let layer = river_layers[node_index];
+    // The node's word: the layer of the coverage array in the low 16 bits and the strength of its river in the next 8 (the plan's `fade`: the width in samples of the node between the minimum and full, REND-059); `0xffffffff`: none.
+    let word = river_layers[node_index];
+    let layer = word & 0xffffu;
+    let strength = f32((word >> 16u) & 0xffu) / 255.0;
     let edge = f32(textureDimensions(river_cov).x - 1u);
     let uv = (clamp(aux, vec2<f32>(0.0), vec2<f32>(1.0)) * edge + 0.5) / (edge + 1.0);
     let c = textureSampleLevel(river_cov, river_samp, uv, i32(min(layer, 255u)), 0.0).r * 255.0;
     let w = max(fwidth(c), 1.0);
     let wet = 1.0 - smoothstep(128.0 - 0.5 * w, 128.0 + 0.5 * w, c);
-    return select(0.0, wet, layer != 0xffffffffu);
+    return select(0.0, wet * strength, word != 0xffffffffu);
 }
 
 // The look of river water until its own look values exist (REND-060): the lit colour darkened and tinted blue-green.
@@ -2686,7 +2689,8 @@ impl TerrainRenderer {
                 let size = self.cells + 1;
                 let mut layers = vec![0xffu8; 4 * self.node_capacity.max(1)];
                 for (used, node) in r.nodes.iter().enumerate() {
-                    layers[4 * node.node as usize..4 * node.node as usize + 4].copy_from_slice(&(used as u32).to_le_bytes());
+                    layers[4 * node.node as usize..4 * node.node as usize + 4]
+                        .copy_from_slice(&((used as u32) | (u32::from(node.fade) << 16)).to_le_bytes());
                     ctx.queue.write_texture(
                         wgpu::TexelCopyTextureInfo {
                             texture: &set.river_array,
