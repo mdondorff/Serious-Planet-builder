@@ -50,6 +50,8 @@ mod layer_tiles;
 mod meshpack;
 #[path = "pack.rs"]
 mod pack;
+#[path = "region_bake.rs"]
+mod region_bake;
 #[path = "relief_store.rs"]
 mod relief_store;
 #[path = "stage_keys.rs"]
