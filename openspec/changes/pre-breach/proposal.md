@@ -1,6 +1,8 @@
 # pre-breach (GEN-174, TEST-121)
 
-The profile runs the breach to the fixed point (cap 8 passes), architect 2026-11-12; R3b: three passes of 0.45 s (share of land in basins over 30 cells 21.3 % to 4.9 % at three passes, 3.8 % at six).
+OFF by default (architect, 2026-11-12): the default `PlanParams`, the bake profile and the examples do not set `pre_breach` (`PreBreach::PROFILE` stays defined); the production-path measurement made the 45-degree defect worse (see the spec text), a redesign follows. The measurements below are the start surface only.
+
+The breach ran to the fixed point (cap 8 passes) in the profile, architect 2026-11-12 (now off); R3b: three passes of 0.45 s (share of land in basins over 30 cells 21.3 % to 4.9 % at three passes, 3.8 % at six).
 
 ## Why
 - SPIKE-108 follow-up: the start surface holds large closed basins on 21 to 32 % of the land (R3b: 21.3 % in basins over 30 cells; the DEM 3.3 %); the fill turns each into a flat and the carve incises along the flat's routes.
