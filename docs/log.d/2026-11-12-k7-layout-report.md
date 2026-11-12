@@ -1,0 +1,1 @@
+- BUILD-052: cargo xtask k7-layout reports K7's difference from an alternate tile layout (fixture: tile 64 against 128, halo 24); baseline in docs/gates/k7-layout-baseline.txt; prepush runs it on K7 diffs; region_bake split into region_front + layout_difference (crusader, 2026-11-12)
