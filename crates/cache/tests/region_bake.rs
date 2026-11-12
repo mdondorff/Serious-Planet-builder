@@ -228,9 +228,9 @@ fn a_world_of_huge_bounds_runs_f64_rounds_and_commits_at_the_profile_epsilon_and
     let (cb, _) = bake_region(&w, &RegionSpec { threads: 8, ..huge }, &base, &climate, b.path()).unwrap();
     assert_eq!(ca.id, cb.id, "the same bytes at one and eight threads");
     assert_ne!(ca.id, bake_region(&w, &spec(1), &base, &climate, Dir::new("region-f64-c").path()).unwrap().0.id, "the bounds are keyed");
-    // Bounds that do not hold the base: refused at once, naming the stage (certain: the fixture base reaches 1.6 km). A round that lifts a surface past bounds that held the base is returned the same way (the rounds' narrowing
+    // Bounds that do not hold the base: refused at once, naming the stage (certain: the fixture base reaches about 1 km, above R = 300 m). A round that lifts a surface past bounds that held the base is returned the same way (the rounds' narrowing
     // assert is caught): which bounds that takes depends on the carve, so this test asserts only the certain case.
-    let tight = RegionSpec { height_bounds: (-2_000.0, 1_000.0), ..spec(1) };
+    let tight = RegionSpec { height_bounds: (-300.0, 300.0), ..spec(1) };
     let e = solve_region_for_test(&tight).expect_err("a base above the bounds is refused");
     assert!(e.contains("the base of the region") && e.contains("height bounds"), "{e}");
 }
