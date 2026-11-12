@@ -78,6 +78,7 @@ A change of a gate row of A3 12.1 or of the table above needs a line here (BUILD
 - Every gate of A3 section 12.1 passes on the fresh build and after each edit, or its failure is reported against S1-S5.
 - Measured: landmass memory against 12 GB, store against 40 GB, latency of the preview levels.
 - Measured by a lane other than the one that built the item (item 12).
+- G-RT on the in-memory base fixture (no base store reads) is provisional. It is re-run over a store of the approved world bake, and its row names the streaming measurements that stand in for the base read until then (architect, 2026-11-12).
 - A re-estimate of the remaining work under A and under B.
 - The owner reviews the prototype once and decides A or B.
 
