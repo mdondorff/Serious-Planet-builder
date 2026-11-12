@@ -55,11 +55,11 @@ fn base(d: Vec3) -> f64 {
     1500.0 + 100.0 * d.z
 }
 
-fn tile_at(level: u8, s: f64, t: f64) -> TileId {
+fn tile_at(face: Face, level: u8, s: f64, t: f64) -> TileId {
     let n = f64::from(1u32 << level);
     let ix = (libm::floor((s + 1.0) / 2.0 * n) as i64).clamp(0, (1i64 << level) - 1);
     let iy = (libm::floor((t + 1.0) / 2.0 * n) as i64).clamp(0, (1i64 << level) - 1);
-    TileId::new(Face(2), level, ix as u32, iy as u32).expect("a tile")
+    TileId::new(face, level, ix as u32, iy as u32).expect("a tile")
 }
 
 // spec: TEST-123, STRM-086, REND-062
@@ -134,7 +134,7 @@ fn a_flight_over_a_one_face_world_with_a_channel_graph_plans_its_rivers_through_
             let (s, t) = (to_face(px), to_face(py));
             // The flight descends over the point: a node ring of 3 x 3 tiles at each level from 6 down to 14.
             for level in 6u8..=14 {
-                let centre = tile_at(level, s, t);
+                let centre = tile_at(Face(2), level, s, t);
                 let mut nodes = Vec::new();
                 for dy in -1i64..=1 {
                     for dx in -1i64..=1 {
@@ -175,8 +175,79 @@ fn a_flight_over_a_one_face_world_with_a_channel_graph_plans_its_rivers_through_
             d(a).total_cmp(&d(b))
         })
         .unwrap();
-    let control = plan_nodes_rivers(&src, NODE_CELLS, &[(0, tile_at(14, to_face(far.0), to_face(far.1)), 0.0)]).expect("the control plan");
+    let control =
+        plan_nodes_rivers(&src, NODE_CELLS, &[(0, tile_at(Face(2), 14, to_face(far.0), to_face(far.1)), 0.0)]).expect("the control plan");
     assert!(control.nodes.is_empty(), "a node at {far:?}, far from every channel, carries no river");
     assert!(with_river > 0, "some node of the flight carries a river");
     assert!(peak <= CACHE_BOUND, "the reader holds {peak} B, its bound is {CACHE_BOUND} B");
+}
+
+// spec: TEST-123, STRM-086, REND-062
+/// The flight of TEST-123 over a REAL stored region: a commit folder baked by `cargo run --release -p planet-cache --example bake_region` (the G-RT fixture), named by `PLANET_RIVER_STORE`. Skips with a message when the variable
+/// is unset or the folder holds no commit. Reports the reader's cache peak (against its 64 MiB default bound), the decodes and the time of the flight; light CPU (run it at BelowNormal).
+#[test]
+#[ignore = "needs PLANET_RIVER_STORE=<a commit folder baked by the bake_region example>"]
+fn a_flight_over_a_stored_region_with_a_channel_graph_reports_the_readers_cache_peak() {
+    use planet_cache::l_writer::Commit;
+    use planet_cache::river_read::DEFAULT_CACHE_BYTES;
+    let Ok(dir) = std::env::var("PLANET_RIVER_STORE") else {
+        println!("skipped: PLANET_RIVER_STORE names no commit folder (the G-RT fixture: `bake_region`, output target/stores/g-rt-fixture)");
+        return;
+    };
+    let dir = std::path::PathBuf::from(dir);
+    let Some(commit) = Commit::read(&dir).expect("a readable commit file") else {
+        println!("skipped: {} holds no commit", dir.display());
+        return;
+    };
+    assert!(!commit.graph.is_empty(), "the commit holds a channel graph");
+    let world = GlobalWorld::from_definition(&WorldDefinition::single_planet(commit.spec.radius_m, commit.spec.seed))
+        .expect("the world of the commit");
+    let face = Face(commit.tiles.keys().next().expect("a tile").0);
+    let store = Arc::new(TileStore::open(&dir, world.params()).unwrap());
+    let reader = RiverReader::new(store, commit.clone(), DEFAULT_CACHE_BYTES).expect("the reader of the commit");
+    let src = ReaderRiverSource::new(Arc::new(reader));
+    let cells = f64::from(src.reader().grid_dims().0);
+    let to_face = |p: f64| 2.0 * (p + 0.5) / cells - 1.0;
+
+    // The course: the points of the longest channels of the commit's tiles, every 24th point.
+    let t0 = std::time::Instant::now();
+    let mut chans: Vec<Arc<Vec<planet_generators::bake::k7::Channel>>> = Vec::new();
+    for &(f, ti, tj) in commit.tiles.keys() {
+        chans.push(src.reader().tile_channels(Face(f), ti, tj).expect("a tile's channels"));
+    }
+    let mut longest: Vec<&planet_generators::bake::k7::Channel> = chans.iter().flat_map(|c| c.iter()).collect();
+    longest.sort_by_key(|c| std::cmp::Reverse(c.points.len()));
+    longest.truncate(4);
+    assert!(!longest.is_empty(), "the store has channels");
+    let course: Vec<(f64, f64)> = longest.iter().flat_map(|c| c.points.iter().step_by(24).copied()).collect();
+    let (mut peak, mut asked, mut with_river) = (src.reader().bytes(), 0usize, 0usize);
+    for &(px, py) in &course {
+        let (s, t) = (to_face(px), to_face(py));
+        for level in 6u8..=16 {
+            let centre = tile_at(face, level, s, t);
+            let mut nodes = Vec::new();
+            for dy in -1i64..=1 {
+                for dx in -1i64..=1 {
+                    let (x, y) = (i64::from(centre.x()) + dx, i64::from(centre.y()) + dy);
+                    if (0..(1i64 << level)).contains(&x) && (0..(1i64 << level)).contains(&y) {
+                        let id = TileId::new(face, level, x as u32, y as u32).unwrap();
+                        nodes.push((nodes.len() as u32, id, f64::from(level) * 100.0 + (dx.abs() + dy.abs()) as f64));
+                    }
+                }
+            }
+            let plan = plan_nodes_rivers(&src, NODE_CELLS, &nodes).expect("the river plan");
+            asked += nodes.len();
+            with_river += plan.nodes.len();
+            peak = peak.max(src.reader().bytes());
+        }
+    }
+    let secs = t0.elapsed().as_secs_f64();
+    println!(
+        "river flight over {}: {} course points, {asked} nodes asked, {with_river} carry a river; reader cache peak {peak} B of {DEFAULT_CACHE_BYTES} B, {} decodes; {secs:.1} s (the read of every tile and the flight; not a measurement)",
+        dir.display(),
+        course.len(),
+        src.reader().decodes()
+    );
+    assert!(with_river > 0, "some node of the flight carries a river");
+    assert!(peak <= DEFAULT_CACHE_BYTES, "the reader holds {peak} B, its bound is {DEFAULT_CACHE_BYTES} B");
 }
