@@ -92,6 +92,8 @@ mod regions;
 mod residency;
 #[path = "river_coverage.rs"]
 mod river_coverage;
+#[path = "river_plan.rs"]
+mod river_plan;
 #[path = "scheduler_equivalence.rs"]
 mod scheduler_equivalence;
 #[path = "scheduler_incremental.rs"]
