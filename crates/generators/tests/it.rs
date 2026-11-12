@@ -88,7 +88,6 @@ mod climate;
 mod coast;
 #[path = "coast_tilt.rs"]
 mod coast_tilt;
-mod plateau_rim;
 #[path = "compact.rs"]
 mod compact;
 #[path = "continents.rs"]
@@ -135,6 +134,7 @@ mod ocean;
 mod orography;
 #[path = "pipeline.rs"]
 mod pipeline;
+mod plateau_rim;
 #[path = "reads_contract.rs"]
 mod reads_contract;
 #[path = "region_mask.rs"]

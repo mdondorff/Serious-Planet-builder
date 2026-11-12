@@ -98,5 +98,8 @@ fn with_the_rule_on_the_share_follows_the_distance_not_the_field_and_the_shore_h
             assert!((on.e0 - off.e0).abs() <= 0.1 * U + 1e-9, "at the shore the rule adds little: {} m", on.e0 - off.e0);
         }
     }
-    assert!(inside > 0 && outside > 0 && shore > 0, "the spiral reaches plateau interiors ({inside}), land outside them ({outside}) and the shore ({shore})");
+    assert!(
+        inside > 0 && outside > 0 && shore > 0,
+        "the spiral reaches plateau interiors ({inside}), land outside them ({outside}) and the shore ({shore})"
+    );
 }
