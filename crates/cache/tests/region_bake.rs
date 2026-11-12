@@ -246,7 +246,7 @@ fn solve_region_for_test(s: &RegionSpec) -> Result<(), String> {
 // spec: BUILD-052
 #[test]
 fn the_same_layout_twice_differs_in_no_cell() {
-    let s = spec(2);
+    let s = RegionSpec { margin: 12, ..spec(2) };
     let d = planet_cache::region_bake::layout_difference(&s, &base, &climate, (s.tile, s.halo)).unwrap();
     assert!(d.rows.iter().all(|r| r.differ == 0 && r.max == 0.0), "{:#?}", d.rows);
     assert!(d.rows[0].cells > 0, "no common cells: {:#?}", d.rows);
@@ -255,8 +255,8 @@ fn the_same_layout_twice_differs_in_no_cell() {
 // spec: BUILD-052
 #[test]
 fn the_bands_and_the_line_split_partition_the_common_cells() {
-    let s = spec(2);
-    let d = planet_cache::region_bake::layout_difference(&s, &base, &climate, (32, 12)).unwrap();
+    let s = RegionSpec { margin: 12, ..spec(2) };
+    let d = planet_cache::region_bake::layout_difference(&s, &base, &climate, (128, 24)).unwrap();
     let all = d.rows[0].cells;
     assert_eq!(d.rows[1].cells + d.rows[2].cells, all, "line and non-line cells: {:#?}", d.rows);
     assert_eq!(d.rows[3..].iter().map(|r| r.cells).sum::<usize>(), all, "the seam bands: {:#?}", d.rows);
@@ -265,8 +265,8 @@ fn the_bands_and_the_line_split_partition_the_common_cells() {
 // spec: BUILD-052
 #[test]
 fn a_halo_that_is_too_small_changes_the_cells_near_the_seam_more_than_the_cells_far_from_it() {
-    let s = spec(2);
-    let d = planet_cache::region_bake::layout_difference(&s, &base, &climate, (s.tile, 4)).unwrap();
+    let s = RegionSpec { margin: 12, halo: 28, ..spec(2) };
+    let d = planet_cache::region_bake::layout_difference(&s, &base, &climate, (s.tile, 24)).unwrap();
     let rate = |rows: &[planet_cache::region_bake::LayoutRow]| {
         let (n, k) = rows.iter().fold((0usize, 0usize), |(n, k), r| (n + r.differ, k + r.cells));
         n as f64 / k.max(1) as f64

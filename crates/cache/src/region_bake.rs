@@ -530,11 +530,11 @@ fn fixture_spec(threads: usize) -> RegionSpec {
     }
 }
 
-/// The layout report of the fixture (BUILD-052): the fixture's layout (tile 64, halo 24) against the alternative of 32-cell tiles with a halo of 12, at `threads` threads.
+/// The layout report of the fixture (BUILD-052): the fixture's layout (tile 64, halo 24) against the alternative of 128-cell tiles with a halo of 24 (a margin of 12 regional cells holds the larger tiles; K7's halo is at least 24 cells, GEN-169), at `threads` threads.
 pub fn layout_fixture(threads: usize) -> Result<LayoutDiff, String> {
     let base = |d: Vec3| 500.0 - 2400.0 * (d.x - 0.1) + 120.0 * libm::sin(40.0 * d.z);
     let climate = |_: Vec3| (1.0e-8, 0.0, 1.0);
-    layout_difference(&fixture_spec(threads), &base, &climate, (32, 12))
+    layout_difference(&RegionSpec { margin: 12, ..fixture_spec(threads) }, &base, &climate, (128, 24))
 }
 
 /// The determinism fixture of the cross-OS manifest (BUILD-051): a small analytic face (a ridge that falls to the sea, constant runoff) baked
