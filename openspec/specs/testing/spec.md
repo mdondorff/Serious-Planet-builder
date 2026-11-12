@@ -1690,3 +1690,45 @@ Source: GEN-167, architect 2026-11-10
 #### Scenario: Cases
 - **WHEN** the tests of `bake_water_mask` run
 - **THEN** each case above has a test that cites GEN-167 and fails without the mask
+
+### Requirement: TEST-116 G-PROFILE holds along the stored channels at tier A
+A tier-A test SHALL show that along every stored channel piece the surface does not rise downstream by more than 0.25 m, in K7's heights and in the stored read `B + L`, with the regional change off and on and across tile borders, on a fixture with `cutoff_binds` 0.
+- A deep-fixture test asserts every tile with a rise over 0.25 m reports cutoff cells and the report counts at least every rise.
+- Production runs report `cutoff_binds`; a non-zero count goes to the architect.
+
+Verify: A
+Status: active
+Source: Architect 2026-11-11, A3 12.1 (G-PROFILE)
+
+#### Scenario: Shallow fixture
+- **WHEN** the fixture's channels are burnt into a ground that falls with the flow
+- **THEN** no step along a stored piece rises over 0.25 m and no cutoff binds in any tile
+
+#### Scenario: Deep fixture
+- **WHEN** the trenches are deeper than the carry
+- **THEN** each rise over 0.25 m lies in a tile whose final pass reports cutoff cells
+
+### Requirement: TEST-117 The river scene
+A tier-C scene SHALL draw a river over the lit terrain at a near pose and check: bank positions move at most 1.5 px per pixel line beyond a straight line; one level coarser changes the wetness of at most 10 % of the river's pixels; the picture is a golden per adapter.
+- Flying out, the wet pixels form one connected line, the wet mass falls and the strength never grows; while at least 50 px are wet, no step lowers mass times altitude squared by over half.
+- The first river goldens go to the owner's /bless (ADR 0017).
+- The report gives the REND-061 boundary difference and a thin river across two levels (not gated).
+
+Verify: C
+Status: planned
+Source: Architect 2026-11-12 (REND-059 part C), REND-059, REND-061, ADR 0017
+
+#### Scenario: Banks and levels
+- **WHEN** the near pose is drawn with the river, and again with the finest level one coarser
+- **THEN** the bank second difference is at most 1.5 px and at most 10 % of the river's pixels change wetness
+
+### Requirement: TEST-123 The flight over a graph world stays within the reader's cache bound
+A flight over a small one-face world baked with a channel graph SHALL plan rivers through the reader at levels 6 to 14 along the longest channel, twice, and the reader's cache SHALL hold at most its byte bound at every step; the flight reports the peak bytes and the decodes.
+
+Verify: A
+Status: active
+Source: Architect 2026-11-12, STRM-085
+
+#### Scenario: The cache peak
+- **WHEN** the flight runs twice over the same course
+- **THEN** some node carries a river and the cache never exceeds its bound

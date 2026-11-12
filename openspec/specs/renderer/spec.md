@@ -821,3 +821,61 @@ Source: SPIKE-100 (D1 patch break-up), owner 2026-11-04, planner 2026-11-04 (sli
 #### Scenario: A look file in the stills and the cost path
 - **WHEN** a pose is drawn without and with a look file whose `ground` table gives the detail strength, a crack depth and an 8 m octave, a look file that does not load is named, and the cost row of a plan with the patch and the two octaves given is read
 - **THEN** the pictures differ, the unreadable file is refused naming its path, a run without a look file draws what it drew, and the row has the patch's and the octaves' share as the full draw minus the draw with it at 0 (absent when the plan has it at 0)
+
+### Requirement: REND-059 The river coverage of a tile is a signed distance to the river edge
+The plan SHALL give each tile with rivers a coverage of its cell centres: the signed distance in cells to the nearest river edge, coded `128 + 32 d` clamped to 0..255, and the renderer SHALL draw river water where the interpolated code is at or under 128.
+- The river is the stored channels' polylines at width `max(min(w, 32 cells), 1 cell)` (`trench_width_cells`).
+- The distance depends on the channels alone (CON-30).
+- A node carries coverage at its own samples only while a river is drawn wider than `min_samples` 0.5 of its samples, at full strength from `full_samples` 1.0, linear between (architect, 2026-11-12).
+- A texel beyond 4 cells from every edge has code 255.
+
+Verify: A, C
+Status: active
+Source: Architect 2026-11-11 (item 15 PR 8), GEN-165, GEN-168
+
+#### Scenario: Smooth banks
+- **WHEN** a 45-degree river is coded
+- **THEN** the distance changes by cos 45 degrees a cell along a row, with no staircase, and a river under a cell is one cell wide
+
+#### Scenario: A widening river
+- **WHEN** a segment widens from one cell to 32 cells and is burnt and coded
+- **THEN** every burnt cell is within 0.75 cell of the coded edge and every cell half a cell inside the edge is burnt (the edge is the envelope of the burn's discs)
+
+### Requirement: REND-061 The plan chooses which nodes get a river layer
+The terrain plan SHALL carry the river coverage as an optional part (`rivers`; `None` keeps the plan's text and hash). The renderer SHALL hold coverages in one 8-bit texture array of at most 256 layers; when more nodes have a river the nearest keep theirs (ties by node index) and the dropped count is in the plan's text and the frame's stats.
+- The scale of a code is cells, not metres (CON-11).
+- Neighbouring nodes agree on shared edge samples; across a level boundary the largest in-between difference is reported.
+- Sampling clamps inside a layer.
+- With no river node every lit golden is bit-identical.
+
+Verify: A, C
+Status: active
+Source: Architect 2026-11-12 (REND-059 part C), REND-059, CON-03, CON-11
+
+#### Scenario: Layer overflow
+- **WHEN** six nodes have a river and the array holds three layers
+- **THEN** the three nearest keep theirs, the text says three were dropped, and the same plan results from any input order
+
+### Requirement: REND-060 River water is the ground at the burned bed
+River water SHALL have no geometry of its own: where the coverage is wet the terrain's own ground is drawn as water, and that ground is the trench K7 burned to the segment's profile, so the water level is the burned bed (GEN-165). A frame with rivers SHALL submit the same draws, triangles and node records as the frame without. A visible depth (a surface above the bed) is a look value, decided later (architect, 2026-11-12).
+- The cells the coverage calls water are cells the burn lowered, to within the line's rasterisation.
+
+Verify: A, C
+Status: active
+Source: Architect 2026-11-12 (REND-059 part C), GEN-165, REND-059
+
+#### Scenario: No geometry
+- **WHEN** a frame is drawn with and without a river plan
+- **THEN** the draws, triangles, vertex bytes and node records are equal
+
+### Requirement: REND-062 The viewer plans the rivers of every lit frame from its river source
+When the stored world holds a river source (STRM-086), the viewer SHALL set the lit plan's `rivers` each frame from `plan_rivers` over the terrain plan's nodes, with the river law of the bake (`WidthLaw::STANDARD`), the minimum and full samples `MIN_RIVER_SAMPLES` and `FULL_RIVER_SAMPLES`, the layer count `RIVER_LAYERS` and the node's distance from the camera; a world without a river source SHALL leave `rivers` empty.
+- A plan error ends the frame with the error's text (never a silent drop).
+
+Verify: A
+Status: active
+Source: Architect 2026-11-12 (item 15 PR 8), REND-059, STRM-086
+
+#### Scenario: A world with a graph
+- **WHEN** the viewer plans a lit frame over a world whose commit holds a channel graph
+- **THEN** the plan's rivers hold the nodes with a river in range
