@@ -285,3 +285,81 @@ pub fn bake_region(
 pub fn lattice_direction(face: Face, nodes: usize, i: usize, j: usize) -> Vec3 {
     face_to_direction(&TangentWarp, face, 2.0 * i as f64 / nodes as f64 - 1.0, 2.0 * j as f64 / nodes as f64 - 1.0)
 }
+
+/// The determinism fixture of the cross-OS manifest (BUILD-051): a small analytic face (a ridge that falls to the sea, constant runoff) baked
+/// to a commit with a channel graph at `threads` threads, and a 64-bit hash of every file the bake wrote (path and bytes, in path order).
+/// The manifest lines of one process hold the hash at one thread twice and at eight threads: a thread count or a repeat that changes a byte
+/// changes a line, and a platform whose float results differ changes the same line on one operating system against the other.
+pub fn determinism_fixture(threads: usize) -> Result<u64, String> {
+    use planet_world_def::WorldDefinition;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    const RADIUS_M: f64 = 6_371_000.0;
+    static N: AtomicUsize = AtomicUsize::new(0);
+    let world = GlobalWorld::from_definition(&WorldDefinition::single_planet(RADIUS_M, 3))
+        .map_err(|e| format!("the fixture world: {e:?}"))?
+        .with_block_limit(4);
+    let spec = RegionSpec {
+        seed: 3,
+        face: Face(2),
+        radius_m: RADIUS_M,
+        regional: 64,
+        region: (16, 39, 16, 39),
+        margin: 6,
+        tile: 64,
+        halo: 24,
+        rounds: 2,
+        threads,
+        res: 64,
+        base_id: 7,
+        inputs_id: 11,
+        keep_channels: false,
+    };
+    let base = |d: Vec3| 500.0 - 2400.0 * (d.x - 0.1) + 120.0 * libm::sin(40.0 * d.z);
+    let climate = |_: Vec3| (1.0e-8, 0.0, 1.0);
+    let dir = std::env::temp_dir().join(format!("planet-det-fixture-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let _ = std::fs::remove_dir_all(&dir);
+    let baked = bake_region(&world, &spec, &base, &climate, &dir);
+    let hashed = baked.and_then(|_| hash_tree(&dir));
+    let _ = std::fs::remove_dir_all(&dir);
+    hashed
+}
+
+/// A 64-bit fold of every file under `dir` (relative path, length and bytes in 8-byte little-endian words, in path order).
+fn hash_tree(dir: &Path) -> Result<u64, String> {
+    use planet_core::hash::mix64;
+    fn walk(at: &Path, out: &mut Vec<std::path::PathBuf>) -> Result<(), String> {
+        let mut entries: Vec<_> = std::fs::read_dir(at)
+            .map_err(|e| format!("{}: {e}", at.display()))?
+            .map(|e| e.map(|e| e.path()))
+            .collect::<Result<_, _>>()
+            .map_err(|e| e.to_string())?;
+        entries.sort();
+        for p in entries {
+            if p.is_dir() {
+                walk(&p, out)?;
+            } else {
+                out.push(p);
+            }
+        }
+        Ok(())
+    }
+    let mut files = Vec::new();
+    walk(dir, &mut files)?;
+    let mut h = mix64(files.len() as u64);
+    for f in files {
+        let rel = f.strip_prefix(dir).unwrap_or(&f).to_string_lossy().replace('\\', "/");
+        for chunk in rel.as_bytes().chunks(8) {
+            let mut w = [0u8; 8];
+            w[..chunk.len()].copy_from_slice(chunk);
+            h = mix64(h ^ u64::from_le_bytes(w));
+        }
+        let bytes = std::fs::read(&f).map_err(|e| format!("{}: {e}", f.display()))?;
+        h = mix64(h ^ bytes.len() as u64);
+        for chunk in bytes.chunks(8) {
+            let mut w = [0u8; 8];
+            w[..chunk.len()].copy_from_slice(chunk);
+            h = mix64(h ^ u64::from_le_bytes(w));
+        }
+    }
+    Ok(h)
+}

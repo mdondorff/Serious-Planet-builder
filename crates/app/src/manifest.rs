@@ -69,12 +69,41 @@ pub fn persistent_known_answers() -> String {
 pub fn full_manifest() -> String {
     let mut s = planet_generators::manifest::determinism_manifest();
     s.push_str(&persistent_known_answers());
+    s.push_str(&region_bake_fixture_lines());
+    s
+}
+
+/// The region bake fixture of the cross-OS determinism manifest (BUILD-051): the hash of the bake's files at one thread twice and at eight
+/// threads (`planet_cache::region_bake::determinism_fixture`). The three lines of one run are equal (a thread count or a repeat that changes a
+/// byte breaks that, a tier A test below), and the manifest diff across Windows and Linux compares them with the other platform's.
+pub fn region_bake_fixture_lines() -> String {
+    let mut s = String::new();
+    for (label, threads) in [("t1", 1usize), ("t1again", 1), ("t8", 8)] {
+        let h = planet_cache::region_bake::determinism_fixture(threads)
+            .unwrap_or_else(|e| panic!("the determinism fixture at {threads} threads: {e}"));
+        s.push_str(&format!(
+            "regionbake {label} {h:016x}
+"
+        ));
+    }
     s
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // spec: BUILD-051
+    #[test]
+    fn the_region_bake_fixture_gives_one_hash_at_one_thread_twice_and_at_eight_threads() {
+        let lines = region_bake_fixture_lines();
+        let hashes: Vec<&str> = lines.lines().map(|l| l.rsplit(' ').next().unwrap()).collect();
+        assert_eq!(hashes.len(), 3, "{lines}");
+        assert!(hashes.iter().all(|h| h.len() == 16 && *h != "0000000000000000"), "{lines}");
+        assert!(hashes[0] == hashes[1], "a second bake at one thread gives other bytes: {lines}");
+        assert!(hashes[0] == hashes[2], "eight threads give other bytes than one: {lines}");
+        assert!(full_manifest().contains("regionbake t8 "), "the fixture is part of the manifest `generate --manifest` writes");
+    }
 
     // spec: GEN-003
     // spec: STRM-003
