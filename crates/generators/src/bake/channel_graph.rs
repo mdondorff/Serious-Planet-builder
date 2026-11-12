@@ -10,7 +10,7 @@
 use super::hydro::{Hydro, QUnit};
 use super::k7::Channel;
 use super::route::{Routing, NONE};
-use super::Grid;
+use super::{Grid, Heights};
 
 /// The discharge of code 1, m3/s (a discharge below it reads as it).
 pub const Q_CODE_MIN: f64 = 1.0e-4;
@@ -95,9 +95,9 @@ impl SegmentView<'_> {
 
 impl ChannelGraph {
     /// The graph of `hydro` on `grid`: the chains by the routing's receivers, `Q_w` and the running minimum of `zs` (the H1 surface) along them. `Q_w` must still be there (run before the discharges are released).
-    pub fn from_hydro(grid: &Grid, routing: &Routing, hydro: &Hydro, zs: &[f64]) -> ChannelGraph {
+    pub fn from_hydro(grid: &Grid, routing: &Routing, hydro: &Hydro, zs: &(impl Heights + ?Sized)) -> ChannelGraph {
         assert!(
-            hydro.qw.iter().all(|q| q.is_finite()) && zs.iter().all(|z| z.is_finite()),
+            hydro.qw.iter().all(|q| q.is_finite()) && (0..zs.len()).all(|c| zs.at(c).is_finite()),
             "the graph needs Q_w and the surface finite (no NaN, no infinity)"
         );
         assert!(
@@ -122,7 +122,7 @@ impl ChannelGraph {
             let mut count = 0u32;
             let mut into = 0u8; // the direction of the step into the current vertex (0 for the first)
             loop {
-                level = level.min(zs[cur]);
+                level = level.min(zs.at(cur));
                 g.dir.push(into);
                 let code = q_code(hydro.qw[cur]);
                 if hydro.qw[cur] >= Q_CODE_MIN && hydro.qw[cur] <= Q_CODE_MAX {

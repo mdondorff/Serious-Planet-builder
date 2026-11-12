@@ -112,13 +112,10 @@ fn apply_plan_sets_every_epsilon_that_acts_on_an_f32_surface() {
     let spill = std::path::PathBuf::from("unused.f64");
     // Earth: today's plan, with the world remembered
     let earth = WorldPrecision::new(-11_000.0, 9_000.0, EPS, EPSILON_MAX_M);
-    let (std, e) = (PlanParams::standard(5, 1, spill.clone()), PlanParams::standard_for(5, 1, spill.clone(), &earth));
-    assert_eq!(
-        (e.epsilon, e.carve.epsilon, e.sediment.carve.epsilon, e.carve.round_f32),
-        (std.epsilon, std.carve.epsilon, std.sediment.carve.epsilon, std.carve.round_f32)
-    );
+    let e = PlanParams::standard_for(5, 1, spill.clone(), &earth);
+    // today's values, written out: the epsilon 1e-3 everywhere, the f32 rounds, the world remembered
+    assert_eq!((e.epsilon, e.carve.epsilon, e.sediment.carve.epsilon, e.carve.round_f32), (1e-3, 1e-3, 1e-3, true));
     assert_eq!(e.precision, Some(earth));
-    assert_eq!(std.precision, None, "the plain standard plan checks no bounds");
     // 60 km: the carve, H1's fill and pass 2 (the sediment pass and K7) flood with epsilon_w; pass 2 never takes the f32 flag
     let w = WorldPrecision::new(-10_000.0, 50_000.0, EPS, EPSILON_MAX_M);
     let p = PlanParams::standard_for(5, 1, spill.clone(), &w);
@@ -231,4 +228,30 @@ fn a_round_with_the_world_epsilon_narrows_the_summit() {
     narrow_f32_checked(&mut z, w.epsilon_w);
     assert_eq!(z[1], f64::from(40_000.000_1f64 as f32));
     narrow_f32_checked(&mut [16_000.0, -11_000.0], EPS);
+}
+
+// spec: GEN-175, TEST-122
+#[test]
+fn the_plan_has_no_constructor_without_the_bounds_of_its_world() {
+    // `PlanParams::standard` is gone: only standard_for (compile-time: this test would not build with a call to `standard`), and Earth's bounds are written out by the callers
+    let earth = WorldPrecision::new(-11_000.0, 9_000.0, EPS, EPSILON_MAX_M);
+    let p = planet_generators::bake::build::PlanParams::standard_for(5, 1, std::path::PathBuf::from("unused.f64"), &earth);
+    assert!(p.precision.is_some());
+}
+
+// spec: GEN-175, TEST-122
+#[test]
+#[should_panic(expected = "filled surface is never narrowed")]
+fn a_filled_surface_is_never_narrowed_to_f32() {
+    use planet_generators::bake::carve::{narrow_f32_surface, Surface};
+    narrow_f32_surface(Surface::Filled, &mut [10.0, 20.0], EPS);
+}
+
+// spec: GEN-175, TEST-122
+#[test]
+fn a_round_surface_is_narrowed_through_the_surface_gate() {
+    use planet_generators::bake::carve::{narrow_f32_surface, Surface};
+    let mut z = [10.000_000_1, 20.5];
+    narrow_f32_surface(Surface::Round, &mut z, EPS);
+    assert_eq!(z[0], f64::from(10.000_000_1f64 as f32));
 }

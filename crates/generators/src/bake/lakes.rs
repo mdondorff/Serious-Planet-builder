@@ -15,7 +15,7 @@
 
 use super::hydro::{Basin, BasinClass, Hydro, QUnit, CURVE_STEPS};
 use super::route::{Routing, NONE};
-use super::Grid;
+use super::{Grid, Heights};
 use std::collections::HashSet;
 
 /// Version of the producer behaviour (the level rule, the water rule, the lake record): part of the key of a stored basin table, bumped with any change of what a lake is.
@@ -146,9 +146,9 @@ fn area_at(b: &Basin, level: f64) -> f64 {
 ///   basin cells up to the spill; those labelled cells downstream of the water are not a river (the lake has no outflow there; at an overflowing lake they are water already). Stored, sorted.
 ///
 /// The memory is the shore and the dead ground, not the water of the basins.
-pub struct Water<'a> {
+pub struct Water<'a, Z: Heights + ?Sized = [f64]> {
     label: &'a [u32],
-    z: &'a [f64],
+    z: &'a Z,
     level: Vec<f64>,
     /// Sorted by cell: the shore cells with the index of the lake they drain into, and the dead ground with [`DEAD`].
     extra: Vec<(u32, u32)>,
@@ -157,10 +157,10 @@ pub struct Water<'a> {
 /// The tag of a cell of the dead ground in `Water::extra`.
 const DEAD: u32 = u32::MAX;
 
-impl Water<'_> {
+impl<Z: Heights + ?Sized> Water<'_, Z> {
     fn seed(&self, c: usize) -> bool {
         let l = self.label[c];
-        l != NONE && self.z[c] < self.level[l as usize]
+        l != NONE && self.z.at(c) < self.level[l as usize]
     }
 
     /// Whether no river is drawn on cell `c`.
@@ -206,7 +206,7 @@ impl Water<'_> {
 }
 
 /// The water of the wet lakes and the ground below it, on the surface `z` H1 ran on.
-pub fn water_cells<'a>(grid: &Grid, routing: &Routing, hydro: &'a Hydro, z: &'a [f64]) -> Water<'a> {
+pub fn water_cells<'a, Z: Heights + ?Sized>(grid: &Grid, routing: &Routing, hydro: &'a Hydro, z: &'a Z) -> Water<'a, Z> {
     assert!(z.len() == grid.len(), "one height per cell");
     let level: Vec<f64> = hydro.basins.iter().map(|b| if b.q_in > 0.0 { b.water_level_m } else { f64::NEG_INFINITY }).collect();
     let mut w = Water { label: &hydro.label, z, level, extra: Vec::new() };
@@ -221,7 +221,7 @@ pub fn water_cells<'a>(grid: &Grid, routing: &Routing, hydro: &'a Hydro, z: &'a 
         while let Some((x, l)) = stack.pop() {
             for d in 0..8 {
                 let Some(q) = grid.neighbour(x as usize, d) else { continue };
-                if routing.receiver[q] == x && hydro.label[q] == NONE && z[q] < w.level[l as usize] {
+                if routing.receiver[q] == x && hydro.label[q] == NONE && z.at(q) < w.level[l as usize] {
                     shore.push((q as u32, l));
                     stack.push((q as u32, l));
                 }
@@ -232,7 +232,7 @@ pub fn water_cells<'a>(grid: &Grid, routing: &Routing, hydro: &'a Hydro, z: &'a 
     w.extra = shore;
     // Below the water: from every water cell whose receiver is not water, the labelled cells down the receiver chain to the basin's edge.
     let mut dead: HashSet<u32> = HashSet::new();
-    let mut walk = |w: &Water, c: usize| {
+    let mut walk = |w: &Water<Z>, c: usize| {
         let mut cur = routing.receiver[c];
         while cur != NONE && hydro.label[cur as usize] != NONE && !w.contains(cur as usize) && dead.insert(cur) {
             cur = routing.receiver[cur as usize];
@@ -299,17 +299,23 @@ pub fn cut_segments(hydro: &Hydro, routing: &Routing, water: &dyn Fn(usize) -> b
 }
 
 /// Produce the lakes and the pieces of the river segments from a hydrology (GEN-163).
-pub fn lakes_from_hydro(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &[f64]) -> Lakes {
+pub fn lakes_from_hydro(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &(impl Heights + ?Sized)) -> Lakes {
     produce(grid, routing, hydro, z, None)
 }
 
 /// [`lakes_from_hydro`] with the tiles of each lake's water (`Lake::tiles`) from the tile map `tile_of`: the basin table's tile list (STRM-080).
-pub fn lakes_with_tiles(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &[f64], tile_of: &dyn Fn(usize) -> TileRef) -> Lakes {
+pub fn lakes_with_tiles(
+    grid: &Grid,
+    routing: &Routing,
+    hydro: &Hydro,
+    z: &(impl Heights + ?Sized),
+    tile_of: &dyn Fn(usize) -> TileRef,
+) -> Lakes {
     produce(grid, routing, hydro, z, Some(tile_of))
 }
 
 /// The part of the producer that reads the discharges (`Q_w` at the ends of the pieces): the river pieces and the number of cells dropped. Run it before the discharges are released (D22); it holds nothing back, so the rest ([`lake_records`]) can run after the release.
-pub fn river_pieces(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &[f64]) -> PreRelease {
+pub fn river_pieces(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &(impl Heights + ?Sized)) -> PreRelease {
     assert_discharge(hydro);
     assert!(hydro.qw.len() == grid.len(), "the producer needs Q_w: run it before the discharges are released");
     assert!(routing.receiver.len() == grid.len(), "one receiver per cell");
@@ -409,7 +415,13 @@ fn basin_lakes(grid: &Grid, hydro: &Hydro) -> Vec<Lake> {
         })
         .collect()
 }
-fn produce(grid: &Grid, routing: &Routing, hydro: &Hydro, z: &[f64], tile_of: Option<&dyn Fn(usize) -> TileRef>) -> Lakes {
+fn produce(
+    grid: &Grid,
+    routing: &Routing,
+    hydro: &Hydro,
+    z: &(impl Heights + ?Sized),
+    tile_of: Option<&dyn Fn(usize) -> TileRef>,
+) -> Lakes {
     assert_discharge(hydro);
     assert!(hydro.qw.len() == grid.len(), "the producer needs Q_w: run it before the discharges are released");
     assert!(routing.receiver.len() == grid.len(), "one receiver per cell");

@@ -359,6 +359,24 @@ pub fn narrow_f32_checked(z: &mut [f64], epsilon: f64) {
     }
 }
 
+/// The kind of a surface a narrowing is asked for (GEN-175).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Surface {
+    /// The heights of a round: carved epsilon chains of at least the f32 spacing at the summit; stored f32 between the rounds.
+    Round,
+    /// A filled surface (the flood of a round surface): its flat grade steps by a fraction of the epsilon, so a narrowed copy collapses (learning 2026-11-12). Never narrowed or stored f32.
+    Filled,
+}
+
+/// [`narrow_f32_checked`] for a surface of the given kind: a filled surface is refused (GEN-175).
+pub fn narrow_f32_surface(kind: Surface, z: &mut [f64], epsilon: f64) {
+    assert!(
+        kind == Surface::Round,
+        "a filled surface is never narrowed to f32 (GEN-175): its flat grade steps by a fraction of the epsilon, so the narrowed copy collapses; keep it f64, or re-flood the narrowed round surface in f64"
+    );
+    narrow_f32_checked(z, epsilon);
+}
+
 /// The distance between two neighbouring cells.
 pub(super) fn distance(grid: &Grid, a: usize, b: usize) -> f64 {
     if grid.has_metric() {

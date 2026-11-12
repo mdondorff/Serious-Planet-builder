@@ -1,7 +1,7 @@
 //! Routing: the jittered D8 receivers on the filled surface, the order from the receivers (the donor stack of Braun and Willett) and the drainage area, which is multiple-flow-direction (Freeman) over the filled surface: the receivers stay D8 for the implicit carve, the area that drives it does not follow the grid's eight directions (GEN-100).
 
 use super::flood::priority_flood_with;
-use super::Grid;
+use super::{Grid, Heights};
 
 /// `u32::MAX` marks a cell without a receiver (an outlet).
 pub const NONE: u32 = u32::MAX;
@@ -72,13 +72,21 @@ pub const MFD_EXPONENT: f64 = 1.1;
 /// (`slope (1 + 0.5 u)` for a downhill neighbour, `u` the [`jitter`] of the global cell), orders the cells and accumulates the area by multiple flow direction over the filled surface
 /// (highest cells first, ties by the cell index: a total order, so the sums are the same bits on any machine). `max_area` caps the area when positive
 /// (SPIKE-70's local carve). Every cell that is not an outlet has a receiver after the flood; a cell without one is an error naming it.
-pub fn route(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64, seed: u64, max_area: f64) -> Routing {
+pub fn route(grid: &Grid, z: &(impl Heights + ?Sized), outlet: &[bool], epsilon: f64, seed: u64, max_area: f64) -> Routing {
     route_weighted(grid, z, outlet, epsilon, seed, max_area, None)
 }
 
 /// [`route`] with the runoff weight of each cell (GEN-129): every cell starts with the area `w dx^2`, so the returned `area` is the discharge `Q = sum(w dA)` (the area for weights of 1).
 /// The cap applies to `Q`.
-pub fn route_weighted(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64, seed: u64, max_area: f64, weights: Option<&[f32]>) -> Routing {
+pub fn route_weighted(
+    grid: &Grid,
+    z: &(impl Heights + ?Sized),
+    outlet: &[bool],
+    epsilon: f64,
+    seed: u64,
+    max_area: f64,
+    weights: Option<&[f32]>,
+) -> Routing {
     route_rules(grid, z, outlet, epsilon, seed, max_area, weights, RoundRules::default())
 }
 
@@ -86,7 +94,7 @@ pub fn route_weighted(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64, see
 #[allow(clippy::too_many_arguments)]
 pub fn route_rules(
     grid: &Grid,
-    z: &[f64],
+    z: &(impl Heights + ?Sized),
     outlet: &[bool],
     epsilon: f64,
     seed: u64,
@@ -102,7 +110,7 @@ pub fn route_rules(
 #[allow(clippy::too_many_arguments)]
 pub fn route_rules_filled(
     grid: &Grid,
-    z: &[f64],
+    z: &(impl Heights + ?Sized),
     outlet: &[bool],
     epsilon: f64,
     seed: u64,
@@ -117,7 +125,7 @@ pub fn route_rules_filled(
 #[allow(clippy::too_many_arguments)]
 fn route_core(
     grid: &Grid,
-    z: &[f64],
+    z: &(impl Heights + ?Sized),
     outlet: &[bool],
     epsilon: f64,
     seed: u64,

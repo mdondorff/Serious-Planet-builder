@@ -624,7 +624,14 @@ fn main() {
             planet_generators::bake::probe::install(std::sync::Arc::new(DamProbe { inner, prefix: dam_prefix.clone(), last_round: 3 }));
             println!("stage probe: sheets {} (at most {bins} bins, numbers in {dir}/; memory inside the peaks), dam surfaces {} (on disk, deleted after the count)", if stages_on { "ON" } else { "off" }, if dams_on { "ON" } else { "off" });
         }
-        let params = PlanParams::standard(seed, threads, format!("target/plan_zstart_k{k}_{}.f64", std::process::id()).into());
+        // Earth's span, written out (GEN-175): the plan refuses a landmass or a surface above 11 km or below -11 km
+        let earth = planet_generators::bake::precision::WorldPrecision::new(
+            -11_000.0,
+            9_000.0,
+            1e-3,
+            planet_generators::bake::precision::EPSILON_MAX_M,
+        );
+        let params = PlanParams::standard_for(seed, threads, format!("target/plan_zstart_k{k}_{}.f64", std::process::id()).into(), &earth);
         let t = Instant::now();
         let built = build_resident(&grid, z, &outlet, &params, &climate, &mark).expect("the build");
         let r = &built.report;

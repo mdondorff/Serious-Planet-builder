@@ -4,7 +4,7 @@
 
 #![allow(clippy::needless_range_loop)]
 
-use super::{assert_finite, Grid, NEIGHBOURS};
+use super::{assert_finite_heights, Grid, Heights, NEIGHBOURS};
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, VecDeque};
 
@@ -21,14 +21,14 @@ fn key(v: f64) -> u64 {
 /// The filled surface of `z`: `outlet` cells keep their height, every other cell is raised until it has a neighbour lower than itself on a path to an outlet (by `epsilon` on the flats).
 /// Ties of the heap break by the cell index, so the result does not depend on anything but the input. Refused: a height that is not finite, no outlet at all, and an `epsilon`
 /// that is not positive.
-pub fn priority_flood(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64) -> Vec<f64> {
+pub fn priority_flood(grid: &Grid, z: &(impl Heights + ?Sized), outlet: &[bool], epsilon: f64) -> Vec<f64> {
     priority_flood_with(grid, z, outlet, epsilon, false)
 }
 
 /// [`priority_flood`] with the canonical tie rule when `canonical` (GEN-141, A3 section 6.4): there is no FIFO queue for the flats, every cell enters the heap at its filled level and cells are
 /// visited by (level, cell id), so a cell's level comes from its lowest visited neighbour by a total order that no other cell's presence changes. The id order of the cells of a rectangular grid
 /// is the global id order (row-major), so it is the same in every window.
-pub fn priority_flood_with(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64, canonical: bool) -> Vec<f64> {
+pub fn priority_flood_with(grid: &Grid, z: &(impl Heights + ?Sized), outlet: &[bool], epsilon: f64, canonical: bool) -> Vec<f64> {
     let mut filled = priority_flood_ungraded(grid, z, outlet, epsilon, canonical);
     if canonical {
         let _ = regrade_flats(grid, z, outlet, epsilon, FLAT_BOUND, &mut filled);
@@ -37,11 +37,11 @@ pub fn priority_flood_with(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64
 }
 
 /// [`priority_flood_with`] before the flats are graded (GEN-173): the chessboard levels the grade starts from.
-pub fn priority_flood_ungraded(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64, canonical: bool) -> Vec<f64> {
+pub fn priority_flood_ungraded(grid: &Grid, z: &(impl Heights + ?Sized), outlet: &[bool], epsilon: f64, canonical: bool) -> Vec<f64> {
     let n = grid.len();
     assert!(z.len() == n && outlet.len() == n, "one height and one outlet flag per cell");
     assert!(epsilon > 0.0 && epsilon.is_finite(), "the epsilon is finite and positive (a flat could not drain), not {epsilon}");
-    assert_finite("the heights", z);
+    assert_finite_heights("the heights", z);
     assert!(outlet.iter().any(|&o| o), "a flood needs an outlet: the mask has none");
     let mut filled = vec![0.0f64; n];
     let mut seen = vec![false; n];
@@ -49,14 +49,14 @@ pub fn priority_flood_ungraded(grid: &Grid, z: &[f64], outlet: &[bool], epsilon:
     let mut flat: VecDeque<u32> = VecDeque::new();
     for p in 0..n {
         if outlet[p] {
-            filled[p] = z[p];
+            filled[p] = z.at(p);
             seen[p] = true;
         }
     }
     // Only an outlet with a neighbour that is not one expands anything: the others are seen and finished (the same filled surface, a far smaller heap on a sea face).
     for p in 0..n {
         if outlet[p] && grid.is_active(p) && (0..8).filter_map(|d| grid.neighbour(p, d)).any(|q| !outlet[q]) {
-            heap.push(Reverse((key(z[p]), p as u32)));
+            heap.push(Reverse((key(z.at(p)), p as u32)));
         }
     }
     loop {
@@ -75,11 +75,11 @@ pub fn priority_flood_ungraded(grid: &Grid, z: &[f64], outlet: &[bool], epsilon:
             seen[q] = true;
             let lowest = filled[p] + epsilon;
             assert!(lowest > filled[p], "the epsilon {epsilon} is below the spacing of the heights near {}", filled[p]);
-            if !canonical && z[q] <= lowest {
+            if !canonical && z.at(q) <= lowest {
                 filled[q] = lowest;
                 flat.push_back(q as u32);
             } else {
-                filled[q] = z[q].max(lowest);
+                filled[q] = z.at(q).max(lowest);
                 heap.push(Reverse((key(filled[q]), q as u32)));
             }
         }
@@ -99,7 +99,14 @@ const FLAT_STEP: f64 = 1e-6;
 /// `bound`, and none of whose cells lies on the border of the grid (it does not touch the window's outer ring: it may be larger than the window shows), is regraded to `base + epsilon d / sqrt 2` where `d`
 /// is the Euclidean distance in cells to the nearest lower rim cell (propagated offsets, Dijkstra by (d squared, cell id)); each cell stays strictly above its parent. A larger flat keeps the
 /// chessboard grade. The result depends only on the cells of the flat and its rim, never on a tiling. Cube grids are left as they are.
-pub fn regrade_flats(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64, bound: usize, filled: &mut [f64]) -> Vec<FlatInfo> {
+pub fn regrade_flats(
+    grid: &Grid,
+    z: &(impl Heights + ?Sized),
+    outlet: &[bool],
+    epsilon: f64,
+    bound: usize,
+    filled: &mut [f64],
+) -> Vec<FlatInfo> {
     let flats = lifted_flats(grid, z, outlet, epsilon, filled);
     let mut infos = Vec::with_capacity(flats.len());
     // The levels are written after every flat is read, so the rim of a flat is always the chessboard surface: no neighbouring flat decides a bit.
@@ -138,13 +145,13 @@ pub struct Flat {
 /// The flats of the canonical filled surface `filled` of `z` (planar grids; none for a cube grid), in the order of their lowest cell by (level, id). A cell is lifted when `filled > z`; its parent
 /// is the neighbour whose level plus `epsilon` is its level (the lowest by (level, id)); the base of a cell is the level of the non-lifted cell its parent chain ends at; a flat is a connected set
 /// of lifted cells of one base. Used by the grade of the flats (GEN-173) and the breach of the basins (GEN-174).
-pub fn lifted_flats(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64, filled: &[f64]) -> Vec<Flat> {
+pub fn lifted_flats(grid: &Grid, z: &(impl Heights + ?Sized), outlet: &[bool], epsilon: f64, filled: &[f64]) -> Vec<Flat> {
     let mut out = Vec::new();
     if grid.is_cube() {
         return out;
     }
     let n = grid.len();
-    let lifted = |q: usize| !outlet[q] && grid.is_active(q) && filled[q] > z[q];
+    let lifted = |q: usize| !outlet[q] && grid.is_active(q) && filled[q] > z.at(q);
     let mut ids: Vec<u32> = (0..n).filter(|&q| lifted(q)).map(|q| q as u32).collect();
     if ids.is_empty() {
         return out;
@@ -197,7 +204,7 @@ pub fn lifted_flats(grid: &Grid, z: &[f64], outlet: &[bool], epsilon: f64, fille
                 }
             }
         }
-        let max_lift_m = members.iter().map(|&k| filled[ids[k] as usize] - z[ids[k] as usize]).fold(0.0f64, f64::max);
+        let max_lift_m = members.iter().map(|&k| filled[ids[k] as usize] - z.at(ids[k] as usize)).fold(0.0f64, f64::max);
         out.push(Flat {
             cells: members.iter().map(|&k| ids[k]).collect(),
             base: base[k0],
@@ -221,7 +228,15 @@ pub struct FlatInfo {
 
 /// One flat's Euclidean grade (see [`regrade_flats`]).
 #[allow(clippy::too_many_arguments)]
-fn regrade_one(grid: &Grid, z: &[f64], epsilon: f64, cells: &[u32], base: f64, filled: &[f64], writes: &mut Vec<(u32, f64)>) {
+fn regrade_one(
+    grid: &Grid,
+    z: &(impl Heights + ?Sized),
+    epsilon: f64,
+    cells: &[u32],
+    base: f64,
+    filled: &[f64],
+    writes: &mut Vec<(u32, f64)>,
+) {
     let m = cells.len();
     let mut local = std::collections::HashMap::with_capacity(m);
     for (j, &c) in cells.iter().enumerate() {
@@ -261,7 +276,7 @@ fn regrade_one(grid: &Grid, z: &[f64], epsilon: f64, cells: &[u32], base: f64, f
         done[jp] = true;
         let below = if parent[jp] == u32::MAX { 0.0 } else { rank[local[&(parent[jp] as usize)]] };
         // Never below the cell's own height: a cell lifted by less than the chessboard count may stand above its grade.
-        let own = (z[p] - base) / epsilon + FLAT_STEP;
+        let own = (z.at(p) - base) / epsilon + FLAT_STEP;
         rank[jp] = (libm::sqrt(d2 as f64) / std::f64::consts::SQRT_2).max(below + FLAT_STEP).max(own);
         for d in 0..8 {
             let Some(q) = grid.neighbour(p, d) else { continue };
