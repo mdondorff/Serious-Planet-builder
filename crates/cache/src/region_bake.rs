@@ -169,6 +169,8 @@ pub struct RegionReport {
     pub segments: usize,
     pub lakes: usize,
     pub tiles: usize,
+    /// The world's precision of the bake (GEN-175), as the MARK line records it.
+    pub precision_mark: String,
     /// The channels burnt, when the spec asked to keep them.
     pub channels: Vec<planet_generators::bake::k7::Channel>,
 }
@@ -222,7 +224,15 @@ pub fn solve_region(spec: &RegionSpec, base: &(dyn Fn(Vec3) -> f64 + Sync)) -> R
     precision.apply(&mut carve);
     let stream = face_spec.stream();
     let mut zs = zb.clone();
-    solve_rounds(&grid, &mut zs, &outlet, &carve, spec.rounds, &spec.threads, stream);
+    // The rounds' own narrowing guard asserts when a round lifts a summit past the binade the epsilon was chosen for: that is the same refusal as the check after them, returned as an error naming the cell.
+    let solved = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        solve_rounds(&grid, &mut zs, &outlet, &carve, spec.rounds, &spec.threads, stream)
+    }));
+    if let Err(panic) = solved {
+        let why =
+            panic.downcast_ref::<String>().cloned().or_else(|| panic.downcast_ref::<&str>().map(|s| (*s).to_string())).unwrap_or_default();
+        return Err(format!("after the rounds of the region: the rounds refused the surface (GEN-175): {why}"));
+    }
     precision.check_within_radius(&grid, &zs, |c| grid.global_id(c)).map_err(|e| format!("after the rounds of the region: {e}"))?;
     Ok(RegionSolve { face_spec, grid, outlet, zb, zs, stream, ri0, rj0, rw, rh, precision })
 }
@@ -238,11 +248,11 @@ pub fn bake_region(
     spec.check()?;
     // The K7 of the commit is the standard one: a world whose flood epsilon is not the profile's cannot be committed yet (the commit spec records no epsilon), and it is refused before any work is done.
     let precision = spec.precision();
-    if precision.epsilon_w != CarveParams::default().epsilon {
+    let k7_epsilon = K7Params::standard(spec.seed, 0.0).pass2.carve.epsilon;
+    if precision.epsilon_w != k7_epsilon {
         return Err(format!(
             "the world's flood epsilon is {} m, not the profile's {} m (GEN-175): the commit spec records no flood epsilon, so a commit of such a world could not be read back with the keys it was made under: a format question for the architect (CON-10)",
-            precision.epsilon_w,
-            CarveParams::default().epsilon
+            precision.epsilon_w, k7_epsilon
         ));
     }
     let RegionSolve { face_spec, grid, outlet, zb, zs, stream, ri0, rj0, rw, rh, precision } = solve_region(spec, base)?;
@@ -327,6 +337,7 @@ pub fn bake_region(
         segments: hydro.stats.segments,
         lakes: lakes.lakes.len(),
         tiles: tiles.len(),
+        precision_mark: precision.mark_line(),
         channels: if spec.keep_channels { feed.channels.clone() } else { Vec::new() },
     };
     Ok((commit, report))

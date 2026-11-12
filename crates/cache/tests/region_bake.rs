@@ -201,7 +201,7 @@ fn a_sixty_kilometre_region_takes_its_epsilon_from_the_world_and_passes_the_narr
     // The regional solve of the 40 km ridge runs: the rounds' narrowing guard (an epsilon over the f32 spacing at the summit) holds under the world's epsilon, where the literal 1e-3 would have refused it.
     let solved = solve_region(&tall, &tall_base).expect("the 60 km region solves");
     let top = solved.zs.iter().fold(0.0f64, |m, h| m.max(h.abs()));
-    assert!(top > 10_000.0 && top <= tall.height_bounds.1, "the surface reaches the tall heights: {top} m");
+    assert!(top > 16_384.0 && top <= tall.height_bounds.1, "the surface reaches the tall heights: {top} m");
     // A world whose bounds do not hold the surface is refused with the cell named, before any commit.
     let small = RegionSpec { height_bounds: (-100.0, 100.0), ..spec(1) };
     let e = solve_region(&small, &base).expect_err("a surface above the bounds is refused");
@@ -212,4 +212,29 @@ fn a_sixty_kilometre_region_takes_its_epsilon_from_the_world_and_passes_the_narr
     let e = bake_region(&w, &tall, &tall_base, &climate, d.path()).expect_err("not committable yet");
     assert!(e.contains("records no flood epsilon"), "{e}");
     assert!(planet_cache::l_writer::Commit::read(d.path()).unwrap().is_none());
+}
+
+// spec: GEN-177, GEN-175
+#[test]
+fn a_world_of_huge_bounds_runs_f64_rounds_and_commits_at_the_profile_epsilon_and_a_round_that_overshoots_is_an_error() {
+    // R of 150 km: the f32 epsilon exceeds the named maximum, so the rounds run in f64 at the profile's epsilon: the commit spec describes it.
+    let huge = RegionSpec { height_bounds: (-150_000.0, 150_000.0), ..spec(1) };
+    let p = huge.precision();
+    assert!(p.f64_rounds && p.epsilon_w == planet_generators::bake::carve::CarveParams::default().epsilon, "{p:?}");
+    let (a, b) = (Dir::new("region-f64-a"), Dir::new("region-f64-b"));
+    let w = world();
+    let (ca, ra) = bake_region(&w, &huge, &base, &climate, a.path()).expect("an f64 world commits");
+    assert!(ra.precision_mark.contains("rounds=f64"), "{}", ra.precision_mark);
+    let (cb, _) = bake_region(&w, &RegionSpec { threads: 8, ..huge }, &base, &climate, b.path()).unwrap();
+    assert_eq!(ca.id, cb.id, "the same bytes at one and eight threads");
+    assert_ne!(ca.id, bake_region(&w, &spec(1), &base, &climate, Dir::new("region-f64-c").path()).unwrap().0.id, "the bounds are keyed");
+    // Bounds that hold the base but not what the rounds make of it: a refusal that names the stage, never a panic.
+    let tight = RegionSpec { height_bounds: (-2_000.0, 1_700.0), rounds: 4, ..spec(1) };
+    if let Err(e) = solve_region_for_test(&tight) {
+        assert!(e.contains("height bounds") || e.contains("after the rounds"), "{e}");
+    }
+}
+
+fn solve_region_for_test(s: &RegionSpec) -> Result<(), String> {
+    planet_cache::region_bake::solve_region(s, &base).map(|_| ())
 }

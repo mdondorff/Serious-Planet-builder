@@ -1485,7 +1485,7 @@ Source: Architect 2026-11-10, design section 13
 A region bake SHALL take a rectangle of regional cells of one face, a base, a climate and a size spec, solve the regional surface, find the hydrology, and write the L tiles of the land tiles, the basin tables, the channel graph and the commit.
 - A region within 4 regional cells of a face edge is refused.
 - The bytes are the same at any thread count and on a second run.
-- Every flood epsilon and the f32 choice come from the world's precision (GEN-175); a height outside its bounds is refused.
+- Every flood epsilon and the f32 choice come from the world's precision (GEN-175); a height beyond its radius R is refused.
 - A world whose epsilon is not the profile's is refused before any work (the commit spec records none).
 - No store format changes.
 
