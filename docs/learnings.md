@@ -132,3 +132,8 @@ Scope: project (GEN-173, GEN-175)
 What happened: GEN-173 grades a flat by `epsilon d / sqrt 2` and the receiver is the steepest jittered slope, so neighbouring cells of a flat can differ by a small fraction of epsilon; on a 60 km world (spacing 3.9e-3 m at 40 km) a fill narrowed to f32 collapses at `epsilon_w` (40 lifted cells of a crater floor are not above their receiver), and no factor on the spacing guarantees strictness. H1 floods in f64 and the plan stores no f32 fill; pass 2 does store its heights as f32 (tile.rs), with incise chains of `hr + epsilon`.
 Assumption it changes: that `epsilon >= spacing` keeps every flood step strict after narrowing; it holds for the carved epsilon chains, not for the flat grade.
 Obsolete when: a stored or narrowed copy of a filled surface exists (re-flood it in f64 or grade it by a full epsilon) or the grade steps by a full epsilon.
+## 2026-11-12 K7's halo sets its result; it is not a performance setting
+Scope: K7 (ADR 0119)
+What happened: one region, two tilings. At halo 128, 0.57 % of non-line cells differ (p99 1.1 mm, max 0.31 m); at halo 64, 2.29 % (max 3.59 m, all at the seam). River line cells are bit-identical at both.
+Assumption it changes: that the halo is a margin that only has to be wide enough. Tile size and halo are inputs of K7's result and part of its key.
+Obsolete when: K7 reads region-wide inflow at the halo border.
