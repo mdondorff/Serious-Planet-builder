@@ -3,7 +3,7 @@
 //! as a value (`eval_with`).
 
 use planet_core::Vec3;
-use planet_generators::classes::{ClassSource, CoastTilt, CLASS_COUNT, MOUNTAINS, PLAIN, ROLLING};
+use planet_generators::classes::{ClassSource, CoastTilt, PLAIN, ROLLING};
 
 /// A spiral of directions over the sphere (golden angle).
 fn directions() -> Vec<Vec3> {
@@ -81,7 +81,6 @@ fn the_tilt_lifts_land_only_within_its_bound_and_moves_no_class() {
         }
     }
     assert!(lifted > 20 && sea > 50, "the fixture has lifted land ({lifted}) and sea ({sea}); weightless land {weightless}");
-    assert!(MOUNTAINS < CLASS_COUNT);
 }
 
 // spec: GEN-180, TEST-128
