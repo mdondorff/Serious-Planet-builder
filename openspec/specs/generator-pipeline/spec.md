@@ -1508,7 +1508,7 @@ Source: architect, 2026-11-11
 - **AND** the carve that follows widens the valley around the burnt channel; that is not a burn defect
 
 ### Requirement: GEN-169 The channel profile is monotone
-The burn SHALL target, at each cell of a channel's line, the lowest of its level and of the heights found within L line steps upstream along the channel tree (L the tile's halo in cells), lowering only. A final pass at the end of K7 SHALL lower every land cell of each line to the lowest height within L steps upstream, lowering path cells only, booking the removed volume as eroded and exported. Channels SHALL be listed upstream first, ties by segment id. K7 SHALL refuse a tile whose halo is under the smallest carry, and a bake or a reader a channel graph whose margin is under what the halo needs; the pass-2 kernel version SHALL be bumped.
+The burn SHALL target, at each cell of a channel's line, the lowest of its level and of the heights found within L line steps upstream along the channel tree (L the tile's halo in cells), lowering only. A final pass at the end of K7 SHALL lower every land cell of each line to the lowest height within L steps upstream, lowering path cells only, booking the removed volume as eroded and exported. Channels SHALL be listed upstream first, ties by segment id. K7 SHALL refuse a tile with channels whose halo is under the smallest carry, and a bake or reader a channel graph whose margin is too small; the pass-2 kernel version SHALL be bumped.
 
 Verify: A
 Status: active
@@ -1521,6 +1521,7 @@ Source: architect, 2026-11-11
 #### Scenario: Details of the burn and the final pass
 - **WHEN** the burn and the final pass run
 - **THEN** a tributary is a channel whose last cell is this channel's first cell, and a channel inside one cell is nobody's tributary; the heights are those found before any burn, the disc of a wide river burns to the same target, and the final pass reads the surface as it finds it
+- **AND** the removed volume is booked as eroded and exported, so G-SED closes; the final pass runs after incision, thermal, deposition and pit spreading, and the pass-2 kernel version bump is carried by the tile keys
 - **AND** the final pass reports the largest lowering, the cells lowered by more than 1 m and the cells where the cutoff binds
 - **AND** a trench is at most 32 cells wide (`DISC_RADIUS_MAX` 16) and, with a width law, the burn carries L - 16 steps so that the disc of a line cell in the halo does not break partition independence; the halo holds both, and K7 refuses a tile whose halo is under 16 + 8 cells, naming both numbers (architect, 2026-11-11)
 - **AND** the stored channel graph carries its margin (H1 cells beyond a block) in its spec, its key and each block, equal to the H1 cells that hold the tile halo plus one; a bake refuses a graph whose margin is smaller than its tile halo needs, and a reader refuses a block whose margin is smaller than its commit's halo needs, each naming both numbers

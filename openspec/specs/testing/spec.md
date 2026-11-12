@@ -1743,6 +1743,7 @@ Source: GEN-177
 #### Scenario: Determinism
 - **WHEN** the fixture region is baked twice and at one and eight threads
 - **THEN** every stored record is byte-equal
+
 ### Requirement: TEST-110 The burn width tests
 The burn SHALL be tested at tier A on a straight line (off and on a cell row), a diagonal and a curved channel at w = 0.5, 1.5, 2 and 3 cells: no gap on the line, no cell raised, the mean burnt width within the tolerance of GEN-168, and at least floor(max(1, w)) burnt cells in every column across a straight line.
 
@@ -1775,6 +1776,7 @@ Source: GEN-169, architect, 2026-11-11
 #### Scenario: Cases
 - **WHEN** the tests of `bake_burn_width` run
 - **THEN** the partition and order cases cite GEN-169
+
 ### Requirement: TEST-118 The window-cut outlet tests
 The outlet kind SHALL be tested at tier A: (a) a closed bowl with a window-cut rim has no floor behind the cut (the breach goes down to the depression) through the round solver and through the region carve, and the same bowl with the rim as a basin rim keeps the floor of GEN-162; (b) a region bounded by the sea has no window-cut outlet and the flag moves no bit on it; (c) the catchment key changes with the outlet kind.
 
@@ -1785,6 +1787,7 @@ Source: GEN-172, architect 2026-11-12
 #### Scenario: Cases
 - **WHEN** the tests of `bake_round` run
 - **THEN** each of (a), (b) and (c) has an assertion that cites GEN-172
+
 ### Requirement: TEST-119 The flat-grade tests
 The flat grade SHALL be tested at tier A: (a) a square pit has no straight diagonal run over 12 cells where the chessboard flood has one of 29; (b) the grade is `epsilon d / sqrt 2` within 5 % of the distance, never above the chessboard count, every cell drains; (c) the same bits on a rerun and on a translated window; (d) a flat of diameter exactly at the bound is graded and one cell wider keeps the chessboard grade, and on two tilings (a tile corner inside the flat) the partitioned surface equals the resident one bit for bit; (e) the tests of GEN-159 and GEN-162 assert the exact grade and keep their intent.
 
@@ -1795,6 +1798,7 @@ Source: GEN-173, architect 2026-11-12
 #### Scenario: Cases
 - **WHEN** the tests of `bake_flats` and `bake_round` run
 - **THEN** each of (a) to (e) has an assertion that cites GEN-173
+
 ### Requirement: TEST-124 The K7 bed and fixed-channel tests
 The K7 channel rules SHALL be tested at tier A: (a) a line across a low coastal plain has no land bed below the sea level and the profile holds; (b) a burned trench in steep terrain keeps its depth through the whole pass, fixed cells are bit-unchanged by thermal, deposition and pit spreading, and the exported volume equals what would have entered them; (c) the cutoff counts include sub-sea cells and the burn's own; (d) the G-PROFILE tests of TEST-116 hold their properties.
 
