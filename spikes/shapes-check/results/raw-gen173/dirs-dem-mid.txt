@@ -1,0 +1,9 @@
+-- pooled DEM (4 tiles, slope p95 in 0.03..0.14)
+    [pooled DEM, routed U] channel steps 3459, runs over 10 cells 3
+      direction      |       W       E       N       S      NW      NE      SW      SE
+      steps, share   |   0.115   0.090   0.104   0.269   0.077   0.050   0.201   0.095
+      runs, count    |       0       1       2       0       0       0       0       0
+      steps on lifted cells, share of the direction |   0.216   0.152   0.292   0.496   0.209   0.221   0.390   0.226
+      run length on lifted cells / run length |   0.000   0.000   0.344   0.000   0.000   0.000   0.000   0.000
+      run length / channel length |  0.0000  0.0034  0.0079  0.0000  0.0000  0.0000  0.0000  0.0000
+      steps: horizontal 0.205, vertical 0.373, diagonal NW-SE 0.172, diagonal NE-SW 0.250; runs: horizontal 1, vertical 2, NW-SE 0, NE-SW 0; mean step vector (-0.159, +0.333) cells (i right, j down)

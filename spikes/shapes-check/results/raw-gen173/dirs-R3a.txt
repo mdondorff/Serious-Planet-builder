@@ -1,0 +1,26 @@
+== window face 4 cells 12288 seed 15: i 0-1387 j 4320-5739 = 1388 x 1420; box i 168-1187 j 4520-5539; land 64.6 %; base sampled in 48.5 s
+-- [R3a] channel steps and straight runs per D8 direction (directions as (di, dj): W (-1,0), E (1,0), N (0,-1), S (0,1), NW (-1,-1), NE (1,-1), SW (-1,1), SE (1,1); j grows downwards)
+    [z0 routed U] channel steps 64981, runs over 10 cells 122
+      direction      |       W       E       N       S      NW      NE      SW      SE
+      steps, share   |   0.155   0.059   0.160   0.122   0.245   0.059   0.101   0.099
+      runs, count    |       4       1      11      23      49       1       3      30
+      steps on lifted cells, share of the direction |   0.722   0.705   0.764   0.687   0.861   0.630   0.524   0.833
+      run length on lifted cells / run length |   0.873   1.000   0.924   0.994   0.999   0.947   1.000   0.966
+      run length / channel length |  0.0007  0.0001  0.0017  0.0040  0.0327  0.0003  0.0013  0.0101
+      steps: horizontal 0.214, vertical 0.282, diagonal NW-SE 0.344, diagonal NE-SW 0.160; runs: horizontal 5, vertical 34, NW-SE 79, NE-SW 4; mean step vector (-0.286, -0.142) cells (i right, j down)
+    [U rounds, routed U] channel steps 44832, runs over 10 cells 115
+      direction      |       W       E       N       S      NW      NE      SW      SE
+      steps, share   |   0.157   0.054   0.150   0.130   0.213   0.079   0.133   0.083
+      runs, count    |       3       3      13      19      53       1       4      19
+      steps on lifted cells, share of the direction |   0.616   0.408   0.563   0.494   0.756   0.322   0.337   0.621
+      run length on lifted cells / run length |   1.000   0.314   0.503   0.720   0.953   1.000   0.742   0.829
+      run length / channel length |  0.0006  0.0006  0.0028  0.0048  0.0498  0.0003  0.0017  0.0093
+      steps: horizontal 0.211, vertical 0.281, diagonal NW-SE 0.297, diagonal NE-SW 0.212; runs: horizontal 6, vertical 32, NW-SE 72, NE-SW 5; mean step vector (-0.288, -0.095) cells (i right, j down)
+    [C rounds, routed C] channel steps 44823, runs over 10 cells 115
+      direction      |       W       E       N       S      NW      NE      SW      SE
+      steps, share   |   0.157   0.054   0.151   0.131   0.213   0.079   0.132   0.083
+      runs, count    |       3       3      13      20      52       1       4      19
+      steps on lifted cells, share of the direction |   0.617   0.405   0.562   0.489   0.757   0.325   0.337   0.617
+      run length on lifted cells / run length |   1.000   0.314   0.503   0.691   0.953   1.000   0.742   0.829
+      run length / channel length |  0.0006  0.0006  0.0028  0.0050  0.0495  0.0003  0.0017  0.0093
+      steps: horizontal 0.211, vertical 0.282, diagonal NW-SE 0.296, diagonal NE-SW 0.211; runs: horizontal 6, vertical 33, NW-SE 71, NE-SW 5; mean step vector (-0.284, -0.096) cells (i right, j down)
