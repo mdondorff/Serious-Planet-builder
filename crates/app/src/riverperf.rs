@@ -102,6 +102,17 @@ pub fn views(
         let f = x - k as f64;
         (best[k].0 + (best[k + 1].0 - best[k].0) * f, best[k].1 + (best[k + 1].1 - best[k].1) * f)
     };
+    let (p0, p1) = (at(0.0), at(1.0));
+    let km = libm::hypot(p1.0 - p0.0, p1.1 - p0.1) * 1.0e-3 * (radius_m * core::f64::consts::FRAC_PI_2 / cells);
+    println!(
+        "river course: {} points of the longest channel inside the commit's tiles, from cell ({:.0}, {:.0}) to ({:.0}, {:.0}) (about {km:.0} km as the crow flies); ground at the start {:.0} m",
+        best.len(),
+        p0.0,
+        p0.1,
+        p1.0,
+        p1.1,
+        field.height(dir_of(p0))
+    );
     let n = frames.max(2);
     let ahead = 1.5 / (best.len() - 1) as f64;
     // The camera at course parameter `u`, `alt_m` above the ground (and the sea), looking along the river, pitched down.
@@ -140,7 +151,11 @@ pub(crate) fn report(c: &crate::litperf::RiverCounters, out: &mut dyn Write) -> 
     }
     writeln!(
         out,
-        "  river plans: {} frames, CPU {:.3} ms mean, {:.3} ms max; river nodes up to {}, dropped up to {}; reader cache peak {} B of {} B",
+        "  terrain plan nodes: levels {} to {}, up to {} at the finest
+  river plans: {} frames, CPU {:.3} ms mean, {:.3} ms max; river nodes up to {}, dropped up to {}; reader cache peak {} B of {} B",
+        c.level_min,
+        c.level_max,
+        c.finest_nodes_max,
         c.plans,
         c.plan_ns_total as f64 / c.plans as f64 / 1.0e6,
         c.plan_ns_max as f64 / 1.0e6,

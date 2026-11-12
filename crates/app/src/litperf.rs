@@ -65,6 +65,10 @@ pub(crate) struct RiverCounters {
     pub nodes_max: usize,
     pub dropped_max: u32,
     pub reader_peak_bytes: usize,
+    /// The finest and coarsest level of the terrain plans' nodes, and the nodes of the finest level (a river is seen only by nodes whose samples are narrower than it).
+    pub level_max: u8,
+    pub level_min: u8,
+    pub finest_nodes_max: usize,
 }
 
 /// `lit` with the ground look of the file named by `--look` (VIEW-060's `File` choice at the natural strength): its curves, octave coefficients, patch and detail
@@ -174,6 +178,10 @@ impl LitSetup {
             let ns = u64::try_from(t.elapsed().as_nanos()).unwrap_or(u64::MAX);
             let c = &mut self.river;
             c.plans += 1;
+            let (lo, hi) = (plan.nodes.iter().map(|n| n.level).min().unwrap_or(0), plan.nodes.iter().map(|n| n.level).max().unwrap_or(0));
+            c.level_min = if c.plans == 1 { lo } else { c.level_min.min(lo) };
+            c.level_max = c.level_max.max(hi);
+            c.finest_nodes_max = c.finest_nodes_max.max(plan.nodes.iter().filter(|n| n.level == hi).count());
             c.plan_ns_total += ns;
             c.plan_ns_max = c.plan_ns_max.max(ns);
             c.nodes_max = c.nodes_max.max(rivers.nodes.len());
