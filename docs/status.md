@@ -19,10 +19,8 @@ Dormant items moved to `docs/parking.md` (2026-11-12).
 Every row names an exit item (ADR 0120). Everything else is in `docs/parking.md`.
 | Exit | Step | Lane |
 |---|---|---|
-| E1 | River-frames scene PR (in flight); then fly one `bake-region` commit in the viewer through the production path, lakes and rivers drawn, defect labelled; report the gap to a flyable stored region first | crusader |
-| E2 | G-LOCAL repeated on the f32 rounds (R3a, R1), ledger rows with a verdict | spikes, after SPIKE-111 |
+| E1 | Pairing check (ADR 0110 PR 5a) if missing; lakes in the viewer (WaterSource, REND-058); the defect label on the pose line (TEST-128); the R3a `bake-region` commit (heavy, at least 40 GB free); then the flight stills | crusader |
 | E4 | Owner flight of the E1 region; sign-off line in `docs/milestones/P1.md` | owner, after E1 |
-| E5 | `cargo xtask plan` (ADR 0120 point 5) | explorer |
 
 Finishing (changeover, 2026-11-12; no successor work): SPIKE-111 ends its time-box with the report (spikes); PR #1449 parked as draft (explorer).
 

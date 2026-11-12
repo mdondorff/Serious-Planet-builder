@@ -15,6 +15,8 @@ Owner, 2026-11-12 (ADR 0120). These items are outside the current milestone, one
 - Briefing item 17: noise of the base bands (gradient noise, crease filter or turned lattice), decided at the gate.
 - Per-round convergence indicators (spikes).
 - GEN-175 follow-ups: the narrowed-fill refusal; remove `PlanParams::standard`.
+- GEN-173 spec text: define how a flat and its rim are found and the grade order, so the flood can be checked independently (E2 trace, 2026-11-13).
+- GEN-173 bound: cells stand up to 9.8e-10 m above the ungraded flood (R3a round 3); a derived bound (formula) or a fix, never "up to rounding" without a derivation.
 - Ledger row for the k=4 memory pair (10,565 against 11,136 MiB, hashes equal; #1447).
 
 ## Starting surface (look work; the owner decides on a picture sheet after flying E1)
