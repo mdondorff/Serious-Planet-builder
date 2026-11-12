@@ -1128,6 +1128,10 @@ impl App<'_> {
                 // (the plan reads the channels through the commit's reader); a world without one draws none.
                 if let Some(src) = self.world.rivers() {
                     // The plan is a lookup in the coverage cache (REND-064); missing tiles are built off the frame path on the terrain share.
+                    // A coverage built over another source (another commit) is dropped with its cache.
+                    if st.river_cov.as_ref().is_some_and(|c| Arc::as_ptr(c.source()).cast::<()>() != Arc::as_ptr(src).cast::<()>()) {
+                        st.river_cov = None;
+                    }
                     let cov = st.river_cov.get_or_insert_with(|| {
                         crate::rivers::RiverCoverage::new(
                             src.clone(),

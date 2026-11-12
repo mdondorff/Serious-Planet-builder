@@ -553,3 +553,24 @@ fn another_request_or_source_clears_the_cache() {
     assert!(plan.nodes.len() <= 1);
     assert_eq!(plan_rivers_cached(&few, nodes, &mut cache).unwrap(), plan);
 }
+
+// spec: REND-064
+#[test]
+fn a_build_made_under_an_old_stamp_never_lands_in_the_cache_of_another_request() {
+    use planet_frame::river::{build_river_node, RiverCache};
+    let src = flight_source();
+    let req = request(&src, 32);
+    let mut cache = RiverCache::new(1 << 20);
+    let old = cache.adopt(&req).unwrap();
+    let t = tile(2, 3, 1, 1);
+    let value = build_river_node(&req, t).unwrap();
+    // The request changes (other limits) while the build was running: the cache is cleared and restamped.
+    let mut other = request(&src, 32);
+    other.min_samples = 0.7;
+    let new = cache.adopt(&other).unwrap();
+    assert_ne!(old, new);
+    cache.insert_stamped(old, t, value.clone());
+    assert!(cache.is_empty(), "a late build of the old request is dropped");
+    cache.insert_stamped(new, t, value);
+    assert_eq!(cache.len(), 1);
+}

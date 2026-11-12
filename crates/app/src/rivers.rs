@@ -88,7 +88,7 @@ pub struct CoverageFrame {
 /// The river coverage of the viewer and of the river scene (REND-064): the frame's river plan is a lookup in a byte-bounded cache of coverage by tile; the tiles that are missing are built OFF the frame path, as
 /// `Prefetch` jobs of the terrain share, and a node whose coverage is not ready draws no river until it is. Without a share (a test, a tool) a missing tile is built at once, in the call.
 pub struct RiverCoverage {
-    src: Arc<ReaderRiverSource>,
+    src: Arc<dyn RiverSource + Send + Sync>,
     cache: Arc<std::sync::Mutex<planet_frame::river::RiverCache>>,
     share: Option<planet_streaming::jobs::Share>,
     inflight: Arc<std::sync::Mutex<std::collections::HashSet<planet_core::TileId>>>,
@@ -101,7 +101,7 @@ pub struct RiverCoverage {
 pub const COVERAGE_CACHE_BYTES: usize = 8 << 20;
 
 fn river_request<'a>(
-    src: &'a ReaderRiverSource,
+    src: &'a (dyn RiverSource + Send + Sync),
     law: &'a planet_generators::bake::k7::WidthLaw,
     res: u32,
 ) -> planet_frame::river::RiverRequest<'a> {
@@ -122,6 +122,16 @@ impl RiverCoverage {
         share: Option<planet_streaming::jobs::Share>,
         system: Option<Arc<planet_streaming::jobs::JobSystem>>,
     ) -> RiverCoverage {
+        RiverCoverage::with_source(src, cache_bytes, share, system)
+    }
+
+    /// [`RiverCoverage::new`] over any river source (a test's).
+    pub fn with_source(
+        src: Arc<dyn RiverSource + Send + Sync>,
+        cache_bytes: usize,
+        share: Option<planet_streaming::jobs::Share>,
+        system: Option<Arc<planet_streaming::jobs::JobSystem>>,
+    ) -> RiverCoverage {
         RiverCoverage {
             src,
             cache: Arc::new(std::sync::Mutex::new(planet_frame::river::RiverCache::new(cache_bytes))),
@@ -132,7 +142,8 @@ impl RiverCoverage {
         }
     }
 
-    pub fn source(&self) -> &Arc<ReaderRiverSource> {
+    /// The source the coverage reads (the viewer compares it with the world's to notice a new commit).
+    pub fn source(&self) -> &Arc<dyn RiverSource + Send + Sync> {
         &self.src
     }
 
@@ -158,7 +169,7 @@ impl RiverCoverage {
         true
     }
 
-    /// The river plan of a frame from the cache (REND-062, REND-064): missing tiles are queued for the background (or built here without a share). An error from an earlier background build is returned once.
+    /// The river plan of a frame from the cache (REND-062, REND-064): missing tiles are queued for the background (or built here without a share). An error of a background build (a failed read, a panic) is returned by the next call; without a share, by the call that hit it.
     pub fn plan(&self, plan: &planet_frame::terrain::TerrainPlan) -> Result<CoverageFrame, String> {
         if let Some(e) = self.failure.lock().expect("river failure").take() {
             return Err(e);
@@ -178,7 +189,7 @@ impl RiverCoverage {
             return Err(e);
         }
         let law = planet_generators::bake::k7::WidthLaw::STANDARD;
-        let req = river_request(&self.src, &law, res);
+        let req = river_request(self.src.as_ref(), &law, res);
         let (looked, stamp, bytes) = {
             let mut cache = self.cache.lock().expect("river cache");
             let looked = planet_frame::river::plan_rivers_lookup(&req, nodes, &mut cache)?;
@@ -195,13 +206,31 @@ impl RiverCoverage {
             let (src, cache, inflight, failure) = (self.src.clone(), self.cache.clone(), self.inflight.clone(), self.failure.clone());
             let tile = *tile;
             let job = move || {
-                let law = planet_generators::bake::k7::WidthLaw::STANDARD;
-                let req = river_request(&src, &law, res);
-                match planet_frame::river::build_river_node(&req, tile) {
-                    Ok(v) => cache.lock().expect("river cache").insert_stamped(stamp, tile, v),
-                    Err(e) => *failure.lock().expect("river failure") = Some(e),
+                // The tile leaves `inflight` however the build ends (a panic of the build is caught below, and a job system swallows one).
+                struct Done(Arc<std::sync::Mutex<std::collections::HashSet<planet_core::TileId>>>, planet_core::TileId);
+                impl Drop for Done {
+                    fn drop(&mut self) {
+                        if let Ok(mut set) = self.0.lock() {
+                            set.remove(&self.1);
+                        }
+                    }
                 }
-                inflight.lock().expect("river inflight").remove(&tile);
+                let _done = Done(inflight, tile);
+                let law = planet_generators::bake::k7::WidthLaw::STANDARD;
+                let req = river_request(src.as_ref(), &law, res);
+                let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| planet_frame::river::build_river_node(&req, tile)));
+                match built {
+                    Ok(Ok(v)) => cache.lock().expect("river cache").insert_stamped(stamp, tile, v),
+                    Ok(Err(e)) => *failure.lock().expect("river failure") = Some(e),
+                    Err(panic) => {
+                        let why =
+                            panic.downcast_ref::<String>().cloned().or_else(|| panic.downcast_ref::<&str>().map(|s| (*s).to_string()));
+                        *failure.lock().expect("river failure") = Some(format!(
+                            "the river coverage of tile {tile:?} could not be built: the build panicked: {}",
+                            why.unwrap_or_default()
+                        ));
+                    }
+                }
             };
             match &self.share {
                 Some(share) => share.spawn_class(planet_streaming::jobs::Class::Prefetch, Box::new(job)),
@@ -209,7 +238,10 @@ impl RiverCoverage {
             }
         }
         if self.share.is_none() && queued > 0 {
-            // Built here: the plan again, now from the filled cache.
+            // Built here: an error of a build is the error of this call, then the plan again from the filled cache.
+            if let Some(e) = self.failure.lock().expect("river failure").take() {
+                return Err(e);
+            }
             let again = {
                 let mut cache = self.cache.lock().expect("river cache");
                 let again = planet_frame::river::plan_rivers_lookup(&req, nodes, &mut cache)?;

@@ -323,3 +323,56 @@ fn the_river_coverage_is_built_off_the_frame_path_and_a_later_frame_is_the_fresh
     assert_eq!((got.not_ready, sync.pending()), (0, 0));
     assert_eq!(got.plan, fresh(&frames[1]));
 }
+
+/// A river source that fails (an error or a panic) on every tile.
+struct Failing {
+    panic: bool,
+}
+
+impl planet_frame::river::RiverSource for Failing {
+    fn grid(&self) -> planet_frame::river::RiverGrid {
+        planet_frame::river::RiverGrid { cells: 98_304, tile: 768, cell_m: 100.0 }
+    }
+    fn tile_channels(&self, _: Face, _: u32, _: u32) -> Result<Arc<Vec<planet_generators::bake::k7::Channel>>, String> {
+        if self.panic {
+            panic!("a damaged block");
+        }
+        Err("river tile: a damaged block".into())
+    }
+}
+
+// spec: REND-064
+/// A failed build is never silent and never stuck: without a share the call that hit it returns the error; with a share an error or a panic of a background build leaves `inflight` and is returned by the next call.
+#[test]
+fn a_failed_or_panicking_coverage_build_returns_its_error_and_leaves_no_tile_stuck() {
+    use planet::rivers::RiverCoverage;
+    use planet_streaming::jobs::JobSystem;
+    let nodes = vec![(0u32, tile_at(Face(2), 12, 0.0, 0.0), 1.0)];
+    for panic in [false, true] {
+        let src: Arc<dyn planet_frame::river::RiverSource + Send + Sync> = Arc::new(Failing { panic });
+        let sync = RiverCoverage::with_source(src.clone(), 1 << 20, None, None);
+        if panic {
+            // Without a share a panic is the caller's (the build runs in the call); only the share path catches it.
+            continue;
+        }
+        let e = sync.plan_nodes(NODE_CELLS, &nodes).expect_err("the sync call returns the error of its build");
+        assert!(e.contains("damaged block"), "{e}");
+        assert_eq!(sync.pending(), 0);
+        let system = Arc::new(JobSystem::new(1, planet_streaming::Priority::Normal));
+        let share = system.share("river-coverage-failing", 1);
+        let cov = RiverCoverage::with_source(src, 1 << 20, Some(share), Some(system));
+        let first = cov.plan_nodes(NODE_CELLS, &nodes).expect("the first frame only queues");
+        assert!(first.queued > 0);
+        assert!(cov.wait_idle(std::time::Duration::from_secs(30)), "the failed build left the queue");
+        assert!(cov.plan_nodes(NODE_CELLS, &nodes).is_err(), "the next call returns the error of the background build");
+    }
+    // A panic in a background build is caught, named, and leaves nothing stuck.
+    let src: Arc<dyn planet_frame::river::RiverSource + Send + Sync> = Arc::new(Failing { panic: true });
+    let system = Arc::new(JobSystem::new(1, planet_streaming::Priority::Normal));
+    let share = system.share("river-coverage-panicking", 1);
+    let cov = RiverCoverage::with_source(src, 1 << 20, Some(share), Some(system));
+    cov.plan_nodes(NODE_CELLS, &nodes).expect("the first frame only queues");
+    assert!(cov.wait_idle(std::time::Duration::from_secs(30)), "a panicking build leaves the queue");
+    let e = cov.plan_nodes(NODE_CELLS, &nodes).expect_err("the panic is returned");
+    assert!(e.contains("panicked") && e.contains("damaged block"), "{e}");
+}
