@@ -1,0 +1,17 @@
+== window face 1 cells 12288 seed 14: i 7856-8875 j 560-1579 = 1020 x 1020; box i 8056-8675 j 760-1379; land 69.4 %; base sampled in 445.1 s
+-- [R1h] round-1 breach of z0 (U): lowered cells 55716 of 267717 land cells (20.81 %)
+   lowering of the lowered cells: p10 0.56 p25 3.59 p50 20.22 p75 76.61 p90 215.56 p95 338.35 p99 498.03 p99.9 578.2 max 794.1 m; cells lowered by more than 10 m 34486, 100 m 11413, 500 m 215
+   cells in not lifted: 11743 lowered, lowering p50 1.08 p90 60.73 p99 462.50 max 663.7 m
+   cells in 1-30 cells: 4218 lowered, lowering p50 5.20 p90 67.04 p99 384.31 max 500.1 m
+   cells in 31-300: 11263 lowered, lowering p50 16.29 p90 102.61 p99 463.30 max 555.3 m
+   cells in 301-3000: 18061 lowered, lowering p50 47.63 p90 306.28 p99 500.00 max 794.1 m
+   cells in over 3000: 10431 lowered, lowering p50 51.66 p90 248.62 p99 487.78 max 713.5 m
+   the 8 cells with the largest lowering (window cell, global cell, z0, z after, lowering, fill depth at the cell, lowering events, capped events, lowest donor z, receiver of the cell, depression size / depth):
+     (622, 211) = global (8478, 771): z0 969.0, after 174.9, lowering 794.1 m, fill depth 10.6 m, events 2, capped 1, lowest donor z0 935.7 m, receiver z0 969.3 m, depression 1268 cells / 810 m deep
+     (622, 210) = global (8478, 770): z0 935.7, after 175.7, lowering 760.0 m, fill depth 43.9 m, events 2, capped 1, lowest donor z0 790.3 m, receiver z0 969.0 m, depression 1268 cells / 810 m deep
+     (800, 295) = global (8656, 855): z0 1207.7, after 465.0, lowering 742.7 m, fill depth 9.6 m, events 2, capped 1, lowest donor z0 988.8 m, receiver z0 1217.3 m, depression 301 cells / 785 m deep
+     (741, 356) = global (8597, 916): z0 859.4, after 127.5, lowering 731.8 m, fill depth 91.7 m, events 2, capped 1, lowest donor z0 592.4 m, receiver z0 843.1 m, depression 678 cells / 852 m deep
+     (740, 357) = global (8596, 917): z0 843.1, after 126.6, lowering 716.5 m, fill depth 108.0 m, events 2, capped 0, lowest donor z0 859.4 m, receiver z0 923.3 m, depression 678 cells / 852 m deep
+     (518, 313) = global (8374, 873): z0 713.5, after 0.0, lowering 713.5 m, fill depth 13.7 m, events 2, capped 1, lowest donor z0 580.1 m, receiver z0 615.4 m, depression 18191 cells / 726 m deep
+     (495, 308) = global (8351, 868): z0 720.1, after 20.5, lowering 699.5 m, fill depth 7.2 m, events 2, capped 1, lowest donor z0 464.8 m, receiver z0 552.4 m, depression 18191 cells / 726 m deep
+     (805, 352) = global (8661, 912): z0 1030.1, after 348.5, lowering 681.6 m, fill depth 47.7 m, events 2, capped 1, lowest donor z0 829.6 m, receiver z0 992.6 m, depression 557 cells / 858 m deep
