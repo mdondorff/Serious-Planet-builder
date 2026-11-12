@@ -1732,3 +1732,14 @@ Source: Architect 2026-11-12, STRM-085
 #### Scenario: The cache peak
 - **WHEN** the flight runs twice over the same course
 - **THEN** some node carries a river and the cache never exceeds its bound
+
+### Requirement: TEST-125 The region bake test
+A tier-A test SHALL bake a fixture region and check that the commit names a graph, the reader gives the channels of the fixture's known H1 segments at their local cells, the L tiles of the land tiles are present, two bakes give the same bytes and one and eight threads give the same bytes, and a region near a face edge is refused.
+
+Verify: A
+Status: active
+Source: GEN-177
+
+#### Scenario: Determinism
+- **WHEN** the fixture region is baked twice and at one and eight threads
+- **THEN** every stored record is byte-equal

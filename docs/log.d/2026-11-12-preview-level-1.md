@@ -1,0 +1,1 @@
+- 2026-11-12 **preview-level-1** and **preview-latency** archived (AUTH-007 to AUTH-010, GEN-157, TEST-098, VIEW-067 active; TEST-099 stays planned until its timing runs in a perf window).

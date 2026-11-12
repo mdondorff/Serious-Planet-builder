@@ -20,6 +20,7 @@ pub mod layer_store;
 pub mod layer_tiles;
 pub mod meshpack;
 pub mod pack;
+pub mod region_bake;
 pub mod relief_store;
 pub mod river_read;
 pub mod stage_key;

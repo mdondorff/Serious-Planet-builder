@@ -1,0 +1,1 @@
+- 2026-11-12 **bake-region**: a region of a face is baked to a commit with a channel graph (GEN-177, TEST-125; planet_cache::region_bake and the example bake_region); the R3a run waits for a heavy-run window.

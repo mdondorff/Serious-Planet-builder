@@ -1,0 +1,1 @@
+- 2026-11-12 **river-thin**: the wet width of a thin river over coarse samples is measured (no thickening, at most 1.04 of its width; thinning below one sample); the Tracked line rewritten.

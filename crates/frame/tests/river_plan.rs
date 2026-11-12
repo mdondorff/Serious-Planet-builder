@@ -356,3 +356,62 @@ fn across_a_level_boundary_the_shared_samples_agree_and_the_in_between_ones_are_
     assert!(max_between <= 16, "an in-between sample differs from the coarse interpolation by {max_between} codes");
     println!("level boundary: largest code difference of an in-between sample against the coarse interpolation: {max_between} codes ({:.2} cells)", f64::from(max_between) / 32.0);
 }
+
+// spec: REND-059
+/// The thin-river thickening (Tracked, reported, not gated): the drawn width of a river over nodes whose samples are 1/r of its width apart, the codes interpolated bilinearly as the fragment does, against the river's own
+/// width, over phases of the river's centre between sample rows and over its direction against the sample grid (0, 22.5 and 45 degrees). The wet area over a stretch of river, divided by the stretch and the river's width.
+#[test]
+fn the_wet_width_of_a_thin_river_over_coarse_samples_is_reported_against_its_own_width() {
+    let width = 3.0f64;
+    let q = q_for(width);
+    println!("wet width / river width, node samples 1/r of the width apart (min, mean, max over 4 phases and 3 directions):");
+    let mut rows: Vec<(f64, f64, f64, f64)> = Vec::new();
+    for &r in &[0.5f64, 0.75, 1.0, 1.2, 1.5, 2.0, 3.0, 4.0] {
+        let step = width / r;
+        let (mut lo, mut hi, mut sum, mut n) = (f64::MAX, 0.0f64, 0.0f64, 0.0f64);
+        for deg in [0.0f64, 22.5, 45.0] {
+            let (ux, uy) = (libm::cos(deg.to_radians()), libm::sin(deg.to_radians()));
+            for ph in 0..4 {
+                // The grid has 33 x 33 samples; the river passes the grid's centre sample shifted by `ph / 4` of a step across.
+                let size = 33usize;
+                let c = 16.0 * step;
+                let (cx, cy) = (c - uy * step * f64::from(ph) / 4.0, c + ux * step * f64::from(ph) / 4.0);
+                let ch =
+                    channel(&[(cx - 100.0 * width * ux, cy - 100.0 * width * uy), (cx + 100.0 * width * ux, cy + 100.0 * width * uy)], q);
+                let d = river_distance_grid(&[ch], (0.0, 0.0), step, (size, size), &LAW, GRID.cell_m);
+                let code = |i: usize, j: usize| f64::from(planet_frame::river::distance_code(d[j * size + i]));
+                // A square of the grid's middle (8 samples a side), sampled at 16 points a sample; the wet area against the river's length in the square along its direction.
+                let (span, sub) = (8.0f64, 16.0f64);
+                let (mut wet, mut count) = (0.0f64, 0.0f64);
+                let total = (span * sub) as usize;
+                for a in 0..total {
+                    for b in 0..total {
+                        let (x, y) = (12.0 + (a as f64 + 0.5) / sub, 12.0 + (b as f64 + 0.5) / sub);
+                        let (i, j) = (libm::floor(x) as usize, libm::floor(y) as usize);
+                        let (fx, fy) = (x - libm::floor(x), y - libm::floor(y));
+                        let v = code(i, j) * (1.0 - fx) * (1.0 - fy)
+                            + code(i + 1, j) * fx * (1.0 - fy)
+                            + code(i, j + 1) * (1.0 - fx) * fy
+                            + code(i + 1, j + 1) * fx * fy;
+                        wet += f64::from(u8::from(v <= 128.0));
+                        count += 1.0;
+                    }
+                }
+                // The length of river inside the square: the square's area over its width, the river passing through its middle: its extent along the direction is span / max(|cos|, |sin|) for the chord through the centre.
+                let chord = span / libm::fmax(libm::fabs(ux), libm::fabs(uy));
+                let area = wet / count * span * span * step * step;
+                let h = area / (chord * step * width);
+                lo = lo.min(h);
+                hi = hi.max(h);
+                sum += h;
+                n += 1.0;
+            }
+        }
+        rows.push((r, lo, sum / n, hi));
+        println!("  r = {r:>5.2}: {lo:.2}, {:.2}, {hi:.2}", sum / n);
+    }
+    // Reported, not gated as a look value; what the test holds is the finding: the wet band is never wider than the river (1.1 of its width at most) whatever the phase and direction, and a river of 1.2 samples or more
+    // is drawn at 0.8 of its width or more; below one sample it thins and breaks up instead of thickening.
+    assert!(rows.iter().all(|x| x.3 <= 1.1), "no thickening: {rows:?}");
+    assert!(rows.iter().filter(|x| x.0 >= 1.2).all(|x| x.1 >= 0.8), "a river of 1.2 samples or more keeps its width: {rows:?}");
+}
