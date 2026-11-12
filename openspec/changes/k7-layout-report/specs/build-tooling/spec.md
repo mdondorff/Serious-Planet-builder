@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: BUILD-052 K7 changes report their difference from an alternate tile layout
-`cargo xtask k7-layout` SHALL run K7 on the region bake fixture under the canonical layout and the alternate layout (half the tile side, same halo), unquantised, and SHALL print: the cells differing in bits and their share, the p50, p99 and maximum height difference in metres, and the cells over 0.25 m and over 1 m, for all cells and for the cells off the channel lines, in total and by distance to the nearest alternate seam (0 to 7, 8 to 31, 32 to 127, 128 or more cells). `cargo xtask prepush` SHALL run it when the diff touches K7, print the committed baseline beside it, and print `REVIEW` above twice the baseline p99 or maximum. The exit code SHALL be 0.
+`cargo xtask k7-layout` SHALL run K7 on the region bake fixture under the canonical layout and the alternate layout (twice the tile side, same halo), unquantised, and SHALL print: cells differing in bits and their share, p50, p99 and maximum height difference in metres, and the cells over 0.25 m and over 1 m, in total, on and off the channel lines, and for all cells by distance to the nearest alternate seam (0 to 7, 8 to 31, 32 to 127, 128 or more cells). `cargo xtask prepush` SHALL run it when the diff touches K7, print the committed baseline beside it, and `REVIEW` above twice the baseline p99 or maximum. The exit code SHALL be 0.
 
 Verify: A
 Status: active
