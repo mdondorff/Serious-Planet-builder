@@ -58,19 +58,41 @@ fn highland() -> Vec3 {
     panic!("no highland");
 }
 
-/// A low pose over a highland point, looking along the ground and pitched down.
-fn scene() -> (TerrainPlan, Reference) {
+/// A pose `alt` m over a highland point, looking along the ground and pitched down by `pitch_deg`, with the selection's `tau_px`.
+fn scene_at(alt: f64, pitch_deg: f64, tau_px: f64) -> (TerrainPlan, Reference) {
+    scene_capped(alt, pitch_deg, tau_px, FINEST)
+}
+
+/// [`scene_at`] with the finest level of the selection capped at `max_level`.
+fn scene_capped(alt: f64, pitch_deg: f64, tau_px: f64, max_level: u8) -> (TerrainPlan, Reference) {
     let field = Reference(1);
     let d = highland();
     let heading = Vec3::new(0.0, 0.0, 1.0).cross(d).normalized();
-    let camera =
-        Camera::at_surface_point(PlanetFixed(d * (R + field.height(d) + 40.0)), heading, 25f64.to_radians(), 60f64.to_radians(), 1.6, 0.1);
+    let camera = Camera::at_surface_point(
+        PlanetFixed(d * (R + field.height(d) + alt)),
+        heading,
+        pitch_deg.to_radians(),
+        60f64.to_radians(),
+        1.6,
+        0.1,
+    );
     let plan = plan_terrain_field(
-        &TerrainRequest { camera, size: SIZE, view: TerrainView::Level, lod: lod(), face_mapping: "tangent-v1".into(), seed: 1 },
+        &TerrainRequest {
+            camera,
+            size: SIZE,
+            view: TerrainView::Level,
+            lod: LodParams { tau_px, max_level, ..lod() },
+            face_mapping: "tangent-v1".into(),
+            seed: 1,
+        },
         &field,
     )
     .unwrap();
     (plan, field)
+}
+
+fn scene() -> (TerrainPlan, Reference) {
+    scene_at(40.0, 25.0, 4.0)
 }
 
 /// One channel for every tile asked: the source of a test that places the river by the nodes' own windows.
@@ -88,8 +110,8 @@ impl RiverSource for OneRiver {
     }
 }
 
-/// A river through the middle of the finest node nearest to the camera, on a layer grid whose cells are that node's own (one sample a cell), 6 cells wide.
-fn river_plan(plan: &TerrainPlan, max_layers: usize) -> RiverPlan {
+/// A river through the middle of the finest node nearest to the camera of `plan`, `width_cells` wide, on a layer grid whose cells are that node's own (one sample a cell): the grid and the channel, in face cell-index space.
+fn make_river(plan: &TerrainPlan, width_cells: f64) -> OneRiver {
     let finest = plan.nodes.iter().map(|n| n.level).max().unwrap();
     let cells = 1u32 << (finest + 4);
     let grid = RiverGrid { cells, tile: cells / 4, cell_m: 1.0 };
@@ -101,21 +123,30 @@ fn river_plan(plan: &TerrainPlan, max_layers: usize) -> RiverPlan {
     });
     let tile = pick.expect("a finest node").tile;
     let (origin, _) = node_window(tile, CELLS, cells);
-    let q = (6.0 / law.a) * (6.0 / law.a);
+    let q = (width_cells / law.a) * (width_cells / law.a);
     let channel = Channel {
         points: vec![(origin.0 - 120.0, origin.1 + 3.0), (origin.0 - 10.0, origin.1 + 9.0), (origin.0 + 130.0, origin.1 + 2.0)],
         levels: vec![1.0, 1.0, 1.0],
         q: vec![q, q, q],
         q_unit: QUnit::Discharge,
     };
-    let src = OneRiver { grid, channel };
+    OneRiver { grid, channel }
+}
+
+/// The river plan of `plan` over `src`: nodes with a river in range whose samples are at most `max_step` cells apart.
+fn plan_river_over(plan: &TerrainPlan, src: &OneRiver, max_layers: usize, max_step: f64) -> RiverPlan {
+    let law = WidthLaw::STANDARD;
     let nodes: Vec<(u32, planet_core::TileId, f64)> = plan
         .nodes
         .iter()
         .enumerate()
         .map(|(i, n)| (i as u32, n.tile, n.camera_relative_origin.iter().map(|v| f64::from(*v) * f64::from(*v)).sum::<f64>().sqrt()))
         .collect();
-    plan_rivers(&RiverRequest { source: &src, law: &law, res: CELLS, max_step_cells: 2.0, max_layers }, &nodes).unwrap()
+    plan_rivers(&RiverRequest { source: src, law: &law, res: CELLS, max_step_cells: max_step, max_layers }, &nodes).unwrap()
+}
+
+fn river_plan(plan: &TerrainPlan, max_layers: usize) -> RiverPlan {
+    plan_river_over(plan, &make_river(plan, 6.0), max_layers, 2.0)
 }
 
 fn renderer(ctx: &GpuContext, plan: &TerrainPlan, field: &Reference) -> TerrainRenderer {
@@ -325,4 +356,88 @@ fn river_water_adds_no_geometry_the_frame_submits_the_draws_and_triangles_it_did
             without.water_draws
         )
     );
+}
+
+/// The wetness of every pixel: how much the river darkened it, from 0 (the frame without) to about 1 (the full tint), from the HDR luminance of the frame with and without the river.
+fn wetness(base: &[[f32; 4]], with: &[[f32; 4]]) -> Vec<f32> {
+    let d: Vec<f32> = base.iter().zip(with).map(|(a, b)| (lum(a) - lum(b)).max(0.0) / lum(a).max(1e-6)).collect();
+    let top = d.iter().copied().fold(0.0f32, f32::max).max(1e-6);
+    d.iter().map(|v| v / top).collect()
+}
+
+/// The sub-pixel positions where the wetness crosses a half along each row (`axis` 0) or column (`axis` 1): per line the first and the last crossing, which are the banks of a river that crosses the line.
+fn bank_positions(w: &[f32], axis: usize) -> Vec<(usize, f64, f64)> {
+    let (n_lines, len) = if axis == 0 { (SIZE.1 as usize, SIZE.0 as usize) } else { (SIZE.0 as usize, SIZE.1 as usize) };
+    let at = |line: usize, k: usize| if axis == 0 { w[line * SIZE.0 as usize + k] } else { w[k * SIZE.0 as usize + line] };
+    let mut out = Vec::new();
+    for line in 0..n_lines {
+        let mut crossings = Vec::new();
+        for k in 0..len - 1 {
+            let (a, b) = (at(line, k), at(line, k + 1));
+            if (a - 0.5) * (b - 0.5) < 0.0 {
+                crossings.push(k as f64 + f64::from((0.5 - a) / (b - a)));
+            }
+        }
+        if crossings.len() >= 2 {
+            out.push((line, crossings[0], crossings[crossings.len() - 1]));
+        }
+    }
+    out
+}
+
+/// The largest second difference of a bank's position along consecutive lines: a cell staircase moves the bank by whole texels (several pixels) at a step; a smooth bank moves it by a fraction of a pixel.
+fn staircase_px(banks: &[(usize, f64, f64)]) -> f64 {
+    let mut worst = 0.0f64;
+    for w in banks.windows(3) {
+        if w[1].0 == w[0].0 + 1 && w[2].0 == w[1].0 + 1 {
+            worst = worst.max((w[0].1 - 2.0 * w[1].1 + w[2].1).abs()).max((w[0].2 - 2.0 * w[1].2 + w[2].2).abs());
+        }
+    }
+    worst
+}
+
+// spec: TEST-117, REND-059
+#[test]
+fn the_river_scene_has_smooth_banks_at_the_near_pose_and_no_pop_between_two_levels_of_detail() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let mut goldens = planet_testkit::GoldenChecks::new(&ctx.adapter_key(), &ctx.driver_string());
+    // The near pose: low, pitched down, a river 10 cells wide through the finest node nearest to the camera.
+    let (plan, field) = scene_at(25.0, 40.0, 4.0);
+    let src = make_river(&plan, 10.0);
+    let rp = plan_river_over(&plan, &src, RIVER_LAYERS as usize, 2.0);
+    assert!(!rp.nodes.is_empty(), "the near pose has river nodes");
+    let mut r = renderer(&ctx, &plan, &field);
+    let (base, _) = frame(&ctx, &mut r, &plan, None);
+    let (with, stats) = frame(&ctx, &mut r, &plan, Some(&rp));
+    let near_img = {
+        let f = r.read_color(&ctx);
+        planet_testkit::Image::new(f.width, f.height, f.rgba)
+    };
+    let w = wetness(&base, &with);
+    let wet_px = w.iter().filter(|v| **v > 0.5).count();
+    assert!(wet_px > 200, "the river shows at the near pose ({wet_px} wet pixels, {} river nodes)", stats.river_nodes);
+    // No staircase bank: along the rows (or the columns, whichever the river crosses more of) the bank moves by a fraction of a pixel from line to line.
+    let (rows, cols) = (bank_positions(&w, 0), bank_positions(&w, 1));
+    let banks = if rows.len() >= cols.len() { rows } else { cols };
+    assert!(banks.len() >= 8, "the river crosses enough lines to judge its banks ({})", banks.len());
+    let stair = staircase_px(&banks);
+    println!("near pose: {wet_px} wet pixels, {} bank lines, largest bank second difference {stair:.3} px", banks.len());
+    assert!(stair <= 1.5, "the bank has a staircase: its position changes by {stair} px from one line to the next beyond a straight line");
+    goldens.check("river_lit_near", &near_img, planet_testkit::Tolerance::Exact);
+    // Two levels of detail: the same camera and the same river over a plan whose finest level is one coarser (the nearest tiles are the parents of the near pose's): the river is drawn from coverages of half the resolution.
+    let finest = plan.nodes.iter().map(|n| n.level).max().unwrap();
+    let (coarse_plan, _) = scene_capped(25.0, 40.0, 4.0, finest - 1);
+    let coarse_nodes = coarse_plan.nodes.len();
+    assert_eq!(coarse_plan.nodes.iter().map(|n| n.level).max().unwrap(), finest - 1);
+    let rp_coarse = plan_river_over(&coarse_plan, &src, RIVER_LAYERS as usize, 2.0);
+    let mut rc = renderer(&ctx, &coarse_plan, &field);
+    let (base_c, _) = frame(&ctx, &mut rc, &coarse_plan, None);
+    let (with_c, _) = frame(&ctx, &mut rc, &coarse_plan, Some(&rp_coarse));
+    let wc = wetness(&base_c, &with_c);
+    let wet_c = wc.iter().filter(|v| **v > 0.5).count();
+    let differ = w.iter().zip(&wc).filter(|(a, b)| (**a > 0.5) != (**b > 0.5)).count();
+    let share = differ as f64 / wet_px.max(1) as f64;
+    println!("two levels: {wet_px} wet pixels (finest level {finest}, {} nodes) and {wet_c} (finest level {}, {coarse_nodes} nodes); {differ} pixels change wetness: {:.1} % of the wet pixels", plan.nodes.len(), finest - 1, share * 100.0);
+    assert!(wet_c > 100, "the coarser plan still draws the river ({wet_c})");
+    assert!(share <= 0.1, "the river pops between two levels of detail: {:.1} % of its pixels change wetness", share * 100.0);
 }
