@@ -54,7 +54,7 @@ impl WorldPrecision {
         let spacing = SPACING_FACTOR * f32_spacing(radius);
         let need = spacing * (1.0 + TIE_MARGIN);
         let want = epsilon_profile.max(need);
-        if !(want <= epsilon_max) {
+        if want > epsilon_max {
             WorldPrecision { radius, epsilon_w: epsilon_profile, f64_rounds: true }
         } else {
             WorldPrecision { radius, epsilon_w: want, f64_rounds: false }
