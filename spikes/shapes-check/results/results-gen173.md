@@ -62,3 +62,23 @@ PLANET_WIN=1,12288,8056,8675,760,1379,14 PLANET_MARGIN=200 shapes_check gen 8   
 shapes_check dem          # PLANET_SLOPE=0.2,0.7 (high) or 0.03,0.14 (mid)
 region_scale mem 400 8    # the stage sheets
 ```
+
+## 5. Addendum: counts per direction (architect, 2026-11-12)
+
+Added on the bulldozer's order: the channel steps and the straight runs over 10 cells per D8 direction (four diagonals, two axes), after GEN-173, on the same surfaces as section 1 (U after 4 rounds, box counted; margin 200). Probe `shapes_check dirs` and `dirsdem` on the local branch `spike/spike-108-rerun`. Raw: `raw-gen173/dirs-*.txt`. Directions as (di, dj) with j growing downwards: W (-1, 0), E (1, 0), N (0, -1), S (0, 1), NW (-1, -1), NE (1, -1), SW (-1, 1), SE (1, 1). A run is counted once, at its head; "run length" is the length of channel in runs over 10 cells (diagonal steps weigh sqrt 2) over the channel length; "on lifted cells" is the share of that length on cells the fill raised.
+
+| Set | Steps by direction, share (W / E / N / S / NW / NE / SW / SE) | Runs over 10 cells by direction (count) | Run length / channel length by direction | Mean step vector (i, j) |
+|---|---|---|---|---|
+| R1h | 0.071 / 0.148 / 0.030 / 0.263 / 0.026 / 0.086 / 0.214 / 0.162 | 5 / 6 / 0 / 3 / 1 / 2 / 6 / 2 (25) | 0.0030 / 0.0051 / 0 / 0.0017 / 0.0009 / 0.0017 / 0.0078 / 0.0029 | (+0.09, +0.50) |
+| R3a | 0.157 / 0.054 / 0.150 / 0.130 / 0.213 / 0.079 / 0.133 / 0.083 | 3 / 3 / 13 / 19 / 53 / 1 / 4 / 19 (115) | 0.0006 / 0.0006 / 0.0028 / 0.0048 / 0.0498 / 0.0003 / 0.0017 / 0.0093 | (-0.29, -0.10) |
+| R3b | 0.032 / 0.258 / 0.098 / 0.117 / 0.028 / 0.220 / 0.090 / 0.157 | 0 / 25 / 11 / 11 / 1 / 24 / 2 / 14 (88) | 0 / 0.0041 / 0.0016 / 0.0018 / 0.0003 / 0.0077 / 0.0007 / 0.0043 | (+0.49, +0.02) |
+| DEM high pool (8 tiles) | 0.110 / 0.156 / 0.167 / 0.107 / 0.107 / 0.185 / 0.097 / 0.072 | 1 / 1 / 0 / 1 / 0 / 0 / 0 / 0 (3) | up to 0.0024 | (+0.10, -0.18) |
+| DEM mid pool (4 tiles) | 0.115 / 0.090 / 0.104 / 0.269 / 0.077 / 0.050 / 0.201 / 0.095 | 0 / 1 / 2 / 0 / 0 / 0 / 0 / 0 (3) | up to 0.0079 | (-0.16, +0.33) |
+| DEM all 15 tiles | 0.127 / 0.122 / 0.137 / 0.169 / 0.110 / 0.121 / 0.135 / 0.078 | 1 / 2 / 2 / 1 / 1 / 0 / 0 / 0 (7) | up to 0.0032 | (-0.05, +0.01) |
+
+- Grouped (steps / runs): R1h horizontal 0.219 / 11, vertical 0.294 / 3, NW-SE diagonals 0.188 / 3, NE-SW diagonals 0.300 / 8; R3a horizontal 0.211 / 6, vertical 0.281 / 32, NW-SE 0.297 / 72, NE-SW 0.212 / 5; R3b horizontal 0.289 / 25, vertical 0.215 / 22, NW-SE 0.186 / 15, NE-SW 0.310 / 26.
+- One diagonal dominates the long runs of R3a: NW has 53 of the 115 runs and 0.0498 of the channel length in runs (SE has 19 and 0.0093; the other two diagonals 5 runs together). R1h has no dominant diagonal (SW 6 runs, SE 2, NW 1, NE 2; the runs are spread over W, E, SW); R3b's runs are NE 24, E 25, SE 14.
+- The dominant direction follows the mean flow of the box: R3a's mean step vector is (-0.29, -0.10) (towards the west-north-west, NW dominant), R3b's (+0.49, +0.02) (towards the east, E and NE dominant), R1h's (+0.09, +0.50) (towards the south, S, SW and SE). The dominant diagonal differs between the three regions, so it is not one fixed grid direction.
+- R3a's NW runs lie on the flats: 95 % of their length is on cells the fill raised (all runs in W, NE: 100 %; the SE runs 83 %); 75.6 % of all NW steps are on lifted cells (R3a overall 55 %). R3a's lifted components reach 10,622 cells, beyond the 127-cell limit of the regrade (section 2), and 61.7 % of its lifted cells are still on the chessboard rule. In R3b the run length on lifted cells is 50 to 69 % for E and NE; in R1h it is 25 to 31 % for E and SE.
+- The DEM pools hold 3 to 7 runs over 10 cells (4,217, 3,459 and 8,480 channel steps), so no direction can be compared there beyond the steps: the DEM's step shares are within 0.05 to 0.27 per direction with no direction above 0.27 (the mid pool's S 0.269) and the diagonal steps 0.17 to 0.28 per group.
+- U and C give the same counts within 1 per direction (raw).
