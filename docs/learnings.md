@@ -126,3 +126,9 @@ Scope: project (GEN-175, GEN-166)
 What happened: on a synthetic 60 km world (40 km cone, 384 x 384 cells of 800 m, 4 rounds) f64 at flood epsilon 1.95e-3 m against 1e-3 m differs by a p99 of 77 m, and a 0.2 mm random perturbation of the f64 start by 1,400 m (p50 3.6 m; 4 km control: p99 104 m); a midpoint datum (f32 about 20 km) made f32 differ from f64 by a p99 of 75 m after 4 rounds because it coarsened the rounding grid near the sea (1 mm instead of 1e-7 m), where the ties are; in the sea frame f32 against f64 at the same epsilon is within 0.011 m (p99) after 4 rounds. Differences between runs grow from round 3 as cascades of breach and flat routes.
 Assumption it changes: that an f32 against f64 difference over several rounds measures the rounding; it measures the carve's sensitivity. Compare one round, or a perturbation control.
 Obsolete when: the carve is stable under start-surface noise.
+
+## 2026-11-12 A flat grade narrowed to f32 collapses at any epsilon near the spacing
+Scope: project (GEN-173, GEN-175)
+What happened: GEN-173 grades a flat by `epsilon d / sqrt 2` and the receiver is the steepest jittered slope, so neighbouring cells of a flat can differ by a small fraction of epsilon; on a 60 km world (spacing 3.9e-3 m at 40 km) a fill narrowed to f32 collapses at `epsilon_w` (40 lifted cells of a crater floor are not above their receiver), and no factor on the spacing guarantees strictness. H1 floods in f64 and the plan stores no f32 fill; pass 2 does store its heights as f32 (tile.rs), with incise chains of `hr + epsilon`.
+Assumption it changes: that `epsilon >= spacing` keeps every flood step strict after narrowing; it holds for the carved epsilon chains, not for the flat grade.
+Obsolete when: a stored or narrowed copy of a filled surface exists (re-flood it in f64 or grade it by a full epsilon) or the grade steps by a full epsilon.
