@@ -272,7 +272,7 @@ pub fn solve_rounds_with(
             }
         }
         if p.round_f32 {
-            super::carve::narrow_f32(z);
+            super::carve::narrow_f32_checked(z, p.epsilon);
         }
         report.rounds.push(RoundStats {
             catchments: cuts.members.len(),
@@ -472,7 +472,7 @@ pub fn solve_rounds_memo(
             }
         }
         if p.round_f32 {
-            super::carve::narrow_f32(z);
+            super::carve::narrow_f32_checked(z, p.epsilon);
         }
         let (e, b) = cache.evict();
         (w.evicted, w.evicted_bytes) = (w.evicted + e, w.evicted_bytes + b);

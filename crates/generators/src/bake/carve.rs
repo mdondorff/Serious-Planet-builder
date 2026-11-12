@@ -226,7 +226,7 @@ pub fn carve_rock_fixed(
         if step % p.reroute_every == 0 {
             // GEN-166: the heights of the round that ended are narrowed before the next routing reads them.
             if p.round_f32 && step > 0 {
-                narrow_f32(z);
+                narrow_f32_checked(z, p.epsilon);
             }
             // The previous routing is dropped before the next is built: two live routings of a face would not fit its memory budget.
             drop(routing.take());
@@ -331,7 +331,7 @@ pub fn carve_rock_fixed(
         }
     }
     if p.round_f32 {
-        narrow_f32(z);
+        narrow_f32_checked(z, p.epsilon);
     }
     routing.expect("a carve has at least one step")
 }
@@ -342,6 +342,20 @@ pub fn narrow_f32(z: &mut [f64]) {
         let n = *v as f32;
         assert!(n.is_finite(), "the height {v} does not fit an f32");
         *v = f64::from(n);
+    }
+}
+
+/// [`narrow_f32`] under the epsilon of the round (GEN-175): the epsilon SHALL exceed the f32 spacing at the largest height of the surface, or the carved epsilon chains collapse to equal heights near the summit
+/// (the world's epsilon is chosen for its height bounds; a surface above them is refused here, naming the cell, wherever the round is run).
+pub fn narrow_f32_checked(z: &mut [f64], epsilon: f64) {
+    narrow_f32(z);
+    let top = (0..z.len()).fold(0, |m, c| if z[c].abs() > z[m].abs() { c } else { m });
+    if let Some(&h) = z.get(top) {
+        let spacing = super::precision::f32_spacing(h);
+        assert!(
+            epsilon > spacing,
+            "cell {top} stands at {h} m: the f32 spacing there is {spacing} m, not under the flood epsilon {epsilon} m (GEN-175): the world's height bounds do not hold this surface; choose the epsilon for the bounds (WorldPrecision) or run the rounds in f64"
+        );
     }
 }
 

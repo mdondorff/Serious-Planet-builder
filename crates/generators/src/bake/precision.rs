@@ -7,6 +7,8 @@
 //! (the base heights plus the profile's largest uplift).
 
 use super::carve::CarveParams;
+use super::k7::K7Params;
+use super::Grid;
 
 /// The largest `epsilon_w` the f32 rounds accept (a named parameter, metres). Above it the world's rounds run in f64. 0.01 m keeps f32 up to `R` = 131 km.
 pub const EPSILON_MAX_M: f64 = 0.01;
@@ -65,6 +67,26 @@ impl WorldPrecision {
     pub fn apply(&self, c: &mut CarveParams) {
         c.epsilon = self.epsilon_w;
         c.round_f32 = !self.f64_rounds;
+    }
+
+    /// Set K7's flood epsilon (pass 2's, read by its pit statistics, incising carve and deposition sweep) to the world's (GEN-175).
+    pub fn apply_k7(&self, k: &mut K7Params) {
+        k.pass2.carve.epsilon = self.epsilon_w;
+    }
+
+    /// Refuse a surface whose heights leave the world's bounds: `max |h| <= R` (GEN-175; the bounds hold the base heights plus the profile's largest uplift). The error names the first
+    /// offending active cell (`cell_id` maps a cell index to its global id), its height and `R`, and says what to do.
+    pub fn check_within_radius(&self, grid: &Grid, z: &[f64], cell_id: impl Fn(usize) -> u64) -> Result<(), String> {
+        match (0..z.len()).find(|&c| grid.is_active(c) && (z[c].is_nan() || z[c].abs() > self.radius)) {
+            None => Ok(()),
+            Some(c) => Err(format!(
+                "cell {c} (global id {}) stands at {} m, outside the world's height bounds R = {} m (GEN-175): the epsilon {} m was chosen for |h| <= R; widen the bounds (the base heights plus the profile's largest uplift) and rebuild",
+                cell_id(c),
+                z[c],
+                self.radius,
+                self.epsilon_w
+            )),
+        }
     }
 
     /// The MARK line of the choice (recorded with the bake; the key carries the choice through the carve parameters: the epsilon and the f32 byte).
