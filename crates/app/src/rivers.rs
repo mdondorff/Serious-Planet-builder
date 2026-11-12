@@ -70,7 +70,7 @@ pub fn plan_nodes_rivers(
             res,
             min_samples: MIN_RIVER_SAMPLES,
             full_samples: FULL_RIVER_SAMPLES,
-            max_layers: planet_render::RIVER_LAYERS as usize,
+            max_layers: planet_render::RIVER_SLOTS as usize,
         },
         nodes,
     )
@@ -111,7 +111,7 @@ fn river_request<'a>(
         res,
         min_samples: planet_frame::river::MIN_RIVER_SAMPLES,
         full_samples: planet_frame::river::FULL_RIVER_SAMPLES,
-        max_layers: planet_render::RIVER_LAYERS as usize,
+        max_layers: planet_render::RIVER_SLOTS as usize,
     }
 }
 
