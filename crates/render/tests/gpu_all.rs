@@ -40,6 +40,8 @@ mod gpu_renderer;
 mod gpu_resize;
 #[path = "gpu_resolve.rs"]
 mod gpu_resolve;
+#[path = "gpu_rivers.rs"]
+mod gpu_rivers;
 #[path = "gpu_shading.rs"]
 mod gpu_shading;
 #[path = "gpu_shadow_frame.rs"]

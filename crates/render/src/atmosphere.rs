@@ -848,6 +848,7 @@ fn fs_lit_atmo(in: VsOut) -> LitOut {
 }
 
 fn fs_lit_atmo_view(in: VsOut) -> LitOut {
+    let wet = river_wet(in.node_index, in.aux);
     let sun = vec3<f32>(bitcast<f32>(g.mode.y), bitcast<f32>(g.mode.z), bitcast<f32>(g.mode.w));
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
@@ -865,6 +866,8 @@ fn fs_lit_atmo_view(in: VsOut) -> LitOut {
         dir = dir + atm_sun_direct(up, in.height, sun) * (gloss * g.range.z);
     }
     // The two targets add up in the scene target (f16): the sum is bounded here, as the single clamp of the unsplit radiance did.
+    amb = river_tint(amb, wet);
+    dir = river_tint(dir, wet);
     amb = min(amb, vec3<f32>(60000.0));
     dir = min(dir, vec3<f32>(60000.0) - amb);
     var rgb = amb + dir;

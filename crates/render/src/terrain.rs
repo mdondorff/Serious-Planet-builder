@@ -127,6 +127,11 @@ struct Node {
 @group(0) @binding(0) var<uniform> g: Globals;
 // One record per planned node, read with the draw's instance index (`first_instance` = the node's index in the plan, REND-015).
 @group(0) @binding(1) var<storage, read> nodes: array<Node>;
+// The river coverage of the frame (REND-059, REND-061; bindings 2 and 3 are the water pass's): per node the layer of the coverage array it reads (`0xffffffff`: none), the array of 8-bit signed-distance codes, one layer a river
+// node, and its sampler (clamped, bilinear). Only the lit fragment stages read them.
+@group(0) @binding(4) var<storage, read> river_layers: array<u32>;
+@group(0) @binding(5) var river_cov: texture_2d_array<f32>;
+@group(0) @binding(6) var river_samp: sampler;
 "#,
     r#"
 struct VsOut {
@@ -756,7 +761,25 @@ fn fs_lit(in: VsOut) -> LitOut {
     return c;
 }
 
+// The share of the fragment that is river water (REND-059): the coverage code of its node's layer, interpolated over the node's samples (the code is `128 + 32 d`, `d` the signed distance in cells to the river's edge, so water
+// where it is at or under 128), with the edge smoothed over one code step of the screen (no cell staircase). The scale of the code is in cells, not metres (CON-11). Derivatives are taken in uniform control flow.
+fn river_wet(node_index: u32, aux: vec2<f32>) -> f32 {
+    let layer = river_layers[node_index];
+    let edge = f32(textureDimensions(river_cov).x - 1u);
+    let uv = (clamp(aux, vec2<f32>(0.0), vec2<f32>(1.0)) * edge + 0.5) / (edge + 1.0);
+    let c = textureSampleLevel(river_cov, river_samp, uv, i32(min(layer, 255u)), 0.0).r * 255.0;
+    let w = max(fwidth(c), 1.0);
+    let wet = 1.0 - smoothstep(128.0 - 0.5 * w, 128.0 + 0.5 * w, c);
+    return select(0.0, wet, layer != 0xffffffffu);
+}
+
+// The look of river water until its own look values exist (REND-060): the lit colour darkened and tinted blue-green.
+fn river_tint(rgb: vec3<f32>, wet: f32) -> vec3<f32> {
+    return mix(rgb, rgb * vec3<f32>(0.18, 0.32, 0.38), wet);
+}
+
 fn fs_lit_view(in: VsOut) -> LitOut {
+    let wet = river_wet(in.node_index, in.aux);
     let sun = vec3<f32>(bitcast<f32>(g.mode.y), bitcast<f32>(g.mode.z), bitcast<f32>(g.mode.w));
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
@@ -767,6 +790,7 @@ fn fs_lit_view(in: VsOut) -> LitOut {
     var rgb = shade_lit(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), sun, g.range.z) * detail_mul(gd, g.mode.x, g.albedo, climate.x, climate.y, clamp(dot(normalize(gd.normal), up), 0.0, 1.0), in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)));
     // The sum is clamped like the rest of the lit radiance: the scene target is f16.
     rgb = min(rgb + vec3<f32>(ground_gloss(in.node_index, in.local, gd, sun) * g.range.z), vec3<f32>(60000.0));
+    rgb = river_tint(rgb, wet);
     var sunlit = g.mode.x == 0u || g.mode.x == 2u;
     if (g.mode.x == 5u) {
         // J's shadow view: a lit grey; the march's visibility is drawn over it (VIEW-054).
@@ -921,6 +945,9 @@ pub struct TerrainStats {
     pub tile_ref_bytes: u64,
     /// Draws of the water pass (one per water node, per-draw submission).
     pub water_draws: u32,
+    /// Nodes of this frame that have a river layer, and the nodes with a river that the plan left without one because the array was full (REND-061; never silent).
+    pub river_nodes: u32,
+    pub river_dropped: u32,
 }
 
 /// How the renderer submits the planned draws (REND-015). Both draw the same plan in the same order.
@@ -1022,7 +1049,15 @@ struct FrameSet {
     /// The water pass's per-node records and globals (bindings 2 and 3 of the group `bind`; written only by frames with water).
     water_nodes: wgpu::Buffer,
     water_globals: wgpu::Buffer,
+    /// The river coverage (bindings 4 to 6 of `bind`, REND-059): the layer of each node (`u32::MAX`: none), the array of `(cells + 1)` square 8-bit layers and its view.
+    river_layers: wgpu::Buffer,
+    river_array: wgpu::Texture,
+    /// Whether this set's layer buffer holds layers of an earlier frame (it is cleared by the next frame without rivers, so that a plan without rivers draws as before).
+    rivers_live: std::cell::Cell<bool>,
 }
+
+/// The layers of the river coverage array (REND-061): the most river nodes a frame draws; the plan chooses which get one and counts the rest.
+pub const RIVER_LAYERS: u32 = 256;
 
 /// A resident tile: its mesh key and the slot of the pool it sits in.
 #[derive(Clone, Copy, Debug)]
@@ -1449,10 +1484,36 @@ impl TerrainRenderer {
                 entry(1, wgpu::BufferBindingType::Storage { read_only: true }),
                 entry(2, wgpu::BufferBindingType::Storage { read_only: true }),
                 entry(3, wgpu::BufferBindingType::Uniform),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
         });
         let compact_gpu = Self::make_compact(ctx, &bgl, format, cells, &pool);
-        let ring = Self::make_ring(device, &bgl, node_capacity, &compact_gpu);
+        let ring = Self::make_ring(device, &bgl, node_capacity, &compact_gpu, cells);
         let index_data = grid_indices(cells);
         let indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("terrain-indices"),
@@ -1606,8 +1667,14 @@ impl TerrainRenderer {
     }
 
     /// The bind group of the terrain pass (group 0) over a ring set's buffers.
-    fn make_bind(device: &wgpu::Device, bgl: &wgpu::BindGroupLayout, buffers: [&wgpu::Buffer; 4]) -> wgpu::BindGroup {
+    fn make_bind(
+        device: &wgpu::Device,
+        bgl: &wgpu::BindGroupLayout,
+        buffers: [&wgpu::Buffer; 4],
+        river: (&wgpu::Buffer, &wgpu::TextureView, &wgpu::Sampler),
+    ) -> wgpu::BindGroup {
         let [globals, nodes, water_nodes, water_globals] = buffers;
+        let (river_layers, river_view, river_sampler) = river;
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("terrain-bind"),
             layout: bgl,
@@ -1616,12 +1683,24 @@ impl TerrainRenderer {
                 wgpu::BindGroupEntry { binding: 1, resource: nodes.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 2, resource: water_nodes.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 3, resource: water_globals.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: river_layers.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(river_view) },
+                wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::Sampler(river_sampler) },
             ],
         })
     }
 
     /// The ring of per-frame buffers for plans of up to `capacity` nodes.
-    fn make_ring(device: &wgpu::Device, bgl: &wgpu::BindGroupLayout, capacity: usize, compact: &CompactGpu) -> Vec<FrameSet> {
+    fn make_ring(device: &wgpu::Device, bgl: &wgpu::BindGroupLayout, capacity: usize, compact: &CompactGpu, cells: u32) -> Vec<FrameSet> {
+        let river_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("river-sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
         (0..RING)
             .map(|_| {
                 let buffer = |label, size, usage| {
@@ -1641,14 +1720,54 @@ impl TerrainRenderer {
                     planet_frame::look::water::GLOBALS_BYTES,
                     wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 );
-                let bind = Self::make_bind(device, bgl, [&globals, &nodes, &water_nodes, &water_globals]);
+                // No node has a river until a plan says so: every layer index is `u32::MAX`.
+                let river_layers = wgpu::util::DeviceExt::create_buffer_init(
+                    device,
+                    &wgpu::util::BufferInitDescriptor {
+                        label: Some("river-layers"),
+                        contents: &vec![0xffu8; 4 * capacity.max(1)],
+                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    },
+                );
+                let river_array = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("river-coverage"),
+                    size: wgpu::Extent3d { width: cells + 1, height: cells + 1, depth_or_array_layers: RIVER_LAYERS },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::R8Unorm,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
+                });
+                let river_view = river_array.create_view(&wgpu::TextureViewDescriptor {
+                    dimension: Some(wgpu::TextureViewDimension::D2Array),
+                    ..Default::default()
+                });
+                let bind = Self::make_bind(
+                    device,
+                    bgl,
+                    [&globals, &nodes, &water_nodes, &water_globals],
+                    (&river_layers, &river_view, &river_sampler),
+                );
                 let refs = buffer("tile-refs", REF_BYTES * capacity as u64, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST);
                 let frame_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("compact-frame-bind"),
                     layout: &compact.bgl_frame,
                     entries: &[wgpu::BindGroupEntry { binding: 0, resource: refs.as_entire_binding() }],
                 });
-                FrameSet { globals, nodes, args, bind, refs, frame_bind, water_nodes, water_globals }
+                FrameSet {
+                    globals,
+                    nodes,
+                    args,
+                    bind,
+                    refs,
+                    frame_bind,
+                    water_nodes,
+                    water_globals,
+                    river_layers,
+                    river_array,
+                    rivers_live: std::cell::Cell::new(false),
+                }
             })
             .collect()
     }
@@ -1937,7 +2056,7 @@ impl TerrainRenderer {
         let warm_nodes = WARM_NODES.min(self.max_nodes);
         if warm_nodes > self.node_capacity {
             self.node_capacity = warm_nodes;
-            self.ring = Self::make_ring(device, &self.bgl, self.node_capacity, &self.compact);
+            self.ring = Self::make_ring(device, &self.bgl, self.node_capacity, &self.compact, self.cells);
             self.init.ring_builds += 1;
         }
         self.compact.block(device, 0, &mut self.init);
@@ -2453,7 +2572,7 @@ impl TerrainRenderer {
         if plan.nodes.len() > self.node_capacity {
             self.node_capacity = plan.nodes.len().next_power_of_two().min(self.max_nodes);
             // Frames in flight keep the buffers they use alive; the new ring serves the frames from here on.
-            self.ring = Self::make_ring(device, &self.bgl, self.node_capacity, &self.compact);
+            self.ring = Self::make_ring(device, &self.bgl, self.node_capacity, &self.compact, self.cells);
             self.init.ring_builds += 1;
             self.used.ring = 0;
         }
@@ -2524,6 +2643,47 @@ impl TerrainRenderer {
         let node_write_ms = phase.elapsed().as_secs_f64() * 1000.0;
         let refs_phase = std::time::Instant::now();
         let mut stats = TerrainStats { node_record_bytes: nodes.len() as u64, ..Default::default() };
+        // The river coverage (REND-059, REND-061): the plan's layers into the array, each node's layer index into the buffer the lit fragment reads. A frame without rivers clears what an earlier frame of this set left.
+        match &plan.rivers {
+            Some(r) => {
+                let size = self.cells + 1;
+                let mut layers = vec![0xffu8; 4 * plan.nodes.len().max(1)];
+                let mut used = 0u32;
+                for node in &r.nodes {
+                    // A coverage of another size than the array's layers, a node the plan does not have or more nodes than layers cannot be drawn: the plan chose them, so it is a plan error, not a silent skip.
+                    assert!(
+                        node.size == size && (node.node as usize) < plan.nodes.len() && used < RIVER_LAYERS,
+                        "the plan's river node {} does not fit the coverage array ({}x{} against {size}x{size}, {} layers)",
+                        node.node,
+                        node.size,
+                        node.size,
+                        RIVER_LAYERS
+                    );
+                    layers[4 * node.node as usize..4 * node.node as usize + 4].copy_from_slice(&used.to_le_bytes());
+                    ctx.queue.write_texture(
+                        wgpu::TexelCopyTextureInfo {
+                            texture: &set.river_array,
+                            mip_level: 0,
+                            origin: wgpu::Origin3d { x: 0, y: 0, z: used },
+                            aspect: wgpu::TextureAspect::All,
+                        },
+                        &node.coverage,
+                        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(size), rows_per_image: Some(size) },
+                        wgpu::Extent3d { width: size, height: size, depth_or_array_layers: 1 },
+                    );
+                    used += 1;
+                }
+                ctx.queue.write_buffer(&set.river_layers, 0, &layers);
+                set.rivers_live.set(used > 0);
+                stats.river_nodes = used;
+                stats.river_dropped = r.dropped;
+            }
+            None if set.rivers_live.get() => {
+                ctx.queue.write_buffer(&set.river_layers, 0, &vec![0xffu8; 4 * plan.nodes.len().max(1)]);
+                set.rivers_live.set(false);
+            }
+            None => {}
+        }
         // The argument records come from the plan and the slots alone (CON-03: the GPU culls and decides nothing).
         let block_of = |r: &Resident| buffer_of(r.slot, self.pool.block_slots);
         {
