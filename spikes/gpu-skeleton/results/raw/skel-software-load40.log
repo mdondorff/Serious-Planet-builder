@@ -1,0 +1,6 @@
+15:43:31 repeat 1 per-draw: 2,5 s wall, cpu 2,4 s, exit 0
+15:43:33 repeat 1 indirect: 2,5 s wall, cpu 2,6 s, exit 0
+15:43:36 repeat 1 indirect-stream: 2,8 s wall, cpu 2,7 s, exit 0
+15:44:12 repeat 1 indirect-pipelined: 36,1 s wall, cpu 8,9 s, exit 0
+15:44:42 repeat 1 per-draw-pipelined: 30,5 s wall, cpu 10,3 s, exit 0
+done
