@@ -399,6 +399,9 @@ impl WaterCounters {
     }
 }
 
+/// A memoised lake mask (REND-065): `None` when no sample of the tile is the lake's.
+type LakeMaskMemo = Option<std::sync::Arc<Vec<u8>>>;
+
 /// The per-tile answers of the selection query, memoised (a pure function of the tile and the field).
 #[derive(Default)]
 pub struct WaterTileCache {
@@ -422,8 +425,8 @@ pub struct WaterTileCache {
     pub no_minimum: u64,
     /// The extent and the lowest terrain bound of the tiles the cut has looked at (pure functions of the tile and the height field).
     extents: HashMap<TileId, (TileExtent, Option<f64>)>,
-    /// The lake masks of the tiles (REND-065), by tile and body: a pure function of the tile, the node size and the lake source. `None`: no sample of the tile is the lake's.
-    masks: HashMap<(TileId, u64), Option<std::sync::Arc<Vec<u8>>>>,
+    /// The lake masks of the tiles (REND-065), by tile, node size and body: a pure function of those and the lake source (one source a cache: the viewer's world sets it once). `None`: no sample of the tile is the lake's.
+    masks: HashMap<(TileId, u32, u64), LakeMaskMemo>,
 }
 
 impl WaterTileCache {
@@ -463,14 +466,14 @@ impl WaterTileCache {
         cells: u32,
         body: WaterBodyId,
     ) -> Result<Option<std::sync::Arc<Vec<u8>>>, WaterError> {
-        if let Some(m) = self.masks.get(&(tile, body.0)) {
+        if let Some(m) = self.masks.get(&(tile, cells, body.0)) {
             return Ok(m.clone());
         }
         let m = node_lake_mask(lakes, tile, cells, body)?.map(std::sync::Arc::new);
         if self.masks.len() >= WATER_BOOK_CAP {
             self.masks.clear();
         }
-        self.masks.insert((tile, body.0), m.clone());
+        self.masks.insert((tile, cells, body.0), m.clone());
         Ok(m)
     }
 

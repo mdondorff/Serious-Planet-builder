@@ -3,4 +3,4 @@
 - [x] 1.2 render: the masks into the coverage atlas, the node record's mask word, the fragment's discard; frame stats.
 - [x] 1.3 app: the viewer and the lit scenes pass the commit's lake masks.
 - [x] 1.4 Tests: tier A (frame), tier C TEST-133 with the golden pending.
-- [ ] 2.1 spec-lint, prepush, golden-review (escalate the first golden), verifier, spec-guardian; archive, log fragment, PR, merge on green.
+- [x] 2.1 spec-lint, prepush, golden-review (escalate the first golden), verifier, spec-guardian; archive, log fragment, PR, merge on green.

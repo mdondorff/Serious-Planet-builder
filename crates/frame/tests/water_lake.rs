@@ -132,3 +132,39 @@ fn the_masks_survive_the_text_form_and_a_missing_mask_is_refused() {
     q.masks.clear();
     assert!(q.validate().unwrap_err().contains("names lake mask"));
 }
+
+// spec: REND-065
+#[test]
+fn one_cache_planned_at_two_node_sizes_keeps_a_mask_per_size() {
+    let lake = Everywhere(lake_body(Face(2), 3));
+    let wet = Lakes { cells: 1 << 14, wet_below: 0, everywhere: true };
+    let (_, camera) = scripted_views(R, 4.0 / 3.0, 1)[0];
+    let (table, look) = (LiquidTable::earth(), WaterLook::EARTH);
+    let mut cache = WaterTileCache::new();
+    for cells in [16u32, 8] {
+        let lod = LodParams { cells, viewport_h_px: 96.0, tau_px: 2.5, max_level: 26, ..LodParams::earth_1080p() };
+        let terrain = plan_terrain(&TerrainRequest {
+            camera,
+            size: (128, 96),
+            view: TerrainView::Level,
+            lod: lod.clone(),
+            face_mapping: "tangent-v1".into(),
+            seed: 1,
+        })
+        .unwrap();
+        let req = WaterRequest {
+            source: &lake,
+            map: &TangentWarp,
+            liquids: &table,
+            look: &look,
+            lod: &lod,
+            time_s: 1.0,
+            view: WaterView::Lit,
+            cut: None,
+            lakes: Some(&wet),
+        };
+        let p = plan_water(&req, &mut cache, &terrain).unwrap();
+        p.validate().unwrap_or_else(|e| panic!("cells {cells}: {e}"));
+        assert!(p.masks.iter().all(|m| m.size == cells + 1));
+    }
+}
