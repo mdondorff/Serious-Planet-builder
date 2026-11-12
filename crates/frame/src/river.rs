@@ -395,7 +395,7 @@ impl RiverCache {
     }
 
     /// Clears the cache when the request is not the one its entries were built for.
-    pub fn adopt(&mut self, req: &RiverRequest<'_>) -> Result<(), String> {
+    pub fn adopt(&mut self, req: &RiverRequest<'_>) -> Result<u64, String> {
         let grid = check_request(req)?;
         let stamp = Self::stamp_of(req, &grid);
         if self.stamp != Some(stamp) {
@@ -404,7 +404,16 @@ impl RiverCache {
             self.bytes = 0;
             self.stamp = Some(stamp);
         }
-        Ok(())
+        Ok(stamp)
+    }
+
+    /// [`RiverCache::insert`] for a build made under `stamp` (what [`RiverCache::adopt`] returned when the build was queued): dropped when the cache has been cleared for another request since, so a late build of the
+    /// background fill never lands in a cache of another commit.
+    pub fn insert_stamped(&mut self, stamp: u64, tile: planet_core::TileId, value: Option<std::sync::Arc<NodeCoverage>>) {
+        if self.stamp == Some(stamp) {
+            self.insert(tile, value);
+            self.counters.builds += 1;
+        }
     }
 
     /// The coverage of `tile` if the cache holds it (and it counts as used).
@@ -486,6 +495,12 @@ pub fn plan_rivers_lookup(
         }
     }
     Ok(LookupPlan { plan: choose_layers(req, out), missing, not_ready })
+}
+
+/// The coverage of one node built outside any cache (what a background fill computes, then hands to [`RiverCache::insert_stamped`]): `None` when the node carries no river.
+pub fn build_river_node(req: &RiverRequest<'_>, tile: planet_core::TileId) -> Result<Option<std::sync::Arc<NodeCoverage>>, String> {
+    let grid = check_request(req)?;
+    Ok(node_coverage(req, &grid, tile)?.map(std::sync::Arc::new))
 }
 
 /// Builds the coverage of `tiles` and keeps it in the cache (the body of the background fill). Returns how many were built. An error names the tile that failed.
