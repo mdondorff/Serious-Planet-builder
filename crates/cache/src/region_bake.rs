@@ -176,7 +176,7 @@ pub fn bake_region(
     let dir_of = |c: usize| face_spec.halo_direction((ri0 + c % rw) as i64, (rj0 + c / rw) as i64);
 
     // The regional solve from B read at the regional cells' centres.
-    let zb: Vec<f64> = scoped_map(n, spec.threads, |c| base(dir_of(c)));
+    let zb: Vec<f64> = (0..n).map(|c| base(dir_of(c))).collect();
     let grid = Grid::new(rw, rh, face_spec.dx()).with_origin((ri0 as u32, rj0 as u32)).with_metric(Metric::cube_face(
         spec.regional,
         spec.radius_m,
@@ -279,23 +279,6 @@ pub fn bake_region(
         channels: if spec.keep_channels { feed.channels.clone() } else { Vec::new() },
     };
     Ok((commit, report))
-}
-
-/// `f(c)` for every `c` in `0..n`, over scoped threads in contiguous chunks (a pure function of `c`: the result is the same at any thread count).
-fn scoped_map<T: Send + Default + Clone>(n: usize, threads: usize, f: impl Fn(usize) -> T + Sync) -> Vec<T> {
-    let mut out = vec![T::default(); n];
-    let chunk = n.div_ceil(threads.max(1)).max(1);
-    std::thread::scope(|s| {
-        for (k, part) in out.chunks_mut(chunk).enumerate() {
-            let f = &f;
-            s.spawn(move || {
-                for (c, v) in part.iter_mut().enumerate() {
-                    *v = f(k * chunk + c);
-                }
-            });
-        }
-    });
-    out
 }
 
 /// The direction of a lattice vertex `(i, j)` of a face of `nodes` nodes an edge (the store lattice is vertex-based: vertex `k` lies at `2k/nodes - 1`).
