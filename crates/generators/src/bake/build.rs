@@ -49,8 +49,8 @@ pub struct PlanParams {
 }
 
 impl PlanParams {
-    /// The prototype's values: 4 rounds of 20 steps (the route rebuilt every 5) under the round rules, H1's defaults, pass 2's sediment parameters with pass 1's breach limit.
-    pub fn standard(seed: u64, threads: usize, spill: PathBuf) -> PlanParams {
+    /// The prototype's values: 4 rounds of 20 steps (the route rebuilt every 5) under the round rules, H1's defaults, pass 2's sediment parameters with pass 1's breach limit. Private: a plan is made for a world's height bounds (`standard_for`), never without them (GEN-175).
+    fn base(seed: u64, threads: usize, spill: PathBuf) -> PlanParams {
         let mut sediment = Pass2Params::standard(seed, 0.0);
         sediment.carve.breach_max_m = CarveParams::default().breach_max_m;
         PlanParams {
@@ -68,10 +68,10 @@ impl PlanParams {
 }
 
 impl PlanParams {
-    /// [`PlanParams::standard`] for a world with known height bounds (GEN-175): the carve, H1's fill and pass 2 (K7 and the sediment pass) flood with the world's `epsilon_w`, the rounds are f32 or f64 as the world chooses,
+    /// The prototype's plan for a world with known height bounds (GEN-175; Earth's span is `WorldPrecision::new(-11_000.0, 9_000.0, 1e-3, EPSILON_MAX_M)`): the carve, H1's fill and pass 2 (K7 and the sediment pass) flood with the world's `epsilon_w`, the rounds are f32 or f64 as the world chooses,
     /// and `build_resident` refuses a surface whose heights leave the bounds.
     pub fn standard_for(seed: u64, threads: usize, spill: PathBuf, world: &WorldPrecision) -> PlanParams {
-        let mut p = PlanParams::standard(seed, threads, spill);
+        let mut p = PlanParams::base(seed, threads, spill);
         p.apply_precision(world);
         p
     }

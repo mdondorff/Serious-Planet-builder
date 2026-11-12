@@ -91,7 +91,7 @@ fn the_plan_stores_the_heights_f32_between_the_rounds_and_the_sediment_pass_and_
     let outlet = g.outlets(&z0, 0.0);
     let run = |f32_rounds: bool| {
         let spill = std::env::temp_dir().join(format!("planet-heights-{}-{f32_rounds}.f64", std::process::id()));
-        let mut p = PlanParams::standard(5, 2, spill);
+        let mut p = PlanParams::standard_for(5, 2, spill, &earth_span());
         p.rounds = 2;
         p.carve.steps = 10;
         p.carve.round_f32 = f32_rounds;
@@ -113,4 +113,9 @@ fn the_plan_stores_the_heights_f32_between_the_rounds_and_the_sediment_pass_and_
     assert_eq!(on.z.len(), off.z.len());
     assert!(on.hydro.q.is_empty() && on.hydro.qw.is_empty());
     assert_eq!(on.hydro.label.len(), z0.len());
+}
+
+/// Earth's height span, written out (GEN-175): the plan refuses a surface outside it.
+fn earth_span() -> planet_generators::bake::precision::WorldPrecision {
+    planet_generators::bake::precision::WorldPrecision::new(-11_000.0, 9_000.0, 1e-3, planet_generators::bake::precision::EPSILON_MAX_M)
 }

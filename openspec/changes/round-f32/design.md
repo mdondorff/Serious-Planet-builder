@@ -1,6 +1,6 @@
 # round-f32: design (GEN-166; architect D24 row 8, inbox #125)
 
-Status: PR 1 (the narrowing) implemented on `change/round-f32`; PR 2 (f32 storage) and the region gates follow. Heavy runs: the bulldozer's slot.
+Status: PR 1 (the narrowing) merged (#1394); PR 2 (f32 storage, GEN-178) in review: the change stays OPEN until the k=4 bar (at least 200 MiB of the peak commit, same-slot baseline of main) is checked in the bulldozer's slot, and the region gates (G-EQ, G-LOCAL, G-SCALE) follow. Heavy runs: the bulldozer's slot.
 
 ## Contract (A3 §9)
 - The round surface is stored f32; the round computes in f64 and the routing and sweeps read the widened heights.

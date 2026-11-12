@@ -515,7 +515,7 @@ fn the_phase_plan_is_the_steps_in_order_releases_what_it_should_and_does_not_mov
         (900.0 + 700.0 * (d.x + d.y + d.z) / 1.7, 8.0 + 14.0 * d.z)
     };
     let spill = std::env::temp_dir().join(format!("planet-plan-{}.f64", std::process::id()));
-    let mut params = PlanParams::standard(5, 3, spill.clone());
+    let mut params = PlanParams::standard_for(5, 3, spill.clone(), &earth_span());
     params.rounds = 2;
     params.carve.steps = 10;
     let marks = Mutex::new(Vec::<String>::new());
@@ -720,4 +720,9 @@ fn the_sediment_balance_is_the_same_under_every_partition_the_pass_has_and_no_lo
             assert!((g.0 - g.1 - g.2).abs() / scale < 1e-9, "k = {k}, group {i}: {g:?}");
         }
     }
+}
+
+/// Earth's height span, written out (GEN-175): the plan refuses a surface outside it.
+fn earth_span() -> planet_generators::bake::precision::WorldPrecision {
+    planet_generators::bake::precision::WorldPrecision::new(-11_000.0, 9_000.0, 1e-3, planet_generators::bake::precision::EPSILON_MAX_M)
 }
