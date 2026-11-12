@@ -1156,7 +1156,10 @@ pub fn capture_river_frames(o: &Options, ctx: &GpuContext, out: &mut dyn Write) 
         let plan = last_plan.expect("three frames");
         let (nodes, dropped) = plan.rivers.as_ref().map_or((0, 0), |p| (p.nodes.len(), p.dropped));
         if dropped > 0 {
-            return Err(format!("river frame {}: the plan dropped {dropped} river nodes (the layer cap): the picture would hide rivers, so the run fails", pose.name));
+            return Err(format!(
+                "river frame {}: the plan dropped {dropped} river nodes (the layer cap): the picture would hide rivers, so the run fails",
+                pose.name
+            ));
         }
         // The centre of the picture: the distance along the view ray to the ground (as the pose label measures it).
         let label = crate::stills::pose_label(&camera, &|d| rig.field.height(d), radius_m, setup.level_m);
@@ -1165,8 +1168,15 @@ pub fn capture_river_frames(o: &Options, ctx: &GpuContext, out: &mut dyn Write) 
         planet_render::annotate::annotate(&mut image, &label);
         let file = dir.join(format!("{}.png", pose.name));
         image.write_png(&file).map_err(|e| format!("writing {}: {e}", file.display()))?;
-        writeln!(out, "{} -> river drawn {:.1} m wide = {:.1} px at the centre; {nodes} river nodes, {dropped} dropped; {}", pose.name, pose.drawn_width_m, px, file.display())
-            .map_err(err)?;
+        writeln!(
+            out,
+            "{} -> river drawn {:.1} m wide = {:.1} px at the centre; {nodes} river nodes, {dropped} dropped; {}",
+            pose.name,
+            pose.drawn_width_m,
+            px,
+            file.display()
+        )
+        .map_err(err)?;
         index += &format!("{} {:.2} {:.2} {nodes} {dropped}\n", pose.name, pose.drawn_width_m, px);
     }
     std::fs::write(dir.join("river-frames.txt"), index).map_err(err)?;

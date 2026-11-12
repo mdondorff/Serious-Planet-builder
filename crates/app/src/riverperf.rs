@@ -121,7 +121,9 @@ pub fn views(
 ) -> Result<Vec<LitView>, String> {
     let course = course(world, field)?;
     let n = frames.max(2);
-    let camera = |u: f64, alt_m: f64, pitch_deg: f64| course.camera(field, radius_m, level_m, aspect, CameraAt { u, alt_m, pitch_deg, yaw_deg: 0.0 });
+    let camera = |u: f64, alt_m: f64, pitch_deg: f64| {
+        course.camera(field, radius_m, level_m, aspect, CameraAt { u, alt_m, pitch_deg, yaw_deg: 0.0 })
+    };
     let run: Vec<Camera> = (0..n).map(|k| camera(k as f64 / (n - 1) as f64, 300.0, 15.0)).collect();
     // The descent over the course's middle: 3 km down to 30 m, log-spaced, looking along the river, 25 degrees down.
     let descent: Vec<Camera> = (0..n)
@@ -154,8 +156,44 @@ const LOW_SUN_DEG: f64 = 2.0;
 
 /// The river look frames (item 15, queue row 2): the table of [`FRAME_ALTS_M`] x [`FRAME_VIEWS`] at the middle course point (9 frames), the same three altitudes along the river at the other two course points, and the
 /// 9 poses again under a sun of 2 degrees from the side. Names carry every parameter, so a frame is found by its file name.
-pub fn frame_poses(world: &WorldTerrain, field: &dyn HeightField, radius_m: f64, level_m: f64, aspect: f64) -> Result<Vec<FramePose>, String> {
+pub fn frame_poses(
+    world: &WorldTerrain,
+    field: &dyn HeightField,
+    radius_m: f64,
+    level_m: f64,
+    aspect: f64,
+) -> Result<Vec<FramePose>, String> {
     let course = course(world, field)?;
+    Ok(pose_table()
+        .into_iter()
+        .map(|k| FramePose {
+            camera: course.camera(
+                field,
+                radius_m,
+                level_m,
+                aspect,
+                CameraAt { u: k.u, alt_m: k.alt_m, pitch_deg: k.pitch_deg, yaw_deg: k.yaw_deg },
+            ),
+            drawn_width_m: course.drawn_width_m(k.u),
+            sun_deg: k.sun_deg,
+            name: k.name,
+        })
+        .collect())
+}
+
+/// The parameters of one frame, before the world gives it a camera.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PoseKey {
+    pub name: String,
+    pub u: f64,
+    pub alt_m: f64,
+    pub pitch_deg: f64,
+    pub yaw_deg: f64,
+    pub sun_deg: Option<f64>,
+}
+
+/// The table of the river look frames: 30 poses, each name carrying every parameter.
+pub fn pose_table() -> Vec<PoseKey> {
     let mut poses = Vec::new();
     for sun in [None, Some(LOW_SUN_DEG)] {
         let sun_tag = if sun.is_some() { "sun2" } else { "sun-look" };
@@ -164,17 +202,19 @@ pub fn frame_poses(world: &WorldTerrain, field: &dyn HeightField, radius_m: f64,
                 // The shallow along view is also taken at the other two course points: three points of the river.
                 let us: &[f64] = if vi < 1 { &FRAME_US } else { &FRAME_US[1..2] };
                 for &u in us {
-                    poses.push(FramePose {
+                    poses.push(PoseKey {
                         name: format!("{vname}-alt{alt:.0}-u{:02.0}-{sun_tag}", u * 100.0),
-                        camera: course.camera(field, radius_m, level_m, aspect, CameraAt { u, alt_m: alt, pitch_deg: *pitch, yaw_deg: *yaw }),
+                        u,
+                        alt_m: alt,
+                        pitch_deg: *pitch,
+                        yaw_deg: *yaw,
                         sun_deg: sun,
-                        drawn_width_m: course.drawn_width_m(u),
                     });
                 }
             }
         }
     }
-    Ok(poses)
+    poses
 }
 
 fn course(world: &WorldTerrain, field: &dyn HeightField) -> Result<Course, String> {
@@ -277,4 +317,22 @@ pub fn check_options(o: &Options) -> Result<(), String> {
         return Err(format!("--scene {SCENE} takes its world from {STORE_ENV} (the fixture commit): --store and --world do not apply"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // spec: TEST-128
+    #[test]
+    fn the_river_look_table_has_thirty_poses_with_unique_names_and_the_low_sun_on_half() {
+        let t = pose_table();
+        assert_eq!(t.len(), 30);
+        let mut names: Vec<&str> = t.iter().map(|k| k.name.as_str()).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), 30, "names repeat");
+        assert_eq!(t.iter().filter(|k| k.sun_deg == Some(2.0)).count(), 15);
+        assert!(t.iter().all(|k| (0.0..=1.0).contains(&k.u) && k.alt_m >= 30.0 && k.alt_m <= 200.0));
+    }
 }
