@@ -15,3 +15,8 @@
 ## Declared moves
 - The plan's stage hashes and the k=1 plan hashes change (the rounds' heights are narrowed): stated per fixture in the PR.
 - G-EQ (f32 against f64 on R3a, R3b: relief within 2 %, membership and channel status on at most 1 %) is the region gate after this PR, not a tier A test.
+
+## Result (k=4 complete build, 2026-11-12; PLANET_DAMS=0, PLANET_STAGES=0; baseline main c4ffeded, branch 65727210)
+- Peak commit: 11,136 MiB (baseline) against 10,565 MiB (f32 storage): 571 MiB saved (bar: at least 200 MiB).
+- Hashes equal between the two runs: H1 label 73f4733fa74ea955, channel addd45e619daf383, segments 6e95df72819b17f2, lakes d6d086a1d64fb784, z after the sediment pass a75a341d71580f30.
+- Baseline: peak working set 10,651 MiB; 5,554 s wall; gate 11,444 MiB of peak commit.
