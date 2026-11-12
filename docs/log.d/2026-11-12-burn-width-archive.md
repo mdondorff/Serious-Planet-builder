@@ -1,0 +1,1 @@
+- 2026-11-12 **burn-width**: archived; GEN-168, GEN-169, TEST-110, TEST-112, TEST-113 active in the specs.

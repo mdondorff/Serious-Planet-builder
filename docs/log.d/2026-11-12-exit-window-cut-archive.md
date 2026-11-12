@@ -1,0 +1,1 @@
+- 2026-11-12 **exit-window-cut**: archived; GEN-172 (a window-cut outlet gives the breach no floor, #1379) and TEST-118 active in the specs.
