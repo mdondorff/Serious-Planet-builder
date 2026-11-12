@@ -44,6 +44,8 @@ pub struct ThermalReport {
     pub moved_volume_first: f64,
     /// Cells evaluated over all passes (the cost: `passes_run * cells` for the full variant).
     pub evaluations: u64,
+    /// The volume in cubic metres that cells gave to the fixed cells of the run (a fixed cell takes nothing: the material leaves the grid as exported sediment, like the sea and the border), over all passes (GEN-176).
+    pub exported_to_fixed_m3: f64,
 }
 
 /// A number in `[-1, 1)`: an integer hash of the unordered pair of global cell ids.
@@ -56,11 +58,16 @@ pub fn pair_u(a: u64, b: u64) -> f64 {
     (x >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0
 }
 
-/// The change of cell `p` in one pass, from the heights `z` of the previous one.
-fn delta(grid: &Grid, z: &[f64], p: usize, tan_theta: f64, params: &ThermalParams) -> f64 {
+/// The change of cell `p` in one pass, from the heights `z` of the previous one, and the part of what it gave that went to a fixed cell (`fixed` empty: none; a fixed cell neither gives nor takes: GEN-176).
+fn delta(grid: &Grid, z: &[f64], p: usize, tan_theta: f64, params: &ThermalParams, fixed: &[bool]) -> (f64, f64) {
+    let is_fixed = |c: usize| !fixed.is_empty() && fixed[c];
+    if is_fixed(p) {
+        return (0.0, 0.0);
+    }
     let (zp, gp) = (z[p], grid.global_id(p));
     let gives = zp > params.sea_level && !grid.is_edge(p);
     let mut dh = 0.0;
+    let mut to_fixed = 0.0;
     // On a cube grid (GEN-150) the distance is the sphere's and a cell takes the giver's volume over its own area, so the volume is kept; on a plane grid both are 1 and `dx`.
     let cube = grid.is_cube();
     let ap = if cube { grid.cell_area(p) } else { 1.0 };
@@ -71,19 +78,23 @@ fn delta(grid: &Grid, z: &[f64], p: usize, tan_theta: f64, params: &ThermalParam
         let diff = zp - z[q];
         if diff - crit > params.min_excess && gives {
             dh -= params.k * (diff - crit);
-        } else if -diff - crit > params.min_excess && z[q] > params.sea_level && !grid.is_edge(q) {
+            if is_fixed(q) {
+                to_fixed += params.k * (diff - crit);
+            }
+        } else if -diff - crit > params.min_excess && z[q] > params.sea_level && !grid.is_edge(q) && !is_fixed(q) {
             let share = if cube { grid.cell_area(q) / ap } else { 1.0 };
             dh += params.k * (-diff - crit) * share;
         }
     }
-    dh
+    (dh, to_fixed)
 }
 
 /// Cells per piece of work.
 const CHUNK: usize = 4096;
 
-fn run(grid: &Grid, z: &mut [f64], params: &ThermalParams, threads: usize, all_cells: bool) -> ThermalReport {
+fn run(grid: &Grid, z: &mut [f64], params: &ThermalParams, threads: usize, all_cells: bool, fixed: &[bool]) -> ThermalReport {
     assert_eq!(z.len(), grid.len(), "one height per cell");
+    assert!(fixed.is_empty() || fixed.len() == grid.len(), "one fixed flag per cell, or none");
     super::assert_finite("the heights", z);
     assert!(grid.len() <= u32::MAX as usize, "the active set holds u32 cell indices: {} cells are too many", grid.len());
     assert!(params.sea_level.is_finite(), "the sea level is finite, not {}", params.sea_level);
@@ -106,7 +117,7 @@ fn run(grid: &Grid, z: &mut [f64], params: &ThermalParams, threads: usize, all_c
     let tan_theta = libm::tan(params.theta_deg.to_radians());
     let par: &dyn Par = &threads;
     let mut active: Vec<u32> = (0..grid.len() as u32).collect();
-    let mut report = ThermalReport { passes_run: 0, moved_last: 0, moved_volume_first: 0.0, evaluations: 0 };
+    let mut report = ThermalReport { passes_run: 0, moved_last: 0, moved_volume_first: 0.0, evaluations: 0, exported_to_fixed_m3: 0.0 };
     let area = grid.dx() * grid.dx();
     let cube = grid.is_cube();
     for pass in 0..params.passes {
@@ -114,10 +125,13 @@ fn run(grid: &Grid, z: &mut [f64], params: &ThermalParams, threads: usize, all_c
             break;
         }
         let pieces = active.len().div_ceil(CHUNK);
-        let deltas: Vec<Vec<f64>> = {
+        let deltas: Vec<Vec<(f64, f64)>> = {
             let (zr, act) = (&*z, &active);
             par::map(par, pieces, &|c| {
-                act[c * CHUNK..((c + 1) * CHUNK).min(act.len())].iter().map(|&p| delta(grid, zr, p as usize, tan_theta, params)).collect()
+                act[c * CHUNK..((c + 1) * CHUNK).min(act.len())]
+                    .iter()
+                    .map(|&p| delta(grid, zr, p as usize, tan_theta, params, fixed))
+                    .collect()
             })
         };
         report.evaluations += active.len() as u64;
@@ -125,7 +139,8 @@ fn run(grid: &Grid, z: &mut [f64], params: &ThermalParams, threads: usize, all_c
         let mut moved = 0usize;
         let mut volume = 0.0;
         for (c, piece) in deltas.iter().enumerate() {
-            for (o, &dh) in piece.iter().enumerate() {
+            for (o, &(dh, to_fixed)) in piece.iter().enumerate() {
+                report.exported_to_fixed_m3 += if cube { 0.0 } else { to_fixed * area };
                 if dh != 0.0 {
                     let p = active[c * CHUNK + o];
                     let before = z[p as usize];
@@ -168,10 +183,17 @@ fn run(grid: &Grid, z: &mut [f64], params: &ThermalParams, threads: usize, all_c
 /// Thermal stabilisation of `z` in place on active cells (see the module): at most `params.passes` passes, fewer when nothing moves. `z` must be finite. Refused: a critical angle
 /// outside (0, 90) degrees, a perturbation of 1 or more, a share `k` over 1/8 or not positive, a negative minimum excess.
 pub fn thermal(grid: &Grid, z: &mut [f64], params: &ThermalParams, threads: usize) -> ThermalReport {
-    run(grid, z, params, threads, false)
+    run(grid, z, params, threads, false, &[])
+}
+
+/// [`thermal`] with fixed cells (GEN-176): a fixed cell neither gives nor takes (a boundary like the sea and the grid's border); what its neighbours would have given it leaves the grid and is
+/// counted in `exported_to_fixed_m3`. `fixed` has one flag per cell. Not for a cube grid.
+pub fn thermal_fixed(grid: &Grid, z: &mut [f64], params: &ThermalParams, threads: usize, fixed: &[bool]) -> ThermalReport {
+    assert!(!grid.is_cube() || fixed.is_empty(), "fixed cells are for a plane grid");
+    run(grid, z, params, threads, false, fixed)
 }
 
 /// The same as [`thermal`] over every cell every pass: the reference the active-cell run is tested against.
 pub fn thermal_all_cells(grid: &Grid, z: &mut [f64], params: &ThermalParams, threads: usize) -> ThermalReport {
-    run(grid, z, params, threads, true)
+    run(grid, z, params, threads, true, &[])
 }

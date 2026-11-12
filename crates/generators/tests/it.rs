@@ -26,6 +26,8 @@ mod bake_h0;
 mod bake_hydro;
 #[path = "bake_k7.rs"]
 mod bake_k7;
+#[path = "bake_k7_beds.rs"]
+mod bake_k7_beds;
 #[path = "bake_kernels.rs"]
 mod bake_kernels;
 #[path = "bake_lakes.rs"]

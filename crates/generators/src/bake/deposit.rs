@@ -36,13 +36,15 @@ pub struct DepositReport {
     pub eroded: f64,
     pub deposited: f64,
     pub exported: f64,
+    /// Of `exported`, what would have settled on a fixed cell (GEN-176): the cell keeps its height and the volume leaves.
+    pub exported_to_fixed: f64,
 }
 
 /// Deposits on `z` in place along `routing`, whose receivers and order were made on `filled` (the flooded surface of `z`'s carved ground). `original` is the ground before the carve:
 /// the eroded column of a cell is `original - z` where positive. `area` is the routing's drainage area. Refused: arrays of another length, a `zeta` outside [0, 1], a `kc` that is
 /// negative or not finite, a height that is not finite.
 pub fn deposit(grid: &Grid, z: &mut [f64], original: &[f64], filled: &[f64], routing: &Routing, params: &DepositParams) -> DepositReport {
-    deposit_core(grid, z, original, filled, routing, params, None)
+    deposit_core(grid, z, original, filled, routing, params, None, &[])
 }
 
 /// [`deposit`] that also writes, for the cell where a route leaves (a cell with no receiver), the load that leaves there in cubic metres (`exports`, one entry per cell, set to 0 first): the per-catchment export of G-SED (GEN-152).
@@ -57,9 +59,10 @@ pub fn deposit_exports(
 ) -> DepositReport {
     assert_eq!(exports.len(), grid.len(), "one export per cell");
     exports.fill(0.0);
-    deposit_core(grid, z, original, filled, routing, params, Some(exports))
+    deposit_core(grid, z, original, filled, routing, params, Some(exports), &[])
 }
 
+#[allow(clippy::too_many_arguments)]
 fn deposit_core(
     grid: &Grid,
     z: &mut [f64],
@@ -68,7 +71,9 @@ fn deposit_core(
     routing: &Routing,
     params: &DepositParams,
     mut exports: Option<&mut [f64]>,
+    fixed: &[bool],
 ) -> DepositReport {
+    assert!(fixed.is_empty() || fixed.len() == grid.len(), "one fixed flag per cell, or none");
     let n = grid.len();
     assert!(z.len() == n && original.len() == n && filled.len() == n && routing.receiver.len() == n, "one value per cell");
     assert!((0.0..=1.0).contains(&params.zeta), "zeta is a share in [0, 1], not {}", params.zeta);
@@ -85,7 +90,7 @@ fn deposit_core(
     assert!(routing.area.iter().all(|a| a.is_finite() && *a >= 0.0), "the drainage areas are finite and not negative");
     let mut carried = vec![0.0f64; n];
     let mut ceiling = vec![f64::INFINITY; n];
-    let mut report = DepositReport { eroded: 0.0, deposited: 0.0, exported: 0.0 };
+    let mut report = DepositReport { eroded: 0.0, deposited: 0.0, exported: 0.0, exported_to_fixed: 0.0 };
     for &p in routing.order.iter().rev() {
         let p = p as usize;
         let land = z[p] > params.sea_level;
@@ -140,6 +145,12 @@ fn deposit_core(
             load += (rise - allowed) * ca;
             rise = allowed;
         }
+        if !fixed.is_empty() && fixed[p] {
+            // A fixed cell keeps its height: what would have settled on it leaves with the sediment that is exported (GEN-176).
+            report.exported += rise * ca;
+            report.exported_to_fixed += rise * ca;
+            rise = 0.0;
+        }
         z[p] = zp + rise;
         report.deposited += rise * ca;
         carried[r] += load;
@@ -171,6 +182,21 @@ pub fn deposit_on_own_route_flood(
     params: &DepositParams,
     canonical: bool,
 ) -> DepositReport {
+    deposit_on_own_route_fixed(grid, z, original, epsilon, seed, params, canonical, &[])
+}
+
+/// [`deposit_on_own_route_flood`] with fixed cells (GEN-176): a fixed cell (a channel cell after the burn) keeps its height; the volume that would have settled on it leaves with the exported sediment, counted in `DepositReport::exported_to_fixed`. `fixed` has one flag per cell, or none.
+#[allow(clippy::too_many_arguments)]
+pub fn deposit_on_own_route_fixed(
+    grid: &Grid,
+    z: &mut [f64],
+    original: &[f64],
+    epsilon: f64,
+    seed: u64,
+    params: &DepositParams,
+    canonical: bool,
+    fixed: &[bool],
+) -> DepositReport {
     let outlet = grid.outlets(z, params.sea_level);
     let (filled, routing) = if canonical {
         let filled = priority_flood_with(grid, z, &outlet, epsilon, true);
@@ -179,7 +205,7 @@ pub fn deposit_on_own_route_flood(
     } else {
         (priority_flood(grid, z, &outlet, epsilon), route(grid, z, &outlet, epsilon, seed, 0.0))
     };
-    deposit(grid, z, original, &filled, &routing, params)
+    deposit_core(grid, z, original, &filled, &routing, params, None, fixed)
 }
 
 /// Spreads the one-cell pits of `z` over their neighbours, keeping the volume (GEN-101): a land cell whose 8 neighbours are inside the grid's border (the border cells only receive and are never lowered), that is lower than all its 8 neighbours by more than
@@ -187,7 +213,15 @@ pub fn deposit_on_own_route_flood(
 /// heights' sum is unchanged. The pits are taken in cell order and the pass repeats (the neighbours' fall can make a smaller pit) up to `max_passes` times, until no pit is deeper than
 /// `min_depth_m`. Returns the passes run. Deterministic: serial, fixed order, no hash or thread.
 pub fn spread_pits(grid: &Grid, z: &mut [f64], sea_level: f64, min_depth_m: f64, max_passes: usize) -> usize {
+    spread_pits_fixed(grid, z, sea_level, min_depth_m, max_passes, &[])
+}
+
+/// [`spread_pits`] with fixed cells (GEN-176): a fixed cell is neither a pit nor lowered; a pit takes its rise from the neighbours that are free only (the volume is kept: the rise is the share `free / 8` of the usual one). Not for a cube grid.
+pub fn spread_pits_fixed(grid: &Grid, z: &mut [f64], sea_level: f64, min_depth_m: f64, max_passes: usize, fixed: &[bool]) -> usize {
+    assert!(fixed.is_empty() || fixed.len() == z.len(), "one fixed flag per cell, or none");
+    let is_fixed = |c: usize| !fixed.is_empty() && fixed[c];
     if grid.is_cube() {
+        assert!(fixed.is_empty(), "fixed cells are for a plane grid");
         return spread_pits_cube(grid, z, sea_level, min_depth_m, max_passes);
     }
     let w = grid.w();
@@ -205,21 +239,25 @@ pub fn spread_pits(grid: &Grid, z: &mut [f64], sea_level: f64, min_depth_m: f64,
         for j in 2..h.saturating_sub(2) {
             for i in 2..w.saturating_sub(2) {
                 let p = j * w + i;
-                if z[p] <= sea_level {
+                if z[p] <= sea_level || is_fixed(p) {
                     continue;
                 }
                 let mut lowest = f64::INFINITY;
+                let mut free = 0usize;
                 for (di, dj) in &around {
                     let q = ((j as i64 + dj) as usize) * w + (i as i64 + di) as usize;
                     lowest = lowest.min(z[q]);
+                    free += usize::from(!is_fixed(q));
                 }
                 let depth = lowest - z[p];
-                let rise = 0.8 * depth;
-                if depth > min_depth_m && lowest - rise / 8.0 > sea_level {
+                let rise = 0.8 * depth * free as f64 / 8.0;
+                if depth > min_depth_m && free > 0 && lowest - rise / free as f64 > sea_level {
                     z[p] += rise;
                     for (di, dj) in &around {
                         let q = ((j as i64 + dj) as usize) * w + (i as i64 + di) as usize;
-                        z[q] -= rise / 8.0;
+                        if !is_fixed(q) {
+                            z[q] -= rise / free as f64;
+                        }
                     }
                     moved = true;
                 }

@@ -4,14 +4,14 @@
 //! sweep and the pit spreading of pass 2. `L` is the result minus `B`, stored in steps of 0.25 m. The pit share and depth are reported after each stage, and G-SURF compares the runtime's `B + L`
 //! with the bake's surface at the lattice nodes.
 
-use super::carve::{carve, CarveParams};
-use super::deposit::{deposit_on_own_route_flood, spread_pits, DepositParams, DepositReport, Kc};
+use super::carve::{carve_fixed, CarveParams};
+use super::deposit::{deposit_on_own_route_fixed, spread_pits_fixed, DepositParams, DepositReport, Kc};
 use super::flood::priority_flood_with;
 use super::hydro::Hydro;
 pub use super::hydro::QUnit;
 use super::map::catmull_rom;
 use super::route::{MfdClip, RoundRules, Routing, NONE};
-use super::thermal::thermal;
+use super::thermal::thermal_fixed;
 use super::tile::{sample_window, window_grid, Pass2Params, TileGrid, TileId, QUANT_STEP_M};
 use planet_core::cube::{face_to_direction, TangentWarp};
 use planet_core::{Face, Vec3};
@@ -317,11 +317,55 @@ pub fn burn_channels_wide(z: &mut [f64], w: usize, origin: (i64, i64), channels:
 pub fn burn_channels_bounded(
     z: &mut [f64],
     w: usize,
-    (i0, j0): (i64, i64),
+    origin: (i64, i64),
     channels: &[Channel],
     law: Option<(&WidthLaw, f64)>,
     carry: usize,
 ) -> usize {
+    burn_channels_report(z, w, origin, channels, law, carry, None).lowered
+}
+
+/// What the burn did (GEN-176).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct BurnReport {
+    /// The cells lowered.
+    pub lowered: usize,
+    /// The line cells whose target differs from the unbounded carry (the burn's own cutoff: a hole more than `carry` steps upstream is not carried to them); 0 for an unbounded carry.
+    pub cutoff_binds: usize,
+    /// The bounded target minus the unbounded one over the cutoff cells, in metres (p50, p99, max; 0 for none): a bound that changes no height by more than the store's 0.25 m step changes nothing visible or stored.
+    pub cutoff_diff: CutoffDiff,
+}
+
+/// The distribution of what a cutoff costs (GEN-176): the bounded target minus the unbounded target, in metres, over the cells where they differ.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CutoffDiff {
+    pub p50: f64,
+    pub p99: f64,
+    pub max: f64,
+}
+
+impl CutoffDiff {
+    /// The nearest-rank percentiles of `diffs` (all of them finite, not negative); zero for none.
+    fn of(diffs: &mut [f64]) -> CutoffDiff {
+        if diffs.is_empty() {
+            return CutoffDiff::default();
+        }
+        diffs.sort_by(f64::total_cmp);
+        let at = |p: f64| diffs[((p * diffs.len() as f64).ceil() as usize).clamp(1, diffs.len()) - 1];
+        CutoffDiff { p50: at(0.5), p99: at(0.99), max: diffs[diffs.len() - 1] }
+    }
+}
+
+/// [`burn_channels_bounded`] with the bed floor of GEN-176 and the report: with `sea_floor` set, the level a land cell (a cell standing at or above the sea level when it is burnt; a cell burnt to the floor stays at it) is burnt to is at least the sea level, so a river bed never stands below the sea on land. The 0.5 m code of the bed rounds down first (when the channel is read), then the floor applies; the line ends at its outlet, a cell at or below the sea level, as before.
+pub fn burn_channels_report(
+    z: &mut [f64],
+    w: usize,
+    (i0, j0): (i64, i64),
+    channels: &[Channel],
+    law: Option<(&WidthLaw, f64)>,
+    carry: usize,
+    sea_floor: Option<f64>,
+) -> BurnReport {
     let mut lowered = 0;
     // The disc of a wide river reaches DISC_RADIUS_MAX cells from the line, so a cell of the core is burnt by a line cell up to that far outside it, whose own carry reaches `carry` steps further: the profile
     // carries `carry - DISC_RADIUS_MAX` steps when a law is given, and the half width is capped (GEN-169, partition independence with the discs).
@@ -349,12 +393,43 @@ pub fn burn_channels_bounded(
         })
         .collect();
     let target = tree_carry(&cells, &value, carry);
+    let (cutoff_binds, cutoff_diff) = if carry == usize::MAX {
+        (0, CutoffDiff::default())
+    } else {
+        let unbounded = tree_min_unbounded(&cells, &value);
+        // The cells of the window only, on the heights the burn applies: a land cell is floored at the sea level (both targets), so a cutoff below it changes nothing (GEN-176).
+        let (mut binds, mut diffs) = (0usize, Vec::new());
+        for (ci, line) in cells.iter().enumerate() {
+            for (k, &(x, y)) in line.iter().enumerate() {
+                if !in_window(x, y) {
+                    continue;
+                }
+                let (mut t, mut u) = (target[ci][k], unbounded[ci][k]);
+                if let Some(s) = sea_floor {
+                    if z[(y - j0) as usize * w + (x - i0) as usize] >= s {
+                        (t, u) = (t.max(s), u.max(s));
+                    }
+                }
+                if t != u {
+                    binds += 1;
+                    if (t - u).is_finite() {
+                        diffs.push(t - u);
+                    }
+                }
+            }
+        }
+        (binds, CutoffDiff::of(&mut diffs))
+    };
     for (ci, ch) in channels.iter().enumerate() {
         let bounds = (i0, i0 + w as i64 - 1, j0, j0 + w as i64 - 1);
         let width_cells = |q: f64| law.map_or(0.0, |(l, cell_m)| trench_width_cells(l, cell_m, q));
         let mut burn = |x: i64, y: i64, level: f64| {
             if in_window(x, y) {
                 let c = (y - j0) as usize * w + (x - i0) as usize;
+                let level = match sea_floor {
+                    Some(s) if z[c] >= s => level.max(s),
+                    _ => level,
+                };
                 if level < z[c] {
                     z[c] = level;
                     lowered += 1;
@@ -404,7 +479,7 @@ pub fn burn_channels_bounded(
             }
         }
     }
-    lowered
+    BurnReport { lowered, cutoff_binds, cutoff_diff }
 }
 
 /// The largest half width of a trench in cells (GEN-169): a wider river is burnt as one of `2 * DISC_RADIUS_MAX` cells (3.3 km at 101.8 m cells; the Amazon's mouth is about 16 cells). The tile halo must hold
@@ -423,8 +498,10 @@ pub struct FinalPass {
     /// The largest lowering in metres, and the removed volume in cubic metres (land cells only, `cell_area_m2` a cell): booked as eroded and exported.
     pub largest_m: f64,
     pub removed_m3: f64,
-    /// The land path cells whose target differs from the unbounded carry (the cutoff binds: a hole more than `carry` steps upstream is not carried to them).
+    /// The path cells of the window (land or sea) whose target differs from the unbounded carry (the cutoff binds: a hole more than `carry` steps upstream is not carried to them).
     pub cutoff_binds: usize,
+    /// The bounded target minus the unbounded one over those cells, in metres (GEN-176): p50, p99 and max.
+    pub cutoff_diff: CutoffDiff,
 }
 
 /// The final channel pass (GEN-169): every land cell of a channel's line is lowered to the lowest height over the cells within `carry` steps upstream along the channel tree (the heights as the pass
@@ -456,14 +533,33 @@ pub fn final_channel_pass(
         })
         .collect();
     let target = tree_carry(&cells, &value, carry);
-    let unbounded = tree_min_unbounded(&cells, &value);
+    // The cutoff count reads every path cell of the window, the sub-sea ones too, on their own heights (GEN-176): a cell at or under the sea level is not lowered, but a rise to it from a hole farther
+    // upstream than the carry is as much a bind as on land. (With the sub-sea heights a monotone profile has no spurious bind below its last land cell.)
+    let all: Vec<Vec<f64>> = cells
+        .iter()
+        .map(|l| {
+            l.iter().map(|&(x, y)| if in_window(x, y) { z[(y - j0) as usize * w + (x - i0) as usize] } else { f64::INFINITY }).collect()
+        })
+        .collect();
+    let (target_all, unbounded_all) = (tree_carry(&cells, &all, carry), tree_min_unbounded(&cells, &all));
     let mut report = FinalPass::default();
+    let mut diffs: Vec<f64> = Vec::new();
     for (ci, line) in cells.iter().enumerate() {
         for (k, &(x, y)) in line.iter().enumerate() {
-            if !in_window(x, y) || value[ci][k] == f64::INFINITY {
+            if !in_window(x, y) {
                 continue;
             }
-            report.cutoff_binds += usize::from(target[ci][k] != unbounded[ci][k]);
+            // Every path cell in the window counts (a cell at or under the sea level too: its target is the carry through it, GEN-176); only land cells are lowered.
+            if target_all[ci][k] != unbounded_all[ci][k] {
+                report.cutoff_binds += 1;
+                let d = target_all[ci][k] - unbounded_all[ci][k];
+                if d.is_finite() {
+                    diffs.push(d);
+                }
+            }
+            if value[ci][k] == f64::INFINITY {
+                continue;
+            }
             let c = (y - j0) as usize * w + (x - i0) as usize;
             if z[c] > target[ci][k] {
                 let d = z[c] - target[ci][k];
@@ -475,6 +571,7 @@ pub fn final_channel_pass(
             }
         }
     }
+    report.cutoff_diff = CutoffDiff::of(&mut diffs);
     report
 }
 
@@ -577,6 +674,13 @@ pub struct K7Result {
     pub sediment: DepositReport,
     /// The final channel pass (GEN-169).
     pub final_pass: FinalPass,
+    /// The burn's own cutoff binds (GEN-176): line cells whose burn target differs from the unbounded carry.
+    pub burn_cutoff_binds: usize,
+    pub burn_cutoff_diff: CutoffDiff,
+    /// The channel cells fixed after the burn (GEN-176), and the volume in cubic metres that thermal and the deposition sweep would have put on them and that left the tile as exported sediment.
+    pub fixed_cells: usize,
+    pub thermal_exported_m3: f64,
+    pub deposit_exported_to_fixed_m3: f64,
 }
 
 /// K7 on one tile. `base` is `B` (read at every cell of the window), `regional` the regional change (a C1 read of the regional solve, `RegionField::at`), `channels` the channel segments on the local
@@ -616,8 +720,19 @@ pub fn k7_tile(
         DISC_RADIUS_MAX as usize + PROFILE_CARRY_MIN
     );
     let channels = &upstream_first(channels.to_vec());
-    let burned = burn_channels_bounded(&mut z, w, origin, channels, Some((&p.width, g.dx())), g.halo);
+    let burn = burn_channels_report(&mut z, w, origin, channels, Some((&p.width, g.dx())), g.halo, Some(q.sea_level));
+    let burned = burn.lowered;
     let burn_mask: Vec<bool> = z.iter().zip(&z_start).map(|(a, b)| a != b).collect();
+    // The channel cells are fixed for every stage after the burn that is not the final pass (GEN-176): the cells the burn lowered and the cells of the lines in the window.
+    let mut fixed = burn_mask.clone();
+    for ch in channels {
+        for (x, y) in line_cells(ch) {
+            if x >= origin.0 && y >= origin.1 && x < origin.0 + w as i64 && y < origin.1 + w as i64 {
+                fixed[(y - origin.1) as usize * w + (x - origin.0) as usize] = true;
+            }
+        }
+    }
+    let fixed_cells = fixed.iter().filter(|&&f| f).count();
     drop(z_start);
     pits.push(("channels burned in", stats(&z)));
     let z_burned = z.clone();
@@ -627,13 +742,13 @@ pub fn k7_tile(
     let local = CarveParams { max_area: q.local_area_cells * g.dx() * g.dx(), round_rules: rules, ..q.carve };
     // The breach alone: the carve with no incision (`k_dt` 0) runs the breach of pass 1 and leaves the rest.
     let mut breach_only = z.clone();
-    carve(&grid, &mut breach_only, &outlet, &CarveParams { k_dt: 0.0, steps: 1, reroute_every: 1, ..local }, None, stream);
+    carve_fixed(&grid, &mut breach_only, &outlet, &CarveParams { k_dt: 0.0, steps: 1, reroute_every: 1, ..local }, None, stream, &fixed);
     pits.push(("breach", stats(&breach_only)));
     drop(breach_only);
-    let _ = carve(&grid, &mut z, &outlet, &local, None, stream);
+    let _ = carve_fixed(&grid, &mut z, &outlet, &local, None, stream, &fixed);
     pits.push(("breach and incision", stats(&z)));
-    thermal(&grid, &mut z, &q.thermal, threads);
-    let mut sediment = deposit_on_own_route_flood(
+    let thermal_report = thermal_fixed(&grid, &mut z, &q.thermal, threads, &fixed);
+    let mut sediment = deposit_on_own_route_fixed(
         &grid,
         &mut z,
         &z_burned,
@@ -641,8 +756,11 @@ pub fn k7_tile(
         stream,
         &DepositParams { kc: Kc::Uniform(q.kc), zeta: q.zeta, sea_level: q.sea_level },
         p.canonical_flood,
+        &fixed,
     );
-    spread_pits(&grid, &mut z, q.sea_level, q.pit_min_m, q.pit_passes);
+    // What thermal gave to the fixed cells left the tile with the sediment: reported in `thermal_exported_m3` (GEN-176).
+    // (Not booked in the ledger: the deposition sweep reads the givers' loss as eroded column against `z_burned` already.)
+    spread_pits_fixed(&grid, &mut z, q.sea_level, q.pit_min_m, q.pit_passes, &fixed);
     let final_pass = final_channel_pass(&mut z, w, origin, channels, q.sea_level, g.dx() * g.dx(), g.halo);
     sediment.eroded += final_pass.removed_m3;
     sediment.exported += final_pass.removed_m3;
@@ -661,7 +779,21 @@ pub fn k7_tile(
             change.push((z[c] - b[c]) as f32);
         }
     }
-    K7Result { z, b, change, burned, burn_mask, pits, sediment, final_pass }
+    K7Result {
+        z,
+        b,
+        change,
+        burned,
+        burn_mask,
+        pits,
+        sediment,
+        final_pass,
+        burn_cutoff_binds: burn.cutoff_binds,
+        burn_cutoff_diff: burn.cutoff_diff,
+        fixed_cells,
+        thermal_exported_m3: thermal_report.exported_to_fixed_m3,
+        deposit_exported_to_fixed_m3: sediment.exported_to_fixed,
+    }
 }
 
 /// The result of G-SURF at the lattice nodes of a tile.
@@ -845,4 +977,31 @@ pub fn surface_gate(g: &TileGrid, id: TileId, base: &(dyn Fn(Vec3) -> f64 + Sync
         }
     }
     out
+}
+
+impl K7Result {
+    /// The MARK line of the tile (GEN-176): the channel cells fixed after the burn, what thermal and the deposition sweep would have put on them (exported, m3), the burn's cutoff binds and the final pass's with the
+    /// distribution of what a cutoff costs (bounded minus unbounded target, metres: p50, p99, max), the final pass's lowering.
+    pub fn mark_line(&self) -> String {
+        let (b, f) = (&self.burn_cutoff_diff, &self.final_pass.cutoff_diff);
+        format!(
+            "K7: {} cells burned, {} channel cells fixed, exported to fixed cells: thermal {:.1} m3, deposition {:.1} m3; burn cutoff {} (diff p50 {:.3} p99 {:.3} max {:.3} m); final pass cutoff {} (diff p50 {:.3} p99 {:.3} max {:.3} m), {} cells lowered, {} by more than 1 m, largest {:.3} m, {:.1} m3 removed",
+            self.burned,
+            self.fixed_cells,
+            self.thermal_exported_m3,
+            self.deposit_exported_to_fixed_m3,
+            self.burn_cutoff_binds,
+            b.p50,
+            b.p99,
+            b.max,
+            self.final_pass.cutoff_binds,
+            f.p50,
+            f.p99,
+            f.max,
+            self.final_pass.lowered,
+            self.final_pass.over_1m,
+            self.final_pass.largest_m,
+            self.final_pass.removed_m3
+        )
+    }
 }

@@ -166,6 +166,36 @@ impl Rock<'static> {
 
 /// [`carve`] with a [`Rock`]: K at each cell's current height multiplies the carve factor in each step, and the uplift array replaces `u_over_k`.
 pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, factor: Option<&[f64]>, rock: &Rock, seed: u64) -> Routing {
+    carve_rock_fixed(grid, z, outlet, p, factor, rock, seed, &[])
+}
+
+/// [`carve`] with fixed cells (GEN-176): a fixed cell is neither lowered by the breach nor moved by a sweep (a channel cell after the burn of K7: only the final channel pass may lower it); `fixed` has one flag per cell, or none.
+pub fn carve_fixed(
+    grid: &Grid,
+    z: &mut [f64],
+    outlet: &[bool],
+    p: &CarveParams,
+    factor: Option<&[f64]>,
+    seed: u64,
+    fixed: &[bool],
+) -> Routing {
+    carve_rock_fixed(grid, z, outlet, p, factor, &Rock::none(), seed, fixed)
+}
+
+/// [`carve_rock`] with fixed cells (see [`carve_fixed`]).
+#[allow(clippy::too_many_arguments)]
+pub fn carve_rock_fixed(
+    grid: &Grid,
+    z: &mut [f64],
+    outlet: &[bool],
+    p: &CarveParams,
+    factor: Option<&[f64]>,
+    rock: &Rock,
+    seed: u64,
+    fixed: &[bool],
+) -> Routing {
+    assert!(fixed.is_empty() || fixed.len() == grid.len(), "one fixed flag per cell, or none");
+    let is_fixed = |c: usize| !fixed.is_empty() && fixed[c];
     assert!(p.steps > 0 && p.reroute_every > 0, "a carve has steps and a re-route interval");
     assert!(p.max_area >= 0.0 && p.max_area.is_finite(), "the area cap is finite and not negative, not {}", p.max_area);
     assert_finite("the heights", z);
@@ -226,6 +256,9 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
                     continue;
                 }
                 let rec = rec as usize;
+                if is_fixed(rec) {
+                    continue;
+                }
                 let mut want = (z[c] - p.breach_slope * distance(grid, c, rec)).max(floor);
                 if let Some(b) = &base {
                     want = want.max(b[rec]);
@@ -270,6 +303,9 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
                 continue;
             }
             let rec = rec as usize;
+            if is_fixed(c) {
+                continue;
+            }
             let class = factor.map_or(1.0, |f| f[c]);
             let scale = class * if rock.k.is_some() { f64::from(k[c]) } else { 1.0 };
             let f = p.k_dt * scale * libm::sqrt(r.area[c]) / distance(grid, c, rec);
