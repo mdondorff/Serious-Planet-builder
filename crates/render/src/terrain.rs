@@ -127,7 +127,7 @@ struct Node {
 @group(0) @binding(0) var<uniform> g: Globals;
 // One record per planned node, read with the draw's instance index (`first_instance` = the node's index in the plan, REND-015).
 @group(0) @binding(1) var<storage, read> nodes: array<Node>;
-// The river coverage of the frame (REND-059, REND-061; bindings 2 and 3 are the water pass's): per node the layer of the coverage array it reads (`0xffffffff`: none), the array of 8-bit signed-distance codes, one layer a river
+// The river coverage of the frame (REND-059, REND-061; bindings 2 and 3 are the water pass's): per node the slot of the coverage atlas it reads (`0xffffffff`: none), the array of 8-bit signed-distance codes, one layer a river
 // node, and its sampler (clamped, bilinear). Only the lit fragment stages read them.
 @group(0) @binding(4) var<storage, read> river_layers: array<u32>;
 @group(0) @binding(5) var river_cov: texture_2d<f32>;
@@ -1066,11 +1066,25 @@ struct FrameSet {
     rivers_live: std::cell::Cell<bool>,
 }
 
-/// The layers of the river coverage array (REND-061): the most river nodes a frame draws; the plan chooses which get one and counts the rest.
 /// The columns and rows of the river coverage atlas: [`RIVER_SLOTS`] slots in a near-square grid.
 pub(crate) fn river_atlas_grid() -> (u32, u32) {
     let cols = (f64::from(RIVER_SLOTS)).sqrt().ceil() as u32;
     (cols, RIVER_SLOTS.div_ceil(cols))
+}
+
+/// Whether the river atlas of nodes of `cells` cells fits a device whose largest 2D texture is `max_dim` texels, and the size of a slot fits the node's word (8 bits).
+pub(crate) fn river_atlas_fits(cells: u32, max_dim: u32) -> Result<(), String> {
+    if cells + 1 > 254 {
+        return Err(format!(
+            "the river coverage atlas packs a slot's samples a side ({}) in 8 bits of the node word: at most 254",
+            cells + 1
+        ));
+    }
+    let (w, h) = river_atlas_size(cells);
+    if w > max_dim || h > max_dim {
+        return Err(format!("the river coverage atlas of {RIVER_SLOTS} slots of {} texels is {w} x {h}, over the device's {max_dim} texel limit: fewer cells a node", cells + 3));
+    }
+    Ok(())
 }
 
 /// The atlas texture's size for nodes of `cells` cells: a slot is `cells + 3` texels a side (the node's `cells + 1` samples and a border of one).
@@ -1475,6 +1489,9 @@ impl TerrainRenderer {
             planet_generators::compact::slot_bytes(cells),
             "the pool slot is not the compact slot of {cells} cells"
         );
+        if let Err(why) = river_atlas_fits(cells, ctx.device.limits().max_texture_dimension_2d) {
+            panic!("{why}");
+        }
         Self::build(ctx, size, cells, pool)
     }
 
@@ -3424,7 +3441,7 @@ mod river_atlas_tests {
     #[test]
     fn the_atlas_holds_every_slot_with_its_border_and_a_padded_slot_repeats_its_edges() {
         let (cols, rows) = river_atlas_grid();
-        assert!(cols * rows >= RIVER_SLOTS && (cols - 1) * rows < RIVER_SLOTS + rows, "{cols} x {rows} for {RIVER_SLOTS} slots");
+        assert!(cols * rows >= RIVER_SLOTS && (cols - 1) * rows < RIVER_SLOTS, "{cols} x {rows} for {RIVER_SLOTS} slots");
         let (w, h) = river_atlas_size(32);
         assert_eq!((w, h), (cols * 35, rows * 35));
         assert!(w <= 8192 && h <= 8192, "the atlas fits the portable texture size: {w} x {h}");
@@ -3440,5 +3457,26 @@ mod river_atlas_tests {
         assert_eq!(row(2), vec![4, 4, 5, 6, 6]);
         assert_eq!(row(3), vec![7, 7, 8, 9, 9]);
         assert_eq!(row(4), vec![7, 7, 8, 9, 9]);
+    }
+    // spec: REND-061
+    #[test]
+    fn every_slot_with_its_border_lies_inside_the_atlas_for_the_cells_a_device_takes_and_the_others_are_refused() {
+        for cells in [16u32, 32, 64, 128] {
+            river_atlas_fits(cells, 8192).unwrap_or_else(|e| panic!("cells {cells}: {e}"));
+            let (w, h) = river_atlas_size(cells);
+            let (cols, rows) = river_atlas_grid();
+            let (size, stride) = (cells + 1, cells + 3);
+            for slot in 0..RIVER_SLOTS {
+                // The shader's origin of a slot's first sample, and its last: inside the slot's border, inside the atlas.
+                let (ox, oy) = ((slot % cols) * stride + 1, (slot / cols) * stride + 1);
+                assert!(
+                    slot / cols < rows && ox + size < w && oy + size < h,
+                    "cells {cells}, slot {slot}: ({ox}, {oy}) + {size} in {w} x {h}"
+                );
+            }
+        }
+        let e = river_atlas_fits(256, 8192).expect_err("an atlas of 256-cell nodes is over the portable limit");
+        assert!(e.contains("limit") || e.contains("8 bits"), "{e}");
+        assert!(river_atlas_fits(16, 1024).is_ok() && river_atlas_fits(128, 4096).is_err());
     }
 }

@@ -653,3 +653,39 @@ fn the_strength_of_a_node_scales_its_river_in_the_shader_and_a_river_narrower_th
 fn darkening(base: &[[f32; 4]], with: &[[f32; 4]]) -> f64 {
     base.iter().zip(with).map(|(a, b)| f64::from((lum(a) - lum(b)).max(0.0) / lum(a).max(1e-6))).sum()
 }
+
+// spec: REND-061
+/// A node's slot is its place in the plan's river list: a river in a late slot (past the first row and column of the atlas, where the slot's origin has both a column and a row) draws the frame of the same river in slot
+/// zero. A swapped column count or row stride of the shader or the upload would pass every other test, which only ever fill the first row.
+#[test]
+fn a_river_in_a_late_slot_of_the_atlas_draws_the_frame_of_the_same_river_in_slot_zero() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let (plan, field) = scene();
+    let rp = river_plan(&plan, RIVER_SLOTS as usize);
+    assert!(!rp.nodes.is_empty());
+    let size = CELLS + 1;
+    let wanted = 60usize;
+    let taken: std::collections::HashSet<u32> = rp.nodes.iter().map(|n| n.node).collect();
+    let dry: Vec<planet_frame::river::RiverNode> = (0..plan.nodes.len() as u32)
+        .filter(|i| !taken.contains(i))
+        .map(|node| planet_frame::river::RiverNode { node, size, coverage: vec![255; (size * size) as usize], fade: 255 })
+        .collect();
+    // Slots 0.. are dry nodes (far from any river: no water), the real river nodes follow: the first lands past slot 46, the atlas's first row.
+    let need = wanted.min(dry.len());
+    assert!(
+        need >= 47,
+        "the pose plans {} nodes: not enough to fill the first row of the atlas ({} dry ones)",
+        plan.nodes.len(),
+        dry.len()
+    );
+    let mut late = RiverPlan { nodes: dry.into_iter().take(need).collect(), dropped: 0 };
+    late.nodes.extend(rp.nodes.iter().cloned());
+    let mut r = renderer(&ctx, &plan, &field);
+    let (first, s1) = frame(&ctx, &mut r, &plan, Some(&rp));
+    let (second, s2) = frame(&ctx, &mut r, &plan, Some(&late));
+    assert_eq!((s1.river_dropped, s2.river_dropped), (0, 0));
+    assert!(s2.river_nodes as usize >= need + rp.nodes.len());
+    let (base, _) = frame(&ctx, &mut r, &plan, None);
+    assert!(first.iter().zip(&base).any(|(a, b)| a != b), "the river draws");
+    assert_eq!(second, first, "the same river in slot {need} draws the frame of slot 0");
+}
