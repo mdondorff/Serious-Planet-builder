@@ -243,7 +243,7 @@ fn baked(name: &str, regional: &(dyn Fn(planet_core::Vec3) -> f64 + Sync)) -> (D
     (d, c, h)
 }
 
-// spec: STRM-085
+// spec: STRM-085, STRM-086
 #[test]
 fn the_river_reader_gives_the_tile_its_channels_under_the_commit_of_the_layer_and_keeps_a_bounded_cache() {
     use planet_cache::l_layer::CommitLayer;
@@ -263,6 +263,10 @@ fn the_river_reader_gives_the_tile_its_channels_under_the_commit_of_the_layer_an
     let bound = all.bytes() / 4;
     let rivers = layer.rivers(bound).expect("a reader over the commit of the layer");
     assert_eq!(rivers.commit_id(), layer.id(), "the rivers, the tiles and the tables are one commit");
+    // The grid the plan needs: the face edge and the L tile edge in cells, and the nominal cell size the burn's width law used (the commit's radius over its cells).
+    let (cells, tile, cell_m) = rivers.grid_dims();
+    assert_eq!((cells, tile), (256, 64));
+    assert_eq!(cell_m, spec().grid.dx(), "the same cell size as the K7 grid");
     let store = Arc::new(TileStore::open(d.path(), w.params()).unwrap());
     let feed = ChannelGraphFeed::new(store.clone(), c.clone()).unwrap();
     let mut seen = 0;

@@ -211,6 +211,8 @@ pub struct WorldTerrain {
     erosion: Option<planet_generators::height_fields::ErosionSwitch>,
     /// What the layer is, for the log and the title.
     erosion_note: String,
+    /// The river source of the new chain's commit when it holds a channel graph (STRM-086): the frame's river plan reads the channels through it.
+    rivers: Option<Arc<crate::rivers::ReaderRiverSource>>,
     /// Scoped threads of one horizon bake (0: the cores, at most 4).
     horizon_threads: std::sync::atomic::AtomicUsize,
     /// Cells per chunk edge of the horizon lattice (0: the default of [`crate::horizonworld::HORIZON_CELL_M`]); a test sets a coarse one to stay quick.
@@ -326,6 +328,7 @@ impl WorldTerrain {
             store_world: None,
             erosion: None,
             erosion_note: String::new(),
+            rivers: None,
         })
     }
 
@@ -427,6 +430,7 @@ impl WorldTerrain {
             store_world: Some(world),
             erosion: None,
             erosion_note: String::new(),
+            rivers: None,
         })
     }
 
@@ -667,6 +671,11 @@ impl WorldTerrain {
         &self.erosion_note
     }
 
+    /// The river source of the commit the layer is read under, when the commit holds a channel graph (STRM-086).
+    pub fn rivers(&self) -> Option<&Arc<crate::rivers::ReaderRiverSource>> {
+        self.rivers.as_ref()
+    }
+
     /// Turns the erosion layer of a bake on over this stored world (VIEW-062, GEN-112): the layer is read from `o.layer_dir` (the bake's output folder or its `tiles/`, else the world's
     /// store) under the keys of the bake shape `o` names and the definition's seed, added to the C1 read of the stored lattice (the default eroded field is upgraded to the C1 one) with
     /// the crease band, the relief channels not read. An error naming the problem when the world has no stored bake, its field is not an eroded one, its relief scale is not 1 or its
@@ -720,12 +729,18 @@ impl WorldTerrain {
             let layer = planet_cache::l_layer::CommitLayer::open(&commit_dir, world.clone(), LAYER_CACHE_TILES)
                 .map_err(|e| format!("--erosion: {e}"))?;
             let commit_id = layer.commit().id;
+            // A commit with a channel graph gives the frame its rivers; one without has none (the reader refuses it, and the viewer draws no river).
+            self.rivers = layer
+                .rivers(planet_cache::river_read::DEFAULT_CACHE_BYTES)
+                .ok()
+                .map(|r| Arc::new(crate::rivers::ReaderRiverSource::new(Arc::new(r))));
             let layer = planet_generators::erosion_layer::ErosionLayer::new(Arc::new(layer)).map_err(|e| format!("--erosion: {e}"))?;
             let sea_level_m = def.sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
             self.kind = HeightFieldKind::ErodedC1;
             self.erosion_note = format!(
-                "erosion layer {} (commit {commit_id:016x} of the new chain, L with no fill, seed {seed}, coast fade {} m over the sea level {sea_level_m} m, crease band on, relief channels off, C1 base)",
+                "erosion layer {} (commit {commit_id:016x} of the new chain, L with no fill, {}, seed {seed}, coast fade {} m over the sea level {sea_level_m} m, crease band on, relief channels off, C1 base)",
                 commit_dir.display(),
+                if self.rivers.is_some() { "rivers from its channel graph" } else { "no channel graph" },
                 planet_generators::erosion_layer::COAST_FADE_M
             );
             self.source = format!("{} + {}", self.source, self.erosion_note);

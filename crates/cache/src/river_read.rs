@@ -45,6 +45,17 @@ impl RiverReader {
         self.feed.commit().id
     }
 
+    /// The commit this reader reads.
+    pub fn commit(&self) -> &Commit {
+        self.feed.commit()
+    }
+
+    /// The grid the channels live on: the face edge in L cells, the L tile edge in cells and the nominal cell size in metres (the width law's `cell_m`, the K7 grid's `dx`: the commit's radius over its cells).
+    pub fn grid_dims(&self) -> (u32, u32, f64) {
+        let spec = &self.commit().spec;
+        (spec.cells, spec.tile, spec.radius_m * core::f64::consts::FRAC_PI_2 / f64::from(spec.cells))
+    }
+
     /// Tiles decoded so far (a hit is not a decode; a tile that left the cache and comes back is).
     pub fn decodes(&self) -> u64 {
         self.decodes.load(std::sync::atomic::Ordering::Relaxed)
