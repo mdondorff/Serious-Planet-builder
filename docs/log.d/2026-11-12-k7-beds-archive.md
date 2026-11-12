@@ -1,0 +1,1 @@
+- 2026-11-12 **k7-beds**: archived; GEN-176 (K7 beds on or above the sea level, channel cells fixed after the burn, every cutoff reported, #1405) and TEST-124 active in the specs; G-PROFILE still fails after it (ledger).

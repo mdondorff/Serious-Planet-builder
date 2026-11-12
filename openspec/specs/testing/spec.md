@@ -1743,3 +1743,66 @@ Source: GEN-177
 #### Scenario: Determinism
 - **WHEN** the fixture region is baked twice and at one and eight threads
 - **THEN** every stored record is byte-equal
+### Requirement: TEST-110 The burn width tests
+The burn SHALL be tested at tier A on a straight line (off and on a cell row), a diagonal and a curved channel at w = 0.5, 1.5, 2 and 3 cells: no gap on the line, no cell raised, the mean burnt width within the tolerance of GEN-168, and at least floor(max(1, w)) burnt cells in every column across a straight line.
+
+Verify: A
+Status: active
+Source: GEN-168, architect 2026-11-11
+
+#### Scenario: Cases
+- **WHEN** the tests of `bake_burn_width` run
+- **THEN** each shape and width has an assertion that cites GEN-168
+
+### Requirement: TEST-112 The monotone burn tests
+The monotone burn SHALL be tested at tier A on a straight, a diagonal and a curved channel over a surface with holes under the profile: no cell of the line above its upstream neighbour after the burn, no cell raised, and the lowest hole carried down the channel.
+
+Verify: A
+Status: active
+Source: GEN-169, architect, 2026-11-11
+
+#### Scenario: Cases
+- **WHEN** the tests of `bake_burn_width` run
+- **THEN** the monotone case fails on the burn without the running minimum and cites GEN-169
+
+### Requirement: TEST-113 The partition and order tests of the profile
+The burn and the final pass SHALL be tested at tier A for partition independence: the same channel tree through two overlapping windows (the same halo) gives bit-identical core cells, and the unbounded carry does not (the test has teeth); and for order: channels listed in any order are burnt in the tree order. The whole K7 under two tilings is reported (core cells differing, largest difference), not asserted: its general halo difference is A3's open tile-continuity item.
+
+Verify: A
+Status: active
+Source: GEN-169, architect, 2026-11-11
+
+#### Scenario: Cases
+- **WHEN** the tests of `bake_burn_width` run
+- **THEN** the partition and order cases cite GEN-169
+### Requirement: TEST-118 The window-cut outlet tests
+The outlet kind SHALL be tested at tier A: (a) a closed bowl with a window-cut rim has no floor behind the cut (the breach goes down to the depression) through the round solver and through the region carve, and the same bowl with the rim as a basin rim keeps the floor of GEN-162; (b) a region bounded by the sea has no window-cut outlet and the flag moves no bit on it; (c) the catchment key changes with the outlet kind.
+
+Verify: A
+Status: active
+Source: GEN-172, architect 2026-11-12
+
+#### Scenario: Cases
+- **WHEN** the tests of `bake_round` run
+- **THEN** each of (a), (b) and (c) has an assertion that cites GEN-172
+### Requirement: TEST-119 The flat-grade tests
+The flat grade SHALL be tested at tier A: (a) a square pit has no straight diagonal run over 12 cells where the chessboard flood has one of 29; (b) the grade is `epsilon d / sqrt 2` within 5 % of the distance, never above the chessboard count, every cell drains; (c) the same bits on a rerun and on a translated window; (d) a flat of diameter exactly at the bound is graded and one cell wider keeps the chessboard grade, and on two tilings (a tile corner inside the flat) the partitioned surface equals the resident one bit for bit; (e) the tests of GEN-159 and GEN-162 assert the exact grade and keep their intent.
+
+Verify: A
+Status: active
+Source: GEN-173, architect 2026-11-12
+
+#### Scenario: Cases
+- **WHEN** the tests of `bake_flats` and `bake_round` run
+- **THEN** each of (a) to (e) has an assertion that cites GEN-173
+### Requirement: TEST-124 The K7 bed and fixed-channel tests
+The K7 channel rules SHALL be tested at tier A: (a) a line across a low coastal plain has no land bed below the sea level and the profile holds; (b) a burned trench in steep terrain keeps its depth through the whole pass, fixed cells are bit-unchanged by thermal, deposition and pit spreading, and the exported volume equals what would have entered them; (c) the cutoff counts include sub-sea cells and the burn's own; (d) the G-PROFILE tests of TEST-116 hold their properties.
+
+Verify: A
+Status: active
+Source: GEN-176, architect 2026-11-12
+
+#### Scenario: Cases
+- **WHEN** the tests of `bake_k7_beds` and the G-PROFILE tests of `l_graph` run
+- **THEN** each of (a) to (d) has an assertion that cites GEN-176
+- **AND** (a) starts at -4 to +20 m and fails without the floor; (b) fails without the fixed cells, the deposition ledger closes, and pit spreading leaves fixed cells alone and keeps the volume; (c) an unbounded carry reports no burn cutoff and K7 reports both counts; (d) the rise stays under 0.25 m along and across tile borders, no cutoff is over 0.25 m, cutoff_binds is 0 on the shallow fixture, and the non-vacuity is restated (channel steps, tiles with a burned channel, steps across a tile border; the deep fixture holds holes farther upstream than the carry so that a genuine cutoff rise exists and the final pass has work)

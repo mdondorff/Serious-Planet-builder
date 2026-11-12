@@ -1494,3 +1494,84 @@ Source: Architect 2026-11-12 (item 15, G-RT fixture), STRM-084, GEN-170
 #### Scenario: A fixture region
 - **WHEN** a region of a small fixture face is baked
 - **THEN** the commit holds a graph, its channels read back through the reader and its tiles are present
+
+### Requirement: GEN-168 The burnt channel matches the width law
+`burn_channels_wide` SHALL lower every cell of a channel's 8-connected line to the channel's level there, SHALL raise no cell, and SHALL burn a trench whose mean width across the line (burnt cells per cell of arc length, the line's ends left out) is within 0.5 cell of max(1, w) on a line off the cell rows and columns, within 0.71 cell on a diagonal or curved line, and within 1.05 cells on a line on a cell row or column; at every column across an axis-parallel line at least floor(max(1, w)) cells SHALL be burnt.
+
+Verify: A
+Status: active
+Source: architect, 2026-11-11
+
+#### Scenario: Lattice limit
+- **WHEN** a symmetric burn is centred on a cell row
+- **THEN** its cell count is odd, so an integer w can differ by one cell from w; the 1.05 adds 0.05 for the line's ends
+- **AND** the carve that follows widens the valley around the burnt channel; that is not a burn defect
+
+### Requirement: GEN-169 The channel profile is monotone
+The burn SHALL target, at each cell of a channel's line, the lowest of its level and of the heights found within L line steps upstream along the channel tree (L the tile's halo in cells), lowering only. A final pass at the end of K7 SHALL lower every land cell of each line to the lowest height within L steps upstream, lowering path cells only, booking the removed volume as eroded and exported. Channels SHALL be listed upstream first, ties by segment id. K7 SHALL refuse a tile whose halo is under the smallest carry, and a bake or a reader a channel graph whose margin is under what the halo needs; the pass-2 kernel version SHALL be bumped.
+
+Verify: A
+Status: active
+Source: architect, 2026-11-11
+
+#### Scenario: A hole under the profile
+- **WHEN** a cell of the line already stands under its level
+- **THEN** the cells downstream are lowered to at least that height, and none stands above the cell before it
+
+#### Scenario: Details of the burn and the final pass
+- **WHEN** the burn and the final pass run
+- **THEN** a tributary is a channel whose last cell is this channel's first cell, and a channel inside one cell is nobody's tributary; the heights are those found before any burn, the disc of a wide river burns to the same target, and the final pass reads the surface as it finds it
+- **AND** the final pass reports the largest lowering, the cells lowered by more than 1 m and the cells where the cutoff binds
+- **AND** a trench is at most 32 cells wide (`DISC_RADIUS_MAX` 16) and, with a width law, the burn carries L - 16 steps so that the disc of a line cell in the halo does not break partition independence; the halo holds both, and K7 refuses a tile whose halo is under 16 + 8 cells, naming both numbers (architect, 2026-11-11)
+- **AND** the stored channel graph carries its margin (H1 cells beyond a block) in its spec, its key and each block, equal to the H1 cells that hold the tile halo plus one; a bake refuses a graph whose margin is smaller than its tile halo needs, and a reader refuses a block whose margin is smaller than its commit's halo needs, each naming both numbers
+- **AND** channels are listed upstream first by `channels_from_hydro` and by the feed
+
+### Requirement: GEN-172 A window cut gives the breach no floor
+When the caller marks the land outlets on the border of the grid as window cuts (`CarveParams::window_cut`), the breach SHALL NOT take their height as a base: a receiver chain that ends in such an outlet SHALL have no base, while a chain that ends in an interior land outlet (a basin's rim) keeps the base of GEN-162. A region bounded by the sea SHALL have no window-cut outlet, and a build without the flag SHALL be bit-identical to the build before this requirement. The catchment key SHALL hold the outlet kind, only when it is a window cut, and the layer key SHALL differ with the flag.
+
+Verify: A
+Status: active
+Source: Architect, 2026-11-12 (SPIKE-107)
+
+#### Scenario: Valley behind a window cut
+- **WHEN** a bowl whose border cells are land outlets runs a round with the border as a window cut
+- **THEN** the breach cuts the cells beside the border far below the border cells' height, and with the border as a basin rim it does not
+- **AND** for a masked grid the border is the border of its rectangle; the caller sets the kind of an outlet (the flag), it is not inferred from heights
+
+### Requirement: GEN-173 Flats are graded by distance to the pour points
+The canonical flood SHALL grade a flat by the Euclidean distance to its lower rim, not by the chessboard count: the level is `base + epsilon d / sqrt 2`, `d` the distance in cells to the nearest rim cell, every cell kept above the neighbour it drains to. A flat whose Chebyshev diameter exceeds `halo - 1` cells, or that touches the border of the grid, keeps the chessboard grade. The grade SHALL be a function of the flat and its rim only, so the resident flood and the partitioned route give the same bits on any tiling. No cell SHALL stand above its chessboard count.
+
+Verify: A
+Status: active
+Source: Architect, 2026-11-12 (SPIKE-108)
+
+#### Scenario: A square pit with one pour point
+- **WHEN** a square pit drains through one outlet in its wall
+- **THEN** the longest straight diagonal run of the receivers is under half that of the chessboard flood, and every cell has a lower neighbour
+
+#### Scenario: Details of the grade
+- **WHEN** a flat is graded
+- **THEN** the production profile's halo is 128 cells, so the bound is 127; a flat of exactly the bound across a tile corner gives the same bits resident and partitioned
+- **AND** a flat is a connected set of cells the fill lifted with one pour level, and its lower rim is the cells next to it at or below that level
+- **AND** the non-canonical flood and cube grids are unchanged
+- **AND** no cell above a lower outlet beside it stands above one epsilon over it (GEN-159 and GEN-162 keep their intent; their exact values follow this grade)
+
+### Requirement: GEN-176 K7 river beds stay on or above the sea level and the channel cells are fixed after the burn
+K7 SHALL burn every land cell of a channel line to `max(bed, sea_level)`, after the 0.5 m code of the bed has rounded down. The channel cells of a window SHALL be fixed for every stage after the burn: the incising carve, thermal, the deposition sweep and pit spreading treat them as boundaries, and the material that would have entered them leaves the tile as counted, exported sediment. Only the final channel pass (GEN-169) MAY change a channel cell after the burn, downward. The reports SHALL count every cutoff bound, the burn's own included. A tile with no channel SHALL be bit-identical to the build before this requirement.
+
+Verify: A
+Status: active
+Source: Architect, 2026-11-12 (G-PROFILE on production geometry: R1h tile (21, 2), 72 rises)
+
+#### Scenario: A low coastal plain
+- **WHEN** a channel crosses a plain from +20 m down to a sea outlet and its beds run to -10 m
+- **THEN** no land cell of the line stands below the sea level and no cell is above its upstream neighbour
+
+#### Scenario: Details of the fixed cells and the reports
+- **WHEN** K7 runs after the burn
+- **THEN** the channel cells of a window are the cells of its lines and the cells the burn lowered; the cells of a line's sea outlet are burnt to their bed
+- **AND** the final channel pass is the only stage after the burn that changes a channel cell
+- **THEN** the incising carve's breach does not lower a fixed cell and its sweeps do not move it; a fixed cell neither gives nor takes in thermal, the deposition sweep and pit spreading
+- **AND** the material is counted as `thermal_exported_m3` and `deposit_exported_to_fixed_m3`, with `fixed_cells`, in the result and the MARK line; thermal's is a report only (the givers' loss is already the deposition sweep's eroded column), the sweep's own export to fixed cells is part of its ledger, so G-SED closes; a pit spreads from its free neighbours only, keeping the volume
+- **AND** the final pass's `cutoff_binds` counts every path cell of the window, sub-sea cells included (on the cells' own heights), and the burn reports its own `burn_cutoff_binds` (the cells of the window whose floored target differs from the unbounded carry), both in the MARK line and the G-PROFILE ledger row with the distribution of what a cutoff costs, the bounded target minus the unbounded one in metres (p50, p99, max)
+- **AND** G-PROFILE gates that no line step rises over 0.25 m and that no cutoff changes a height by more than 0.25 m; a cutoff above it comes to the architect with its tile and cell
