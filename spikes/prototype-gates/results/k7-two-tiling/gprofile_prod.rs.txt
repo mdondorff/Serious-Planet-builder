@@ -1,0 +1,1142 @@
+//! G-PROFILE production gate probe (spikes lane, never merged): K7 on production tiles (3072 cells, halo 128, 98,304 local cells a face edge) of a region, reporting the rises over 0.25 m along the
+//! stored channel pieces (the rasterised line steps of each segment with both cells in a tile core), on K7's own heights and on the stored surface B + L (L in steps of 0.25 m), the per-tile `cutoff_binds`
+//! of the final pass, the tile-border steps between tiles of the run, and the segment IDs of every piece with a rise over the step.
+//! Usage: gprofile_prod [margin_regional_cells] [threads]. Env: `PLANET_REGION=seed,face,i0,j0,size` (default the prototype region R1h as in k7_region); `PLANET_TILES=ti,tj;ti,tj` restricts the tiles;
+//! `PLANET_DRY=1` lists the tiles and stops after the geometry. The base is the lattice C1 read as in k7_region (rectangle clamped to the face).
+#![allow(clippy::needless_range_loop)]
+use planet_core::cube::{face_to_direction, TangentWarp};
+use planet_core::{Face, Vec3};
+use planet_generators::bake::carve::CarveParams;
+use planet_generators::bake::face::FaceSpec;
+use planet_generators::bake::flood::priority_flood_with;
+use planet_generators::bake::hydro::{hydrology, HydroParams};
+use planet_generators::bake::inputs::BakeInputs;
+use planet_generators::bake::k7::{k7_tile, line_cells, upstream_first, Channel, K7Params, K7Result, RegionField};
+use planet_generators::bake::metric::Metric;
+use planet_generators::bake::round::solve_rounds;
+use planet_generators::bake::route::{route_rules, RoundRules, NONE};
+use planet_generators::bake::tile::{TileGrid, TileId};
+use planet_generators::bake::Grid;
+use planet_generators::global::{read_elevation_c1, GlobalSample, LatticeSource, ReadError};
+use planet_generators::runoff::{discharge_weight, pet_mm, runoff_mm};
+use std::collections::HashMap;
+use std::time::Instant;
+
+const K: u32 = 14;
+const LATTICE: usize = 1 << K;
+const REGIONAL: usize = 12_288;
+const LOCAL: usize = 6 << K;
+const R: f64 = 6_371_000.0;
+const SECONDS_PER_YEAR: f64 = 31_557_600.0;
+const STEP: f64 = 0.25;
+const DEFAULT_REGION: (u64, u8, (usize, usize, usize, usize)) = (14, 1, (2014 * 4, 2168 * 4 + 3, 190 * 4, 344 * 4 + 3));
+
+fn region() -> (u64, u8, (usize, usize, usize, usize)) {
+    let Ok(text) = std::env::var("PLANET_REGION") else { return DEFAULT_REGION };
+    let v: Vec<usize> = text.split(',').map(|s| s.trim().parse().expect("PLANET_REGION=seed,face,i0,j0,size")).collect();
+    assert_eq!(v.len(), 5, "PLANET_REGION=seed,face,i0,j0,size");
+    (v[0] as u64, v[1] as u8, (v[2], v[2] + v[4] - 1, v[3], v[3] + v[4] - 1))
+}
+
+struct Lattice {
+    face: Face,
+    i0: usize,
+    j0: usize,
+    w: usize,
+    h: usize,
+    z: Vec<f32>,
+}
+
+impl LatticeSource for Lattice {
+    fn res(&self) -> u32 {
+        LATTICE as u32
+    }
+    fn at(&self, face: Face, i: u32, j: u32) -> Result<GlobalSample, ReadError> {
+        let (i, j) = (i as usize, j as usize);
+        if face != self.face || i < self.i0 || j < self.j0 || i >= self.i0 + self.w || j >= self.j0 + self.h {
+            return Err(ReadError::Source(format!("node ({}, {i}, {j}) is outside the sampled rectangle", face.0)));
+        }
+        Ok(GlobalSample { continent: 0.0, elevation_m: self.z[(j - self.j0) * self.w + (i - self.i0)], temperature_c: 0.0, precipitation_mm: 0.0 })
+    }
+}
+
+/// One stored surface of a tile core (B + L quantised) for the border steps.
+struct Stored {
+    surf: Vec<f64>,
+}
+
+fn main() {
+    let a: Vec<String> = std::env::args().collect();
+    let margin: usize = a.get(1).map_or(200, |s| s.parse().unwrap());
+    let threads: usize = a.get(2).map_or(8, |s| s.parse().unwrap());
+    let (seed, face_n, region) = region();
+    let face = Face(face_n);
+    let t0 = Instant::now();
+    let inputs = BakeInputs::new(seed, threads);
+    // the regional window, clamped to the face
+    let ri0 = region.0.saturating_sub(margin).max(16);
+    let ri1 = (region.1 + margin).min(REGIONAL - 17);
+    let rj0 = region.2.saturating_sub(margin).max(16);
+    let rj1 = (region.3 + margin).min(REGIONAL - 17);
+    let (rw, rh) = (ri1 - ri0 + 1, rj1 - rj0 + 1);
+    // the tiles of the production grid whose window lies inside the solved window and whose core meets the region
+    let g = TileGrid { cells: LOCAL, tile: 3072, halo: 128, radius_m: R };
+    let (t, h) = (g.tile as i64, g.halo as i64);
+    let (wx0, wx1, wy0, wy1) = (ri0 as i64 * 8, (ri1 as i64 + 1) * 8, rj0 as i64 * 8, (rj1 as i64 + 1) * 8);
+    let (cx0, cx1, cy0, cy1) = (region.0 as i64 * 8, (region.1 as i64 + 1) * 8, region.2 as i64 * 8, (region.3 as i64 + 1) * 8);
+    let mut ids: Vec<TileId> = Vec::new();
+    for tj in 0..(LOCAL as i64 / t) {
+        for ti in 0..(LOCAL as i64 / t) {
+            let (x0, y0) = (ti * t, tj * t);
+            let inside = x0 - h >= wx0 && x0 + t + h <= wx1 && y0 - h >= wy0 && y0 + t + h <= wy1;
+            let meets = x0 < cx1 && x0 + t > cx0 && y0 < cy1 && y0 + t > cy0;
+            if inside && meets {
+                ids.push(TileId { face, ti: ti as u32, tj: tj as u32 });
+            }
+        }
+    }
+    if let Ok(s) = std::env::var("PLANET_TILES") {
+        let want: Vec<(u32, u32)> = s
+            .split(';')
+            .map(|p| {
+                let v: Vec<u32> = p.split(',').map(|x| x.trim().parse().unwrap()).collect();
+                (v[0], v[1])
+            })
+            .collect();
+        ids.retain(|id| want.contains(&(id.ti, id.tj)));
+    }
+    println!(
+        "seed {seed} face {face_n} region cells i {}..{} j {}..{}; solved window {rw} x {rh} regional cells (margin {margin}); {} production tiles (3072, halo 128) inside the window with their core meeting the region: {:?}",
+        region.0, region.1, region.2, region.3, ids.len(), ids.iter().map(|i| (i.ti, i.tj)).collect::<Vec<_>>()
+    );
+    if std::env::var("PLANET_DRY").is_ok() || ids.is_empty() {
+        return;
+    }
+    // the lattice rectangle: the solved window plus the tile windows
+    let to_node = |reg: usize| reg * 8 / 6;
+    let (ni0, nj0) = (to_node(ri0).saturating_sub(3), to_node(rj0).saturating_sub(3));
+    let (ni1, nj1) = ((to_node(ri1) + 4).min(LATTICE), (to_node(rj1) + 4).min(LATTICE));
+    let (nw, nh) = (ni1 - ni0, nj1 - nj0);
+    let spec_l = FaceSpec { face, cells: LATTICE, radius_m: R, sea_level: 0.0, seed, halo: 0 };
+    let mut nodes = vec![0f32; nw * nh];
+    let rows = nh.div_ceil(threads);
+    std::thread::scope(|s| {
+        for (k, chunk) in nodes.chunks_mut(rows * nw).enumerate() {
+            let (inputs, spec) = (&inputs, &spec_l);
+            s.spawn(move || {
+                for (c, v) in chunk.iter_mut().enumerate() {
+                    let p = k * rows * nw + c;
+                    let (vi, vj) = ((ni0 + p % nw) as f64, (nj0 + p / nw) as f64);
+                    let nn = LATTICE as f64;
+                    *v = inputs.base(face_to_direction(&TangentWarp, spec.face, 2.0 * vi / nn - 1.0, 2.0 * vj / nn - 1.0)) as f32;
+                }
+            });
+        }
+    });
+    let lattice = Lattice { face, i0: ni0, j0: nj0, w: nw, h: nh, z: nodes };
+    let base = |d: Vec3| -> f64 { f64::from(read_elevation_c1(&lattice, &TangentWarp, d).expect("a node of the sampled rectangle")) };
+    println!("lattice {nw} x {nh} nodes sampled ({:.1} s)", t0.elapsed().as_secs_f64());
+
+    let spec_r = FaceSpec { face, cells: REGIONAL, radius_m: R, sea_level: 0.0, seed, halo: 0 };
+    let n = rw * rh;
+    let mut zb = vec![0.0f64; n];
+    let rrows = rh.div_ceil(threads);
+    std::thread::scope(|s| {
+        for (k, chunk) in zb.chunks_mut(rrows * rw).enumerate() {
+            let (spec, base) = (&spec_r, &base);
+            s.spawn(move || {
+                for (c, v) in chunk.iter_mut().enumerate() {
+                    let p = k * rrows * rw + c;
+                    *v = base(spec.halo_direction((ri0 + p % rw) as i64, (rj0 + p / rw) as i64));
+                }
+            });
+        }
+    });
+    let grid = Grid::new(rw, rh, spec_r.dx()).with_origin((ri0 as u32, rj0 as u32)).with_metric(Metric::cube_face(REGIONAL, R, (ri0 as i64, rj0 as i64), rw, rh));
+    let outlet = grid.outlets(&zb, 0.0);
+    let p = CarveParams {
+        steps: 20,
+        reroute_every: 5,
+        round_rules: RoundRules::ROUND,
+        round_f32: true,
+        cell_metric: true,
+        window_cut: true,
+        ..CarveParams::default()
+    };
+    let stream = spec_r.stream();
+    let mut zs = zb.clone();
+    solve_rounds(&grid, &mut zs, &outlet, &p, 4, &threads, stream);
+    let round_data: Vec<(Vec<f64>, Vec<f64>, Vec<f64>)> = std::mem::take(&mut *planet_generators::bake::round::ROUND_PROBE.lock().unwrap());
+    println!("regional window solved ({:.1} s)", t0.elapsed().as_secs_f64());
+    let change: Vec<f32> = zs.iter().zip(&zb).map(|(s, b)| (s - b) as f32).collect();
+    let regional_field = RegionField::new(face, REGIONAL, (ri0 as i64, rj0 as i64), rw, rh, change);
+    let regional = |d: Vec3| regional_field.at(d);
+
+    let o = inputs.orography();
+    let (mut weight, mut runoff, mut evap) = (vec![1.0f32; n], vec![0.0f32; n], vec![0.0f32; n]);
+    for c in (0..n).filter(|&c| zs[c] > 0.0) {
+        let d = spec_r.halo_direction((ri0 + c % rw) as i64, (rj0 + c / rw) as i64);
+        let (pm, tc) = (o.precipitation_mm(d), o.temperature_c(d));
+        let ro = runoff_mm(pm, tc);
+        weight[c] = discharge_weight(ro) as f32;
+        runoff[c] = (ro / 1000.0 / SECONDS_PER_YEAR) as f32;
+        evap[c] = ((pet_mm(tc) - (pm - ro)).max(0.0) / 1000.0 / SECONDS_PER_YEAR) as f32;
+    }
+    let routing = route_rules(&grid, &zs, &outlet, 1e-3, stream, 0.0, Some(&weight), RoundRules::ROUND);
+    let filled = priority_flood_with(&grid, &zs, &outlet, 1e-3, true);
+    let hy = hydrology(&grid, &zs, &filled, &routing, &outlet, Some(&runoff), Some(&evap), &HydroParams::default());
+    let lakes = planet_generators::bake::lakes::lakes_from_hydro(&grid, &routing, &hy, &zs);
+    let lake_water: std::collections::HashSet<u32> = lakes.water.iter().map(|w| w.0).collect();
+    println!("lakes: {} lakes, {} water cells; basins kept by H1: {}", lakes.lakes.len(), lake_water.len(), hy.basins.len());
+    let reg = Regional { ri0, rj0, rw, seed, zb: &zb, zs: &zs, filled: &filled, outlet: &outlet, label: &hy.label, basins: &hy.basins, lake_water: &lake_water, rounds: &round_data };
+    println!("H1: {} channel cells, {} segments ({:.1} s)", hy.stats.channel_cells, hy.stats.segments, t0.elapsed().as_secs_f64());
+    {
+        // D102 (b): what holds regional cells at a fixed height after the rounds: the most frequent heights among the cells lowered by more than 50 m, and a sample of the cells at 5.000 m
+        let mut freq: HashMap<i64, usize> = HashMap::new();
+        let (mut deep, mut at5) = (0usize, 0usize);
+        for c in 0..n {
+            if zs[c] > 0.0 && zb[c] - zs[c] > 50.0 {
+                deep += 1;
+                *freq.entry((zs[c] * 1000.0).round() as i64).or_insert(0) += 1;
+                at5 += usize::from((zs[c] - 5.001).abs() < 1e-4);
+            }
+        }
+        let mut fv: Vec<(i64, usize)> = freq.into_iter().collect();
+        fv.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        println!(
+            "REGIONAL: land cells lowered by more than 50 m by the rounds: {deep}; with a height of exactly 5.000 m: {at5}; the most frequent heights (m: cells): {}",
+            fv.iter().take(10).map(|(h, c)| format!("{:.3}: {c}", *h as f64 / 1000.0)).collect::<Vec<_>>().join(", ")
+        );
+        let mut shown = 0;
+        for c in 0..n {
+            if (zs[c] - 5.001).abs() < 1e-4 && zb[c] > 100.0 && shown < 10 {
+                shown += 1;
+                let rec = routing.receiver[c];
+                let nb: Vec<String> = (0..8).filter_map(|d| grid.neighbour(c, d)).map(|q| format!("{:.2}", zs[q])).collect();
+                println!(
+                    "  regional cell ({}, {}) base {:.2} after the rounds {:.4}, receiver height {}, outlet {}, donors {}, kept basin {}, neighbours {}",
+                    ri0 + c % rw, rj0 + c / rw, zb[c], zs[c], if rec == NONE { "none".to_string() } else { format!("{:.3}", zs[rec as usize]) }, outlet[c],
+                    (0..n).filter(|&q| routing.receiver[q] == c as u32).count(), if hy.label[c] == NONE { "none".to_string() } else { "yes".to_string() }, nb.join(" ")
+                );
+                println!(
+                    "    per round (before / after the breach / after the round): {}",
+                    round_data.iter().map(|(b, ab, a)| format!("{:.3} / {:.3} / {:.3}", b[c], ab[c], a[c])).collect::<Vec<_>>().join(" | ")
+                );
+            }
+        }
+    }
+
+    // all segments as channels (id kept), upstream first as the producers give them
+    let to_local = |c: usize| (8.0 * (ri0 + c % rw) as f64 + 3.5, 8.0 * (rj0 + c / rw) as f64 + 3.5);
+    let mut all: Vec<(u64, Channel)> = Vec::new();
+    let mut order: Vec<usize> = (0..hy.segments.len()).collect();
+    order.sort_by_key(|&i| hy.segments[i].id);
+    for &i in &order {
+        let sg = &hy.segments[i];
+        let mut cells = vec![sg.up as usize];
+        while *cells.last().unwrap() != sg.down as usize {
+            let r = routing.receiver[*cells.last().unwrap()];
+            assert!(r != NONE);
+            cells.push(r as usize);
+        }
+        let mut level = f64::INFINITY;
+        let levels = cells
+            .iter()
+            .map(|&c| {
+                level = level.min(zs[c]);
+                level
+            })
+            .collect();
+        all.push((
+            sg.id,
+            Channel { points: cells.iter().map(|&c| to_local(c)).collect(), levels, q: cells.iter().map(|&c| hy.qw[c]).collect(), q_unit: hy.q_unit },
+        ));
+    }
+    let key = |c: &Channel| (c.points[0].0.to_bits(), c.points[0].1.to_bits(), c.points.last().unwrap().0.to_bits(), c.points.last().unwrap().1.to_bits(), c.points.len());
+    let id_of: HashMap<_, u64> = all.iter().map(|(id, c)| (key(c), *id)).collect();
+
+    let params = K7Params::standard(seed, 0.0);
+    if let Ok(s) = std::env::var("PLANET_SEAM") {
+        seam_run(&s, &all, &base, &regional, &params, face, threads);
+        return;
+    }
+    let mut stored: HashMap<(u32, u32), Stored> = HashMap::new();
+    let mut tot = (0usize, 0usize, 0usize, 0usize); // steps, over (own), over (stored), cutoff binds
+    let ww = g.window() as i64;
+    for id in &ids {
+        let (wi0, wj0) = (i64::from(id.ti) * t - h, i64::from(id.tj) * t - h);
+        let near: Vec<Channel> = all
+            .iter()
+            .filter(|(_, c)| {
+                c.points.iter().any(|&(x, y)| x >= (wi0 - 16) as f64 && x <= (wi0 + ww + 16) as f64 && y >= (wj0 - 16) as f64 && y <= (wj0 + ww + 16) as f64)
+            })
+            .map(|(_, c)| c.clone())
+            .collect();
+        let chans = upstream_first(near);
+        let tt = Instant::now();
+        let r = k7_tile(&g, *id, &base, &regional, &chans, &params, threads);
+        let fp = r.final_pass;
+        let at = |x: i64, y: i64| r.z[((y - wj0) * ww + (x - wi0)) as usize];
+        let (cx, cy) = (i64::from(id.ti) * t, i64::from(id.tj) * t);
+        let core = |x: i64, y: i64| x >= cx && y >= cy && x < cx + t && y < cy + t;
+        // the stored surface of the core: B + L quantised to 0.25 m
+        let mut surf = vec![0.0f64; (t * t) as usize];
+        for j in 0..t {
+            for i in 0..t {
+                let wc = ((j + h) * ww + i + h) as usize;
+                surf[(j * t + i) as usize] = r.b[wc] + libm::round(f64::from(r.change[(j * t + i) as usize]) / STEP) * STEP;
+            }
+        }
+        let st = |x: i64, y: i64| surf[((y - cy) * t + (x - cx)) as usize];
+        let (mut n_steps, mut over_own, mut over_st, mut worst_own, mut worst_st) = (0usize, 0usize, 0usize, 0.0f64, 0.0f64);
+        let mut pieces: Vec<(u64, f64, f64, (i64, i64))> = Vec::new();
+        for ch in &chans {
+            let mut piece_worst = (0.0f64, 0.0f64, (0, 0));
+            for pr in line_cells(ch).windows(2) {
+                let ((x0, y0), (x1, y1)) = (pr[0], pr[1]);
+                if core(x0, y0) && core(x1, y1) {
+                    n_steps += 1;
+                    let ro = at(x1, y1) - at(x0, y0);
+                    let rs = st(x1, y1) - st(x0, y0);
+                    over_own += usize::from(ro > STEP);
+                    over_st += usize::from(rs > STEP);
+                    worst_own = worst_own.max(ro);
+                    worst_st = worst_st.max(rs);
+                    if rs > piece_worst.1 || ro > piece_worst.0 {
+                        piece_worst = (piece_worst.0.max(ro), piece_worst.1.max(rs), (x1, y1));
+                    }
+                }
+            }
+            if piece_worst.0 > STEP || piece_worst.1 > STEP {
+                pieces.push((*id_of.get(&key(ch)).unwrap_or(&u64::MAX), piece_worst.0, piece_worst.1, piece_worst.2));
+            }
+        }
+        println!(
+            "TILE ({}, {}): {:.0} s; {} channel segments in the window; {} line steps in the core; own heights: {} rises over {STEP} m (largest {:.4} m); stored B+L: {} rises over {STEP} m (largest {:.4} m); final pass: {} lowered, {} over 1 m, largest {:.2} m; cutoff_binds {}",
+            id.ti, id.tj, tt.elapsed().as_secs_f64(), chans.len(), n_steps, over_own, worst_own, over_st, worst_st, fp.lowered, fp.over_1m, fp.largest_m, fp.cutoff_binds
+        );
+        for (sid, ro, rs, (x, y)) in pieces.iter().take(40) {
+            println!("  piece segment {sid}: own rise {ro:.4} m, stored rise {rs:.4} m, at cell ({x}, {y})");
+        }
+        report_gen176(&chans, &r, &base, &regional, &g, *id, &id_of_chan(&chans, &id_of));
+        report_d97(&reg, &chans, &r, &base, &regional, &g, *id, &id_of_chan(&chans, &id_of));
+        tot = (tot.0 + n_steps, tot.1 + over_own, tot.2 + over_st, tot.3 + fp.cutoff_binds);
+        stored.insert((id.ti, id.tj), Stored { surf });
+    }
+    // the steps across a border between two tiles of the run (the stored surface)
+    let (mut bsteps, mut bover, mut bworst) = (0usize, 0usize, 0.0f64);
+    let cellstored = |x: i64, y: i64| -> Option<f64> {
+        let (ti, tj) = ((x.div_euclid(t)) as u32, (y.div_euclid(t)) as u32);
+        stored.get(&(ti, tj)).map(|s| s.surf[((y - i64::from(tj) * t) * t + (x - i64::from(ti) * t)) as usize])
+    };
+    for (_, ch) in &all {
+        for pr in line_cells(ch).windows(2) {
+            let ((x0, y0), (x1, y1)) = (pr[0], pr[1]);
+            if x0.div_euclid(t) != x1.div_euclid(t) || y0.div_euclid(t) != y1.div_euclid(t) {
+                if let (Some(a0), Some(a1)) = (cellstored(x0, y0), cellstored(x1, y1)) {
+                    bsteps += 1;
+                    let rs = a1 - a0;
+                    bover += usize::from(rs > STEP);
+                    bworst = bworst.max(rs);
+                }
+            }
+        }
+    }
+    println!("TOTAL: {} line steps, {} rises over {STEP} m (own heights), {} (stored), cutoff_binds {}; across tile borders of the run: {bsteps} steps, {bover} over {STEP} m, largest {bworst:.4} m; {:.0} s", tot.0, tot.1, tot.2, tot.3, t0.elapsed().as_secs_f64());
+}
+
+
+fn id_of_chan(chans: &[Channel], id_of: &HashMap<(u64, u64, u64, u64, usize), u64>) -> Vec<u64> {
+    chans
+        .iter()
+        .map(|c| {
+            let k = (c.points[0].0.to_bits(), c.points[0].1.to_bits(), c.points.last().unwrap().0.to_bits(), c.points.last().unwrap().1.to_bits(), c.points.len());
+            *id_of.get(&k).unwrap_or(&u64::MAX)
+        })
+        .collect()
+}
+
+/// GEN-176 re-run: the refined criterion (no line step rising over 0.25 m; every cutoff's bounded minus unbounded target reported: p50, p99, max, count), the count of mid-line cells whose start height is already at or under the sea
+/// level (B + the regional change at the cell, before the burn; the line's last cell is not mid-line) and the rises they cause, the beds under the sea level after K7, the MARK line.
+fn report_gen176(chans: &[Channel], r: &K7Result, base: &(dyn Fn(Vec3) -> f64 + Sync), regional: &(dyn Fn(Vec3) -> f64 + Sync), g: &TileGrid, id: TileId, seg: &[u64]) {
+    let (t, h) = (g.tile as i64, g.halo as i64);
+    let (wi0, wj0) = (i64::from(id.ti) * t - h, i64::from(id.tj) * t - h);
+    let ww = g.window() as i64;
+    let (cx, cy) = (i64::from(id.ti) * t, i64::from(id.tj) * t);
+    let core = |x: i64, y: i64| x >= cx && y >= cy && x < cx + t && y < cy + t;
+    let widx = |x: i64, y: i64| ((y - wj0) * ww + (x - wi0)) as usize;
+    let zstart = |x: i64, y: i64| {
+        let d = g.direction(id.face, x, y);
+        base(d) + regional(d)
+    };
+    println!("MARK {}", r.mark_line());
+    let lines: Vec<Vec<(i64, i64)>> = chans.iter().map(line_cells).collect();
+    // mid-line cells in the core with a start height at or under 0 m; the cells of a line that are its last cell are the outlets and not counted
+    let mut sub: std::collections::HashSet<(i64, i64)> = std::collections::HashSet::new();
+    let mut bed_under = 0usize;
+    let mut bed_min = f64::INFINITY;
+    let mut line_cells_in_core: std::collections::HashSet<(i64, i64)> = std::collections::HashSet::new();
+    for l in &lines {
+        for (k, &(x, y)) in l.iter().enumerate() {
+            if !core(x, y) {
+                continue;
+            }
+            line_cells_in_core.insert((x, y));
+            if k + 1 < l.len() && zstart(x, y) <= 0.0 {
+                sub.insert((x, y));
+            }
+        }
+    }
+    for &(x, y) in &line_cells_in_core {
+        let z = r.z[widx(x, y)];
+        if z < 0.0 {
+            bed_under += 1;
+            bed_min = bed_min.min(z);
+        }
+    }
+    println!(
+        "G-PROFILE cells: {} line cells in the core; mid-line cells with a start height at or under the sea level {} ({}), of them with a final height under 0 m {}; line cells with a final height under 0 m {} (lowest {:.3} m)",
+        line_cells_in_core.len(),
+        sub.len(),
+        if line_cells_in_core.is_empty() { 0.0 } else { 100.0 * sub.len() as f64 / line_cells_in_core.len() as f64 },
+        sub.iter().filter(|&&(x, y)| r.z[widx(x, y)] < 0.0).count(),
+        bed_under,
+        if bed_min.is_finite() { bed_min } else { 0.0 }
+    );
+    // the rises over 0.25 m along the line steps with both cells in the core, on K7's own heights, and the stored B + L (quantised)
+    let stored = |x: i64, y: i64| {
+        let c = ((y - cy) * t + (x - cx)) as usize;
+        r.b[widx(x, y)] + libm::round(f64::from(r.change[c]) / STEP) * STEP
+    };
+    let (mut steps, mut over, mut over_st, mut worst, mut worst_st) = (0usize, 0usize, 0usize, 0.0f64, 0.0f64);
+    let (mut caused_by_sub, mut sub_any) = (0usize, 0usize);
+    let mut list: Vec<(f64, u64, (i64, i64), (i64, i64))> = Vec::new();
+    for (ci, l) in lines.iter().enumerate() {
+        for w2 in l.windows(2) {
+            let ((x0, y0), (x1, y1)) = (w2[0], w2[1]);
+            if !(core(x0, y0) && core(x1, y1)) {
+                continue;
+            }
+            steps += 1;
+            let rise = r.z[widx(x1, y1)] - r.z[widx(x0, y0)];
+            let rs = stored(x1, y1) - stored(x0, y0);
+            worst = worst.max(rise);
+            worst_st = worst_st.max(rs);
+            over_st += usize::from(rs > STEP);
+            if rise > STEP {
+                over += 1;
+                let sub_here = sub.contains(&(x0, y0)) || sub.contains(&(x1, y1));
+                caused_by_sub += usize::from(sub_here);
+                sub_any += usize::from(r.z[widx(x0, y0)] <= 0.0 || r.z[widx(x1, y1)] <= 0.0);
+                list.push((rise, seg[ci], (x0, y0), (x1, y1)));
+            }
+        }
+    }
+    println!(
+        "G-PROFILE rises: {steps} line steps in the core; rises over {STEP} m on K7's own heights {over} (largest {worst:.4} m), on the stored B + L {over_st} (largest {worst_st:.4} m); of the {over}: {caused_by_sub} touch a mid-line cell that was at or under the sea level before the burn, {sub_any} have a cell at or under 0 m after K7"
+    );
+    list.sort_by(|a, b| b.0.total_cmp(&a.0));
+    for (rise, sid, a, b) in list.iter().take(20) {
+        println!(
+            "  rise {rise:.4} m, segment {sid}, upper cell {a:?} (start {:.2}, final {:.2}), lower cell {b:?} (start {:.2}, final {:.2})",
+            zstart(a.0, a.1), r.z[widx(a.0, a.1)], zstart(b.0, b.1), r.z[widx(b.0, b.1)]
+        );
+    }
+    let (bd, fd) = (&r.burn_cutoff_diff, &r.final_pass.cutoff_diff);
+    println!(
+        "G-PROFILE criterion: cutoffs (all path cells): burn {} (bounded minus unbounded p50 {:.4} p99 {:.4} max {:.4} m), final pass {} (p50 {:.4} p99 {:.4} max {:.4} m); gated: rises over {STEP} m {over}, cutoff difference over {STEP} m {}",
+        r.burn_cutoff_binds, bd.p50, bd.p99, bd.max, r.final_pass.cutoff_binds, fd.p50, fd.p99, fd.max,
+        if bd.max > STEP || fd.max > STEP { "YES (to the architect with the tile)" } else { "none" }
+    );
+}
+
+/// What the regional solve and its hydrology say about a regional cell (D97).
+struct Regional<'a> {
+    ri0: usize,
+    rj0: usize,
+    rw: usize,
+    seed: u64,
+    zb: &'a [f64],
+    zs: &'a [f64],
+    filled: &'a [f64],
+    outlet: &'a [bool],
+    label: &'a [u32],
+    basins: &'a [planet_generators::bake::hydro::Basin],
+    lake_water: &'a std::collections::HashSet<u32>,
+    rounds: &'a [(Vec<f64>, Vec<f64>, Vec<f64>)],
+}
+
+fn pctl(v: &mut Vec<f64>, q: f64) -> f64 {
+    if v.is_empty() {
+        return f64::NAN;
+    }
+    v.sort_by(f64::total_cmp);
+    v[((v.len() - 1) as f64 * q) as usize]
+}
+
+/// D97: where the sub-sea mid-line cells come from, whether they lie in the sea, a closed basin or a lake; the rises without a sub-sea cell by mechanism; the cutoff differences far from every sub-sea stretch.
+fn report_d97(reg: &Regional, chans: &[Channel], r: &K7Result, base: &(dyn Fn(Vec3) -> f64 + Sync), regional: &(dyn Fn(Vec3) -> f64 + Sync), g: &TileGrid, id: TileId, seg: &[u64]) {
+    use planet_generators::bake::k7::{BURN_PROBE, FINAL_PROBE, STAGE_PROBE};
+    let fp = FINAL_PROBE.lock().unwrap().take().expect("final probe");
+    let sp = STAGE_PROBE.lock().unwrap().take().expect("stage probe");
+    let (bc, bdiff) = BURN_PROBE.lock().unwrap().take().expect("burn probe");
+    let lines: Vec<Vec<(i64, i64)>> = chans.iter().map(line_cells).collect();
+    for (i, l) in lines.iter().enumerate() {
+        assert_eq!(*l, fp.cells[i], "the probe's channel order is the input order");
+    }
+    let (t, h) = (g.tile as i64, g.halo as i64);
+    let (wi0, wj0) = (i64::from(id.ti) * t - h, i64::from(id.tj) * t - h);
+    let ww = g.window() as i64;
+    let (cx, cy) = (i64::from(id.ti) * t, i64::from(id.tj) * t);
+    let core = |x: i64, y: i64| x >= cx && y >= cy && x < cx + t && y < cy + t;
+    let widx = |x: i64, y: i64| ((y - wj0) * ww + (x - wi0)) as usize;
+    let zst = |x: i64, y: i64| sp.z_start[widx(x, y)];
+    // ---- 1. the sub-sea mid-line cells of the core and their origin
+    let mut sub: std::collections::HashSet<(i64, i64)> = std::collections::HashSet::new();
+    let mut origin = [0usize; 2]; // [B at the local cell at or under 0 (z0), B above 0 and lowered below by the regional change]
+    for l in &lines {
+        for (k, &(x, y)) in l.iter().enumerate() {
+            if core(x, y) && k + 1 < l.len() && zst(x, y) <= 0.0 && sub.insert((x, y)) {
+                let b = r.b[widx(x, y)];
+                origin[usize::from(b > 0.0)] += 1;
+            }
+        }
+    }
+    let nsub = sub.len();
+    let pc = |n: usize, d: usize| 100.0 * n as f64 / d.max(1) as f64;
+    println!(
+        "D97.1 origin: {nsub} mid-line cells in the core with a start height (B + regional change) at or under 0 m: B itself at or under 0 m (z0) {} ({:.1} %), B above 0 m and lowered below 0 m by the regional rounds {} ({:.1} %)",
+        origin[0], pc(origin[0], nsub), origin[1], pc(origin[1], nsub)
+    );
+    // ---- 1b. the regional change read (C1) against the four regional cells around the local cell: an overshoot below the lowest of them makes a sub-sea start height
+    {
+        let mut ord: Vec<(i64, i64)> = sub.iter().copied().collect();
+        ord.sort_unstable();
+        let (mut below, mut within, mut above, mut still_sub) = (0usize, 0usize, 0usize, 0usize);
+        let mut amounts: Vec<f64> = Vec::new();
+        let mut nowin = 0usize;
+        let rh = reg.zs.len() / reg.rw;
+        for &(x, y) in &ord {
+            let dr = regional(g.direction(id.face, x, y));
+            let (u, v) = ((x as f64 - 3.5) / 8.0, (y as f64 - 3.5) / 8.0);
+            let (i0, j0) = (libm::floor(u) as i64, libm::floor(v) as i64);
+            let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+            for dj in 0..2 {
+                for di in 0..2 {
+                    let (ri, rj) = (i0 + di - reg.ri0 as i64, j0 + dj - reg.rj0 as i64);
+                    if ri < 0 || rj < 0 || ri as usize >= reg.rw || rj as usize >= rh {
+                        continue;
+                    }
+                    let c = rj as usize * reg.rw + ri as usize;
+                    let d = reg.zs[c] - reg.zb[c];
+                    lo = lo.min(d);
+                    hi = hi.max(d);
+                }
+            }
+            if !lo.is_finite() {
+                nowin += 1;
+                continue;
+            }
+            if dr < lo - STEP {
+                below += 1;
+                amounts.push(lo - dr);
+            } else if dr > hi + STEP {
+                above += 1;
+            } else {
+                within += 1;
+            }
+            let clamped = dr.clamp(lo, hi);
+            if r.b[widx(x, y)] + clamped <= 0.0 {
+                still_sub += 1;
+            }
+        }
+        println!(
+            "D97.1b regional change read (C1) against the four regional cells around each sub-sea cell: below the lowest of their changes by more than {STEP} m {below} ({:.1} %), within {within}, above the highest by more than {STEP} m {above} (no regional cell in the window {nowin}); the overshoot below: p50 {:.2} p99 {:.2} max {:.2} m; with the read clamped to the four cells the start height is still at or under 0 m for {still_sub} cells ({:.1} %)",
+            pc(below, nsub), pctl(&mut amounts.clone(), 0.5), pctl(&mut amounts.clone(), 0.99), amounts.iter().cloned().fold(0.0, f64::max), pc(still_sub, nsub)
+        );
+    }
+    // ---- 2. components of the cells at or under 0 m of the start surface; the continent stage's sea (land depth at or under 0) in the component means a connection to the sea
+    let n = (ww * ww) as usize;
+    let mut label = vec![u32::MAX; n];
+    struct Comp {
+        size: usize,
+        ring: bool,
+        sea: bool,
+        complete: bool,
+    }
+    let mut comps: Vec<Comp> = Vec::new();
+    let mut comp_of_cell: std::collections::HashMap<(i64, i64), u32> = std::collections::HashMap::new();
+    let sea_at = |x: i64, y: i64| planet_generators::global::continent_land_depth(reg.seed, g.direction(id.face, x, y)) <= 0.0;
+    let mut order: Vec<(i64, i64)> = sub.iter().copied().collect();
+    order.sort_unstable();
+    for &(sx, sy) in &order {
+        let s = widx(sx, sy);
+        if label[s] == u32::MAX {
+            let cid = comps.len() as u32;
+            let mut c = Comp { size: 0, ring: false, sea: false, complete: true };
+            let mut stack = vec![(sx, sy)];
+            label[s] = cid;
+            while let Some((x, y)) = stack.pop() {
+                c.size += 1;
+                c.ring |= x == wi0 || y == wj0 || x == wi0 + ww - 1 || y == wj0 + ww - 1;
+                if !c.sea && sea_at(x, y) {
+                    c.sea = true;
+                }
+                if c.sea && c.size > 2_000_000 {
+                    c.complete = false;
+                    break;
+                }
+                for dy in -1i64..=1 {
+                    for dx in -1i64..=1 {
+                        let (nx, ny) = (x + dx, y + dy);
+                        if (dx, dy) == (0, 0) || nx < wi0 || ny < wj0 || nx >= wi0 + ww || ny >= wj0 + ww {
+                            continue;
+                        }
+                        let q = widx(nx, ny);
+                        if label[q] == u32::MAX && zst(nx, ny) <= 0.0 {
+                            label[q] = cid;
+                            stack.push((nx, ny));
+                        }
+                    }
+                }
+            }
+            comps.push(c);
+        }
+        comp_of_cell.insert((sx, sy), label[s]);
+    }
+    // the regional facts of each sub-sea cell
+    #[derive(Default)]
+    struct Row {
+        n: usize,
+        sea: usize,
+        ring_only: usize,
+        inland: usize,
+        reg_outlet: usize,
+        kept_basin: usize,
+        lake_water: usize,
+        pit_deeper: usize,
+        pit_shallow: usize,
+        no_pit: usize,
+    }
+    let mut rows = [Row::default(), Row::default()];
+    let mut examples: Vec<String> = Vec::new();
+    let mut inland_depth: Vec<f64> = Vec::new();
+    for &(x, y) in &order {
+        let oi = usize::from(r.b[widx(x, y)] > 0.0);
+        let row = &mut rows[oi];
+        row.n += 1;
+        let c = &comps[comp_of_cell[&(x, y)] as usize];
+        if c.sea {
+            row.sea += 1;
+        } else if c.ring {
+            row.ring_only += 1;
+        } else {
+            row.inland += 1;
+        }
+        let (rx, ry) = ((x / 8) as usize, (y / 8) as usize);
+        let rc = (ry - reg.rj0) * reg.rw + (rx - reg.ri0);
+        if reg.outlet[rc] {
+            row.reg_outlet += 1;
+        }
+        if reg.label[rc] != planet_generators::bake::route::NONE {
+            row.kept_basin += 1;
+        }
+        if reg.lake_water.contains(&(rc as u32)) {
+            row.lake_water += 1;
+        }
+        let depth = reg.filled[rc] - reg.zs[rc];
+        if !reg.outlet[rc] && reg.label[rc] == planet_generators::bake::route::NONE {
+            if depth >= 2.0 {
+                row.pit_deeper += 1;
+            } else if depth >= 0.5 {
+                row.pit_shallow += 1;
+            } else {
+                row.no_pit += 1;
+            }
+        }
+        if !c.sea && !c.ring {
+            inland_depth.push(depth);
+            if examples.len() < 12 {
+                examples.push(format!(
+                    "cell ({x}, {y}) b {:.2} start {:.2}: local component {} cells at or under 0 m, no sea cell, regional cell ({rx}, {ry}) base {:.2} after rounds {:.2} fill depth {:.2} m outlet {} kept basin {} lake water {}",
+                    r.b[widx(x, y)], zst(x, y), c.size, reg.zb[rc], reg.zs[rc], depth, reg.outlet[rc],
+                    if reg.label[rc] == planet_generators::bake::route::NONE { "none".to_string() } else { format!("{} cells floor {:.1} spill {:.1} {:?}", reg.basins[reg.label[rc] as usize].cells, reg.basins[reg.label[rc] as usize].floor_m, reg.basins[reg.label[rc] as usize].spill_m, reg.basins[reg.label[rc] as usize].class) },
+                    reg.lake_water.contains(&(rc as u32))
+                ));
+            }
+        }
+    }
+    let nsea_comps = comps.iter().filter(|c| c.sea).count();
+    println!(
+        "D97.2 connection to the sea through cells at or under 0 m of the start surface: {} local components hold a sub-sea mid-line cell ({} reach the continent stage's sea, {} touch only the window border, {} are closed inland)",
+        comps.len(), nsea_comps, comps.iter().filter(|c| !c.sea && c.ring).count(), comps.iter().filter(|c| !c.sea && !c.ring).count()
+    );
+    for (name, row) in [("origin z0 (B at or under 0 m)", &rows[0]), ("origin regional rounds (B above 0 m)", &rows[1])] {
+        println!(
+            "  {name}: {} cells: connected to the sea {}, window border only {}, closed inland {}; their regional cell: sea outlet (base at or under 0 m) {}, in a kept basin {}, in a lake's water {}, no basin: pit of 2 m or more {} / 0.5 to 2 m {} / under 0.5 m or none {}",
+            row.n, row.sea, row.ring_only, row.inland, row.reg_outlet, row.kept_basin, row.lake_water, row.pit_deeper, row.pit_shallow, row.no_pit
+        );
+    }
+    println!(
+        "D97.3 closed inland sub-sea cells: {} ; regional fill depth p50 {:.2} p99 {:.2} max {:.2} m (the keep thresholds of H1: a basin is kept at a fill depth over 0.5 m, an artefact under 4 cells and 2 m)",
+        inland_depth.len(), pctl(&mut inland_depth.clone(), 0.5), pctl(&mut inland_depth.clone(), 0.99), inland_depth.iter().cloned().fold(f64::NAN, f64::max)
+    );
+    for e in &examples {
+        println!("    {e}");
+    }
+    // ---- 4. the rises without a sub-sea start cell on either side, by mechanism
+    let cutoff_at = |ci: usize, k: usize| fp.target_all[ci][k] != fp.unbounded_all[ci][k];
+    let (mut cls, mut listed) = ([0usize; 5], 0usize);
+    let names = ["post-burn fill (lower cell raised after the carve)", "carry cutoff (a cutoff cell within 3 steps)", "burn column rise (the burn's profile)", "sub-sea after K7 (a cell at or under 0 m at the end, start above)", "other"];
+    let mut total_no_sub = 0usize;
+    for (ci, l) in lines.iter().enumerate() {
+        for k in 0..l.len().saturating_sub(1) {
+            let ((x0, y0), (x1, y1)) = (l[k], l[k + 1]);
+            if !(core(x0, y0) && core(x1, y1)) {
+                continue;
+            }
+            let rise = r.z[widx(x1, y1)] - r.z[widx(x0, y0)];
+            if rise <= STEP || zst(x0, y0) <= 0.0 || zst(x1, y1) <= 0.0 {
+                continue;
+            }
+            total_no_sub += 1;
+            let fill = fp.z_pre[widx(x1, y1)] - sp.z_carved[widx(x1, y1)] > STEP;
+            let cut = (k.saturating_sub(2)..=(k + 3).min(l.len() - 1)).any(|j| cutoff_at(ci, j));
+            let burn_rise = sp.z_burned[widx(x1, y1)] - sp.z_burned[widx(x0, y0)] > STEP;
+            let subafter = r.z[widx(x0, y0)] <= 0.0 || r.z[widx(x1, y1)] <= 0.0;
+            let c = if fill { 0 } else if cut { 1 } else if burn_rise { 2 } else if subafter { 3 } else { 4 };
+            cls[c] += 1;
+            if listed < 40 {
+                listed += 1;
+                println!(
+                    "    no sub-sea start cell: rise {rise:.3} m segment {} upper {:?} (start {:.2} burn {:.2} carve {:.2} pre {:.2} final {:.2}) lower {:?} (start {:.2} burn {:.2} carve {:.2} pre {:.2} final {:.2}); class: {}",
+                    seg[ci], (x0, y0), zst(x0, y0), sp.z_burned[widx(x0, y0)], sp.z_carved[widx(x0, y0)], fp.z_pre[widx(x0, y0)], r.z[widx(x0, y0)],
+                    (x1, y1), zst(x1, y1), sp.z_burned[widx(x1, y1)], sp.z_carved[widx(x1, y1)], fp.z_pre[widx(x1, y1)], r.z[widx(x1, y1)], names[c]
+                );
+            }
+        }
+    }
+    println!(
+        "D97.4 rises over {STEP} m with no start cell at or under 0 m on either side: {total_no_sub}; by mechanism (first match): {}: {}, {}: {}, {}: {}, {}: {}, {}: {}",
+        names[0], cls[0], names[1], cls[1], names[2], cls[2], names[3], cls[3], names[4], cls[4]
+    );
+    // ---- 5. the cutoff differences on land line cells at least 10 steps from any sub-sea stretch (distance over the channel tree: along the lines and across the shared end cells)
+    let mut offs = Vec::with_capacity(lines.len() + 1);
+    let mut tot = 0usize;
+    for l in &lines {
+        offs.push(tot);
+        tot += l.len();
+    }
+    let mut at_cell: std::collections::HashMap<(i64, i64), Vec<usize>> = std::collections::HashMap::new();
+    for (ci, l) in lines.iter().enumerate() {
+        for (k, &c) in l.iter().enumerate() {
+            at_cell.entry(c).or_default().push(offs[ci] + k);
+        }
+    }
+    let mut node_of = vec![(0usize, 0usize); tot];
+    for (ci, l) in lines.iter().enumerate() {
+        for k in 0..l.len() {
+            node_of[offs[ci] + k] = (ci, k);
+        }
+    }
+    let mut dist = vec![u32::MAX; tot];
+    let mut queue = std::collections::VecDeque::new();
+    for (ci, l) in lines.iter().enumerate() {
+        for (k, &(x, y)) in l.iter().enumerate() {
+            let inw = x >= wi0 && y >= wj0 && x < wi0 + ww && y < wj0 + ww;
+            if inw && zst(x, y) <= 0.0 {
+                dist[offs[ci] + k] = 0;
+                queue.push_back(offs[ci] + k);
+            }
+        }
+    }
+    while let Some(v) = queue.pop_front() {
+        let (ci, k) = node_of[v];
+        let mut nb: Vec<usize> = Vec::new();
+        if k > 0 {
+            nb.push(v - 1);
+        }
+        if k + 1 < lines[ci].len() {
+            nb.push(v + 1);
+        }
+        if let Some(same) = at_cell.get(&lines[ci][k]) {
+            nb.extend(same.iter().copied().filter(|&u| u != v));
+        }
+        for u in nb {
+            let step = if node_of[u].0 == ci { 1 } else { 0 };
+            if dist[u] == u32::MAX || dist[u] > dist[v] + step {
+                let better = dist[u] == u32::MAX;
+                dist[u] = dist[v] + step;
+                if better || step == 0 {
+                    queue.push_back(u);
+                } else {
+                    queue.push_back(u);
+                }
+            }
+        }
+    }
+    let far = |ci: usize, k: usize| {
+        let (x, y) = lines[ci][k];
+        core(x, y) && zst(x, y) > 0.0 && dist[offs[ci] + k] >= 10
+    };
+    let (mut fin_far, mut fin_all_core, mut fin_far_cells) = (Vec::new(), 0usize, 0usize);
+    for ci in 0..lines.len() {
+        for k in 0..lines[ci].len() {
+            let (x, y) = lines[ci][k];
+            if core(x, y) && zst(x, y) > 0.0 {
+                if far(ci, k) {
+                    fin_far_cells += 1;
+                }
+            }
+            if core(x, y) && fp.target_all[ci][k] != fp.unbounded_all[ci][k] {
+                fin_all_core += 1;
+                if far(ci, k) {
+                    let d = fp.target_all[ci][k] - fp.unbounded_all[ci][k];
+                    fin_far.push((d, ci, k));
+                }
+            }
+        }
+    }
+    let mut dv: Vec<f64> = fin_far.iter().map(|f| f.0).filter(|d| d.is_finite()).collect();
+    let over = fin_far.iter().filter(|f| f.0 > STEP).count();
+    println!(
+        "D97.5 final pass cutoffs: {fin_all_core} in the core, of them {} on land line cells at least 10 steps from any sub-sea stretch (of {fin_far_cells} such cells); bounded minus unbounded target there: p50 {:.4} p99 {:.4} max {:.4} m; over {STEP} m: {over}",
+        fin_far.len(), pctl(&mut dv.clone(), 0.5), pctl(&mut dv.clone(), 0.99), dv.iter().cloned().fold(0.0, f64::max)
+    );
+    fin_far.sort_by(|a, b| b.0.total_cmp(&a.0));
+    for &(d, ci, k) in fin_far.iter().take(12) {
+        println!("    final-pass cutoff {d:.3} m: segment {} line index {k} cell {:?}, {} steps from a sub-sea cell", seg[ci], lines[ci][k], dist[offs[ci] + k]);
+    }
+    // D102 (a): where the unreached pits of the final-pass cutoffs lie. The pit of a cutoff cell is the lowest height over its whole upstream tree (heights before the final pass); a pit is an undershoot cell
+    // when the C1 read of the regional change is below the lowest change of the four surrounding regional cells by more than a step, or the start height is below the lowest of their heights.
+    {
+        let mut best: Vec<(f64, usize)> = vec![(f64::INFINITY, usize::MAX); tot];
+        for ci in 0..lines.len() {
+            let mut cur = (f64::INFINITY, usize::MAX);
+            if let Some(ns) = at_cell.get(&lines[ci][0]) {
+                for &u in ns {
+                    let (cj, kj) = node_of[u];
+                    if cj < ci && kj + 1 == lines[cj].len() && best[u].0 < cur.0 {
+                        cur = best[u];
+                    }
+                }
+            }
+            for k in 0..lines[ci].len() {
+                let (x, y) = lines[ci][k];
+                let inw = x >= wi0 && y >= wj0 && x < wi0 + ww && y < wj0 + ww;
+                let hgt = if inw { fp.z_pre[widx(x, y)] } else { f64::INFINITY };
+                if hgt < cur.0 {
+                    cur = (hgt, offs[ci] + k);
+                }
+                best[offs[ci] + k] = cur;
+            }
+        }
+        let mism = (0..tot).filter(|&v| { let (ci, k) = node_of[v]; best[v].0 != fp.unbounded_all[ci][k] }).count();
+        let rh = reg.zs.len() / reg.rw;
+        // undershoot test at a window cell
+        let under = |x: i64, y: i64| -> Option<(bool, bool)> {
+            let dr = regional(g.direction(id.face, x, y));
+            let (u, v) = ((x as f64 - 3.5) / 8.0, (y as f64 - 3.5) / 8.0);
+            let (i0, j0) = (libm::floor(u) as i64, libm::floor(v) as i64);
+            let (mut lo, mut zmin, mut any) = (f64::INFINITY, f64::INFINITY, false);
+            for dj in 0..2 {
+                for di in 0..2 {
+                    let (ri, rj) = (i0 + di - reg.ri0 as i64, j0 + dj - reg.rj0 as i64);
+                    if ri < 0 || rj < 0 || ri as usize >= reg.rw || rj as usize >= rh {
+                        continue;
+                    }
+                    let c = rj as usize * reg.rw + ri as usize;
+                    lo = lo.min(reg.zs[c] - reg.zb[c]);
+                    zmin = zmin.min(reg.zs[c]);
+                    any = true;
+                }
+            }
+            any.then(|| (dr < lo - STEP, zst(x, y) < zmin - STEP))
+        };
+        let mut cut_pits: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+        for &(_, ci, k) in &fin_far {
+            let p = best[offs[ci] + k].1;
+            if p != usize::MAX {
+                *cut_pits.entry(p).or_insert(0) += 1;
+            }
+        }
+        let (mut cells_c, mut cells_h, mut cells_any, mut cells_n) = (0usize, 0usize, 0usize, 0usize);
+        let (mut pits_c, mut pits_h, mut pits_any, mut pits_n, mut pits_sub, mut pits_out) = (0usize, 0usize, 0usize, 0usize, 0usize, 0usize);
+        let mut examples: Vec<String> = Vec::new();
+        let mut pits: Vec<(&usize, &usize)> = cut_pits.iter().collect();
+        pits.sort();
+        for (&p, &n_cells) in pits {
+            let (ci, k) = node_of[p];
+            let (x, y) = lines[ci][k];
+            let inw = x >= wi0 && y >= wj0 && x < wi0 + ww && y < wj0 + ww;
+            if !inw {
+                pits_out += 1;
+                continue;
+            }
+            match under(x, y) {
+                Some((c, hh)) => {
+                    pits_n += 1;
+                    cells_n += n_cells;
+                    pits_c += usize::from(c);
+                    pits_h += usize::from(hh);
+                    pits_any += usize::from(c || hh);
+                    cells_c += n_cells * usize::from(c);
+                    cells_h += n_cells * usize::from(hh);
+                    cells_any += n_cells * usize::from(c || hh);
+                    if examples.len() < 8 && n_cells >= 20 {
+                        examples.push(format!(
+                            "pit cell ({x}, {y}) segment {}: {} far cutoff cells on it; start {:.2} burn {:.2} before the final pass {:.2}; change read undershoot {c}, height undershoot {hh}",
+                            seg[ci], n_cells, zst(x, y), sp.z_burned[widx(x, y)], fp.z_pre[widx(x, y)]
+                        ));
+                    }
+                }
+                None => pits_out += 1,
+            }
+            pits_sub += usize::from(zst(x, y) <= 0.0);
+        }
+        println!(
+            "D102(a) unreached pits of the {} far final-pass cutoff cells (pit = lowest pre-pass height upstream; check of the pit finder against the pass: {mism} nodes differ): {} distinct pits ({} outside the regional window or the core data); on a change-read undershoot cell {} ({:.1} %), on a height undershoot cell {} ({:.1} %), on either {} ({:.1} %); pits with a start height at or under 0 m {}; far cutoff cells whose pit is an undershoot cell: change {} ({:.1} %), height {} ({:.1} %), either {} ({:.1} %) of {}",
+            fin_far.len(), cut_pits.len(), pits_out, pits_c, pc(pits_c, pits_n), pits_h, pc(pits_h, pits_n), pits_any, pc(pits_any, pits_n), pits_sub,
+            cells_c, pc(cells_c, cells_n), cells_h, pc(cells_h, cells_n), cells_any, pc(cells_any, cells_n), cells_n
+        );
+        for e in &examples {
+            println!("    {e}");
+        }
+        // D103: the regional cells under the sub-sea mid-line cells, under the far pits, and (reference) under every line cell of the core
+        let bwin = |x: i64, y: i64| -> Option<f64> { if x >= wi0 && y >= wj0 && x < wi0 + ww && y < wj0 + ww { Some(r.b[widx(x, y)]) } else { None } };
+        let sub_vec: Vec<(i64, i64)> = sub.iter().copied().collect();
+        let pit_xy: Vec<(i64, i64)> = cut_pits.keys().map(|&p| { let (ci, k) = node_of[p]; lines[ci][k] }).collect();
+        let all_line: Vec<(i64, i64)> = lines.iter().flatten().copied().filter(|&(x, y)| core(x, y)).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+        lowering_report("sub-sea mid-line cells", &sub_vec, reg, reg.rounds, &bwin, true);
+        lowering_report("far pits of the cutoffs", &pit_xy, reg, reg.rounds, &bwin, true);
+        lowering_report("every line cell of the core (reference)", &all_line, reg, reg.rounds, &bwin, true);
+    }
+    let mut bfar: Vec<(f64, usize, usize)> = Vec::new();
+    let mut bcore = 0usize;
+    for &(ci, k, d) in &bdiff {
+        let (x, y) = bc[ci][k];
+        if core(x, y) {
+            bcore += 1;
+        }
+        // the burn probe's lines are the same line cells
+        if core(x, y) && zst(x, y) > 0.0 && ci < lines.len() && k < lines[ci].len() && dist[offs[ci] + k] >= 10 {
+            bfar.push((d, ci, k));
+        }
+    }
+    let mut bd: Vec<f64> = bfar.iter().map(|f| f.0).filter(|d| d.is_finite()).collect();
+    println!(
+        "D97.5 burn cutoffs: {bcore} in the core, of them {} on land line cells at least 10 steps from any sub-sea stretch; bounded minus unbounded target there: p50 {:.4} p99 {:.4} max {:.4} m; over {STEP} m: {}",
+        bfar.len(), pctl(&mut bd.clone(), 0.5), pctl(&mut bd.clone(), 0.99), bd.iter().cloned().fold(0.0, f64::max), bfar.iter().filter(|f| f.0 > STEP).count()
+    );
+    bfar.sort_by(|a, b| b.0.total_cmp(&a.0));
+    for &(d, ci, k) in bfar.iter().take(8) {
+        println!("    burn cutoff {d:.3} m: segment {} line index {k} cell {:?}, {} steps from a sub-sea cell", seg[ci], lines[ci][k], dist[offs[ci] + k]);
+    }
+}
+
+/// D103: the regional cells under a set of local cells: the lowering by the rounds split by mechanism (the breach of each round against the sweeps of stream power) and the local detail against the erosion depth.
+fn lowering_report(label: &str, cells: &[(i64, i64)], reg: &Regional, rounds: &[(Vec<f64>, Vec<f64>, Vec<f64>)], bwin: &dyn Fn(i64, i64) -> Option<f64>, face_origin_ok: bool) {
+    let _ = face_origin_ok;
+    let mut set: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+    let rh = reg.zs.len() / reg.rw;
+    for &(x, y) in cells {
+        let (rx, ry) = ((x / 8) as i64 - reg.ri0 as i64, (y / 8) as i64 - reg.rj0 as i64);
+        if rx >= 0 && ry >= 0 && (rx as usize) < reg.rw && (ry as usize) < rh {
+            set.insert(ry as usize * reg.rw + rx as usize);
+        }
+    }
+    let n = set.len();
+    if n == 0 || rounds.is_empty() {
+        println!("D103 [{label}]: no regional cells");
+        return;
+    }
+    let mut total = 0.0f64;
+    let mut breach = vec![0.0f64; rounds.len()];
+    let mut sweep = vec![0.0f64; rounds.len()];
+    let (mut lows, mut zs_v, mut bshare, mut round1_share) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let mut breach_dominant = 0usize;
+    for &c in &set {
+        let l = reg.zb[c] - reg.zs[c];
+        total += l;
+        lows.push(l);
+        zs_v.push(reg.zs[c]);
+        let (mut bsum, mut ssum) = (0.0, 0.0);
+        for (i, (before, after_b, after)) in rounds.iter().enumerate() {
+            let b = before[c] - after_b[c];
+            let s = after_b[c] - after[c];
+            breach[i] += b;
+            sweep[i] += s;
+            bsum += b;
+            ssum += s;
+        }
+        bshare.push(if bsum + ssum > 0.0 { bsum / (bsum + ssum) } else { f64::NAN });
+        let (b1, _) = (rounds[0].0[c] - rounds[0].1[c], 0.0);
+        round1_share.push(if l > 0.0 { b1 / l } else { f64::NAN });
+        breach_dominant += usize::from(bsum > ssum);
+    }
+    let fin = |v: &Vec<f64>| v.iter().cloned().filter(|x| x.is_finite()).collect::<Vec<f64>>();
+    let (mut lo, mut zv, mut bs, mut r1) = (lows.clone(), zs_v.clone(), fin(&bshare), fin(&round1_share));
+    println!(
+        "D103 [{label}]: {n} regional cells; total lowering zb - zs p50 {:.1} p95 {:.1} max {:.1} m; height after the rounds p50 {:.2} p95 {:.2} m; sum of the lowering {:.0} m: by round (breach / sweeps, m summed over the cells): {}; breach share of the sum {:.1} %; round 1's breach share of the sum {:.1} %; cells where the breaches lowered more than the sweeps: {breach_dominant} ({:.1} %); per-cell breach share p50 {:.2} p95 {:.2}; round 1 breach share of the cell's lowering p50 {:.2} p95 {:.2}",
+        pctl(&mut lo, 0.5), pctl(&mut lo, 0.95), lo.iter().cloned().fold(0.0, f64::max), pctl(&mut zv, 0.5), pctl(&mut zv, 0.95), total,
+        (0..rounds.len()).map(|i| format!("r{} {:.0} / {:.0}", i + 1, breach[i], sweep[i])).collect::<Vec<_>>().join(", "),
+        100.0 * breach.iter().sum::<f64>() / total.max(1e-9), 100.0 * breach[0] / total.max(1e-9), 100.0 * breach_dominant as f64 / n as f64,
+        pctl(&mut bs.clone(), 0.5), pctl(&mut bs, 0.95), pctl(&mut r1.clone(), 0.5), pctl(&mut r1, 0.95)
+    );
+    // the local detail against the erosion depth, per local cell
+    let (mut dd, mut amp, mut ero, mut ratio) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let mut below = 0usize;
+    for &(x, y) in cells {
+        let (rx, ry) = ((x / 8) as i64, (y / 8) as i64);
+        let (cx, cy) = (rx - reg.ri0 as i64, ry - reg.rj0 as i64);
+        if cx < 0 || cy < 0 || cx as usize >= reg.rw || cy as usize >= rh {
+            continue;
+        }
+        let c = cy as usize * reg.rw + cx as usize;
+        let Some(b) = bwin(x, y) else { continue };
+        let (mut lo_b, mut hi_b, mut cnt) = (f64::INFINITY, f64::NEG_INFINITY, 0);
+        for j in 0..8 {
+            for i in 0..8 {
+                if let Some(v) = bwin(rx * 8 + i, ry * 8 + j) {
+                    lo_b = lo_b.min(v);
+                    hi_b = hi_b.max(v);
+                    cnt += 1;
+                }
+            }
+        }
+        let d = (b - reg.zb[c]).abs();
+        let e = reg.zb[c] - reg.zs[c];
+        dd.push(d);
+        ero.push(e);
+        if cnt >= 32 {
+            amp.push(hi_b - lo_b);
+        }
+        if e > 0.0 {
+            ratio.push(d / e);
+        }
+        below += usize::from(reg.zb[c] - b > reg.zs[c]);
+    }
+    println!(
+        "D103 [{label}] local detail: abs(local B - regional base) p50 {:.2} p95 {:.2} m; B range inside the 8 x 8 local cells of the regional cell p50 {:.2} p95 {:.2} m (cells with 32 or more window cells: {}); erosion depth zb - zs p50 {:.1} p95 {:.1} m; abs(B - zb) over the erosion depth p50 {:.4} p95 {:.4}; local cells whose B stands below the regional base by more than the regional height after the rounds {} of {}",
+        pctl(&mut dd.clone(), 0.5), pctl(&mut dd, 0.95), pctl(&mut amp.clone(), 0.5), pctl(&mut amp.clone(), 0.95), amp.len(), pctl(&mut ero.clone(), 0.5), pctl(&mut ero, 0.95),
+        pctl(&mut ratio.clone(), 0.5), pctl(&mut ratio, 0.95), below, cells.len()
+    );
+}
+
+/// K7 two-tiling continuity on the production path (spikes lane probe, never merged): tile (ti, tj) of `big` cells at halo `halo` against the four tiles of `big / 2` cells inside its core (each at the same halo),
+/// the channels of each tile taken from the solved regional window as `main` does. The core of the big tile is compared with the mosaic of the four small cores; the cells are split into line cells (a cell of any
+/// channel line of the solved window, `line_cells`) and the others, and by the distance to the seams of the second tiling (the middle of the core).
+fn seam_run(spec: &str, all: &[(u64, Channel)], base: &(dyn Fn(Vec3) -> f64 + Sync), regional: &(dyn Fn(Vec3) -> f64 + Sync), params: &K7Params, face: Face, threads: usize) {
+    let v: Vec<u32> = spec.split(',').map(|s| s.trim().parse().expect("PLANET_SEAM=ti,tj")).collect();
+    let (ti, tj) = (v[0], v[1]);
+    let big: usize = std::env::var("PLANET_BIG").ok().map_or(1024, |s| s.parse().unwrap());
+    let small = big / 2;
+    let halos: Vec<usize> = std::env::var("PLANET_HALO").unwrap_or_else(|_| "128".into()).split(',').map(|s| s.trim().parse().unwrap()).collect();
+    for halo in halos {
+        let run_core = |tile: usize, tx: u32, ty: u32| -> Vec<f64> {
+            let g = TileGrid { cells: LOCAL, tile, halo, radius_m: R };
+            let id = TileId { face, ti: tx, tj: ty };
+            let (t, hh) = (g.tile as i64, g.halo as i64);
+            let ww = g.window() as i64;
+            let (wi0, wj0) = (i64::from(tx) * t - hh, i64::from(ty) * t - hh);
+            let near: Vec<Channel> = all
+                .iter()
+                .filter(|(_, c)| c.points.iter().any(|&(x, y)| x >= (wi0 - 16) as f64 && x <= (wi0 + ww + 16) as f64 && y >= (wj0 - 16) as f64 && y <= (wj0 + ww + 16) as f64))
+                .map(|(_, c)| c.clone())
+                .collect();
+            let chans = upstream_first(near);
+            let r = k7_tile(&g, id, base, regional, &chans, params, threads);
+            let w = g.window();
+            let mut core = Vec::with_capacity(tile * tile);
+            for j in 0..tile {
+                for i in 0..tile {
+                    core.push(r.z[(j + halo) * w + i + halo]);
+                }
+            }
+            core
+        };
+        let t0 = Instant::now();
+        let core_big = run_core(big, ti, tj);
+        println!("  big tile ({ti}, {tj}) of {big} cells at halo {halo}: {:.0} s", t0.elapsed().as_secs_f64());
+        let mut mosaic = vec![0.0f64; big * big];
+        for b in 0..2u32 {
+            for a in 0..2u32 {
+                let c = run_core(small, 2 * ti + a, 2 * tj + b);
+                for j in 0..small {
+                    for i in 0..small {
+                        mosaic[(b as usize * small + j) * big + a as usize * small + i] = c[j * small + i];
+                    }
+                }
+            }
+        }
+        println!("  mosaic of four tiles of {small} cells done ({:.0} s)", t0.elapsed().as_secs_f64());
+        // the line cells of the whole solved window inside the big core
+        let (cx, cy) = (i64::from(ti) * big as i64, i64::from(tj) * big as i64);
+        let mut line = vec![false; big * big];
+        for (_, ch) in all {
+            for (x, y) in line_cells(ch) {
+                let (dx, dy) = (x - cx, y - cy);
+                if dx >= 0 && dy >= 0 && (dx as usize) < big && (dy as usize) < big {
+                    line[dy as usize * big + dx as usize] = true;
+                }
+            }
+        }
+        let seam_dist = |q: usize| -> usize {
+            let (i, j) = (q % big, q / big);
+            let m = small as i64;
+            ((i as i64 - m).abs().min((i as i64 - m + 1).abs())).min((j as i64 - m).abs().min((j as i64 - m + 1).abs())) as usize
+        };
+        {
+            let mut idx: Vec<usize> = (0..big * big).filter(|&q| core_big[q].to_bits() != mosaic[q].to_bits()).collect();
+            idx.sort_by(|&a, &b| (core_big[b] - mosaic[b]).abs().total_cmp(&(core_big[a] - mosaic[a]).abs()));
+            for &q in idx.iter().take(8) {
+                let (i, j) = ((q % big) as i64, (q / big) as i64);
+                let mut nl = i64::MAX;
+                for dj in -64i64..=64 { for di in -64i64..=64 {
+                    let (x, y) = (i + di, j + dj);
+                    if x >= 0 && y >= 0 && (x as usize) < big && (y as usize) < big && line[y as usize * big + x as usize] { nl = nl.min(di.abs().max(dj.abs())); }
+                } }
+                println!("SEAMTOP | halo {halo} | core cell ({i}, {j}) = local ({}, {}) | seam distance {} | nearest line cell {} cells (Chebyshev, up to 64) | big {:.4} mosaic {:.4} diff {:.4} m", cx + i, cy + j, seam_dist(q), if nl == i64::MAX { ">64".to_string() } else { nl.to_string() }, core_big[q], mosaic[q], (core_big[q] - mosaic[q]).abs());
+            }
+        }
+        let bands: [(usize, usize); 4] = [(0, 7), (8, 31), (32, 127), (128, usize::MAX)];
+        let pct = |v: &mut Vec<f64>, q: usize| -> f64 {
+            if v.is_empty() {
+                return 0.0;
+            }
+            v.sort_by(|a, b| a.total_cmp(b));
+            v[(v.len() - 1) * q / 100]
+        };
+        for (cname, want_line) in [("all cells", None), ("line cells", Some(true)), ("non-line cells", Some(false))] {
+            let sel: Vec<usize> = (0..big * big).filter(|&q| want_line.is_none_or(|w| line[q] == w)).collect();
+            let mut rows: Vec<String> = Vec::new();
+            for (name, range) in std::iter::once(("whole core", (0usize, usize::MAX))).chain(["0-7", "8-31", "32-127", "128+"].into_iter().zip(bands)) {
+                let (mut n, mut bits, mut o25, mut o1, mut mx) = (0usize, 0usize, 0usize, 0usize, 0.0f64);
+                let mut dv: Vec<f64> = Vec::new();
+                for &q in &sel {
+                    if name != "whole core" {
+                        let d = seam_dist(q);
+                        if d < range.0 || d > range.1 {
+                            continue;
+                        }
+                    }
+                    n += 1;
+                    let (a, b) = (core_big[q], mosaic[q]);
+                    let d = (a - b).abs();
+                    if a.to_bits() != b.to_bits() {
+                        bits += 1;
+                        dv.push(d);
+                    }
+                    o25 += usize::from(d > 0.25);
+                    o1 += usize::from(d > 1.0);
+                    mx = mx.max(d);
+                }
+                let (p50, p99) = (pct(&mut dv, 50), pct(&mut dv, 99));
+                rows.push(format!("SEAM | halo {halo} | {cname} | {name} | cells {n} | differ in bits {bits} ({:.2} %) | over 0.25 m {o25} | over 1 m {o1} | p50 {p50:.4} p99 {p99:.4} max {mx:.4} m", 100.0 * bits as f64 / n.max(1) as f64));
+            }
+            for r in rows {
+                println!("{r}");
+            }
+        }
+    }
+}

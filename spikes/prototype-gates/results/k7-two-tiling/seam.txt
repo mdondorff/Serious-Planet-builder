@@ -1,0 +1,76 @@
+seed 14 face 1 region cells i 8056..8675 j 760..1379; solved window 1020 x 1020 regional cells (margin 200); 4 production tiles (3072, halo 128) inside the window with their core meeting the region: [(21, 2), (22, 2), (21, 3), (22, 3)]
+lattice 1366 x 1366 nodes sampled (50.4 s)
+regional window solved (67.5 s)
+lakes: 69 lakes, 50130 water cells; basins kept by H1: 69
+H1: 47951 channel cells, 13578 segments (73.7 s)
+REGIONAL: land cells lowered by more than 50 m by the rounds: 397958; with a height of exactly 5.000 m: 1059; the most frequent heights (m: cells): 5.001: 1059, 599.448: 5, 820.414: 5, 836.190: 5, 945.474: 5, 1050.203: 5, 1143.413: 5, 11.551: 4, 16.681: 4, 37.193: 4
+  regional cell (8356, 821) base 287.57 after the rounds 5.0010, receiver height 5.001, outlet false, donors 4, kept basin none, neighbours 11.34 11.56 12.78 11.84 7.46 5.16 5.00 14.70
+    per round (before / after the breach / after the round): 287.574 / 223.934 / 10.773 | 10.773 / 10.773 / 6.359 | 6.359 / 4.228 / 6.583 | 6.583 / 0.001 / 5.001
+  regional cell (8355, 822) base 312.68 after the rounds 5.0010, receiver height 5.001, outlet false, donors 3, kept basin none, neighbours 5.56 11.84 11.34 116.79 14.15 5.00 176.84 5.00
+    per round (before / after the breach / after the round): 312.680 / 218.202 / 6.479 | 6.479 / 6.443 / 5.650 | 5.650 / 3.283 / 6.014 | 6.014 / 0.001 / 5.001
+  regional cell (8356, 823) base 305.78 after the rounds 5.0010, receiver height 5.001, outlet false, donors 6, kept basin none, neighbours 116.79 11.24 11.84 13.04 5.00 14.70 11.33 5.00
+    per round (before / after the breach / after the round): 305.782 / 205.803 / 6.015 | 6.015 / 5.319 / 5.226 | 5.226 / 2.159 / 5.438 | 5.438 / 0.001 / 5.001
+  regional cell (8357, 824) base 318.14 after the rounds 5.0010, receiver height 5.001, outlet false, donors 3, kept basin none, neighbours 13.04 5.00 11.24 183.06 5.00 15.58 5.00 112.20
+    per round (before / after the breach / after the round): 318.135 / 0.001 / 5.001 | 5.001 / 0.001 / 5.001 | 5.001 / 0.001 / 5.001 | 5.001 / 0.001 / 5.001
+  regional cell (8358, 824) base 326.55 after the rounds 5.0010, receiver height 5.001, outlet false, donors 2, kept basin none, neighbours 5.00 10.80 15.58 112.20 11.24 19.30 183.06 5.00
+    per round (before / after the breach / after the round): 326.548 / 0.001 / 5.001 | 5.001 / 0.001 / 5.001 | 5.001 / 0.001 / 5.001 | 5.001 / 0.001 / 5.001
+  regional cell (8356, 825) base 325.68 after the rounds 5.0010, receiver height 5.001, outlet false, donors 2, kept basin none, neighbours 148.71 183.06 13.04 14.70 11.33 5.00 5.00 161.18
+    per round (before / after the breach / after the round): 325.677 / 0.001 / 5.001 | 5.001 / 0.001 / 5.001 | 5.001 / 0.001 / 5.001 | 5.001 / 0.001 / 5.001
+  regional cell (8359, 825) base 314.39 after the rounds 5.0010, receiver height 5.001, outlet false, donors 3, kept basin none, neighbours 112.20 14.00 10.80 5.00 5.00 8.96 96.41 11.68
+    per round (before / after the breach / after the round): 314.385 / 0.001 / 5.001 | 5.001 / 0.001 / 5.001 | 5.001 / 0.001 / 5.001 | 5.001 / 0.001 / 5.001
+  regional cell (8355, 826) base 316.44 after the rounds 5.0010, receiver height 5.001, outlet false, donors 3, kept basin none, neighbours 13.19 14.70 148.71 11.56 149.67 5.00 5.00 18.32
+    per round (before / after the breach / after the round): 316.435 / 0.001 / 5.001 | 5.001 / 0.001 / 5.001 | 5.001 / 0.001 / 5.001 | 5.001 / 0.001 / 5.001
+  regional cell (8359, 826) base 325.53 after the rounds 5.0010, receiver height 5.001, outlet false, donors 4, kept basin none, neighbours 96.41 11.68 5.00 166.20 112.20 14.00 210.48 5.00
+    per round (before / after the breach / after the round): 325.531 / 0.001 / 5.001 | 5.001 / 0.001 / 5.001 | 5.001 / 0.001 / 5.001 | 5.001 / 0.001 / 5.001
+  regional cell (8310, 827) base 631.91 after the rounds 5.0010, receiver height 5.001, outlet false, donors 3, kept basin none, neighbours 7.99 5.00 33.41 5.23 38.27 40.44 5.00 12.11
+    per round (before / after the breach / after the round): 631.914 / 275.966 / 104.365 | 104.365 / 104.365 / 8.534 | 8.534 / 8.534 / 6.958 | 6.958 / 0.001 / 5.001
+  big tile (65, 8) of 1024 cells at halo 128: 20 s
+  mosaic of four tiles of 512 cells done (38 s)
+SEAMTOP | halo 128 | core cell (381, 121) = local (66941, 8313) | seam distance 130 | nearest line cell 1 cells (Chebyshev, up to 64) | big 1.8268 mosaic 2.1354 diff 0.3085 m
+SEAMTOP | halo 128 | core cell (442, 2) = local (67002, 8194) | seam distance 69 | nearest line cell 2 cells (Chebyshev, up to 64) | big 32.3539 mosaic 32.3879 diff 0.0341 m
+SEAMTOP | halo 128 | core cell (443, 11) = local (67003, 8203) | seam distance 68 | nearest line cell 1 cells (Chebyshev, up to 64) | big 27.6165 mosaic 27.6330 diff 0.0165 m
+SEAMTOP | halo 128 | core cell (443, 15) = local (67003, 8207) | seam distance 68 | nearest line cell 1 cells (Chebyshev, up to 64) | big 25.4077 mosaic 25.4171 diff 0.0093 m
+SEAMTOP | halo 128 | core cell (435, 52) = local (66995, 8244) | seam distance 76 | nearest line cell 1 cells (Chebyshev, up to 64) | big 15.4211 mosaic 15.4294 diff 0.0083 m
+SEAMTOP | halo 128 | core cell (443, 14) = local (67003, 8206) | seam distance 68 | nearest line cell 1 cells (Chebyshev, up to 64) | big 25.8037 mosaic 25.8109 diff 0.0072 m
+SEAMTOP | halo 128 | core cell (442, 10) = local (67002, 8202) | seam distance 69 | nearest line cell 2 cells (Chebyshev, up to 64) | big 30.1482 mosaic 30.1414 diff 0.0067 m
+SEAMTOP | halo 128 | core cell (445, 6) = local (67005, 8198) | seam distance 66 | nearest line cell 1 cells (Chebyshev, up to 64) | big 30.2793 mosaic 30.2858 diff 0.0065 m
+SEAM | halo 128 | all cells | whole core | cells 1048576 | differ in bits 5905 (0.56 %) | over 0.25 m 1 | over 1 m 0 | p50 0.0000 p99 0.0011 max 0.3085 m
+SEAM | halo 128 | all cells | 0-7 | cells 32512 | differ in bits 1102 (3.39 %) | over 0.25 m 0 | over 1 m 0 | p50 0.0000 p99 0.0002 max 0.0029 m
+SEAM | halo 128 | all cells | 8-31 | cells 94464 | differ in bits 1398 (1.48 %) | over 0.25 m 0 | over 1 m 0 | p50 0.0000 p99 0.0000 max 0.0019 m
+SEAM | halo 128 | all cells | 32-127 | cells 331776 | differ in bits 2893 (0.87 %) | over 0.25 m 0 | over 1 m 0 | p50 0.0000 p99 0.0021 max 0.0341 m
+SEAM | halo 128 | all cells | 128+ | cells 589824 | differ in bits 512 (0.09 %) | over 0.25 m 1 | over 1 m 0 | p50 0.0000 p99 0.0005 max 0.3085 m
+SEAM | halo 128 | line cells | whole core | cells 8548 | differ in bits 0 (0.00 %) | over 0.25 m 0 | over 1 m 0 | p50 0.0000 p99 0.0000 max 0.0000 m
+SEAM | halo 128 | line cells | 0-7 | cells 163 | differ in bits 0 (0.00 %) | over 0.25 m 0 | over 1 m 0 | p50 0.0000 p99 0.0000 max 0.0000 m
+SEAM | halo 128 | line cells | 8-31 | cells 510 | differ in bits 0 (0.00 %) | over 0.25 m 0 | over 1 m 0 | p50 0.0000 p99 0.0000 max 0.0000 m
+SEAM | halo 128 | line cells | 32-127 | cells 1489 | differ in bits 0 (0.00 %) | over 0.25 m 0 | over 1 m 0 | p50 0.0000 p99 0.0000 max 0.0000 m
+SEAM | halo 128 | line cells | 128+ | cells 6386 | differ in bits 0 (0.00 %) | over 0.25 m 0 | over 1 m 0 | p50 0.0000 p99 0.0000 max 0.0000 m
+SEAM | halo 128 | non-line cells | whole core | cells 1040028 | differ in bits 5905 (0.57 %) | over 0.25 m 1 | over 1 m 0 | p50 0.0000 p99 0.0011 max 0.3085 m
+SEAM | halo 128 | non-line cells | 0-7 | cells 32349 | differ in bits 1102 (3.41 %) | over 0.25 m 0 | over 1 m 0 | p50 0.0000 p99 0.0002 max 0.0029 m
+SEAM | halo 128 | non-line cells | 8-31 | cells 93954 | differ in bits 1398 (1.49 %) | over 0.25 m 0 | over 1 m 0 | p50 0.0000 p99 0.0000 max 0.0019 m
+SEAM | halo 128 | non-line cells | 32-127 | cells 330287 | differ in bits 2893 (0.88 %) | over 0.25 m 0 | over 1 m 0 | p50 0.0000 p99 0.0021 max 0.0341 m
+SEAM | halo 128 | non-line cells | 128+ | cells 583438 | differ in bits 512 (0.09 %) | over 0.25 m 1 | over 1 m 0 | p50 0.0000 p99 0.0005 max 0.3085 m
+  big tile (65, 8) of 1024 cells at halo 64: 9 s
+  mosaic of four tiles of 512 cells done (26 s)
+SEAMTOP | halo 64 | core cell (510, 25) = local (67070, 8217) | seam distance 1 | nearest line cell >64 cells (Chebyshev, up to 64) | big 116.7100 mosaic 120.3026 diff 3.5926 m
+SEAMTOP | halo 64 | core cell (511, 25) = local (67071, 8217) | seam distance 0 | nearest line cell >64 cells (Chebyshev, up to 64) | big 120.1073 mosaic 123.5942 diff 3.4869 m
+SEAMTOP | halo 64 | core cell (504, 25) = local (67064, 8217) | seam distance 7 | nearest line cell 60 cells (Chebyshev, up to 64) | big 100.8662 mosaic 103.0704 diff 2.2042 m
+SEAMTOP | halo 64 | core cell (508, 25) = local (67068, 8217) | seam distance 3 | nearest line cell 64 cells (Chebyshev, up to 64) | big 111.9807 mosaic 114.0838 diff 2.1031 m
+SEAMTOP | halo 64 | core cell (507, 25) = local (67067, 8217) | seam distance 4 | nearest line cell 63 cells (Chebyshev, up to 64) | big 108.7358 mosaic 110.8117 diff 2.0759 m
+SEAMTOP | halo 64 | core cell (509, 25) = local (67069, 8217) | seam distance 2 | nearest line cell >64 cells (Chebyshev, up to 64) | big 114.9854 mosaic 117.0472 diff 2.0619 m
+SEAMTOP | halo 64 | core cell (506, 25) = local (67066, 8217) | seam distance 5 | nearest line cell 62 cells (Chebyshev, up to 64) | big 105.7979 mosaic 107.7391 diff 1.9413 m
+SEAMTOP | halo 64 | core cell (511, 24) = local (67071, 8216) | seam distance 0 | nearest line cell >64 cells (Chebyshev, up to 64) | big 120.5889 mosaic 122.4773 diff 1.8884 m
+SEAM | halo 64 | all cells | whole core | cells 1048576 | differ in bits 23969 (2.29 %) | over 0.25 m 319 | over 1 m 53 | p50 0.0000 p99 0.3406 max 3.5926 m
+SEAM | halo 64 | all cells | 0-7 | cells 32512 | differ in bits 3650 (11.23 %) | over 0.25 m 87 | over 1 m 26 | p50 0.0000 p99 0.7746 max 3.5926 m
+SEAM | halo 64 | all cells | 8-31 | cells 94464 | differ in bits 7140 (7.56 %) | over 0.25 m 161 | over 1 m 26 | p50 0.0000 p99 0.5191 max 1.8726 m
+SEAM | halo 64 | all cells | 32-127 | cells 331776 | differ in bits 12430 (3.75 %) | over 0.25 m 71 | over 1 m 1 | p50 0.0000 p99 0.1888 max 1.2779 m
+SEAM | halo 64 | all cells | 128+ | cells 589824 | differ in bits 749 (0.13 %) | over 0.25 m 0 | over 1 m 0 | p50 0.0000 p99 0.0012 max 0.0071 m
+SEAM | halo 64 | line cells | whole core | cells 8548 | differ in bits 0 (0.00 %) | over 0.25 m 0 | over 1 m 0 | p50 0.0000 p99 0.0000 max 0.0000 m
+SEAM | halo 64 | line cells | 0-7 | cells 163 | differ in bits 0 (0.00 %) | over 0.25 m 0 | over 1 m 0 | p50 0.0000 p99 0.0000 max 0.0000 m
+SEAM | halo 64 | line cells | 8-31 | cells 510 | differ in bits 0 (0.00 %) | over 0.25 m 0 | over 1 m 0 | p50 0.0000 p99 0.0000 max 0.0000 m
+SEAM | halo 64 | line cells | 32-127 | cells 1489 | differ in bits 0 (0.00 %) | over 0.25 m 0 | over 1 m 0 | p50 0.0000 p99 0.0000 max 0.0000 m
+SEAM | halo 64 | line cells | 128+ | cells 6386 | differ in bits 0 (0.00 %) | over 0.25 m 0 | over 1 m 0 | p50 0.0000 p99 0.0000 max 0.0000 m
+SEAM | halo 64 | non-line cells | whole core | cells 1040028 | differ in bits 23969 (2.30 %) | over 0.25 m 319 | over 1 m 53 | p50 0.0000 p99 0.3406 max 3.5926 m
+SEAM | halo 64 | non-line cells | 0-7 | cells 32349 | differ in bits 3650 (11.28 %) | over 0.25 m 87 | over 1 m 26 | p50 0.0000 p99 0.7746 max 3.5926 m
+SEAM | halo 64 | non-line cells | 8-31 | cells 93954 | differ in bits 7140 (7.60 %) | over 0.25 m 161 | over 1 m 26 | p50 0.0000 p99 0.5191 max 1.8726 m
+SEAM | halo 64 | non-line cells | 32-127 | cells 330287 | differ in bits 12430 (3.76 %) | over 0.25 m 71 | over 1 m 1 | p50 0.0000 p99 0.1888 max 1.2779 m
+SEAM | halo 64 | non-line cells | 128+ | cells 583438 | differ in bits 749 (0.13 %) | over 0.25 m 0 | over 1 m 0 | p50 0.0000 p99 0.0012 max 0.0071 m
