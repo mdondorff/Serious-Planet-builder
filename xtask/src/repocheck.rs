@@ -371,7 +371,11 @@ mod tests {
             let Ok(text) = std::fs::read_to_string(&f) else { continue };
             for needle in ["target-cpu", "target-feature", "fast-math", "ffast-math", "RUSTFLAGS", "opt-level = \"z\""] {
                 let hits: Vec<&str> = text.lines().filter(|l| !l.trim_start().starts_with('#') && l.contains(needle)).collect();
-                assert!(hits.is_empty(), "{} sets `{needle}`: the build settings stay the profile's defaults (ADR 0114 point 6): {hits:?}", f.display());
+                assert!(
+                    hits.is_empty(),
+                    "{} sets `{needle}`: the build settings stay the profile's defaults (ADR 0114 point 6): {hits:?}",
+                    f.display()
+                );
             }
         }
     }
