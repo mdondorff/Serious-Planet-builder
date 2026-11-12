@@ -11,7 +11,7 @@ const EPS: f64 = 1e-3;
 // spec: GEN-175, TEST-122
 #[test]
 fn earth_keeps_the_profile_epsilon_and_f32() {
-    let w = WorldPrecision::new(0.0, -11_000.0, 9_000.0, EPS, EPSILON_MAX_M);
+    let w = WorldPrecision::new(-11_000.0, 9_000.0, EPS, EPSILON_MAX_M);
     assert_eq!((w.radius, w.epsilon_w, w.f64_rounds), (11_000.0, EPS, false));
     let mut c = CarveParams { round_f32: false, ..CarveParams::default() };
     w.apply(&mut c);
@@ -21,12 +21,14 @@ fn earth_keeps_the_profile_epsilon_and_f32() {
 // spec: GEN-175, TEST-122
 #[test]
 fn a_60_km_span_stays_f32_with_a_strict_descent_at_both_ends() {
-    let w = WorldPrecision::new(0.0, -10_000.0, 50_000.0, EPS, EPSILON_MAX_M);
+    let w = WorldPrecision::new(-10_000.0, 50_000.0, EPS, EPSILON_MAX_M);
     assert!(!w.f64_rounds);
     assert_eq!(w.radius, 50_000.0);
     assert!(w.epsilon_w >= f32_spacing(w.radius) && w.epsilon_w > EPS);
-    // a chain of epsilon_w steps at the top of R's exponent bin (32,768 to 65,536 m from the sea), above and below the sea, stays strictly descending after the narrowing
-    for top in [65_000.0, -33_000.0] {
+    // a chain of epsilon_w steps at the top of R's exponent bin (32,768 to 65,536 m), above and below the sea, stays strictly descending after the narrowing
+    // the starts include a half-spacing offset: a height that lands on a rounding tie must still step down
+    let half = 0.5 * f32_spacing(w.radius);
+    for top in [65_000.0, 65_000.0 + half, 33_000.0 + half, -65_000.0 + half, -33_000.0] {
         let z: Vec<f64> = (0..64).map(|i| f64::from((top - w.epsilon_w * f64::from(i)) as f32)).collect();
         assert!(z.windows(2).all(|p| p[1] < p[0]), "a chain of epsilon_w steps from {top} m is strictly descending after the narrowing");
     }
@@ -35,16 +37,16 @@ fn a_60_km_span_stays_f32_with_a_strict_descent_at_both_ends() {
 // spec: GEN-175, TEST-122
 #[test]
 fn the_choice_is_a_function_of_the_bounds_only() {
-    let a = WorldPrecision::new(0.0, -10_000.0, 50_000.0, EPS, EPSILON_MAX_M);
+    let a = WorldPrecision::new(-10_000.0, 50_000.0, EPS, EPSILON_MAX_M);
     for _ in 0..3 {
-        assert_eq!(a, WorldPrecision::new(0.0, -10_000.0, 50_000.0, EPS, EPSILON_MAX_M), "every window reads the same epsilon_w");
+        assert_eq!(a, WorldPrecision::new(-10_000.0, 50_000.0, EPS, EPSILON_MAX_M), "every window reads the same epsilon_w");
     }
 }
 
 // spec: GEN-175, TEST-122
 #[test]
 fn above_epsilon_max_the_rounds_are_f64() {
-    let w = WorldPrecision::new(0.0, -200_000.0, 200_000.0, EPS, EPSILON_MAX_M);
+    let w = WorldPrecision::new(-200_000.0, 200_000.0, EPS, EPSILON_MAX_M);
     assert!(w.f64_rounds);
     assert_eq!(w.epsilon_w, EPS);
     let mut c = CarveParams { round_f32: true, ..CarveParams::default() };
@@ -69,7 +71,7 @@ fn one_round_in_f32_is_the_f64_round_to_within_the_spacing() {
                 (40_000.0 * (1.0 - r).powf(1.3) + 200.0 * jitter(5, (j * N + i) as u64, 0)) * edge + 2.0 - 10_000.0 * (1.0 - edge);
         }
     }
-    let w = WorldPrecision::new(0.0, -10_000.0, 50_000.0, EPS, EPSILON_MAX_M);
+    let w = WorldPrecision::new(-10_000.0, 50_000.0, EPS, EPSILON_MAX_M);
     let base = CarveParams { steps: 5, reroute_every: 5, round_rules: RoundRules::ROUND, ..CarveParams::default() };
     let outlet = g.outlets(&z0, 0.0);
     let run = |p: &CarveParams| {
@@ -86,4 +88,19 @@ fn one_round_in_f32_is_the_f64_round_to_within_the_spacing() {
         "one round in f32 differs from f64 by {worst} m, more than 2 x the spacing {}",
         f32_spacing(w.radius)
     );
+}
+
+// spec: GEN-175, TEST-122
+#[test]
+fn the_spacing_and_the_choice_handle_every_edge() {
+    assert_eq!((f32_spacing(0.0), f32_spacing(-0.0)), (0.0, 0.0));
+    assert_eq!(f32_spacing(1.0), 2f64.powi(-23));
+    assert_eq!(f32_spacing(16_384.0), 2f64.powi(-9), "at a power of two the spacing is the one above it");
+    assert_eq!(f32_spacing(16_383.0), 2f64.powi(-10));
+    assert_eq!(f32_spacing(-16_383.0), 2f64.powi(-10));
+    for bad in [1e39, f64::INFINITY, f64::NAN] {
+        assert!(f32_spacing(bad).is_infinite(), "{bad} does not fit an f32");
+    }
+    let w = WorldPrecision::new(-1e39, 1e39, EPS, EPSILON_MAX_M);
+    assert!(w.f64_rounds, "a span that does not fit an f32 runs in f64");
 }

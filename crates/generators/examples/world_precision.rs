@@ -52,7 +52,7 @@ fn main() {
             z0[j * n + i] = (cone + ridge * (cone / 4000.0).min(1.0)) * edge + 2.0 + -10_000.0 * (1.0 - edge);
         }
     }
-    let w = WorldPrecision::new(0.0, lo, hi, 1e-3, EPSILON_MAX_M);
+    let w = WorldPrecision::new(lo, hi, 1e-3, EPSILON_MAX_M);
     println!("{} ; spacing(R) {:.5} m; 2 x spacing {:.5} m", w.mark_line(), f32_spacing(w.radius), 2.0 * f32_spacing(w.radius));
     let outlet = g.outlets(&z0, 0.0);
     let noisy = {
