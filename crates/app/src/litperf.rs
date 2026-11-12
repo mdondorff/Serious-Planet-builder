@@ -982,7 +982,7 @@ pub(crate) fn capture_lod(
 
 /// Whether `--scene NAME` names the flight capture (a tool, never a measurement).
 pub fn is_capture_scene(name: &str) -> bool {
-    matches!(name, "capture-flights" | "capture-stills")
+    matches!(name, "capture-flights" | "capture-stills" | "river-frames")
 }
 
 /// `test-render --scene capture-flights --out-dir DIR [--store DIR | --allow-memory-bake --global-res N] [--size WxH] [--flight-frames N]`
@@ -1092,6 +1092,86 @@ pub fn capture_flights(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
     setup.look.water.shore_filter = default;
     std::fs::write(dir.join("capture.txt"), index).map_err(err)?;
     writeln!(out, "wrote {} (frames of each flight and shore filter, and capture.txt)", dir.display()).map_err(err)
+}
+
+/// `test-render --scene river-frames --out-dir DIR` with `PLANET_RIVER_STORE` (item 15, queue row 2): the river look frames, low over the G-RT fixture's rivers, each written as an annotated PNG
+/// (scale bar and pose, TEST-128) with a report line: the pose, the river's drawn width in metres and in pixels at the centre of the picture, and the river plan's nodes and drops. The coverage is warmed
+/// before each frame, so the river is drawn at full sample count; a frame whose plan dropped a river node FAILS the run. Never a measurement, no gate, no log. The rivers are straight between the
+/// graph points of H1 (about 816 m apart at the regional grid): the report says so, as the pictures show it. The scene is for the owner's look review; whether to add shape below that resolution is the architect's call.
+pub fn capture_river_frames(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<(), String> {
+    let dir = o.out_dir.clone().ok_or("river-frames needs --out-dir")?;
+    crate::riverperf::check_options(o)?;
+    let world = crate::riverperf::open_world(out)?.bounding_water();
+    let field = world.field()?;
+    let radius_m = world.radius_m();
+    let size = o.size.unwrap_or((2560, 1440));
+    let lod = capture_lod(o, size, radius_m, field.as_ref())?;
+    let aspect = f64::from(size.0) / f64::from(size.1);
+    let mut setup = LitSetup::new(o, &world, &lod)?;
+    let system = Arc::new(planet_streaming::jobs::JobSystem::new(2, planet_streaming::Priority::Normal));
+    setup.river_share = Some((system.clone(), system.share("river-coverage", 2)));
+    let mut poses = crate::riverperf::frame_poses(&world, field.as_ref(), radius_m, setup.level_m, aspect)?;
+    if let Some(names) = &o.views {
+        poses.retain(|p| names.iter().any(|n| p.name.contains(n.as_str())));
+        if poses.is_empty() {
+            return Err("--views names no river frame (a name or part of one: along-12, along-40, across-25, alt30, sun2, ...)".into());
+        }
+    }
+    let rig = Rig {
+        ctx,
+        world: &world,
+        field: field.as_ref(),
+        lod: &lod,
+        size,
+        smoke: true,
+        calibrate: false,
+        frames: 0,
+        cells: o.cells,
+        radius_m,
+    };
+    writeln!(out, "river-frames: NOT a measurement (no gate, no timestamps, no log); {}x{}, {} frames, rivers are straight between the H1 graph points (about 816 m apart)", size.0, size.1, poses.len())
+        .map_err(err)?;
+    std::fs::create_dir_all(&dir).map_err(err)?;
+    let mut r = new_renderer(&rig, &setup, poses[0].camera)?;
+    let mut index = String::from("# frame width_m_drawn width_px_at_centre river_nodes dropped\n");
+    for (k, pose) in poses.iter().enumerate() {
+        let camera = pose.camera;
+        let mut cache = SelectionCache::new();
+        let base = planet_frame::plan_terrain_cached(&request(&rig, camera), rig.field, &mut cache).map_err(|e| e.to_string())?;
+        crate::skeleton::upload_missing_meshes(ctx, Some(rig.world), &mut r, &base, rig.field, radius_m, o.cells)?;
+        setup.warm_rivers(&world, &base)?;
+        // The sun: the look's own, or `sun_deg` above the horizon from the camera's right (a grazing light across the river). The exposure adapts over three frames of a second each.
+        let mut last_plan = None;
+        for step in 0..3 {
+            let mut lit = setup.plan(&world, rig.field, &base, WATER_T0 + k as f64, 1.0, step == 0)?;
+            if let (Some(deg), Some(l)) = (pose.sun_deg, lit.lit.as_mut()) {
+                let right = camera.forward.cross(camera.up).normalized();
+                let a = deg.to_radians();
+                let v = (right * libm::cos(a) + camera.up * libm::sin(a)).normalized();
+                l.sun_dir = [v.x as f32, v.y as f32, v.z as f32];
+            }
+            r.render(ctx, &lit, false).map_err(|e| e.to_string())?;
+            last_plan = Some(lit);
+        }
+        let plan = last_plan.expect("three frames");
+        let (nodes, dropped) = plan.rivers.as_ref().map_or((0, 0), |p| (p.nodes.len(), p.dropped));
+        if dropped > 0 {
+            return Err(format!("river frame {}: the plan dropped {dropped} river nodes (the layer cap): the picture would hide rivers, so the run fails", pose.name));
+        }
+        // The centre of the picture: the distance along the view ray to the ground (as the pose label measures it).
+        let label = crate::stills::pose_label(&camera, &|d| rig.field.height(d), radius_m, setup.level_m);
+        let px = label.metres_per_pixel(size.1).map_or(f64::NAN, |m| pose.drawn_width_m / m);
+        let mut image = r.read_color(ctx);
+        planet_render::annotate::annotate(&mut image, &label);
+        let file = dir.join(format!("{}.png", pose.name));
+        image.write_png(&file).map_err(|e| format!("writing {}: {e}", file.display()))?;
+        writeln!(out, "{} -> river drawn {:.1} m wide = {:.1} px at the centre; {nodes} river nodes, {dropped} dropped; {}", pose.name, pose.drawn_width_m, px, file.display())
+            .map_err(err)?;
+        index += &format!("{} {:.2} {:.2} {nodes} {dropped}\n", pose.name, pose.drawn_width_m, px);
+    }
+    std::fs::write(dir.join("river-frames.txt"), index).map_err(err)?;
+    writeln!(out, "wrote {} ({} frames and river-frames.txt); the river is straight between the H1 graph points: that is the resolution of its channel, not of the drawing", dir.display(), poses.len())
+        .map_err(err)
 }
 
 /// One lit still: the frames of a held camera drawn on the lit path (atmosphere, water, exposure), read back, and how the exposure ended (TEST-069).

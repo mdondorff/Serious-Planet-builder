@@ -1070,6 +1070,8 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     if litperf::is_capture_scene(&o.scene) {
         return if stills::is_stills_scene(&o.scene) {
             stills::capture_stills(o, &ctx, out)
+        } else if o.scene == "river-frames" {
+            litperf::capture_river_frames(o, &ctx, out)
         } else {
             litperf::capture_flights(o, &ctx, out)
         };
