@@ -156,3 +156,47 @@ mod tests {
         assert!(FixtureLattice::sample(60, Face(2), (0, 0, 2, 2), &direction, &base, Box::new(Coarse), 1).is_err(), "8 does not divide 60");
     }
 }
+
+#[cfg(test)]
+mod rectangle_tests {
+    use crate::worldfield::fixture_rectangle;
+    use planet_cache::l_writer::CommitSpec;
+
+    fn spec() -> CommitSpec {
+        // The G-RT fixture's: 98,304 local cells over 16,384 nodes (6 cells a node), tiles of 768 and a halo of 64.
+        CommitSpec {
+            res: 16_384,
+            cells: 98_304,
+            tile: 768,
+            halo: 64,
+            radius_m: 6_371_000.0,
+            seed: 14,
+            sea_level_m: 0.0,
+            canonical_flood: true,
+            width_a: 7.2,
+            width_b: 0.5,
+            base_id: 1,
+            inputs_id: 2,
+        }
+    }
+
+    // spec: GEN-177
+    #[test]
+    fn the_rectangle_holds_every_tile_with_its_halo_and_a_tile_of_margin_and_the_c1_stencil() {
+        // The G-RT fixture's tiles on face 1: ti 83..=93, tj 7..=17 (as its commit lists them).
+        let tiles: Vec<(u8, u32, u32)> = (7..=17).flat_map(|tj| (83..=93).map(move |ti| (1u8, ti, tj))).collect();
+        let (face, (i0, j0, w, h)) = fixture_rectangle(&spec(), tiles.iter().copied()).unwrap();
+        assert_eq!(face.0, 1);
+        // The local cell range of the tiles with halo: [83 * 768 - 64, 94 * 768 + 64); a node every 6 cells; a tile of margin (128 nodes) and 3 + 4 nodes of stencil.
+        let (lo, hi) = ((83 * 768 - 64) / 6, (94 * 768 + 64) / 6);
+        assert!(i64::from(i0) <= lo as i64 - 128 - 2, "the margin is a tile and the stencil is 3 nodes: {i0} against {lo}");
+        assert!((i0 as usize + w) as i64 >= hi as i64 + 128 + 3, "the far side: {} against {hi}", i0 as usize + w);
+        assert!(j0 > 0 && h > 0 && (j0 as usize + h) <= 16_385);
+        // A face-edge commit is clamped to the face and a two-face commit is refused.
+        let (_, (i0, _, w, _)) = fixture_rectangle(&spec(), [(1u8, 0u32, 0u32), (1, 1, 1)].into_iter()).unwrap();
+        assert_eq!(i0, 0);
+        assert!(i0 as usize + w <= 16_385);
+        assert!(fixture_rectangle(&spec(), [(1u8, 5u32, 5u32), (2, 5, 5)].into_iter()).is_err());
+        assert!(fixture_rectangle(&spec(), std::iter::empty()).is_err());
+    }
+}

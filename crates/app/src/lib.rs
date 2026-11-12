@@ -29,6 +29,7 @@ pub mod preflightperf;
 pub mod previewjob;
 pub mod reproworld;
 pub mod reserveload;
+pub mod riverperf;
 pub mod rivers;
 pub mod shadowrig;
 pub mod sheet;

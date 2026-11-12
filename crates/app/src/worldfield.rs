@@ -213,6 +213,8 @@ pub struct WorldTerrain {
     erosion_note: String,
     /// The river source of the new chain's commit when it holds a channel graph (STRM-086): the frame's river plan reads the channels through it.
     rivers: Option<Arc<crate::rivers::ReaderRiverSource>>,
+    /// What the base is, for a world opened by `open_fixture` (empty otherwise).
+    fixture_note: String,
     /// Scoped threads of one horizon bake (0: the cores, at most 4).
     horizon_threads: std::sync::atomic::AtomicUsize,
     /// Cells per chunk edge of the horizon lattice (0: the default of [`crate::horizonworld::HORIZON_CELL_M`]); a test sets a coarse one to stay quick.
@@ -329,6 +331,7 @@ impl WorldTerrain {
             erosion: None,
             erosion_note: String::new(),
             rivers: None,
+            fixture_note: String::new(),
         })
     }
 
@@ -431,6 +434,7 @@ impl WorldTerrain {
             erosion: None,
             erosion_note: String::new(),
             rivers: None,
+            fixture_note: String::new(),
         })
     }
 
@@ -676,6 +680,75 @@ impl WorldTerrain {
         self.rivers.as_ref()
     }
 
+    /// Draws the commit of the new chain in `commit_dir` over this world: L with no fill, and the rivers of its channel graph when it holds one (STRM-086). `world` is the world the commit's keys are made under.
+    fn use_commit(mut self, commit_dir: &Path, world: Arc<GlobalWorld>, def: &WorldDefinition, seed: u64) -> Result<WorldTerrain, String> {
+        let layer = planet_cache::l_layer::CommitLayer::open(commit_dir, world.clone(), LAYER_CACHE_TILES)
+            .map_err(|e| format!("--erosion: {e}"))?;
+        let commit_id = layer.commit().id;
+        // A commit with a channel graph gives the frame its rivers; one without has none (the reader refuses it, and the viewer draws no river).
+        self.rivers = layer
+            .rivers(planet_cache::river_read::DEFAULT_CACHE_BYTES)
+            .ok()
+            .map(|r| Arc::new(crate::rivers::ReaderRiverSource::new(Arc::new(r))));
+        let layer = planet_generators::erosion_layer::ErosionLayer::new(Arc::new(layer)).map_err(|e| format!("--erosion: {e}"))?;
+        let sea_level_m = def.sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
+        self.kind = HeightFieldKind::ErodedC1;
+        self.erosion_note = format!(
+            "erosion layer {} (commit {commit_id:016x} of the new chain, L with no fill, {}, seed {seed}, coast fade {} m over the sea level {sea_level_m} m, crease band on, relief channels off, C1 base)",
+            commit_dir.display(),
+            if self.rivers.is_some() { "rivers from its channel graph" } else { "no channel graph" },
+            planet_generators::erosion_layer::COAST_FADE_M
+        );
+        self.source = format!("{} + {}", self.source, self.erosion_note);
+        self.erosion =
+            Some(planet_generators::height_fields::ErosionSwitch { relief: None, layer: Arc::new(layer), sea_level_m, channels: None });
+        Ok(self)
+    }
+
+    /// TEST-ONLY (the G-RT fixture, architect 2026-11-12): the terrain of a commit baked by `bake_region` over an in-memory base that needs no store. The base is the 1,024-cell in-memory bake everywhere (ocean, water, far
+    /// ground) with the exact 16384-node lattice (`BakeInputs::base`) over the rectangle of the commit's tiles (their halo and one tile of margin), sampled here once, before any frame; the commit is opened under a
+    /// `GlobalWorld` of the definition (no store). Reached only by the `river-flight` perf scene; no viewer flag opens it. The seam between the exact rectangle and the coarse ground, and the edge of the commit's tiles, lie
+    /// one tile (the margin) from the commit's tiles: a flight stays at least one LOD range inside them. [`WorldTerrain::fixture_note`] says what the base is.
+    pub fn open_fixture(def: WorldDefinition, commit_dir: &Path, threads: usize) -> Result<WorldTerrain, String> {
+        let started = std::time::Instant::now();
+        let commit = planet_cache::l_writer::Commit::read(commit_dir)?
+            .ok_or_else(|| format!("{} holds no commit of the new chain", commit_dir.display()))?;
+        let spec = commit.spec;
+        let seed = GenContext::new(&def).body_seed(BodyId::PLANET).map_err(|e| format!("the definition has no body seed: {e}"))?;
+        if spec.seed != seed {
+            return Err(format!("the commit was baked for seed {}, the definition's is {seed}", spec.seed));
+        }
+        let (face, rect) = fixture_rectangle(&spec, commit.tiles.keys().copied())?;
+        let res = spec.res;
+        let (i1, j1) = (rect.0 as usize + rect.2 - 1, rect.1 as usize + rect.3 - 1);
+        let mut world = WorldTerrain::open(def.clone(), MAX_RUN_BAKE_RES)?;
+        let coarse = std::mem::replace(&mut world.src, Box::new(NoBake));
+        let inputs = planet_cache::global_store::class_inputs(&def, seed, threads);
+        let direction = |i: u32, j: u32| planet_cache::region_bake::lattice_direction(face, res as usize, i as usize, j as usize);
+        let fixture = crate::fixturebase::FixtureLattice::sample(res, face, rect, &direction, &|d| inputs.base(d), coarse, threads)?;
+        world.src = Box::new(fixture);
+        world.kind = HeightFieldKind::ErodedC1;
+        let stored = Arc::new(GlobalWorld::from_definition(&def).map_err(|e| format!("the definition cannot be generated: {e}"))?);
+        let mut world = world.use_commit(commit_dir, stored, &def, seed)?;
+        world.fixture_note = format!(
+            "base: IN-MEMORY FIXTURE (not the world bake, no store): the {MAX_RUN_BAKE_RES}-cell in-memory bake elsewhere and the exact {res}-node lattice over {} x {} nodes (face {}, nodes {}..{} x {}..{}) of the commit's tiles with one tile of margin, built in {:.1} s on {threads} threads before the first frame; G-RT on it is PROVISIONAL (no base store reads); the flight stays inside the tiles",
+            rect.2,
+            rect.3,
+            face.0,
+            rect.0,
+            i1,
+            rect.1,
+            j1,
+            started.elapsed().as_secs_f64()
+        );
+        Ok(world)
+    }
+
+    /// What the base of a world opened by [`WorldTerrain::open_fixture`] is (empty for every other world).
+    pub fn fixture_note(&self) -> &str {
+        &self.fixture_note
+    }
+
     /// Turns the erosion layer of a bake on over this stored world (VIEW-062, GEN-112): the layer is read from `o.layer_dir` (the bake's output folder or its `tiles/`, else the world's
     /// store) under the keys of the bake shape `o` names and the definition's seed, added to the C1 read of the stored lattice (the default eroded field is upgraded to the C1 one) with
     /// the crease band, the relief channels not read. An error naming the problem when the world has no stored bake, its field is not an eroded one, its relief scale is not 1 or its
@@ -726,27 +799,7 @@ impl WorldTerrain {
                     commit_dir.display()
                 ));
             }
-            let layer = planet_cache::l_layer::CommitLayer::open(&commit_dir, world.clone(), LAYER_CACHE_TILES)
-                .map_err(|e| format!("--erosion: {e}"))?;
-            let commit_id = layer.commit().id;
-            // A commit with a channel graph gives the frame its rivers; one without has none (the reader refuses it, and the viewer draws no river).
-            self.rivers = layer
-                .rivers(planet_cache::river_read::DEFAULT_CACHE_BYTES)
-                .ok()
-                .map(|r| Arc::new(crate::rivers::ReaderRiverSource::new(Arc::new(r))));
-            let layer = planet_generators::erosion_layer::ErosionLayer::new(Arc::new(layer)).map_err(|e| format!("--erosion: {e}"))?;
-            let sea_level_m = def.sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
-            self.kind = HeightFieldKind::ErodedC1;
-            self.erosion_note = format!(
-                "erosion layer {} (commit {commit_id:016x} of the new chain, L with no fill, {}, seed {seed}, coast fade {} m over the sea level {sea_level_m} m, crease band on, relief channels off, C1 base)",
-                commit_dir.display(),
-                if self.rivers.is_some() { "rivers from its channel graph" } else { "no channel graph" },
-                planet_generators::erosion_layer::COAST_FADE_M
-            );
-            self.source = format!("{} + {}", self.source, self.erosion_note);
-            self.erosion =
-                Some(planet_generators::height_fields::ErosionSwitch { relief: None, layer: Arc::new(layer), sea_level_m, channels: None });
-            return Ok(self);
+            return self.use_commit(&commit_dir, world.clone(), &def, seed);
         }
         let (layer, manifest, shape) =
             planet_cache::layer_tiles::StoreLayer::open_recorded(&dir, world.clone(), &defaults, over, LAYER_CACHE_TILES)
@@ -1053,6 +1106,33 @@ impl WorldTerrain {
         self.field_ns.fetch_add(spent, std::sync::atomic::Ordering::Relaxed);
         built
     }
+}
+
+/// A rectangle of lattice nodes: `(i0, j0, w, h)`.
+pub(crate) type NodeRect = (u32, u32, usize, usize);
+
+/// The face and the node rectangle `(i0, j0, w, h)` of the lattice a fixture commit needs exact: the tiles with their halo and one tile of margin, widened by the nodes the C1 read of the last local cell needs (3 before, 4
+/// after), clamped to the face. The commit's tiles are `(face, ti, tj)` keys of one face.
+pub(crate) fn fixture_rectangle(
+    spec: &planet_cache::l_writer::CommitSpec,
+    tiles: impl Iterator<Item = (u8, u32, u32)> + Clone,
+) -> Result<(Face, NodeRect), String> {
+    let first = tiles.clone().next().ok_or("the commit holds no tile")?;
+    if tiles.clone().any(|k| k.0 != first.0) {
+        return Err("the fixture commit spans more than one face".into());
+    }
+    if spec.res == 0 || !spec.cells.is_multiple_of(spec.res) || spec.cells / spec.res == 0 {
+        return Err(format!("the commit's {} local cells are not a whole number of nodes of its {} cells", spec.cells, spec.res));
+    }
+    let per_node = i64::from(spec.cells / spec.res);
+    let (tile, halo) = (i64::from(spec.tile), i64::from(spec.halo));
+    let (ti0, ti1) = (tiles.clone().map(|k| k.1).min().expect("a tile"), tiles.clone().map(|k| k.1).max().expect("a tile"));
+    let (tj0, tj1) = (tiles.clone().map(|k| k.2).min().expect("a tile"), tiles.map(|k| k.2).max().expect("a tile"));
+    let lo = |t: u32| (i64::from(t) * tile - halo - tile).div_euclid(per_node) - 3;
+    let hi = |t: u32| ((i64::from(t) + 1) * tile + halo + tile).div_euclid(per_node) + 4;
+    let (i0, i1) = (lo(ti0).max(0), hi(ti1).min(i64::from(spec.res)));
+    let (j0, j1) = (lo(tj0).max(0), hi(tj1).min(i64::from(spec.res)));
+    Ok((Face(first.0), (i0 as u32, j0 as u32, (i1 - i0 + 1) as usize, (j1 - j0 + 1) as usize)))
 }
 
 /// Reject what a world-selected terrain run cannot do, before any GPU work (GEN-018). `--world` and `--global-res` belong to

@@ -32,7 +32,7 @@ fn run_stamp(smoke: bool) -> String {
 
 /// Whether `--scene NAME` names a lit perf scene.
 pub fn is_lit_scene(name: &str) -> bool {
-    name == "lit"
+    name == "lit" || crate::riverperf::is_river_scene(name)
 }
 
 /// Waves move with the clock: a flight's frame k is drawn at `WATER_T0 + k / 60` s.
@@ -52,6 +52,19 @@ pub(crate) struct LitSetup {
     /// The `ground` table of an explicit `--look` file (curves, coefficients, patch, detail strength), applied to every lit plan; none without one, so the
     /// scenes the baselines were measured with are unchanged.
     ground_file: Option<planet_frame::look::file::GroundLook>,
+    /// What the river plans of a run cost and carried (worlds with a river source only; nothing is counted without one).
+    pub(crate) river: RiverCounters,
+}
+
+/// The river plans of a run (REND-062): the CPU time of each, the nodes they carried and dropped, the reader's cache.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct RiverCounters {
+    pub plans: u64,
+    pub plan_ns_total: u64,
+    pub plan_ns_max: u64,
+    pub nodes_max: usize,
+    pub dropped_max: u32,
+    pub reader_peak_bytes: usize,
 }
 
 /// `lit` with the ground look of the file named by `--look` (VIEW-060's `File` choice at the natural strength): its curves, octave coefficients, patch and detail
@@ -85,6 +98,7 @@ impl LitSetup {
             has_water: world.has_water(),
             ground_detail: std::env::var("PLANET_GROUND_DETAIL").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0),
             ground_file: o.look.is_some().then_some(look.ground),
+            river: RiverCounters::default(),
         })
     }
 
@@ -152,6 +166,20 @@ impl LitSetup {
         })?;
         if let Some(w) = water {
             plan.water = Some(w.map_err(|e| e.to_string())?);
+        }
+        // The rivers of the frame (REND-062): timed, with the nodes carried and dropped and the reader's cache.
+        if let Some(src) = world.rivers() {
+            let t = Instant::now();
+            let rivers = crate::rivers::plan_frame_rivers(src, &plan)?;
+            let ns = u64::try_from(t.elapsed().as_nanos()).unwrap_or(u64::MAX);
+            let c = &mut self.river;
+            c.plans += 1;
+            c.plan_ns_total += ns;
+            c.plan_ns_max = c.plan_ns_max.max(ns);
+            c.nodes_max = c.nodes_max.max(rivers.nodes.len());
+            c.dropped_max = c.dropped_max.max(rivers.dropped);
+            c.reader_peak_bytes = c.reader_peak_bytes.max(src.reader().bytes());
+            plan.rivers = Some(rivers);
         }
         Ok(plan)
     }
@@ -566,8 +594,12 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
     use planet_perf::compare;
     let smoke = o.perf_smoke;
     crate::streamperf::check_options(o)?;
+    let river = crate::riverperf::is_river_scene(&o.scene);
+    if river {
+        crate::riverperf::check_options(o)?;
+    }
     let from_store = o.store.is_some();
-    let world = crate::streamperf::open_world(o, false)?.bounding_water();
+    let world = if river { crate::riverperf::open_world(out)? } else { crate::streamperf::open_world(o, false)? }.bounding_water();
     if !world.has_water() {
         return Err("the lit scenes measure the water pass, but this world has no ocean channel (a store made before GLOBAL_VERSION 4?): regenerate it with `generate --global-dir`".into());
     }
@@ -602,8 +634,12 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
     let mut setup = LitSetup::new(o, &world, &lod)?;
     let is_sea = |d: planet_core::Vec3| carries_sea(&world, d);
     let flight_frames = if smoke && !o.given.contains("--flight-frames") { 4 } else { o.flight_frames };
-    let mut views = lit_views(radius_m, aspect, field.as_ref(), setup.level_m, &is_sea, flight_frames)?;
-    if o.views.is_some() {
+    let mut views = if river {
+        crate::riverperf::views(&world, field.as_ref(), radius_m, setup.level_m, aspect, flight_frames.max(if smoke { 4 } else { 240 }))?
+    } else {
+        lit_views(radius_m, aspect, field.as_ref(), setup.level_m, &is_sea, flight_frames)?
+    };
+    if o.views.is_some() && !river {
         views.extend(planet_frame::litscenes::ground_views(radius_m, aspect, field.as_ref()));
     }
     if let Some(names) = &o.views {
@@ -666,8 +702,14 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
                 // Both settings of the shore filter, the look's default first (ATMO-017; the inspection of the gate).
                 let default = setup.look.water.shore_filter;
                 crate::stall::phase_mark_owned(format!("{path} flight start"));
+                setup.river = RiverCounters::default();
                 results.push(measure_flight(&rig, &mut r, &mut setup, view, &path, out)?);
                 crate::stall::phase_mark_owned(format!("{path} flight end"));
+                if river {
+                    // The river flights run once (the shore filter is the water scenes' inspection) and report their river plans.
+                    crate::riverperf::report(&setup.river, out)?;
+                    continue;
+                }
                 let other = if default == 0.0 { 1.0 } else { 0.0 };
                 setup.look.water.shore_filter = other;
                 let off_path = format!("{path}@filter{}", other as u32);
@@ -685,7 +727,11 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
     let throttled: Vec<String> = all_reports.iter().filter(|r| crate::run_throttled(r)).map(|r| r.path_name.clone()).collect();
     let noisy: Vec<(String, f64)> = results.iter().filter_map(|r| r.noisy.map(|n| (r.path.clone(), n))).collect();
     let mut validity = if smoke { planet_perf::gate::Validity::default() } else { planet_perf::gate::validity(&throttled, &noisy) };
-    if !from_store {
+    if river {
+        validity
+            .reasons
+            .push("the base is the in-memory fixture of the G-RT scene: G-RT on it is PROVISIONAL (no base store reads)".to_string());
+    } else if !from_store {
         validity.reasons.push(format!("the bake is {source}: the lit budgets are judged over the production store only"));
     }
     let verdict = planet_perf::validity::SessionVerdict::assess(
