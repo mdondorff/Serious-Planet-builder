@@ -3,5 +3,4 @@
 explorer | pt
 crusader | sonnet-crusader
 spikes | sonnet-spikes
-bulldozer | bulldozer
 architect | opus-architect

@@ -1,6 +1,6 @@
 # Status
 
-Forward state only (owner, 2026-10-16): open owner items, the current queue's open items, the current unanswered stop report, tracked items and quarantines. History goes to the log (`cargo xtask log`). When a change is archived the coder deletes its queue item's text (the log line is the record); when the architect answers a stop report it deletes it. A Tracked entry has at most 3 lines; a finished one is deleted (ADR 0075). Cap: 15 KB. Earlier states: `docs/archive/M4/status-at-m4-acceptance.md`, `docs/archive/M6/status-at-m6-close.md`. M8 closed 2026-10-30: `docs/milestones/M8-report.md`. New requirement IDs, ADR and SPIKE numbers are reserved through the planner (2026-10-30).
+Forward state only (owner, 2026-10-16): open owner items, the current queue's open items, the current unanswered stop report, tracked items and quarantines. History goes to the log (`cargo xtask log`). When a change is archived the coder deletes its queue item's text (the log line is the record); when the architect answers a stop report it deletes it. A Tracked entry has at most 3 lines; a finished one is deleted (ADR 0075). Cap: 15 KB. Earlier states: `docs/archive/M4/status-at-m4-acceptance.md`, `docs/archive/M6/status-at-m6-close.md`. M8 closed 2026-10-30: `docs/milestones/M8-report.md`. New requirement IDs, ADR and SPIKE numbers are reserved through the lead (ADR 0120).
 
 ## Waiting for the owner
 - **For M9 planning**: owner test 2026-10-27 groups E (edits on top as default, erosion keeping mass), F and G scope, the 1 m / 500 m exception (`docs/milestones/M8/owner-test-2026-10-27/README.md`); where edits sit relative to M9's erosion (D3: under the erosion by default).
@@ -13,43 +13,18 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 - **ADR 0110 acceptance** gates item 15 PR 5b (it retires ADR 0101 point 3); CON-08: resolved by constitution v1.7 (ADR 0116, #1335). ADRs 0110-0115: architect's text pass in P0, then owner acceptance.
 - **Optional, when convenient:** the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); excluding the repo's `target` folders from Windows Search indexing.
 
-Dormant (no near trigger; not asked now):
-- **Volcanoes** (SPIKE-102 D5; owner, 2026-11-05: after M9): young edifices as an additive layer (no re-bake); old eroded ones in the base with the next pass-1 re-bake. Trigger: terrain round 2.
-- **Isostatic rebound** (GEN-124, `openspec/changes/isostasy-rebound/proposal.md`): dropped from M9 (owner, 2026-11-05: no relief gain measured, +250-290 m elevation); a full flexural version (loads from deposition and belts, `Te` field) is the improvement candidate. Trigger: hypsometry tuning, rifts, escarpments, foreland basins.
-- **ADR 0045** (bodies, bake resolution, storage budget): proposed. Trigger: multi-body work.
-- **Region keep-inside** (`openspec/changes/region-mode1`): soft influence for Cities, not a hard clip (owner, 2026-10-21, Q8). Trigger: Cities.
-- **Global authoring preview** (owner, 2026-10-31): a coarse whole-planet preview of relief and landforms from the inputs, before the bake, as the step before detailed editing; not runtime. SPIKE-69 rates its k-sources for this. Trigger: after M9's bake, or when SPIKE-69 shows a pre-bake source.
-- **Coarse-first refinement of an edit** (owner, 2026-10-20): parked. Trigger: a brush case of the edit-latency scene that misses its budget.
+Dormant items moved to `docs/parking.md` (2026-11-12).
 
-## Queue (2026-11-10)
-| # | Step | Lane |
+## Queue (2026-11-12, milestone P1: `docs/milestones/P1.md`)
+Every row names an exit item (ADR 0120). Everything else is in `docs/parking.md`.
+| Exit | Step | Lane |
 |---|---|---|
-| P0 (to 11-13) | Finished work only: each lane archives its finished changes; read-only repo audit (no change before the owner's yes); this refresh and the worktree inventory | all, spikes, bulldozer |
-| CP1 (about 11-20) | G-LOCAL first and the gate re-measure (spikes); item 15: bake writer, then the L read behind `--erosion` (crusader); GEN-166 f32 rounds, then one k=4 pair (explorer) | per lane |
-| CP2 (about 12-01) | Rivers and lakes, G-RT frame time, the dam brief; then the gate (`docs/briefings/terrain-prototype.md`) | per lane |
-| Perf | Machine ready (preflight OK 2026-11-07): REND-052 verdicts, ground-detail and channel-read cost; TEST-099 waits for a perf authorisation; a current store first (MESH_VERSION 11) | bulldozer |
-| Store | All stores on disk refused by keys since #1218/#1225 (read-only references); in-memory `--world` runs only until a new store | all |
-| Audit batch C (approved by the owner 2026-11-10; queued 2026-11-12) | 72 open changes and 57 design/tasks files: a read-only table (finished changes: spec delta synced, tests active; archivable design/tasks files) in a docs PR; the architect syncs specs from it; nobody archives before | spikes, due 2026-11-13; architect |
-| Audit batch E | Waits on the owner's list (nothing to run) | owner |
-| Start surface 1: band slope cap (GEN-179, merged #1430, off) | Sweep done (c=1 meets depth, 9-12 % share); D117: c=1 not recommended as built (R1h keeps 1/4 of its 3 km relief); cap stays off until the owner's look call on previews | explorer, previews next |
-| Start surface 2: coast-plain tilt | Regional gradient toward the sea added to e0; value from a probe in the PR (smallest that drains the R3 plains); own switch, off by default | spikes (probe) then explorer, 2026-11-16 |
-| Start surface 3: monotone plateau | Plateau uplift monotone from rim to interior (smoothstep of the edge distance); own switch, off by default | explorer, 2026-11-17 |
-| SPIKE-111: band relief from a channel tree, candidate C (D120) | A, A+B read (#1439): relief kept, drain like the cap, look synthetic; C: relief from the distance to a tree grown over e0 and its order; D111 bars, relief kept, cost per sample, crops plus a low-sun oblique; 1.5 days; no band switch-on until C is read | spikes, 2026-11-14 |
-| K7 continuity 1 (ADR 0119, architect D119, 2026-11-12) | Spec text GEN-182: K7 layout parameters (tile size, origin, alignment as a pure function of face, k, profile; halo 128) as key inputs; region edges and coasts; the cube-face edge rides with REND-063 | explorer, 2026-11-18 |
-| K7 continuity 5 | Trace the 0.31 m cell to its K7 step (2 h, report before G-SEAM) | spikes, 2026-11-14 |
-| K7 continuity 2 | TEST-130 tier B: K7 on one layout at 1, 3 and 8 threads and two schedules is bit-identical | explorer, 2026-11-19 |
-| K7 continuity 3 | Alternate-layout diagnostic (cells, p99, max, distance to seam) as a reported xtask output on K7 changes (BUILD-052) | crusader, 2026-11-19 |
-| K7 continuity 4 | G-SEAM reading on the four terrain types (fixture by the lane, reported with the numbers) | spikes, 2026-11-20 |
-| ADR 0108 audit (D124, 2026-11-12) | Table in docs/design/ of every Earth-specific value in continents.rs, global.rs, classes.rs, the band, the carve, the rounds: name, default, unit, source, target block; radius-scaling values marked; 0.5 day | spikes, 2026-11-14 |
-| ADR 0108 review rule | From now no new Earth literal in generator code (numerics-reviewer and spec-guardian prompts updated in this PR); the valley-network design takes its constants as parameters | all lanes |
-| ADR 0108 lift (GEN-184 reserved) | `BasePreset` block in the world definition (continents, plates, belts, coast, plateau, class rules, band); radius from the world definition in ClassSource; Earth preset reproduces today's bits (tier A); folded into the keys; after the start-surface PRs | explorer, after PR 3 |
-| ADR 0108 off-Earth presets | Scorecard presets responding in the expected direction (ADR 0108 point 6), after the lift | explorer / spikes |
-| Start surface bars | With all switches on: z0 basins over 30 cells at most 7 % of land, depth p95 at most 270 m on R1h/R3a/R3b; then 45 degree runs, 5.001 m cells, G-PROFILE rises go to the architect; switch-on waits for the owner's look approval on engine frames | explorer, spikes |
-| GEN-175 follow-ups (architect, 2026-11-12) | `region_bake` takes every epsilon from `WorldPrecision` (change/region-precision, PR #1433, refusal of a world with another epsilon; two format questions go to the owner with ADR 0117); narrowed-fill refusal; remove `PlanParams::standard` | crusader / explorer |
-| River look frames (owner via architect, 2026-11-12) | After the G-RT flight scene: low-altitude frames of real rivers over R3a with the scale bar, for the owner's river look review (the straight river; shape below H1 resolution is the architect's call after the frames) | crusader, after the flight scene |
-| A3 12.4 P1 | Thermal-dam investigation (after the k=2 dam count); compaction peak, temp disk and crash-safe replacement tests (G-STORE extension); a smaller and a larger body (G-SCALE) | explorer, after GEN-175 (due 2026-11-18) |
-| A3 12.4 P1 | Editor commit readiness, supersession, undo/replay with basin split/merge, latency of three levels | crusader, after ADR 0117 is accepted |
-| A3 12.4 P1 | Per-round convergence indicators | spikes, after SPIKE-109 (due 2026-11-18) |
+| E1 | River-frames scene PR (in flight); then fly one `bake-region` commit in the viewer through the production path, lakes and rivers drawn, defect labelled; report the gap to a flyable stored region first | crusader |
+| E2 | G-LOCAL repeated on the f32 rounds (R3a, R1), ledger rows with a verdict | spikes, after SPIKE-111 |
+| E4 | Owner flight of the E1 region; sign-off line in `docs/milestones/P1.md` | owner, after E1 |
+| E5 | `cargo xtask plan` (ADR 0120 point 5) | explorer |
+
+Finishing (changeover, 2026-11-12; no successor work): SPIKE-111 ends its time-box with the report (spikes); PR #1449 parked as draft (explorer).
 
 ## Tracked
 - **River at a cube face edge** (REND-059, 2026-11-12): the store holds a segment crossing a face edge as two runs with a gap of about the H1 ratio in cells (a dry notch); the burn has the same dam, so drawn river and burned trench agree; the charts shear (x1.22 mid-edge, x1.41 at the corner). Fix (B): overlapping runs read by drawing and burn, width in metres through each face's metric: a store format change for the owner, with the face-seam work before the planet bake (REND-063 reserved).

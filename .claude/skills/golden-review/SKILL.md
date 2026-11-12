@@ -27,7 +27,7 @@ Policy and thresholds: `docs/adr/0017-golden-review-policy.md`; goldens after M5
    **Rounding on lit, sky and water views (ADR 0096):** `AUTO-R` covers every class: at most 32 changed pixels and max channel delta 1 on that adapter, same driver. For a lit, sky or water view
    the report also compares the candidate with the **anchor**: that golden's file at the latest commit with an `Owner-approved:` trailer (else its first commit); the numbers against both golden and anchor
    are in the report's Anchor column. Drift beyond rounding from the anchor (above 32 px or delta 1), or no anchor, escalates ("drift from the owner's bless"). Every lit, sky or water auto-bless goes into
-   bulldozer's next summary to the owner, with both sets of numbers. Everything else is unchanged: first goldens, driver changes, size changes, larger changes and look changes outside the look path escalate.
+   lead's next digest to the owner, with both sets of numbers. Everything else is unchanged: first goldens, driver changes, size changes, larger changes and look changes outside the look path escalate.
    Look at every enlarged triptych and crop yourself; if a picture contradicts its verdict (a hole, a seam, a colour that should not exist), treat it as `ESCALATE`.
    An `AUTO-L` needs the same oracle check as an `AUTO-E` (commit it as `bless(auto): <tests> [L]`).
    An `AUTO-E` also needs, per ADR 0017 and ADR 0061 point 3: at least one adapter with a candidate, the declared bound tests green in the same run (enforced by the tool from the `--tests` reports), the test's own oracles passing on the candidate frame (no holes, coverage, colour
