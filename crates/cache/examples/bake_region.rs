@@ -115,10 +115,13 @@ fn main() {
         res: LATTICE as u32,
         base_id: 0x6c61_7474_6963_6531 ^ (LATTICE as u64),
         inputs_id: class_inputs_key(&def, seed),
+        // Earth's span (the default world's base heights plus the profile's largest uplift): its flood epsilon is the profile's, so its heights are the ones they were (the keys change: the bounds are keyed).
+        height_bounds: (-11_000.0, 9_000.0),
         keep_channels: false,
     };
     std::fs::create_dir_all(&out).expect("the output folder");
     let (commit, report) = bake_region(&world, &spec, &base, &climate, &out).unwrap_or_else(|e| panic!("the region bake: {e}"));
+    println!("{}", report.precision_mark);
     println!(
         "MARK region bake: window {:?}, H1 {} channel cells in {} segments, {} lakes, {} tiles, commit {:016x}, graph blocks {} ({:.1} s)",
         report.window,

@@ -1,0 +1,1 @@
+- 2026-11-12 **region-precision**: region_bake takes every epsilon and the f32 choice from WorldPrecision (GEN-177, GEN-175); a 60 km region solves; committing a world whose epsilon is not the profile's is refused until the commit spec records the epsilon (format question).
