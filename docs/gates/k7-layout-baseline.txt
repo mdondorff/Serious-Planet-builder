@@ -1,0 +1,8 @@
+LAYOUTS | canonical tile 64 halo 24 (9 land tiles) | alternative tile 128 halo 24 (4 land tiles)
+LAYOUT | all cells | whole | cells 36864 | differ in bits 9630 (26.12 %) | over 0.25 m 99 | over 1 m 51 | p50 0.0000 p99 0.0057 max 4.1050 m
+LAYOUT | line cells | whole | cells 4145 | differ in bits 2 (0.05 %) | over 0.25 m 0 | over 1 m 0 | p50 0.0000 p99 0.0000 max 0.0370 m
+LAYOUT | non-line cells | whole | cells 32719 | differ in bits 9628 (29.43 %) | over 0.25 m 99 | over 1 m 51 | p50 0.0000 p99 0.0075 max 4.1050 m
+LAYOUT | all cells | 0-7 | cells 8640 | differ in bits 3143 (36.38 %) | over 0.25 m 99 | over 1 m 51 | p50 0.0000 p99 0.3917 max 4.1050 m
+LAYOUT | all cells | 8-31 | cells 19008 | differ in bits 5404 (28.43 %) | over 0.25 m 0 | over 1 m 0 | p50 0.0000 p99 0.0002 max 0.0195 m
+LAYOUT | all cells | 32-127 | cells 9216 | differ in bits 1083 (11.75 %) | over 0.25 m 0 | over 1 m 0 | p50 0.0000 p99 0.0000 max 0.0000 m
+LAYOUT | all cells | 128+ | cells 0 | differ in bits 0 (0.00 %) | over 0.25 m 0 | over 1 m 0 | p50 0.0000 p99 0.0000 max 0.0000 m

@@ -12,7 +12,7 @@ use planet_generators::bake::channel_graph::{channels_from_graph, ChannelGraph};
 use planet_generators::bake::face::FaceSpec;
 use planet_generators::bake::flood::priority_flood_with;
 use planet_generators::bake::hydro::{hydrology, HydroParams};
-use planet_generators::bake::k7::{K7Params, RegionField};
+use planet_generators::bake::k7::{k7_tile, K7Params, RegionField};
 use planet_generators::bake::lakes::lakes_from_hydro;
 use planet_generators::bake::metric::Metric;
 use planet_generators::bake::precision::{WorldPrecision, EPSILON_MAX_M};
@@ -24,7 +24,7 @@ use planet_generators::bake::Grid;
 use crate::basin_table::BasinSpec;
 use crate::global_store::GlobalWorld;
 use crate::graph_store::GraphSpec;
-use crate::l_writer::{bake_l, Commit, GraphInput, LBake, MemoryFeed};
+use crate::l_writer::{bake_l, ChannelFeed, Commit, GraphInput, LBake, MemoryFeed};
 use crate::layer_l::LTileSpec;
 
 /// Regional cells from a face edge within which a region is refused.
@@ -237,6 +237,51 @@ pub fn solve_region(spec: &RegionSpec, base: &(dyn Fn(Vec3) -> f64 + Sync)) -> R
     Ok(RegionSolve { face_spec, grid, outlet, zb, zs, stream, ri0, rj0, rw, rh, precision })
 }
 
+/// The front half of the bake, which the tile layout does not enter: the regional solve, H1 on the solved surface, the lakes, the channel graph and its channels.
+pub struct RegionFront {
+    pub solve: RegionSolve,
+    pub regional_field: RegionField,
+    pub hydro_stats: planet_generators::bake::hydro::HydroStats,
+    pub lakes: planet_generators::bake::lakes::Lakes,
+    pub graph: ChannelGraph,
+    pub segment_ids: Vec<u64>,
+    pub feed: MemoryFeed,
+}
+
+/// Runs the stages of [`bake_region`] before the writer: the same code for the bake and for the layout report (BUILD-052).
+pub fn region_front(spec: &RegionSpec, base: &(dyn Fn(Vec3) -> f64 + Sync), climate: Climate<'_>) -> Result<RegionFront, String> {
+    let solve = solve_region(spec, base)?;
+    let RegionSolve { face_spec, grid, outlet, zb, zs, stream, ri0, rj0, rw, rh, precision } = &solve;
+    let (ri0, rj0, rw, rh, stream) = (*ri0, *rj0, *rw, *rh, *stream);
+    let n = rw * rh;
+    let dir_of = |c: usize| face_spec.halo_direction((ri0 + c % rw) as i64, (rj0 + c / rw) as i64);
+    let change: Vec<f32> = zs.iter().zip(zb).map(|(s, b)| (s - b) as f32).collect();
+    let regional_field = RegionField::new(spec.face, spec.regional, (ri0 as i64, rj0 as i64), rw, rh, change);
+    let (mut weight, mut runoff, mut evap) = (vec![1.0f32; n], vec![0.0f32; n], vec![0.0f32; n]);
+    for c in (0..n).filter(|&c| zs[c] > 0.0) {
+        let (ro, ev, w) = climate(dir_of(c));
+        runoff[c] = ro as f32;
+        evap[c] = ev as f32;
+        weight[c] = w as f32;
+    }
+    let routing = route_rules(grid, zs, outlet, precision.epsilon_w, stream, 0.0, Some(&weight), RoundRules::ROUND);
+    let filled = priority_flood_with(grid, zs, outlet, precision.epsilon_w, true);
+    let hydro = hydrology(grid, zs, &filled, &routing, outlet, Some(&runoff), Some(&evap), &HydroParams::default());
+    let lakes = lakes_from_hydro(grid, &routing, &hydro, zs);
+    let graph = ChannelGraph::from_hydro(grid, &routing, &hydro, zs);
+    let segment_ids: Vec<u64> = hydro.segments.iter().map(|s| s.id).collect();
+    let to_local = |c: u32| {
+        let c = c as usize;
+        (
+            (LOCAL_PER_REGIONAL * (ri0 + c % rw)) as f64 + (LOCAL_PER_REGIONAL as f64 - 1.0) / 2.0,
+            (LOCAL_PER_REGIONAL * (rj0 + c / rw)) as f64 + (LOCAL_PER_REGIONAL as f64 - 1.0) / 2.0,
+        )
+    };
+    let feed = MemoryFeed { face: spec.face, channels: channels_from_graph(&graph, grid, &to_local), discharge: true };
+    let _ = rh;
+    Ok(RegionFront { solve, regional_field, hydro_stats: hydro.stats.clone(), lakes, graph, segment_ids, feed })
+}
+
 /// Bakes the region into `dir` as a commit with a channel graph. `base` is the base height (the bake's `B`), `climate` the runoff of the land.
 pub fn bake_region(
     world: &GlobalWorld,
@@ -255,35 +300,9 @@ pub fn bake_region(
             precision.radius, precision.epsilon_w, k7_epsilon
         ));
     }
-    let RegionSolve { face_spec, grid, outlet, zb, zs, stream, ri0, rj0, rw, rh, precision } = solve_region(spec, base)?;
-    let n = rw * rh;
-    let dir_of = |c: usize| face_spec.halo_direction((ri0 + c % rw) as i64, (rj0 + c / rw) as i64);
-    let change: Vec<f32> = zs.iter().zip(&zb).map(|(s, b)| (s - b) as f32).collect();
-    let regional_field = RegionField::new(spec.face, spec.regional, (ri0 as i64, rj0 as i64), rw, rh, change);
+    let RegionFront { solve, regional_field, hydro_stats, lakes, graph, segment_ids, feed } = region_front(spec, base, climate)?;
+    let RegionSolve { grid, ri0, rj0, rw, rh, precision, .. } = solve;
     let regional = |d: Vec3| regional_field.at(d);
-
-    // H1 on the solved surface: the runoff in m/s (without it Q is an area), the weight of the discharge.
-    let (mut weight, mut runoff, mut evap) = (vec![1.0f32; n], vec![0.0f32; n], vec![0.0f32; n]);
-    for c in (0..n).filter(|&c| zs[c] > 0.0) {
-        let (ro, ev, w) = climate(dir_of(c));
-        runoff[c] = ro as f32;
-        evap[c] = ev as f32;
-        weight[c] = w as f32;
-    }
-    let routing = route_rules(&grid, &zs, &outlet, precision.epsilon_w, stream, 0.0, Some(&weight), RoundRules::ROUND);
-    let filled = priority_flood_with(&grid, &zs, &outlet, precision.epsilon_w, true);
-    let hydro = hydrology(&grid, &zs, &filled, &routing, &outlet, Some(&runoff), Some(&evap), &HydroParams::default());
-    let lakes = lakes_from_hydro(&grid, &routing, &hydro, &zs);
-    let graph = ChannelGraph::from_hydro(&grid, &routing, &hydro, &zs);
-    let segment_ids: Vec<u64> = hydro.segments.iter().map(|s| s.id).collect();
-    let to_local = |c: u32| {
-        let c = c as usize;
-        (
-            (LOCAL_PER_REGIONAL * (ri0 + c % rw)) as f64 + (LOCAL_PER_REGIONAL as f64 - 1.0) / 2.0,
-            (LOCAL_PER_REGIONAL * (rj0 + c / rw)) as f64 + (LOCAL_PER_REGIONAL as f64 - 1.0) / 2.0,
-        )
-    };
-    let feed = MemoryFeed { face: spec.face, channels: channels_from_graph(&graph, &grid, &to_local), discharge: true };
 
     let local = spec.local();
     let basin = BasinSpec {
@@ -333,8 +352,8 @@ pub fn bake_region(
     let commit = bake_l(dir, &b, &tiles)?;
     let report = RegionReport {
         window: (rw, rh),
-        channel_cells: hydro.stats.channel_cells,
-        segments: hydro.stats.segments,
+        channel_cells: hydro_stats.channel_cells,
+        segments: hydro_stats.segments,
         lakes: lakes.lakes.len(),
         tiles: tiles.len(),
         precision_mark: precision.mark_line(),
@@ -343,27 +362,159 @@ pub fn bake_region(
     Ok((commit, report))
 }
 
+/// One row of the layout report (BUILD-052): the cells of a set, and the difference of K7's height between the two layouts over them, in metres.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LayoutRow {
+    pub set: &'static str,
+    pub band: &'static str,
+    pub cells: usize,
+    pub differ: usize,
+    pub p50: f64,
+    pub p99: f64,
+    pub max: f64,
+    pub over_025: usize,
+    pub over_1: usize,
+}
+
+impl LayoutRow {
+    /// The row as one report line.
+    pub fn line(&self) -> String {
+        let pct = if self.cells == 0 { 0.0 } else { 100.0 * self.differ as f64 / self.cells as f64 };
+        format!(
+            "LAYOUT | {} | {} | cells {} | differ in bits {} ({pct:.2} %) | over 0.25 m {} | over 1 m {} | p50 {:.4} p99 {:.4} max {:.4} m",
+            self.set, self.band, self.cells, self.differ, self.over_025, self.over_1, self.p50, self.p99, self.max
+        )
+    }
+}
+
+/// The difference between two tile layouts of the same region (BUILD-052).
+#[derive(Clone, Debug, PartialEq)]
+pub struct LayoutDiff {
+    /// `(tile, halo)` of the canonical layout and of the alternative.
+    pub layouts: [(usize, usize); 2],
+    /// Land tiles baked in each layout.
+    pub tiles: [usize; 2],
+    pub rows: Vec<LayoutRow>,
+}
+
+/// Distance bands from a seam, in cells: `[lo, hi)`.
+const SEAM_BANDS: [(&str, usize, usize); 4] = [("0-7", 0, 8), ("8-31", 8, 32), ("32-127", 32, 128), ("128+", 128, usize::MAX)];
+
+fn percentile(sorted: &[f64], p: usize) -> f64 {
+    if sorted.is_empty() {
+        0.0
+    } else {
+        sorted[(p * sorted.len()).div_ceil(100).saturating_sub(1).min(sorted.len() - 1)]
+    }
+}
+
+fn row(set: &'static str, band: &'static str, a: &[f64], b: &[f64], pick: impl Fn(usize) -> bool) -> LayoutRow {
+    let mut d: Vec<f64> = Vec::new();
+    let mut differ = 0;
+    for k in (0..a.len()).filter(|&k| pick(k)) {
+        differ += usize::from(a[k].to_bits() != b[k].to_bits());
+        d.push((a[k] - b[k]).abs());
+    }
+    d.sort_by(f64::total_cmp);
+    LayoutRow {
+        set,
+        band,
+        cells: d.len(),
+        differ,
+        p50: percentile(&d, 50),
+        p99: percentile(&d, 99),
+        max: d.last().copied().unwrap_or(0.0),
+        over_025: d.iter().filter(|&&x| x > 0.25).count(),
+        over_1: d.iter().filter(|&&x| x > 1.0).count(),
+    }
+}
+
+/// K7's heights of the cells of the region in one layout (unquantised `z`, row-major over the region's local rectangle; NaN where no land tile of the layout covers a cell), and the land tiles baked.
+fn k7_layout(spec: &RegionSpec, front: &RegionFront, base: &(dyn Fn(Vec3) -> f64 + Sync)) -> Result<(Vec<f64>, usize), String> {
+    let l = LOCAL_PER_REGIONAL;
+    let (x0, x1, y0, y1) = (spec.region.0 * l, (spec.region.1 + 1) * l, spec.region.2 * l, (spec.region.3 + 1) * l);
+    let w = x1 - x0;
+    let mut out = vec![f64::NAN; w * (y1 - y0)];
+    let grid = TileGrid { cells: spec.local(), tile: spec.tile, halo: spec.halo, radius_m: spec.radius_m };
+    let regional = |d: Vec3| front.regional_field.at(d);
+    let surface = |d: Vec3| base(d) + regional(d);
+    let k7 = K7Params::standard(spec.seed, 0.0);
+    let ids: Vec<TileId> = spec.tiles().into_iter().filter(|&id| tile_has_land(&grid, id, &surface, 0.0, 8)).collect();
+    for &id in &ids {
+        let (t, h, wn) = (spec.tile as i64, spec.halo as i64, grid.window());
+        let (i0, j0) = (i64::from(id.ti) * t - h, i64::from(id.tj) * t - h);
+        let channels = front.feed.channels_near(id.face, i0, j0, wn as i64);
+        let r = k7_tile(&grid, id, base, &regional, &channels, &k7, spec.threads);
+        for cj in 0..spec.tile {
+            for ci in 0..spec.tile {
+                let (gi, gj) = (id.ti as usize * spec.tile + ci, id.tj as usize * spec.tile + cj);
+                if (x0..x1).contains(&gi) && (y0..y1).contains(&gj) {
+                    out[(gj - y0) * w + (gi - x0)] = r.z[(cj + spec.halo) * wn + ci + spec.halo];
+                }
+            }
+        }
+    }
+    Ok((out, ids.len()))
+}
+
+/// The difference in K7's height between the layout of `spec` and the layout `alt = (tile, halo)` of the same region, over the cells both layouts bake (BUILD-052). The heights are K7's own (unquantised); the seam
+/// is the tile boundaries only one of the layouts has (all boundaries when they are the same lines).
+pub fn layout_difference(
+    spec: &RegionSpec,
+    base: &(dyn Fn(Vec3) -> f64 + Sync),
+    climate: Climate<'_>,
+    alt: (usize, usize),
+) -> Result<LayoutDiff, String> {
+    let other = RegionSpec { tile: alt.0, halo: alt.1, ..*spec };
+    other.check()?;
+    let front = region_front(spec, base, climate)?;
+    let (za, na) = k7_layout(spec, &front, base)?;
+    let (zb, nb) = k7_layout(&other, &front, base)?;
+    let l = LOCAL_PER_REGIONAL;
+    let (x0, x1, y0, y1) = (spec.region.0 * l, (spec.region.1 + 1) * l, spec.region.2 * l, (spec.region.3 + 1) * l);
+    let w = x1 - x0;
+    // The cells both layouts bake, as parallel lists.
+    let common: Vec<usize> = (0..za.len()).filter(|&k| !za[k].is_nan() && !zb[k].is_nan()).collect();
+    let (a, b): (Vec<f64>, Vec<f64>) = common.iter().map(|&k| (za[k], zb[k])).unzip();
+    // The seam lines (boundary `k` lies between cells `k - 1` and `k`), per axis: those of one layout only, else all.
+    let lines = |lo: usize, hi: usize| -> Vec<usize> {
+        let (ta, tb) = (spec.tile, other.tile);
+        let mut only: Vec<usize> = (lo..=hi).filter(|&k| (k % ta == 0) != (k % tb == 0)).collect();
+        if only.is_empty() {
+            only = (lo..=hi).filter(|&k| k % ta == 0).collect();
+        }
+        only
+    };
+    let (sx, sy) = (lines(x0, x1), lines(y0, y1));
+    let near = |v: usize, ls: &[usize]| ls.iter().map(|&k| if v >= k { v - k } else { k - 1 - v }).min().unwrap_or(usize::MAX);
+    let dist: Vec<usize> = common.iter().map(|&k| near(x0 + k % w, &sx).min(near(y0 + k / w, &sy))).collect();
+    let line: std::collections::HashSet<(i64, i64)> =
+        front.feed.channels.iter().flat_map(planet_generators::bake::k7::line_cells).collect();
+    let is_line: Vec<bool> = common.iter().map(|&k| line.contains(&((x0 + k % w) as i64, (y0 + k / w) as i64))).collect();
+    let mut rows = vec![
+        row("all cells", "whole", &a, &b, |_| true),
+        row("line cells", "whole", &a, &b, |k| is_line[k]),
+        row("non-line cells", "whole", &a, &b, |k| !is_line[k]),
+    ];
+    for (name, lo, hi) in SEAM_BANDS {
+        rows.push(row("all cells", name, &a, &b, |k| (lo..hi).contains(&dist[k])));
+    }
+    Ok(LayoutDiff { layouts: [(spec.tile, spec.halo), alt], tiles: [na, nb], rows })
+}
+
 /// The direction of a lattice vertex `(i, j)` of a face of `nodes` nodes an edge (the store lattice is vertex-based: vertex `k` lies at `2k/nodes - 1`).
 pub fn lattice_direction(face: Face, nodes: usize, i: usize, j: usize) -> Vec3 {
     face_to_direction(&TangentWarp, face, 2.0 * i as f64 / nodes as f64 - 1.0, 2.0 * j as f64 / nodes as f64 - 1.0)
 }
 
-/// The determinism fixture of the cross-OS manifest (BUILD-051): a small analytic face (a ridge that falls to the sea, constant runoff) baked
-/// to a commit with a channel graph at `threads` threads, and a 64-bit hash of every file the bake wrote (path and bytes, in path order).
-/// The manifest lines of one process hold the hash at one thread twice and at eight threads: a thread count or a repeat that changes a byte
-/// changes a line, and a platform whose float results differ changes the same line on one operating system against the other.
-pub fn determinism_fixture(threads: usize) -> Result<u64, String> {
-    use planet_world_def::WorldDefinition;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    const RADIUS_M: f64 = 6_371_000.0;
-    static N: AtomicUsize = AtomicUsize::new(0);
-    let world = GlobalWorld::from_definition(&WorldDefinition::single_planet(RADIUS_M, 3))
-        .map_err(|e| format!("the fixture world: {e:?}"))?
-        .with_block_limit(4);
-    let spec = RegionSpec {
+const FIXTURE_RADIUS_M: f64 = 6_371_000.0;
+
+/// The region of the fixture face of BUILD-051 and BUILD-052: 24 by 24 regional cells of face 2, tiles of 64 cells with a halo of 24.
+fn fixture_spec(threads: usize) -> RegionSpec {
+    RegionSpec {
         seed: 3,
         face: Face(2),
-        radius_m: RADIUS_M,
+        radius_m: FIXTURE_RADIUS_M,
         regional: 64,
         region: (16, 39, 16, 39),
         margin: 6,
@@ -376,7 +527,28 @@ pub fn determinism_fixture(threads: usize) -> Result<u64, String> {
         inputs_id: 11,
         height_bounds: (-11_000.0, 9_000.0),
         keep_channels: false,
-    };
+    }
+}
+
+/// The layout report of the fixture (BUILD-052): the fixture's layout (tile 64, halo 24) against the alternative of 128-cell tiles with a halo of 24 (a margin of 12 regional cells holds the larger tiles; K7's halo is at least 24 cells, GEN-169), at `threads` threads.
+pub fn layout_fixture(threads: usize) -> Result<LayoutDiff, String> {
+    let base = |d: Vec3| 500.0 - 2400.0 * (d.x - 0.1) + 120.0 * libm::sin(40.0 * d.z);
+    let climate = |_: Vec3| (1.0e-8, 0.0, 1.0);
+    layout_difference(&RegionSpec { margin: 12, ..fixture_spec(threads) }, &base, &climate, (128, 24))
+}
+
+/// The determinism fixture of the cross-OS manifest (BUILD-051): a small analytic face (a ridge that falls to the sea, constant runoff) baked
+/// to a commit with a channel graph at `threads` threads, and a 64-bit hash of every file the bake wrote (path and bytes, in path order).
+/// The manifest lines of one process hold the hash at one thread twice and at eight threads: a thread count or a repeat that changes a byte
+/// changes a line, and a platform whose float results differ changes the same line on one operating system against the other.
+pub fn determinism_fixture(threads: usize) -> Result<u64, String> {
+    use planet_world_def::WorldDefinition;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static N: AtomicUsize = AtomicUsize::new(0);
+    let world = GlobalWorld::from_definition(&WorldDefinition::single_planet(FIXTURE_RADIUS_M, 3))
+        .map_err(|e| format!("the fixture world: {e:?}"))?
+        .with_block_limit(4);
+    let spec = fixture_spec(threads);
     let base = |d: Vec3| 500.0 - 2400.0 * (d.x - 0.1) + 120.0 * libm::sin(40.0 * d.z);
     let climate = |_: Vec3| (1.0e-8, 0.0, 1.0);
     let dir = std::env::temp_dir().join(format!("planet-det-fixture-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));

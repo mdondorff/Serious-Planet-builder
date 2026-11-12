@@ -9,6 +9,7 @@ mod disk;
 mod gate;
 mod gates;
 mod heavy;
+mod k7layout;
 mod lanes;
 mod layering;
 mod logcmd;
@@ -43,6 +44,7 @@ const USAGE: &str = "cargo xtask <command>
   gate [--small] [--site frame-N]... [--paths DIR] [--store DIR]   the no-degradation gate (TEST-061 to TEST-063): the editor window over the real store, a scripted 400 m hill and the camera path of each capture site of the owner test (outputs under target/gate/), judged on frames over 100 ms, held-back tiles no edit reaches, horizon maps, caught panics and the step between levels; --small is the same counters on a generated world on the software adapter
   prepush              before every push to a PR branch: check, test fast, and test gpu when the diff against origin/main touches a golden-producing path (render, frame, shaders, generators, ...); prints each step's time and one verdict line (BUILD-016); refuses a working tree that differs from HEAD, since the push sends the commit (BUILD-037)
   layering             crate layering and GPU-free dependency check (CON-02)
+  k7-layout [--write-baseline]  the layout report of K7 (BUILD-052): the fixture's tile layout against an alternative, compared with docs/gates/k7-layout-baseline.txt; REVIEW above twice the baseline p99 or max; exit 0; prepush runs it when K7 files change
   spec-lint            trace IDs, tiers, requirement coverage (CON-16)
   log [--since YYYY-MM-DD] [--limit N]   the project log: fragments of docs/log.d/ and the entries of docs/log.md, newest first (BUILD-010)
   accept <milestone>   run milestone acceptance, e.g. M0; M4 also judges the perf logs of a streaming window (--logs DIR, default perf/logs) and refuses without a valid one
@@ -99,6 +101,7 @@ fn main() -> ExitCode {
         }
         Some("gate") => heavy::with(&format!("gate {}", args[1..].join(" ")), || gate::run_gate(&root, &args[1..])),
         Some("layering") => layering::run(&root),
+        Some("k7-layout") => heavy::with("k7-layout", || k7layout::run(&root, &args[1..])),
         Some("spec-lint") => speclint::run(&root),
         Some("log") => logcmd::run(&root, &args[1..]),
         Some("accept") => {
