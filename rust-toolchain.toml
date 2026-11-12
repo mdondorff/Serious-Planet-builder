@@ -1,0 +1,6 @@
+# The Rust toolchain is pinned (ADR 0114 point 6, condition 2 of the external review, 2026-11-11): one exact release for every machine and every CI job.
+# A change of the release is a deliberate PR that also changes `toolchain:` in .github/workflows/ci.yml (BUILD-050 checks they agree) and re-runs the determinism fixture (BUILD-051).
+[toolchain]
+channel = "1.99.0"
+profile = "minimal"
+components = ["clippy", "rustfmt"]
