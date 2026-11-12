@@ -190,7 +190,6 @@ pub fn bake_region(
         reroute_every: 5,
         round_rules: RoundRules::ROUND,
         round_f32: true,
-        pre_breach: Some(planet_generators::bake::breach::PreBreach::PROFILE),
         cell_metric: true,
         window_cut: true,
         ..CarveParams::default()
