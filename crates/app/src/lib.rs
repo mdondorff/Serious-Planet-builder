@@ -247,6 +247,8 @@ pub struct Options {
     pub poses: Option<PathBuf>,
     /// `--note TEXT`: a known defect and its cause, drawn above the pose label of every still of `capture-stills` (TEST-128).
     pub note: Option<String>,
+    /// `--caption TEXT`: a line for the caption of `capture-stills` (its `stills.txt`) only, not drawn on a still (TEST-128).
+    pub caption: Option<String>,
     /// `--commit DIR`: the commit of the new chain in DIR over the production base computed in memory, for the viewer and `capture-stills` (VIEW-069).
     pub commit: Option<PathBuf>,
     /// `--no-ui`: the editor window without the UI (VIEW-011).
@@ -446,6 +448,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         poses: None,
         note: None,
         commit: None,
+        caption: None,
         no_ui: false,
         edit: false,
         items: None,
@@ -556,6 +559,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--calibrate" => o.calibrate = true,
             "--poses" => o.poses = Some(PathBuf::from(it.next().ok_or("--poses needs a poses file")?)),
             "--note" => o.note = Some(it.next().ok_or("--note needs a text")?.clone()),
+            "--caption" => o.caption = Some(it.next().ok_or("--caption needs a text")?.clone()),
             "--commit" => o.commit = Some(PathBuf::from(it.next().ok_or("--commit needs the folder of a commit")?)),
             "--views" => {
                 o.views = Some(it.next().ok_or("--views needs a comma-separated list")?.split(',').map(|v| v.trim().to_string()).collect())
@@ -1094,8 +1098,8 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     {
         return Err("--poses applies to the scene `capture-stills` (and to `shadow-cost` and `shadow-layer1`)".into());
     }
-    if o.given.contains("--note") && !stills::is_stills_scene(&o.scene) {
-        return Err("--note applies to the scene `capture-stills`".into());
+    if (o.given.contains("--note") || o.given.contains("--caption")) && !stills::is_stills_scene(&o.scene) {
+        return Err("--note and --caption apply to the scene `capture-stills`".into());
     }
     check_commit_options(o)?;
     if stills::is_stills_scene(&o.scene) && o.given.contains("--flight-frames") {

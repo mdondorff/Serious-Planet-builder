@@ -12,12 +12,23 @@ use planet_generators::bake::k7::Channel;
 pub struct ReaderRiverSource {
     reader: Arc<RiverReader>,
     grid: RiverGrid,
+    /// The L tiles of the commit: a river is drawn only over them (REND-062; the graph's margin blocks lie over ground the commit did not carve).
+    tiles: std::collections::BTreeSet<(u8, u32, u32)>,
+    /// The lakes of the same commit: a river ends at their water (REND-065).
+    lakes: Option<Arc<planet_cache::lake_read::CommitLakes>>,
 }
 
 impl ReaderRiverSource {
     pub fn new(reader: Arc<RiverReader>) -> ReaderRiverSource {
         let (cells, tile, cell_m) = reader.grid_dims();
-        ReaderRiverSource { reader, grid: RiverGrid { cells, tile, cell_m } }
+        let tiles = reader.commit().tiles.keys().copied().collect();
+        ReaderRiverSource { reader, grid: RiverGrid { cells, tile, cell_m }, tiles, lakes: None }
+    }
+
+    /// The same source whose rivers end at the water of `lakes` (the same commit's, CON-22).
+    pub fn with_lakes(mut self, lakes: Arc<planet_cache::lake_read::CommitLakes>) -> ReaderRiverSource {
+        self.lakes = Some(lakes);
+        self
     }
 
     /// The reader (its cache's bytes and decodes are the report of a flight).
@@ -37,6 +48,17 @@ impl RiverSource for ReaderRiverSource {
 
     fn id(&self) -> u64 {
         self.reader.commit_id()
+    }
+
+    fn has_tile(&self, face: Face, ti: u32, tj: u32) -> bool {
+        self.tiles.contains(&(face.0, ti, tj))
+    }
+
+    fn lake_wet(&self, face: Face, i: i64, j: i64) -> Result<bool, String> {
+        match &self.lakes {
+            Some(l) => Ok(l.lake_cell(face, i, j)?.is_some()),
+            None => Ok(false),
+        }
     }
 }
 

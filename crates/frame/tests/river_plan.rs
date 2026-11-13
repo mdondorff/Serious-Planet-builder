@@ -574,3 +574,74 @@ fn a_build_made_under_an_old_stamp_never_lands_in_the_cache_of_another_request()
     cache.insert_stamped(new, t, value);
     assert_eq!(cache.len(), 1);
 }
+
+/// [`Source`] with only some L tiles and a lake over the cells `i < lake_below`.
+struct Clipped {
+    inner: Source,
+    tiles: Vec<(u32, u32)>,
+    lake_below: i64,
+}
+
+impl RiverSource for Clipped {
+    fn grid(&self) -> RiverGrid {
+        GRID
+    }
+    fn tile_channels(&self, face: Face, ti: u32, tj: u32) -> Result<Arc<Vec<Channel>>, String> {
+        self.inner.tile_channels(face, ti, tj)
+    }
+    fn has_tile(&self, _face: Face, ti: u32, tj: u32) -> bool {
+        self.tiles.contains(&(ti, tj))
+    }
+    fn lake_wet(&self, _face: Face, i: i64, _j: i64) -> Result<bool, String> {
+        Ok(i < self.lake_below)
+    }
+}
+
+// spec: REND-062, REND-065
+#[test]
+fn a_river_is_drawn_only_over_the_commits_tiles_and_ends_at_a_lakes_water() {
+    // A wide river along row 96 across the whole face (tiles 0..4 of 64 cells).
+    let points: Vec<(f64, f64)> = (0..=16).map(|k| (f64::from(k) * 15.9375, 96.0)).collect();
+    let river = channel(&points, q_for(4.0));
+    let all = Clipped {
+        inner: Source::new(vec![river.clone()]),
+        tiles: (0..4).flat_map(|i| (0..4).map(move |j| (i, j))).collect(),
+        lake_below: -1,
+    };
+    let one = Clipped { inner: Source::new(vec![river.clone()]), tiles: vec![(1, 1)], lake_below: -1 };
+    let lake = Clipped { inner: Source::new(vec![river]), tiles: all.tiles.clone(), lake_below: 128 };
+    // Level 2: one node a tile of 64 cells, one sample a cell.
+    let nodes: Vec<(u32, TileId, f64)> = (0..4).map(|x| (x, tile(2, 2, x, 1), 1.0)).collect();
+    let wet = |s: &dyn RiverSource| -> Vec<usize> {
+        plan_rivers(&request(s, 64), &nodes).unwrap().nodes.iter().map(|n| n.coverage.iter().filter(|&&c| c <= 128).count()).collect()
+    };
+    let full = wet(&all);
+    assert_eq!(full.len(), 4, "every node of the row carries the river: {full:?}");
+    assert!(full.iter().all(|&w| w > 0));
+    // Only tile (1, 1) held: the river is drawn in that node alone (its neighbours' channels are not read).
+    // Only tile (1, 1) held: every wet sample's nearest cell lies in that tile (a neighbour node keeps at most its shared edge column).
+    let p = plan_rivers(&request(&one, 64), &nodes).unwrap();
+    assert!(p.nodes.iter().any(|n| n.node == 1));
+    for n in &p.nodes {
+        let (origin, step) = node_window(nodes[n.node as usize].1, 64, GRID.cells);
+        for (k, &c) in n.coverage.iter().enumerate() {
+            if c <= 128 {
+                let i = (origin.0 + (k % 65) as f64 * step).round() as i64;
+                assert_eq!(i / 64, 1, "node {} sample {k}: a wet sample at cell {i}, outside the held tile", n.node);
+            }
+        }
+    }
+    assert!(one.inner.reads.lock().unwrap().iter().all(|&(_, ti, tj)| (ti, tj) == (1, 1)), "no other tile is read");
+    // A lake over the cells i < 128: the river ends at its water.
+    let p = plan_rivers(&request(&lake, 64), &nodes).unwrap();
+    for n in &p.nodes {
+        let (origin, step) = node_window(nodes[n.node as usize].1, 64, GRID.cells);
+        for (k, &c) in n.coverage.iter().enumerate() {
+            if c <= 128 {
+                let i = (origin.0 + (k % 65) as f64 * step).round() as i64;
+                assert!(i >= 128, "node {} sample {k}: the river is drawn at cell {i}, inside the lake", n.node);
+            }
+        }
+    }
+    assert!(p.nodes.iter().any(|n| n.node == 3), "the river still runs outside the lake");
+}

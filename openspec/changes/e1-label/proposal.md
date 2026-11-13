@@ -6,4 +6,6 @@ What: `planet_render::annotate::annotate_with_note` draws a note above the pose 
 
 And the opening route (lead, 2026-11-13, option b): no stored bake matches the R3a commit's world under the current code (`global16384`, `-m9c14`, `-m9r2` refuse it), and a new world bake waits for the owner. `--commit DIR` opens a commit in the viewer and in `capture-stills` over the production base computed in memory (`WorldTerrain::open_commit_in_memory`: the composition the G-RT fixture used, now a production route; `open_fixture` keeps its own note for the perf scene), through the normal key check; the log, the title and every still say so.
 
-Requirements: TEST-128 gains the note bullet (MODIFIED); VIEW-069 (new, lead 2026-11-13). Source: lead 2026-11-12 (E1 item), 2026-11-13 (the label on the pose line).
+Lead review of the first stills (2026-11-13): the label takes a corner at half the text scale and the full notes go to the caption (`stills.txt`, `--caption` for caption-only lines); rivers are drawn only over the commit's L tiles (the margin's graph blocks drew right-angle staircases over the coarse ground) and end at a lake's wet mask (they ran across the lakes).
+
+Requirements: TEST-128 gains the note bullet (MODIFIED); VIEW-069 (new, lead 2026-11-13); REND-062 and REND-065 gain one bullet each (MODIFIED). Source: lead 2026-11-12 (E1 item), 2026-11-13 (the label on the pose line).

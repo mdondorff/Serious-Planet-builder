@@ -724,7 +724,9 @@ fn run_stills(
     }
     std::fs::create_dir_all(&dir).map_err(err)?;
     // The caption carries the full text of the stills' notes (the picture's corner is small).
-    let notes = notes + &still_note.as_deref().unwrap_or("").lines().map(|l| format!("# note: {l}\n")).collect::<String>();
+    let notes = notes
+        + &still_note.as_deref().unwrap_or("").lines().map(|l| format!("# note: {l}\n")).collect::<String>()
+        + &o.caption.as_deref().unwrap_or("").lines().map(|l| format!("# caption: {l}\n")).collect::<String>();
     let mut index =
         notes + "# pose width height eye_lat_deg eye_lon_deg eye_height_m heading_deg pitch_deg sun_local_hours nodes capped_nodes\n";
     for pose in &config.poses {

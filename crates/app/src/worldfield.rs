@@ -717,6 +717,11 @@ impl WorldTerrain {
         self.lakes = Some(Arc::new(
             layer.lakes(planet_cache::lake_read::DEFAULT_MASK_TILES).map_err(|e| format!("--erosion: the lakes of the commit: {e}"))?,
         ));
+        // The rivers end at the lakes' water (REND-065).
+        if let (Some(r), Some(l)) = (self.rivers.take(), self.lakes.clone()) {
+            let r = Arc::try_unwrap(r).map_err(|_| "--erosion: the river source is shared before the world is built".to_string())?;
+            self.rivers = Some(Arc::new(r.with_lakes(l)));
+        }
         let layer = planet_generators::erosion_layer::ErosionLayer::new(Arc::new(layer)).map_err(|e| format!("--erosion: {e}"))?;
         let sea_level_m = def.sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
         self.kind = HeightFieldKind::ErodedC1;
