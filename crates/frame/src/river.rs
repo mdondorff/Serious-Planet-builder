@@ -137,6 +137,14 @@ pub trait RiverSource {
     fn id(&self) -> u64 {
         0
     }
+    /// Whether the source holds L tile `(ti, tj)` of `face` (REND-062): a river is drawn only over the tiles of the commit, whose ground its channels were burnt into. Every tile by default.
+    fn has_tile(&self, _face: planet_core::Face, _ti: u32, _tj: u32) -> bool {
+        true
+    }
+    /// Whether local cell `(i, j)` of `face` lies in a lake's wet mask (REND-065): a river ends at the lake's water and is not drawn through it. No lake by default.
+    fn lake_wet(&self, _face: planet_core::Face, _i: i64, _j: i64) -> Result<bool, String> {
+        Ok(false)
+    }
 }
 
 /// The width, in samples of a node, below which a river is not drawn in it, and from which it is drawn at full strength.
@@ -239,6 +247,9 @@ fn node_coverage(req: &RiverRequest<'_>, grid: &RiverGrid, tile: planet_core::Ti
     let mut channels: Vec<Channel> = Vec::new();
     for tj in tj0..=tj1 {
         for ti in ti0..=ti1 {
+            if !req.source.has_tile(tile.face(), ti as u32, tj as u32) {
+                continue;
+            }
             for c in req.source.tile_channels(tile.face(), ti as u32, tj as u32)?.iter() {
                 // The whole channel is the key: two pieces that share a start and a length are still two rivers.
                 let key: Vec<u64> = c
@@ -271,10 +282,26 @@ fn node_coverage(req: &RiverRequest<'_>, grid: &RiverGrid, tile: planet_core::Ti
     if channels.is_empty() || fade == 0 {
         return Ok(None);
     }
-    let coverage: Vec<u8> = river_distance_grid(&channels, origin, step, (size, size), req.law, grid.cell_m)
+    let mut coverage: Vec<u8> = river_distance_grid(&channels, origin, step, (size, size), req.law, grid.cell_m)
         .into_iter()
         .map(|d| if d.is_finite() { distance_code(d) } else { 255 })
         .collect();
+    // A river is drawn only over the source's tiles (REND-062) and ends at a lake's water (REND-065): a sample whose nearest cell lies in another tile or in a lake's wet mask is far from every river.
+    let last = i64::from(grid.cells) - 1;
+    for b in 0..size {
+        let j = (libm::round(origin.1 + b as f64 * step) as i64).clamp(0, last);
+        for a in 0..size {
+            if coverage[b * size + a] == 255 {
+                continue;
+            }
+            let i = (libm::round(origin.0 + a as f64 * step) as i64).clamp(0, last);
+            // Only over the source's tiles (REND-062), and not through a lake.
+            let t = i64::from(grid.tile);
+            if !req.source.has_tile(tile.face(), (i / t) as u32, (j / t) as u32) || req.source.lake_wet(tile.face(), i, j)? {
+                coverage[b * size + a] = 255;
+            }
+        }
+    }
     if coverage.iter().all(|&c| c == 255) {
         return Ok(None);
     }

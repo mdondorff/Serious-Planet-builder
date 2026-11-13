@@ -52,7 +52,7 @@ use planet_render::{AdapterPolicy, GpuContext};
 
 pub const USAGE: &str = "usage: planet <mode> [options]
 modes:
-  editor        the viewer window (VIEW-001..VIEW-007): the scripted orbit-to-1 m flight on the pipelined loop; keys P/Space pause, R restart, L lit (with the atmosphere) or debug path, V debug view, T vsync, C flight or free camera (WASD move, Q/E down/up, arrows look, Shift boost), Esc quit; the window opens on the lit path with the atmosphere, the look file drawn (sun, adaptive exposure); the title shows frame rate, CPU and GPU time, the path (or the debug view), on the lit path the exposure, and the readiness report; runs on a discrete GPU only (an integrated GPU, a software adapter or an adapter missing a feature or limit is refused with the reason); [--world F --global-res N | --store DIR] [--look F] [--size WxH] [--view NAME] [--cells N --tau PX --finest-level N] [--no-vsync] [--erosion on|off] (draw the erosion layer of a bake over the stored world, off by default, VIEW-062: --store holds the world, the layer is read from --erosion-store DIR, the bake's output folder, or the same store; the layer's manifest gives the bake's shape, versions, field source and change range, and --erosion-face-res N and --erosion-res N replace its pass-1 and pass-2 cells (12288 and 98304 for a layer without a manifest); the run refuses a store that holds the legacy generator's bake unless --erosion-unchecked, and a manifest of another version or field source; the title and the log say what is on and name the field source, VIEW-065) [--channels on|off] (fill the tiles' driver block, the soil depth and the moisture of the ground materials, from the layer's baked channels, the deposited depth and the drainage area; off by default, needs --erosion on, and the run refuses a layer that holds no channels, VIEW-066) [--class-source | --legacy-source] (which bake to open when the store holds both, STRM-073; the store's recorded source otherwise) [--no-shadow-march] (turn the clipmap shadow off: the march shades the terrain and the water by default, REND-051; J shows its visibility; --shadow-march is accepted and does nothing) [--no-ui] (the editor UI, an egui layer drawn after the tone map, VIEW-011) [--edit] (start in the editor mode, VIEW-022; with --site it turns on where the scripted descent over the site ends: Tab toggles it; the panels, stamps by 2-4 and a click, handles on the planet, Ctrl+Z / Ctrl+Y) [--items DIR] (the edits as one TOML file each in DIR, loaded at the start) [--editor-layout F] (the panel layout, VIEW-018) [--marker LAT,LON[,RADIUS_M]]... (item markers of the globe overview, G, VIEW-013) [--site LAT,LON] (the scripted flight descends over this point; without it the world definition's `[world] site = [lat, lon]`, else 20,30 where that is land, else the first shore of the walk from there, GEN-108); --smoke opens the window, drives the keys for a few dozen frames and closes it (test mode: PLANET_ADAPTER or --adapter, software by default; exits with `no display` where there is none); --no-window starts and exits without a window; --offscreen runs the skeleton without a window
+  editor        the viewer window (VIEW-001..VIEW-007): the scripted orbit-to-1 m flight on the pipelined loop; keys P/Space pause, R restart, L lit (with the atmosphere) or debug path, V debug view, T vsync, C flight or free camera (WASD move, Q/E down/up, arrows look, Shift boost), Esc quit; the window opens on the lit path with the atmosphere, the look file drawn (sun, adaptive exposure); the title shows frame rate, CPU and GPU time, the path (or the debug view), on the lit path the exposure, and the readiness report; runs on a discrete GPU only (an integrated GPU, a software adapter or an adapter missing a feature or limit is refused with the reason); [--world F --global-res N | --store DIR | --commit DIR] (--commit: a commit of the new chain over the production base computed in memory for --seed or --world, VIEW-069; no --store, --erosion or --global-res beside it) [--look F] [--size WxH] [--view NAME] [--cells N --tau PX --finest-level N] [--no-vsync] [--erosion on|off] (draw the erosion layer of a bake over the stored world, off by default, VIEW-062: --store holds the world, the layer is read from --erosion-store DIR, the bake's output folder, or the same store; the layer's manifest gives the bake's shape, versions, field source and change range, and --erosion-face-res N and --erosion-res N replace its pass-1 and pass-2 cells (12288 and 98304 for a layer without a manifest); the run refuses a store that holds the legacy generator's bake unless --erosion-unchecked, and a manifest of another version or field source; the title and the log say what is on and name the field source, VIEW-065) [--channels on|off] (fill the tiles' driver block, the soil depth and the moisture of the ground materials, from the layer's baked channels, the deposited depth and the drainage area; off by default, needs --erosion on, and the run refuses a layer that holds no channels, VIEW-066) [--class-source | --legacy-source] (which bake to open when the store holds both, STRM-073; the store's recorded source otherwise) [--no-shadow-march] (turn the clipmap shadow off: the march shades the terrain and the water by default, REND-051; J shows its visibility; --shadow-march is accepted and does nothing) [--no-ui] (the editor UI, an egui layer drawn after the tone map, VIEW-011) [--edit] (start in the editor mode, VIEW-022; with --site it turns on where the scripted descent over the site ends: Tab toggles it; the panels, stamps by 2-4 and a click, handles on the planet, Ctrl+Z / Ctrl+Y) [--items DIR] (the edits as one TOML file each in DIR, loaded at the start) [--editor-layout F] (the panel layout, VIEW-018) [--marker LAT,LON[,RADIUS_M]]... (item markers of the globe overview, G, VIEW-013) [--site LAT,LON] (the scripted flight descends over this point; without it the world definition's `[world] site = [lat, lon]`, else 20,30 where that is land, else the first shore of the walk from there, GEN-108); --smoke opens the window, drives the keys for a few dozen frames and closes it (test mode: PLANET_ADAPTER or --adapter, software by default; exits with `no display` where there is none); --no-window starts and exits without a window; --offscreen runs the skeleton without a window
   generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --cache-dir <dir> --region F,L [--res N] writes a tile face region into a tile store; --verify-cache <dir> [--sample N] regenerates stored tiles and compares (both take --world <definition.toml> or --seed N; --verify-cache fails when nothing could be compared, --allow-stale accepts that); --global-dir <dir> [--global-res N, default 256] bakes the global-coarse field (continents, elevation, climate) of N cells per face edge into a tile store as blocks in the canonical layout (blocks of min(N, 1024) cells) together with its ocean-connectivity channel (one bit per vertex; the area threshold is the definition's `body.0.sea.min_area_fraction`) and prints the time per sample and the channel's cost; --class-source (with --global-dir or --verify-global) samples the class source's surface instead of the legacy generator's and keys the store by it (GEN-115, STRM-073); --verify-global <dir> [--sample N] regenerates stored blocks and compares; --global-products <dir> [--global-res N] writes cube nets and maps of an in-memory bake (these take --world or --seed and --threads N); --coupled-run <dir> --global-res N (required) makes the coupled run of the bake stored in <dir> (or finds it there) and stores it, with a progress line at most every 10 s during the reduction of the bake and the wall time (STRM-051); --coarse-horizon <dir> --global-res N (required) [--threads N] makes the coarse horizon (far-field shadows, STRM-045) from the coupled run stored beside the bake in <dir> and stores it there, with a progress line and the wall time (the coupled run is made and stored by the viewer or `test-render --scene coupled`); --plan-check <dir> --global-res N (required) plans the standard flight at cells 32 and viewport / tau 240 over the stored bake with the terrain and the eroded field and fails if a view is rejected (M3 acceptance); --prefill-dir <dir> --global-res N [--prefill-levels L] [--floor-level F] writes the coarse tiles of levels F..=L (F the render floor, default 3; L default 4; an L below F writes nothing and says so; the tiles of cells 32, finest level 22, compact form, as the streamer generates them) of the stored bake into its tile pack, skipping what is there; --global-dir pre-fills the same way after the bake (--prefill-levels 0 disables; --floor-level takes both); --smoke starts and exits
   test-render   headless render harness
     --scene hello-triangle|tiles|terrain   render a scene (default hello-triangle)
@@ -88,7 +88,7 @@ modes:
     --gen-priority below-normal|normal   OS priority of the generation workers (STRM-020, ADR 0046; default below-normal: the frame thread wins a core both want; no result depends on it)
     --lit                    the streaming perf scenes on the lit path with the atmosphere and water (TEST-025): same scripts, same verdicts, logs named <scene>-lit
     --views a,b,c            only these views of the lit perf scenes (ground-1m, aerial-20km, coast-2km, coast-3m, orbit, coast-glide, coast-descent); a partial log is not a window
-    --scene capture-stills   one PNG per pose of --poses FILE (TEST-048) in --out-dir, over the base terrain of a world (a headless scene; no viewer starts it); needs --store DIR or --allow-memory-bake, takes --size WxH and --views (pose names); never a measurement
+    --scene capture-stills   one PNG per pose of --poses FILE (TEST-048) in --out-dir, over the base terrain of a world (a headless scene; no viewer starts it); needs --store DIR or --allow-memory-bake, takes --size WxH, --views (pose names), --commit DIR (VIEW-069, instead of --store), --caption TEXT and --note TEXT (a known defect and its cause, drawn above every still's pose label, TEST-128); never a measurement
     --scene capture-flights  the two coastal flights as 1440p PNG sequences (shore_filter at the look default, 0, and then 1) in --out-dir, never a measurement (TEST-027; `cargo xtask capture flights` also makes the videos); needs --store DIR or --allow-memory-bake, takes --size WxH, --flight-frames N
     --flight-frames N        frames of each coastal flight of the lit perf scenes (default 240; --scene lit, TEST-025)
     --perf                   performance-harness skeleton (needs --adapter hardware; the readiness gate decides, ADR 0020)
@@ -245,6 +245,12 @@ pub struct Options {
     pub views: Option<Vec<String>>,
     /// `--poses FILE`: the poses of the scene `capture-stills` (TEST-048).
     pub poses: Option<PathBuf>,
+    /// `--note TEXT`: a known defect and its cause, drawn above the pose label of every still of `capture-stills` (TEST-128).
+    pub note: Option<String>,
+    /// `--caption TEXT`: a line for the caption of `capture-stills` (its `stills.txt`) only, not drawn on a still (TEST-128).
+    pub caption: Option<String>,
+    /// `--commit DIR`: the commit of the new chain in DIR over the production base computed in memory, for the viewer and `capture-stills` (VIEW-069).
+    pub commit: Option<PathBuf>,
     /// `--no-ui`: the editor window without the UI (VIEW-011).
     pub no_ui: bool,
     /// `editor --edit`: start in the editor mode (VIEW-022); Tab toggles it in the window.
@@ -440,6 +446,9 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         flight_frames: 240,
         views: None,
         poses: None,
+        note: None,
+        commit: None,
+        caption: None,
         no_ui: false,
         edit: false,
         items: None,
@@ -549,6 +558,9 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--marker" => o.markers.push(it.next().ok_or("--marker needs LAT,LON[,RADIUS_M]")?.clone()),
             "--calibrate" => o.calibrate = true,
             "--poses" => o.poses = Some(PathBuf::from(it.next().ok_or("--poses needs a poses file")?)),
+            "--note" => o.note = Some(it.next().ok_or("--note needs a text")?.clone()),
+            "--caption" => o.caption = Some(it.next().ok_or("--caption needs a text")?.clone()),
+            "--commit" => o.commit = Some(PathBuf::from(it.next().ok_or("--commit needs the folder of a commit")?)),
             "--views" => {
                 o.views = Some(it.next().ok_or("--views needs a comma-separated list")?.split(',').map(|v| v.trim().to_string()).collect())
             }
@@ -772,6 +784,29 @@ const FLIGHT_EXCLUDES: [&str; 13] = [
     "--face-net",
 ];
 const FLIGHT_ONLY: [&str; 2] = ["--size", "--out-dir"];
+
+/// `--commit DIR` (VIEW-069): the commit opens over the production base computed in memory, so the options of a stored world or another base are refused beside it, and it applies to the viewer and
+/// `capture-stills` only.
+pub fn check_commit_options(o: &Options) -> Result<(), String> {
+    if !o.given.contains("--commit") {
+        return Ok(());
+    }
+    let clash: Vec<&str> =
+        ["--store", "--erosion", "--erosion-store", "--global-res", "--allow-memory-bake", "--class-source", "--legacy-source"]
+            .into_iter()
+            .filter(|f| o.given.contains(*f))
+            .collect();
+    if !clash.is_empty() {
+        return Err(format!(
+            "--commit opens a commit over the production base computed in memory: it excludes {} (a stored world, the old layer or another in-memory bake)",
+            clash.join(", ")
+        ));
+    }
+    if !matches!(o.mode, Mode::Editor) && !stills::is_stills_scene(&o.scene) {
+        return Err("--commit applies to the editor (viewer) and to the scene `capture-stills`".into());
+    }
+    Ok(())
+}
 
 /// Reject option combinations that would be silently ignored, before any GPU work.
 fn check_flight_options(o: &Options) -> Result<(), String> {
@@ -1063,6 +1098,10 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     {
         return Err("--poses applies to the scene `capture-stills` (and to `shadow-cost` and `shadow-layer1`)".into());
     }
+    if (o.given.contains("--note") || o.given.contains("--caption")) && !stills::is_stills_scene(&o.scene) {
+        return Err("--note and --caption apply to the scene `capture-stills`".into());
+    }
+    check_commit_options(o)?;
     if stills::is_stills_scene(&o.scene) && o.given.contains("--flight-frames") {
         return Err("--flight-frames does not apply to `capture-stills` (one frame per pose)".into());
     }
@@ -2135,6 +2174,71 @@ mod tests {
         // A commit with no channel graph has no river source, and the note says so (STRM-086).
         assert!(on.rivers().is_none() && on.erosion_note().contains("no channel graph"), "{}", on.erosion_note());
         assert!(on.describe().contains("erosion layer"), "{}", on.describe());
+    }
+
+    // spec: VIEW-069
+    #[test]
+    fn a_commit_opened_in_memory_refuses_a_stored_world_another_base_and_other_scenes() {
+        let args = |a: &[&str]| parse_args(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>()).unwrap_or_else(|e| panic!("{a:?}: {e}"));
+        for extra in
+            [&["--store", "x"][..], &["--erosion", "on"], &["--global-res", "64"], &["--allow-memory-bake"], &["--erosion-store", "y"]]
+        {
+            let mut a = vec!["editor", "--commit", "c"];
+            a.extend_from_slice(extra);
+            let e = check_commit_options(&args(&a)).unwrap_err();
+            assert!(e.contains("excludes") && e.contains(extra[0]), "{extra:?}: {e}");
+        }
+        assert!(check_commit_options(&args(&["editor", "--commit", "c"])).is_ok());
+        assert!(check_commit_options(&args(&["test-render", "--scene", "capture-stills", "--commit", "c"])).is_ok());
+        let e = check_commit_options(&args(&["test-render", "--scene", "terrain", "--commit", "c"])).unwrap_err();
+        assert!(e.contains("editor") && e.contains("capture-stills"), "{e}");
+        assert!(check_commit_options(&args(&["editor"])).is_ok(), "no --commit, nothing to check");
+    }
+
+    // spec: VIEW-069
+    #[test]
+    fn a_commit_baked_for_another_seed_is_refused_before_any_base_is_computed() {
+        let dir = std::env::temp_dir().join(format!("planet-view069-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let world =
+            planet_cache::global_store::GlobalWorld::from_definition(&planet_world_def::WorldDefinition::single_planet(6_371_000.0, 3))
+                .unwrap()
+                .with_block_limit(4);
+        let spec = planet_cache::region_bake::RegionSpec {
+            seed: 3,
+            face: planet_core::Face(2),
+            radius_m: 6_371_000.0,
+            regional: 64,
+            region: (16, 39, 16, 39),
+            margin: 6,
+            tile: 64,
+            halo: 24,
+            rounds: 2,
+            threads: 2,
+            res: 64,
+            base_id: 7,
+            inputs_id: 11,
+            height_bounds: (-11_000.0, 9_000.0),
+            keep_channels: false,
+        };
+        let base = |d: planet_core::Vec3| 500.0 - 2400.0 * (d.x - 0.1) + 120.0 * libm::sin(40.0 * d.z);
+        let climate = |_: planet_core::Vec3| (1.0e-8, 0.0, 1.0);
+        planet_cache::region_bake::bake_region(&world, &spec, &base, &climate, &dir).expect("the fixture commit");
+        let started = std::time::Instant::now();
+        let e = worldfield::WorldTerrain::open_commit_in_memory(planet_world_def::WorldDefinition::single_planet(6_371_000.0, 4), &dir, 2)
+            .err()
+            .expect("another seed is refused");
+        assert!(e.contains("baked for seed 3") && e.contains("4"), "{e}");
+        assert!(started.elapsed().as_secs_f64() < 5.0, "refused before the in-memory bake");
+        let missing = worldfield::WorldTerrain::open_commit_in_memory(
+            planet_world_def::WorldDefinition::single_planet(6_371_000.0, 3),
+            &dir.join("none"),
+            2,
+        )
+        .err()
+        .expect("a folder without a commit is refused");
+        assert!(missing.contains("holds no commit"), "{missing}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // spec: VIEW-065

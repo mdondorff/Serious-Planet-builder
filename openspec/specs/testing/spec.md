@@ -1817,6 +1817,7 @@ Every owner-facing review picture written by the review tooling SHALL carry a sc
 - The metres per pixel are `2 d tan(fov / 2) / height_px` for the distance `d` along the axis to the ground or sea.
 - A view whose axis meets no ground has the label and no bar.
 - Golden-review's difference sheets carry no pose and are not annotated.
+- Notes (`--note`) go above the label.
 
 Verify: A
 Status: active

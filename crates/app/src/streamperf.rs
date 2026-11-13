@@ -144,7 +144,8 @@ pub fn check_options(o: &Options) -> Result<(), String> {
             ));
         }
     }
-    if stream && o.store.is_none() && !o.allow_memory_bake && !o.perf_smoke {
+    // A commit over the in-memory production base (VIEW-069) names its own base: the stills are pictures, not streaming measurements.
+    if stream && o.store.is_none() && !o.allow_memory_bake && !o.perf_smoke && o.commit.is_none() {
         return Err(format!(
             "the streaming scene '{}' measures cold plans and tile generation, which differ over the production store (block decodes, SPIKE-05): \
              give --store DIR, a bake of {PRODUCTION_BAKE_RES} cells per face edge made by `generate --global-dir DIR --global-res {PRODUCTION_BAKE_RES}` \
@@ -159,6 +160,15 @@ pub fn check_options(o: &Options) -> Result<(), String> {
 /// The world a perf scene reads: the stored production bake (`--store`) or the in-memory bake of `--global-res` cells; `cold` ignores
 /// the tile pack's pre-filled tiles (`dive-cold`).
 pub(crate) fn open_world(o: &Options, cold: bool) -> Result<WorldTerrain, String> {
+    if let Some(commit) = &o.commit {
+        // A commit over the production base computed in memory (VIEW-069, `capture-stills --commit`).
+        let def = match &o.world {
+            Some(p) => crate::worldfield::load_world(p)?,
+            None => planet_world_def::WorldDefinition::single_planet(crate::skeleton::RADIUS_M, o.seed),
+        };
+        let threads = planet_streaming::topology::bake_threads(o.threads)?.0;
+        return WorldTerrain::open_commit_in_memory(def, commit, threads).map(|w| if cold { w.cold() } else { w });
+    }
     match &o.store {
         Some(dir) => {
             let res = if o.given.contains("--global-res") { o.global_res } else { PRODUCTION_BAKE_RES };

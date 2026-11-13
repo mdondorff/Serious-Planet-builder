@@ -109,7 +109,13 @@ fn glyph(c: char) -> [u8; 7] {
         '-' => [0, 0, 0, 0b11111, 0, 0, 0],
         '/' => [0b00001, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b10000],
         '?' => [0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0, 0b00100],
+        ':' => [0, 0b01100, 0b01100, 0, 0b01100, 0b01100, 0],
+        ';' => [0, 0b01100, 0b01100, 0, 0b01100, 0b00100, 0b01000],
+        ',' => [0, 0, 0, 0, 0b01100, 0b00100, 0b01000],
+        '(' => [0b00010, 0b00100, 0b01000, 0b01000, 0b01000, 0b00100, 0b00010],
+        ')' => [0b01000, 0b00100, 0b00010, 0b00010, 0b00010, 0b00100, 0b01000],
         'a' => [0, 0, 0b01110, 0b00001, 0b01111, 0b10001, 0b01111],
+        'b' => [0b10000, 0b10000, 0b10110, 0b11001, 0b10001, 0b10001, 0b11110],
         'c' => [0, 0, 0b01110, 0b10000, 0b10000, 0b10001, 0b01110],
         'd' => [0b00001, 0b00001, 0b01111, 0b10001, 0b10001, 0b10001, 0b01111],
         'e' => [0, 0, 0b01110, 0b10001, 0b11111, 0b10000, 0b01110],
@@ -117,19 +123,23 @@ fn glyph(c: char) -> [u8; 7] {
         'g' => [0, 0b01111, 0b10001, 0b10001, 0b01111, 0b00001, 0b01110],
         'h' => [0b10000, 0b10000, 0b10110, 0b11001, 0b10001, 0b10001, 0b10001],
         'i' => [0b00100, 0, 0b01100, 0b00100, 0b00100, 0b00100, 0b01110],
+        'j' => [0b00010, 0, 0b00110, 0b00010, 0b00010, 0b10010, 0b01100],
         'k' => [0b10000, 0b10000, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010],
         'l' => [0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110],
         'm' => [0, 0, 0b11010, 0b10101, 0b10101, 0b10101, 0b10101],
         'n' => [0, 0, 0b10110, 0b11001, 0b10001, 0b10001, 0b10001],
         'o' => [0, 0, 0b01110, 0b10001, 0b10001, 0b10001, 0b01110],
         'p' => [0, 0, 0b11110, 0b10001, 0b11110, 0b10000, 0b10000],
+        'q' => [0, 0, 0b01111, 0b10001, 0b01111, 0b00001, 0b00001],
         'r' => [0, 0, 0b10110, 0b11001, 0b10000, 0b10000, 0b10000],
         's' => [0, 0, 0b01111, 0b10000, 0b01110, 0b00001, 0b11110],
         't' => [0b01000, 0b01000, 0b11100, 0b01000, 0b01000, 0b01001, 0b00110],
         'u' => [0, 0, 0b10001, 0b10001, 0b10001, 0b10011, 0b01101],
         'v' => [0, 0, 0b10001, 0b10001, 0b10001, 0b01010, 0b00100],
+        'w' => [0, 0, 0b10001, 0b10001, 0b10101, 0b10101, 0b01010],
         'x' => [0, 0, 0b10001, 0b01010, 0b00100, 0b01010, 0b10001],
         'y' => [0, 0b10001, 0b10001, 0b10001, 0b01111, 0b00001, 0b01110],
+        'z' => [0, 0, 0b11111, 0b00010, 0b00100, 0b01000, 0b11111],
         _ => [0; 7],
     }
 }
@@ -180,14 +190,20 @@ pub fn draw_text(img: &mut Image, x: i64, y: i64, text: &str, s: u32) -> u32 {
     (text.chars().count() as i64 * advance) as u32
 }
 
-/// The scale of the text for a picture `height_px` tall: one glyph pixel per 180 pixels of height, at least one.
+/// The scale of the text for a picture `height_px` tall: one glyph pixel per 400 pixels of height, at least one (2 at 1080 px: the label and its notes take a corner, not the picture; the full text is in the caption).
 fn text_scale(height_px: u32) -> u32 {
-    (height_px / 180).max(1)
+    (height_px / 400).max(1)
 }
 
 /// Draws the pose label and, when the axis meets the ground, a scale bar on `img`, bottom left. The bar is the longest round length (1, 2 or 5 times a power of ten) that takes at most a quarter of the picture's width.
 /// Returns the bar's length in metres (`None`: no bar).
 pub fn annotate(img: &mut Image, pose: &PoseLabel) -> Option<f64> {
+    annotate_with_note(img, pose, None)
+}
+
+/// [`annotate`] with a note above the label (TEST-128): the known defect of the picture and its cause, so a reader judges the picture with it in mind. The note takes the label's
+/// text scale and wraps at spaces to the picture's width.
+pub fn annotate_with_note(img: &mut Image, pose: &PoseLabel, note: Option<&str>) -> Option<f64> {
     // The text scale: by height, and no larger than the label fits the width at (a narrow picture gets small text rather than a cut-off label).
     let label = pose.text(img.height);
     let fit = (img.width.saturating_sub(16)) / (6 * label.chars().count() as u32).max(1);
@@ -224,6 +240,29 @@ pub fn annotate(img: &mut Image, pose: &PoseLabel) -> Option<f64> {
         }
     }
     draw_text(img, margin, y, &label, s);
+    if let Some(note) = note.filter(|n| !n.is_empty()) {
+        // Wrapped at spaces into lines that fit the width (a word longer than a line is cut), the last line just above the label.
+        let fits = (img.width.saturating_sub(16) / (6 * s)).max(1) as usize;
+        // A line break in the note starts a new line (one note per line).
+        let mut lines: Vec<String> = Vec::new();
+        for para in note.split(char::from(10)) {
+            let start = lines.len();
+            for word in para.split(' ').filter(|w| !w.is_empty()) {
+                let word: String = word.chars().take(fits).collect();
+                let open = lines.len() > start;
+                match lines.last_mut() {
+                    Some(l) if open && l.chars().count() + 1 + word.chars().count() <= fits => {
+                        l.push(' ');
+                        l.push_str(&word);
+                    }
+                    _ => lines.push(word),
+                }
+            }
+        }
+        for (k, l) in lines.iter().rev().enumerate() {
+            draw_text(img, margin, y - line * (k as i64 + 1), l, s);
+        }
+    }
     bar_m
 }
 
@@ -314,9 +353,59 @@ mod tests {
             }
         }
         let mut img = Image { width: w, height: h, rgba };
-        let bar = annotate(&mut img, &PoseLabel { altitude_m: 300.0, pitch_deg: 15.0, fov_deg: 60.0, centre_distance_m: Some(1159.0) });
+        let noted = Image { width: w, height: h, rgba: img.rgba.clone() };
+        let pose = PoseLabel { altitude_m: 300.0, pitch_deg: 15.0, fov_deg: 60.0, centre_distance_m: Some(1159.0) };
+        let bar = annotate(&mut img, &pose);
         assert_eq!(bar, Some(500.0), "1.86 m a pixel: a quarter of 1280 px is 594 m, the longest round length under it 500 m (269 px)");
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/review");
         img.write_png(&dir.join("annotate-sample.png")).unwrap();
+        let mut noted = noted;
+        annotate_with_note(&mut noted, &pose, Some("too many lakes; cause: basins of the starting surface (SPIKE-109)"));
+        noted.write_png(&dir.join("annotate-sample-note.png")).unwrap();
+    }
+
+    // spec: TEST-128
+    #[test]
+    fn a_note_is_drawn_above_the_label_in_glyphs_the_font_has_and_wraps_at_the_width() {
+        let note = "too many lakes; cause: basins of the starting surface (SPIKE-109)";
+        for c in note.chars().filter(|c| *c != ' ') {
+            assert_ne!(glyph(c.to_ascii_lowercase()), [0; 7], "the font has no glyph for '{c}'");
+        }
+        let (w, h) = (1280u32, 720u32);
+        let plain = filled(w, h, [40, 90, 60, 255]);
+        let p = pose();
+        let mut without = Image { width: w, height: h, rgba: plain.rgba.clone() };
+        annotate(&mut without, &p);
+        let mut with = Image { width: w, height: h, rgba: plain.rgba.clone() };
+        assert_eq!(
+            annotate_with_note(&mut with, &p, Some(note)),
+            annotate(&mut Image { width: w, height: h, rgba: plain.rgba.clone() }, &p)
+        );
+        // The note changes pixels only above the label's rows and leaves the label and the bar as they were.
+        let label_top = (0..h).find(|&y| (0..w).any(|x| pixel_at(&without, x, y) != pixel_at(&plain, x, y))).unwrap();
+        let mut above = 0usize;
+        for y in 0..h {
+            for x in 0..w {
+                let (a, b) = (pixel_at(&without, x, y), pixel_at(&with, x, y));
+                if a != b {
+                    assert!(y < label_top + 4, "({x}, {y}): the note reaches into the label (top {label_top})");
+                    above += 1;
+                }
+            }
+        }
+        assert!(above > 500, "{above} note pixels");
+        // An empty note is no note; a narrow picture wraps the note onto more lines above the label.
+        let mut empty = Image { width: w, height: h, rgba: plain.rgba.clone() };
+        annotate_with_note(&mut empty, &p, Some(""));
+        assert_eq!(empty.rgba, without.rgba);
+        let rows_drawn = |img: &Image, base: &Image| {
+            (0..img.height).filter(|&y| (0..img.width).any(|x| pixel_at(img, x, y) != pixel_at(base, x, y))).count()
+        };
+        let narrow_plain = filled(400, 720, [40, 90, 60, 255]);
+        let mut narrow = Image { width: 400, height: 720, rgba: narrow_plain.rgba.clone() };
+        annotate_with_note(&mut narrow, &p, Some(note));
+        let mut narrow_one = Image { width: 400, height: 720, rgba: narrow_plain.rgba.clone() };
+        annotate_with_note(&mut narrow_one, &p, Some("lakes"));
+        assert!(rows_drawn(&narrow, &narrow_plain) > rows_drawn(&narrow_one, &narrow_plain), "the long note takes more lines");
     }
 }

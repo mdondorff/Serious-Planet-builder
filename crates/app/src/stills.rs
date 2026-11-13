@@ -682,9 +682,15 @@ fn run_stills(
         size.1,
         config.poses.len(),
         world.describe(),
-        if o.store.is_some() { "" } else { " (in-memory bake)" }
+        if o.store.is_some() || o.commit.is_some() { "" } else { " (in-memory bake)" }
     )
     .map_err(err)?;
+    // Every still carries the run's note and, for a commit opened in memory, that the base is not a stored bake (VIEW-069, TEST-128): one line each.
+    let still_note: Option<String> = {
+        let base = if o.commit.is_some() { Some("base: computed in memory, not read from a stored bake") } else { None };
+        let lines: Vec<&str> = o.note.as_deref().into_iter().chain(base).collect();
+        (!lines.is_empty()).then(|| lines.join(&char::from(10).to_string()))
+    };
     let maps = crate::horizonstep::wait_coupled(&world, out)?;
     let base = world.field()?;
     let step_m = std::f64::consts::FRAC_PI_2 * radius_m / f64::from(world.global_res());
@@ -717,6 +723,10 @@ fn run_stills(
         writeln!(out, "slopes.txt written in {:.0} s", started.elapsed().as_secs_f64()).map_err(err)?;
     }
     std::fs::create_dir_all(&dir).map_err(err)?;
+    // The caption carries the full text of the stills' notes (the picture's corner is small).
+    let notes = notes
+        + &still_note.as_deref().unwrap_or("").lines().map(|l| format!("# note: {l}\n")).collect::<String>()
+        + &o.caption.as_deref().unwrap_or("").lines().map(|l| format!("# caption: {l}\n")).collect::<String>();
     let mut index =
         notes + "# pose width height eye_lat_deg eye_lon_deg eye_height_m heading_deg pitch_deg sun_local_hours nodes capped_nodes\n";
     for pose in &config.poses {
@@ -796,7 +806,11 @@ fn run_stills(
         }
         // The owner's copy carries the scale bar and the pose (ADR 0118 point 5): drawn on this review picture, never on a golden.
         let mut shot = r.read_color(ctx);
-        planet_render::annotate::annotate(&mut shot, &pose_label(&camera, &|d| field.height(d), radius_m, setup.level_m));
+        planet_render::annotate::annotate_with_note(
+            &mut shot,
+            &pose_label(&camera, &|d| field.height(d), radius_m, setup.level_m),
+            still_note.as_deref(),
+        );
         shot.write_png(&dir.join(format!("{}.png", pose.name))).map_err(|e| format!("writing {}: {e}", pose.name))?;
         let (eye_lat, _) = camera.position.0.lat_lon();
         let height = camera.position.0.length() - radius_m;

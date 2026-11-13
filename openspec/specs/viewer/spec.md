@@ -1326,3 +1326,18 @@ Source: Architect order 2026-11-09 (inbox #99), A3 11.1, CON-18, VIEW-067; the t
 #### Scenario: The producer and the pixels
 - **WHEN** a handle is held over a stamp with the flag on, with it off, and a frame is composed with the overlay and without it
 - **THEN** the worker answers and the preview is drawn and gone when the edit is committed, nothing runs without the flag, and the two frames differ only where the overlay's lines and label are
+
+### Requirement: VIEW-069 The viewer and capture-stills open a commit over the in-memory production base
+With `--commit DIR` the viewer and `capture-stills` SHALL open the commit in DIR over the production generator's base computed in memory for the definition (`--world` or `--seed`): the exact base values on the commit's lattice over its tiles and one tile of margin, the in-memory bake elsewhere. The commit SHALL pass the normal key check (a commit of another world or seed is refused). `--store`, `--erosion`, `--erosion-store`, `--global-res`, `--allow-memory-bake` and the source flags SHALL be refused beside it. The log, the title and every still SHALL say "base: computed in memory, not read from a stored bake".
+
+Verify: A
+Status: active
+Source: Lead 2026-11-13 (E1, option b; E4 is the owner flying it), TEST-128, REND-058
+
+#### Scenario: Refusals
+- **WHEN** `--commit` is given with a stored world, the erosion layer, a bake size, or to another scene
+- **THEN** the run is refused naming the clashing options
+
+#### Scenario: Another seed
+- **WHEN** a commit baked for seed 3 is opened for seed 4
+- **THEN** it is refused before any base is computed

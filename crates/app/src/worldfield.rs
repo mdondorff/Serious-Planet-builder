@@ -157,6 +157,9 @@ pub struct BakeProbe {
     pub wet_vertex: bool,
 }
 
+/// The lattice resolution, face and node rectangle `(i0, j0, w, h)` of the exact base under a commit opened in memory.
+type CommitBase = (u32, Face, (u32, u32, usize, usize));
+
 /// A world's terrain: the definition, the field it selects and the bake the field reads.
 pub struct WorldTerrain {
     /// The definition the fields are built from, replaceable while the terrain is shared ([`WorldTerrain::set_definition`]): a reader takes
@@ -215,8 +218,10 @@ pub struct WorldTerrain {
     rivers: Option<Arc<crate::rivers::ReaderRiverSource>>,
     /// The lakes of the same commit (REND-058): the water field answers a lake's level where the commit's lake mask is wet.
     lakes: Option<Arc<planet_cache::lake_read::CommitLakes>>,
-    /// What the base is, for a world opened by `open_fixture` (empty otherwise).
+    /// What the base is, for a world opened by `open_commit_in_memory` or `open_fixture` (empty otherwise).
     fixture_note: String,
+    /// The lattice resolution, face and node rectangle of the exact base of a commit opened in memory.
+    commit_base: Option<CommitBase>,
     /// The lattice the water field reads when it is not the height field's (a fixture world: the in-memory coarse bake, whose ocean channel the water field is built over).
     water_src: Option<Arc<dyn LatticeSource + Send>>,
     /// Scoped threads of one horizon bake (0: the cores, at most 4).
@@ -337,6 +342,7 @@ impl WorldTerrain {
             rivers: None,
             lakes: None,
             fixture_note: String::new(),
+            commit_base: None,
             water_src: None,
         })
     }
@@ -442,6 +448,7 @@ impl WorldTerrain {
             rivers: None,
             lakes: None,
             fixture_note: String::new(),
+            commit_base: None,
             water_src: None,
         })
     }
@@ -652,6 +659,9 @@ impl WorldTerrain {
         if !self.erosion_note.is_empty() {
             s += &format!(", {}", self.erosion_note);
         }
+        if !self.fixture_note.is_empty() {
+            s += &format!(", {}", self.fixture_note);
+        }
         s
     }
 
@@ -707,6 +717,11 @@ impl WorldTerrain {
         self.lakes = Some(Arc::new(
             layer.lakes(planet_cache::lake_read::DEFAULT_MASK_TILES).map_err(|e| format!("--erosion: the lakes of the commit: {e}"))?,
         ));
+        // The rivers end at the lakes' water (REND-065).
+        if let (Some(r), Some(l)) = (self.rivers.take(), self.lakes.clone()) {
+            let r = Arc::try_unwrap(r).map_err(|_| "--erosion: the river source is shared before the world is built".to_string())?;
+            self.rivers = Some(Arc::new(r.with_lakes(l)));
+        }
         let layer = planet_generators::erosion_layer::ErosionLayer::new(Arc::new(layer)).map_err(|e| format!("--erosion: {e}"))?;
         let sea_level_m = def.sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
         self.kind = HeightFieldKind::ErodedC1;
@@ -728,27 +743,9 @@ impl WorldTerrain {
     /// one tile (the margin) from the commit's tiles: a flight stays at least one LOD range inside them. [`WorldTerrain::fixture_note`] says what the base is.
     pub fn open_fixture(def: WorldDefinition, commit_dir: &Path, threads: usize) -> Result<WorldTerrain, String> {
         let started = std::time::Instant::now();
-        let commit = planet_cache::l_writer::Commit::read(commit_dir)?
-            .ok_or_else(|| format!("{} holds no commit of the new chain", commit_dir.display()))?;
-        let spec = commit.spec;
-        let seed = GenContext::new(&def).body_seed(BodyId::PLANET).map_err(|e| format!("the definition has no body seed: {e}"))?;
-        if spec.seed != seed {
-            return Err(format!("the commit was baked for seed {}, the definition's is {seed}", spec.seed));
-        }
-        let (face, rect) = fixture_rectangle(&spec, commit.tiles.keys().copied())?;
-        let res = spec.res;
+        let mut world = WorldTerrain::open_commit_in_memory(def, commit_dir, threads)?;
+        let (res, face, rect) = world.commit_base.expect("the in-memory commit route records its rectangle");
         let (i1, j1) = (rect.0 as usize + rect.2 - 1, rect.1 as usize + rect.3 - 1);
-        let mut world = WorldTerrain::open(def.clone(), MAX_RUN_BAKE_RES)?;
-        let coarse: Arc<dyn LatticeSource + Send> = Arc::from(std::mem::replace(&mut world.src, Box::new(NoBake)));
-        // The water field reads the coarse lattice (its ocean channel and floors are of the in-memory bake); the height field reads the fixture lattice.
-        world.water_src = Some(coarse.clone());
-        let inputs = planet_cache::global_store::class_inputs(&def, seed, threads);
-        let direction = |i: u32, j: u32| planet_cache::region_bake::lattice_direction(face, res as usize, i as usize, j as usize);
-        let fixture = crate::fixturebase::FixtureLattice::sample(res, face, rect, &direction, &|d| inputs.base(d), coarse, threads)?;
-        world.src = Box::new(fixture);
-        world.kind = HeightFieldKind::ErodedC1;
-        let stored = Arc::new(GlobalWorld::from_definition(&def).map_err(|e| format!("the definition cannot be generated: {e}"))?);
-        let mut world = world.use_commit(commit_dir, stored, &def, seed)?;
         world.fixture_note = format!(
             "base: IN-MEMORY FIXTURE (not the world bake, no store): the {MAX_RUN_BAKE_RES}-cell in-memory bake elsewhere and the exact {res}-node lattice over {} x {} nodes (face {}, nodes {}..{} x {}..{}) of the commit's tiles with one tile of margin, built in {:.1} s on {threads} threads before the first frame; G-RT on it is PROVISIONAL (no base store reads); the flight stays inside the tiles",
             rect.2,
@@ -761,6 +758,44 @@ impl WorldTerrain {
             started.elapsed().as_secs_f64()
         );
         Ok(world)
+    }
+
+    /// The commit in `commit_dir` over the production generator's base computed in memory (`--commit DIR`, E1; no stored bake): the exact `BakeInputs::base` values of the commit's lattice over its tiles and one
+    /// tile of margin (the base the bake wrote L against), the in-memory bake of the definition elsewhere (far ground, water). The commit opens through [`WorldTerrain::use_commit`] under the keys the
+    /// definition's world makes: a commit of another world, seed or version is refused as from a store. [`WorldTerrain::base_note`] says what the base is (the title, the log and every still carry it).
+    pub fn open_commit_in_memory(def: WorldDefinition, commit_dir: &Path, threads: usize) -> Result<WorldTerrain, String> {
+        let started = std::time::Instant::now();
+        let commit = planet_cache::l_writer::Commit::read(commit_dir)?
+            .ok_or_else(|| format!("{} holds no commit of the new chain", commit_dir.display()))?;
+        let spec = commit.spec;
+        let seed = GenContext::new(&def).body_seed(BodyId::PLANET).map_err(|e| format!("the definition has no body seed: {e}"))?;
+        if spec.seed != seed {
+            return Err(format!("the commit was baked for seed {}, the definition's is {seed}", spec.seed));
+        }
+        let (face, rect) = fixture_rectangle(&spec, commit.tiles.keys().copied())?;
+        let res = spec.res;
+        let mut world = WorldTerrain::open(def.clone(), MAX_RUN_BAKE_RES)?;
+        let coarse: Arc<dyn LatticeSource + Send> = Arc::from(std::mem::replace(&mut world.src, Box::new(NoBake)));
+        // The water field reads the coarse lattice (its ocean channel and floors are of the in-memory bake); the height field reads the exact lattice over the commit.
+        world.water_src = Some(coarse.clone());
+        let inputs = planet_cache::global_store::class_inputs(&def, seed, threads);
+        let direction = |i: u32, j: u32| planet_cache::region_bake::lattice_direction(face, res as usize, i as usize, j as usize);
+        let exact = crate::fixturebase::FixtureLattice::sample(res, face, rect, &direction, &|d| inputs.base(d), coarse, threads)?;
+        world.src = Box::new(exact);
+        world.kind = HeightFieldKind::ErodedC1;
+        let stored = Arc::new(GlobalWorld::from_definition(&def).map_err(|e| format!("the definition cannot be generated: {e}"))?);
+        let mut world = world.use_commit(commit_dir, stored, &def, seed)?;
+        world.commit_base = Some((res, face, rect));
+        world.fixture_note = format!(
+            "base: computed in memory, not read from a stored bake (the production base on the exact {res}-node lattice over the commit's tiles and one tile of margin, the {MAX_RUN_BAKE_RES}-cell in-memory bake elsewhere; {:.1} s on {threads} threads)",
+            started.elapsed().as_secs_f64()
+        );
+        Ok(world)
+    }
+
+    /// What the base is when the world opened a commit in memory ([`WorldTerrain::open_commit_in_memory`], [`WorldTerrain::open_fixture`]); empty otherwise.
+    pub fn base_note(&self) -> &str {
+        &self.fixture_note
     }
 
     /// What the base of a world opened by [`WorldTerrain::open_fixture`] is (empty for every other world).

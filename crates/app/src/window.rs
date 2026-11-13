@@ -1996,8 +1996,11 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     crate::stall::phase_mark("event loop");
 
     // The production store when one is configured or found (VIEW-051); otherwise the in-memory preview bake, which the title says.
+    crate::check_commit_options(o)?;
     let store = match &o.store {
         Some(dir) => Some(dir.clone()),
+        // A commit opens over the production base computed in memory (VIEW-069): no stored world.
+        None if o.commit.is_some() => None,
         // A definition of its own or a bake size asked for says what the run wants: the default store holds the default world only.
         None if o.smoke || o.world.is_some() || o.given.contains("--global-res") => None,
         None => crate::worldfield::default_store(&std::env::current_dir().map_err(|e| e.to_string())?),
@@ -2008,8 +2011,16 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         );
     }
     let world = Arc::new(
-        match &store {
-            Some(dir) => {
+        match (&o.commit, &store) {
+            (Some(commit), _) => {
+                let def = match &o.world {
+                    Some(p) => crate::worldfield::load_world(p)?,
+                    None => planet_world_def::WorldDefinition::single_planet(crate::skeleton::RADIUS_M, o.seed),
+                };
+                let threads = planet_streaming::topology::bake_threads(o.threads)?.0;
+                WorldTerrain::open_commit_in_memory(def, commit, threads)?
+            }
+            (None, Some(dir)) => {
                 let res = if o.given.contains("--global-res") { o.global_res } else { crate::streamperf::PRODUCTION_BAKE_RES };
                 let def = match &o.world {
                     Some(p) => crate::worldfield::load_world(p)?,
@@ -2017,14 +2028,18 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
                 };
                 WorldTerrain::open_store_as(def, dir, res, o.field_source_choice()?)?
             }
-            None => WorldTerrain::of_perf_options(o, crate::skeleton::RADIUS_M)?,
+            (None, None) => WorldTerrain::of_perf_options(o, crate::skeleton::RADIUS_M)?,
         }
         .with_erosion_if(o)?
         // The viewer's plans keep the tiles whose water the view sees even where their terrain is culled (ADR 0053).
         .bounding_water(),
     );
     // The title names the world's field source (class or legacy) and whether the layer is on, so a screenshot says which world it shows (VIEW-065); the log prints the description.
-    let world_label = title_world_label(store.as_deref(), o.global_res, world.field_source_name(), o.erosion);
+    let world_label = match &o.commit {
+        // The title says the base is computed in memory (VIEW-069).
+        Some(dir) => format!("commit {} over the base computed in memory, not a stored bake", dir.display()),
+        None => title_world_label(store.as_deref(), o.global_res, world.field_source_name(), o.erosion),
+    };
     let _ = writeln!(out, "{}", world.describe());
     crate::stall::phase_mark("world");
     let field = world.field()?;
