@@ -1,0 +1,1 @@
+- 2026-11-12 xtask-plan archived: cargo xtask plan, the active milestone's exit items against the queue, also run by spec-lint (BUILD-053).

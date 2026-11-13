@@ -224,6 +224,23 @@ pub fn pick_active(files: Vec<(String, String)>) -> Res<(String, String)> {
     }
 }
 
+/// The problems of BUILD-053 for spec-lint: the active milestone, its exit table and the queue of `docs/status.md`, without the PR list.
+pub fn lint_errors(root: &Path) -> Vec<String> {
+    let (name, text) = match current_milestone(root) {
+        Ok(m) => m,
+        Err(e) => return vec![format!("plan: {e}")],
+    };
+    let items = match parse_exit_table(&text) {
+        Ok(i) => i,
+        Err(e) => return vec![format!("plan: docs/milestones/{name}.md: {e}")],
+    };
+    let status = match std::fs::read_to_string(root.join("docs").join("status.md")) {
+        Ok(s) => s,
+        Err(e) => return vec![format!("plan: docs/status.md: {e}")],
+    };
+    errors(&items, &parse_queue(&status))
+}
+
 /// `cargo xtask plan`: prints the plan; an `Err` (exit code 1) when a queue row or an open item breaks BUILD-053.
 pub fn run(root: &Path) -> Res {
     let (name, text) = current_milestone(root)?;
@@ -312,6 +329,22 @@ mod tests {
         let two = pick_active(vec![file("P1", "active"), file("P2", "active (next)")]).unwrap_err();
         assert!(two.contains("2 milestone files") && two.contains("P1") && two.contains("P2"), "{two}");
         assert_eq!(pick_active(vec![file("M9", "closed"), file("P1", "active")]).unwrap().0, "P1");
+    }
+
+    // spec: BUILD-053
+    #[test]
+    fn spec_lint_reads_the_repository_files_and_names_what_breaks() {
+        let root = std::env::temp_dir().join(format!("plancmd-lint-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("docs").join("milestones")).unwrap();
+        assert!(lint_errors(&root).iter().any(|e| e.contains("no milestone file")), "no milestone");
+        std::fs::write(root.join("docs").join("milestones").join("P1.md"), MILESTONE).unwrap();
+        std::fs::write(root.join("docs").join("status.md"), STATUS).unwrap();
+        assert!(lint_errors(&root).is_empty(), "{:?}", lint_errors(&root));
+        std::fs::write(root.join("docs").join("status.md"), "## Queue\n| Exit | Step |\n|---|---|\n| X9 | a |\n").unwrap();
+        let e = lint_errors(&root);
+        assert!(e.iter().any(|m| m.contains("X9")) && e.iter().any(|m| m.contains("E1")), "{e:?}");
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     // spec: BUILD-053
