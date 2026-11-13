@@ -31,7 +31,7 @@ The lanes (`sonnet-explorer`, `sonnet-crusader`, `sonnet-spikes`) implement and 
    - Anything else goes to `docs/parking.md`, one line each.
    - An owner idea goes to the parking list unless the owner moves it into the milestone. When it moves in, name what moves out or how the date moves.
    - Use `cargo xtask plan` once it exists; until then, check by hand.
-2. **Order the work.** Write lane orders as numbered entries (`## #N <date> <subject>`) in `C:/DEV/planner-inbox/<lane>.md`. Each order has:
+2. **Order the work.** Write lane orders as numbered entries (`## #N <date> <subject>`) in `C:/DEV/SeriousPlanetData/lanes/<lane>.md`. Each order has:
    - the exit item it serves;
    - the file paths;
    - the requirement;
@@ -41,7 +41,7 @@ The lanes (`sonnet-explorer`, `sonnet-crusader`, `sonnet-spikes`) implement and 
    Send a message only to stop or change running work. The app pauses your sends after 10 without an owner message.
 3. **Keep lanes busy only on exit items.** An idle lane is fine; a PR in a direction the owner has not seen is not.
    - Look work stays in spike code with picture sheets until the owner picks a variant.
-4. **The digest.** Once a day, write `C:/DEV/planner-inbox/digest/<date>.md` (outside the repo) and send it with SendUserFile. Its parts are read on their own:
+4. **The digest.** Once a day, write `C:/DEV/SeriousPlanetData/lanes/digest/<date>.md` (outside the repo) and send it with SendUserFile. Its parts are read on their own:
    - (a) the exit list with its state;
    - (b) a picture sheet through the production path, with the DEM reference beside it, when there is one;
    - (c) at most three decisions, each with options, a recommendation, your objection and how long it has waited;
