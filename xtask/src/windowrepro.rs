@@ -91,6 +91,8 @@ pub fn run(root: &Path, bundle: &str, path: &str, real: bool, extra: &[String]) 
         .env("PLANET_GATE", "1")
         .env("PLANET_GATE_PATH", path)
         .env("PLANET_GATE_REPORT", &report)
+        // A replay measures: the gate's failures are printed, not turned into an error that ends the run before its closing lines.
+        .env("PLANET_GATE_MEASURE", "1")
         .env("PLANET_CRASH_DIR", out_dir.join("crashes"));
     if !real {
         // The software adapter's frame times are not judged (the gate's rule).
@@ -101,12 +103,19 @@ pub fn run(root: &Path, bundle: &str, path: &str, real: bool, extra: &[String]) 
     // The whole output stays beside the report: the closing lines of the window are not all printed.
     let _ = std::fs::write(out_dir.join("stdout.txt"), stdout.as_bytes());
     let stderr = String::from_utf8_lossy(&out.stderr);
+    let _ = std::fs::write(out_dir.join("stderr.txt"), stderr.as_bytes());
     let Some(line) = gate_line(&stdout) else {
         return Err(format!("the window replay printed no gate line ({}): {}", out.status, stderr.lines().last().unwrap_or("")));
     };
     println!("{line}");
     if let Some(r) = stdout.lines().find(|l| l.starts_with("planet editor: resident tiles")) {
         println!("{r}");
+    }
+    // The failures the gate would have judged (held-back tiles, slow frames), printed as they are (stdout, after the gate line).
+    if let Some(k) = stdout.lines().position(|l| l.starts_with("gate (measure, not judged):")) {
+        for l in stdout.lines().skip(k).take(4) {
+            println!("{l}");
+        }
     }
     println!("{}", verdict(line, &world));
     println!("report: {}; stall reports of the window: {}", report.display(), out_dir.join("crashes").display());

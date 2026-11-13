@@ -10,6 +10,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// A frame over this many milliseconds fails the gate.
 pub const FRAME_LIMIT_MS: f64 = 100.0;
 
+/// Whether the run only measures (`PLANET_GATE_MEASURE`, set by `cargo xtask repro --window`, BUILD-054): the gate's failures are printed and do not end the run in an error.
+pub fn measure_mode() -> bool {
+    std::env::var_os("PLANET_GATE_MEASURE").is_some()
+}
+
 /// The stalls the gate line names with their counts (the first ones of the run).
 const STALL_DETAIL_FRAMES: usize = 12;
 
@@ -94,6 +99,9 @@ pub struct Gate {
     /// Most tiles held back under an edit at once (reported, not failed).
     pub held_under_edit_max: usize,
     pub held_frames: u64,
+    /// The distinct tiles the plan held back over the run, and those among them inside the region of the commit the world opened (BUILD-054).
+    pub held_distinct: std::collections::BTreeSet<TileId>,
+    pub held_inside: std::collections::BTreeSet<TileId>,
     /// The clock time the scripted edit was published at, and the wanted horizon maps it touched (their edit word changed).
     pub edit_at: Option<u64>,
     pub touched: Vec<planet_generators::chunkfield::ChunkKey>,
@@ -187,6 +195,15 @@ impl Gate {
         }
     }
 
+    /// Where the held-back tiles of a frame lie: `inside(tile)` says whether a tile is over the region of the commit the world opened (BUILD-054).
+    pub fn held_where(&mut self, held: &[TileId], inside: &dyn Fn(TileId) -> bool) {
+        for &t in held {
+            if self.held_distinct.insert(t) && inside(t) {
+                self.held_inside.insert(t);
+            }
+        }
+    }
+
     /// With `judge_perf` false (the software adapter: its rendering shares the CPU with the main thread, and a 32-cell world lands too few chunks to bake a map) the
     /// frame time and the horizon maps are reported and not judged; held-back tiles and panics always are.
     ///
@@ -263,8 +280,19 @@ impl Gate {
                 .collect();
             format!("; stall frames: {}", shown.join(" | "))
         };
+        let held_where = if self.held_distinct.is_empty() {
+            String::new()
+        } else {
+            let levels = self.held_distinct.iter().map(|t| t.level());
+            let (lo, hi) = (levels.clone().min().unwrap_or(0), levels.max().unwrap_or(0));
+            format!(
+                "; held tiles: {} distinct at levels {lo} to {hi}, {} over the commit's region",
+                self.held_distinct.len(),
+                self.held_inside.len()
+            )
+        };
         format!(
-            "gate: {} frames, longest {:.0} ms, {} over {FRAME_LIMIT_MS:.0} ms; main-thread block decodes {} in {} frames; held back: {} frames, {} with no edit in reach, up to {} under an edit; horizon maps baked {horizon_baked}; panics {panics}; stalls {} (frames of {:.0} ms or more with the GPU phases, longest {:.0} ms); resident tiles at most {}, evicted {}{detail}{edit}",
+            "gate: {} frames, longest {:.0} ms, {} over {FRAME_LIMIT_MS:.0} ms; main-thread block decodes {} in {} frames; held back: {} frames, {} with no edit in reach, up to {} under an edit; horizon maps baked {horizon_baked}; panics {panics}; stalls {} (frames of {:.0} ms or more with the GPU phases, longest {:.0} ms); resident tiles at most {}, evicted {}{held_where}{detail}{edit}",
             self.frames,
             self.longest_ms,
             self.slow.len(),
@@ -383,6 +411,21 @@ mod tests {
         assert!(g.failures(1, true, 0, true).is_empty());
         assert_eq!(g.held_under_edit_max, 2);
         assert!(g.report(1, 0).contains("up to 2 under an edit"));
+    }
+
+    // spec: BUILD-054
+    #[test]
+    fn the_held_back_tiles_are_told_by_level_and_by_whether_they_lie_over_the_commits_region() {
+        let t = |level: u8, x: u32| TileId::new(planet_core::Face(0), level, x, 0).unwrap();
+        let (a, b, c) = (t(5, 1), t(7, 2), t(7, 3));
+        let mut g = Gate::default();
+        assert!(!g.report(0, 0).contains("held tiles:"), "nothing held, nothing said");
+        let inside = |tile: TileId| tile == b;
+        g.held_where(&[a, b], &inside);
+        g.held_where(&[b, c, a], &inside);
+        assert_eq!((g.held_distinct.len(), g.held_inside.len()), (3, 1), "each tile once");
+        let line = g.report(0, 0);
+        assert!(line.contains("; held tiles: 3 distinct at levels 5 to 7, 1 over the commit's region"), "{line}");
     }
 
     // spec: BUILD-054

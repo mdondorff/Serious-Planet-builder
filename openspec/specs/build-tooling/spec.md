@@ -824,7 +824,7 @@ Source: ADR 0120 point 5 (owner, 2026-11-12), lead 2026-11-12
 - **THEN** the command names the item and exits non-zero; a done item needs no row
 
 ### Requirement: BUILD-054 repro replays a recorded path in a window and counts the stalls
-`cargo xtask repro <frame-N-path.txt | bundle> --window [--real] [-- OPTIONS]` SHALL replay the camera path in real time in `planet editor --smoke` (the gate's path replay, TEST-061) over the world its bundle records: the seed and, when recorded, `--commit` and `--site` (VIEW-071). The options after `--` go to `planet editor` as they are. It SHALL print the gate line with the stalls (frames of 1 s or more with the GPU phases counted; the first ones each with its frame's resident, written and evicted tiles) and a verdict line. With `--real` a locked desktop ends it as NOT RUN, never a pass. It SHALL refuse a non-terrain bundle, a missing path file, and `--at-commit`, `--every` or `--store` beside it.
+`cargo xtask repro <frame-N-path.txt | bundle> --window [--real] [-- OPTIONS]` SHALL replay the camera path in real time in `planet editor --smoke` (the gate's path replay, TEST-061) over the world its bundle records (VIEW-071); options after `--` go to the editor. The run measures: the gate's failures are printed, not raised, and its output is kept under `target/repro-window`. It SHALL print the gate line (stalls of 1 s or more with the GPU phases counted, each with its frame's resident, written and evicted tiles; the held-back tiles and how many lie over the commit's region). With `--real` a locked desktop is NOT RUN. It SHALL refuse a non-terrain bundle, a missing path file, and `--at-commit`, `--every` or `--store`.
 
 Verify: A
 Status: active
@@ -841,3 +841,7 @@ Source: Lead 2026-11-13 (P2 E3), crusader's #124 diagnosis (no windowed path rep
 #### Scenario: A render submit counts
 - **WHEN** a frame spends 4.5 s in its render submit and nothing else is slow
 - **THEN** it is a stall of the report and not a failure of the gate's frame limit
+
+#### Scenario: A replay that the gate would fail
+- **WHEN** the plan holds tiles back with no edit in reach during a replay
+- **THEN** the gate line says how many distinct tiles were held, at which levels and how many lie over the commit's region, the failure is printed as not judged, and the run ends normally with its closing lines
