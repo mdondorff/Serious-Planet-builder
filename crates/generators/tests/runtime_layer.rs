@@ -332,21 +332,37 @@ fn layered<'a>(src: &'a dyn LatticeSource, c1: bool, scale: f64) -> ErosionField
     relief(src, c1).with_layer(layer(scale, 3), 0.0).unwrap()
 }
 
-// spec: GEN-112
+// spec: GEN-112, GEN-187
 #[test]
-fn off_is_the_field_with_the_band_and_a_layer_of_zeros_changes_nothing() {
+fn off_is_the_field_with_the_band_and_a_layer_of_zeros_changes_nothing_but_the_pinned_detail() {
+    // ADR 0122 point 1 (GEN-187): where the layer is read the detail is pinned to the layer's samples, so a layer of zeros is the band's field with the detail minus
+    // its interpolant from the four cell centres around the point; before GEN-187 it was the band's field bit for bit.
     let g = grid();
     let src = GridSource(&g);
     for c1 in [false, true] {
         let band = relief(&src, c1).with_crease_band(planet_generators::erosion::CreaseBand::of_the_bake(0.0)).unwrap();
-        let zero = relief(&src, c1).with_layer(layer(0.0, 3), 0.0).unwrap();
+        let zero_layer = layer(0.0, 3);
+        let zero = relief(&src, c1).with_layer(zero_layer.clone(), 0.0).unwrap();
         let mut rng = SplitMix64(11);
         for _ in 0..300 {
             let d = random_dir(&mut rng);
-            assert_eq!(band.height(d).to_bits(), zero.height(d).to_bits(), "c1 {c1}: a layer of zeros adds nothing, bit for bit");
+            let stencil = zero_layer.centres_around(d);
+            let interpolant: f64 = stencil.centres.iter().filter(|(_, w)| *w > 0.0).map(|(c, w)| w * band.detail_unpinned(*c)).sum();
+            let k = relief_k(&src, d);
+            let want = band.height(d) - k * interpolant;
+            let got = zero.height(d);
+            assert!(
+                (got - want).abs() <= 1e-6 * (1.0 + want.abs()),
+                "c1 {c1}: {got} against the band's height minus the pinned interpolant {want}"
+            );
         }
         assert!(layered(&src, c1, 1.0).layer_on() && !relief(&src, c1).layer_on());
     }
+}
+
+/// The relief channel `k` at a direction (the factor on the detail with the relief channels on).
+fn relief_k(_src: &dyn LatticeSource, d: Vec3) -> f64 {
+    ReliefLattice::new(channels()).unwrap().at(d).0
 }
 
 // spec: GEN-113
@@ -356,7 +372,8 @@ fn the_layer_is_added_after_the_relief_base_faded_at_the_coast_and_not_scaled_by
     let src = GridSource(&g);
     let l = layer(1.0, 3);
     let on = layered(&src, true, 1.0);
-    let band = relief(&src, true).with_crease_band(planet_generators::erosion::CreaseBand::of_the_bake(0.0)).unwrap();
+    // The reference is a layer of zeros over the same grid: the same pinned detail (GEN-187), no change.
+    let band = relief(&src, true).with_layer(layer(0.0, 3), 0.0).unwrap();
     let mut rng = SplitMix64(12);
     let (mut high, mut coast, mut sea) = (0, 0, 0);
     for _ in 0..3000 {
@@ -631,7 +648,8 @@ fn without_the_relief_channels_the_layer_is_added_to_the_lattice_read_with_the_b
     let l = layer(1.0, 3);
     for c1 in [false, true] {
         let on = plain(&src, c1).with_layer(l.clone(), 0.0).unwrap();
-        let band = plain(&src, c1).with_crease_band(planet_generators::erosion::CreaseBand::of_the_bake(0.0)).unwrap();
+        // A layer of zeros on the same grid: the band's field with the same pinned detail (GEN-187), no change.
+        let band = plain(&src, c1).with_layer(layer(0.0, 3), 0.0).unwrap();
         assert!(on.layer_on() && on.crease_band_on() && !on.relief_on());
         let mut rng = SplitMix64(31);
         for _ in 0..1500 {
@@ -856,5 +874,49 @@ fn the_read_at_a_cell_centre_is_the_sample_at_the_production_geometry() {
         let v = l.change_at(d).unwrap();
         let want = LazyLayer::value(f, i, j);
         assert_eq!(v.to_bits(), want.to_bits(), "face {f} cell ({i}, {j}): read {v}, sample {want}");
+    }
+}
+
+// spec: GEN-187
+#[test]
+fn where_the_layer_is_read_the_ground_at_every_cell_centre_is_the_base_plus_the_change_and_the_detail_lives_between() {
+    let g = grid();
+    let src = GridSource(&g);
+    let l = layer(1.0, 3);
+    for c1 in [false, true] {
+        let on = plain(&src, c1).with_layer(l.clone(), 0.0).unwrap();
+        let mut rng = SplitMix64(41);
+        // At the centres the detail is pinned to 0: the drawn ground is the stored base plus the faded change, bit for bit.
+        for _ in 0..400 {
+            let (f, i, j) = (
+                (rng.next_u64() % 6) as u8,
+                (rng.next_u64() % LAYER_CELLS as u64) as usize,
+                (rng.next_u64() % LAYER_CELLS as u64) as usize,
+            );
+            let c = cell_dir(f, i, j);
+            assert!(l.centres_around(c).at_centre, "cell ({f}, {i}, {j}) is a centre");
+            let e = on.base_elevation(c);
+            let want = e + coast_fade(e, 0.0) * l.change_at(c).unwrap();
+            assert_eq!(on.height(c).to_bits(), want.to_bits(), "c1 {c1}: cell ({f}, {i}, {j})");
+        }
+        // Between the centres the pinned detail is the detail minus its interpolant: not 0 in general, and the same in a batch as in single reads.
+        let (mut off, mut big) = (0, 0.0f64);
+        let dirs: Vec<Vec3> =
+            (0..400).map(|_| at_cell((rng.next_u64() % 6) as u8, 4.0 + rng.next_f64() * 240.0, 4.0 + rng.next_f64() * 240.0)).collect();
+        for d in &dirs {
+            let e = on.base_elevation(*d);
+            let pinned = on.height(*d) - (e + coast_fade(e, 0.0) * l.change_at(*d).unwrap());
+            let s = l.centres_around(*d);
+            let interpolant: f64 = s.centres.iter().map(|(c, w)| w * on.detail_unpinned(*c)).sum();
+            let want = on.detail_unpinned(*d) - interpolant;
+            assert!((pinned - want).abs() <= 1e-6 * (1.0 + e.abs()), "c1 {c1}: pinned detail {pinned} against {want}");
+            off += usize::from(pinned.abs() > 1e-3);
+            big = big.max(pinned.abs());
+        }
+        assert!(off > 300 && big > 0.01, "c1 {c1}: the detail lives between the centres ({off} of 400 off zero, largest {big} m)");
+        for (d, h) in dirs.iter().zip(on.heights(&dirs)) {
+            assert_eq!(on.height(*d).to_bits(), h.to_bits(), "c1 {c1}: a batch reads as single reads");
+        }
+        assert!(on.error().is_none());
     }
 }

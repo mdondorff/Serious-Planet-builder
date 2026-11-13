@@ -54,6 +54,13 @@ pub const EROSION_BAND_IMPLEMENTATION_ID: &str = "cpu-erosion-v1+relief+band";
 pub const EROSION_C1_BAND_IMPLEMENTATION_ID: &str = "cpu-erosion-v2+relief+band";
 /// Bump whenever the crease band's weights or the way they apply change (it enters the inputs hash of a field with the band on).
 pub const CREASE_BAND_VERSION: u32 = 1;
+/// The version of the detail pinned to the layer's samples (GEN-187, ADR 0122 point 1): it enters the keys of every field that reads the layer.
+pub const PINNED_DETAIL_VERSION: u32 = 1;
+
+/// How far, in layer cells, the cell centres a pinned point reads lie from it (the four around it are within the cell's diagonal, about 1.42; the warp of the face stretches a cell by at
+/// most a few per cent): the reach the bounds widen the cap by (GEN-187).
+const PIN_REACH_CELLS: f64 = 2.0;
+
 /// The implementation id of a field that reads the erosion layer (GEN-112) over the v1 base.
 pub const EROSION_LAYER_IMPLEMENTATION_ID: &str = "cpu-erosion-v1+relief+band+layer";
 /// The crease band without the relief channels (`k` 1, `m` unread) over the v1 base (GEN-109).
@@ -365,6 +372,7 @@ impl ErosionField<'_> {
                 sea_level_m.to_bits(),
                 crate::erosion_layer::COAST_FADE_M.to_bits(),
                 u64::from(crate::erosion_layer::LAYER_READ_VERSION),
+                u64::from(PINNED_DETAIL_VERSION),
             ],
         );
         f.layer = Some((layer, sea_level_m));
@@ -444,6 +452,12 @@ impl ErosionField<'_> {
         scan_base(&self.src, centre, angular_radius, self.c1).ok().flatten().map(|s| (s.lo, s.hi))
     }
 
+    /// The fine-detail term at a direction as ADR 0098 sets it, before any pinning (GEN-187). For tests.
+    #[doc(hidden)]
+    pub fn detail_unpinned(&self, dir: Vec3) -> f64 {
+        self.detail_via_c(&self.src, dir, false).1
+    }
+
     /// The ground elevation of the bake at a direction, without creases.
     pub fn base_elevation(&self, dir: Vec3) -> f64 {
         self.base_via(&self.src, dir)
@@ -508,6 +522,32 @@ impl ErosionField<'_> {
     }
 
     fn height_via_c(&self, src: &dyn LatticeSource, dir: Vec3, cached: bool) -> f64 {
+        let (e, detail) = self.detail_via_c(src, dir, cached);
+        // GEN-187 (ADR 0122 point 1): where the layer is read the detail is pinned to the stored samples: minus its bilinear interpolant from the four
+        // surrounding cell centres of the layer, so it is 0 at every centre and the ground there is the stored base plus the change.
+        let detail = match &self.layer {
+            None => detail,
+            Some((layer, _)) => {
+                let stencil = layer.centres_around(dir);
+                if stencil.at_centre {
+                    0.0
+                } else {
+                    let mut interpolant = 0.0;
+                    for (centre, w) in stencil.centres {
+                        if w > 0.0 {
+                            // The centres lie outside the batch's gathered footprint: read them uncached.
+                            interpolant += w * self.detail_via_c(src, centre, false).1;
+                        }
+                    }
+                    detail - interpolant
+                }
+            }
+        };
+        self.compose(dir, e, detail)
+    }
+
+    /// The base elevation at `dir` and the fine-detail term there as ADR 0098 sets it (the crease octaves, banded where the band is on).
+    fn detail_via_c(&self, src: &dyn LatticeSource, dir: Vec3, cached: bool) -> (f64, f64) {
         let e = self.base_via_c(src, dir, cached);
         let slope = self.gradient_via_c(src, dir, cached) / self.radius_m;
         let c = carve(slope);
@@ -526,6 +566,11 @@ impl ErosionField<'_> {
             }
             None => detail_m(self.seed, dir, e, c, l),
         };
+        (e, detail)
+    }
+
+    /// The height from the base elevation `e` and the detail term: the relief base, then the layer's change.
+    fn compose(&self, dir: Vec3, e: f64, detail: f64) -> f64 {
         let base = match &self.relief_channels {
             None => e + detail,
             // GEN-099: each term one read at the point.
@@ -708,12 +753,68 @@ impl HeightField for ErosionField<'_> {
     /// over the intervals of the four terms (the range of the channels over the cap from [`crate::relief_lattice::ReliefLattice::range_over_cap`]).
     fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
         let global = (-self.max_abs_height(), self.max_abs_height());
+        let Some((blo, bhi, dlo, dhi)) = self.base_and_detail_range(centre, angular_radius) else {
+            return global;
+        };
+        // GEN-187: where the layer is read the detail is pinned: the detail at the point minus its interpolant from the layer's cell centres around it, which lie within
+        // `PIN_REACH_CELLS` cells of the point; the interpolant is a convex combination of the detail over the cap widened by that reach.
+        let (dlo, dhi) = match &self.layer {
+            None => (dlo, dhi),
+            Some((layer, _)) => {
+                let reach = PIN_REACH_CELLS * core::f64::consts::FRAC_PI_2 / layer.cells() as f64;
+                let (wlo, whi) = match self.base_and_detail_range(centre, (angular_radius + reach) * (1.0 + 1e-9)) {
+                    Some((_, _, wlo, whi)) => (wlo, whi),
+                    None => (-DETAIL_DOWN_M, 0.25 * AMPLITUDE_MAX_M),
+                };
+                (dlo - whi, dhi - wlo)
+            }
+        };
+        let pad = |x: f64| 1e-6 + x.abs() * 1.2e-7;
+        let (l, h) = match &self.relief_channels {
+            None => (blo + dlo, bhi + dhi),
+            // `m + k (e - m) + k detail` over the intervals of `e`, `m`, `k` and the detail: the products of intervals (GEN-099, GEN-102).
+            Some(r) => {
+                let [klo, khi, mlo, mhi] = r.range_over_cap(centre, angular_radius);
+                let product = |alo: f64, ahi: f64, blo_: f64, bhi_: f64| {
+                    let p = [alo * blo_, alo * bhi_, ahi * blo_, ahi * bhi_];
+                    (p.iter().cloned().fold(f64::INFINITY, f64::min), p.iter().cloned().fold(f64::NEG_INFINITY, f64::max))
+                };
+                let (rise_lo, rise_hi) = product(klo, khi, blo - mhi, bhi - mlo);
+                let (det_lo, det_hi) = product(klo, khi, dlo, dhi);
+                (mlo + rise_lo + det_lo, mhi + rise_hi + det_hi)
+            }
+        };
+        // GEN-102, GEN-112: the layer's change over the cap (from its pyramid, or the global range for a cap too wide) times the fade over the cap's base interval.
+        let (l, h) = match &self.layer {
+            None => (l, h),
+            Some((layer, sea)) => {
+                let (clo, chi) = match layer.range_over_cap(centre, angular_radius) {
+                    Ok(Some(r)) => r,
+                    Ok(None) => layer.global_range(),
+                    Err(e) => {
+                        self.fail_text(&e);
+                        return global;
+                    }
+                };
+                let (flo, fhi) = (crate::erosion_layer::coast_fade(blo, *sea), crate::erosion_layer::coast_fade(bhi, *sea));
+                let p = [flo * clo, flo * chi, fhi * clo, fhi * chi];
+                (l + p.iter().cloned().fold(f64::INFINITY, f64::min), h + p.iter().cloned().fold(f64::NEG_INFINITY, f64::max))
+            }
+        };
+        ((l - pad(l)).max(global.0), (h + pad(h)).min(global.1))
+    }
+}
+
+impl ErosionField<'_> {
+    /// The base range `(blo, bhi)` over a cap and the range `(dlo, dhi)` of the unpinned detail term over it (the parts of [`HeightField::height_bounds`] before the relief channels and the
+    /// layer), or `None` where the cap takes the global range (a cap too wide for the scan, or a read error, recorded).
+    fn base_and_detail_range(&self, centre: Vec3, angular_radius: f64) -> Option<(f64, f64, f64, f64)> {
         let base = match scan_base(&self.src, centre, angular_radius, self.c1) {
             Ok(Some(s)) => s,
-            Ok(None) => return global,
+            Ok(None) => return None,
             Err(e) => {
                 self.fail(&e);
-                return global;
+                return None;
             }
         };
         let (blo, bhi) = (base.lo, base.hi);
@@ -729,7 +830,7 @@ impl HeightField for ErosionField<'_> {
                     let lip = f64::from(self.src.res()) * (wide.max_du + wide.max_dv);
                     let g_centre = self.gradient(centre);
                     if g_centre.is_nan() {
-                        return global;
+                        return None;
                     }
                     // The 2.5 (the exact worst case of the sum is 2.45) also absorbs the gap between chord and arc at a very fine
                     // bake: do not tighten it without redoing that argument.
@@ -745,7 +846,7 @@ impl HeightField for ErosionField<'_> {
                 Ok(None) => (carve(0.0), 1.0),
                 Err(e) => {
                     self.fail(&e);
-                    return global;
+                    return None;
                 }
             }
         } else {
@@ -803,39 +904,7 @@ impl HeightField for ErosionField<'_> {
             }
             None => detail_range(None),
         };
-        let pad = |x: f64| 1e-6 + x.abs() * 1.2e-7;
-        let (l, h) = match &self.relief_channels {
-            None => (blo + dlo, bhi + dhi),
-            // `m + k (e - m) + k detail` over the intervals of `e`, `m`, `k` and the detail: the products of intervals (GEN-099, GEN-102).
-            Some(r) => {
-                let [klo, khi, mlo, mhi] = r.range_over_cap(centre, angular_radius);
-                let product = |alo: f64, ahi: f64, blo_: f64, bhi_: f64| {
-                    let p = [alo * blo_, alo * bhi_, ahi * blo_, ahi * bhi_];
-                    (p.iter().cloned().fold(f64::INFINITY, f64::min), p.iter().cloned().fold(f64::NEG_INFINITY, f64::max))
-                };
-                let (rise_lo, rise_hi) = product(klo, khi, blo - mhi, bhi - mlo);
-                let (det_lo, det_hi) = product(klo, khi, dlo, dhi);
-                (mlo + rise_lo + det_lo, mhi + rise_hi + det_hi)
-            }
-        };
-        // GEN-102, GEN-112: the layer's change over the cap (from its pyramid, or the global range for a cap too wide) times the fade over the cap's base interval.
-        let (l, h) = match &self.layer {
-            None => (l, h),
-            Some((layer, sea)) => {
-                let (clo, chi) = match layer.range_over_cap(centre, angular_radius) {
-                    Ok(Some(r)) => r,
-                    Ok(None) => layer.global_range(),
-                    Err(e) => {
-                        self.fail_text(&e);
-                        return global;
-                    }
-                };
-                let (flo, fhi) = (crate::erosion_layer::coast_fade(blo, *sea), crate::erosion_layer::coast_fade(bhi, *sea));
-                let p = [flo * clo, flo * chi, fhi * clo, fhi * chi];
-                (l + p.iter().cloned().fold(f64::INFINITY, f64::min), h + p.iter().cloned().fold(f64::NEG_INFINITY, f64::max))
-            }
-        };
-        ((l - pad(l)).max(global.0), (h + pad(h)).min(global.1))
+        Some((blo, bhi, dlo, dhi))
     }
 }
 
