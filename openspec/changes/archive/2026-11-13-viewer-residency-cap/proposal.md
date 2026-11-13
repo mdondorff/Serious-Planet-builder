@@ -8,7 +8,7 @@
 
 ## Not in this change
 - The perf scenes (they keep the pool as capacity), the pool sizes (STRM-006), the eviction order (STRM-007).
-- Whether the stalls vanish at the cap: measured on the R3a path replay (G-RT), reported, and the cap value restated from it if needed.
+- Whether the stalls vanish at the cap. G-RT (2026-11-13, the RTX, `cargo xtask repro frame-17426-path.txt --window --real` over `r3a-e1`, BUILD-054): the 60 s path alone shows 0 stalls with the pool as capacity (14,290 frames, resident at most 17,125, none evicted) and with the default cap (12,812 frames, resident at most 16,483, none evicted). The recorded minute starts after the residency had grown, so it cannot show the effect; a long free flight (25 min, as in the diagnosis) can. The cap value stays 24,000.
 
 ## Impact
 app (pipelined.rs, window.rs, lib.rs). Spec: viewer. Tests: frame managed (tier A), app unit.

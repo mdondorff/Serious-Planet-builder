@@ -79,6 +79,9 @@ pub struct Gate {
     /// Frames of the stall limit (`stall::limit`, default 1 s) or more with the GPU phases counted, and the longest such total (BUILD-054).
     pub stalls: u64,
     pub longest_total_ms: f64,
+    /// The most tiles resident in a frame, and the tiles evicted over the run (VIEW-070: what the cap did).
+    pub max_resident: usize,
+    pub evicted_total: u64,
     /// Each stall with the streamer's counts of its frame, so that the resident count is told from an upload burst (BUILD-054).
     pub stall_frames: Vec<StallFrame>,
     /// The streamer's counts of the frame being judged: resident tiles, tiles written, tiles evicted, bytes written ([`Gate::counts`]).
@@ -167,6 +170,8 @@ impl Gate {
     /// The streamer's counts of the frame about to be judged by [`Gate::frame`]: tiles resident, written and evicted, and the bytes written.
     pub fn counts(&mut self, resident: usize, uploaded: u64, evicted: u64, upload_bytes: u64) {
         self.counts = (resident, uploaded, evicted, upload_bytes);
+        self.max_resident = self.max_resident.max(resident);
+        self.evicted_total += evicted;
     }
 
     /// The tiles the plan of `frame` holds back, and which of them an edit reaches.
@@ -259,7 +264,7 @@ impl Gate {
             format!("; stall frames: {}", shown.join(" | "))
         };
         format!(
-            "gate: {} frames, longest {:.0} ms, {} over {FRAME_LIMIT_MS:.0} ms; main-thread block decodes {} in {} frames; held back: {} frames, {} with no edit in reach, up to {} under an edit; horizon maps baked {horizon_baked}; panics {panics}; stalls {} (frames of {:.0} ms or more with the GPU phases, longest {:.0} ms){detail}{edit}",
+            "gate: {} frames, longest {:.0} ms, {} over {FRAME_LIMIT_MS:.0} ms; main-thread block decodes {} in {} frames; held back: {} frames, {} with no edit in reach, up to {} under an edit; horizon maps baked {horizon_baked}; panics {panics}; stalls {} (frames of {:.0} ms or more with the GPU phases, longest {:.0} ms); resident tiles at most {}, evicted {}{detail}{edit}",
             self.frames,
             self.longest_ms,
             self.slow.len(),
@@ -270,9 +275,17 @@ impl Gate {
             self.held_under_edit_max,
             self.stalls,
             crate::stall::limit().as_secs_f64() * 1e3,
-            self.longest_total_ms
+            self.longest_total_ms,
+            self.max_resident,
+            self.evicted_total
         )
     }
+}
+
+/// Whether the gate's edit script is over (the path replay starts after it): a run without `--edit` has no script, whatever the editor state
+/// reports (BUILD-054: `repro --window` replays a path without placing a hill).
+pub fn edit_done(edit_requested: bool, smoke_finished: Option<bool>) -> bool {
+    !edit_requested || smoke_finished.unwrap_or(true)
 }
 
 /// A camera path file replayed in real time on the window's clock (`PLANET_GATE_PATH`): the pose logged at or before the time since the start.
@@ -374,6 +387,16 @@ mod tests {
 
     // spec: BUILD-054
     #[test]
+    fn a_run_without_the_edit_flag_has_no_script_to_wait_for() {
+        assert!(edit_done(false, Some(false)), "no --edit: the replay starts although the editor's smoke script never ran");
+        assert!(edit_done(false, None));
+        assert!(!edit_done(true, Some(false)), "--edit: the replay waits for the script");
+        assert!(edit_done(true, Some(true)));
+        assert!(edit_done(true, None), "no editor state, nothing to wait for");
+    }
+
+    // spec: BUILD-054
+    #[test]
     fn a_stall_counts_the_gpu_phases_and_is_reported_without_failing_the_gate() {
         let mut g = Gate::default();
         g.frame(30, &[("draw", 12.0)], &[]);
@@ -393,6 +416,8 @@ mod tests {
             "{line}"
         );
         assert_eq!(g.stall_frames.len(), 1);
+        // The cap's effect over the run (VIEW-070): the most tiles resident and the tiles evicted.
+        assert!(line.contains("; resident tiles at most 23100, evicted 4"), "{line}");
         assert!(!line.contains("edit:"), "no edit, nothing to say: {line}");
     }
 

@@ -934,7 +934,7 @@ impl App<'_> {
             // The gate holds the first pose of its path while the edit script runs, then replays the path in real time.
             let camera = match st.gate.as_mut() {
                 Some(g) => {
-                    let edit_done = st.edit.as_ref().is_none_or(|e| e.smoke_finished());
+                    let edit_done = crate::gate::edit_done(cfg.edit, st.edit.as_ref().map(|e| e.smoke_finished()));
                     if edit_done {
                         let at = *g.edit_done_at.get_or_insert(st.frames);
                         if st.frames >= at + gate_settle_frames() {
