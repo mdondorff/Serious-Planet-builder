@@ -144,7 +144,8 @@ pub fn check_options(o: &Options) -> Result<(), String> {
             ));
         }
     }
-    if stream && o.store.is_none() && !o.allow_memory_bake && !o.perf_smoke {
+    // A commit over the in-memory production base (VIEW-069) names its own base: the stills are pictures, not streaming measurements.
+    if stream && o.store.is_none() && !o.allow_memory_bake && !o.perf_smoke && o.commit.is_none() {
         return Err(format!(
             "the streaming scene '{}' measures cold plans and tile generation, which differ over the production store (block decodes, SPIKE-05): \
              give --store DIR, a bake of {PRODUCTION_BAKE_RES} cells per face edge made by `generate --global-dir DIR --global-res {PRODUCTION_BAKE_RES}` \
