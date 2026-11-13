@@ -5,7 +5,7 @@ Every owner-facing review picture written by the review tooling SHALL carry a sc
 - The metres per pixel are `2 d tan(fov / 2) / height_px` for the distance `d` along the axis to the ground or sea.
 - A view whose axis meets no ground has the label and no bar.
 - Golden-review's difference sheets carry no pose and are not annotated.
-- A picture of a known defect carries a note above the label naming the defect and its cause (`capture-stills --note`), wrapped to the width.
+- Notes (`--note`) go above the label.
 
 Verify: A
 Status: active

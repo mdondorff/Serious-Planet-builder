@@ -8,4 +8,4 @@ And the opening route (lead, 2026-11-13, option b): no stored bake matches the R
 
 Lead review of the first stills (2026-11-13): the label takes a corner at half the text scale and the full notes go to the caption (`stills.txt`, `--caption` for caption-only lines); rivers are drawn only over the commit's L tiles (the margin's graph blocks drew right-angle staircases over the coarse ground) and end at a lake's wet mask (they ran across the lakes).
 
-Requirements: TEST-128 gains the note bullet (MODIFIED); VIEW-069 (new, lead 2026-11-13); REND-062 and REND-065 gain one bullet each (MODIFIED). Source: lead 2026-11-12 (E1 item), 2026-11-13 (the label on the pose line).
+Requirements: TEST-128 gains the note bullet (MODIFIED); VIEW-069 (new, lead 2026-11-13); REND-062 gains one bullet (MODIFIED: rivers only over the commit's tiles, ending at a lake's wet mask). Source: lead 2026-11-12 (E1 item), 2026-11-13 (the label on the pose line).
