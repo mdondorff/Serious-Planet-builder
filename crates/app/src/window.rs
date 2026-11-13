@@ -58,6 +58,39 @@ pub fn descent_site(option: Option<(f64, f64)>, world: &WorldTerrain, field: &dy
     let is_sea = |d: planet_core::Vec3| crate::litperf::carries_sea(world, d);
     planet_frame::litscenes::default_land_site(&is_sea, &|d| field.height(d), level_m, (SITE_LAT_DEG, SITE_LON_DEG), radius_m)
 }
+/// The pose the viewer starts at over a commit opened in memory (VIEW-069): the eye 20 km behind the anchor and 25 km above the ground,
+/// looking north 50 degrees down (the E1 cluster still).
+pub fn commit_start_pose() -> crate::stills::Pose {
+    crate::stills::Pose {
+        name: "commit-start".into(),
+        altitude_m: 25_000.0,
+        back_m: 20_000.0,
+        heading_deg: 0.0,
+        pitch_deg: 50.0,
+        sun_local_hours: 13.0,
+        sun_declination_deg: 0.0,
+        view: None,
+    }
+}
+
+/// The anchor of the start pose over a commit (VIEW-069): `--site` when given, else the centre of the commit's tiles.
+pub fn commit_start_anchor(region: &crate::worldfield::CommitRegion, site: Option<(f64, f64)>) -> Option<planet_core::Vec3> {
+    match site {
+        Some((lat, lon)) => Some(planet_core::Vec3::from_lat_lon(lat.to_radians(), lon.to_radians())),
+        None => region.centre(),
+    }
+}
+
+/// What the title says of the camera and the commit's region (VIEW-069): over the region the layer, lakes and rivers of the commit lie on
+/// the exact base; elsewhere the viewer draws the coarse in-memory bake.
+pub fn region_text(region: &crate::worldfield::CommitRegion, camera_position: planet_core::Vec3) -> &'static str {
+    if region.contains(camera_position.normalized()) {
+        "inside the region"
+    } else {
+        "outside the region: coarse base"
+    }
+}
+
 /// Frames after which a smoke run that has presented nothing gives up (a window that is never shown is not a pass).
 const SMOKE_GIVE_UP: u64 = 1500;
 /// Seconds between the title updates, and between the GPU-time samples.
@@ -228,6 +261,8 @@ struct Config {
     liquids: planet_world_def::LiquidTable,
     /// The item markers of the globe overview (`--marker`, VIEW-013).
     markers: Vec<Marker>,
+    /// The region of a commit opened in memory: the title says whether the camera is over it (VIEW-069).
+    region: Option<crate::worldfield::CommitRegion>,
 }
 
 /// What the globe overview did in the run (the smoke summary reports it).
@@ -325,6 +360,7 @@ struct Running {
     report: Option<planet_frame::viewer::StatsReport>,
     readiness: Readiness,
     world_label: String,
+    region: Option<crate::worldfield::CommitRegion>,
     altitude_m: f64,
     frames: u64,
     presented: u64,
@@ -604,6 +640,7 @@ impl App<'_> {
             report: None,
             readiness: cfg.base_readiness,
             world_label: cfg.world_label.clone(),
+            region: cfg.region.clone(),
             altitude_m: 0.0,
             frames: 0,
             presented: 0,
@@ -1556,6 +1593,9 @@ fn title_text(st: &Running, now_ms: u64) -> String {
         input += &format!(" | look {}", st.viewer.look_choice.name());
     }
     input += &format!(" | {}", st.world_label);
+    if let Some(region) = &st.region {
+        input += &format!(" | {}", region_text(region, st.camera_position));
+    }
     if st.viewer.scale_refs {
         input += " | scale references";
     }
@@ -2059,7 +2099,34 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     };
     lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, tau))?;
     let site = descent_site(o.site, &world, field.as_ref(), radius_m);
-    let script = build_script_at(site, StreamScene::Dive, radius_m, f64::from(size.0) / f64::from(size.1), field.as_ref(), field.seed());
+    let aspect = f64::from(size.0) / f64::from(size.1);
+    let water_level_m =
+        world.definition().sea(planet_world_def::BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
+    // A commit opened in memory starts over its region, held still at the start pose (VIEW-069): the dive of the default site lies
+    // outside the region, over the coarse base.
+    let cameras = match world.commit_region() {
+        Some(region) => {
+            let anchor = commit_start_anchor(region, o.site).ok_or("--commit: the commit holds no tile")?;
+            let fov = planet_frame::litscenes::FOV_DEG.to_radians();
+            let camera =
+                crate::stills::pose_camera(anchor, &commit_start_pose(), &|d| field.height(d), radius_m, water_level_m, aspect, fov);
+            let (lat, lon) = anchor.lat_lon();
+            let (eye_lat, eye_lon) = camera.position.0.lat_lon();
+            let _ = writeln!(
+                out,
+                "start: the commit's region, looking at {:.4} {:.4} ({}) from {:.4} {:.4}, {:.1} km from the planet's surface; {}",
+                lat.to_degrees(),
+                lon.to_degrees(),
+                if o.site.is_some() { "--site" } else { "the centre of its tiles" },
+                eye_lat.to_degrees(),
+                eye_lon.to_degrees(),
+                (camera.position.0.length() - radius_m) / 1000.0,
+                region_text(region, camera.position.0)
+            );
+            vec![camera]
+        }
+        None => build_script_at(site, StreamScene::Dive, radius_m, aspect, field.as_ref(), field.seed()).cameras,
+    };
     let views: Vec<&str> = TerrainView::ALL.iter().map(|v| v.name()).collect();
     // A flight shows the relief view unless `--view` says otherwise (the flat-colour views are one colour at 1 m).
     let view_name = if o.given.contains("--view") { o.view.as_str() } else { "relief" };
@@ -2079,8 +2146,6 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     let look = crate::lookload::load(o)?.params(planet_world_def::BodyId::PLANET);
     let atmosphere_note = viewer_lit_plan(&look, radius_m, 0.0, true, true).err();
     let atmosphere = atmosphere_note.is_none();
-    let water_level_m =
-        world.definition().sea(planet_world_def::BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
     let cfg = Config {
         size,
         lod,
@@ -2118,6 +2183,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         atmosphere,
         liquids: world.definition().liquids().map_err(|e| format!("the liquid table of the definition: {e}"))?,
         markers: parse_markers(&o.markers)?,
+        region: world.commit_region().cloned(),
     };
     writeln!(out, "planet editor: {} ({})", if o.smoke { "smoke test" } else { "viewer" }, world.describe()).map_err(err)?;
     writeln!(out, "keys: {}", *KEYS_HELP).map_err(err)?;
@@ -2139,7 +2205,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         field,
         field_stage: world.field_stage(),
         lod: cfg.lod.clone(),
-        cameras: &script.cameras,
+        cameras: &cameras,
         size: cfg.size,
         pending_resize: None,
         clock: Arc::new(SystemClock::new()),
@@ -2183,6 +2249,41 @@ fn gate_finish(g: &GateRun) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The tiles of the R3a commit's region: face 1, tiles 83..=90 by 7..=14 of 768 cells on a 98,304-cell face.
+    fn r3a_like_region() -> crate::worldfield::CommitRegion {
+        crate::worldfield::CommitRegion::new(98_304, 768, (83..=90).flat_map(|ti| (7..=14).map(move |tj| (1u8, ti, tj))))
+    }
+
+    // spec: VIEW-069
+    #[test]
+    fn the_viewer_starts_over_a_commits_region_and_the_title_says_whether_the_camera_is_inside_it() {
+        let region = r3a_like_region();
+        let centre = region.centre().expect("a region with tiles has a centre");
+        let (lat, lon) = centre.lat_lon();
+        assert!((lat.to_degrees() + 36.6).abs() < 0.5 && (lon.to_degrees() + 164.1).abs() < 0.5, "centre {lat} {lon}");
+        assert!(region.contains(centre), "the centre of the tiles is over them");
+        assert_eq!(region_text(&region, centre * 6_400_000.0), "inside the region", "the camera's direction counts, not its height");
+        // The dive of the default site (20 N 30 E) lies far outside the region: the coarse base.
+        let default_site = planet_core::Vec3::from_lat_lon(20f64.to_radians(), 30f64.to_radians());
+        assert_eq!(region_text(&region, default_site * 6_400_000.0), "outside the region: coarse base");
+        assert!(!crate::worldfield::CommitRegion::new(98_304, 768, []).contains(centre), "an empty commit holds nothing");
+        assert_eq!(crate::worldfield::CommitRegion::new(98_304, 768, []).centre(), None);
+        // The anchor: the centre of the tiles, or --site (the E1 cluster of three lakes).
+        assert_eq!(commit_start_anchor(&region, None), Some(centre));
+        let cluster = commit_start_anchor(&region, Some((-36.7498, -162.2827))).unwrap();
+        let (clat, clon) = cluster.lat_lon();
+        assert!((clat.to_degrees() + 36.7498).abs() < 1e-9 && (clon.to_degrees() + 162.2827).abs() < 1e-9);
+        assert!(region.contains(cluster), "the cluster lies in the region");
+        // The start pose: 25 km over the ground, 20 km behind the anchor, inside the region.
+        let pose = commit_start_pose();
+        assert_eq!((pose.altitude_m, pose.back_m, pose.heading_deg, pose.pitch_deg), (25_000.0, 20_000.0, 0.0, 50.0));
+        let radius = 6_371_000.0;
+        let cam = crate::stills::pose_camera(cluster, &pose, &|_| 100.0, radius, 0.0, 16.0 / 9.0, 1.0);
+        assert!(((cam.position.0.length() - radius) - 25_100.0).abs() < 1e-3, "25 km over the ground");
+        assert!((cam.position.0.normalized().angle_to(cluster) * radius - 20_000.0).abs() < 1e-3, "20 km behind the anchor");
+        assert_eq!(region_text(&region, cam.position.0), "inside the region");
+    }
 
     // spec: VIEW-013
     #[test]

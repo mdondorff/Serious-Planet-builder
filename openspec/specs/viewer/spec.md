@@ -1328,7 +1328,7 @@ Source: Architect order 2026-11-09 (inbox #99), A3 11.1, CON-18, VIEW-067; the t
 - **THEN** the worker answers and the preview is drawn and gone when the edit is committed, nothing runs without the flag, and the two frames differ only where the overlay's lines and label are
 
 ### Requirement: VIEW-069 The viewer and capture-stills open a commit over the in-memory production base
-With `--commit DIR` the viewer and `capture-stills` SHALL open the commit in DIR over the production generator's base computed in memory for the definition (`--world` or `--seed`): the exact base values on the commit's lattice over its tiles and one tile of margin, the in-memory bake elsewhere. The commit SHALL pass the normal key check (a commit of another world or seed is refused). `--store`, `--erosion`, `--erosion-store`, `--global-res`, `--allow-memory-bake` and the source flags SHALL be refused beside it. The log, the title and every still SHALL say "base: computed in memory, not read from a stored bake".
+With `--commit DIR` the viewer and `capture-stills` SHALL open the commit over the production base computed in memory for the definition: exact base values over its tiles and one tile of margin, the in-memory bake elsewhere. The commit SHALL pass the normal key check. `--store`, `--erosion`, `--erosion-store`, `--global-res`, `--allow-memory-bake` and the source flags SHALL be refused beside it. The log, the title and every still SHALL say "base: computed in memory, not read from a stored bake". The viewer SHALL start held still 25 km over the ground, 20 km south of `--site` or the centre of the commit's tiles, looking north 50 degrees down; the title SHALL say "inside the region" or "outside the region: coarse base".
 
 Verify: A
 Status: active
@@ -1341,3 +1341,7 @@ Source: Lead 2026-11-13 (E1, option b; E4 is the owner flying it), TEST-128, REN
 #### Scenario: Another seed
 - **WHEN** a commit baked for seed 3 is opened for seed 4
 - **THEN** it is refused before any base is computed
+
+#### Scenario: Start over the region
+- **WHEN** the viewer opens a commit, without `--site` and with it
+- **THEN** the camera starts over the centre of the commit's tiles or the site, the title says "inside the region", and over the default site it would say "outside the region: coarse base"
