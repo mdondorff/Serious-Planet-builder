@@ -105,6 +105,31 @@ fn main() -> Result<(), String> {
     let regional = |d: Vec3| front.regional_field.at(d);
     let grid = TileGrid { cells: spec.local(), tile: spec.tile, halo: spec.halo, radius_m: spec.radius_m };
     let commit = Commit::read(dir)?.ok_or("no commit record")?;
+    println!("{}", front.bed_cut.line());
+    {
+        // The depth inside the commit's tiles (the graph's margin blocks lie over ground the commit did not carve).
+        let (ri0, rj0, rw) = (front.solve.ri0, front.solve.rj0, front.solve.rw);
+        let l = planet_cache::region_bake::LOCAL_PER_REGIONAL;
+        let to_local = |c: u32| {
+            let c = c as usize;
+            ((l * (ri0 + c % rw)) as f64 + (l as f64 - 1.0) / 2.0, (l * (rj0 + c / rw)) as f64 + (l as f64 - 1.0) / 2.0)
+        };
+        let n_local = spec.local() as f64;
+        let start = |x: i64, y: i64| {
+            let d = planet_core::cube::face_to_direction(&TangentWarp, face, 2.0 * (x as f64 + 0.5) / n_local - 1.0, 2.0 * (y as f64 + 0.5) / n_local - 1.0);
+            base(d) + front.regional_field.at(d)
+        };
+        let t = spec.tile as i64;
+        let tiles = commit.tiles.clone();
+        let keep = |x: i64, y: i64| tiles.contains_key(&(face.0, (x / t) as u32, (y / t) as u32));
+        let inside = planet_cache::region_bake::BedCut::of(&front.graph, &front.solve.grid, &to_local, &start, &keep);
+        println!("inside the commit's tiles: {}", inside.line());
+        for (name, (x, y)) in [("deepest", inside.deepest), ("p95", inside.p95_cell)] {
+            let d = planet_core::cube::face_to_direction(&TangentWarp, face, 2.0 * (x as f64 + 0.5) / n_local - 1.0, 2.0 * (y as f64 + 0.5) / n_local - 1.0);
+            let (la, lo) = d.lat_lon();
+            println!("{name} cut at local cell ({x}, {y}): lat {:.5} lon {:.5}, start {:.1} m", la.to_degrees(), lo.to_degrees(), start(x, y));
+        }
+    }
     let store = Arc::new(TileStore::open(dir, world.params()).map_err(|e| format!("{e}"))?);
     let feed = ChannelGraphFeed::new(store, commit)?;
     let src: Arc<dyn planet_generators::erosion_layer::LayerSource> = Arc::new(planet_cache::l_layer::CommitLayer::open(dir, world.clone(), 16)?);

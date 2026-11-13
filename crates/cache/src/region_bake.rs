@@ -263,10 +263,14 @@ pub struct BedCut {
     pub over_50m: usize,
     /// The local face cell of the deepest cut.
     pub deepest: (i64, i64),
+    /// The 95th percentile and a cell that has it (an ordinary deep cut, for a still).
+    pub p95: f64,
+    pub p95_cell: (i64, i64),
 }
 
 impl BedCut {
-    fn of(graph: &ChannelGraph, grid: &Grid, to_local: &dyn Fn(u32) -> (f64, f64), start: &dyn Fn(i64, i64) -> f64) -> BedCut {
+    /// The depth over the line cells `keep` accepts (the region bake keeps every cell).
+    pub fn of(graph: &ChannelGraph, grid: &Grid, to_local: &dyn Fn(u32) -> (f64, f64), start: &dyn Fn(i64, i64) -> f64, keep: &dyn Fn(i64, i64) -> bool) -> BedCut {
         use planet_generators::bake::channel_graph::bed_value;
         use planet_generators::bake::k7::{line_cells, Channel, QUnit};
         // Every local line cell once (a cell on two lines keeps its deepest cut), against the level interpolated between its two vertices as the burn interpolates it.
@@ -280,6 +284,9 @@ impl BedCut {
                 let line = line_cells(&Channel { points: vec![p0, p1], levels: vec![l0, l1], q: Vec::new(), q_unit: QUnit::Discharge });
                 let m = line.len();
                 for (i, c) in line.into_iter().enumerate() {
+                    if !keep(c.0, c.1) {
+                        continue;
+                    }
                     let z0 = start(c.0, c.1);
                     if z0 > 0.0 {
                         let level = if m > 1 { l0 + (l1 - l0) * i as f64 / (m - 1) as f64 } else { l1 };
@@ -296,14 +303,32 @@ impl BedCut {
         d.sort_by(|a, b| a.0.total_cmp(&b.0));
         let at = |p: usize| d[(p * d.len()).div_ceil(100).saturating_sub(1).min(d.len() - 1)].0;
         let last = d[d.len() - 1];
-        BedCut { cells: d.len(), p50: at(50), p99: at(99), max: last.0, over_50m: d.iter().filter(|v| v.0 > 50.0).count(), deepest: last.1 }
+        let k95 = (95 * d.len()).div_ceil(100).saturating_sub(1).min(d.len() - 1);
+        BedCut {
+            cells: d.len(),
+            p50: at(50),
+            p99: at(99),
+            max: last.0,
+            over_50m: d.iter().filter(|v| v.0 > 50.0).count(),
+            deepest: last.1,
+            p95: d[k95].0,
+            p95_cell: d[k95].1,
+        }
     }
 
     /// The MARK line.
     pub fn line(&self) -> String {
         format!(
-            "MARK burn levels (GEN-185): {} line cells on land, cut under the start surface p50 {:.2} p99 {:.2} max {:.2} m, {} over 50 m, deepest at local cell {:?}",
-            self.cells, self.p50, self.p99, self.max, self.over_50m, self.deepest
+            "MARK burn levels (GEN-185): {} line cells on land, cut under the start surface p50 {:.2} p95 {:.2} p99 {:.2} max {:.2} m, {} over 50 m ({:.2} % of the line cells), deepest at local cell {:?}, a p95 cut at {:?}",
+            self.cells,
+            self.p50,
+            self.p95,
+            self.p99,
+            self.max,
+            self.over_50m,
+            100.0 * self.over_50m as f64 / self.cells.max(1) as f64,
+            self.deepest,
+            self.p95_cell
         )
     }
 }
@@ -344,7 +369,7 @@ pub fn region_front(spec: &RegionSpec, base: &(dyn Fn(Vec3) -> f64 + Sync), clim
         base(d) + regional_field.at(d)
     };
     graph.deepen_beds(grid, &to_local, &start);
-    let bed_cut = BedCut::of(&graph, grid, &to_local, &start);
+    let bed_cut = BedCut::of(&graph, grid, &to_local, &start, &|_, _| true);
     let feed = MemoryFeed { face: spec.face, channels: channels_from_graph(&graph, grid, &to_local), discharge: true };
     let _ = rh;
     Ok(RegionFront { solve, regional_field, hydro_stats: hydro.stats.clone(), lakes, graph, segment_ids, feed, bed_cut })
