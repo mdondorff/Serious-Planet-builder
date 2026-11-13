@@ -88,7 +88,7 @@ modes:
     --gen-priority below-normal|normal   OS priority of the generation workers (STRM-020, ADR 0046; default below-normal: the frame thread wins a core both want; no result depends on it)
     --lit                    the streaming perf scenes on the lit path with the atmosphere and water (TEST-025): same scripts, same verdicts, logs named <scene>-lit
     --views a,b,c            only these views of the lit perf scenes (ground-1m, aerial-20km, coast-2km, coast-3m, orbit, coast-glide, coast-descent); a partial log is not a window
-    --scene capture-stills   one PNG per pose of --poses FILE (TEST-048) in --out-dir, over the base terrain of a world (a headless scene; no viewer starts it); needs --store DIR or --allow-memory-bake, takes --size WxH and --views (pose names); never a measurement
+    --scene capture-stills   one PNG per pose of --poses FILE (TEST-048) in --out-dir, over the base terrain of a world (a headless scene; no viewer starts it); needs --store DIR or --allow-memory-bake, takes --size WxH, --views (pose names) and --note TEXT (a known defect and its cause, drawn above every still's pose label, TEST-128); never a measurement
     --scene capture-flights  the two coastal flights as 1440p PNG sequences (shore_filter at the look default, 0, and then 1) in --out-dir, never a measurement (TEST-027; `cargo xtask capture flights` also makes the videos); needs --store DIR or --allow-memory-bake, takes --size WxH, --flight-frames N
     --flight-frames N        frames of each coastal flight of the lit perf scenes (default 240; --scene lit, TEST-025)
     --perf                   performance-harness skeleton (needs --adapter hardware; the readiness gate decides, ADR 0020)
@@ -245,6 +245,8 @@ pub struct Options {
     pub views: Option<Vec<String>>,
     /// `--poses FILE`: the poses of the scene `capture-stills` (TEST-048).
     pub poses: Option<PathBuf>,
+    /// `--note TEXT`: a known defect and its cause, drawn above the pose label of every still of `capture-stills` (TEST-128).
+    pub note: Option<String>,
     /// `--no-ui`: the editor window without the UI (VIEW-011).
     pub no_ui: bool,
     /// `editor --edit`: start in the editor mode (VIEW-022); Tab toggles it in the window.
@@ -440,6 +442,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         flight_frames: 240,
         views: None,
         poses: None,
+        note: None,
         no_ui: false,
         edit: false,
         items: None,
@@ -549,6 +552,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--marker" => o.markers.push(it.next().ok_or("--marker needs LAT,LON[,RADIUS_M]")?.clone()),
             "--calibrate" => o.calibrate = true,
             "--poses" => o.poses = Some(PathBuf::from(it.next().ok_or("--poses needs a poses file")?)),
+            "--note" => o.note = Some(it.next().ok_or("--note needs a text")?.clone()),
             "--views" => {
                 o.views = Some(it.next().ok_or("--views needs a comma-separated list")?.split(',').map(|v| v.trim().to_string()).collect())
             }
@@ -1062,6 +1066,9 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         && !stills::is_layer1_scene(&o.scene)
     {
         return Err("--poses applies to the scene `capture-stills` (and to `shadow-cost` and `shadow-layer1`)".into());
+    }
+    if o.given.contains("--note") && !stills::is_stills_scene(&o.scene) {
+        return Err("--note applies to the scene `capture-stills`".into());
     }
     if stills::is_stills_scene(&o.scene) && o.given.contains("--flight-frames") {
         return Err("--flight-frames does not apply to `capture-stills` (one frame per pose)".into());

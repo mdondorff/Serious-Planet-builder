@@ -796,7 +796,11 @@ fn run_stills(
         }
         // The owner's copy carries the scale bar and the pose (ADR 0118 point 5): drawn on this review picture, never on a golden.
         let mut shot = r.read_color(ctx);
-        planet_render::annotate::annotate(&mut shot, &pose_label(&camera, &|d| field.height(d), radius_m, setup.level_m));
+        planet_render::annotate::annotate_with_note(
+            &mut shot,
+            &pose_label(&camera, &|d| field.height(d), radius_m, setup.level_m),
+            o.note.as_deref(),
+        );
         shot.write_png(&dir.join(format!("{}.png", pose.name))).map_err(|e| format!("writing {}: {e}", pose.name))?;
         let (eye_lat, _) = camera.position.0.lat_lon();
         let height = camera.position.0.length() - radius_m;
