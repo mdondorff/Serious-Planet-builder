@@ -26,7 +26,7 @@ Every row names an exit item (ADR 0120). Everything else is in `docs/parking.md`
 | E2 | Acceptance: the owner's next long flight reads resident tiles at most and evicted from the run log | owner |
 | E5 | ADRs for edits against the erosion and for inland lakes and dams, with the owner | owner |
 
-P1 closing: the owner's sign-off line (P1 E4) in `docs/milestones/P1.md` after the flight of 2026-11-13.
+P1 closed 2026-11-13 (owner sign-off in `docs/milestones/P1.md`).
 
 ## Tracked
 - **River at a cube face edge** (REND-059, 2026-11-12): the store holds a segment crossing a face edge as two runs with a gap of about the H1 ratio in cells (a dry notch); the burn has the same dam, so drawn river and burned trench agree; the charts shear (x1.22 mid-edge, x1.41 at the corner). Fix (B): overlapping runs read by drawing and burn, width in metres through each face's metric: a store format change for the owner, with the face-seam work before the planet bake (REND-063 reserved).
