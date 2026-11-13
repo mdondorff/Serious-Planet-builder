@@ -136,6 +136,97 @@ fn main() -> Result<(), String> {
     let layer = planet_generators::erosion_layer::ErosionLayer::new(src)?;
     let n = spec.local() as f64;
     let dir_of = |x: i64, y: i64| planet_core::cube::face_to_direction(&TangentWarp, face, 2.0 * (x as f64 + 0.5) / n - 1.0, 2.0 * (y as f64 + 0.5) / n - 1.0);
+    // `--profile name,x,y`: the line through the local cell (x, y) (the in-memory channel with the largest discharge there): the start surface, the burn level and the stored ground along it (60 cells
+    // each way) and across it (1 km each way, 20 m steps), as CSV under target/review/k7-beds/, and the heading of the line there.
+    let profiles: Vec<(String, i64, i64)> = args
+        .iter()
+        .enumerate()
+        .filter(|(_, a)| *a == "--profile")
+        .map(|(k, _)| {
+            let v: Vec<&str> = args[k + 1].split(',').collect();
+            (v[0].to_string(), v[1].parse().expect("x"), v[2].parse().expect("y"))
+        })
+        .collect();
+    for (name, px, py) in &profiles {
+        let (px, py) = (*px, *py);
+        let dirf = |x: f64, y: f64| planet_core::cube::face_to_direction(&TangentWarp, face, 2.0 * (x + 0.5) / n - 1.0, 2.0 * (y + 0.5) / n - 1.0);
+        let start_at = |x: f64, y: f64| {
+            let d = dirf(x, y);
+            base(d) + regional(d)
+        };
+        let ground_at = |x: f64, y: f64| -> Result<f64, String> {
+            let d = dirf(x, y);
+            Ok(base(d) + layer.change_at(d)?)
+        };
+        let near = front.feed.channels_near(face, px - 4, py - 4, 9);
+        let mut best: Option<(f64, Vec<((i64, i64), f64)>)> = None;
+        for ch in &near {
+            // the line cells with the burn level interpolated between the points
+            let mut cells: Vec<((i64, i64), f64)> = Vec::new();
+            for k in 0..ch.points.len() {
+                let p0 = if k == 0 { ch.points[0] } else { ch.points[k - 1] };
+                let (l0, l1) = (ch.levels[if k == 0 { 0 } else { k - 1 }], ch.levels[k]);
+                let line = line_cells(&Channel { points: vec![p0, ch.points[k]], levels: vec![l0, l1], q: Vec::new(), q_unit: ch.q_unit });
+                let m = line.len();
+                for (i, c) in line.into_iter().enumerate() {
+                    let lv = if m > 1 { l0 + (l1 - l0) * i as f64 / (m - 1) as f64 } else { l1 };
+                    match cells.last_mut() {
+                        Some(last) if last.0 == c => last.1 = last.1.min(lv),
+                        _ => cells.push((c, lv)),
+                    }
+                }
+            }
+            if cells.iter().any(|(c, _)| *c == (px, py)) {
+                let q = ch.q.iter().copied().fold(0.0, f64::max);
+                if best.as_ref().is_none_or(|b| q > b.0) {
+                    best = Some((q, cells));
+                }
+            }
+        }
+        let Some((q, cells)) = best else {
+            println!("profile {name}: no line through ({px}, {py})");
+            continue;
+        };
+        let k = cells.iter().position(|(c, _)| *c == (px, py)).expect("the cell");
+        let mut f = String::from("step,offset_m,x,y,start_m,burn_level_m,stored_ground_m
+");
+        for j in k.saturating_sub(60)..(k + 61).min(cells.len()) {
+            let ((x, y), lv) = cells[j];
+            f += &format!("{},{:.0},{x},{y},{:.2},{:.2},{:.2}
+", j as i64 - k as i64, (j as f64 - k as f64) * 101.8, start_at(x as f64, y as f64), lv, ground_at(x as f64, y as f64)?);
+        }
+        std::fs::write(format!("target/review/k7-beds/profile-{name}-along.csv"), f).map_err(|e| e.to_string())?;
+        let (a, b) = (cells[k.saturating_sub(5)].0, cells[(k + 5).min(cells.len() - 1)].0);
+        let (tx, ty) = ((b.0 - a.0) as f64, (b.1 - a.1) as f64);
+        let len = (tx * tx + ty * ty).sqrt().max(1e-9);
+        let (nx, ny) = (-ty / len, tx / len);
+        let mut g = String::from("offset_m,start_m,stored_ground_m
+");
+        let cell_m = 101.8;
+        for m in -50..=50 {
+            let o = f64::from(m) * 20.0 / cell_m;
+            let (x, y) = (px as f64 + nx * o, py as f64 + ny * o);
+            g += &format!("{},{:.2},{:.2}
+", m * 20, start_at(x, y), ground_at(x, y)?);
+        }
+        std::fs::write(format!("target/review/k7-beds/profile-{name}-across.csv"), g).map_err(|e| e.to_string())?;
+        // the heading of the line (downstream), degrees from north clockwise
+        let (d0, d1) = (dirf(a.0 as f64, a.1 as f64), dirf(b.0 as f64, b.1 as f64));
+        let up = dirf(px as f64, py as f64);
+        let east = Vec3::new(0.0, 0.0, 1.0).cross(up).normalized();
+        let north = up.cross(east);
+        let v = d1 - d0;
+        let heading = libm::atan2(v.dot(east), v.dot(north)).to_degrees().rem_euclid(360.0);
+        let (la, lo) = up.lat_lon();
+        println!(
+            "profile {name}: ({px}, {py}) lat {:.5} lon {:.5}, line max q {q:.1} m3/s, heading downstream {heading:.1} deg; start {:.1} m, burn level {:.1} m, stored ground {:.1} m",
+            la.to_degrees(),
+            lo.to_degrees(),
+            start_at(px as f64, py as f64),
+            cells[k].1,
+            ground_at(px as f64, py as f64)?
+        );
+    }
     for &(ti, tj, sx, sy) in &spots {
     let id = TileId { face, ti, tj };
     let (t, h, w) = (spec.tile as i64, spec.halo as i64, grid.window() as i64);
