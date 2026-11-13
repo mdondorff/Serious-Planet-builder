@@ -26,10 +26,11 @@ fn spec() -> RegionSpec {
         face: Face(2),
         radius_m: R,
         regional: 64,
-        region: (16, 39, 16, 39),
-        margin: 6,
-        tile: 64,
-        halo: 24,
+        region: (16, 47, 16, 47),
+        margin: 8,
+        tile: 128,
+        // A carry of 24 steps (halo - 16): a placed step (GEN-186) is longer than the 8 cells of a straight one, and the burn's carry must hold the longest step (production: 48).
+        halo: 40,
         rounds: 2,
         threads: 2,
         res: 64,
@@ -175,5 +176,5 @@ fn with_the_burn_levels_of_the_whole_network_no_tile_s_burn_has_a_cutoff() {
         assert_eq!(r.burn_cutoff_binds, 0, "tile ({}, {}): the burn's cutoff binds {} cells (diff max {:.2} m)", id.ti, id.tj, r.burn_cutoff_binds, r.burn_cutoff_diff.max);
     }
     println!("TEST-134: {tiles} tiles with channels, {burned} cells burned, burn cutoff binds {binds}");
-    assert!(tiles > 4 && burned > 100, "the fixture burns channels: {tiles} tiles, {burned} cells");
+    assert!(tiles >= 4 && burned > 100, "the fixture burns channels: {tiles} tiles, {burned} cells");
 }

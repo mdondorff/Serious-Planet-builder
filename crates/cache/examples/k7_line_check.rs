@@ -122,7 +122,9 @@ fn main() -> Result<(), String> {
         let t = spec.tile as i64;
         let tiles = commit.tiles.clone();
         let keep = |x: i64, y: i64| tiles.contains_key(&(face.0, (x / t) as u32, (y / t) as u32));
-        let inside = planet_cache::region_bake::BedCut::of(&front.graph, &front.solve.grid, &to_local, &start, &keep);
+        let base_at = |x: i64, y: i64| base(planet_core::cube::face_to_direction(&TangentWarp, face, 2.0 * (x as f64 + 0.5) / n_local - 1.0, 2.0 * (y as f64 + 0.5) / n_local - 1.0));
+        let placement = planet_generators::bake::placement::Placement::new(&base_at);
+        let inside = planet_cache::region_bake::BedCut::of(&front.graph, &front.solve.grid, &to_local, &start, &keep, if std::env::var("K7_STRAIGHT").is_ok() { None } else { Some(&placement) });
         println!("inside the commit's tiles: {}", inside.line());
         for (name, (x, y)) in [("deepest", inside.deepest), ("p95", inside.p95_cell)] {
             let d = planet_core::cube::face_to_direction(&TangentWarp, face, 2.0 * (x as f64 + 0.5) / n_local - 1.0, 2.0 * (y as f64 + 0.5) / n_local - 1.0);

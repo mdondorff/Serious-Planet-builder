@@ -150,7 +150,13 @@ impl ChannelGraph {
     /// reads the same levels whatever window it holds (partition independence) and the burn's carry only bridges the cells between two vertices. A level outside the bed code's `i16` range
     /// (-16,384 m to 16,383.5 m) is clamped by the code (a stated limit: the region's height bounds lie inside it). Returns the number of vertices lowered and the largest
     /// lowering in metres. Run it before the graph is stored and before the channels are made from it: the stored levels are the burn's input (STRM-084).
-    pub fn deepen_beds(&mut self, grid: &Grid, to_local: &dyn Fn(u32) -> (f64, f64), start: &(dyn Fn(i64, i64) -> f64 + Sync)) -> (usize, f64) {
+    pub fn deepen_beds(
+        &mut self,
+        grid: &Grid,
+        to_local: &dyn Fn(u32) -> (f64, f64),
+        start: &(dyn Fn(i64, i64) -> f64 + Sync),
+        placement: Option<&super::placement::Placement>,
+    ) -> (usize, f64) {
         let n = self.first.len();
         let mut offset = Vec::with_capacity(n);
         let mut at = 0usize;
@@ -197,8 +203,13 @@ impl ChannelGraph {
                 for k in 0..c.len() {
                     let (x1, y1) = to_local(c[k]);
                     let (x0, y0) = if k == 0 { (x1, y1) } else { to_local(c[k - 1]) };
-                    let step = Channel { points: vec![(x0, y0), (x1, y1)], levels: vec![0.0, 0.0], q: Vec::new(), q_unit: QUnit::Discharge };
-                    for (x, y) in super::k7::line_cells(&step) {
+                    // The cells K7 burns between the two vertices: the placed step (GEN-186), or the straight raster without a placement.
+                    let step_cells = match placement {
+                        Some(pl) if k == 0 => vec![pl.vertex((x1, y1))],
+                        Some(pl) => pl.step(pl.vertex((x0, y0)), pl.vertex((x1, y1)), (x0, y0), (x1, y1)),
+                        None => super::k7::line_cells(&Channel { points: vec![(x0, y0), (x1, y1)], levels: vec![0.0, 0.0], q: Vec::new(), q_unit: QUnit::Discharge }),
+                    };
+                    for (x, y) in step_cells {
                         let v = start(x, y);
                         assert!(v.is_finite(), "the start surface at local cell ({x}, {y}) is {v}: not finite");
                         run = run.min(v);

@@ -4,6 +4,8 @@ mod arid;
 mod bake_breach;
 #[path = "bake_burn_width.rs"]
 mod bake_burn_width;
+#[path = "bake_placement.rs"]
+mod bake_placement;
 #[path = "bake_channel_graph.rs"]
 mod bake_channel_graph;
 #[path = "bake_compact.rs"]

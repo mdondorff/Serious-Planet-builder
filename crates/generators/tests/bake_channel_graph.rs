@@ -253,7 +253,7 @@ fn the_burn_levels_of_the_whole_network_carry_every_low_of_the_start_surface_dow
     let to_local = |c: u32| (8.0 * f64::from(c % W as u32) + 3.5, 8.0 * f64::from(c / W as u32) + 3.5);
     // A start surface with a narrow pit every 37 cells in both directions, 400 m under the H1 levels: a line that crosses one carries it to every vertex downstream, through the junctions.
     let start = |x: i64, y: i64| if x % 37 == 5 && y % 37 == 11 { -50.0 + 0.001 * x as f64 } else { 900.0 };
-    let (lowered, largest) = graph.deepen_beds(&r.g, &to_local, &start);
+    let (lowered, largest) = graph.deepen_beds(&r.g, &to_local, &start, None);
     assert!(lowered > 0 && largest > 100.0, "the pits lower some beds: {lowered} vertices, largest {largest} m");
     // The reference: the running minimum along each segment of its H1 levels and of the start surface at the rasterised line cells, the tributaries' end levels carried in.
     let cells: Vec<Vec<u32>> = {
@@ -297,7 +297,7 @@ fn the_burn_levels_of_the_whole_network_carry_every_low_of_the_start_surface_dow
         assert!(progress, "the tree is acyclic");
     }
     // Idempotent: the levels already hold every low.
-    let again = graph.clone().deepen_beds(&r.g, &to_local, &start);
+    let again = graph.clone().deepen_beds(&r.g, &to_local, &start, None);
     assert_eq!(again.0, 0, "a second pass lowers nothing");
 }
 
@@ -349,6 +349,6 @@ fn the_burn_levels_read_the_cells_k7_burns_and_a_cycle_of_segments_ends() {
     hydro.qw = vec![1.0; 9];
     let mut graph = ChannelGraph::from_hydro(&g, &routing, &hydro, &z);
     let to_local = |c: u32| (8.0 * f64::from(c) + 3.5, 3.5);
-    let (lowered, _) = graph.deepen_beds(&g, &to_local, &|_, _| 1.0);
+    let (lowered, _) = graph.deepen_beds(&g, &to_local, &|_, _| 1.0, None);
     assert!(lowered > 0, "the cycle ends and the start surface lowers its beds");
 }

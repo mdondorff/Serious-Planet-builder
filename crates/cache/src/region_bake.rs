@@ -13,6 +13,7 @@ use planet_generators::bake::face::FaceSpec;
 use planet_generators::bake::flood::priority_flood_with;
 use planet_generators::bake::hydro::{hydrology, HydroParams};
 use planet_generators::bake::k7::{k7_tile, K7Params, RegionField};
+use planet_generators::bake::placement::Placement;
 use planet_generators::bake::lakes::lakes_from_hydro;
 use planet_generators::bake::metric::Metric;
 use planet_generators::bake::precision::{WorldPrecision, EPSILON_MAX_M};
@@ -270,7 +271,14 @@ pub struct BedCut {
 
 impl BedCut {
     /// The depth over the line cells `keep` accepts (the region bake keeps every cell).
-    pub fn of(graph: &ChannelGraph, grid: &Grid, to_local: &dyn Fn(u32) -> (f64, f64), start: &dyn Fn(i64, i64) -> f64, keep: &dyn Fn(i64, i64) -> bool) -> BedCut {
+    pub fn of(
+        graph: &ChannelGraph,
+        grid: &Grid,
+        to_local: &dyn Fn(u32) -> (f64, f64),
+        start: &dyn Fn(i64, i64) -> f64,
+        keep: &dyn Fn(i64, i64) -> bool,
+        placement: Option<&Placement>,
+    ) -> BedCut {
         use planet_generators::bake::channel_graph::bed_value;
         use planet_generators::bake::k7::{line_cells, Channel, QUnit};
         // Every local line cell once (a cell on two lines keeps its deepest cut), against the level interpolated between its two vertices as the burn interpolates it.
@@ -281,7 +289,11 @@ impl BedCut {
                 let p1 = to_local(cells[k]);
                 let p0 = if k == 0 { p1 } else { to_local(cells[k - 1]) };
                 let (l0, l1) = (bed_value(s.bed[if k == 0 { 0 } else { k - 1 }]), bed_value(s.bed[k]));
-                let line = line_cells(&Channel { points: vec![p0, p1], levels: vec![l0, l1], q: Vec::new(), q_unit: QUnit::Discharge });
+                let line = match placement {
+                    Some(pl) if k == 0 => vec![pl.vertex(p1)],
+                    Some(pl) => pl.step(pl.vertex(p0), pl.vertex(p1), p0, p1),
+                    None => line_cells(&Channel { points: vec![p0, p1], levels: vec![l0, l1], q: Vec::new(), q_unit: QUnit::Discharge }),
+                };
                 let m = line.len();
                 for (i, c) in line.into_iter().enumerate() {
                     if !keep(c.0, c.1) {
@@ -368,9 +380,15 @@ pub fn region_front(spec: &RegionSpec, base: &(dyn Fn(Vec3) -> f64 + Sync), clim
         let d = planet_core::cube::face_to_direction(&planet_core::TangentWarp, spec.face, 2.0 * (x as f64 + 0.5) / n_local - 1.0, 2.0 * (y as f64 + 0.5) / n_local - 1.0);
         base(d) + regional_field.at(d)
     };
-    graph.deepen_beds(grid, &to_local, &start);
-    let bed_cut = BedCut::of(&graph, grid, &to_local, &start, &|_, _| true);
-    let feed = MemoryFeed { face: spec.face, channels: channels_from_graph(&graph, grid, &to_local), discharge: true };
+    // GEN-186: the lines at L follow the lowest pass of `B` between their H1 vertices; the levels, the burn and the drawing read the placed line (REND-067 places it the same way at read time).
+    let base_at = |x: i64, y: i64| {
+        base(planet_core::cube::face_to_direction(&planet_core::TangentWarp, spec.face, 2.0 * (x as f64 + 0.5) / n_local - 1.0, 2.0 * (y as f64 + 0.5) / n_local - 1.0))
+    };
+    let placement = Placement::new(&base_at);
+    graph.deepen_beds(grid, &to_local, &start, Some(&placement));
+    let bed_cut = BedCut::of(&graph, grid, &to_local, &start, &|_, _| true, Some(&placement));
+    let channels = channels_from_graph(&graph, grid, &to_local).iter().map(|c| placement.channel(c)).collect();
+    let feed = MemoryFeed { face: spec.face, channels, discharge: true };
     let _ = rh;
     Ok(RegionFront { solve, regional_field, hydro_stats: hydro.stats.clone(), lakes, graph, segment_ids, feed, bed_cut })
 }
