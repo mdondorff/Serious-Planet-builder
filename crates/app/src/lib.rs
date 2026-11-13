@@ -2254,6 +2254,89 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    // spec: VIEW-072
+    #[test]
+    fn the_base_under_a_commit_is_the_bakes_base_bit_for_bit_and_carries_the_commits_base_id() {
+        use planet_core::cube::{face_to_direction, TangentWarp};
+        use planet_generators::global::{read_elevation_c1, GlobalSample, LatticeSource, ReadError};
+        /// The bake's lattice: `BakeInputs::base` at the nodes of a rectangle of the face (what `bake_region`'s `base` closure reads C1).
+        struct Grid {
+            face: planet_core::Face,
+            res: u32,
+            lo: usize,
+            side: usize,
+            z: Vec<f32>,
+        }
+        impl LatticeSource for Grid {
+            fn res(&self) -> u32 {
+                self.res
+            }
+            fn at(&self, face: planet_core::Face, i: u32, j: u32) -> Result<GlobalSample, ReadError> {
+                assert_eq!(face, self.face);
+                let (i, j) = (i as usize, j as usize);
+                assert!(
+                    i >= self.lo && j >= self.lo && i - self.lo < self.side && j - self.lo < self.side,
+                    "node ({i}, {j}) outside the sampled rectangle"
+                );
+                let elevation_m = self.z[(j - self.lo) * self.side + (i - self.lo)];
+                Ok(GlobalSample { continent: 0.0, elevation_m, temperature_c: 0.0, precipitation_mm: 0.0 })
+            }
+        }
+        let dir = std::env::temp_dir().join(format!("planet-view072-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let def = planet_world_def::WorldDefinition::single_planet(6_371_000.0, 3);
+        let world = planet_cache::global_store::GlobalWorld::from_definition(&def).unwrap().with_block_limit(4);
+        let face = planet_core::Face(2);
+        let spec = planet_cache::region_bake::RegionSpec {
+            seed: 3,
+            face,
+            radius_m: 6_371_000.0,
+            regional: 128,
+            region: (32, 55, 32, 55),
+            margin: 6,
+            tile: 64,
+            halo: 24,
+            rounds: 2,
+            threads: 2,
+            res: 1024,
+            base_id: 0x6c61_7474_6963_6531 ^ 1024,
+            inputs_id: 11,
+            height_bounds: (-11_000.0, 9_000.0),
+            keep_channels: false,
+        };
+        let base = |d: planet_core::Vec3| 500.0 - 2400.0 * (d.x - 0.1) + 120.0 * libm::sin(40.0 * d.z);
+        let climate = |_: planet_core::Vec3| (1.0e-8, 0.0, 1.0);
+        planet_cache::region_bake::bake_region(&world, &spec, &base, &climate, &dir).expect("the fixture commit");
+        let opened = worldfield::WorldTerrain::open_commit_in_memory(def.clone(), &dir, 2).expect("the commit opens in memory");
+        let (read, id) = opened.bake_base().expect("a commit opened in memory has a base");
+        assert_eq!(id, spec.base_id, "the base carries the commit's base_id");
+        // The bake's side: the production base at the nodes around the cells below (a regional cell is 8 nodes of the 1,024-node face edge), read C1.
+        let inputs = planet_cache::global_store::class_inputs(&def, 3, 2);
+        let (lo, side) = (36 * 8 - 8, (50 - 36) * 8 + 24);
+        let z: Vec<f32> = (0..side * side)
+            .map(|c| {
+                inputs.base(planet_cache::region_bake::lattice_direction(face, spec.res as usize, lo + c % side, lo + c / side)) as f32
+            })
+            .collect();
+        let grid = Grid { face, res: spec.res, lo, side, z };
+        let mut compared = 0;
+        for y in (38..49).step_by(3) {
+            for x in (38..49).step_by(3) {
+                for (fx, fy) in [(0.1, 0.2), (0.5, 0.5), (0.9, 0.7)] {
+                    let n = spec.regional as f64;
+                    let d = face_to_direction(&TangentWarp, face, 2.0 * (f64::from(x) + fx) / n - 1.0, 2.0 * (f64::from(y) + fy) / n - 1.0);
+                    let want = f64::from(read_elevation_c1(&grid, &TangentWarp, d).unwrap());
+                    assert_eq!(read(d).to_bits(), want.to_bits(), "B at regional cell ({x}, {y}) + ({fx}, {fy})");
+                    compared += 1;
+                }
+            }
+        }
+        assert!(compared >= 40, "{compared} cells compared");
+        // Every other world has no commit base.
+        assert!(worldfield::WorldTerrain::open(def, 32).unwrap().bake_base().is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     // spec: VIEW-065
     #[test]
     fn the_viewer_opens_the_world_a_store_records_and_the_layer_by_its_manifest() {
