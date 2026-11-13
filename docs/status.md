@@ -17,13 +17,17 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 
 Dormant items moved to `docs/parking.md` (2026-11-12).
 
-## Queue (2026-11-12, milestone P1: `docs/milestones/P1.md`)
+## Queue (2026-11-13, milestone P2: `docs/milestones/P2.md`)
 Every row names an exit item (ADR 0120). Everything else is in `docs/parking.md`.
 | Exit | Step | Lane |
 |---|---|---|
-| E4 | Owner flight of the E1 region from the crusader worktree: `cargo run --release -p planet -- editor --seed 14 --commit target/stores/r3a-e1`; sign-off line in `docs/milestones/P1.md` | owner |
+| E1 | K7 bed coherence: monotone beds, no banks; test from the diag-124 replay; R3a re-baked into a new spike store | crusader |
+| E2 | Viewer residency cap and eviction; G-RT on R3a with the frame-17426 path | explorer |
+| E3 | F9 bundles record --commit/--site; windowed path replay | explorer |
+| E4 | SPIKE-113: detail below 100 m, with a river cross-section | spikes |
+| E5 | ADRs for edits against the erosion and for inland lakes and dams, with the owner | owner |
 
-Finishing (changeover, 2026-11-12; no successor work): SPIKE-111 ends its time-box with the report (spikes); PR #1449 parked as draft (explorer).
+P1 closing: the owner's sign-off line (P1 E4) in `docs/milestones/P1.md` after the flight of 2026-11-13.
 
 ## Tracked
 - **River at a cube face edge** (REND-059, 2026-11-12): the store holds a segment crossing a face edge as two runs with a gap of about the H1 ratio in cells (a dry notch); the burn has the same dam, so drawn river and burned trench agree; the charts shear (x1.22 mid-edge, x1.41 at the corner). Fix (B): overlapping runs read by drawing and burn, width in metres through each face's metric: a store format change for the owner, with the face-seam work before the planet bake (REND-063 reserved).
