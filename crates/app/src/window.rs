@@ -242,6 +242,8 @@ struct Config {
     shadow_march: bool,
     policy: AdapterPolicy,
     gen: planet_streaming::GenWorkers,
+    /// The most tiles the streamer keeps resident (`--resident-cap`, VIEW-070).
+    resident_cap: usize,
     initial_view: usize,
     /// Where the terrain comes from, for the title: the store the editor opened, or the in-memory preview bake (VIEW-051).
     world_label: String,
@@ -563,7 +565,7 @@ impl App<'_> {
         }
         let first = self.request(self.cameras[0], TerrainView::ALL[cfg.initial_view], false);
         // The 384 floor tiles load here, before frame 0 (STRM-001): the title shows how many are in.
-        let mut rig = Rig::new_with_progress(&ctx, self.world, &first, cfg.gen, &mut |done, total| {
+        let mut rig = Rig::new_with_progress(&ctx, self.world, &first, cfg.gen, Some(cfg.resident_cap), &mut |done, total| {
             window.set_title(&planet_frame::viewer::roots_title(done, total));
         })?;
         crate::stall::phase_mark("floor tiles");
@@ -2172,6 +2174,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         shadow_march: o.shadow_march,
         policy,
         gen: o.gen_workers(),
+        resident_cap: o.resident_cap.unwrap_or(crate::pipelined::VIEWER_RESIDENT_CAP),
         initial_view,
         world_label,
         base_readiness: Readiness { bake_done, bake_total, prefill_done, prefill_total, view: ViewCoverage::default() },

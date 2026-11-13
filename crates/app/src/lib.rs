@@ -83,6 +83,7 @@ modes:
     --draw per-draw|indirect   how the terrain renderer submits draws (REND-015): per-draw is the reference loop, indirect one multi-draw per buffer run from a CPU-built argument buffer (default indirect where the adapter supports it, else per-draw)
     --upload per-slot|batched   how a frame's tile writes reach the queue (REND-016): batched (default) writes each run of adjacent slots with one call, per-slot is the reference (one or two calls per tile); the pool contents are identical
     --gen-workers N          threads of the tile generation pool and so jobs running at once in the pipelined loop and the streaming perf scenes (STRM-020; default: the terrain share, BUDG-003; the rig keeps the pool inside that share; the plan worker's threads are separate)
+    --resident-cap N         the viewer keeps at most N tiles resident (VIEW-070; default 24000, at most the renderer's pool)
     --gen-reserve N          size the generation pool as the hardware threads less N instead of the terrain share (STRM-020; ignored when --gen-workers is given)
     --gen-ahead N            jobs queued behind the running ones so a worker that finishes between two frames takes the next at once (STRM-020; default: the worker count; 0: refill at frame boundaries only)
     --gen-priority below-normal|normal   OS priority of the generation workers (STRM-020, ADR 0046; default below-normal: the frame thread wins a core both want; no result depends on it)
@@ -123,6 +124,8 @@ pub struct Options {
     pub gen_reserve: Option<usize>,
     /// `--gen-priority below-normal|normal`: the priority of the generation workers (STRM-020, ADR 0046); below-normal when absent.
     pub gen_priority: Option<planet_streaming::Priority>,
+    /// `--resident-cap N`: the most tiles the viewer keeps resident (VIEW-070); `None` is the default, `pipelined::VIEWER_RESIDENT_CAP`.
+    pub resident_cap: Option<usize>,
     pub perf: bool,
     pub machine_ready: bool,
     /// Loaded mode (BUILD-030): the readiness gate records the load of the machine instead of refusing on it.
@@ -374,6 +377,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         upload: None,
         gen_workers: None,
         gen_priority: None,
+        resident_cap: None,
         gen_ahead: None,
         gen_reserve: None,
         perf: false,
@@ -703,6 +707,15 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--gen-reserve" => {
                 let v = it.next().ok_or("--gen-reserve needs a count")?;
                 o.gen_reserve = Some(v.parse::<usize>().map_err(|_| format!("--gen-reserve must be a non-negative integer, got '{v}'"))?)
+            }
+            "--resident-cap" => {
+                let v = it.next().ok_or("--resident-cap needs a tile count")?;
+                o.resident_cap = Some(
+                    v.parse::<usize>()
+                        .ok()
+                        .filter(|n| *n >= 1)
+                        .ok_or_else(|| format!("--resident-cap must be a positive integer, got '{v}'"))?,
+                )
             }
             "--gen-priority" => {
                 let v = it.next().ok_or("--gen-priority needs a value")?;

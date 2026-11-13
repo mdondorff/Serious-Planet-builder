@@ -107,6 +107,16 @@ pub(crate) fn terrain_sizes(workers: usize, horizon: usize, cap: usize) -> (usiz
     (tile, cap.min(tile + 1 + horizon))
 }
 
+/// The most tiles the viewer keeps resident (VIEW-070). The residency set R of the ten standard views is at most 10 % of the mid tier's 205,170 slots
+/// (20,517, STRM-006), so the cap leaves R with its ancestors and the prefetch inside it.
+pub const VIEWER_RESIDENT_CAP: usize = 24_000;
+
+/// The streamer's capacity in slots (VIEW-070): the renderer's pool, or the cap when that is smaller. The streamer evicts only to make room
+/// (STRM-007), so a pool of 200,000 slots lets a long flight keep every tile it ever loaded; the cap makes it evict the farthest and least recently used.
+pub(crate) fn resident_capacity(pool_slots: usize, cap: Option<usize>) -> usize {
+    cap.map_or(pool_slots, |c| c.min(pool_slots))
+}
+
 impl Rig {
     /// A rig for requests like `first`: one tile size (cells) and one finest level, the pools sized for the first request.
     pub(crate) fn new(
@@ -115,7 +125,7 @@ impl Rig {
         first: &TerrainRequest,
         gen: planet_streaming::GenWorkers,
     ) -> Result<Rig, String> {
-        Rig::new_with_progress(ctx, world, first, gen, &mut |_, _| {})
+        Rig::new_with_progress(ctx, world, first, gen, None, &mut |_, _| {})
     }
 
     /// [`Rig::new`] reporting the start-up load of the roots: `progress(done, total)` as in
@@ -125,6 +135,7 @@ impl Rig {
         world: &Arc<WorldTerrain>,
         first: &TerrainRequest,
         gen: planet_streaming::GenWorkers,
+        resident_cap: Option<usize>,
         progress: &mut dyn FnMut(usize, usize),
     ) -> Result<Rig, String> {
         crate::stall::phase_mark("rig start");
@@ -162,7 +173,7 @@ impl Rig {
             tile_pool,
             Arc::clone(&clock),
             gen.apply(StreamConfig {
-                capacity: pool.main_slots() as usize,
+                capacity: resident_capacity(pool.main_slots() as usize, resident_cap),
                 retire_frames: u64::from(MAX_FRAMES_IN_FLIGHT),
                 retry_after_ms: 1000,
                 floor: first.lod.floor_level(),
@@ -374,7 +385,16 @@ pub fn log_text(log: &[FrameLog]) -> String {
 
 #[cfg(test)]
 mod size_tests {
-    use super::terrain_sizes;
+    use super::{resident_capacity, terrain_sizes, VIEWER_RESIDENT_CAP};
+
+    // spec: VIEW-070
+    #[test]
+    fn the_capacity_is_the_pool_or_the_cap_when_that_is_smaller() {
+        assert_eq!(resident_capacity(205_170, None), 205_170);
+        assert_eq!(resident_capacity(205_170, Some(VIEWER_RESIDENT_CAP)), VIEWER_RESIDENT_CAP);
+        assert_eq!(resident_capacity(13_678, Some(VIEWER_RESIDENT_CAP)), 13_678);
+        assert!(VIEWER_RESIDENT_CAP >= 20_517, "R of the standard views (10 % of the mid tier) fits the cap");
+    }
 
     // spec: BUDG-003
     #[test]
