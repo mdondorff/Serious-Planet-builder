@@ -235,6 +235,106 @@ fn main() -> Result<(), String> {
     let (wi0, wj0) = (i64::from(ti) * t - h, i64::from(tj) * t - h);
     let mem: Vec<Channel> = front.feed.channels_near(face, wi0, wj0, w);
     let r = k7_tile(&grid, id, &base, &regional, &mem, &K7Params::standard(seed, 0.0), threads);
+    // The pits of the start surface `B + regional` on the tile's window (flood with the window's border and the sea as outlets: window-local, a halo of 64 cells), and the line cells in them.
+    {
+        let field = |d: Vec3| base(d) + regional(d);
+        let z0 = planet_generators::bake::tile::sample_window_coarse(&grid, id, &field, threads, 1);
+        let wn = grid.window();
+        let g = planet_generators::bake::Grid::new(wn, wn, grid.dx());
+        let outlet = g.outlets(&z0, 0.0);
+        let filled = planet_generators::bake::flood::priority_flood_with(&g, &z0, &outlet, 1.0e-3, true);
+        let depth: Vec<f64> = filled.iter().zip(&z0).map(|(f, z)| f - z).collect();
+        // label the pits: 8-connected cells with a depth over 0.01 m
+        let mut label = vec![u32::MAX; wn * wn];
+        let mut pits: Vec<(f64, usize)> = Vec::new();
+        for start in 0..wn * wn {
+            if depth[start] <= 0.05 || label[start] != u32::MAX {
+                continue;
+            }
+            let id_l = pits.len() as u32;
+            let (mut maxd, mut area) = (0.0f64, 0usize);
+            let mut stack = vec![start];
+            label[start] = id_l;
+            while let Some(c) = stack.pop() {
+                maxd = maxd.max(depth[c]);
+                area += 1;
+                let (cx, cy) = ((c % wn) as i64, (c / wn) as i64);
+                for dy in -1..=1i64 {
+                    for dx in -1..=1i64 {
+                        let (nx, ny) = (cx + dx, cy + dy);
+                        if nx < 0 || ny < 0 || nx >= wn as i64 || ny >= wn as i64 {
+                            continue;
+                        }
+                        let q = ny as usize * wn + nx as usize;
+                        if depth[q] > 0.05 && label[q] == u32::MAX {
+                            label[q] = id_l;
+                            stack.push(q);
+                        }
+                    }
+                }
+            }
+            pits.push((maxd, area));
+        }
+        let (h, t) = (spec.halo as i64, spec.tile as i64);
+        let (wi0, wj0) = (i64::from(ti) * t - h, i64::from(tj) * t - h);
+        let straight: Vec<Channel> = {
+            let (ri0, rj0, rw) = (front.solve.ri0, front.solve.rj0, front.solve.rw);
+            let l = planet_cache::region_bake::LOCAL_PER_REGIONAL;
+            let to_local = |c: u32| {
+                let c = c as usize;
+                ((l * (ri0 + c % rw)) as f64 + (l as f64 - 1.0) / 2.0, (l * (rj0 + c / rw)) as f64 + (l as f64 - 1.0) / 2.0)
+            };
+            planet_generators::bake::channel_graph::channels_from_graph(&front.graph, &front.solve.grid, &to_local)
+                .into_iter()
+                .filter(|c| c.points.iter().any(|&(x, y)| x >= (wi0 - 16) as f64 && y >= (wj0 - 16) as f64 && x <= (wi0 + wn as i64 + 16) as f64 && y <= (wj0 + wn as i64 + 16) as f64))
+                .collect()
+        };
+        for (name, chs) in [("straight", &straight), ("placed", &mem)] {
+            let (mut cells, mut in_pit) = (0usize, 0usize);
+            let mut touched: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
+            for ch in chs.iter() {
+                for (x, y) in line_cells(ch) {
+                    if x < i64::from(ti) * t || y < i64::from(tj) * t || x >= (i64::from(ti) + 1) * t || y >= (i64::from(tj) + 1) * t {
+                        continue;
+                    }
+                    let c = ((y - wj0) as usize) * wn + (x - wi0) as usize;
+                    if z0[c] <= 0.0 {
+                        continue;
+                    }
+                    cells += 1;
+                    if label[c] != u32::MAX {
+                        in_pit += 1;
+                        touched.insert(label[c]);
+                    }
+                }
+            }
+            let mut d: Vec<f64> = touched.iter().map(|&k| pits[k as usize].0).collect();
+            let mut a: Vec<usize> = touched.iter().map(|&k| pits[k as usize].1).collect();
+            d.sort_by(f64::total_cmp);
+            a.sort();
+            let pf = |v: &[f64], q: f64| v.get(((v.len() as f64 * q) as usize).min(v.len().saturating_sub(1))).copied().unwrap_or(0.0);
+            let pu = |v: &[usize], q: f64| v.get(((v.len() as f64 * q) as usize).min(v.len().saturating_sub(1))).copied().unwrap_or(0);
+            let over = |m: f64| d.iter().filter(|&&v| v > m).count();
+            println!(
+                "PITS tile {ti}/{tj} {name}: {} line cells on land, {} in a pit ({:.2} %); {} pits touched, depth below spill p50 {:.2} p90 {:.2} max {:.2} m, area p50 {} p90 {} max {} cells; pits deeper than 1/5/20/50 m: {}/{}/{}/{}; all pits of the window {}",
+                cells,
+                in_pit,
+                100.0 * in_pit as f64 / cells.max(1) as f64,
+                d.len(),
+                pf(&d, 0.5),
+                pf(&d, 0.9),
+                d.last().copied().unwrap_or(0.0),
+                pu(&a, 0.5),
+                pu(&a, 0.9),
+                a.last().copied().unwrap_or(0),
+                over(1.0),
+                over(5.0),
+                over(20.0),
+                over(50.0),
+                pits.len()
+            );
+        }
+    }
     println!("{}", r.mark_line());
     let stored: Vec<Channel> = feed.try_channels_near(face, wi0, wj0, w)?;
 
