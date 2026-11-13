@@ -9,7 +9,7 @@ use planet_core::{Face, Vec3};
 use planet_generators::bake::tile::{TileGrid, TileId as PassTile, TileResult, TileStats};
 use planet_generators::erosion::{ErosionField, ErosionGenerator, EROSION_C1_LAYER_IMPLEMENTATION_ID, EROSION_LAYER_IMPLEMENTATION_ID};
 use planet_generators::erosion_layer::{coast_fade, ErosionLayer, LayerSource, LayerTile, COAST_FADE_M, MAX_CAP_TILES};
-use planet_generators::global::{bake, GlobalGrid, GridSource, LatticeSource};
+use planet_generators::global::{bake, GlobalGrid, GlobalSample, GridSource, LatticeSource, ReadError};
 use planet_generators::height::HeightField;
 use planet_generators::relief_channels::ReliefChannels;
 use planet_generators::relief_lattice::ReliefLattice;
@@ -352,7 +352,7 @@ fn off_is_the_field_with_the_band_and_a_layer_of_zeros_changes_nothing_but_the_p
             let want = band.height(d) - k * interpolant;
             let got = zero.height(d);
             assert!(
-                (got - want).abs() <= 1e-6 * (1.0 + want.abs()),
+                (got - want).abs() <= 1e-9 * (1.0 + want.abs()),
                 "c1 {c1}: {got} against the band's height minus the pinned interpolant {want}"
             );
         }
@@ -887,12 +887,10 @@ fn where_the_layer_is_read_the_ground_at_every_cell_centre_is_the_base_plus_the_
         let on = plain(&src, c1).with_layer(l.clone(), 0.0).unwrap();
         let mut rng = SplitMix64(41);
         // At the centres the detail is pinned to 0: the drawn ground is the stored base plus the faded change, bit for bit.
+        // Within 2 cells of a cube edge the pin is cross-faded with the neighbouring face's (so it meets itself across the edge), and a centre there is not pinned to 0.
         for _ in 0..400 {
-            let (f, i, j) = (
-                (rng.next_u64() % 6) as u8,
-                (rng.next_u64() % LAYER_CELLS as u64) as usize,
-                (rng.next_u64() % LAYER_CELLS as u64) as usize,
-            );
+            let inner = (LAYER_CELLS - 4) as u64;
+            let (f, i, j) = ((rng.next_u64() % 6) as u8, 2 + (rng.next_u64() % inner) as usize, 2 + (rng.next_u64() % inner) as usize);
             let c = cell_dir(f, i, j);
             assert!(l.centres_around(c).at_centre, "cell ({f}, {i}, {j}) is a centre");
             let e = on.base_elevation(c);
@@ -909,7 +907,7 @@ fn where_the_layer_is_read_the_ground_at_every_cell_centre_is_the_base_plus_the_
             let s = l.centres_around(*d);
             let interpolant: f64 = s.centres.iter().map(|(c, w)| w * on.detail_unpinned(*c)).sum();
             let want = on.detail_unpinned(*d) - interpolant;
-            assert!((pinned - want).abs() <= 1e-6 * (1.0 + e.abs()), "c1 {c1}: pinned detail {pinned} against {want}");
+            assert!((pinned - want).abs() <= 1e-9 * (1.0 + e.abs()), "c1 {c1}: pinned detail {pinned} against {want}");
             off += usize::from(pinned.abs() > 1e-3);
             big = big.max(pinned.abs());
         }
@@ -919,4 +917,76 @@ fn where_the_layer_is_read_the_ground_at_every_cell_centre_is_the_base_plus_the_
         }
         assert!(on.error().is_none());
     }
+}
+
+/// A grid that reports blocks of 16 cells, so a batch takes the gathered and hinted footprint paths (a hint only; it never changes a value).
+struct Blocked<'a>(&'a GridSource<'a>);
+
+impl LatticeSource for Blocked<'_> {
+    fn res(&self) -> u32 {
+        self.0.res()
+    }
+    fn at(&self, f: Face, i: u32, j: u32) -> Result<GlobalSample, ReadError> {
+        self.0.at(f, i, j)
+    }
+    fn block_cells(&self) -> u32 {
+        16
+    }
+}
+
+// spec: GEN-187
+#[test]
+fn a_batch_over_a_blocked_source_reads_the_pins_centres_as_single_reads_do() {
+    // A gathered batch reads its cells from the table of its footprint: the pin's centres must be in it, or the heights are NaN and the field records an error.
+    let g = grid();
+    let plain_src = GridSource(&g);
+    let src = Blocked(&plain_src);
+    let l = layer(1.0, 3);
+    let mut rng = SplitMix64(43);
+    // A sparse batch over the planet (the exact footprint), a dense one inside a face, one along a face edge and one across two faces.
+    let sparse: Vec<Vec3> = (0..200).map(|_| random_dir(&mut rng)).collect();
+    let dense: Vec<Vec3> = (0..200).map(|k| at_cell(2, 100.0 + (k % 20) as f64 * 0.37, 120.0 + (k / 20) as f64 * 0.41)).collect();
+    let edge: Vec<Vec3> = (0..200).map(|k| at_cell(1, 0.2 + (k % 4) as f64 * 0.3, 20.0 + k as f64 * 1.07)).collect();
+    let across: Vec<Vec3> = (0..200).map(|k| at_cell(3, -1.5 + (k % 10) as f64 * 0.31, 60.0 + (k / 10) as f64 * 0.5)).collect();
+    for c1 in [false, true] {
+        let on = plain(&src, c1).with_layer(l.clone(), 0.0).unwrap();
+        for (name, dirs) in [("sparse", &sparse), ("dense", &dense), ("edge", &edge), ("across", &across)] {
+            let batch = on.heights(dirs);
+            for (d, h) in dirs.iter().zip(&batch) {
+                assert!(h.is_finite(), "c1 {c1} {name}: a NaN height in the batch at {d:?}");
+                assert_eq!(on.height(*d).to_bits(), h.to_bits(), "c1 {c1} {name}: a batch reads as single reads");
+            }
+            assert!(on.error().is_none(), "c1 {c1} {name}: {:?}", on.error());
+        }
+    }
+}
+
+// spec: GEN-187
+#[test]
+fn the_pinned_detail_meets_itself_across_every_cube_edge_and_corner() {
+    // A layer of zeros: the height is the base plus the pinned detail, so a step across an edge would be the pin's. Each pair straddles an edge 2e-11 rad (0.13 mm) apart, so a slope adds well under a millimetre.
+    let g = grid();
+    let src = GridSource(&g);
+    let on = plain(&src, true).with_layer(layer(0.0, 3), 0.0).unwrap();
+    let mut worst = 0.0f64;
+    let mut pairs = 0;
+    for f in 0..6u8 {
+        for k in 0..64 {
+            let along = -0.99 + 1.98 * f64::from(k) / 63.0;
+            for (s, t) in [(1.0, along), (-1.0, along), (along, 1.0), (along, -1.0), (1.0, 1.0), (-1.0, -1.0)] {
+                let e = face_to_direction(&TangentWarp, Face(f), s, t);
+                // A tangent across the edge: away from the face's centre.
+                let inward = face_to_direction(&TangentWarp, Face(f), 0.0, 0.0);
+                let across = (e - inward * e.dot(inward)).normalized();
+                let tangent = (across - e * across.dot(e)).normalized();
+                let (a, b) = ((e + tangent * 1e-11).normalized(), (e - tangent * 1e-11).normalized());
+                let step = (on.height(a) - on.height(b)).abs();
+                worst = worst.max(step);
+                pairs += 1;
+            }
+        }
+    }
+    assert!(pairs > 2000);
+    assert!(worst < 1e-3, "the pinned detail steps by {worst} m across a cube edge");
+    assert!(on.error().is_none());
 }

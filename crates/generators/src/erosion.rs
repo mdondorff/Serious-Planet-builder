@@ -57,9 +57,10 @@ pub const CREASE_BAND_VERSION: u32 = 1;
 /// The version of the detail pinned to the layer's samples (GEN-187, ADR 0122 point 1): it enters the keys of every field that reads the layer.
 pub const PINNED_DETAIL_VERSION: u32 = 1;
 
-/// How far, in layer cells, the cell centres a pinned point reads lie from it (the four around it are within the cell's diagonal, about 1.42; the warp of the face stretches a cell by at
-/// most a few per cent): the reach the bounds widen the cap by (GEN-187).
-const PIN_REACH_CELLS: f64 = 2.0;
+/// How far, in layer cells of angle, the cell centres a pinned point reads lie from it: the reach the bounds and a batch's footprint widen by (GEN-187). A centre of the point's own
+/// face with a weight lies less than one cell away along each face axis, and the arc of a step along either axis of `TangentWarp` is at most one cell per cell, so it lies within 2
+/// cells; within the edge blend (2 cells of an edge) the neighbouring face's centres lie within the blend plus that, so 4.
+const PIN_REACH_CELLS: f64 = 4.0;
 
 /// The implementation id of a field that reads the erosion layer (GEN-112) over the v1 base.
 pub const EROSION_LAYER_IMPLEMENTATION_ID: &str = "cpu-erosion-v1+relief+band+layer";
@@ -537,8 +538,8 @@ impl ErosionField<'_> {
                     let mut interpolant = 0.0;
                     for (centre, w) in stencil.centres {
                         if w > 0.0 {
-                            // The centres lie outside the batch's gathered footprint: read them uncached.
-                            interpolant += w * self.detail_via_c(src, centre, false).1;
+                            // The centres' reads are in a gathered batch's footprint (`gather_footprint`).
+                            interpolant += w * self.detail_via_c(src, centre, cached).1;
                         }
                     }
                     detail - interpolant
@@ -546,6 +547,35 @@ impl ErosionField<'_> {
             }
         };
         self.compose(dir, e, detail)
+    }
+
+    /// The lattice reads of a height at `dir` for a gathered batch (GEN-020): the base and its gradient at the point and, where the detail is pinned (GEN-187), at the layer's
+    /// cell centres the pin reads.
+    fn gather_footprint(&self, g: &dyn LatticeSource, dir: Vec3) {
+        self.base_via(g, dir);
+        self.gradient_via(g, dir);
+        if let Some((layer, _)) = &self.layer {
+            let stencil = layer.centres_around(dir);
+            if !stencil.at_centre {
+                for (centre, w) in stencil.centres {
+                    if w > 0.0 {
+                        self.base_via(g, centre);
+                        self.gradient_via(g, centre);
+                    }
+                }
+            }
+        }
+    }
+
+    /// The reach in bake cells of a height's reads around its point: the gradient's, and the pin's centres where the layer is read (GEN-187).
+    fn gather_reach(&self) -> u32 {
+        match &self.layer {
+            None => GRADIENT_REACH_CELLS,
+            Some((layer, _)) => {
+                let pin = libm::ceil(PIN_REACH_CELLS * f64::from(self.src.res()) / layer.cells() as f64) as u32;
+                GRADIENT_REACH_CELLS + pin
+            }
+        }
     }
 
     /// The base elevation at `dir` and the fine-detail term there as ADR 0098 sets it (the crease octaves, banded where the band is on).
@@ -602,20 +632,14 @@ impl HeightField for ErosionField<'_> {
 
     /// The lattice cells of the whole batch are read once, grouped by bake block (GEN-020): the same values, in the caller's order.
     fn heights_until(&self, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> Vec<f64> {
-        let footprint = |g: &dyn LatticeSource, d: Vec3| {
-            self.base_via(g, d);
-            self.gradient_via(g, d);
-        };
-        crate::global::eval_gathered(&self.src, dirs, stop, &footprint, Some(GRADIENT_REACH_CELLS), &|s, d| self.height_via_c(s, d, true))
+        let footprint = |g: &dyn LatticeSource, d: Vec3| self.gather_footprint(g, d);
+        crate::global::eval_gathered(&self.src, dirs, stop, &footprint, Some(self.gather_reach()), &|s, d| self.height_via_c(s, d, true))
     }
 
     /// [`HeightField::heights_until`] with the distinct blocks of the batch read on `threads` threads (GEN-020, LOD-009).
     fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), par: &dyn planet_core::par::Par) -> Vec<f64> {
-        let footprint = |g: &dyn LatticeSource, d: Vec3| {
-            self.base_via(g, d);
-            self.gradient_via(g, d);
-        };
-        crate::global::eval_gathered_threads(&self.src, dirs, stop, par, &footprint, Some(GRADIENT_REACH_CELLS), &|s, d| {
+        let footprint = |g: &dyn LatticeSource, d: Vec3| self.gather_footprint(g, d);
+        crate::global::eval_gathered_threads(&self.src, dirs, stop, par, &footprint, Some(self.gather_reach()), &|s, d| {
             self.height_via_c(s, d, true)
         })
     }
@@ -671,10 +695,7 @@ impl HeightField for ErosionField<'_> {
         dirs: &[Vec3],
         stop: &dyn Fn() -> bool,
     ) -> (Vec<f64>, crate::climate::ClimateTexture) {
-        let footprint = |g: &dyn LatticeSource, d: Vec3| {
-            self.base_via(g, d);
-            self.gradient_via(g, d);
-        };
+        let footprint = |g: &dyn LatticeSource, d: Vec3| self.gather_footprint(g, d);
         let climate = |s: &dyn LatticeSource| match crate::climate::climate_tile_direct(s, id) {
             Ok(c) => c,
             Err(e) => {
@@ -687,7 +708,7 @@ impl HeightField for ErosionField<'_> {
             dirs,
             stop,
             &footprint,
-            Some(GRADIENT_REACH_CELLS),
+            Some(self.gather_reach()),
             &|s, d| self.height_via_c(s, d, true),
             &climate,
         )
