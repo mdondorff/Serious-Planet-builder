@@ -4,7 +4,7 @@
 //! - the rises over 0.25 m of K7's `z` along each set of lines;
 //! - K7's `z` against the stored L (`B + L` at the cell, quantised) at the line cells.
 //!
-//! Usage: `k7_line_check <commit dir> <ti> <tj> [--threads T]` (R3a of face 1, seed 14, margin 200: the defaults of `bake_region`).
+//! Usage: `k7_line_check <commit dir> <ti,tj,x,y>... [--threads T]` (a tile and a face cell near a line in it) (R3a of face 1, seed 14, margin 200: the defaults of `bake_region`).
 use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::Arc;
@@ -51,7 +51,7 @@ impl LatticeSource for Lattice {
 fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let dir = Path::new(&args[0]);
-    let (ti, tj): (u32, u32) = (args[1].parse().expect("ti"), args[2].parse().expect("tj"));
+    let spots: Vec<(u32, u32, i64, i64)> = args[1..].iter().take_while(|a| !a.starts_with("--")).map(|s| { let v: Vec<i64> = s.split(',').map(|x| x.parse().expect("ti,tj,x,y")).collect(); (v[0] as u32, v[1] as u32, v[2], v[3]) }).collect();
     let threads: usize = args.iter().position(|a| a == "--threads").map_or(8, |k| args[k + 1].parse().expect("--threads T"));
     let (seed, face, margin) = (14u64, Face(1), 200usize);
     let (i0, j0, size) = (2014 * 4, 190 * 4, (2168 * 4 + 3) - 2014 * 4 + 1);
@@ -104,15 +104,21 @@ fn main() -> Result<(), String> {
     let front = region_front(&spec, &base, &climate)?;
     let regional = |d: Vec3| front.regional_field.at(d);
     let grid = TileGrid { cells: spec.local(), tile: spec.tile, halo: spec.halo, radius_m: spec.radius_m };
+    let commit = Commit::read(dir)?.ok_or("no commit record")?;
+    let store = Arc::new(TileStore::open(dir, world.params()).map_err(|e| format!("{e}"))?);
+    let feed = ChannelGraphFeed::new(store, commit)?;
+    let src: Arc<dyn planet_generators::erosion_layer::LayerSource> = Arc::new(planet_cache::l_layer::CommitLayer::open(dir, world.clone(), 16)?);
+    let layer = planet_generators::erosion_layer::ErosionLayer::new(src)?;
+    let n = spec.local() as f64;
+    let dir_of = |x: i64, y: i64| planet_core::cube::face_to_direction(&TangentWarp, face, 2.0 * (x as f64 + 0.5) / n - 1.0, 2.0 * (y as f64 + 0.5) / n - 1.0);
+    for &(ti, tj, sx, sy) in &spots {
     let id = TileId { face, ti, tj };
     let (t, h, w) = (spec.tile as i64, spec.halo as i64, grid.window() as i64);
     let (wi0, wj0) = (i64::from(ti) * t - h, i64::from(tj) * t - h);
     let mem: Vec<Channel> = front.feed.channels_near(face, wi0, wj0, w);
     let r = k7_tile(&grid, id, &base, &regional, &mem, &K7Params::standard(seed, 0.0), threads);
-
-    let commit = Commit::read(dir)?.ok_or("no commit record")?;
-    let store = Arc::new(TileStore::open(dir, world.params()).map_err(|e| format!("{e}"))?);
-    let stored: Vec<Channel> = ChannelGraphFeed::new(store, commit)?.try_channels_near(face, wi0, wj0, w)?;
+    println!("{}", r.mark_line());
+    let stored: Vec<Channel> = feed.try_channels_near(face, wi0, wj0, w)?;
 
     let (x0, y0) = (i64::from(ti) * t, i64::from(tj) * t);
     let core = |x: i64, y: i64| x >= x0 && y >= y0 && x < x0 + t && y < y0 + t;
@@ -151,9 +157,6 @@ fn main() -> Result<(), String> {
         println!("K7 z along the {name} lines: {steps} land steps, {rises} rise over 0.25 m, largest {worst:.2} m");
     }
     // K7's z against the stored L at the stored line cells: B + L as stored.
-    let src: Arc<dyn planet_generators::erosion_layer::LayerSource> = Arc::new(planet_cache::l_layer::CommitLayer::open(dir, world.clone(), 16)?);
-    let layer = planet_generators::erosion_layer::ErosionLayer::new(src)?;
-    let n = spec.local() as f64;
     let mut d: Vec<f64> = Vec::new();
     for &(x, y) in b.iter().step_by(7) {
         let dir_v = planet_core::cube::face_to_direction(&TangentWarp, face, 2.0 * (x as f64 + 0.5) / n - 1.0, 2.0 * (y as f64 + 0.5) / n - 1.0);
@@ -169,5 +172,22 @@ fn main() -> Result<(), String> {
         d.get(d.len() * 99 / 100).copied().unwrap_or(0.0),
         d.last().copied().unwrap_or(0.0)
     );
+    // The in-memory channels through the spot: K7's start, z and burn flag, and the stored B + L, along the line around the spot.
+    let win = |x: i64, y: i64| ((y - wj0) * w + (x - wi0)) as usize;
+    for (ci, ch) in mem.iter().enumerate() {
+        let line = line_cells(ch);
+        let Some(k) = line.iter().position(|&(x, y)| (x - sx).abs() <= 1 && (y - sy).abs() <= 1) else { continue };
+        println!("spot ({sx},{sy}) in-memory channel {ci}: {} points, levels {:.1}..{:.1}, line cell {k} of {}", ch.points.len(), ch.levels[0], ch.levels.last().unwrap(), line.len());
+        for j in k.saturating_sub(10)..(k + 16).min(line.len()) {
+            let (x, y) = line[j];
+            if !core(x, y) { continue; }
+            let c = win(x, y);
+            let start = r.b[c] + regional(dir_of(x, y));
+            let stored_g = r.b[c] + layer.change_at(dir_of(x, y))?;
+            let lo3 = (-1..=1).flat_map(|dy| (-1..=1).map(move |dx| (dx, dy))).map(|(dx, dy)| r.z[win(x + dx, y + dy)]).fold(f64::INFINITY, f64::min);
+            println!("  {j} ({x},{y}) start {start:.2} k7 {:.2} burnt {} stored {stored_g:.2} min3x3 {lo3:.2}", r.z[c], r.burn_mask[c]);
+        }
+    }
+    }
     Ok(())
 }
