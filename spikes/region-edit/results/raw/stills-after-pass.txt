@@ -1,0 +1,8 @@
+# anchor: latitude -36.8280 longitude -162.3450 degrees, ground 820.4 m
+# note: SPIKE-112 AFTER: pass lowered by 100 m; level-2 re-solve, bit-equal to a fresh build; edit applied to the in-memory base (spike code)
+# note: too many lakes; cause: basins of the starting surface (SPIKE-109)
+# note: valley ponds: sea water of the coastal band in valleys the carve (K7) cut below sea level, not lakes
+# note: base: computed in memory, not read from a stored bake
+# caption: SPIKE-112 SPIKE-112 AFTER: pass lowered by 100 m; level-2 re-solve, bit-equal to a fresh build; edit applied to the in-memory base (spike code)
+# pose width height eye_lat_deg eye_lon_deg eye_height_m heading_deg pitch_deg sun_local_hours nodes capped_nodes
+pass-lowsun-3000m 1920 1080 -36.82796 -162.44612 3737.8 90 10 17 855 0

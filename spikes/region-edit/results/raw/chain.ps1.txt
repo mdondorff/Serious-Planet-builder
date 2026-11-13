@@ -1,0 +1,12 @@
+Set-Location C:\DEV\Serious-Planet-Builder\.claude\worktrees\sonnet-spikes-36fc88
+$pass  = 'lower:-36.82800:-162.34497:100:2.5:1.5'
+$split = 'ridge:-36.86612:-162.20215:-36.73365:-162.12158:25.1:0.6:0.6'
+$stamp = 'dome:-36.74977:-162.28271:400:10'
+& target/spike112/run.ps1 -out fresh-none -argline 'fresh --threads 8 --name none'
+& target/spike112/run.ps1 -out fresh-pass -argline "fresh --threads 8 --name pass --edit $pass"
+& target/spike112/run.ps1 -out fresh-split -argline "fresh --threads 8 --name split --edit $split"
+& target/spike112/run.ps1 -out fresh-stamp -argline "fresh --threads 8 --name stamp --edit $stamp"
+& target/spike112/run.ps1 -out incr-pass -argline "incr --threads 8 --name pass --edit $pass"
+& target/spike112/run.ps1 -out incr-split -argline "incr --threads 8 --name split --edit $split"
+& target/spike112/run.ps1 -out incr-stamp -argline "incr --threads 8 --name stamp --edit $stamp"
+Add-Content target/spike112/progress.log 'CHAIN DONE'

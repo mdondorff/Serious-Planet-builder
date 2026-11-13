@@ -1,0 +1,8 @@
+SPIKE-112 region_edit fresh, edit 'lower:-36.82800:-162.34497:100:2.5:1.5' (pass), threads 8, memo tile 256; setup 14.0 s
+MEM setup: commit 45 MiB, peak commit 195 MiB
+PARTS fresh rounds: resident route 4.16; resident cut 0.10; resident catchments 0.10; resident assemble+narrow 0.02
+MEM after the rounds: commit 75 MiB, peak commit 195 MiB
+MEM after H1: commit 104 MiB, peak commit 195 MiB
+MEM after K7: commit 162 MiB, peak commit 214 MiB
+FRESH pass: lattice 9.0 s, rounds 4.6 s, H1+lakes+graph 1.6 s, K7+write 177.4 s (52 tiles); total without the lattice 183.7 s; commit 62fe365293cf8acd, 69 lakes, 47950 channel cells
+done in 206.7 s
