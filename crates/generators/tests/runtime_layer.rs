@@ -200,7 +200,7 @@ fn cell_dir(face: u8, i: usize, j: usize) -> Vec3 {
     )
 }
 
-// spec: GEN-112
+// spec: GEN-112, GEN-188
 #[test]
 fn the_read_is_the_cell_value_at_a_cell_centre_and_within_the_four_cells_around_a_point() {
     let l = layer(1.0, 3);
@@ -713,4 +713,44 @@ fn the_eroded_field_reads_the_channels_for_the_driver_block_and_changes_nothing_
     let s = broken.driver_channels(&dirs[..3]).unwrap();
     assert!(s.iter().all(|s| s.area_log2_cells.is_none()));
     assert!(broken.error().is_some_and(|e| e.contains("could not be read")), "{:?}", broken.error());
+}
+
+// spec: GEN-188
+#[test]
+fn the_read_has_no_step_across_a_cell_centre_line() {
+    // The noisy layer (cell-scale noise of 25 m): a read clamped to the four cells around the point stepped where the set of four changes, at every cell-centre line where the
+    // interpolant along the line overshoots on one side only (the #108 finding: 1.5 % of crossings over 0.1 m on R3a, up to 12.5 m).
+    let l = layer(1.0, 3);
+    let mut rng = SplitMix64(108);
+    let e = 1e-7;
+    let mut worst = (0.0f64, 0u8, 0.0f64, 0.0f64);
+    for k in 0..20_000 {
+        let face = (rng.next_f64() * 6.0) as u8;
+        // Away from the cube edges (the cross-fade with the neighbouring face is tested on its own).
+        let (x, y) = (4.0 + rng.next_f64() * 247.0, 4.0 + rng.next_f64() * 247.0);
+        let jump = if k % 2 == 0 {
+            let yi = libm::floor(y);
+            (l.change_at(at_cell(face, x, yi + e)).unwrap() - l.change_at(at_cell(face, x, yi - e)).unwrap()).abs()
+        } else {
+            let xi = libm::floor(x);
+            (l.change_at(at_cell(face, xi + e, y)).unwrap() - l.change_at(at_cell(face, xi - e, y)).unwrap()).abs()
+        };
+        if jump > worst.0 {
+            worst = (jump, face, x, y);
+        }
+    }
+    assert!(worst.0 <= 1e-3, "a jump of {} m across a cell-centre line on face {} near cell ({}, {})", worst.0, worst.1, worst.2, worst.3);
+}
+
+// spec: GEN-188
+#[test]
+fn the_read_at_a_cell_centre_is_the_stored_sample_bit_for_bit() {
+    let l = layer(1.0, 3);
+    let mut rng = SplitMix64(1880);
+    for _ in 0..2000 {
+        let (f, i, j) = ((rng.next_f64() * 6.0) as u8, 3 + (rng.next_f64() * 250.0) as usize, 3 + (rng.next_f64() * 250.0) as usize);
+        let v = l.change_at(cell_dir(f, i, j)).unwrap();
+        let want = f64::from(synthetic(1.0, 3, f, i, j) as f32);
+        assert_eq!(v.to_bits(), want.to_bits(), "face {f} cell ({i}, {j}): read {v}, sample {want}");
+    }
 }
