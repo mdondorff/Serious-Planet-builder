@@ -28,6 +28,8 @@ mod keys;
 mod keys_footprint;
 #[path = "keys_wide_ids.rs"]
 mod keys_wide_ids;
+#[path = "k7_bed_coherence.rs"]
+mod k7_bed_coherence;
 #[path = "l_graph.rs"]
 mod l_graph;
 #[path = "l_layer.rs"]
