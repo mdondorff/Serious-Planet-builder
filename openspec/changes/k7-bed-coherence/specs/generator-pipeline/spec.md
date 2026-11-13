@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: GEN-185 The burn levels come from the whole channel network
-Before K7 runs, the level of every channel vertex SHALL be the running minimum down the channel tree of its H1 level and of K7's start surface `B + regional` at every local line cell up to it, the cells between two vertices rasterised as the burn rasterises them; a tributary (a segment ending at a segment's first cell) carries its end level in. The levels SHALL be computed once for the region, before the graph is stored and before the channels are burnt, so the stored level is the burn's input (STRM-084) and a function of the network and the start surface alone. With them the burn's cutoff SHALL bind no cell, and along every stored line the stored ground `B + L` SHALL NOT rise downstream by more than 0.25 m. The depth of the levels under the start surface at the vertices on land SHALL be reported (p50, p99, max, the vertices over 50 m), not limited. The stored level is the burn level, not a water surface; the drawn water level is derived at read time (REND-066).
+Before K7 runs, the level of every channel vertex SHALL be the running minimum down the channel tree of its H1 level and of K7's start surface `B + regional` at every local line cell up to it, the cells between two vertices rasterised as the burn rasterises them; a tributary (a segment ending at a segment's first cell) carries its end level in. The levels SHALL be computed once for the region, before the graph is stored and before the channels are burnt, so the stored level is the burn's input (STRM-084) and a function of the network and the start surface alone. With them the burn's cutoff SHALL bind no cell, and along every stored line the stored ground `B + L` SHALL NOT rise downstream by more than 0.25 m. The depth of the levels under the start surface at the line cells on land SHALL be reported (p50, p99, max, the vertices over 50 m), not limited. The stored level is the burn level, not a water surface; the drawn water level is derived at read time (REND-066).
 
 Verify: A
 Status: active
@@ -13,7 +13,8 @@ Source: Lead 2026-11-13 (P2 E1, #125: option A''); the R3a line check (bounded c
 
 #### Scenario: Details
 - **WHEN** the levels are computed
-- **THEN** a level is coded by the 0.5 m bed code (rounded down) and a second computation lowers nothing
+- **THEN** a level is coded by the 0.5 m bed code (rounded down) and a second computation lowers nothing; a level outside the code's range (-16,384 m to 16,383.5 m) is clamped, a stated limit (the region's height bounds lie inside it)
+- **AND** the start surface is finite at every line cell (a cell that is not is refused, naming it), and a cycle of segments (malformed input) ends without a carry across it
 - **AND** the region bake's MARK line reports the depth under the start surface; deep cuts through ridges of the start surface that H1's lines cross are a finding for H1's routing, not limited here
 
 ## MODIFIED Requirements

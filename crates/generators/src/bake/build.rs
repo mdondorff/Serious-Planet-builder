@@ -224,6 +224,7 @@ fn h1_stage<Z: Heights + ?Sized>(
     mark("hydrology");
     // The pieces of the river segments carry `Q_w` at their ends: they are cut now and are the only part of the lake producer that reads the discharges (GEN-163, D22).
     let pre = river_pieces(grid, &routing, &hy, z);
+    // The levels here are H1's: a graph stored or burnt under graph version 3 or pass-2 kernel 10 needs the burn levels of the whole network first (`ChannelGraph::deepen_beds`, GEN-185), as the region bake does.
     let mut graph = ChannelGraph::from_hydro(grid, &routing, &hy, z);
     graph.set_cuts(pre.cuts.clone());
     mark("channel graph");

@@ -248,15 +248,15 @@ pub struct RegionFront {
     pub graph: ChannelGraph,
     pub segment_ids: Vec<u64>,
     pub feed: MemoryFeed,
-    /// How deep the burn levels lie under the start surface at the vertices on land (GEN-185).
+    /// How deep the burn levels lie under the start surface at the line cells on land (GEN-185).
     pub bed_cut: BedCut,
 }
 
-/// The depth of the burn levels under K7's start surface at the graph's vertices on land (start surface over the sea level), in metres: the canyons a running minimum cuts through a ridge of the start
-/// surface (GEN-185, lead 2026-11-13: reported, not limited).
+/// The depth of the burn levels under K7's start surface at the local line cells on land (start surface over the sea level; the level interpolated between two vertices as the burn does), in metres:
+/// the canyons a running minimum cuts through a ridge of the start surface (GEN-185, lead 2026-11-13: reported, not limited).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct BedCut {
-    pub vertices: usize,
+    pub cells: usize,
     pub p50: f64,
     pub p99: f64,
     pub max: f64,
@@ -267,31 +267,43 @@ pub struct BedCut {
 
 impl BedCut {
     fn of(graph: &ChannelGraph, grid: &Grid, to_local: &dyn Fn(u32) -> (f64, f64), start: &dyn Fn(i64, i64) -> f64) -> BedCut {
-        let mut d: Vec<(f64, (i64, i64))> = Vec::new();
+        use planet_generators::bake::channel_graph::bed_value;
+        use planet_generators::bake::k7::{line_cells, Channel, QUnit};
+        // Every local line cell once (a cell on two lines keeps its deepest cut), against the level interpolated between its two vertices as the burn interpolates it.
+        let mut cut: std::collections::BTreeMap<(i64, i64), f64> = std::collections::BTreeMap::new();
         graph.for_each(|s| {
-            for (k, c) in s.cells(grid).into_iter().enumerate() {
-                let (x, y) = to_local(c);
-                let cell = (libm::round(x) as i64, libm::round(y) as i64);
-                let z0 = start(cell.0, cell.1);
-                if z0 > 0.0 {
-                    d.push((z0 - planet_generators::bake::channel_graph::bed_value(s.bed[k]), cell));
+            let cells = s.cells(grid);
+            for k in 0..cells.len() {
+                let p1 = to_local(cells[k]);
+                let p0 = if k == 0 { p1 } else { to_local(cells[k - 1]) };
+                let (l0, l1) = (bed_value(s.bed[if k == 0 { 0 } else { k - 1 }]), bed_value(s.bed[k]));
+                let line = line_cells(&Channel { points: vec![p0, p1], levels: vec![l0, l1], q: Vec::new(), q_unit: QUnit::Discharge });
+                let m = line.len();
+                for (i, c) in line.into_iter().enumerate() {
+                    let z0 = start(c.0, c.1);
+                    if z0 > 0.0 {
+                        let level = if m > 1 { l0 + (l1 - l0) * i as f64 / (m - 1) as f64 } else { l1 };
+                        let e = cut.entry(c).or_insert(f64::NEG_INFINITY);
+                        *e = e.max(z0 - level);
+                    }
                 }
             }
         });
+        let mut d: Vec<(f64, (i64, i64))> = cut.into_iter().map(|(c, v)| (v, c)).collect();
         if d.is_empty() {
             return BedCut::default();
         }
         d.sort_by(|a, b| a.0.total_cmp(&b.0));
         let at = |p: usize| d[(p * d.len()).div_ceil(100).saturating_sub(1).min(d.len() - 1)].0;
         let last = d[d.len() - 1];
-        BedCut { vertices: d.len(), p50: at(50), p99: at(99), max: last.0, over_50m: d.iter().filter(|v| v.0 > 50.0).count(), deepest: last.1 }
+        BedCut { cells: d.len(), p50: at(50), p99: at(99), max: last.0, over_50m: d.iter().filter(|v| v.0 > 50.0).count(), deepest: last.1 }
     }
 
     /// The MARK line.
     pub fn line(&self) -> String {
         format!(
-            "MARK burn levels (GEN-185): {} vertices on land, cut under the start surface p50 {:.2} p99 {:.2} max {:.2} m, {} over 50 m, deepest at local cell {:?}",
-            self.vertices, self.p50, self.p99, self.max, self.over_50m, self.deepest
+            "MARK burn levels (GEN-185): {} line cells on land, cut under the start surface p50 {:.2} p99 {:.2} max {:.2} m, {} over 50 m, deepest at local cell {:?}",
+            self.cells, self.p50, self.p99, self.max, self.over_50m, self.deepest
         )
     }
 }

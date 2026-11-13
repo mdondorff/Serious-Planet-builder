@@ -300,3 +300,55 @@ fn the_burn_levels_of_the_whole_network_carry_every_low_of_the_start_surface_dow
     let again = graph.clone().deepen_beds(&r.g, &to_local, &start);
     assert_eq!(again.0, 0, "a second pass lowers nothing");
 }
+
+// spec: GEN-185, TEST-134
+#[test]
+fn the_burn_levels_read_the_cells_k7_burns_and_a_cycle_of_segments_ends() {
+    use planet_generators::bake::k7::{line_cells, Channel};
+    // (a) The per-pair rasterisation of the levels is the whole channel's: for chains of 8-neighbour H1 steps, the pairs' cells (consecutive repeats merged) are the cells of `line_cells` of the channel.
+    let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+    let mut next = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed
+    };
+    for _ in 0..200 {
+        let len = 2 + (next() % 30) as usize;
+        let (mut i, mut j) = (50i64, 50i64);
+        let mut pts = vec![(8.0 * i as f64 + 3.5, 8.0 * j as f64 + 3.5)];
+        for _ in 1..len {
+            let d = [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)][(next() % 8) as usize];
+            i += d.0;
+            j += d.1;
+            pts.push((8.0 * i as f64 + 3.5, 8.0 * j as f64 + 3.5));
+        }
+        let whole = line_cells(&Channel { points: pts.clone(), levels: vec![0.0; len], q: Vec::new(), q_unit: QUnit::Discharge });
+        let mut pairs: Vec<(i64, i64)> = Vec::new();
+        for k in 0..len {
+            let p0 = if k == 0 { pts[0] } else { pts[k - 1] };
+            for c in line_cells(&Channel { points: vec![p0, pts[k]], levels: vec![0.0; 2], q: Vec::new(), q_unit: QUnit::Discharge }) {
+                if pairs.last() != Some(&c) {
+                    pairs.push(c);
+                }
+            }
+        }
+        assert_eq!(pairs, whole, "the pairs' cells are the channel's");
+    }
+    // (b) A malformed graph whose two segments end at each other's first cell ends (no carry across the cycle) instead of looping.
+    let g = Grid::new(3, 3, 800.0);
+    let z = vec![10.0, 9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0];
+    let mut outlet = vec![false; 9];
+    outlet[8] = true;
+    let mut receiver = route_rules(&g, &z, &outlet, EPS, 3, 0.0, None, RoundRules::ROUND).receiver.clone();
+    (receiver[0], receiver[1]) = (1, 0);
+    let routing = Routing { receiver, ..route_rules(&g, &z, &outlet, EPS, 3, 0.0, None, RoundRules::ROUND) };
+    let mut hydro = run().hydro;
+    let seg = |up: u32, down: u32| planet_generators::bake::hydro::Segment { id: u64::from(up), up, down, cells: 1, q_up: 1.0, q_down: 1.0, downstream: down };
+    hydro.segments = vec![seg(0, 1), seg(1, 0)];
+    hydro.qw = vec![1.0; 9];
+    let mut graph = ChannelGraph::from_hydro(&g, &routing, &hydro, &z);
+    let to_local = |c: u32| (8.0 * f64::from(c) + 3.5, 3.5);
+    let (lowered, _) = graph.deepen_beds(&g, &to_local, &|_, _| 1.0);
+    assert!(lowered > 0, "the cycle ends and the start surface lowers its beds");
+}

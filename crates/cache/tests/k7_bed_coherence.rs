@@ -144,11 +144,12 @@ fn the_stored_ground_does_not_rise_along_a_stored_line_and_the_burn_reaches_the_
     );
     assert!(b.steps > 100 && b.points > 20, "the fixture has rivers on land: {} steps, {} points", b.steps, b.points);
     assert!(b.rises.is_empty(), "{} steps rise over 0.25 m along the stored lines, the first {:?}", b.rises.len(), &b.rises[..b.rises.len().min(8)]);
-    // The burn reaches the stored level wherever the level is on land: the ground stands at most the 0.5 m code of the level and the 0.25 m step of L over it (it may lie lower: incision and the final pass
-    // cut under the burn; the read-time water level of REND-066 follows the ground). A level under the sea is floored at the sea level on land (GEN-176): those points are not compared.
+    // The burn reaches the stored level wherever the level is on land: the burn lowers a cell to the coded level itself, so the ground stands over it by L's quantisation only (half of 0.25 m plus f32
+    // rounding; it may lie lower: incision and the final pass cut under the burn, and the read-time water level of REND-066 follows the ground). A level under the sea is floored at the sea level on land
+    // (GEN-176): those points are the coast points, not compared.
     assert!(b.coast.iter().all(|c| c.2 <= 0.0 && c.3 >= 0.0), "the coast points are levels under the sea with the ground floored at or over it");
     let over = b.ground_over_level.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    assert!(over <= 0.75, "the stored ground stands {over:.2} m over the stored level: the burn did not reach the level (GEN-185)");
+    assert!(over <= 0.13, "the stored ground stands {over:.2} m over the stored level: the burn did not reach the level (GEN-185)");
 }
 
 // spec: GEN-185, TEST-134

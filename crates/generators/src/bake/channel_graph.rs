@@ -147,7 +147,8 @@ impl ChannelGraph {
     /// The burn levels of the whole network (GEN-185): every vertex's bed becomes the running minimum down the channel tree of its H1 level and of `start` (the start surface `B + regional` of K7) at every
     /// local line cell up to it, the cells of the line between consecutive vertices rasterised as K7's burn rasterises them (`to_local` maps an H1 cell to its point in the face's local cell-index space).
     /// A tributary is a segment whose last cell is this segment's first cell; its end level carries into this segment. A function of the network and of `start` alone, so every tile that burns a line
-    /// reads the same levels whatever window it holds (partition independence) and the burn's carry only bridges the cells between two vertices. Returns the number of vertices lowered and the largest
+    /// reads the same levels whatever window it holds (partition independence) and the burn's carry only bridges the cells between two vertices. A level outside the bed code's `i16` range
+    /// (-16,384 m to 16,383.5 m) is clamped by the code (a stated limit: the region's height bounds lie inside it). Returns the number of vertices lowered and the largest
     /// lowering in metres. Run it before the graph is stored and before the channels are made from it: the stored levels are the burn's input (STRM-084).
     pub fn deepen_beds(&mut self, grid: &Grid, to_local: &dyn Fn(u32) -> (f64, f64), start: &(dyn Fn(i64, i64) -> f64 + Sync)) -> (usize, f64) {
         let n = self.first.len();
@@ -171,24 +172,26 @@ impl ChannelGraph {
         }
         // a segment's end level, computed after its tributaries' (an explicit stack: the trees are deep)
         let mut end: Vec<Option<f64>> = vec![None; n];
+        // A segment on the stack whose tributaries are being computed: a cycle (malformed input only; H1's receivers make none) reads such a tributary as no carry instead of looping.
+        let mut visiting = vec![false; n];
         let (mut lowered, mut largest) = (0usize, 0.0f64);
         for root in 0..n {
             let mut stack = vec![(root, false)];
             while let Some((s, ready)) = stack.pop() {
-                if end[s].is_some() {
+                if end[s].is_some() || (!ready && visiting[s]) {
                     continue;
                 }
                 let tribs: Vec<usize> = ending.get(&cells[s][0]).map_or(Vec::new(), |v| v.iter().copied().filter(|&u| u != s).collect());
                 if !ready {
+                    visiting[s] = true;
                     stack.push((s, true));
                     for &u in &tribs {
-                        if end[u].is_none() {
+                        if end[u].is_none() && !visiting[u] {
                             stack.push((u, false));
                         }
                     }
                     continue;
                 }
-                // a cycle (malformed input only) reads an unfinished tributary as no carry
                 let mut run = tribs.iter().filter_map(|&u| end[u]).fold(f64::INFINITY, f64::min);
                 let c = &cells[s];
                 for k in 0..c.len() {
@@ -196,7 +199,9 @@ impl ChannelGraph {
                     let (x0, y0) = if k == 0 { (x1, y1) } else { to_local(c[k - 1]) };
                     let step = Channel { points: vec![(x0, y0), (x1, y1)], levels: vec![0.0, 0.0], q: Vec::new(), q_unit: QUnit::Discharge };
                     for (x, y) in super::k7::line_cells(&step) {
-                        run = run.min(start(x, y));
+                        let v = start(x, y);
+                        assert!(v.is_finite(), "the start surface at local cell ({x}, {y}) is {v}: not finite");
+                        run = run.min(v);
                     }
                     let i = offset[s] + k;
                     let old = bed_value(self.bed[i]);
@@ -209,6 +214,7 @@ impl ChannelGraph {
                     }
                 }
                 end[s] = Some(run);
+                visiting[s] = false;
             }
         }
         (lowered, largest)
