@@ -3,6 +3,8 @@
 Forward state only (owner, 2026-10-16): open owner items, the current queue's open items, the current unanswered stop report, tracked items and quarantines. History goes to the log (`cargo xtask log`). When a change is archived the coder deletes its queue item's text (the log line is the record); when the architect answers a stop report it deletes it. A Tracked entry has at most 3 lines; a finished one is deleted (ADR 0075). Cap: 15 KB. Earlier states: `docs/archive/M4/status-at-m4-acceptance.md`, `docs/archive/M6/status-at-m6-close.md`. M8 closed 2026-10-30: `docs/milestones/M8-report.md`. New requirement IDs, ADR and SPIKE numbers are reserved through the lead (ADR 0120).
 
 ## Waiting for the owner
+- **/bless: `water_class_lake_mask_stripes`** (TEST-133, #1459): the first lake golden, a class view; escalated as the first of its class and for a WARP driver difference. Nothing waits on it.
+- **A new global store for the default world, seed 14**: every store on disk is refused by its keys; E1 runs on the in-memory production base (VIEW-069). Lead's recommendation: bake it after the flight, with ADR 0117's format.
 - **For M9 planning**: owner test 2026-10-27 groups E (edits on top as default, erosion keeping mass), F and G scope, the 1 m / 500 m exception (`docs/milestones/M8/owner-test-2026-10-27/README.md`); where edits sit relative to M9's erosion (D3: under the erosion by default).
 - **Sunset shadow look** (ADR 0095 draft, crusader): the sky ambient as a hemisphere average is physically consistent and dark at a 7° sun; options: sky light plus a lift (planner's pick), sky light as is, or the old term. Every lit and sky golden moves with it. SPIKE-96 (sky visibility) follows the choice.
 - **Architecture re-plan** (owner, 2026-11-08; SPIKE-104, SPIKE-105): D1 = option A, conditional on a prototype and a switch-to-B gate (S1-S5); phases and gates in `docs/briefings/terrain-prototype.md`; the owner decides at the A/B gate.
@@ -19,7 +21,7 @@ Dormant items moved to `docs/parking.md` (2026-11-12).
 Every row names an exit item (ADR 0120). Everything else is in `docs/parking.md`.
 | Exit | Step | Lane |
 |---|---|---|
-| E1 | Pairing check (ADR 0110 PR 5a) if missing; lakes in the viewer (WaterSource, REND-058); the defect label on the pose line (TEST-128); the R3a `bake-region` commit (heavy, at least 40 GB free); then the flight stills | crusader |
+| E1 | The label + `--commit` PR (VIEW-069, TEST-128): in-memory production base, labels in a corner; rivers clipped to the region and ended at lake water (or labelled); then the stills retake, viewed by the lead first | crusader |
 | E4 | Owner flight of the E1 region; sign-off line in `docs/milestones/P1.md` | owner, after E1 |
 
 Finishing (changeover, 2026-11-12; no successor work): SPIKE-111 ends its time-box with the report (spikes); PR #1449 parked as draft (explorer).
