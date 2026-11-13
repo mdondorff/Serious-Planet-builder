@@ -108,7 +108,7 @@ pub fn run(root: &Path, bundle: &str, path: &str, real: bool, extra: &[String]) 
         return Err(format!("the window replay printed no gate line ({}): {}", out.status, stderr.lines().last().unwrap_or("")));
     };
     println!("{line}");
-    if let Some(r) = stdout.lines().find(|l| l.starts_with("planet editor: resident tiles")) {
+    for r in stdout.lines().filter(|l| l.starts_with("planet editor: resident tiles") || l.starts_with("planet editor: gpu memory")) {
         println!("{r}");
     }
     // The failures the gate would have judged (held-back tiles, slow frames), printed as they are (stdout, after the gate line).

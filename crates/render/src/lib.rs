@@ -85,6 +85,16 @@ pub struct RgbaFrame {
     pub rgba: Vec<u8>,
 }
 
+/// The device allocator as numbers (`GpuContext::allocator_report`, VIEW-070).
+#[derive(Clone, Debug, Default)]
+pub struct AllocatorSummary {
+    pub allocated_bytes: u64,
+    pub reserved_bytes: u64,
+    pub blocks: usize,
+    /// `(name, bytes)` of every live allocation.
+    pub allocations: Vec<(String, u64)>,
+}
+
 pub struct GpuContext {
     // wgpu stays behind render's API (ADR 0004): other crates see names and verdicts, never wgpu types.
     pub(crate) device: wgpu::Device,
@@ -160,6 +170,18 @@ impl GpuContext {
             usage: wgpu::BufferUsages::empty(),
             mapped_at_creation: false,
         });
+    }
+
+    /// What the device's allocator holds (VIEW-070): bytes allocated, bytes reserved in its blocks, the number of blocks and every live allocation as `(name, bytes)`; `None` when the
+    /// backend reports no allocator. Informational.
+    pub fn allocator_report(&self) -> Option<AllocatorSummary> {
+        let r = self.device.generate_allocator_report()?;
+        Some(AllocatorSummary {
+            allocated_bytes: r.total_allocated_bytes,
+            reserved_bytes: r.total_reserved_bytes,
+            blocks: r.blocks.len(),
+            allocations: r.allocations.iter().map(|a| (a.name.clone(), a.size)).collect(),
+        })
     }
 
     /// Why the device was lost (a driver reset, a GPU timeout), if it was; a deliberate destroy is not a loss (REND-029).

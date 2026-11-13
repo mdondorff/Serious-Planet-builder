@@ -361,6 +361,8 @@ struct Running {
     last_counts: planet_frame::managed::FrameCounts,
     /// The residency over the run, printed when the window closes (VIEW-070).
     residency: crate::pipelined::ResidencyLog,
+    /// The GPU allocator after the start-up (VIEW-070): the closing lines set it beside the end.
+    gpu_start: String,
     last_ms: Option<u64>,
     last_gpu_sample: Instant,
     gpu_ms: Option<f64>,
@@ -624,6 +626,7 @@ impl App<'_> {
         // The free camera's ground is read on a thread of its own, with the blocks under the camera pinned (VIEW-061, CON-22).
         let ground_world = self.world.clone();
         let ground = crate::cameraground::CameraGround::new(std::sync::Arc::new(move |d| ground_world.ground_pinned(d)));
+        let gpu_start = crate::gpumem::line(&ctx, "at the start");
         self.state = Some(Running {
             ground,
             ui,
@@ -646,6 +649,7 @@ impl App<'_> {
             warm_prev: None,
             last_counts: Default::default(),
             residency: Default::default(),
+            gpu_start,
             last_ms: None,
             last_gpu_sample: Instant::now(),
             gpu_ms: None,
@@ -1727,7 +1731,16 @@ impl ApplicationHandler for App<'_> {
         }
         match event {
             WindowEvent::CloseRequested => {
-                self.closing = self.state.as_ref().map(|st| st.residency.line(self.cfg.resident_cap));
+                self.closing = self.state.as_ref().map(|st| {
+                    format!(
+                        "{}
+{}
+{}",
+                        st.residency.line(self.cfg.resident_cap),
+                        st.gpu_start,
+                        crate::gpumem::line(&st.ctx, "at the end")
+                    )
+                });
                 el.exit()
             }
             WindowEvent::ModifiersChanged(m) => {
@@ -1892,7 +1905,16 @@ impl ApplicationHandler for App<'_> {
                 match drawn {
                     Ok(true) => {
                         self.summary = self.state.as_ref().map(smoke_summary);
-                        self.closing = self.state.as_ref().map(|st| st.residency.line(self.cfg.resident_cap));
+                        self.closing = self.state.as_ref().map(|st| {
+                            format!(
+                                "{}
+{}
+{}",
+                                st.residency.line(self.cfg.resident_cap),
+                                st.gpu_start,
+                                crate::gpumem::line(&st.ctx, "at the end")
+                            )
+                        });
                         el.exit();
                     }
                     Ok(false) => {
