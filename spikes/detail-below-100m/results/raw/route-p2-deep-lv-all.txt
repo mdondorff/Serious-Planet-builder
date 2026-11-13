@@ -1,0 +1,23 @@
+open 43.5 s; 27960 segments
+levels: 21652 channel points on land (h > sea + 5 m), first point of each segment at its cell centre
+  composed ground - stored level: p5 -5.57 p25 -2.76 p50 -1.49 p75 -0.46 p95 0.81
+  ground without the crease detail (e + fade * L) - level: p5 -0.11 p25 -0.06 p50 0.00 p75 0.06 p95 0.11
+  crease detail: p5 -5.41 p25 -2.76 p50 -1.49 p75 -0.47 p95 0.78
+  q in [0, 1) m3/s: 5292 points, ground - level p5 -6.42 p25 -2.87 p50 -1.58 p75 -0.49 p95 0.79
+  q in [1, 10) m3/s: 11570 points, ground - level p5 -5.71 p25 -2.70 p50 -1.45 p75 -0.45 p95 0.82
+  q in [10, 100) m3/s: 3984 points, ground - level p5 -4.94 p25 -2.77 p50 -1.47 p75 -0.44 p95 0.86
+  q in [100, 1000000000000) m3/s: 806 points, ground - level p5 -4.41 p25 -2.81 p50 -1.51 p75 -0.53 p95 0.72
+  deep cut 0: L change -1431.0 m at -38.57632, -162.27127 (ground 362.7 m, stored level 367.0 m, q 94.1 m3/s)
+  deep cut 1: L change -1335.0 m at -37.39007, -161.15067 (ground 214.3 m, stored level 218.0 m, q 129.3 m3/s)
+  deep cut 2: L change -1325.0 m at -38.58471, -162.27859 (ground 367.4 m, stored level 367.0 m, q 94.2 m3/s)
+  deep cut 3: L change -1321.0 m at -38.56906, -162.27127 (ground 367.0 m, stored level 367.0 m, q 94.1 m3/s)
+  deep cut 4: L change -1272.5 m at -38.54502, -162.25662 (ground 365.2 m, stored level 367.0 m, q 93.9 m3/s)
+xsec: river ch 10207 seg 21535 at the anchor: q 94.12 m3/s, width 69.9 m, depth 1.66 m, level 367.00 m, anchor 51.0 m from its line; river heading (local) 180.0 deg
+box 1200 x 1200 at 5 m (6000 m): field before 1.27 s, after 1.90 s on 8 threads
+fine routing (5 m): 490568 land cells, 19110 wet (drawn river), 949432 lake; drains to the same river or outlet before and after: 479644 (97.77 %); of the 0 draining to a river before: 0.00 % the same river after
+  before: filled depth over 0.5 m on 24 land cells (0.00 %), deepest 1.15 m; land within 100 m of a drawn river's edge below its water: 0 of 0 (0.00 %)
+  after: filled depth over 0.5 m on 2075 land cells (0.42 %), deepest 6.66 m; land within 100 m of a drawn river's edge below its water: 0 of 0 (0.00 %)
+after - before on land: mean -0.005 m, |.| p50 0.99 p95 4.29 max 15.02 m
+100 m blocks (60 x 60 block means of the fine grid; outlets: blocks with drawn-river water, the sea, the box edge): receivers equal on 2987 of 3178 non-outlet blocks (93.99 %), D8 areas equal on 2792 (87.85 %); largest block-mean change 217.54 m
+stored samples: 3525 L cell centres in the box (75 x 47): bit-equal before and after 2942 (83.461 %), largest change 2.790e2 m; steepest-descent receivers on the centres equal 3123 (88.596 %)
+store files equal before and after: true

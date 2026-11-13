@@ -8,9 +8,9 @@ Success criteria: the stored region (L tiles, channel graph, basin tables, lake 
 Fallback if it fails: a finer bake near rivers (a K7 profile with a valley section instead of the box trench), with the cost of a bake per tile.
 Code location: branch `spike/detail-below-100m` (throwaway; never merged into the main crates). Starts from SPIKE-100's detail plan (`spikes/ground-detail-m9/results/results.md`, D3).
 
-## Answer (2026-11-13, measured on r3a-e1; the river part waits for E1's re-baked store)
+## Answer (2026-11-13; time-box closed: terrain detail on r3a-e1, river part on E1's store r3a-p2)
 - **Terrain detail: yes.** A later stage adds detail of 64 m to 2 m on top of the stored region and leaves the region's samples bit-equal: the detail minus its bilinear interpolant from the four surrounding L cell centres is 0 at every centre. Measured: 3,800 of 3,800 L cell centres in a 6 km box bit-equal, receivers on them 100 % equal, store files equal. Unpinned detail of the same amplitude keeps 3.9 % of the centres and 83 % of the receivers.
-- **River cross-section: not on today's store.** The stored samples hold the river as a one-cell box trench, and the stored line and level are not the carved ground (below). A sub-cell channel can only replace the trench by changing samples near the river: 9.5 % of the centres in the box, by up to 41 m. A later stage can draw the cross-section without touching the samples only once the stored line lies in a valley floor of the samples and its level is that floor's water surface (E1's source fix).
+- **River cross-section: not yet, on either store.** On r3a-e1 the stored level lay above the carved ground (median 3.8 m). On r3a-p2 the level is the stored ground at the line points (within 0.11 m), but the stored line is a raised one-cell line beside the carved low (the F3 dyke), so a cross-section on the stored level changes the samples near rivers: 9.5 % of the centres at frame-43680 and 16.5 % at a deep cut, by up to 279 m. A later stage can draw the cross-section without touching the samples once the stored line lies in the carved low, every line cell has its level, and the floodplain ends at the valley walls (section "River part on E1's store r3a-p2").
 - **Stand-in, named:** every river result below uses a water surface of `min(stored level, stored ground on the line)`, not rising downstream. It is a stand-in, not an answer.
 
 ## The stored level is not a water surface (r3a-e1)
@@ -48,11 +48,12 @@ Channel points inside the commit's 52 tiles (the first point of each segment at 
 
 | Timing, one thread (us a sample) | Field without the stage | Stage alone | Field with the stage | A 33 x 33 terrain node |
 |---|---|---|---|---|
-| detail pinned + river | 3.34-3.37 | 2.8-3.1 | 6.31-6.32 | +3.2 ms (field 3.7 ms) |
+| detail pinned + river | 3.34-3.37 | 2.8-3.1 | 6.31-6.32 | +3.2 ms (field 3.7 ms); an upper bound from a loaded machine |
 | detail pinned only | 3.21 | 5.5 | 6.39 | +3.5 ms |
 | detail not pinned | rounds loaded | 0.9-1.2 | - | about +1 ms |
 | river section only | 5.2-5.5 (loaded) | 0.14-0.33 | - | +0.2-0.4 ms |
 
+- Every timing above is an upper bound from a loaded machine: the runs overlapped other lanes' prepush (CPU 76 % "% Prozessorleistung" under the 8-thread load); no quiet rerun was made (lead, 2026-11-13).
 - The pin costs five noise sums a sample (the point and four centres): 5x the unpinned detail. Taking the centres' noise from a per-node table would bring it near the unpinned cost (not tried).
 - Stage set-up: 2-6 s (channel index and lake distances over 6,144 x 6,144 cells); the stand-in water surface 1.1 s.
 
@@ -62,6 +63,37 @@ Channel points inside the commit's 52 tiles (the first point of each segment at 
 - **The stored line and level do not describe the carved ground** (table above). With E1's fix (the stored line and level become the water surface of the final ground) the cross-section can be a pinned stage on a floor the samples already hold.
 - **Narrow rivers need a finer coverage**: a 6 m river drawn through REND-059's coverage (codes of 1/32 cell, node samples 2.4-9.5 m apart) breaks into steps; the water is a tint on the ground, so a 0.3 m depth does not show.
 - **With the drawn river narrow, the box trench shows**: at low sun the trench reads as a row of beads along the line's D8 steps (middle frame of the low-sun triptych).
+
+## River part on E1's store r3a-p2 (2026-11-13)
+Store `r3a-p2` (commit 2a2032bd469f76c4, read only), built from branch `change/k7-bed-coherence` (GEN-185 burn levels of the whole network; not merged); the probe ran on `spike/detail-below-100m-p2` (the spike branch merged with that branch at 6aa35c59). Water surface: the **stored level**, no stand-in (`PLANET_SPIKE113_LEVEL=stored`).
+
+| Stored ground minus stored level at the line points (21,652 on land, m) | p5 | p25 | p50 | p75 | p95 |
+|---|---|---|---|---|---|
+| r3a-e1, without the runtime crease | -27.6 | -6.2 | -1.4 | -0.1 | 0.1 |
+| r3a-p2, without the runtime crease | -0.11 | -0.06 | 0.00 | 0.06 | 0.11 |
+| r3a-p2, drawn (with the runtime crease) | -5.6 | -2.8 | -1.5 | -0.5 | 0.8 |
+
+- At the line points (one per regional cell, 8 L cells apart) the stored level is now the stored ground. The runtime crease detail is unpinned and moves the drawn ground off the level by -1.5 m at the median.
+- Between the line points the stored ground at the line cells lies up to 10.8 m below the linear level (frame-43680 channel, a reach falling 72 m over 814 m; `raw/line-p2-f3.tsv`).
+- **The stored line is a raised one-cell line in the samples (the F3 dyke, not fixed in r3a-p2):** the line cells stand above the carved cells beside them, so the drawn surface sags between diagonal line cells and the carved low lies beside the line. At frame-43680 the stored ground on the line lies 32-38 m below the stored level at the three stations, and the carved low 170-350 m to one side 42-46 m below it.
+
+| Stage on the stored level | L cell centres bit-equal | Receivers on the centres equal | Largest sample change | Fine cells to the same river |
+|---|---|---|---|---|
+| frame-43680, river section only | 3,440 of 3,800 (90.5 %) | 92.9 % | 42.6 m | 13.2 % |
+| frame-43680, pinned detail and river | 3,440 (90.5 %) | 92.9 % | 42.6 m | 13.2 % |
+| deep cut (L change -1,431 m, 38.576 S 162.271 W, Q 94 m3/s), river section only | 2,942 of 3,525 (83.5 %) | 88.6 % | 279 m | 100 % (the box is mostly lake) |
+| deep cut, pinned detail and river | 2,942 (83.5 %) | 88.6 % | 279 m | 97.8 % |
+
+- The pinned detail adds no sample change at either spot: the "only" and "and" rows have the same centres.
+- At frame-43680 the floodplain on the stored level is a causeway 31-38 m above the stored ground on the line, so 87 % of the 5 m cells drain to another river.
+- At the deep cut the floodplain width (`W/2 + 30 m + 2 W`, 205 m at Q 94) cuts up to 279 m into the canyon walls: a fixed width is wrong in a canyon; the floodplain has to end at the valley walls.
+- **River verdict:** a sub-cell cross-section as a later stage needs (1) the stored line in the carved low, not on a raised line beside it (the F3 dyke, for E1), (2) the water level of every line cell, not only of the line points 8 cells apart, (3) a floodplain bounded by the valley. With (1) open in r3a-p2, the cross-section changes the samples near rivers at both spots.
+
+![frame-43680 cross-sections on r3a-p2](images/s113-xsec-p2-f3.png)
+r3a-p2, branch change/k7-bed-coherence, water at the stored level: the line on the valley side; the floodplain on the stored level is a causeway.
+
+![deep cut cross-sections on r3a-p2](images/s113-xsec-p2-deep.png)
+r3a-p2, the deepest cut of the region (L change -1,431 m): a canyon about 400 m deep; the fixed-width floodplain cuts into its walls.
 
 ## Visuals
 Product path (`planet test-render --scene capture-stills --commit r3a-e1`), RTX 3080 Ti, 1920 x 1080 scaled to 960 x 540 each. Left: before (r3a-e1 as stored). Middle: **prototype, not the product**: pinned detail, river section off, river drawn at the width law. Right: **prototype, not the product**: pinned detail and the river cross-section on the **stand-in** water level. Poses in `poses-43680.toml`.
