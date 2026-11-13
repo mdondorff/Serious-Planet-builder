@@ -1383,7 +1383,7 @@ impl WaterSource for HeightLake<'_> {
     }
 }
 
-/// A lake grid of 65,536 cells a face edge whose lake (`face`, index 0) holds every cell of its face (`stripe` 0), or the cells of the even stripes of `stripe` columns (about 150 m a cell).
+/// A lake grid of 65,536 cells a face edge whose lake (`face`, index 0) holds every cell of its face (`stripe` 0), or the cells of the even diagonal stripes `(i + j) / stripe` (about 150 m a cell).
 struct HalfLake {
     face: planet_core::Face,
     stripe: i64,
@@ -1393,8 +1393,8 @@ impl planet_generators::lake_water::LakeMaskSource for HalfLake {
     fn cells(&self) -> usize {
         1 << 16
     }
-    fn lake_at(&self, face: planet_core::Face, i: i64, _j: i64) -> Result<Option<planet_generators::lake_water::LakeCell>, ReadError> {
-        Ok((face == self.face && (self.stripe == 0 || (i / self.stripe) % 2 == 0)).then_some(planet_generators::lake_water::LakeCell {
+    fn lake_at(&self, face: planet_core::Face, i: i64, j: i64) -> Result<Option<planet_generators::lake_water::LakeCell>, ReadError> {
+        Ok((face == self.face && (self.stripe == 0 || ((i + j) / self.stripe) % 2 == 0)).then_some(planet_generators::lake_water::LakeCell {
             face: self.face,
             index: 0,
             level_m: 0.0,
@@ -1442,12 +1442,13 @@ fn a_lake_node_draws_its_water_only_where_its_mask_is_wet() {
         class_map(&base, &with, size).class.iter().map(|c| *c != 0).collect()
     };
     let sea_wet = wet_pixels(&wplan(&sea, None), &mut r);
+    write_inspection("lake_mask_sea_class", &image_of(&r, &ctx));
     // A mask wet everywhere draws what the sea draws.
     let all = HalfLake { face, stripe: 0 };
     let full = wplan(&lake, Some(&all));
     assert!(!full.masks.is_empty() && full.nodes.iter().all(|n| n.mask.is_some()));
     assert_eq!(wet_pixels(&full, &mut r), sea_wet, "a mask wet everywhere changes no pixel");
-    // Stripes of 8 cells: the water ends at the mask's edges, a strict part of the sea's.
+    // Diagonal stripes 8 cells wide (about 1.2 km): the water ends at the mask's edges, a strict part of the sea's.
     let half = HalfLake { face, stripe: 8 };
     let hp = wplan(&lake, Some(&half));
     let half_wet = wet_pixels(&hp, &mut r);
