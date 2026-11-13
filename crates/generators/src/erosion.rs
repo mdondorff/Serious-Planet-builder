@@ -427,7 +427,9 @@ impl ErosionField<'_> {
     /// The largest height the field takes in magnitude at its relief scale (WDEF-017): the elevation clamp times the scale plus the deepest incision; with the relief channels on,
     /// `max|1 - k| max|m| + k_max` times that (`m + k (e - m) + k detail = (1 - k) m + k (e + detail)`).
     fn max_abs_height(&self) -> f64 {
-        let today = MAX_ELEVATION_M.max(-MIN_ELEVATION_M) * self.relief + DETAIL_DOWN_M;
+        // The detail lies in [-0.75 A, 0.25 A]; pinned where the layer is read (GEN-187) it is the difference of two such values, within [-A, A].
+        let detail = if self.layer.is_some() { AMPLITUDE_MAX_M } else { DETAIL_DOWN_M };
+        let today = MAX_ELEVATION_M.max(-MIN_ELEVATION_M) * self.relief + detail;
         // The layer adds its change times a fade of at most 1: the largest magnitude of its planet-wide range, a sound bound.
         let layer = self.layer.as_ref().map_or(0.0, |(l, _)| {
             let (lo, hi) = l.global_range();
