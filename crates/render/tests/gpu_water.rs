@@ -1394,11 +1394,8 @@ impl planet_generators::lake_water::LakeMaskSource for HalfLake {
         1 << 16
     }
     fn lake_at(&self, face: planet_core::Face, i: i64, j: i64) -> Result<Option<planet_generators::lake_water::LakeCell>, ReadError> {
-        Ok((face == self.face && (self.stripe == 0 || ((i + j) / self.stripe) % 2 == 0)).then_some(planet_generators::lake_water::LakeCell {
-            face: self.face,
-            index: 0,
-            level_m: 0.0,
-        }))
+        Ok((face == self.face && (self.stripe == 0 || ((i + j) / self.stripe) % 2 == 0))
+            .then_some(planet_generators::lake_water::LakeCell { face: self.face, index: 0, level_m: 0.0 }))
     }
 }
 
