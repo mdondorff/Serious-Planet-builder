@@ -1,0 +1,8 @@
+# anchor: latitude -36.7498 longitude -162.2827 degrees, ground 52.4 m
+# note: SPIKE-112 AFTER: the 5.0 m valley floor joining lakes 30 and 7 lowered to 2 m; level-2 re-solve, bit-equal to a fresh build; edit applied to the in-memory base (spike code)
+# note: too many lakes; cause: basins of the starting surface (SPIKE-109)
+# note: valley ponds: sea water of the coastal band in valleys the carve (K7) cut below sea level, not lakes
+# note: base: computed in memory, not read from a stored bake
+# caption: SPIKE-112 AFTER: the 5.0 m valley floor joining lakes 30 and 7 lowered to 2 m; level-2 re-solve, bit-equal to a fresh build; edit applied to the in-memory base (spike code)
+# pose width height eye_lat_deg eye_lon_deg eye_height_m heading_deg pitch_deg sun_local_hours nodes capped_nodes
+cluster-25km 1920 1080 -36.92966 -162.28270 25517.1 0 50 13 341 0

@@ -79,13 +79,56 @@ The fresh resident rounds spend 3.9 to 4.2 s routing and 0.2 s carving for the s
    - Both are bit-equal to the fresh build of their definition: the level-2 path reproduces what the solver does with the edit; whether that is the expected response to a ridge is a question for the solver, not for the incremental path.
 7. **The pass and the stamp show as edited**: ground at the pass anchor 932 to 820 m (100 m lowered; the carve takes back about 12 m); the dome raises the anchor from 89 to 321 m (400 m added; the rounds and K7 cut the rest) and removes most valley ponds within its 10 km radius.
 
-**Extrapolation, not measured**: the whole parts of the memoised rounds cost about 8 microseconds a regional cell a solve here. On the largest landmass (1.49e8 cells, F8) that is about 20 minutes an edit before K7, with today's one-thread area sweep: at landmass scope the routing recomputed whole would dominate level 2, not K7. A job bounded by a region of this size (A3 §11.3) stays at seconds.
+**At landmass scope** (measured in the follow-up below, replacing the extrapolation first written here): today's area sweep alone is 159 s a round on 1.42e8 land cells, about 11 minutes a 4-round solve at 1.49e8 land cells; there the routing recomputed whole dominates level 2, not K7. A job bounded by a region of this size (A3 §11.3) stays at seconds.
 
 ## Not done
 - One region, four edits, each from the base (no chains of edits, no undo, no eviction budget).
 - The lattice sampling of the edited definition (8 to 9 s) is outside both totals.
 - The dirty-tile test is the probe's; a production rule would be content keys of the tiles (today's L tile keys do not depend on the content).
-- No parallel area sweep tried.
+
+## Follow-up (lead, 2026-11-13): a real split and merge, the area sweep at landmass size, the dome
+### A split and a merge by a height edit
+- **Basin table** (`raw/basins.txt`): 7 lakes have their water centroid inside the region, all shallow and near the sea: floors 0.0 to 1.9 m, levels 1.8 to 5.1 m, 7 to 107 water cells.
+- **No ridge can split a lake in this solver**: every round lowers each receiver on a cell's drain chain to what the cell allows (GEN-162: not below the chain's exit; GEN-174: at most `breach_max_m` = 500 m a cell a round), "so that a ridge across a valley does not hold a lake the flood would fill" (`carve.rs`). Measured on split2 (`raw/ridgecheck-split2.txt`): the ridge's 18 raised cells (to 19 to 29 m) end at 0.1 to 7.6 m after the rounds, the cell in the lake at 0.3 m. A ridge at the waist "level + 10 m" is cut the same way. Lakes survive only where the lowering stops at the sea level, which is why all 7 are 1 to 5 m deep.
+- **The merge edit drained both lakes instead of joining them.** Lakes 30 and 7 are joined by a valley floor at 5.0 m (the minimax path, 69 cells, highest cell 5.0 m: `raw/pair30-7.txt`), 0.1 m under their level of 5.1 m, which drains to the sea. Lowering that floor to 2 m (17 trench parts, 0.5 km half-width) lowers the exit of both: both lakes lose their kept basins (69 to 67 lakes); in the stills the lowered floor fills with sea water (K7 cuts it below the sea level) and links the two lake sites.
+- **Undo of that edit** (`--undo`: the base again through the same cache; K7 records reused by tile and content fingerprint from the base and the edit): both lakes come back with their old ids, bit-equal to the base store, in 10.8 s.
+
+| | merge | undo of the merge |
+|---|---|---|
+| Fresh rebuild (rounds / H1 / K7 + write) | 176.6 s (4.4 / 1.5 / 170.7) | the base: same as fresh-none |
+| Level 2 (rounds / H1 / dirty test / K7 + write) | 33.7 s (9.7 / 1.6 / 0.05 / 22.3, 7 tiles) | 10.8 s (9.1 / 1.5 / 0.06 / 0.2, 0 tiles) |
+| Catchments carved a round | 51, 57, 56, 56 of 2,600 to 2,779 (12,252 to 78,985 cells) | 0 (all 2,550 to 2,729 from the memo) |
+| Tile floods a round | 3, 6, 9, 9 | 0 (44 to 57 memo hits) |
+| Dirty L tiles (records changed) | 7 (6) of 52 | 0: every tile's fingerprint is the base's |
+| Solved surface changed | 11,112 cells | 0 against the base |
+| Lakes (inside the region) | 7 to 5: `8002756936f5f001` (lake 30) and `13b4d1c6bd1d599a` (lake 7) gone | 5 to 7: both back with the same ids, water cells, floor and level |
+| G-EQ | memoised = resident (0 of 1,040,400); store bit-equal to fresh-merge, 52 of 52 records | store bit-equal to fresh-none, 52 of 52 records |
+| Commit after the step (peak) | 481 MiB (534) | 616 MiB (617), both states' records held |
+
+- The first fresh merge rebuild (188.6 s) overlapped a 20 s build of mine; the table holds the clean re-run (`raw/fresh-merge-b.txt`).
+- **What this tests and what not**: the undo/replay of a basin-topology change (two lakes removed, then restored with their ids) is bit-exact through the memo, and costs the rounds' whole parts plus H1 only. A split or merge of two kept basins could not be made by a height edit here: it needs basins the breach keeps (an intentional basin, A3 §5.3, or a profile without the breach), which is a question for the solver, not for the incremental path.
+
+### The area sweep at landmass size
+- Grid: R3a's filled surface (resident solve, canonical flood) upsampled 14 times bilinearly (14,280 x 14,280 = 2.04e8 cells, 1.42e8 of them land; 6.2e7 sea and border outlets), then the canonical flood on that grid (75.3 s, one thread), receivers from it (8 threads) and the topological order and catchment roots (one thread): 18.2 s. No world bake. `raw/sweep-f14.txt`.
+- **Today's sweep is serial**: `partitioned_route_weighted`'s area part (extracted unchanged as `area_sweep` on the spike branch) runs on one thread whatever the thread count.
+- **Probe**: with the local clip a cell shares only with neighbours of its own catchment, so catchments are independent; `area_sweep_par` sweeps them on 8 threads, largest first, each cell adding its donors in the same order (level descending, id): the same bits by construction.
+
+| Sweep (one round, 2.04e8 cells) | Wall time | Cells differing from today's |
+|---|---|---|
+| today's (serial, tiles of 256) | 158.7 s | - |
+| per catchment, 1 thread | 161.1 s | 0 of 203,918,400 |
+| per catchment, 8 threads | 69.4 s | 0 |
+
+- The speed-up stops at 2.3 because the largest catchment holds 23.3 % of the land cells (3.3e7) and is swept by one thread (Amdahl bound about 4.3); a wavefront inside a catchment would be the next step, not tried.
+- **Per level-2 solve** (4 rounds; scaled to F8's 1.49e8 land cells): the sweep alone is about 11 minutes today, about 5 minutes at 8 threads. The receivers (parallel) and the flats regrade, order and roots add to it; the tile floods are memoised.
+- Same check at 4.2e6 cells (`raw/sweep-f2.txt`): 3.7 s, 3.7 s, 1.4 s; 0 cells differ.
+- The probe's peak commit is 13.9 GB (it holds both areas for the comparison); not a budget measurement.
+
+### Why the dome barely shows
+Mostly washed out, not the pose: the rounds take back 188 m of the 400 m at the median raised cell (`raw/ridgecheck-stamp.txt`; 311 of 566 raised cells keep at least half the edit; the anchor keeps 232 m), and the rest is a smooth hump of about 2 % slope in a valley between ridges of about 1 km; the low-sun stills at 25 km and from 30 km back (below) do not show it better.
+
+### Why split2 removed the valley ponds (cheap trace)
+In the valley north of lake 30 (regional cells 8555-8580 x 940-975, 936 cells) the solved floor ends 146 m higher with the ridge (median; p95 406 m; 824 cells higher, 106 lower; `raw/box-split2.txt`): the rounds no longer incise that valley toward the sea level, so K7 has no near-sea-level floor to cut into ponds. That is the carve's re-route of the valley, as the lead expected; why the breach of the ridge does not restore the valley's incision inside the rounds is not traced.
 
 ## Visuals
 Capture-stills `--commit` on the RTX 3080 Ti Laptop (Vulkan), 1920 x 1080, scaled to 960 x 540 (pairs) or 640 x 360 (triples) in the sheets. Poses as the E1 stills (cluster 25 km: altitude 25 km, 20 km back, heading 0, pitch 50, sun 13 h; low-sun obliques: sun 17 h). The commit is the level-2 result; the edit is applied to the stills' in-memory base by the same transform as the bake (spike code, `PLANET_SPIKE_EDIT`). Every still carries the E1 notes (too many lakes, valley ponds, base in memory) and a BEFORE or AFTER line. Not a measurement.
@@ -107,6 +150,15 @@ The 400 m dome, 20 km across, on the anchor (the frame centre): most valley pond
 
 ![stamp, low sun: before, after](images/s112-stamp-lowsun-1500m.jpg)
 The dome at low sun from 1,500 m looking east over the anchor: raised ground in the foreground after (right), with its shadow and a river burnt across it.
+
+![stamp, 25 km at low sun: before, after](images/s112-stamp-25km-lowsun.jpg)
+The cluster pose with the sun at 7 h: the dome on the anchor (frame centre) is still hard to see after (right).
+
+![stamp, low sun from 30 km: before, after](images/s112-stamp-lowsun-wide.jpg)
+From 30 km south at 4,000 m, sun at 7 h: the 1 km ridges in front dominate; the dome in the valley beyond is not visible.
+
+![merge and undo, cluster 25 km: before, merge, undo](images/s112-merge-undo-cluster-25km.jpg)
+The merge edit: before; after (the lowered 5.0 m floor between lakes 30 and 7, filled with sea water by K7; both lakes no longer kept); the undo, identical to before (bit-equal store).
 
 ## Reproduce
 ```
