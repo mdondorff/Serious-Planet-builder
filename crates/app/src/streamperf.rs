@@ -1653,7 +1653,7 @@ mod tests {
         let label = source_label(&stored, true);
         assert!(label.starts_with("store ") && label.contains("8 cells") && label.contains(dir.to_str().unwrap()), "{label}");
         assert!(!label.contains("NOT the production source"));
-        assert!(stored.describe().contains("cpu-erosion-v1 over a 8-cell bake"), "{}", stored.describe());
+        assert!(stored.describe().contains("cpu-erosion-v2 over a 8-cell bake"), "{}", stored.describe());
         // The stored field reads the bake: a height is finite where a missing bake would give NaN.
         let h = stored.field().unwrap().height(planet_core::Vec3::new(0.3, 0.5, 0.8).normalized());
         assert!(h.is_finite(), "{h}");

@@ -78,12 +78,12 @@ fn the_cut_water_nodes_cover_the_same_sea_pixels_as_the_full_selection_in_the_fo
     let views = lit_views(R, aspect, field.as_ref(), 0.0, &is_sea, 240).expect("the world has a beach");
     let look = LookParams::default();
     let table = world.definition().liquids().unwrap();
-    // Per view: the share of the full water nodes the cut keeps, in percent (min, max over the sampled frames), pinned from the runs (re-pinned for ADR 0071, which makes the whole connected plain a water node: the cut keeps 40 to 50 %, the exact minimum 19 to 41 %). Re-pinned 2026-10-25 by `m8-relief-band` (GEN-064, declared): the hill band changes the coastal land the tiles' ranges see; the sea pixels are unchanged (the equalities above hold), and the shares now are the cut 53 to 73 % and the exact minimum 39 to 46 %. Re-pinned 2026-11-02 by `m9-generator-round-2` (GEN-104, declared): the continents move the coast the views look at; the sea pixels are unchanged (the equalities hold), and the cut now keeps 67 to 71 % of the nodes and the exact minimum 38 to 52 %.
+    // Per view: the share of the full water nodes the cut keeps, in percent (min, max over the sampled frames), pinned from the runs (re-pinned for ADR 0071, which makes the whole connected plain a water node: the cut keeps 40 to 50 %, the exact minimum 19 to 41 %). Re-pinned 2026-10-25 by `m8-relief-band` (GEN-064, declared): the hill band changes the coastal land the tiles' ranges see; the sea pixels are unchanged (the equalities above hold), and the shares now are the cut 53 to 73 % and the exact minimum 39 to 46 %. Re-pinned 2026-11-02 by `m9-generator-round-2` (GEN-104, declared): the continents move the coast the views look at; the sea pixels are unchanged (the equalities hold), and the cut now keeps 67 to 71 % of the nodes and the exact minimum 38 to 52 %. Re-pinned 2026-11-03 by `c1-default` (GEN-107, declared): the default field is `cpu-erosion-v2`; the C1 base makes 99 % of the coastal plain's nodes water candidates (88 % before), so the shares fall (coast-3m 50 %, coast-glide 53 to 58 %, the others 59 to 77 %) while the kept count falls (coast-3m 1,479 to 1,193 nodes, -19 %) and the sea pixels are unchanged (the equalities hold in all eight frames); the exact minimum keeps 35 to 48 %, inside its ranges.
     let mut jobs: HashSet<TileId> = HashSet::new();
     let ranges: [(&str, f64, f64, (f64, f64)); 4] = [
         ("coast-2km", 35.0, 80.0, (10.0, 50.0)),
-        ("coast-3m", 55.0, 80.0, (22.0, 45.0)),
-        ("coast-glide", 55.0, 80.0, (22.0, 50.0)),
+        ("coast-3m", 45.0, 80.0, (22.0, 45.0)),
+        ("coast-glide", 50.0, 80.0, (22.0, 50.0)),
         ("coast-descent", 55.0, 80.0, (15.0, 60.0)),
     ];
     for (name, lo, hi, exact_range) in ranges {

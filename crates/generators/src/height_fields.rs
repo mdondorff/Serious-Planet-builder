@@ -30,7 +30,7 @@ pub enum HeightFieldKind {
 }
 
 /// The field a world gets when it names none.
-pub const DEFAULT_HEIGHT_FIELD: HeightFieldKind = HeightFieldKind::Eroded;
+pub const DEFAULT_HEIGHT_FIELD: HeightFieldKind = HeightFieldKind::ErodedC1;
 
 impl HeightFieldKind {
     pub const ALL: [HeightFieldKind; 4] =
@@ -58,7 +58,7 @@ impl HeightFieldKind {
 
 /// Every known id, the default first.
 pub fn known_ids() -> [&'static str; 4] {
-    [DEFAULT_HEIGHT_FIELD.id(), HeightFieldKind::Terrain.id(), HeightFieldKind::Reference.id(), HeightFieldKind::ErodedC1.id()]
+    [DEFAULT_HEIGHT_FIELD.id(), HeightFieldKind::Eroded.id(), HeightFieldKind::Terrain.id(), HeightFieldKind::Reference.id()]
 }
 
 /// The erosion layer of a run that turns it on (GEN-112), with the relief channels when the run has them (GEN-099; none: `k` is 1 and `m` is not read): a run-time choice, not part
