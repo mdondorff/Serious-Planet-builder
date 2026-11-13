@@ -247,6 +247,8 @@ pub struct RegionFront {
     pub hydro_stats: planet_generators::bake::hydro::HydroStats,
     pub lakes: planet_generators::bake::lakes::Lakes,
     pub graph: ChannelGraph,
+    /// The graph with H1's levels, before the network levels (a tool's reference).
+    pub graph_h1: ChannelGraph,
     pub segment_ids: Vec<u64>,
     pub feed: MemoryFeed,
     /// How deep the burn levels lie under the start surface at the line cells on land (GEN-185).
@@ -385,12 +387,13 @@ pub fn region_front(spec: &RegionSpec, base: &(dyn Fn(Vec3) -> f64 + Sync), clim
         base(planet_core::cube::face_to_direction(&planet_core::TangentWarp, spec.face, 2.0 * (x as f64 + 0.5) / n_local - 1.0, 2.0 * (y as f64 + 0.5) / n_local - 1.0))
     };
     let placement = Placement::new(&base_at);
+    let graph_h1 = graph.clone();
     graph.deepen_beds(grid, &to_local, &start, Some(&placement));
     let bed_cut = BedCut::of(&graph, grid, &to_local, &start, &|_, _| true, Some(&placement));
     let channels = channels_from_graph(&graph, grid, &to_local).iter().map(|c| placement.channel(c)).collect();
     let feed = MemoryFeed { face: spec.face, channels, discharge: true };
     let _ = rh;
-    Ok(RegionFront { solve, regional_field, hydro_stats: hydro.stats.clone(), lakes, graph, segment_ids, feed, bed_cut })
+    Ok(RegionFront { solve, regional_field, hydro_stats: hydro.stats.clone(), lakes, graph, graph_h1, segment_ids, feed, bed_cut })
 }
 
 /// Bakes the region into `dir` as a commit with a channel graph. `base` is the base height (the bake's `B`), `climate` the runoff of the land.
@@ -411,7 +414,7 @@ pub fn bake_region(
             precision.radius, precision.epsilon_w, k7_epsilon
         ));
     }
-    let RegionFront { solve, regional_field, hydro_stats, lakes, graph, segment_ids, feed, bed_cut } = region_front(spec, base, climate)?;
+    let RegionFront { solve, regional_field, hydro_stats, lakes, graph, graph_h1: _, segment_ids, feed, bed_cut } = region_front(spec, base, climate)?;
     let RegionSolve { grid, ri0, rj0, rw, rh, precision, .. } = solve;
     let regional = |d: Vec3| regional_field.at(d);
 

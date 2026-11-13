@@ -31,3 +31,14 @@ Open for the lead:
 - the corridor half-width: 4 cells (an H1 cell) or wider;
 - placement on `B` alone, against storing the regional change in the commit (a format change);
 - whether the final pass keeps its bounded carry once the placed line follows the floor (expected: few binds).
+
+## Result on R3a (2026-11-13, not accepted)
+| Lines and levels | Line cells cut > 50 m inside the commit's tiles |
+|---|---|
+| straight raster, network levels (A'') | 6.75 % |
+| placed (lowest pass of B, snap 3) | 13.28 % |
+| placed, no snap | 10.30 % |
+| placed, start surface drained (lakes over D = 5 / 20 / 50 m) | 10.17 / 10.20 / 10.37 % |
+- 32-84 % of the line length lies in closed pits of the start surface (window-local flood, three tiles); the region-wide fill finds 27,636 pits, the widest 1,650 cells across.
+- The drain costs 22 s and 1.5 GB for R3a's 66.6 M cells (113 s with the front).
+- Conclusion: most deep cuts are H1 lines crossing L ridges that water at L does not cross; the source is the network's geometry (H1 receivers), not the levels or the placement within half an H1 cell. Sent to the lead for an ADR (rivers routed at L).
