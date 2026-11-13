@@ -5,6 +5,10 @@
 ## What changes
 - `PLANET_GATE_MEASURE` (set by `repro --window`): the gate's failures are printed as "not judged" and the run ends normally. The gate line gains the distinct held-back tiles, their levels, and how many lie over the commit's region. xtask keeps stdout and stderr in `target/repro-window`.
 
+## Result (2026-11-13, RTX, `repro frame-17426-path.txt --window --real` over `r3a-e1`)
+- Confirmed from the kept output: the replay failed the gate at its end on held-back tiles with no edit in reach (1,903 of 11,956 frames, up to 102 at once).
+- The held tiles are the commit's: 213 distinct, at levels 17 to 18, all 213 over the commit's region. stderr: "the ground under them is too steep to morph (ADR 0074)", the LOD ceiling (LOD-008) reacting to the steep ground of the carved commit.
+
 ## Not in this change
 - Whether holding tiles back over a commit is right, and any fix of it (the lead decides after the numbers).
 
