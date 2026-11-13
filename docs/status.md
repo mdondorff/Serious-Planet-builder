@@ -21,7 +21,7 @@ Dormant items moved to `docs/parking.md` (2026-11-12).
 Every row names an exit item (ADR 0120). Everything else is in `docs/parking.md`.
 | Exit | Step | Lane |
 |---|---|---|
-| E1 | k7-bed-coherence (whole-network burn levels) and k7-line-placement (lines on the valley floor, REND-067), merged back to back; then re-bake r3a-p3 | crusader |
+| E1 | SPIKE-114: rivers routed at L on R3a (cut share, rises, agreement with H1 at the edge, cost, store or rebuild); then the ADR | crusader |
 | E1 | VIEW-072 guard (the base under --commit is already bit-equal); then ADR 0122 point 1, pinned fine detail (GEN-187) | explorer |
 | E2 | Acceptance: the owner's next long flight reads resident tiles at most and evicted from the run log | owner |
 | E5 | Inland lakes and dams ADR, after crusader's rivers-at-L spike sets the lake numbers | owner |
