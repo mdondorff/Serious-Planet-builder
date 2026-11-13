@@ -49,11 +49,37 @@ impl RegionField {
         let at =
             |a: i64, b: i64| f64::from(self.data[b.clamp(0, self.h as i64 - 1) as usize * self.w + a.clamp(0, self.w as i64 - 1) as usize]);
         let (ii, jj) = (i as i64, j as i64);
+        // SPIKE-114 (spike branch only): with PLANET_REGIONAL_MONOTONE set, GEN-188's monotone C1 cubic instead of the clamped Catmull-Rom.
+        if monotone_regional() {
+            let row = |dj: i64| spike_monotone_cubic([at(ii - 1, jj + dj), at(ii, jj + dj), at(ii + 1, jj + dj), at(ii + 2, jj + dj)], fx);
+            return spike_monotone_cubic([row(-1), row(0), row(1), row(2)], fy);
+        }
         let row = |dj: i64| catmull_rom([at(ii - 1, jj + dj), at(ii, jj + dj), at(ii + 1, jj + dj), at(ii + 2, jj + dj)], fx);
         let v = catmull_rom([row(-1), row(0), row(1), row(2)], fy);
         let around = [at(ii, jj), at(ii + 1, jj), at(ii, jj + 1), at(ii + 1, jj + 1)];
         v.clamp(around.iter().copied().fold(f64::INFINITY, f64::min), around.iter().copied().fold(f64::NEG_INFINITY, f64::max))
     }
+}
+
+/// SPIKE-114: whether the regional read uses GEN-188's limiter (read once).
+fn monotone_regional() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("PLANET_REGIONAL_MONOTONE").is_ok())
+}
+
+/// SPIKE-114: a copy of GEN-188's monotone cubic (erosion_layer on main).
+fn spike_monotone_cubic(p: [f64; 4], t: f64) -> f64 {
+    let hs = |a: f64, b: f64| {
+        let ab = a * b;
+        if ab > 0.0 {
+            (2.0 * ab / (a + b)) * (2.0 * ab / (a * a + b * b))
+        } else {
+            0.0
+        }
+    };
+    let (m1, m2) = (hs(p[1] - p[0], p[2] - p[1]), hs(p[2] - p[1], p[3] - p[2]));
+    let (t2, t3) = (t * t, t * t * t);
+    (2.0 * t3 - 3.0 * t2 + 1.0) * p[1] + (t3 - 2.0 * t2 + t) * m1 + (-2.0 * t3 + 3.0 * t2) * p[2] + (t3 - t2) * m2
 }
 
 /// A channel segment on the local grid: points in the face's cell-index space (cell `i` has its centre at `i`) and the bed level at each point (not rising downstream).

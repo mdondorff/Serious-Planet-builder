@@ -157,11 +157,27 @@ fn main() -> Result<(), String> {
         .collect();
     let g = planet_generators::bake::Grid::new(w, h, cell_m);
     let outlet = g.outlets(&z0, 0.0);
-    let filled = planet_generators::bake::flood::priority_flood_with(&g, &z0, &outlet, 1.0e-3, true);
+    // Step 2 (PLANET_CONDITION): K7's local carve (pass 1's breach, incision with the area capped at about 1 km2) run once over the whole region before the routing; z0 stays the reference of the cut.
+    let t_cond = t0.elapsed().as_secs_f64();
+    let zr: Vec<f64> = if std::env::var("PLANET_CONDITION").is_ok() {
+        let q = planet_generators::bake::k7::K7Params::standard(seed, 0.0).pass2;
+        let local = planet_generators::bake::carve::CarveParams {
+            max_area: q.local_area_cells * cell_m * cell_m,
+            round_rules: planet_generators::bake::route::RoundRules::default(),
+            ..q.carve
+        };
+        let mut z = z0.clone();
+        let _ = planet_generators::bake::carve::carve(&g, &mut z, &outlet, &local, None, front.solve.stream);
+        z
+    } else {
+        z0.clone()
+    };
+    println!("RIVERS conditioning {:.0} s (on: {})", t0.elapsed().as_secs_f64() - t_cond, std::env::var("PLANET_CONDITION").is_ok());
+    let filled = planet_generators::bake::flood::priority_flood_with(&g, &zr, &outlet, 1.0e-3, false);
     let t_fill = t0.elapsed().as_secs_f64();
     // Routing at L on the start surface (the canonical flood drains every pit over its spill: the routes of a breach and of a lake are the same; only the levels differ).
     let route = |z: &[f64]| planet_generators::bake::route::route_rules(&g, z, &outlet, 1.0e-3, front.solve.stream, 0.0, None, planet_generators::bake::route::RoundRules::default());
-    let routing = route(&z0);
+    let routing = route(&zr);
     let t_route = t0.elapsed().as_secs_f64();
     // D8 accumulation of the area and of the discharge (the H1 cell's runoff over each L cell) down the receivers.
     let none = planet_generators::bake::route::NONE;
@@ -185,7 +201,7 @@ fn main() -> Result<(), String> {
     let mut label = vec![u32::MAX; w * h];
     let mut depth_of: Vec<f64> = Vec::new();
     for s0 in 0..w * h {
-        if filled[s0] - z0[s0] <= 0.05 || label[s0] != u32::MAX {
+        if filled[s0] - zr[s0] <= 0.05 || label[s0] != u32::MAX {
             continue;
         }
         let id = depth_of.len() as u32;
@@ -193,7 +209,7 @@ fn main() -> Result<(), String> {
         let mut stack = vec![s0];
         label[s0] = id;
         while let Some(c) = stack.pop() {
-            maxd = maxd.max(filled[c] - z0[c]);
+            maxd = maxd.max(filled[c] - zr[c]);
             let (cx, cy) = ((c % w) as i64, (c / w) as i64);
             for dy in -1..=1i64 {
                 for dx in -1..=1i64 {
@@ -202,7 +218,7 @@ fn main() -> Result<(), String> {
                         continue;
                     }
                     let qq = ny as usize * w + nx as usize;
-                    if filled[qq] - z0[qq] > 0.05 && label[qq] == u32::MAX {
+                    if filled[qq] - zr[qq] > 0.05 && label[qq] == u32::MAX {
                         label[qq] = id;
                         stack.push(qq);
                     }
@@ -230,7 +246,7 @@ fn main() -> Result<(), String> {
     // Per variant: the network levels (the running minimum of the drained surface down the channel cells, upstream first), the cut against the start surface and the rises.
     for d_max in [f64::INFINITY, 20.0] {
         let lake = |c: usize| label[c] != u32::MAX && depth_of[label[c] as usize] > d_max;
-        let drained = |c: usize| if lake(c) { filled[c] } else { z0[c] };
+        let drained = |c: usize| if lake(c) { filled[c] } else { zr[c] };
         let mut level = vec![f64::INFINITY; w * h];
         for &c in routing.order.iter().rev() {
             let c = c as usize;
@@ -245,8 +261,8 @@ fn main() -> Result<(), String> {
             }
         }
         let mut cuts: Vec<f64> = Vec::new();
-        let (mut steps, mut rises, mut water_rises, mut lake_cells) = (0usize, 0usize, 0usize, 0usize);
-        let ground = |c: usize| if lake(c) { z0[c] } else { z0[c].min(level[c]) };
+        let (mut steps, mut rises, mut water_rises, mut lake_cells, mut pit_cells) = (0usize, 0usize, 0usize, 0usize, 0usize);
+        let ground = |c: usize| if lake(c) { zr[c] } else { zr[c].min(level[c]) };
         let water = |c: usize| if lake(c) { filled[c] } else { ground(c) };
         for c in 0..w * h {
             if !channel[c] || !inside(c) {
@@ -254,6 +270,7 @@ fn main() -> Result<(), String> {
             }
             cuts.push(z0[c] - level[c].min(z0[c]).max(level[c]));
             lake_cells += usize::from(lake(c));
+            pit_cells += usize::from(label[c] != u32::MAX);
             let r = routing.receiver[c];
             if r != none && channel[r as usize] && z0[r as usize] > 0.0 {
                 steps += 1;
@@ -265,7 +282,7 @@ fn main() -> Result<(), String> {
         let p = |f: f64| cuts[((cuts.len() as f64 * f) as usize).min(cuts.len() - 1)];
         let over = cuts.iter().filter(|&&v| v > 50.0).count();
         println!(
-            "RIVERS D {d_max} m: {} channel cells inside the tiles ({lake_cells} in lakes); cut under the start surface p50 {:.2} p95 {:.2} p99 {:.2} max {:.2} m, {over} over 50 m ({:.2} %); ground rises over 0.25 m {rises} of {steps} steps, water rises {water_rises}",
+            "RIVERS D {d_max} m: {} channel cells inside the tiles ({pit_cells} in a pit of the start surface, {lake_cells} in lakes); cut under the start surface p50 {:.2} p95 {:.2} p99 {:.2} max {:.2} m, {over} over 50 m ({:.2} %); ground rises over 0.25 m {rises} of {steps} steps, water rises {water_rises}",
             cuts.len(),
             p(0.5),
             p(0.95),
