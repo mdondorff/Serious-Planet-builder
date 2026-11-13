@@ -242,3 +242,61 @@ fn the_lake_cuts_of_the_graph_are_the_producers_pieces_and_a_lake_entry_and_spil
     assert_eq!(graph.bytes(), graph.segments() * 8 + graph.vertices() * 5 + graph.cuts().len() * 12);
     assert_eq!(lake_cut_ranges(&hydro, &routing, &|c| water.contains(c)), pre.cuts);
 }
+
+// spec: GEN-185, TEST-134
+#[test]
+fn the_burn_levels_of_the_whole_network_carry_every_low_of_the_start_surface_down_the_tree() {
+    use planet_generators::bake::k7::{line_cells, Channel};
+    let r = run();
+    let mut graph = ChannelGraph::from_hydro(&r.g, &r.routing, &r.hydro, &r.z);
+    let before = graph.clone();
+    let to_local = |c: u32| (8.0 * f64::from(c % W as u32) + 3.5, 8.0 * f64::from(c / W as u32) + 3.5);
+    // A start surface with a narrow pit every 37 cells in both directions, 400 m under the H1 levels: a line that crosses one carries it to every vertex downstream, through the junctions.
+    let start = |x: i64, y: i64| if x % 37 == 5 && y % 37 == 11 { -50.0 + 0.001 * x as f64 } else { 900.0 };
+    let (lowered, largest) = graph.deepen_beds(&r.g, &to_local, &start);
+    assert!(lowered > 0 && largest > 100.0, "the pits lower some beds: {lowered} vertices, largest {largest} m");
+    // The reference: the running minimum along each segment of its H1 levels and of the start surface at the rasterised line cells, the tributaries' end levels carried in.
+    let cells: Vec<Vec<u32>> = {
+        let mut v = Vec::new();
+        before.for_each(|s| v.push(s.cells(&r.g)));
+        v
+    };
+    let mut want_end: Vec<Option<f64>> = vec![None; cells.len()];
+    let mut beds: Vec<Vec<i16>> = Vec::new();
+    graph.for_each(|s| beds.push(s.bed.to_vec()));
+    let mut old: Vec<Vec<i16>> = Vec::new();
+    before.for_each(|s| old.push(s.bed.to_vec()));
+    // Process in the order where every tributary comes first (repeat until all are done: the trees are small).
+    let mut done = 0;
+    while done < cells.len() {
+        let mut progress = false;
+        for s in 0..cells.len() {
+            if want_end[s].is_some() {
+                continue;
+            }
+            let tribs: Vec<usize> = (0..cells.len()).filter(|&u| u != s && cells[u].len() > 1 && cells[u].last() == cells[s].first()).collect();
+            if tribs.iter().any(|&u| want_end[u].is_none()) {
+                continue;
+            }
+            let mut run = tribs.iter().map(|&u| want_end[u].unwrap()).fold(f64::INFINITY, f64::min);
+            for k in 0..cells[s].len() {
+                let p1 = to_local(cells[s][k]);
+                let p0 = if k == 0 { p1 } else { to_local(cells[s][k - 1]) };
+                let step = Channel { points: vec![p0, p1], levels: vec![0.0; 2], q: Vec::new(), q_unit: QUnit::Discharge };
+                for (x, y) in line_cells(&step) {
+                    run = run.min(start(x, y));
+                }
+                run = run.min(bed_value(old[s][k]));
+                assert_eq!(beds[s][k], bed_code(run), "segment {s} vertex {k}: the network's running minimum");
+            }
+            assert!(beds[s].windows(2).all(|w| w[1] <= w[0]), "segment {s}: the levels do not rise");
+            want_end[s] = Some(run);
+            done += 1;
+            progress = true;
+        }
+        assert!(progress, "the tree is acyclic");
+    }
+    // Idempotent: the levels already hold every low.
+    let again = graph.clone().deepen_beds(&r.g, &to_local, &start);
+    assert_eq!(again.0, 0, "a second pass lowers nothing");
+}

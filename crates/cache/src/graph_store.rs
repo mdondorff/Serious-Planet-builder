@@ -23,8 +23,8 @@ use crate::pack::{Record, TileStore};
 
 /// The kind byte of a graph block.
 pub const KIND_CHANNEL_GRAPH: u8 = Kind::ChannelGraph as u8;
-/// Version of the layout and of the meaning of the key. History: 1 = the layout of this file; 2 = the margin is a field of the spec and of the block (it was 1 H1 cell fixed): the H1 cells that hold the K7 halo, plus one (GEN-169).
-pub const GRAPH_VERSION: u32 = 2;
+/// Version of the layout and of the meaning of the key. History: 1 = the layout of this file; 2 = the margin is a field of the spec and of the block (it was 1 H1 cell fixed): the H1 cells that hold the K7 halo, plus one (GEN-169); 3 = the bed is the burn level of the whole network (GEN-185).
+pub const GRAPH_VERSION: u32 = 3;
 const CODEC_VERSION: u8 = 1;
 const IMPLEMENTATION_ID: &str = "channel-graph-block";
 const BROTLI_QUALITY: u32 = 5;

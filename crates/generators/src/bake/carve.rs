@@ -169,8 +169,7 @@ pub fn carve_rock(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, 
     carve_rock_fixed(grid, z, outlet, p, factor, rock, seed, &[])
 }
 
-/// [`carve`] with fixed cells (GEN-176, GEN-186): the breach and the sweeps may lower a fixed cell but never raise it (a channel cell after the burn of K7 incises with its valley; thermal, deposition and pit spreading
-/// keep it fixed); `fixed` has one flag per cell, or none.
+/// [`carve`] with fixed cells (GEN-176): a fixed cell is neither lowered by the breach nor moved by a sweep (a channel cell after the burn of K7: only the final channel pass may lower it); `fixed` has one flag per cell, or none.
 pub fn carve_fixed(
     grid: &Grid,
     z: &mut [f64],
@@ -257,7 +256,9 @@ pub fn carve_rock_fixed(
                     continue;
                 }
                 let rec = rec as usize;
-                // GEN-186: the breach lowers a fixed cell like any other (it only lowers).
+                if is_fixed(rec) {
+                    continue;
+                }
                 let mut want = (z[c] - p.breach_slope * distance(grid, c, rec)).max(floor);
                 if let Some(b) = &base {
                     want = want.max(b[rec]);
@@ -302,6 +303,9 @@ pub fn carve_rock_fixed(
                 continue;
             }
             let rec = rec as usize;
+            if is_fixed(c) {
+                continue;
+            }
             let class = factor.map_or(1.0, |f| f[c]);
             let scale = class * if rock.k.is_some() { f64::from(k[c]) } else { 1.0 };
             let f = p.k_dt * scale * libm::sqrt(r.area[c]) / distance(grid, c, rec);
@@ -323,8 +327,7 @@ pub fn carve_rock_fixed(
             } else {
                 new
             };
-            // GEN-186: a fixed cell is lowered by the step, never raised.
-            z[c] = if p.incise_only || is_fixed(c) { new.min(z[c]) } else { new };
+            z[c] = if p.incise_only { new.min(z[c]) } else { new };
         }
     }
     if p.round_f32 {

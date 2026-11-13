@@ -122,6 +122,7 @@ fn main() {
     std::fs::create_dir_all(&out).expect("the output folder");
     let (commit, report) = bake_region(&world, &spec, &base, &climate, &out).unwrap_or_else(|e| panic!("the region bake: {e}"));
     println!("{}", report.precision_mark);
+    println!("{}", report.bed_cut.line());
     println!(
         "MARK region bake: window {:?}, H1 {} channel cells in {} segments, {} lakes, {} tiles, commit {:016x}, graph blocks {} ({:.1} s)",
         report.window,

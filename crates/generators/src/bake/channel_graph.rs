@@ -144,6 +144,76 @@ impl ChannelGraph {
         g
     }
 
+    /// The burn levels of the whole network (GEN-185): every vertex's bed becomes the running minimum down the channel tree of its H1 level and of `start` (the start surface `B + regional` of K7) at every
+    /// local line cell up to it, the cells of the line between consecutive vertices rasterised as K7's burn rasterises them (`to_local` maps an H1 cell to its point in the face's local cell-index space).
+    /// A tributary is a segment whose last cell is this segment's first cell; its end level carries into this segment. A function of the network and of `start` alone, so every tile that burns a line
+    /// reads the same levels whatever window it holds (partition independence) and the burn's carry only bridges the cells between two vertices. Returns the number of vertices lowered and the largest
+    /// lowering in metres. Run it before the graph is stored and before the channels are made from it: the stored levels are the burn's input (STRM-084).
+    pub fn deepen_beds(&mut self, grid: &Grid, to_local: &dyn Fn(u32) -> (f64, f64), start: &(dyn Fn(i64, i64) -> f64 + Sync)) -> (usize, f64) {
+        let n = self.first.len();
+        let mut offset = Vec::with_capacity(n);
+        let mut at = 0usize;
+        for &v in &self.verts {
+            offset.push(at);
+            at += v as usize;
+        }
+        let cells: Vec<Vec<u32>> = {
+            let mut out = Vec::with_capacity(n);
+            self.for_each(|s| out.push(s.cells(grid)));
+            out
+        };
+        // the segments that end at each cell (a one-vertex segment is nobody's tributary)
+        let mut ending: std::collections::HashMap<u32, Vec<usize>> = std::collections::HashMap::new();
+        for (s, c) in cells.iter().enumerate() {
+            if c.len() > 1 {
+                ending.entry(*c.last().expect("a vertex")).or_default().push(s);
+            }
+        }
+        // a segment's end level, computed after its tributaries' (an explicit stack: the trees are deep)
+        let mut end: Vec<Option<f64>> = vec![None; n];
+        let (mut lowered, mut largest) = (0usize, 0.0f64);
+        for root in 0..n {
+            let mut stack = vec![(root, false)];
+            while let Some((s, ready)) = stack.pop() {
+                if end[s].is_some() {
+                    continue;
+                }
+                let tribs: Vec<usize> = ending.get(&cells[s][0]).map_or(Vec::new(), |v| v.iter().copied().filter(|&u| u != s).collect());
+                if !ready {
+                    stack.push((s, true));
+                    for &u in &tribs {
+                        if end[u].is_none() {
+                            stack.push((u, false));
+                        }
+                    }
+                    continue;
+                }
+                // a cycle (malformed input only) reads an unfinished tributary as no carry
+                let mut run = tribs.iter().filter_map(|&u| end[u]).fold(f64::INFINITY, f64::min);
+                let c = &cells[s];
+                for k in 0..c.len() {
+                    let (x1, y1) = to_local(c[k]);
+                    let (x0, y0) = if k == 0 { (x1, y1) } else { to_local(c[k - 1]) };
+                    let step = Channel { points: vec![(x0, y0), (x1, y1)], levels: vec![0.0, 0.0], q: Vec::new(), q_unit: QUnit::Discharge };
+                    for (x, y) in super::k7::line_cells(&step) {
+                        run = run.min(start(x, y));
+                    }
+                    let i = offset[s] + k;
+                    let old = bed_value(self.bed[i]);
+                    run = run.min(old);
+                    let code = bed_code(run);
+                    if code < self.bed[i] {
+                        lowered += 1;
+                        largest = largest.max(old - bed_value(code));
+                        self.bed[i] = code;
+                    }
+                }
+                end[s] = Some(run);
+            }
+        }
+        (lowered, largest)
+    }
+
     /// Records where the segments go under a lake (the producer's cuts, [`super::lakes::lake_cut_ranges`]): sorted, inside the segments and not empty.
     pub fn set_cuts(&mut self, cuts: Vec<(u32, u32, u32)>) {
         assert!(cuts.windows(2).all(|w| (w[0].0, w[0].1) < (w[1].0, w[1].1)), "the cuts are sorted by segment and vertex");

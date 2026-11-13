@@ -173,6 +173,8 @@ pub struct RegionReport {
     pub precision_mark: String,
     /// The channels burnt, when the spec asked to keep them.
     pub channels: Vec<planet_generators::bake::k7::Channel>,
+    /// The depth of the burn levels under the start surface (GEN-185).
+    pub bed_cut: BedCut,
 }
 
 /// The regional solve of a region (GEN-175): the base and the solved surface on the window's regional cells, with the world's precision applied.
@@ -246,6 +248,52 @@ pub struct RegionFront {
     pub graph: ChannelGraph,
     pub segment_ids: Vec<u64>,
     pub feed: MemoryFeed,
+    /// How deep the burn levels lie under the start surface at the vertices on land (GEN-185).
+    pub bed_cut: BedCut,
+}
+
+/// The depth of the burn levels under K7's start surface at the graph's vertices on land (start surface over the sea level), in metres: the canyons a running minimum cuts through a ridge of the start
+/// surface (GEN-185, lead 2026-11-13: reported, not limited).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct BedCut {
+    pub vertices: usize,
+    pub p50: f64,
+    pub p99: f64,
+    pub max: f64,
+    pub over_50m: usize,
+    /// The local face cell of the deepest cut.
+    pub deepest: (i64, i64),
+}
+
+impl BedCut {
+    fn of(graph: &ChannelGraph, grid: &Grid, to_local: &dyn Fn(u32) -> (f64, f64), start: &dyn Fn(i64, i64) -> f64) -> BedCut {
+        let mut d: Vec<(f64, (i64, i64))> = Vec::new();
+        graph.for_each(|s| {
+            for (k, c) in s.cells(grid).into_iter().enumerate() {
+                let (x, y) = to_local(c);
+                let cell = (libm::round(x) as i64, libm::round(y) as i64);
+                let z0 = start(cell.0, cell.1);
+                if z0 > 0.0 {
+                    d.push((z0 - planet_generators::bake::channel_graph::bed_value(s.bed[k]), cell));
+                }
+            }
+        });
+        if d.is_empty() {
+            return BedCut::default();
+        }
+        d.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let at = |p: usize| d[(p * d.len()).div_ceil(100).saturating_sub(1).min(d.len() - 1)].0;
+        let last = d[d.len() - 1];
+        BedCut { vertices: d.len(), p50: at(50), p99: at(99), max: last.0, over_50m: d.iter().filter(|v| v.0 > 50.0).count(), deepest: last.1 }
+    }
+
+    /// The MARK line.
+    pub fn line(&self) -> String {
+        format!(
+            "MARK burn levels (GEN-185): {} vertices on land, cut under the start surface p50 {:.2} p99 {:.2} max {:.2} m, {} over 50 m, deepest at local cell {:?}",
+            self.vertices, self.p50, self.p99, self.max, self.over_50m, self.deepest
+        )
+    }
 }
 
 /// Runs the stages of [`bake_region`] before the writer: the same code for the bake and for the layout report (BUILD-052).
@@ -268,7 +316,7 @@ pub fn region_front(spec: &RegionSpec, base: &(dyn Fn(Vec3) -> f64 + Sync), clim
     let filled = priority_flood_with(grid, zs, outlet, precision.epsilon_w, true);
     let hydro = hydrology(grid, zs, &filled, &routing, outlet, Some(&runoff), Some(&evap), &HydroParams::default());
     let lakes = lakes_from_hydro(grid, &routing, &hydro, zs);
-    let graph = ChannelGraph::from_hydro(grid, &routing, &hydro, zs);
+    let mut graph = ChannelGraph::from_hydro(grid, &routing, &hydro, zs);
     let segment_ids: Vec<u64> = hydro.segments.iter().map(|s| s.id).collect();
     let to_local = |c: u32| {
         let c = c as usize;
@@ -277,9 +325,17 @@ pub fn region_front(spec: &RegionSpec, base: &(dyn Fn(Vec3) -> f64 + Sync), clim
             (LOCAL_PER_REGIONAL * (rj0 + c / rw)) as f64 + (LOCAL_PER_REGIONAL as f64 - 1.0) / 2.0,
         )
     };
+    // GEN-185: the burn levels of the whole network, from K7's start surface `B + regional` at the local line cells, before the graph is stored or burnt (one network: the stored levels are the burn's input).
+    let n_local = spec.local() as f64;
+    let start = |x: i64, y: i64| {
+        let d = planet_core::cube::face_to_direction(&planet_core::TangentWarp, spec.face, 2.0 * (x as f64 + 0.5) / n_local - 1.0, 2.0 * (y as f64 + 0.5) / n_local - 1.0);
+        base(d) + regional_field.at(d)
+    };
+    graph.deepen_beds(grid, &to_local, &start);
+    let bed_cut = BedCut::of(&graph, grid, &to_local, &start);
     let feed = MemoryFeed { face: spec.face, channels: channels_from_graph(&graph, grid, &to_local), discharge: true };
     let _ = rh;
-    Ok(RegionFront { solve, regional_field, hydro_stats: hydro.stats.clone(), lakes, graph, segment_ids, feed })
+    Ok(RegionFront { solve, regional_field, hydro_stats: hydro.stats.clone(), lakes, graph, segment_ids, feed, bed_cut })
 }
 
 /// Bakes the region into `dir` as a commit with a channel graph. `base` is the base height (the bake's `B`), `climate` the runoff of the land.
@@ -300,7 +356,7 @@ pub fn bake_region(
             precision.radius, precision.epsilon_w, k7_epsilon
         ));
     }
-    let RegionFront { solve, regional_field, hydro_stats, lakes, graph, segment_ids, feed } = region_front(spec, base, climate)?;
+    let RegionFront { solve, regional_field, hydro_stats, lakes, graph, segment_ids, feed, bed_cut } = region_front(spec, base, climate)?;
     let RegionSolve { grid, ri0, rj0, rw, rh, precision, .. } = solve;
     let regional = |d: Vec3| regional_field.at(d);
 
@@ -358,6 +414,7 @@ pub fn bake_region(
         tiles: tiles.len(),
         precision_mark: precision.mark_line(),
         channels: if spec.keep_channels { feed.channels.clone() } else { Vec::new() },
+        bed_cut,
     };
     Ok((commit, report))
 }

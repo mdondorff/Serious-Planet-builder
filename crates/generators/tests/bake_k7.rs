@@ -253,10 +253,9 @@ fn k7_with_the_plain_flood_is_the_k7_of_before_and_the_canonical_k7_is_thread_in
     let with = k7_tile(&g, id(), &base, &smooth, &[channel(&g, g.halo as i64 + 20)], &plain, 2);
     let without = k7_tile(&g, id(), &base, &smooth, &[], &plain, 2);
     // GEN-176 (architect, 2026-11-12): the digest with a channel moved (a declared change: the channel cells are fixed for the stages after the burn, 0x24e829d93ce40015 before); without a channel it is unmoved.
-    // GEN-186 (lead, 2026-11-13): moved again (a declared change: the incising carve lowers the channel cells, never raises them; 0xbdb8c854fe4f2a09 before).
     // The digests are the plain-flood K7 of before GEN-160 and before GEN-169 (the code of origin/main), re-taken on the tile of 96 with a halo of 24 (the halo the profile of GEN-169 needs; architect, 2026-11-11): the smooth surface
     // has no hole under the profile, so the profile moves no bit here (TEST-112 and TEST-113 carry the cases where it does).
-    assert_eq!(k7_digest(&with), 0x6f37e7a84c3dbd25, "the plain-flood K7 with a channel is what GEN-186 made it");
+    assert_eq!(k7_digest(&with), 0xbdb8c854fe4f2a09, "the plain-flood K7 with a channel is what GEN-176 made it");
     assert_eq!(k7_digest(&without), 0xfe5873743fc77bff, "the plain-flood K7 without a channel is what it was");
     // The canonical flood is the default of the new chain. The valley above has no flat, so both floods agree on it; a surface cut flat at 380 m (a plain of the base) tells them apart.
     let canonical = K7Params::standard(5, 0.0);
