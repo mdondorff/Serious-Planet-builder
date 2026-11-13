@@ -21,8 +21,7 @@ Dormant items moved to `docs/parking.md` (2026-11-12).
 Every row names an exit item (ADR 0120). Everything else is in `docs/parking.md`.
 | Exit | Step | Lane |
 |---|---|---|
-| E1 | The label + `--commit` PR (VIEW-069, TEST-128): in-memory production base, labels in a corner; rivers clipped to the region and ended at lake water (or labelled); then the stills retake, viewed by the lead first | crusader |
-| E4 | Owner flight of the E1 region; sign-off line in `docs/milestones/P1.md` | owner, after E1 |
+| E4 | Owner flight of the E1 region from the crusader worktree: `cargo run --release -p planet -- editor --seed 14 --commit target/stores/r3a-e1`; sign-off line in `docs/milestones/P1.md` | owner |
 
 Finishing (changeover, 2026-11-12; no successor work): SPIKE-111 ends its time-box with the report (spikes); PR #1449 parked as draft (explorer).
 
