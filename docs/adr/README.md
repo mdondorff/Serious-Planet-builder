@@ -130,3 +130,4 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0119 | [K7's tile grid and halo are part of its definition; execution partitioning stays result-free](0119-k7-canonical-tiling.md) | accepted (owner, 2026-11-12), with conditions | amends A3 §6.7 and GEN-101 (K7 per tile); reading of CON-08, CON-14, CON-30 for K7 only; gate G-SEAM |
 | 0120 | [A lead and lanes; short milestones with an exit list; a parking list for new ideas](0120-lead-and-lanes-short-milestones.md) | accepted (owner, 2026-11-12) | process; `docs/routing.md`, `docs/milestones/`, `docs/parking.md` |
 | 0121 | [Two data roots: the repository and SeriousPlanetData](0121-two-data-roots.md) | accepted (owner, 2026-11-13) | process; `CLAUDE.md`, `docs/routing.md` |
+| 0122 | [Fine detail pinned to the stored samples and off on river lines](0122-fine-detail-pinned-to-the-stored-samples.md) | proposed (lead, 2026-11-13) | generator field, render; amends 0098 point 2 |
