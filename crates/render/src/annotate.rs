@@ -190,9 +190,9 @@ pub fn draw_text(img: &mut Image, x: i64, y: i64, text: &str, s: u32) -> u32 {
     (text.chars().count() as i64 * advance) as u32
 }
 
-/// The scale of the text for a picture `height_px` tall: one glyph pixel per 180 pixels of height, at least one.
+/// The scale of the text for a picture `height_px` tall: one glyph pixel per 400 pixels of height, at least one (2 at 1080 px: the label and its notes take a corner, not the picture; the full text is in the caption).
 fn text_scale(height_px: u32) -> u32 {
-    (height_px / 180).max(1)
+    (height_px / 400).max(1)
 }
 
 /// Draws the pose label and, when the axis meets the ground, a scale bar on `img`, bottom left. The bar is the longest round length (1, 2 or 5 times a power of ten) that takes at most a quarter of the picture's width.
