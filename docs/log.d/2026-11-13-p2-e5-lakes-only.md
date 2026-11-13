@@ -1,0 +1,1 @@
+- 2026-11-13 P2 E5 narrowed to inland lakes (edits are ADR 0113); OpenSpec clean-up parked as P3's first item (owner).
