@@ -160,6 +160,43 @@ pub struct BakeProbe {
 /// The lattice resolution, face and node rectangle `(i0, j0, w, h)` of the exact base under a commit opened in memory.
 type CommitBase = (u32, Face, (u32, u32, usize, usize));
 
+/// The region of a commit opened in memory (VIEW-069): its L tiles, where the commit's layer, lakes and rivers lie over the exact base;
+/// everywhere else the viewer draws the coarse in-memory bake.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CommitRegion {
+    /// Local cells of a face edge and of a tile edge.
+    pub cells: u32,
+    pub tile: u32,
+    /// The commit's tiles, as (face, ti, tj).
+    pub tiles: std::collections::BTreeSet<(u8, u32, u32)>,
+}
+
+impl CommitRegion {
+    /// The region of the commit's `tiles` on a grid of `cells` local cells a face edge in tiles of `tile` cells.
+    pub fn new(cells: u32, tile: u32, tiles: impl IntoIterator<Item = (u8, u32, u32)>) -> CommitRegion {
+        CommitRegion { cells, tile, tiles: tiles.into_iter().collect() }
+    }
+
+    /// Whether the ground under unit direction `dir` lies in a tile of the commit.
+    pub fn contains(&self, dir: planet_core::Vec3) -> bool {
+        let (face, u, v) = planet_core::cube::direction_to_face(&TangentWarp, dir);
+        let n = f64::from(self.cells);
+        let tile = |x: f64| (((x + 1.0) * 0.5 * n).floor().clamp(0.0, n - 1.0) as u32) / self.tile;
+        self.tiles.contains(&(face.0, tile(u), tile(v)))
+    }
+
+    /// The unit direction at the mean of the centres of the commit's tiles (`None` for a commit with no tile).
+    pub fn centre(&self) -> Option<planet_core::Vec3> {
+        let n = f64::from(self.cells);
+        let mut sum = planet_core::Vec3::new(0.0, 0.0, 0.0);
+        for &(face, ti, tj) in &self.tiles {
+            let at = |t: u32| 2.0 * (f64::from(t) + 0.5) * f64::from(self.tile) / n - 1.0;
+            sum = sum + planet_core::cube::face_to_direction(&TangentWarp, Face(face), at(ti), at(tj));
+        }
+        (!self.tiles.is_empty()).then(|| sum.normalized())
+    }
+}
+
 /// A world's terrain: the definition, the field it selects and the bake the field reads.
 pub struct WorldTerrain {
     /// The definition the fields are built from, replaceable while the terrain is shared ([`WorldTerrain::set_definition`]): a reader takes
@@ -222,6 +259,8 @@ pub struct WorldTerrain {
     fixture_note: String,
     /// The lattice resolution, face and node rectangle of the exact base of a commit opened in memory.
     commit_base: Option<CommitBase>,
+    /// The region of a commit opened in memory (its L tiles).
+    commit_region: Option<CommitRegion>,
     /// The lattice the water field reads when it is not the height field's (a fixture world: the in-memory coarse bake, whose ocean channel the water field is built over).
     water_src: Option<Arc<dyn LatticeSource + Send>>,
     /// Scoped threads of one horizon bake (0: the cores, at most 4).
@@ -343,6 +382,7 @@ impl WorldTerrain {
             lakes: None,
             fixture_note: String::new(),
             commit_base: None,
+            commit_region: None,
             water_src: None,
         })
     }
@@ -449,6 +489,7 @@ impl WorldTerrain {
             lakes: None,
             fixture_note: String::new(),
             commit_base: None,
+            commit_region: None,
             water_src: None,
         })
     }
@@ -773,6 +814,7 @@ impl WorldTerrain {
             return Err(format!("the commit was baked for seed {}, the definition's is {seed}", spec.seed));
         }
         let (face, rect) = fixture_rectangle(&spec, commit.tiles.keys().copied())?;
+        let region = CommitRegion::new(spec.cells, spec.tile, commit.tiles.keys().copied());
         let res = spec.res;
         let mut world = WorldTerrain::open(def.clone(), MAX_RUN_BAKE_RES)?;
         let coarse: Arc<dyn LatticeSource + Send> = Arc::from(std::mem::replace(&mut world.src, Box::new(NoBake)));
@@ -786,6 +828,7 @@ impl WorldTerrain {
         let stored = Arc::new(GlobalWorld::from_definition(&def).map_err(|e| format!("the definition cannot be generated: {e}"))?);
         let mut world = world.use_commit(commit_dir, stored, &def, seed)?;
         world.commit_base = Some((res, face, rect));
+        world.commit_region = Some(region);
         world.fixture_note = format!(
             "base: computed in memory, not read from a stored bake (the production base on the exact {res}-node lattice over the commit's tiles and one tile of margin, the {MAX_RUN_BAKE_RES}-cell in-memory bake elsewhere; {:.1} s on {threads} threads)",
             started.elapsed().as_secs_f64()
@@ -796,6 +839,11 @@ impl WorldTerrain {
     /// What the base is when the world opened a commit in memory ([`WorldTerrain::open_commit_in_memory`], [`WorldTerrain::open_fixture`]); empty otherwise.
     pub fn base_note(&self) -> &str {
         &self.fixture_note
+    }
+
+    /// The region of a commit opened in memory ([`WorldTerrain::open_commit_in_memory`], VIEW-069); `None` for every other world.
+    pub fn commit_region(&self) -> Option<&CommitRegion> {
+        self.commit_region.as_ref()
     }
 
     /// What the base of a world opened by [`WorldTerrain::open_fixture`] is (empty for every other world).

@@ -1,0 +1,1 @@
+- 2026-11-13 e1-start-pose archived: with --commit the viewer starts 25 km over the commit's region (or --site) and the title says inside or outside the region (VIEW-069).
