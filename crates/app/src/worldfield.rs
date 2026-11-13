@@ -70,6 +70,27 @@ pub struct ErosionOptions {
 /// Decoded tiles the layer keeps (a cap's bounds read up to 36, a read a stencil's four; a core is 37.7 MB at 3,072 cells, so up to about 1.7 GB with the pyramids).
 const LAYER_CACHE_TILES: usize = 44;
 
+/// A lattice shared with the world's `bake_base` (VIEW-072): the field and the base closure read the same nodes.
+struct SharedLattice(Arc<dyn LatticeSource + Send>);
+
+impl LatticeSource for SharedLattice {
+    fn res(&self) -> u32 {
+        self.0.res()
+    }
+
+    fn at(&self, face: Face, i: u32, j: u32) -> Result<GlobalSample, ReadError> {
+        self.0.at(face, i, j)
+    }
+
+    fn block_cells(&self) -> u32 {
+        self.0.block_cells()
+    }
+
+    fn relief_scale(&self) -> f64 {
+        self.0.relief_scale()
+    }
+}
+
 /// The leaked stored bake as the field's lattice: it keeps the handle for the counters (`WorldTerrain::counters`).
 struct SharedStore(&'static StoreSource<'static>);
 
@@ -259,6 +280,8 @@ pub struct WorldTerrain {
     fixture_note: String,
     /// The lattice resolution, face and node rectangle of the exact base of a commit opened in memory.
     commit_base: Option<CommitBase>,
+    /// The exact lattice of a commit opened in memory and the commit's `base_id` (VIEW-072): what [`WorldTerrain::bake_base`] reads.
+    bake_base: Option<(Arc<dyn LatticeSource + Send>, u64)>,
     /// The region of a commit opened in memory (its L tiles).
     commit_region: Option<CommitRegion>,
     /// The lattice the water field reads when it is not the height field's (a fixture world: the in-memory coarse bake, whose ocean channel the water field is built over).
@@ -382,6 +405,7 @@ impl WorldTerrain {
             lakes: None,
             fixture_note: String::new(),
             commit_base: None,
+            bake_base: None,
             commit_region: None,
             water_src: None,
         })
@@ -489,6 +513,7 @@ impl WorldTerrain {
             lakes: None,
             fixture_note: String::new(),
             commit_base: None,
+            bake_base: None,
             commit_region: None,
             water_src: None,
         })
@@ -822,8 +847,10 @@ impl WorldTerrain {
         world.water_src = Some(coarse.clone());
         let inputs = planet_cache::global_store::class_inputs(&def, seed, threads);
         let direction = |i: u32, j: u32| planet_cache::region_bake::lattice_direction(face, res as usize, i as usize, j as usize);
-        let exact = crate::fixturebase::FixtureLattice::sample(res, face, rect, &direction, &|d| inputs.base(d), coarse, threads)?;
-        world.src = Box::new(exact);
+        let exact: Arc<dyn LatticeSource + Send> =
+            Arc::new(crate::fixturebase::FixtureLattice::sample(res, face, rect, &direction, &|d| inputs.base(d), coarse, threads)?);
+        world.src = Box::new(SharedLattice(Arc::clone(&exact)));
+        world.bake_base = Some((exact, spec.base_id));
         world.kind = HeightFieldKind::ErodedC1;
         let stored = Arc::new(GlobalWorld::from_definition(&def).map_err(|e| format!("the definition cannot be generated: {e}"))?);
         let mut world = world.use_commit(commit_dir, stored, &def, seed)?;
@@ -834,6 +861,19 @@ impl WorldTerrain {
             started.elapsed().as_secs_f64()
         );
         Ok(world)
+    }
+
+    /// The base B of a commit opened in memory, as the bake read it (VIEW-072): the C1 read of the exact lattice of `BakeInputs::base` (`region_bake`'s `base` closure, bit for bit
+    /// at the stored cells) and the commit's `base_id`, so that a reader can place a line along B exactly as the bake placed it and compare the id with the commit's. `None` for every
+    /// other world. The drawn ground adds the crease detail of the field (GEN-109) to B and the layer's change, so it is not B: read B here.
+    #[allow(clippy::type_complexity)]
+    pub fn bake_base(&self) -> Option<(Arc<dyn Fn(planet_core::Vec3) -> f64 + Send + Sync>, u64)> {
+        let (lattice, id) = self.bake_base.as_ref()?;
+        let lattice = Arc::clone(lattice);
+        let read = move |d: planet_core::Vec3| {
+            planet_generators::global::read_elevation_c1(lattice.as_ref(), &TangentWarp, d).map_or(f64::NAN, f64::from)
+        };
+        Some((Arc::new(read), *id))
     }
 
     /// What the base is when the world opened a commit in memory ([`WorldTerrain::open_commit_in_memory`], [`WorldTerrain::open_fixture`]); empty otherwise.
