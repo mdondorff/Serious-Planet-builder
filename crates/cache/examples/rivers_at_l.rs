@@ -160,7 +160,7 @@ fn main() -> Result<(), String> {
     let filled = planet_generators::bake::flood::priority_flood_with(&g, &z0, &outlet, 1.0e-3, true);
     let t_fill = t0.elapsed().as_secs_f64();
     // Routing at L on the start surface (the canonical flood drains every pit over its spill: the routes of a breach and of a lake are the same; only the levels differ).
-    let route = |z: &[f64]| planet_generators::bake::route::route_rules(&g, z, &outlet, 1.0e-3, front.solve.stream, 0.0, None, planet_generators::bake::route::RoundRules::ROUND);
+    let route = |z: &[f64]| planet_generators::bake::route::route_rules(&g, z, &outlet, 1.0e-3, front.solve.stream, 0.0, None, planet_generators::bake::route::RoundRules::default());
     let routing = route(&z0);
     let t_route = t0.elapsed().as_secs_f64();
     // D8 accumulation of the area and of the discharge (the H1 cell's runoff over each L cell) down the receivers.
@@ -338,7 +338,7 @@ fn main() -> Result<(), String> {
     let t_b = t0.elapsed().as_secs_f64();
     let zb = sample(&|d: Vec3| base(d));
     let outlet_b = g.outlets(&zb, 0.0);
-    let routing_b = planet_generators::bake::route::route_rules(&g, &zb, &outlet_b, 1.0e-3, front.solve.stream, 0.0, None, planet_generators::bake::route::RoundRules::ROUND);
+    let routing_b = planet_generators::bake::route::route_rules(&g, &zb, &outlet_b, 1.0e-3, front.solve.stream, 0.0, None, planet_generators::bake::route::RoundRules::default());
     let mut area_b = vec![cell_m * cell_m; w * h];
     for &c in routing_b.order.iter().rev() {
         let c = c as usize;
