@@ -1,5 +1,5 @@
 # Lanes for `cargo xtask lanes` (BUILD-043): `lane | worktree directory prefix` under .claude/worktrees/. No machine paths.
-# The inbox file of a lane is <inbox>/<lane>.md; the inbox directory is PLANET_INBOX_DIR, else `planner-inbox` beside the main checkout.
+# The inbox file of a lane is <inbox>/<lane>.md; the inbox directory is PLANET_INBOX_DIR, else `SeriousPlanetData/lanes` beside the main checkout.
 explorer | pt
 crusader | sonnet-crusader
 spikes | sonnet-spikes
