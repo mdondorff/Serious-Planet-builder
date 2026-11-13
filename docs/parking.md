@@ -17,6 +17,7 @@ Owner, 2026-11-12 (ADR 0120). These items are outside the current milestone, one
 - GEN-175 follow-ups: the narrowed-fill refusal; remove `PlanParams::standard`.
 - GEN-173 spec text: define how a flat and its rim are found and the grade order, so the flood can be checked independently (E2 trace, 2026-11-13).
 - GEN-173 bound: cells stand up to 9.8e-10 m above the ungraded flood (R3a round 3); a derived bound (formula) or a fix, never "up to rounding" without a derivation.
+- K7 carves below sea level inland: R3a, 4,764 cells 3.5-42 m below 0 m, 1-23 km from the sea (p50 14 km); the starting surface and the rounds leave them at or above 0 m; the coastal band (ADR 0056) floods them as sea ponds. Fix at the source: a carve never goes below its outlet level (E1 stills, 2026-11-13).
 - Ledger row for the k=4 memory pair (10,565 against 11,136 MiB, hashes equal; #1447).
 
 ## Starting surface (look work; the owner decides on a picture sheet after flying E1)
