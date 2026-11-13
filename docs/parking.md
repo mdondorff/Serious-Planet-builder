@@ -55,3 +55,5 @@ Owner, 2026-11-12 (ADR 0120). These items are outside the current milestone, one
 - Coarse-first refinement of an edit (owner, 2026-10-20). Trigger: a brush case missing its budget.
 - River floodplain bounded by the valley walls (SPIKE-113, 2026-11-13): a fixed-width floodplain on the level makes causeways and cuts canyon walls. Trigger: after the line placement (REND-067) lands.
 - Window-edge outlet never lowered (SPIKE-112, 2026-11-13): `Grid::outlets` marks window edges as outlets and the breach never lowers one, so a margin lake forms behind it. Trigger: the next region-solve change.
+- OpenSpec clean-up: 72 open changes, many M8/M9 work done, superseded or dropped; spikes audits (done, superseded, still wanted), owning lanes archive in batches (owner, 2026-11-13: P3's first item). Trigger: P3 starts.
+- Edit wash-out (SPIKE-112, 2026-11-13): a 400 m dome under the erosion ends about 200 m high; tune how strongly an edit holds against the rounds. Trigger: the editor work under ADR 0113.

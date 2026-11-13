@@ -5,7 +5,7 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 ## Waiting for the owner
 - **/bless: `water_class_lake_mask_stripes`** (TEST-133, #1459): the first lake golden, a class view; escalated as the first of its class and for a WARP driver difference. Nothing waits on it.
 - **A new global store for the default world, seed 14**: every store on disk is refused by its keys; E1 runs on the in-memory production base (VIEW-069). Lead's recommendation: bake it after the flight, with ADR 0117's format.
-- **For M9 planning**: owner test 2026-10-27 groups E (edits on top as default, erosion keeping mass), F and G scope, the 1 m / 500 m exception (`docs/milestones/M8/owner-test-2026-10-27/README.md`); where edits sit relative to M9's erosion (D3: under the erosion by default).
+- **For later planning**: owner test 2026-10-27 groups F and G scope, the 1 m / 500 m exception (`docs/milestones/M8/owner-test-2026-10-27/README.md`). Group E (where edits sit) is settled by ADR 0113.
 - **Sunset shadow look** (ADR 0095 draft, crusader): the sky ambient as a hemisphere average is physically consistent and dark at a 7° sun; options: sky light plus a lift (planner's pick), sky light as is, or the old term. Every lit and sky golden moves with it. SPIKE-96 (sky visibility) follows the choice.
 - **Architecture re-plan** (owner, 2026-11-08; SPIKE-104, SPIKE-105): D1 = option A, conditional on a prototype and a switch-to-B gate (S1-S5); phases and gates in `docs/briefings/terrain-prototype.md`; the owner decides at the A/B gate.
 - **Smooth base as default** (GEN-107, `cpu-erosion-v2` on main): removes the 611 m "pyramid" facets; draft #1137 switches the default (no golden moves; two count pins and the water-cut range re-pinned with reasons). Decide with the erosion preview.
@@ -24,7 +24,7 @@ Every row names an exit item (ADR 0120). Everything else is in `docs/parking.md`
 | E1 | k7-bed-coherence (whole-network burn levels) and k7-line-placement (lines on the valley floor, REND-067), merged back to back; then re-bake r3a-p3 | crusader |
 | E1 | VIEW-072 guard (the base under --commit is already bit-equal); then ADR 0122 point 1, pinned fine detail (GEN-187) | explorer |
 | E2 | Acceptance: the owner's next long flight reads resident tiles at most and evicted from the run log | owner |
-| E5 | ADRs for edits against the erosion and for inland lakes and dams, with the owner | owner |
+| E5 | Inland lakes and dams ADR, after crusader's rivers-at-L spike sets the lake numbers | owner |
 
 P1 closed 2026-11-13 (owner sign-off in `docs/milestones/P1.md`).
 
