@@ -144,7 +144,17 @@ fn water_plan_of(
     world
         .with_water(|f| {
             plan_water(
-                &WaterRequest { source: f, map: &TangentWarp, liquids: &table, look: &look.water, lod: &lod, time_s: 2.0, view, cut },
+                &WaterRequest {
+                    source: f,
+                    map: &TangentWarp,
+                    liquids: &table,
+                    look: &look.water,
+                    lod: &lod,
+                    time_s: 2.0,
+                    view,
+                    cut,
+                    lakes: None,
+                },
                 &mut cache,
                 plan,
             )

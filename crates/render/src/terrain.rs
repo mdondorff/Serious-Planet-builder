@@ -958,6 +958,9 @@ pub struct TerrainStats {
     /// Nodes of this frame that have a river layer, and the nodes with a river that the plan left without one because the array was full (REND-061; never silent).
     pub river_nodes: u32,
     pub river_dropped: u32,
+    /// Lake masks of this frame in the coverage atlas, and lake nodes drawn without their mask because no slot was left (REND-065; never silent).
+    pub lake_masks: u32,
+    pub lake_masks_dropped: u32,
 }
 
 /// How the renderer submits the planned draws (REND-015). Both draw the same plan in the same order.
@@ -2720,9 +2723,35 @@ impl TerrainRenderer {
         }
         let set = &self.ring[ring_index];
         ctx.queue.write_buffer(&set.globals, 0, &globals);
+        // The lake masks (REND-065) take the coverage atlas's slots after the rivers' (REND-061 layout); a mask past the atlas gets no slot and its node draws without it (counted in the stats).
+        let (mut lake_masks_dropped, mut lake_masks_uploaded) = (0u32, 0u32);
         if let (Some(w), true) = (&plan.water, water_frame) {
+            let base = plan.rivers.as_ref().map_or(0, |r| r.nodes.len() as u32);
+            let (cols, _) = river_atlas_grid();
+            let (words, dropped) = crate::water::lake_mask_words(base, &w.masks, self.cells, RIVER_SLOTS);
+            lake_masks_dropped = dropped;
+            lake_masks_uploaded = w.masks.len() as u32 - dropped;
+            for (m, &word) in w.masks.iter().zip(&words) {
+                if word == crate::water::NO_MASK {
+                    continue;
+                }
+                let slot = word & 0xffff;
+                let stride = m.size + 2;
+                let padded = pad_coverage(&m.codes, m.size as usize);
+                ctx.queue.write_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &set.river_array,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d { x: (slot % cols) * stride, y: (slot / cols) * stride, z: 0 },
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    &padded,
+                    wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(stride), rows_per_image: Some(stride) },
+                    wgpu::Extent3d { width: stride, height: stride, depth_or_array_layers: 1 },
+                );
+            }
             ctx.queue.write_buffer(&set.water_globals, 0, &crate::water::globals_bytes(w));
-            ctx.queue.write_buffer(&set.water_nodes, 0, &crate::water::node_records(w, plan.nodes.len()));
+            ctx.queue.write_buffer(&set.water_nodes, 0, &crate::water::node_records(w, plan.nodes.len(), &words));
         }
         let phase = std::time::Instant::now();
         let nodes = node_record_bytes(plan);
@@ -2732,6 +2761,8 @@ impl TerrainRenderer {
         let node_write_ms = phase.elapsed().as_secs_f64() * 1000.0;
         let refs_phase = std::time::Instant::now();
         let mut stats = TerrainStats { node_record_bytes: nodes.len() as u64, ..Default::default() };
+        stats.lake_masks = lake_masks_uploaded;
+        stats.lake_masks_dropped = lake_masks_dropped + plan.water.as_ref().filter(|_| water_frame).map_or(0, |w| w.mask_dropped);
         // The river coverage (REND-059, REND-061): the plan's layers into the array, each node's layer index into the buffer the lit fragment reads. A frame without rivers clears what an earlier frame of this set left.
         // Every entry of the buffer is written (the plan's node count is not the buffer's), so no layer of an earlier frame is left for a later plan with more nodes to read.
         match &plan.rivers {

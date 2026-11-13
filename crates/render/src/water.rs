@@ -134,8 +134,11 @@ fn water_surface(liq: WLiquid, la: vec4<f32>, lb: vec4<f32>, n: vec3<f32>, v: ve
 /// `VsOut`, `up_at`).
 const WATER_GLUE: &str = r#"
 struct WaterNodeRec {
-    // x: the water level W, y: the liquid slot (as a float), z: the tile's sample spacing in metres, w: reserved.
-    a: vec4<f32>,
+    // x: the water level W, y: the liquid slot (as a float), z: the tile's sample spacing in metres.
+    a: vec3<f32>,
+    // The lake mask word (REND-065): the slot of the coverage atlas in the low 16 bits, the samples a side in the top 8; 0xffffffff: no mask, the node is drawn
+    // wherever W - h_morph > 0. A u32 of its own at byte 12 (a flag carried as float bits could meet a NaN-canonicalising backend).
+    mask: u32,
     phases: vec4<f32>,
 };
 
@@ -186,6 +189,19 @@ fn water_vertex(t: VsOut) -> WOut {
     return out;
 }
 
+// The lake mask of a node at its position `aux` (0 to 1 over the tile): a slot of the coverage atlas the rivers use (REND-061 layout, the slots after the rivers'), 1 wet, 0 dry.
+fn lake_mask_at(word: u32, aux: vec2<f32>) -> f32 {
+    let slot = word & 0xffffu;
+    let size = max((word >> 24u) & 0xffu, 2u);
+    let dims = textureDimensions(river_cov);
+    let edge = f32(size - 1u);
+    let stride = size + 2u;
+    let cols = max(dims.x / stride, 1u);
+    let origin = vec2<f32>(f32((slot % cols) * stride + 1u), f32((slot / cols) * stride + 1u));
+    let uv = (origin + clamp(aux, vec2<f32>(0.0), vec2<f32>(1.0)) * edge + 0.5) / vec2<f32>(dims);
+    return textureSampleLevel(river_cov, river_samp, uv, 0.0).r;
+}
+
 struct WLight {
     // The light the sun shadow does not touch (the atmosphere ambient) and the direct term it multiplies (REND-051).
     ambient: vec3<f32>,
@@ -202,8 +218,13 @@ fn fs_water(in: WOut) -> @location(0) vec4<f32> {
     if (in.depth <= 0.0 || quadrant_cut_at(in.node_index, in.aux)) {
         discard;
     }
-    let node = nodes[in.node_index];
     let rec = water_nodes[in.node_index];
+    // A lake node draws only where its lake's mask is wet (REND-065): the mask's samples interpolated over the node, wet from one half.
+    let mword = rec.mask;
+    if (mword != 0xffffffffu && lake_mask_at(mword, in.aux) < 0.5) {
+        discard;
+    }
+    let node = nodes[in.node_index];
     let liq = WG.liquids[u32(rec.a.y)];
     let up = up_at(node.up, in.local);
     let cam = node.origin_rel.xyz + in.local;
@@ -337,16 +358,42 @@ pub fn node_buffer_bytes(nodes: usize) -> u64 {
     NODE_RECORD_BYTES * nodes.max(1) as u64
 }
 
+/// The lake mask word of a node with no mask (REND-065).
+pub const NO_MASK: u32 = u32::MAX;
+
+/// The atlas words of a plan's lake masks (REND-065): the masks take the coverage atlas's slots after the `rivers` the frame's rivers use, in order; a mask past `slots` or of
+/// another size than the frame's `cells + 1` gets [`NO_MASK`] (its node draws without it). Returns the words and the masks left without a slot.
+pub fn lake_mask_words(rivers: u32, masks: &[planet_frame::water::WaterMask], cells: u32, slots: u32) -> (Vec<u32>, u32) {
+    let mut dropped = 0;
+    let words = masks
+        .iter()
+        .enumerate()
+        .map(|(k, m)| {
+            let slot = rivers + k as u32;
+            if slot >= slots || m.size != cells + 1 {
+                dropped += 1;
+                NO_MASK
+            } else {
+                slot | (m.size << 24)
+            }
+        })
+        .collect();
+    (words, dropped)
+}
+
 /// The node records of a frame, dense over the terrain plan's `node_count` nodes (the water draws with the terrain's instance index);
-/// nodes without water hold zeros and are never drawn.
-pub fn node_records(plan: &WaterPlan, node_count: usize) -> Vec<u8> {
+/// nodes without water hold zeros and are never drawn. `mask_words` gives each lake mask of the plan its atlas word ([`NO_MASK`] for a mask without a slot).
+pub fn node_records(plan: &WaterPlan, node_count: usize, mask_words: &[u32]) -> Vec<u8> {
     let mut out = vec![0u8; node_buffer_bytes(node_count) as usize];
     for n in &plan.nodes {
         let o = n.node as usize * NODE_RECORD_BYTES as usize;
+        let word = n.mask.and_then(|m| mask_words.get(m as usize).copied()).unwrap_or(NO_MASK);
         let words = [n.level_m, f32::from(n.liquid), n.spacing_m, 0.0, n.phases[0], n.phases[1], n.phases[2], n.phases[3]];
         for (k, w) in words.iter().enumerate() {
             out[o + 4 * k..o + 4 * k + 4].copy_from_slice(&w.to_le_bytes());
         }
+        // The fourth word is the mask's u32 (REND-065).
+        out[o + 12..o + 16].copy_from_slice(&word.to_le_bytes());
     }
     out
 }
@@ -367,4 +414,43 @@ pub fn globals_bytes(plan: &WaterPlan) -> Vec<u8> {
     }
     debug_assert_eq!(out.len() as u64, GLOBALS_BYTES);
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use planet_frame::look::water::WaterLook;
+    use planet_frame::water::{empty_water_plan, WaterMask, WaterNode};
+
+    fn mask(size: u32) -> WaterMask {
+        WaterMask { size, codes: vec![255; (size * size) as usize] }
+    }
+
+    // spec: REND-065
+    #[test]
+    fn the_lake_masks_take_the_atlas_slots_after_the_rivers_and_one_past_it_gets_none() {
+        let masks = [mask(17), mask(17), mask(9), mask(17)];
+        let (words, dropped) = lake_mask_words(5, &masks, 16, 8);
+        // Slots 5 and 6 after five river layers; a mask of another size and one past the atlas (slot 8 of 8) get none.
+        assert_eq!(words, vec![5 | (17 << 24), 6 | (17 << 24), NO_MASK, NO_MASK]);
+        assert_eq!(dropped, 2);
+        assert_eq!(lake_mask_words(0, &masks[..1], 16, 2048), (vec![17 << 24], 0));
+    }
+
+    // spec: REND-065
+    #[test]
+    fn the_node_record_holds_the_mask_word_as_a_u32_at_byte_12_and_the_sea_holds_none() {
+        let mut p = empty_water_plan(&WaterLook::EARTH);
+        let node = |i: u32, mask: Option<u32>| WaterNode { node: i, level_m: 2.0, liquid: 0, phases: [0.0; 4], spacing_m: 1.0, mask };
+        p.nodes = vec![node(0, None), node(2, Some(0))];
+        p.masks = vec![mask(17)];
+        let bytes = node_records(&p, 3, &[7 | (17 << 24)]);
+        let word = |i: usize| {
+            u32::from_le_bytes(bytes[i * NODE_RECORD_BYTES as usize + 12..i * NODE_RECORD_BYTES as usize + 16].try_into().unwrap())
+        };
+        assert_eq!(word(0), NO_MASK);
+        assert_eq!(word(2), 7 | (17 << 24));
+        assert_eq!(word(1), 0, "a node without water holds zeros");
+        assert_eq!(f32::from_le_bytes(bytes[0..4].try_into().unwrap()), 2.0);
+    }
 }

@@ -1,0 +1,1 @@
+- 2026-11-13 lake-mask-pass archived: the water pass draws a lake node only where the commit's lake mask is wet (REND-065, item 15 PR 4b); TEST-133's first golden waits for the owner's /bless (pending.txt).

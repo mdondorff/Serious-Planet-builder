@@ -29,6 +29,7 @@ use planet_core::cube::FaceMapping;
 use planet_core::{TileId, Vec3};
 use planet_generators::global::ReadError;
 use planet_generators::height::HeightField;
+use planet_generators::lake_water::{lake_body, lake_of_body, LakeMaskSource};
 use planet_generators::water::{WaterBodyId, WaterField, WaterSample};
 use planet_world_def::{LiquidKindId, LiquidTable};
 use std::collections::HashMap;
@@ -86,6 +87,18 @@ pub struct WaterNode {
     /// The sample spacing of the node's tile (m, `LodParams::sample_spacing`): the shader multiplies it by `1 + morph` for the
     /// vertex's own spacing, which decides which waves the grid can hold.
     pub spacing_m: f32,
+    /// The node's lake mask (REND-065): an index into [`WaterPlan::masks`] for a lake node, `None` for a node drawn wherever `W - h_morph > 0` (the sea).
+    pub mask: Option<u32>,
+}
+
+/// Slots of the lake mask atlas a frame holds (REND-065): a lake node takes one; past it the plan counts the rest in [`WaterPlan::mask_dropped`] (drawn without the mask, never silent).
+pub const LAKE_MASK_SLOTS: usize = 256;
+
+/// The lake mask of one water node (REND-065): `size * size` codes (row-major, `size = cells + 1`, one a sample of the node), 255 where the commit's mask has the node's lake at the sample's nearest cell, 0 elsewhere.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WaterMask {
+    pub size: u32,
+    pub codes: Vec<u8>,
 }
 
 /// The water of one frame.
@@ -100,6 +113,10 @@ pub struct WaterPlan {
     /// The liquids the nodes use, at most [`MAX_LIQUIDS`].
     pub liquids: Vec<LiquidAppearance>,
     pub nodes: Vec<WaterNode>,
+    /// The lake masks the nodes name (REND-065).
+    pub masks: Vec<WaterMask>,
+    /// Lake nodes that got no mask slot because the atlas was full (drawn wherever `W - h_morph > 0`).
+    pub mask_dropped: u32,
 }
 
 /// Why a water plan could not be made.
@@ -382,6 +399,9 @@ impl WaterCounters {
     }
 }
 
+/// A memoised lake mask (REND-065): `None` when no sample of the tile is the lake's.
+type LakeMaskMemo = Option<std::sync::Arc<Vec<u8>>>;
+
 /// The per-tile answers of the selection query, memoised (a pure function of the tile and the field).
 #[derive(Default)]
 pub struct WaterTileCache {
@@ -405,6 +425,8 @@ pub struct WaterTileCache {
     pub no_minimum: u64,
     /// The extent and the lowest terrain bound of the tiles the cut has looked at (pure functions of the tile and the height field).
     extents: HashMap<TileId, (TileExtent, Option<f64>)>,
+    /// The lake masks of the tiles (REND-065), by tile, node size and body: a pure function of those and the lake source (one source a cache: the viewer's world sets it once). `None`: no sample of the tile is the lake's.
+    masks: HashMap<(TileId, u32, u64), LakeMaskMemo>,
 }
 
 impl WaterTileCache {
@@ -433,6 +455,26 @@ impl WaterTileCache {
     pub fn clear(&mut self) {
         self.tiles.clear();
         self.extents.clear();
+        self.masks.clear();
+    }
+
+    /// The lake mask of `tile` for the lake `body` on nodes of `cells` cells (REND-065), memoised ([`node_lake_mask`]).
+    pub fn lake_mask(
+        &mut self,
+        lakes: &dyn LakeMaskSource,
+        tile: TileId,
+        cells: u32,
+        body: WaterBodyId,
+    ) -> Result<Option<std::sync::Arc<Vec<u8>>>, WaterError> {
+        if let Some(m) = self.masks.get(&(tile, cells, body.0)) {
+            return Ok(m.clone());
+        }
+        let m = node_lake_mask(lakes, tile, cells, body)?.map(std::sync::Arc::new);
+        if self.masks.len() >= WATER_BOOK_CAP {
+            self.masks.clear();
+        }
+        self.masks.insert((tile, cells, body.0), m.clone());
+        Ok(m)
     }
 
     pub fn len(&self) -> usize {
@@ -529,6 +571,31 @@ pub struct WaterRequest<'a> {
     /// The terrain's height field: `Some` switches the cut of ATMO-020 on (the horizon and the height test, the tile's height bounds
     /// being the ones the node selection culls with); `None` keeps every node that carries water.
     pub cut: Option<&'a dyn HeightField>,
+    /// The lake masks of the drawn commit (REND-065): a lake node is drawn only where its mask is wet. `None`: no lake masks (every node drawn wherever `W - h_morph > 0`).
+    pub lakes: Option<&'a dyn LakeMaskSource>,
+}
+
+/// The lake mask of a node (REND-065): the samples of node `tile` (`cells` cells an edge, `cells + 1` samples a side) placed on the lake grid by [`crate::river::node_window`], each read at its nearest
+/// cell (clamped to the face: a sample on the face's edge reads the face's border cell): 255 where that cell is the lake `body`'s, 0 elsewhere. `None` when no sample is the lake's.
+pub fn node_lake_mask(lakes: &dyn LakeMaskSource, tile: TileId, cells: u32, body: WaterBodyId) -> Result<Option<Vec<u8>>, WaterError> {
+    let ((x0, y0), step) = crate::river::node_window(tile, cells, lakes.cells() as u32);
+    let size = cells as usize + 1;
+    let mut codes = vec![0u8; size * size];
+    let mut any = false;
+    // A sample on the face's outer edge lies half a cell outside the first or last cell: it reads that border cell of its own face.
+    let last = lakes.cells() as i64 - 1;
+    for b in 0..size {
+        let j = (libm::round(y0 + b as f64 * step) as i64).clamp(0, last);
+        for a in 0..size {
+            let i = (libm::round(x0 + a as f64 * step) as i64).clamp(0, last);
+            let c = lakes.lake_at(tile.face(), i, j).map_err(|e| WaterError::Read(e.to_string()))?;
+            if c.is_some_and(|c| lake_body(c.face, c.index) == body) {
+                codes[b * size + a] = 255;
+                any = true;
+            }
+        }
+    }
+    Ok(any.then_some(codes))
 }
 
 /// The distance (m) from a camera `height_m` above the level `level_m` out to which a surface that rises `rise_m` above that level
@@ -585,6 +652,7 @@ pub fn tile_above_water(lowest_m: f64, level_m: f64, rise_m: f64) -> bool {
 pub fn plan_water(req: &WaterRequest<'_>, cache: &mut WaterTileCache, terrain: &TerrainPlan) -> Result<WaterPlan, WaterError> {
     let mut liquids: Vec<LiquidAppearance> = Vec::new();
     let mut nodes = Vec::new();
+    let (mut masks, mut mask_dropped): (Vec<WaterMask>, u32) = (Vec::new(), 0);
     (cache.cut_horizon, cache.cut_height, cache.cut_exact, cache.no_minimum) = (0, 0, 0, 0);
     let camera = terrain.camera.position.0;
     for (i, n) in terrain.nodes.iter().enumerate() {
@@ -641,6 +709,17 @@ pub fn plan_water(req: &WaterRequest<'_>, cache: &mut WaterTileCache, terrain: &
                 continue;
             }
         }
+        // A lake node is drawn only where its lake's mask is wet (REND-065); a node none of whose samples is the lake's carries no water.
+        let mut mask = None;
+        if let (Some(lakes), true) = (req.lakes, lake_of_body(w.body).is_some()) {
+            let Some(codes) = cache.lake_mask(lakes, n.tile, req.lod.cells, w.body)? else { continue };
+            if masks.len() < LAKE_MASK_SLOTS {
+                mask = Some(masks.len() as u32);
+                masks.push(WaterMask { size: req.lod.cells + 1, codes: codes.as_ref().clone() });
+            } else {
+                mask_dropped += 1;
+            }
+        }
         let o = n.origin.0;
         nodes.push(WaterNode {
             node: i as u32,
@@ -648,14 +727,15 @@ pub fn plan_water(req: &WaterRequest<'_>, cache: &mut WaterTileCache, terrain: &
             liquid: slot as u8,
             phases: tile_phases(&liquids[slot], [o.x, o.y, o.z], req.time_s),
             spacing_m: req.lod.sample_spacing(n.level) as f32,
+            mask,
         });
     }
-    Ok(WaterPlan { look: *req.look, time_s: req.time_s, view: req.view, liquids, nodes })
+    Ok(WaterPlan { look: *req.look, time_s: req.time_s, view: req.view, liquids, nodes, masks, mask_dropped })
 }
 
 /// An empty water plan (no node): what a viewer warms the pass with.
 pub fn empty_water_plan(look: &WaterLook) -> WaterPlan {
-    WaterPlan { look: *look, time_s: 0.0, view: WaterView::Lit, liquids: Vec::new(), nodes: Vec::new() }
+    WaterPlan { look: *look, time_s: 0.0, view: WaterView::Lit, liquids: Vec::new(), nodes: Vec::new(), masks: Vec::new(), mask_dropped: 0 }
 }
 
 /// The sea's body id, for tests that look for it.
@@ -697,6 +777,15 @@ impl WaterPlan {
             if n.phases.iter().any(|p| !(0.0..=std::f32::consts::TAU).contains(p)) {
                 return Err(format!("water plan: node {} has a wave phase outside [0, 2 pi]: {:?}", n.node, n.phases));
             }
+            if n.mask.is_some_and(|m| m as usize >= self.masks.len()) {
+                return Err(format!("water plan: node {} names lake mask {:?}, the plan has {}", n.node, n.mask, self.masks.len()));
+            }
+        }
+        if self.masks.len() > LAKE_MASK_SLOTS {
+            return Err(format!("water plan: {} lake masks, at most {LAKE_MASK_SLOTS}", self.masks.len()));
+        }
+        if let Some(m) = self.masks.iter().find(|m| m.size < 2 || m.codes.len() != (m.size * m.size) as usize) {
+            return Err(format!("water plan: a lake mask of size {} holds {} codes", m.size, m.codes.len()));
         }
         Ok(())
     }
@@ -719,13 +808,21 @@ impl WaterPlan {
         }
         for n in &self.nodes {
             s += &format!(
-                "wnode {} level {} liquid {} phases {} spacing {}\n",
+                "wnode {} level {} liquid {} phases {} spacing {}{}\n",
                 n.node,
                 h32(n.level_m),
                 n.liquid,
                 n.phases.map(h32).join(" "),
-                h32(n.spacing_m)
+                h32(n.spacing_m),
+                n.mask.map(|m| format!(" mask {m}")).unwrap_or_default()
             );
+        }
+        // The lake masks (REND-065): one line each, the codes as hex; a plan without lakes writes none (the text of every older plan is unchanged).
+        for m in &self.masks {
+            s += &format!("wmask {} {}\n", m.size, m.codes.iter().map(|c| format!("{c:02x}")).collect::<String>());
+        }
+        if self.mask_dropped > 0 {
+            s += &format!("wmaskdropped {}\n", self.mask_dropped);
         }
         // No trailing newline: the caller adds the separators.
         s.pop();
@@ -751,6 +848,8 @@ impl WaterPlan {
                         view: WaterView::parse(view).ok_or(format!("unknown water view '{view}'"))?,
                         liquids: Vec::new(),
                         nodes: Vec::new(),
+                        masks: Vec::new(),
+                        mask_dropped: 0,
                     });
                 }
                 ["liquid", kind, rest @ ..] => {
@@ -773,15 +872,36 @@ impl WaterPlan {
                         waves,
                     });
                 }
-                ["wnode", node, "level", level, "liquid", liquid, "phases", a, b, c, d, "spacing", sp] => {
+                ["wnode", node, "level", level, "liquid", liquid, "phases", a, b, c, d, "spacing", sp, rest @ ..] => {
                     let p = plan.as_mut().ok_or("a wnode line before the water line")?;
+                    let mask = match rest {
+                        [] => None,
+                        ["mask", m] => Some(m.parse().map_err(|e| format!("bad lake mask index '{m}': {e}"))?),
+                        _ => return Err(format!("cannot parse the end of a wnode line '{}'", rest.join(" "))),
+                    };
                     p.nodes.push(WaterNode {
                         node: node.parse().map_err(|e| format!("bad node index '{node}': {e}"))?,
                         level_m: p32(level)?,
                         liquid: liquid.parse().map_err(|e| format!("bad liquid slot '{liquid}': {e}"))?,
                         phases: [p32(a)?, p32(b)?, p32(c)?, p32(d)?],
                         spacing_m: p32(sp)?,
+                        mask,
                     });
+                }
+                ["wmask", size, hex] => {
+                    let p = plan.as_mut().ok_or("a wmask line before the water line")?;
+                    let size: u32 = size.parse().map_err(|e| format!("bad lake mask size '{size}': {e}"))?;
+                    if hex.len() % 2 != 0 {
+                        return Err(format!("a wmask line of size {size} has an odd hex length {}", hex.len()));
+                    }
+                    let codes = (0..hex.len() / 2)
+                        .map(|k| u8::from_str_radix(&hex[2 * k..2 * k + 2], 16).map_err(|e| format!("bad lake mask code: {e}")))
+                        .collect::<Result<Vec<u8>, _>>()?;
+                    p.masks.push(WaterMask { size, codes });
+                }
+                ["wmaskdropped", n] => {
+                    let p = plan.as_mut().ok_or("a wmaskdropped line before the water line")?;
+                    p.mask_dropped = n.parse().map_err(|e| format!("bad dropped mask count '{n}': {e}"))?;
                 }
                 other => return Err(format!("cannot parse water plan line '{}'", other.join(" "))),
             }

@@ -152,8 +152,17 @@ fn terrain(index: usize) -> TerrainPlan {
 
 fn water(src: &dyn WaterSource, plan: &TerrainPlan, cut: Option<&dyn HeightField>, cache: &mut WaterTileCache) -> WaterPlan {
     let (table, look, lod) = (LiquidTable::earth(), WaterLook::EARTH, lod());
-    let req =
-        WaterRequest { source: src, map: &TangentWarp, liquids: &table, look: &look, lod: &lod, time_s: 3.0, view: WaterView::Lit, cut };
+    let req = WaterRequest {
+        source: src,
+        map: &TangentWarp,
+        liquids: &table,
+        look: &look,
+        lod: &lod,
+        time_s: 3.0,
+        view: WaterView::Lit,
+        cut,
+        lakes: None,
+    };
     plan_water(&req, cache, plan).unwrap()
 }
 
