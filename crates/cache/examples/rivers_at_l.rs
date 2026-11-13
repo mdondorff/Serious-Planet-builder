@@ -120,6 +120,34 @@ fn main() -> Result<(), String> {
     let regional = &front.regional_field;
     let z0 = sample(&|d: Vec3| base(d) + regional.at(d));
     let t_sample = t0.elapsed().as_secs_f64();
+    // GEN-188 (lead 2026-11-14): the clamped C1 read of the regional change may step at the regional cell-centre lines (local x = 8i + 3.5): the jump across the pair (8i+3, 8i+4) against the mean of
+    // the two neighbouring differences, over 0.1 m, counted for both axes.
+    let (steps_over, line_pairs) = {
+        let r = sample(&|d: Vec3| regional.at(d));
+        let (mut over, mut pairs) = (0usize, 0usize);
+        let half = (l / 2 - 1) as i64; // 3: the cell before the centre line within a regional cell
+        for y in 1..h - 2 {
+            for x in 1..w - 2 {
+                let (gx, gy) = (x0 + x as i64, y0 + y as i64);
+                if gx.rem_euclid(l as i64) == half {
+                    let c = y * w + x;
+                    let jump = r[c + 1] - r[c];
+                    let around = 0.5 * ((r[c] - r[c - 1]) + (r[c + 2] - r[c + 1]));
+                    pairs += 1;
+                    over += usize::from((jump - around).abs() > 0.1);
+                }
+                if gy.rem_euclid(l as i64) == half {
+                    let c = y * w + x;
+                    let jump = r[c + w] - r[c];
+                    let around = 0.5 * ((r[c] - r[c - w]) + (r[c + 2 * w] - r[c + w]));
+                    pairs += 1;
+                    over += usize::from((jump - around).abs() > 0.1);
+                }
+            }
+        }
+        (over, pairs)
+    };
+    println!("RIVERS GEN-188 steps of the regional read at its cell-centre lines: {steps_over} of {line_pairs} line-crossing L cell pairs jump over 0.1 m beyond their neighbours");
     // The runoff of each L cell: its H1 cell's (m/s), as H1 reads it.
     let h1_runoff: Vec<f32> = (0..rw * rh)
         .map(|c| {
@@ -320,6 +348,31 @@ fn main() -> Result<(), String> {
         }
     }
     let t_b_done = t0.elapsed().as_secs_f64();
+    // The tell of rivers following the regional cell-centre lines: channel steps whose two cells sit on the same side pair of one line (columns 8i+3 / 8i+4, or rows) and that run parallel to it.
+    let along = |recv: &[u32], chan: &dyn Fn(usize) -> bool| -> (usize, usize) {
+        let (mut n_steps, mut n_along) = (0usize, 0usize);
+        let on_line = |v: i64| { let m = v.rem_euclid(l as i64); m == (l / 2 - 1) as i64 || m == (l / 2) as i64 };
+        for c in 0..w * h {
+            let r = recv[c];
+            if r == none || !chan(c) || !inside(c) {
+                continue;
+            }
+            let (cx, cy) = (x0 + (c % w) as i64, y0 + (c / w) as i64);
+            let (rx, ry) = (x0 + (r as usize % w) as i64, y0 + (r as usize / w) as i64);
+            n_steps += 1;
+            let vertical_along = cx == rx && on_line(cx);
+            let horizontal_along = cy == ry && on_line(cy);
+            n_along += usize::from(vertical_along || horizontal_along);
+        }
+        (n_steps, n_along)
+    };
+    let (sa, aa) = along(&routing.receiver, &|c| channel[c]);
+    let (sb, ab) = along(&routing_b.receiver, &|c| area_b[c] >= threshold && zb[c] > 0.0);
+    println!(
+        "RIVERS along the regional cell-centre lines: B + regional {aa} of {sa} channel steps ({:.2} %), B alone {ab} of {sb} ({:.2} %) (a straight step on one of the 2 of 8 columns or rows next to a line)",
+        100.0 * aa as f64 / sa.max(1) as f64,
+        100.0 * ab as f64 / sb.max(1) as f64
+    );
     let (mut both, mut only_a, mut only_b) = (0usize, 0usize, 0usize);
     for c in 0..w * h {
         if !inside(c) {
