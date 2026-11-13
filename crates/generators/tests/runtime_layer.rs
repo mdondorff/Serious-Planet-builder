@@ -200,7 +200,7 @@ fn cell_dir(face: u8, i: usize, j: usize) -> Vec3 {
     )
 }
 
-// spec: GEN-112
+// spec: GEN-112, GEN-188
 #[test]
 fn the_read_is_the_cell_value_at_a_cell_centre_and_within_the_four_cells_around_a_point() {
     let l = layer(1.0, 3);
@@ -713,4 +713,148 @@ fn the_eroded_field_reads_the_channels_for_the_driver_block_and_changes_nothing_
     let s = broken.driver_channels(&dirs[..3]).unwrap();
     assert!(s.iter().all(|s| s.area_log2_cells.is_none()));
     assert!(broken.error().is_some_and(|e| e.contains("could not be read")), "{:?}", broken.error());
+}
+
+// spec: GEN-188
+#[test]
+fn the_read_has_no_step_across_a_cell_centre_line() {
+    // The noisy layer (cell-scale noise of 25 m): a read clamped to the four cells around the point stepped where the set of four changes, at every cell-centre line where the
+    // interpolant along the line overshoots on one side only (the #108 finding: 1.5 % of crossings over 0.1 m on R3a, up to 12.5 m).
+    let l = layer(1.0, 3);
+    let mut rng = SplitMix64(108);
+    let e = 1e-7;
+    let mut worst = (0.0f64, 0u8, 0.0f64, 0.0f64);
+    for k in 0..20_000 {
+        let face = (rng.next_f64() * 6.0) as u8;
+        // Away from the cube edges (the cross-fade with the neighbouring face is tested on its own).
+        let (x, y) = (4.0 + rng.next_f64() * 247.0, 4.0 + rng.next_f64() * 247.0);
+        let jump = if k % 2 == 0 {
+            let yi = libm::floor(y);
+            (l.change_at(at_cell(face, x, yi + e)).unwrap() - l.change_at(at_cell(face, x, yi - e)).unwrap()).abs()
+        } else {
+            let xi = libm::floor(x);
+            (l.change_at(at_cell(face, xi + e, y)).unwrap() - l.change_at(at_cell(face, xi - e, y)).unwrap()).abs()
+        };
+        if jump > worst.0 {
+            worst = (jump, face, x, y);
+        }
+    }
+    assert!(worst.0 <= 1e-4, "a jump of {} m across a cell-centre line on face {} near cell ({}, {})", worst.0, worst.1, worst.2, worst.3);
+}
+
+// spec: GEN-188
+#[test]
+fn the_read_at_a_cell_centre_is_the_stored_sample_bit_for_bit() {
+    let l = layer(1.0, 3);
+    let mut rng = SplitMix64(1880);
+    for _ in 0..2000 {
+        let (f, i, j) = ((rng.next_f64() * 6.0) as u8, 3 + (rng.next_f64() * 250.0) as usize, 3 + (rng.next_f64() * 250.0) as usize);
+        let v = l.change_at(cell_dir(f, i, j)).unwrap();
+        let want = f64::from(synthetic(1.0, 3, f, i, j) as f32);
+        assert_eq!(v.to_bits(), want.to_bits(), "face {f} cell ({i}, {j}): read {v}, sample {want}");
+    }
+}
+
+// spec: GEN-188
+#[test]
+fn the_read_has_no_crease_inside_a_cell_on_a_noisy_layer() {
+    // A fine scan (1e-4 cells) along x at a fixed fraction of a cell row, and along y at a fixed fraction of a column: the second difference over the step is the slope jump at a
+    // kink and about the curvature times the step elsewhere. A harmonic-mean slope in the cross pass kinks where two neighbouring rows' values cross (numerics review,
+    // 2026-11-13: 19.9 m per cell here, straight creases through the cells); the C1 limiter measured 1.8 m per cell (curvature at this step).
+    let l = layer(1.0, 3);
+    let s = 1e-4;
+    let mut rng = SplitMix64(1881);
+    let mut worst = (0.0f64, 0u8, 0.0f64, 0.0f64, 0usize);
+    for k in 0..60 {
+        let (face, axis) = ((rng.next_f64() * 6.0) as u8, k % 2);
+        let (start, across) = (4.0 + (rng.next_f64() * 230.0).floor(), 4.0 + rng.next_f64() * 247.0);
+        let read = |t: f64| {
+            let d = if axis == 0 { at_cell(face, t, across) } else { at_cell(face, across, t) };
+            l.change_at(d).unwrap()
+        };
+        let n = (6.0 / s) as usize;
+        let mut z: Vec<f64> = Vec::with_capacity(n + 1);
+        for q in 0..=n {
+            z.push(read(start + q as f64 * s));
+        }
+        for q in 1..n {
+            let jump = (z[q + 1] - 2.0 * z[q] + z[q - 1]).abs() / s;
+            if jump > worst.0 {
+                worst = (jump, face, start + q as f64 * s, across, axis);
+            }
+        }
+    }
+    assert!(
+        worst.0 < 5.0,
+        "a slope jump of {} m per cell on face {} at {} (across {}) along axis {}",
+        worst.0,
+        worst.1,
+        worst.2,
+        worst.3,
+        worst.4
+    );
+}
+
+/// A layer at the production face geometry (98,304 cells a face edge; small tiles, which do not change the read): each tile made on demand from a hash of the cell, no range scan.
+struct LazyLayer {
+    grid: TileGrid,
+}
+
+impl LazyLayer {
+    fn value(face: u8, i: usize, j: usize) -> f64 {
+        let h = (hash_u64s(0x1a2b, &[u64::from(face), i as u64, j as u64]) >> 11) as f64 / (1u64 << 53) as f64;
+        f64::from((300.0 * h - 150.0) as f32)
+    }
+}
+
+impl LayerSource for LazyLayer {
+    fn grid(&self) -> &TileGrid {
+        &self.grid
+    }
+    fn tile(&self, face: Face, ti: u32, tj: u32) -> Result<Option<Arc<LayerTile>>, String> {
+        let t = self.grid.tile;
+        let core: Vec<f32> =
+            (0..t * t).map(|k| LazyLayer::value(face.0, ti as usize * t + k % t, tj as usize * t + k / t) as f32).collect();
+        let result = Arc::new(TileResult {
+            id: PassTile { face, ti, tj },
+            core,
+            deposited: Vec::new(),
+            fill: Vec::new(),
+            heights: Vec::new(),
+            stats: zero_stats(),
+        });
+        Ok(Some(Arc::new(LayerTile::new(result, t)?)))
+    }
+    fn global_range(&self) -> (f64, f64) {
+        (-150.0, 150.0)
+    }
+    fn id(&self) -> u64 {
+        0x1a2b
+    }
+}
+
+// spec: GEN-188
+#[test]
+fn the_read_at_a_cell_centre_is_the_sample_at_the_production_geometry() {
+    // At 98,304 cells a face edge a direction made from a cell's indices round-trips to about 1.5e-11 cells off the centre (numerics review, 2026-11-13); the snap of 1e-9 cells
+    // keeps the read on the sample there.
+    let cells = 98_304usize;
+    let l = ErosionLayer::new(Arc::new(LazyLayer { grid: TileGrid { cells, tile: 64, halo: 8, radius_m: R } })).unwrap();
+    let mut rng = SplitMix64(98_304);
+    for _ in 0..500 {
+        let (f, i, j) = (
+            (rng.next_f64() * 6.0) as u8,
+            3 + (rng.next_f64() * (cells - 6) as f64) as usize,
+            3 + (rng.next_f64() * (cells - 6) as f64) as usize,
+        );
+        let d = face_to_direction(
+            &TangentWarp,
+            Face(f),
+            2.0 * (i as f64 + 0.5) / cells as f64 - 1.0,
+            2.0 * (j as f64 + 0.5) / cells as f64 - 1.0,
+        );
+        let v = l.change_at(d).unwrap();
+        let want = LazyLayer::value(f, i, j);
+        assert_eq!(v.to_bits(), want.to_bits(), "face {f} cell ({i}, {j}): read {v}, sample {want}");
+    }
 }

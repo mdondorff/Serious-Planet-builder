@@ -2,10 +2,9 @@
 //!
 //! The layer is a grid of tiles, each the change of its core's cells (`TileGrid`, the cell centres being the samples), held by a [`LayerSource`] that decodes a tile once while it stays
 //! cached (the cache crate implements it over the store, CON-02). A decoded tile ([`LayerTile`]) carries a min/max pyramid built when it is decoded: blocks of 32 cells, then 2 x 2
-//! blocks up to the whole tile. [`ErosionLayer::change_at`] reads the Catmull-Rom interpolant of the cells around the point, kept within the range of the four cells that surround it,
+//! blocks up to the whole tile. [`ErosionLayer::change_at`] reads a monotone C1 cubic of the cells around the point, one per axis (GEN-188), which stays within the range of the four cells that surround it,
 //! and [`ErosionLayer::range_over_cap`] the range of the cells a cap's reads can touch, from the pyramids of the tiles the cap reaches.
 
-use crate::bake::map::catmull_rom;
 use crate::bake::tile::{TileGrid, TileId as PassTile, TileResult};
 use planet_core::cube::{direction_to_face, face_to_direction, TangentWarp};
 use planet_core::hash::hash_u64s;
@@ -13,7 +12,7 @@ use planet_core::{smoothstep, Face, Vec3};
 use std::sync::Arc;
 
 /// Version of the runtime read (the C1 read, the fade and the range): part of the keys of a field that reads a layer.
-pub const LAYER_READ_VERSION: u32 = 1;
+pub const LAYER_READ_VERSION: u32 = 2;
 /// The height above the sea level, in metres, within which the layer's change is faded to 0 (the owner's coast remedy: a coastal plain keeps its sea level).
 pub const COAST_FADE_M: f64 = 3.0;
 /// Cells a side of a block of the pyramid's finest level.
@@ -27,6 +26,46 @@ pub const EDGE_BLEND_CELLS: f64 = 2.0;
 const FINE_CAP_CELLS: f64 = 8.0;
 /// A cap that reaches more tiles than this takes the layer's global range (a coarse render tile; the pyramids of a hundred tiles are not read for it).
 pub const MAX_CAP_TILES: usize = 36;
+
+/// A cell coordinate within this many cells of a cell centre is the centre (GEN-188): a direction made from a cell's indices reads its stored sample bit for bit.
+pub const CENTRE_SNAP_CELLS: f64 = 1e-9;
+
+/// `x` moved onto the nearest cell centre (an integer) when it lies within [`CENTRE_SNAP_CELLS`] of it.
+fn snap(x: f64) -> f64 {
+    let r = libm::round(x);
+    if (x - r).abs() <= CENTRE_SNAP_CELLS {
+        r
+    } else {
+        x
+    }
+}
+
+/// The slope at a sample between the differences `a` (before it) and `b` (after it) (GEN-188): when they have the same sign, their harmonic mean `2ab / (a + b)` times
+/// `2ab / (a² + b²)` (1 when `a = b`, so a uniform slope is kept; tending to 0 as either difference does), else 0. It lies between 0 and twice the smaller difference, so the cubic
+/// below stays monotone between its two samples. It vanishes to second order where one difference changes sign, so it is C1 there: the cross pass, whose differences move with the
+/// position along the row, has no crease. The harmonic mean alone (Fritsch-Butland) kinks where a difference changes sign (a slope jump of up to 20 m per cell on a noisy layer).
+fn harmonic_slope(a: f64, b: f64) -> f64 {
+    let ab = a * b;
+    if ab > 0.0 {
+        // `ab > 0` makes `a + b` non-zero and `a² + b² >= 2ab > 0`.
+        (2.0 * ab / (a + b)) * (2.0 * ab / (a * a + b * b))
+    } else {
+        0.0
+    }
+}
+
+/// The monotone cubic (GEN-188) through `p[1]` (at 0) and `p[2]` (at 1) on unit spacing, evaluated at `t` in `[0, 1]`: the Hermite cubic with the slopes [`harmonic_slope`] at both
+/// samples. It never leaves `[min(p1, p2), max(p1, p2)]` (no overshoot, so no clamp), is exactly `p[1]` at 0 and `p[2]` at 1, and joins its neighbouring segment with the same value and
+/// slope (C1), so a read made of it has no step and no kink at a cell-centre line.
+pub fn monotone_cubic(p: [f64; 4], t: f64) -> f64 {
+    let (m1, m2) = (harmonic_slope(p[1] - p[0], p[2] - p[1]), harmonic_slope(p[2] - p[1], p[3] - p[2]));
+    let (t2, t3) = (t * t, t * t * t);
+    let h00 = 2.0 * t3 - 3.0 * t2 + 1.0;
+    let h10 = t3 - 2.0 * t2 + t;
+    let h01 = -2.0 * t3 + 3.0 * t2;
+    let h11 = t3 - t2;
+    h00 * p[1] + h10 * m1 + h01 * p[2] + h11 * m2
+}
 
 /// The fade of the change at a point whose bake elevation is `e` over a sea at `sea_level_m`: 0 at the sea level and below, 1 from [`COAST_FADE_M`] above it, a smoothstep between.
 pub fn coast_fade(e: f64, sea_level_m: f64) -> f64 {
@@ -174,8 +213,9 @@ impl ErosionLayer {
         self.src.global_range()
     }
 
-    /// The layer's change at the unit direction `d`: the Catmull-Rom (C1) interpolant of the cells around the point (the cell centres being the samples), kept within the range of the
-    /// four cells that surround it (a bilinear read leaves a crease along every cell line; Catmull-Rom overshoots by up to 7.4 % of a step beside a sharp feature). A cell of a tile the
+    /// The layer's change at the unit direction `d`: the monotone C1 cubic of the cells around the point, first along each row, then across the rows (GEN-188; the cell centres being the
+    /// samples, read bit for bit there). It stays within the range of the four cells that surround it without a clamp (a bilinear read leaves a crease along every cell line; Catmull-Rom
+    /// overshoots beside a sharp feature, and a clamp to the four cells steps where the four change, at every cell-centre line). A cell of a tile the
     /// layer does not hold is 0; the stencil reads the neighbouring tile's cells and clamps at the edge of the face. Within [`EDGE_BLEND_CELLS`] of a cube edge the face's read is
     /// cross-faded with the neighbouring face's read of the same direction (weights as the bake's `change_at`: the own face 1, a neighbour `1 - smoothstep` of the distance to the edge, the
     /// sum normalised), so the two faces meet at the edge and around a corner.
@@ -216,7 +256,7 @@ impl ErosionLayer {
         let (s, t) = (plane(d.dot(face.u_axis()) / w), plane(d.dot(face.v_axis()) / w));
         let n = g.cells;
         let top = (n - 1) as f64;
-        let (x, y) = (((s + 1.0) * 0.5 * n as f64 - 0.5).clamp(0.0, top), ((t + 1.0) * 0.5 * n as f64 - 0.5).clamp(0.0, top));
+        let (x, y) = (snap(((s + 1.0) * 0.5 * n as f64 - 0.5).clamp(0.0, top)), snap(((t + 1.0) * 0.5 * n as f64 - 0.5).clamp(0.0, top)));
         let (i, j) = ((x as usize).min(n - 2), (y as usize).min(n - 2));
         let (fx, fy) = (x - i as f64, y - j as f64);
         // The tiles of the 4 x 4 stencil, each looked up once.
@@ -237,11 +277,9 @@ impl ErosionLayer {
         let mut rows = [0.0; 4];
         for (r, dj) in rows.iter_mut().zip(-1..=2) {
             let p = [cell(ii - 1, jj + dj)?, cell(ii, jj + dj)?, cell(ii + 1, jj + dj)?, cell(ii + 2, jj + dj)?];
-            *r = catmull_rom(p, fx);
+            *r = monotone_cubic(p, fx);
         }
-        let v = catmull_rom(rows, fy);
-        let around = [cell(ii, jj)?, cell(ii + 1, jj)?, cell(ii, jj + 1)?, cell(ii + 1, jj + 1)?];
-        Ok(v.clamp(around.iter().copied().fold(f64::INFINITY, f64::min), around.iter().copied().fold(f64::NEG_INFINITY, f64::max)))
+        Ok(monotone_cubic(rows, fy))
     }
 
     /// The range `(lowest, highest)` that holds the change at every direction within `angular_radius` of `centre` (GEN-102): the union of the ranges of the pyramid nodes (and of the
