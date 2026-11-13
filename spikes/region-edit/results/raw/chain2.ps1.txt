@@ -1,0 +1,15 @@
+Set-Location C:\DEV\Serious-Planet-Builder\.claude\worktrees\sonnet-spikes-36fc88
+$s2 = 'ridge:-36.81728:-162.22778:-36.79465:-162.08130:25.1:0.6:0.6'
+& target/spike112/run.ps1 -out fresh-split2 -argline "fresh --threads 8 --name split2 --edit $s2"
+& target/spike112/run.ps1 -out incr-split2 -argline "incr --threads 8 --name split2 --edit $s2"
+& target/spike112/run.ps1 -out locate-split2 -argline "locate --threads 8 --edit $s2"
+$S = 'target/spike112/stills'
+$e1 = "too many lakes; cause: basins of the starting surface (SPIKE-109)`nvalley ponds: sea water of the coastal band in valleys the carve (K7) cut below sea level, not lakes"
+$after = 'level-2 re-solve, bit-equal to a fresh build; edit applied to the in-memory base (spike code)'
+$env:PLANET_SPIKE_EDIT = $s2
+foreach ($r in @(@('after-split2-cluster','poses-cluster.toml','cluster-25km',"SPIKE-112 AFTER: 25 m ridge E-W across lake 30 (13 km E); $after"), @('after-split2','poses-split.toml','',"SPIKE-112 AFTER: 25 m ridge E-W across lake 30; $after"))) {
+  $a = @('test-render','--scene','capture-stills','--adapter','hardware','--seed','14','--commit','target/spike112/incr-split2/edit','--poses',"$S/$($r[1])",'--out-dir',"$S/$($r[0])",'--size','1920x1080','--note',"$($r[3])`n$e1",'--caption',$r[3])
+  if ($r[2]) { $a += @('--views',$r[2]) }
+  & "$S/planet.exe" @a *> "$S/$($r[0]).log"
+}
+Add-Content target/spike112/progress.log 'CHAIN2 DONE'

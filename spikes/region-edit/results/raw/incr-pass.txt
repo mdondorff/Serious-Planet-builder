@@ -1,0 +1,29 @@
+SPIKE-112 region_edit incr, edit 'lower:-36.82800:-162.34497:100:2.5:1.5' (pass), threads 8, memo tile 256; setup 10.7 s
+MEM setup: commit 44 MiB, peak commit 194 MiB
+lattices 15.8 s; nodes changed by the edit: 172 of 1865956
+PARTS base memo rounds: part tile hashes 0.02; part tile flood sweeps 2.70; part regrade flats 0.23; part receivers 0.97; part order+roots 0.07; part area 7.97; part compare+keep 0.02; memo cut 0.10; memo catchments 0.10; memo assemble+narrow+evict 0.01
+WORK base round 1: tiles 16, tile floods 44 (memo hits 0), tiles changed: filled 0, receivers 0, A_d 0; catchments 2729 carved 2729 (memo 0), cells carved 724331
+WORK base round 2: tiles 16, tile floods 48 (memo hits 2), tiles changed: filled 0, receivers 0, A_d 0; catchments 2680 carved 2680 (memo 0), cells carved 724282
+WORK base round 3: tiles 16, tile floods 55 (memo hits 2), tiles changed: filled 0, receivers 0, A_d 0; catchments 2611 carved 1853 (memo 758), cells carved 722589
+WORK base round 4: tiles 16, tile floods 55 (memo hits 2), tiles changed: filled 0, receivers 0, A_d 0; catchments 2550 carved 1700 (memo 850), cells carved 722295
+BASE (memoised): rounds 12.5 s, H1 1.7 s, K7+write 171.9 s (52 tiles); cache 203 MiB, 8962 catchment rounds held
+MEM base state held (editor before the edit): commit 373 MiB, peak commit 425 MiB
+PARTS edit memo rounds: part tile hashes 0.02; part tile flood sweeps 0.26; part regrade flats 0.21; part receivers 0.86; part order+roots 0.07; part area 7.02; part compare+keep 0.03; memo cut 0.08; memo catchments 0.06; memo assemble+narrow+evict 0.01
+WORK edit round 1: tiles 16, tile floods 3 (memo hits 41), tiles changed: filled 1, receivers 1, A_d 2; catchments 2729 carved 2 (memo 2727), cells carved 39140
+WORK edit round 2: tiles 16, tile floods 3 (memo hits 47), tiles changed: filled 1, receivers 1, A_d 2; catchments 2680 carved 5 (memo 2675), cells carved 41998
+WORK edit round 3: tiles 16, tile floods 6 (memo hits 51), tiles changed: filled 2, receivers 1, A_d 2; catchments 2611 carved 5 (memo 2606), cells carved 42024
+WORK edit round 4: tiles 16, tile floods 6 (memo hits 51), tiles changed: filled 2, receivers 1, A_d 2; catchments 2550 carved 5 (memo 2545), cells carved 42021
+MEM after the edit: commit 478 MiB, peak commit 529 MiB
+LEVEL2 pass: rounds 8.9 s, H1+lakes+graph 1.5 s, dirty-tile test 0.05 s, K7 of 10 dirty tiles + write 31.4 s; total 41.9 s; cache 213 MiB, 8979 catchment rounds held
+DIRTY pass: 10 of 52 land tiles: (89, 8) (87, 9) (88, 9) (89, 9) (87, 10) (88, 10) (89, 10) (87, 11) (88, 11) (89, 11)
+H1 pass: lakes 69 -> 69, channel cells 47951 -> 47950, segments 13578 -> 13580
+CHANGE pass: regional cells whose base changed 129, whose solved surface changed 8986 of 1040400
+TILES pass: records that differ from the base: 6 ((87, 10) (88, 9) (88, 10) (89, 8) (89, 9) (89, 10))
+PARTS G-EQ resident rounds: resident route 3.69; resident cut 0.09; resident catchments 0.09; resident assemble+narrow 0.01
+G-EQ rounds pass: memoised = resident, 0 of 1040400 regional cells differ (resident 4.2 s)
+G-EQ store base pass: incr base against fresh-none: bit-equal (3 files)
+G-EQ store edit pass: incr edit against fresh-pass: bit-equal (3 files)
+G-EQ tiles base pass: 52 of 52 L tile records equal
+G-EQ tiles edit pass: 52 of 52 L tile records equal
+MEM end: commit 492 MiB, peak commit 555 MiB
+done in 258.8 s
