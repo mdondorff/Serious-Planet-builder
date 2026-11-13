@@ -11,6 +11,7 @@ pub mod envelopeperf;
 pub mod fixturebase;
 pub mod gate;
 pub mod globalperf;
+pub mod gpumem;
 pub mod horizonstep;
 pub mod horizonworld;
 /// The default cells a face edge of the level-1 preview's H0 grid (`--preview-l1`): about a second a preview.

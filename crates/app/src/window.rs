@@ -361,6 +361,8 @@ struct Running {
     last_counts: planet_frame::managed::FrameCounts,
     /// The residency over the run, printed when the window closes (VIEW-070).
     residency: crate::pipelined::ResidencyLog,
+    /// The GPU allocator after the start-up (VIEW-070): the closing lines set it beside the end.
+    gpu_start: String,
     last_ms: Option<u64>,
     last_gpu_sample: Instant,
     gpu_ms: Option<f64>,
@@ -624,6 +626,7 @@ impl App<'_> {
         // The free camera's ground is read on a thread of its own, with the blocks under the camera pinned (VIEW-061, CON-22).
         let ground_world = self.world.clone();
         let ground = crate::cameraground::CameraGround::new(std::sync::Arc::new(move |d| ground_world.ground_pinned(d)));
+        let gpu_start = crate::gpumem::line(&ctx, "at the start");
         self.state = Some(Running {
             ground,
             ui,
@@ -646,6 +649,7 @@ impl App<'_> {
             warm_prev: None,
             last_counts: Default::default(),
             residency: Default::default(),
+            gpu_start,
             last_ms: None,
             last_gpu_sample: Instant::now(),
             gpu_ms: None,
@@ -1038,6 +1042,8 @@ impl App<'_> {
                 let held: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().filter(|n| n.capped).map(|n| n.tile).collect();
                 let under = st.edit.as_ref().map_or(&[][..], |e| e.capped_under_edit());
                 g.gate.held(st.frames, &held, under);
+                let region = self.world.commit_region();
+                g.gate.held_where(&held, &|t| region.is_some_and(|r| r.contains(t.center_direction(&planet_core::cube::TangentWarp))));
             }
             let capped = frame.pipeline.draw.plan.nodes.iter().filter(|n| n.capped).count();
             if let Some(line) = st.capped_log.observe(capped, now_ms) {
@@ -1725,7 +1731,16 @@ impl ApplicationHandler for App<'_> {
         }
         match event {
             WindowEvent::CloseRequested => {
-                self.closing = self.state.as_ref().map(|st| st.residency.line(self.cfg.resident_cap));
+                self.closing = self.state.as_ref().map(|st| {
+                    format!(
+                        "{}
+{}
+{}",
+                        st.residency.line(self.cfg.resident_cap),
+                        st.gpu_start,
+                        crate::gpumem::line(&st.ctx, "at the end")
+                    )
+                });
                 el.exit()
             }
             WindowEvent::ModifiersChanged(m) => {
@@ -1890,7 +1905,16 @@ impl ApplicationHandler for App<'_> {
                 match drawn {
                     Ok(true) => {
                         self.summary = self.state.as_ref().map(smoke_summary);
-                        self.closing = self.state.as_ref().map(|st| st.residency.line(self.cfg.resident_cap));
+                        self.closing = self.state.as_ref().map(|st| {
+                            format!(
+                                "{}
+{}
+{}",
+                                st.residency.line(self.cfg.resident_cap),
+                                st.gpu_start,
+                                crate::gpumem::line(&st.ctx, "at the end")
+                            )
+                        });
                         el.exit();
                     }
                     Ok(false) => {
@@ -2268,6 +2292,10 @@ fn gate_finish(g: &GateRun) -> Result<(), String> {
     }
     let failures = g.gate.failures(0, false, panics, std::env::var_os("PLANET_GATE_SOFTWARE").is_none());
     if failures.is_empty() {
+        Ok(())
+    } else if crate::gate::measure_mode() {
+        // A replay that measures (`cargo xtask repro --window`, BUILD-054) has no verdict to fail: the counters are the result, and the run ends like any other.
+        println!("gate (measure, not judged):\n  {}", failures.join("\n  "));
         Ok(())
     } else {
         Err(format!("gate FAILED:\n  {}", failures.join("\n  ")))
