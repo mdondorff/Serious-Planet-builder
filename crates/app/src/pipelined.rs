@@ -393,7 +393,8 @@ mod size_tests {
         assert_eq!(resident_capacity(205_170, None), 205_170);
         assert_eq!(resident_capacity(205_170, Some(VIEWER_RESIDENT_CAP)), VIEWER_RESIDENT_CAP);
         assert_eq!(resident_capacity(13_678, Some(VIEWER_RESIDENT_CAP)), 13_678);
-        assert!(VIEWER_RESIDENT_CAP >= 20_517, "R of the standard views (10 % of the mid tier) fits the cap");
+        // R of the standard views (10 % of the mid tier) fits the cap.
+        const { assert!(VIEWER_RESIDENT_CAP >= 20_517) };
     }
 
     // spec: BUDG-003
