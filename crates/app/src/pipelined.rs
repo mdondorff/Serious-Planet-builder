@@ -117,6 +117,26 @@ pub(crate) fn resident_capacity(pool_slots: usize, cap: Option<usize>) -> usize 
     cap.map_or(pool_slots, |c| c.min(pool_slots))
 }
 
+/// What the residency did over a run, for the viewer's closing line (VIEW-070): the most tiles resident in a frame and the tiles evicted.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ResidencyLog {
+    pub max_resident: usize,
+    pub evicted: u64,
+}
+
+impl ResidencyLog {
+    /// One frame's counts.
+    pub fn note(&mut self, resident: usize, evicted: u64) {
+        self.max_resident = self.max_resident.max(resident);
+        self.evicted += evicted;
+    }
+
+    /// The line the window prints when it closes, naming the cap the run had.
+    pub fn line(&self, cap: usize) -> String {
+        format!("planet editor: resident tiles at most {}, evicted {} (cap {cap})", self.max_resident, self.evicted)
+    }
+}
+
 impl Rig {
     /// A rig for requests like `first`: one tile size (cells) and one finest level, the pools sized for the first request.
     pub(crate) fn new(
@@ -385,7 +405,18 @@ pub fn log_text(log: &[FrameLog]) -> String {
 
 #[cfg(test)]
 mod size_tests {
-    use super::{resident_capacity, terrain_sizes, VIEWER_RESIDENT_CAP};
+    use super::{resident_capacity, terrain_sizes, ResidencyLog, VIEWER_RESIDENT_CAP};
+
+    // spec: VIEW-070
+    #[test]
+    fn the_closing_line_names_the_most_resident_tiles_the_evictions_and_the_cap() {
+        let mut log = ResidencyLog::default();
+        log.note(9_000, 0);
+        log.note(24_000, 35);
+        log.note(23_500, 120);
+        assert_eq!(log.line(24_000), "planet editor: resident tiles at most 24000, evicted 155 (cap 24000)");
+        assert_eq!(ResidencyLog::default().line(1), "planet editor: resident tiles at most 0, evicted 0 (cap 1)");
+    }
 
     // spec: VIEW-070
     #[test]

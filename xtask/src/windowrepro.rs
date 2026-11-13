@@ -98,11 +98,16 @@ pub fn run(root: &Path, bundle: &str, path: &str, real: bool, extra: &[String]) 
     }
     let out = cmd.output().map_err(|e| format!("cannot start {}: {e}", exe.display()))?;
     let stdout = String::from_utf8_lossy(&out.stdout);
+    // The whole output stays beside the report: the closing lines of the window are not all printed.
+    let _ = std::fs::write(out_dir.join("stdout.txt"), stdout.as_bytes());
     let stderr = String::from_utf8_lossy(&out.stderr);
     let Some(line) = gate_line(&stdout) else {
         return Err(format!("the window replay printed no gate line ({}): {}", out.status, stderr.lines().last().unwrap_or("")));
     };
     println!("{line}");
+    if let Some(r) = stdout.lines().find(|l| l.starts_with("planet editor: resident tiles")) {
+        println!("{r}");
+    }
     println!("{}", verdict(line, &world));
     println!("report: {}; stall reports of the window: {}", report.display(), out_dir.join("crashes").display());
     Ok(())

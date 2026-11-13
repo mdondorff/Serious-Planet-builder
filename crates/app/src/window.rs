@@ -359,6 +359,8 @@ struct Running {
     warm_prev: Option<(u64, planet_core::Vec3)>,
     /// What the scheduler counted in the last frame, for a stall report.
     last_counts: planet_frame::managed::FrameCounts,
+    /// The residency over the run, printed when the window closes (VIEW-070).
+    residency: crate::pipelined::ResidencyLog,
     last_ms: Option<u64>,
     last_gpu_sample: Instant,
     gpu_ms: Option<f64>,
@@ -450,6 +452,8 @@ struct App<'w> {
     state: Option<Running>,
     error: Option<String>,
     summary: Option<String>,
+    /// What the residency did over the run, taken when the window closes or the smoke run ends (the state may be gone by then, VIEW-070).
+    closing: Option<String>,
 }
 
 /// How long a window size must hold before the 3D target is made again at it, milliseconds (an edge drag sends a size per mouse move).
@@ -641,6 +645,7 @@ impl App<'_> {
             stall: Default::default(),
             warm_prev: None,
             last_counts: Default::default(),
+            residency: Default::default(),
             last_ms: None,
             last_gpu_sample: Instant::now(),
             gpu_ms: None,
@@ -1015,6 +1020,7 @@ impl App<'_> {
                 })?;
             st.counts.coarse_lod_frames += u64::from(st.viewer.coarse_lod);
             st.last_counts = frame.counts;
+            st.residency.note(frame.counts.resident, frame.counts.evicted);
             st.stall.mark("plan and residency (begin_frame)");
             // A refusal of the plan for the base parameters degrades the frame (it draws the newest plan in hand); it is said once, never fatal.
             // One line, one report file and one title notice per cause (kind and level) in 5 s; the title counts all of them.
@@ -1718,7 +1724,10 @@ impl ApplicationHandler for App<'_> {
             }
         }
         match event {
-            WindowEvent::CloseRequested => el.exit(),
+            WindowEvent::CloseRequested => {
+                self.closing = self.state.as_ref().map(|st| st.residency.line(self.cfg.resident_cap));
+                el.exit()
+            }
             WindowEvent::ModifiersChanged(m) => {
                 if let Some(st) = self.state.as_mut() {
                     st.ctrl = m.state().control_key();
@@ -1881,6 +1890,7 @@ impl ApplicationHandler for App<'_> {
                 match drawn {
                     Ok(true) => {
                         self.summary = self.state.as_ref().map(smoke_summary);
+                        self.closing = self.state.as_ref().map(|st| st.residency.line(self.cfg.resident_cap));
                         el.exit();
                     }
                     Ok(false) => {
@@ -2225,6 +2235,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         state: None,
         error: None,
         summary: None,
+        closing: None,
     };
     event_loop.run_app(&mut app).map_err(|e| format!("{NO_DISPLAY}the event loop failed: {e}"))?;
     if std::env::var_os("PLANET_TIMING").is_some() {
@@ -2235,6 +2246,10 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     }
     if let Some(st) = &app.state {
         writeln!(out, "{}", st.adapter_line).map_err(err)?;
+    }
+    // A normal flight says what the residency did, the evidence of the cap (VIEW-070).
+    if let Some(line) = &app.closing {
+        writeln!(out, "{line}").map_err(err)?;
     }
     match app.summary {
         Some(s) => writeln!(out, "planet editor [smoke ok]: {s}").map_err(err),

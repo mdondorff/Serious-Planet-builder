@@ -1016,6 +1016,16 @@ impl CoarseCubeGpu {
     /// Rewrite the whole cube from `tiles` (the floor tiles, disjoint footprints, each of a level at most `log2(texels)`), then its mips.
     /// A tile that is not resident in `terrain` is skipped and returned; its texels stay as they were (NO_DATA_M at first) until it is.
     pub fn rebuild(&mut self, ctx: &GpuContext, terrain: &TerrainRenderer, tiles: &[TileId]) -> Vec<TileId> {
+        self.rebuild_tiles(ctx, terrain, tiles, true)
+    }
+
+    /// Write `tiles` into the cube again (the floor tiles an earlier [`rebuild`](Self::rebuild) skipped because they were not resident yet): the rest of
+    /// the cube stays as it is, so the tiles need not cover it (VIEW-070: a viewer that evicts has floor tiles that land late).
+    pub fn rebuild_part(&mut self, ctx: &GpuContext, terrain: &TerrainRenderer, tiles: &[TileId]) -> Vec<TileId> {
+        self.rebuild_tiles(ctx, terrain, tiles, false)
+    }
+
+    fn rebuild_tiles(&mut self, ctx: &GpuContext, terrain: &TerrainRenderer, tiles: &[TileId], whole: bool) -> Vec<TileId> {
         assert_eq!(terrain.compact_cells(), self.cells, "the cube was made for tiles of another size");
         let device = &ctx.device;
         let align = u64::from(device.limits().min_uniform_buffer_offset_alignment).max(CUBE_JOB_BYTES);
@@ -1049,7 +1059,9 @@ impl CoarseCubeGpu {
             }
             jobs.push((block, bytes));
         }
-        assert_eq!(area, 6 * u64::from(self.texels) * u64::from(self.texels), "the floor tiles must cover every face of the cube");
+        if whole {
+            assert_eq!(area, 6 * u64::from(self.texels) * u64::from(self.texels), "the floor tiles must cover every face of the cube");
+        }
         if !jobs.is_empty() {
             let jobs_buffer = job_buffer(ctx, "coarse-cube-jobs", align, jobs.iter().map(|(_, b)| b.as_slice()));
             let bind0 = device.create_bind_group(&wgpu::BindGroupDescriptor {

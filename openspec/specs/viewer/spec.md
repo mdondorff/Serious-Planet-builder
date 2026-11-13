@@ -1358,7 +1358,7 @@ Source: Lead 2026-11-13 (P2 E3), crusader's #124 diagnosis (a bundle without --c
 - **THEN** both values are equal after the read, a path with a space and a backslash included, and a bundle of a run without them has neither line
 
 ### Requirement: VIEW-070 The viewer keeps at most a capped number of tiles resident
-The viewer's streamer SHALL count its capacity as the smaller of the renderer's pool slots (STRM-006) and the resident-tile cap, 24,000 tiles by default (`--resident-cap N` overrides it). At the cap the streamer evicts by STRM-007 (tiles outside D, R and the prefetch set, least recently used first, then R tiles farthest first); the draw set with its ancestors and the roots are never evicted. The cap is above R of the standard views (20,517 slots, 10 % of the mid tier), so with every tile of R resident the drawn frame is the plan node for node and eviction changes no pixel. The perf scenes keep the pool as their capacity.
+The viewer's streamer SHALL count its capacity as the smaller of the renderer's pool slots (STRM-006) and the resident-tile cap, 24,000 tiles by default (`--resident-cap N` overrides it). At the cap the streamer evicts by STRM-007; the draw set with its ancestors and the roots are never evicted. The cap is above R of the standard views (20,517 slots, 10 % of the mid tier), so with every tile of R resident eviction changes no pixel. The perf scenes keep the pool as their capacity. A window prints on closing `planet editor: resident tiles at most N, evicted M (cap C)`.
 
 Verify: A
 Status: active
@@ -1371,3 +1371,7 @@ Source: Lead 2026-11-13 (P2 E2), crusader's #124 diagnosis (resident tiles grew 
 #### Scenario: The capacity rule
 - **WHEN** the pool holds 205,170 slots, or 13,678, and the cap is 24,000
 - **THEN** the capacity is 24,000, or 13,678
+
+#### Scenario: Floor tiles that land late
+- **WHEN** the clipmap shadow pass has floor tiles pending that were not resident in the renderer when the cube was written, and a frame brings no new floor set
+- **THEN** the pending tiles are written alone and the cube is not required to be covered by them; a floor set that arrives is the whole cube and replaces them

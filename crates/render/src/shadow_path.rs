@@ -119,12 +119,9 @@ impl ShadowPath {
         } else {
             generations.mark_rects(ctx, frame, f.plan.levels.iter().enumerate().flat_map(|(k, l)| l.dirty.iter().map(move |r| (k, r))));
         }
-        let mut floor: Vec<TileId> = std::mem::take(&mut self.pending_floor);
-        floor.extend(f.floor_tiles.iter().copied());
-        floor.sort();
-        floor.dedup();
+        let (floor, whole) = floor_job(std::mem::take(&mut self.pending_floor), &f.floor_tiles);
         if !floor.is_empty() {
-            self.pending_floor = self.cube.rebuild(ctx, terrain, &floor);
+            self.pending_floor = if whole { self.cube.rebuild(ctx, terrain, &floor) } else { self.cube.rebuild_part(ctx, terrain, &floor) };
         }
         let camera = camera_of(&f.view);
         let march = MarchParams {
@@ -288,5 +285,37 @@ impl ShadowPath {
     /// The clipmap, for tests.
     pub fn clipmap(&self) -> &ClipmapGpu {
         &self.clip
+    }
+}
+
+/// The floor tiles a frame writes into the coarse cube and whether they are the whole cube (VIEW-070). A floor set that arrived this frame covers every
+/// face and supersedes what an earlier frame skipped (the set may be laid out differently now); without one, the tiles skipped earlier are written again
+/// alone, a part of the cube: a viewer that evicts has floor tiles that are in the streamer's set before they are in the renderer's pool.
+pub(crate) fn floor_job(pending: Vec<TileId>, arrived: &[TileId]) -> (Vec<TileId>, bool) {
+    let (mut tiles, whole) = if arrived.is_empty() { (pending, false) } else { (arrived.to_vec(), true) };
+    tiles.sort();
+    tiles.dedup();
+    (tiles, whole)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use planet_core::Face;
+
+    fn tile(level: u8, x: u32, y: u32) -> TileId {
+        TileId::new(Face(0), level, x, y).unwrap()
+    }
+
+    // spec: VIEW-070
+    #[test]
+    fn a_floor_set_that_arrived_is_the_whole_cube_and_skipped_tiles_alone_are_a_part() {
+        let (a, b, c) = (tile(3, 1, 1), tile(3, 0, 1), tile(4, 2, 2));
+        // Nothing arrived, nothing skipped: no job.
+        assert_eq!(floor_job(Vec::new(), &[]), (Vec::new(), false));
+        // Only tiles skipped earlier: written alone, sorted, once; not the whole cube (the area check would fail on them).
+        assert_eq!(floor_job(vec![a, b, a], &[]), (vec![b, a], false));
+        // A floor set arrived: it is the whole cube and replaces the skipped tiles, so a tile of an old layout cannot overlap the new one.
+        assert_eq!(floor_job(vec![c], &[a, b, a]), (vec![b, a], true));
     }
 }
