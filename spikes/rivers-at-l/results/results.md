@@ -7,3 +7,48 @@ Time box: 1 day of agent work.
 Success criteria: per variant (drain D = infinity, all breach; D = 20 m, lakes kept): line cells cut over 50 m at most 1 % inside the commit's tiles; no water-surface rise over 0.25 m; at the region's edge every H1 inflow and outflow matched by an L river within a stated distance, the discharge ratio per outlet named, and water sent to another valley than H1 named per outlet; wall time and peak commit within 12 GB; the size of the L geometry if stored and the time to rebuild it from `bake_base()`.
 Fallback if it fails: keep H1's network and route at L only within a corridor (placement) with the lakes rule, or route at L with H1's outlets as fixed exits.
 Code location: spike branch `spike/rivers-at-l` (crusader), examples in `crates/cache/examples/`; never merged.
+
+## Method
+- `rivers_at_l` (cache example, spike branch): R3a's front (seed 14, face 1, margin 200); K7's start surface `B + regional` sampled at every L cell of the region window (8,160 x 8,160 = 66.6 M cells).
+- One priority flood over the window (border and sea as outlets), D8 routing at L with the plain flood rules, and D8 accumulation of area and discharge (the H1 cell's runoff over each L cell; no open-water losses).
+- Channel cells: drainage area at least H1's channel threshold (75 km2).
+- Network levels as in A'': the running minimum of the drained surface down the channel cells. D = infinity breaches every pit; D = 20 m keeps pits deeper than 20 m as lakes (water at the spill).
+- Edge: channel steps crossing the region's border (its cells without the margin), against H1's segment steps crossing it.
+- Rebuild: the same routing on `B` alone (what a reader has from `bake_base()`).
+
+## Numbers (R3a, inside the commit's 52 tiles unless named)
+| | D = infinity (all breach) | D = 20 m (lakes kept) |
+|---|---|---|
+| channel cells | 184,118 | 184,118 (99,820 in lakes, 54 %) |
+| cut under the start surface p50 / p95 / p99 / max | 2.2 / 88 / 207 / 738 m | -1.9 / 4.8 / 11.0 / 20.0 m |
+| line cells cut over 50 m (bar 1 %) | 10.55 % | 0.00 % |
+| ground rises over 0.25 m | 0 of 183,891 steps | 43,893 (under lakes) |
+| water rises over 0.25 m | 0 | 268 |
+
+| Region edge (H1 crossings with Q >= 1 m3/s: 44, of them 10 out; L crossings 56, 9 out) | |
+|---|---|
+| H1 crossings with an L crossing of the same kind within 2 km | 36 of 44 |
+| discharge ratio L / H1 where matched | 1.20-1.39 (L carries no open-water losses) |
+| not matched (water elsewhere) | in (69411, 7739) Q 158 m3/s: nearest L inflow 0.3 m3/s at 3.9 km; out (64675, 11035) Q 20: L 2.8 at 5.2 km; out (64875, 11035) Q 6 at 15.2 km; in (69411, 6987) Q 16: L 4.3 at 2.9 km; out (69403, 6947) Q 15 at 6.9 km; 3 small ones (1-3 m3/s) |
+
+| Cost | |
+|---|---|
+| wall | 215 s (front 42 s, start surface 5 s, fill 25 s, route 78 s, accumulation 4 s, rebuild test 58 s) |
+| peak commit | 5.76 GB (budget 12 GB) |
+| partition | whole-region flood and routing (27,636 pits, the widest 1,650 cells): not tile-bounded |
+
+| Store or rebuild | |
+|---|---|
+| stored L geometry | about 0.9 MB for the commit's tiles (5 bytes a channel cell) |
+| rebuild from `B` alone | 58 s for the window, but only 8.0 % of the channel cells agree with the routing on `B + regional` (14,767 of 184,118): `B` alone gives another network |
+
+| GEN-188 (lead 2026-11-14) | |
+|---|---|
+| L cell pairs across a regional cell-centre line that jump over 0.1 m beyond their neighbours | 6,843,572 of 16,640,280 (41 %) |
+| channel steps running straight along such a line | 17.8 % with `B + regional`, 11.9 % with `B` alone |
+
+## Verdict
+Routing at L does not meet the bar by itself: with every pit breached 10.6 % of the river cells are cut over 50 m, because the start surface's L pits lie on the routed paths too. With lakes kept (D = 20 m) the cut bar holds trivially, but 54 % of the river cells lie in lakes. The start surface `B + regional` is not a drainable terrain at L; the fix sits before the rivers (a region-wide L conditioning of the surface: the carve that K7 runs per tile, run once over the region), then routing at L. At the edge 36 of 44 crossings agree within 2 km; the largest inflow (158 m3/s) enters elsewhere. A reader cannot rebuild the network from `B` alone (8 % agreement): the L geometry is stored (0.9 MB) or the regional change goes into the commit. GEN-188's steps are pervasive (41 % of line pairs) and pull rivers onto the 814 m lines (17.8 % against 11.9 %).
+
+## Visuals
+NOT RUN: the before/after stills need a bake whose K7 burns the L-routed lines, which this spike does not build (it measures the network only). The numbers above decide whether that bake is worth making.
