@@ -1379,7 +1379,7 @@ Source: Lead 2026-11-13 (P2 E2), crusader's #124 diagnosis (resident tiles grew 
 ### Requirement: VIEW-072 The base under a commit is the bake's base
 A world that opened a commit in memory (VIEW-069) SHALL give its base B as the bake read it: `bake_base()` returns the C1 read (GEN-107) of the exact lattice of `BakeInputs::base` over the commit's rectangle, equal bit for bit to `bake_region`'s base closure at every cell of the commit's tiles, and the commit's `base_id`; every other world returns none. The drawn ground is B plus the crease detail of the field (GEN-109) plus the layer's change, so it differs from B + L by the detail and not by the base.
 
-Verify: B
+Verify: A
 Status: active
 Source: Lead 2026-11-13 (P2 E1; the premise was a base difference, the probe found none), crusader's #125 line check, VIEW-069, REND-067
 
