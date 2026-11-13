@@ -1,0 +1,16 @@
+SPIKE-112 region_edit sweep, edit '' (none), threads 8, memo tile 256; setup 11.3 s
+MEM setup: commit 45 MiB, peak commit 194 MiB
+coarse solve and flood 13.7 s (1020 x 1020)
+SWEEP grid 2040 x 2040 = 4161600 cells (factor 2), 1273034 outlet cells; upsampled in 0.2 s
+SWEEP canonical flood of the upsampled surface (one thread): 0.9 s
+MEM grid: commit 120 MiB, peak commit 243 MiB
+SWEEP receivers (8 threads) and order and roots (one thread): 0.4 s
+SWEEP catchments 1273034; the largest 674726 cells (23.4 % of the 2888566 land cells)
+MEM receivers and roots: commit 137 MiB, peak commit 243 MiB
+MEM today's sweep: commit 176 MiB, peak commit 243 MiB
+SWEEP today's area sweep (serial, tiles of 256): 3.7 s
+SWEEP per-catchment sweep, 1 thread(s): 3.7 s; 0 of 4161600 cells differ from today's sweep
+MEM parallel sweep: commit 208 MiB, peak commit 376 MiB
+SWEEP per-catchment sweep, 8 thread(s): 1.4 s; 0 of 4161600 cells differ from today's sweep
+MEM parallel sweep: commit 208 MiB, peak commit 376 MiB
+done in 35.3 s

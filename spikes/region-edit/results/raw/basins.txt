@@ -1,0 +1,16 @@
+SPIKE-112 region_edit basins, edit '' (none), threads 8, memo tile 256; setup 12.2 s
+MEM setup: commit 45 MiB, peak commit 195 MiB
+BASIN lake 0 id 0563b44fc93a2d1d: 107 water cells, centroid (8269, 1094), floor 1.9 m, level 4.6 m, spill 4.6 m, solved surface under the water up to 4.6 m, Lake
+  WAIST lake 0: 3 cells wide at angle 0 deg; the cut runs from (8262.0, 1095.0) to (8262.0, 1097.0)
+BASIN lake 15 id 3ffe1479fba4f8e8: 81 water cells, centroid (8512, 931), floor 0.0 m, level 5.1 m, spill 5.1 m, solved surface under the water up to 4.7 m, Lake
+  WAIST lake 15: 6 cells wide at angle 90 deg; the cut runs from (8514.0, 934.0) to (8508.0, 934.0)
+BASIN lake 30 id 8002756936f5f001: 58 water cells, centroid (8579, 933), floor 0.0 m, level 5.1 m, spill 5.1 m, solved surface under the water up to 5.0 m, Lake
+  WAIST lake 30: 4 cells wide at angle 120 deg; the cut runs from (8581.8, 930.3) to (8579.9, 929.2)
+BASIN lake 7 id 13b4d1c6bd1d599a: 44 water cells, centroid (8595, 965), floor 0.0 m, level 5.1 m, spill 5.1 m, solved surface under the water up to 4.5 m, Lake
+  WAIST lake 7: 5 cells wide at angle 0 deg; the cut runs from (8596.0, 962.0) to (8596.0, 966.0)
+BASIN lake 45 id ae1e35a670ab101d: 24 water cells, centroid (8219, 1231), floor 1.1 m, level 2.1 m, spill 2.1 m, solved surface under the water up to 2.1 m, Lake
+  WAIST lake 45: 2 cells wide at angle 75 deg; the cut runs from (8220.0, 1230.9) to (8219.0, 1231.1)
+BASIN lake 55 id ce8ae7fa3ba0f309: 17 water cells, centroid (8155, 1246), floor 1.8 m, level 3.0 m, spill 3.0 m, solved surface under the water up to 2.9 m, Lake
+BASIN lake 63 id dedb04e614b33179: 7 water cells, centroid (8317, 1092), floor 1.1 m, level 1.8 m, spill 1.8 m, solved surface under the water up to 1.8 m, Lake
+SILL lakes 30 (58 cells, level 5.1) and 7 (44 cells, level 5.1): 24 cells apart from (8574, 938) to (8593, 962), sill 169.7 m at (8586, 954)
+done in 26.7 s

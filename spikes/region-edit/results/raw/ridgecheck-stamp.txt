@@ -1,0 +1,9 @@
+SPIKE-112 region_edit ridgecheck, edit 'dome:-36.74977:-162.28271:400:10' (edit), threads 8, memo tile 256; setup 10.5 s
+MEM setup: commit 46 MiB, peak commit 194 MiB
+RIDGE raised: 566 cells; the edit 1.0 to 397.4 m; the rounds change the edited base by -542.9 (min) -188.2 (p50) 12.3 (max) m; cells whose solved surface keeps at least half the edit against the base's: 311
+  cell (8567, 943): base 246.4, edited base 555.4, solved base 53.5, solved edited 12.5
+  cell (8567, 942): base 234.1, edited base 550.7, solved base 14.0, solved edited 13.3
+  cell (8567, 944): base 254.2, edited base 545.4, solved base 98.0, solved edited 11.6
+  cell (8573, 949): base 501.9, edited base 505.2, solved base 7.2, solved edited 7.2
+  cell (8571, 948): base 478.0, edited base 527.5, solved base 16.0, solved edited 33.1
+done in 35.6 s

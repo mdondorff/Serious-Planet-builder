@@ -1,0 +1,6 @@
+Set-Location C:\DEV\Serious-Planet-Builder\.claude\worktrees\sonnet-spikes-36fc88
+$m = (Get-Content target/spike112/merge.edit -Raw).Trim()
+& target/spike112/run.ps1 -out fresh-merge-b -argline "fresh --threads 8 --name merge-b --edit $m"
+& target/spike112/run.ps1 -out ridgecheck-stamp -argline "ridgecheck --threads 8 --edit dome:-36.74977:-162.28271:400:10"
+& target/spike112/run.ps1 -out sweep-f14 -argline "sweep --threads 8 --factor 14"
+Add-Content target/spike112/progress.log 'CHAIN4 DONE'

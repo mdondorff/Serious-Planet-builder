@@ -1,0 +1,5 @@
+Set-Location C:\DEV\Serious-Planet-Builder\.claude\worktrees\sonnet-spikes-36fc88
+$m = (Get-Content target/spike112/merge.edit -Raw).Trim()
+& target/spike112/run.ps1 -out fresh-merge -argline "fresh --threads 8 --name merge --edit $m"
+& target/spike112/run.ps1 -out incr-merge -argline "incr --threads 8 --name merge --undo --edit $m"
+Add-Content target/spike112/progress.log 'CHAIN3 DONE'

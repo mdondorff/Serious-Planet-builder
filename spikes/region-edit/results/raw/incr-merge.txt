@@ -1,0 +1,42 @@
+SPIKE-112 region_edit incr, edit 'trench:-36.76938:-162.19849:-36.74045:-162.19849:2:0.5:0.5;trench:-36.74045:-162.19849:-36.71491:-162.22046:2:0.5:0.5;trench:-36.71491:-162.22046:-36.68711:-162.22778:2:0.5:0.5;trench:-36.68711:-162.22778:-36.66156:-162.24976:2:0.5:0.5;trench:-36.66156:-162.24976:-36.63601:-162.27173:2:0.5:0.5;trench:-36.63601:-162.27173:-36.61045:-162.29370:2:0.5:0.5;trench:-36.61045:-162.29370:-36.58041:-162.28638:2:0.5:0.5;trench:-36.58041:-162.28638:-36.54925:-162.27173:2:0.5:0.5;trench:-36.54925:-162.27173:-36.52145:-162.27905:2:0.5:0.5;trench:-36.52145:-162.27905:-36.49142:-162.27173:2:0.5:0.5;trench:-36.49142:-162.27173:-36.50862:-162.24243:2:0.5:0.5;trench:-36.50862:-162.24243:-36.50413:-162.21313:2:0.5:0.5;trench:-36.50413:-162.21313:-36.50686:-162.18384:2:0.5:0.5;trench:-36.50686:-162.18384:-36.50236:-162.15454:2:0.5:0.5;trench:-36.50236:-162.15454:-36.50507:-162.12524:2:0.5:0.5;trench:-36.50507:-162.12524:-36.52223:-162.09595:2:0.5:0.5;trench:-36.52223:-162.09595:-36.53215:-162.06665:2:0.5:0.5' (merge), threads 8, memo tile 256; setup 10.5 s
+MEM setup: commit 43 MiB, peak commit 193 MiB
+lattices 20.1 s; nodes changed by the edit: 384 of 1865956
+PARTS base memo rounds: part tile hashes 0.02; part tile flood sweeps 2.75; part regrade flats 0.22; part receivers 0.94; part order+roots 0.07; part area 7.85; part compare+keep 0.02; memo cut 0.10; memo catchments 0.11; memo assemble+narrow+evict 0.01
+WORK base round 1: tiles 16, tile floods 44 (memo hits 0), tiles changed: filled 0, receivers 0, A_d 0; catchments 2729 carved 2729 (memo 0), cells carved 724331
+WORK base round 2: tiles 16, tile floods 48 (memo hits 2), tiles changed: filled 0, receivers 0, A_d 0; catchments 2680 carved 2680 (memo 0), cells carved 724282
+WORK base round 3: tiles 16, tile floods 55 (memo hits 2), tiles changed: filled 0, receivers 0, A_d 0; catchments 2611 carved 1853 (memo 758), cells carved 722589
+WORK base round 4: tiles 16, tile floods 55 (memo hits 2), tiles changed: filled 0, receivers 0, A_d 0; catchments 2550 carved 1700 (memo 850), cells carved 722295
+BASE (memoised): rounds 12.4 s, H1 1.6 s, K7+write 171.0 s (52 tiles); cache 203 MiB, 8962 catchment rounds held
+MEM base state held (editor before the edit): commit 374 MiB, peak commit 425 MiB
+PARTS edit memo rounds: part tile hashes 0.02; part tile flood sweeps 0.42; part regrade flats 0.21; part receivers 0.92; part order+roots 0.07; part area 7.61; part compare+keep 0.03; memo cut 0.09; memo catchments 0.07; memo assemble+narrow+evict 0.01
+WORK edit round 1: tiles 16, tile floods 3 (memo hits 41), tiles changed: filled 1, receivers 1, A_d 3; catchments 2779 carved 51 (memo 2728), cells carved 12252
+WORK edit round 2: tiles 16, tile floods 6 (memo hits 44), tiles changed: filled 2, receivers 1, A_d 3; catchments 2732 carved 57 (memo 2675), cells carved 76062
+WORK edit round 3: tiles 16, tile floods 9 (memo hits 48), tiles changed: filled 3, receivers 1, A_d 3; catchments 2662 carved 56 (memo 2606), cells carved 76180
+WORK edit round 4: tiles 16, tile floods 9 (memo hits 48), tiles changed: filled 3, receivers 1, A_d 3; catchments 2600 carved 56 (memo 2544), cells carved 78985
+MEM after the edit: commit 481 MiB, peak commit 534 MiB
+LEVEL2 merge: rounds 9.7 s, H1+lakes+graph 1.6 s, dirty-tile test 0.05 s, K7 of 7 dirty tiles + write 22.3 s; total 33.7 s; cache 218 MiB, 9182 catchment rounds held
+DIRTY merge: 7 of 52 land tiles: (88, 9) (89, 9) (90, 9) (88, 10) (89, 10) (88, 11) (89, 11)
+H1 merge: lakes 69 -> 67, channel cells 47951 -> 47820, segments 13578 -> 13578
+CHANGE merge: regional cells whose base changed 365, whose solved surface changed 11112 of 1040400
+TILES merge: records that differ from the base: 6 ((88, 9) (88, 10) (88, 11) (89, 9) (89, 10) (89, 11))
+PARTS G-EQ resident rounds: resident route 3.68; resident cut 0.09; resident catchments 0.09; resident assemble+narrow 0.01
+G-EQ rounds merge: memoised = resident, 0 of 1040400 regional cells differ (resident 4.1 s)
+G-EQ store base merge: incr base against fresh-none: bit-equal (3 files)
+G-EQ store edit merge: incr edit against fresh-merge: bit-equal (3 files)
+G-EQ tiles base merge: 52 of 52 L tile records equal
+G-EQ tiles edit merge: 52 of 52 L tile records equal
+LAKES base merge: 0563b44fc93a2d1d 107 cells at (8269, 1094) floor 1.9 level 4.6; 13b4d1c6bd1d599a 44 cells at (8595, 965) floor 0.0 level 5.1; 3ffe1479fba4f8e8 81 cells at (8512, 931) floor 0.0 level 5.1; 8002756936f5f001 58 cells at (8579, 933) floor 0.0 level 5.1; ae1e35a670ab101d 24 cells at (8219, 1231) floor 1.1 level 2.1; ce8ae7fa3ba0f309 17 cells at (8155, 1246) floor 1.8 level 3.0; dedb04e614b33179 7 cells at (8317, 1092) floor 1.1 level 1.8
+LAKES edit merge: 0563b44fc93a2d1d 107 cells at (8269, 1094) floor 1.9 level 4.6; 3ffe1479fba4f8e8 81 cells at (8512, 931) floor 0.0 level 5.1; ae1e35a670ab101d 24 cells at (8219, 1231) floor 1.1 level 2.1; ce8ae7fa3ba0f309 17 cells at (8155, 1246) floor 1.8 level 3.0; dedb04e614b33179 7 cells at (8317, 1092) floor 1.1 level 1.8
+PARTS undo memo rounds: part tile hashes 0.02; part tile flood sweeps 0.05; part regrade flats 0.21; part receivers 0.88; part order+roots 0.07; part area 7.37; part compare+keep 0.03; memo cut 0.09; memo catchments 0.07; memo assemble+narrow+evict 0.01
+WORK undo round 1: tiles 16, tile floods 0 (memo hits 44), tiles changed: filled 1, receivers 1, A_d 3; catchments 2729 carved 0 (memo 2729), cells carved 0
+WORK undo round 2: tiles 16, tile floods 0 (memo hits 50), tiles changed: filled 2, receivers 1, A_d 3; catchments 2680 carved 0 (memo 2680), cells carved 0
+WORK undo round 3: tiles 16, tile floods 0 (memo hits 57), tiles changed: filled 3, receivers 1, A_d 3; catchments 2611 carved 0 (memo 2611), cells carved 0
+WORK undo round 4: tiles 16, tile floods 0 (memo hits 57), tiles changed: filled 3, receivers 1, A_d 3; catchments 2550 carved 0 (memo 2550), cells carved 0
+MEM after the undo: commit 616 MiB, peak commit 617 MiB
+UNDO merge: rounds 9.1 s, H1+lakes+graph 1.5 s, fingerprint test 0.06 s, K7 of 0 tiles + write 0.2 s; total 10.8 s; cache 218 MiB
+G-EQ undo rounds merge: 0 of 1040400 cells differ from the base
+G-EQ store undo merge: incr undo against fresh-none: bit-equal (3 files)
+G-EQ tiles undo merge: 52 of 52 L tile records equal
+LAKES undo merge: 0563b44fc93a2d1d 107 cells at (8269, 1094) floor 1.9 level 4.6; 13b4d1c6bd1d599a 44 cells at (8595, 965) floor 0.0 level 5.1; 3ffe1479fba4f8e8 81 cells at (8512, 931) floor 0.0 level 5.1; 8002756936f5f001 58 cells at (8579, 933) floor 0.0 level 5.1; ae1e35a670ab101d 24 cells at (8219, 1231) floor 1.1 level 2.1; ce8ae7fa3ba0f309 17 cells at (8155, 1246) floor 1.8 level 3.0; dedb04e614b33179 7 cells at (8317, 1092) floor 1.1 level 1.8
+MEM end: commit 491 MiB, peak commit 664 MiB
+done in 264.6 s
