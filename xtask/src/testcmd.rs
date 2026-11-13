@@ -511,6 +511,17 @@ fn repro_pair(file: &str) -> (String, Option<String>) {
     }
 }
 
+/// The combinations of `repro` options that `--window` refuses (BUILD-054), and the options after `--` without it.
+fn window_args_refusal(window: bool, at_commit: bool, every: bool, store: bool, passthrough: bool) -> Res {
+    if window && (at_commit || every || store) {
+        return Err("--window does not combine with --at-commit, --every or --store (it opens the world the bundle records)".into());
+    }
+    if !window && passthrough {
+        return Err("options after `--` apply to --window only".into());
+    }
+    Ok(())
+}
+
 pub fn repro(root: &Path, args: &[String]) -> Res {
     let mut it = args.iter();
     let mut file = None;
@@ -542,20 +553,15 @@ pub fn repro(root: &Path, args: &[String]) -> Res {
             .or_else(|_| std::fs::canonicalize(root.join(name)))
             .map(|p| p.to_string_lossy().trim_start_matches("\\?\\").to_string())
     };
+    window_args_refusal(window, at_commit, every.is_some(), store.is_some(), !passthrough.is_empty())?;
     let (bundle_name, path_name) = repro_pair(&file);
     let mut bundle = resolve(&bundle_name).map_err(|e| format!("repro bundle '{bundle_name}' not found: {e}"))?;
     if window {
-        if at_commit || every.is_some() || store.is_some() {
-            return Err("--window does not combine with --at-commit, --every or --store (it opens the world the bundle records)".into());
-        }
         let path_file = if file.ends_with("-path.txt") { Some(file.clone()) } else { path_name.clone() };
         let path = path_file
             .and_then(|p| resolve(&p).ok())
             .ok_or_else(|| format!("--window needs the camera path (frame-<n>-path.txt) of '{file}', and none was found beside it"))?;
         return crate::windowrepro::run(root, &bundle, &path, real, &passthrough);
-    }
-    if !passthrough.is_empty() {
-        return Err("options after `--` apply to --window only".into());
     }
     let adapter = if real { "hardware" } else { "software" };
     // `--at-commit` (TEST-071): the replay runs in a worktree of the commit the bundle was recorded at, building into its own target
@@ -2268,6 +2274,25 @@ commit zz
         assert!(repro(Path::new("."), &["x.bundle".to_string(), "--bogus".to_string()]).unwrap_err().contains("unknown repro option"));
         assert!(repro(Path::new("."), &["x.bundle".to_string(), "--store".to_string()]).unwrap_err().contains("--store needs"));
         assert!(repro(Path::new("."), &["no-such-path.txt".to_string()]).unwrap_err().contains("not found"));
+    }
+
+    // spec: BUILD-054
+    #[test]
+    fn the_window_replay_refuses_the_options_that_do_not_fit_it_and_the_passthrough_without_it() {
+        let a = |s: &[&str]| s.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert!(window_args_refusal(true, false, false, false, true).is_ok(), "options after -- go to the window");
+        for (at_commit, every, store) in [(true, false, false), (false, true, false), (false, false, true)] {
+            let e = window_args_refusal(true, at_commit, every, store, false).unwrap_err();
+            assert!(e.contains("--window does not combine"), "{e}");
+        }
+        assert!(window_args_refusal(false, false, false, false, true).unwrap_err().contains("apply to --window only"));
+        assert!(window_args_refusal(false, true, true, true, false).is_ok(), "without --window nothing changes");
+        // Through the command: the refusal comes before any file is read; a path file that is not there is named.
+        let e = repro(Path::new("."), &a(&["x-path.txt", "--window", "--store", "s"])).unwrap_err();
+        assert!(e.contains("--window does not combine"), "{e}");
+        let e = repro(Path::new("."), &a(&["x-path.txt", "--", "--resident-cap", "9"])).unwrap_err();
+        assert!(e.contains("apply to --window only"), "{e}");
+        assert!(repro(Path::new("."), &a(&["x-path.txt", "--window"])).unwrap_err().contains("not found"));
     }
 }
 
