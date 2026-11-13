@@ -1,5 +1,5 @@
 # 0122 Fine detail pinned to the stored samples and off on river lines
-Status: proposed (lead, 2026-11-13; easy to reverse: viewer and field only, no store format; owner acceptance pending)
+Status: accepted (owner, 2026-11-13: "this reads as acceptable"; the risk is the cost per node; watch for a 100 m lattice at low sun)
 Date: 2026-11-13
 Source: SPIKE-113 (#1471, #1474); explorer's commit-base probe (#135, 2026-11-13); amends ADR 0098 point 2
 
