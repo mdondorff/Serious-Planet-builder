@@ -682,9 +682,15 @@ fn run_stills(
         size.1,
         config.poses.len(),
         world.describe(),
-        if o.store.is_some() { "" } else { " (in-memory bake)" }
+        if o.store.is_some() || o.commit.is_some() { "" } else { " (in-memory bake)" }
     )
     .map_err(err)?;
+    // Every still carries the run's note and, for a commit opened in memory, that the base is not a stored bake (VIEW-069, TEST-128): one line each.
+    let still_note: Option<String> = {
+        let base = if o.commit.is_some() { Some("base: computed in memory, not read from a stored bake") } else { None };
+        let lines: Vec<&str> = o.note.as_deref().into_iter().chain(base).collect();
+        (!lines.is_empty()).then(|| lines.join(&char::from(10).to_string()))
+    };
     let maps = crate::horizonstep::wait_coupled(&world, out)?;
     let base = world.field()?;
     let step_m = std::f64::consts::FRAC_PI_2 * radius_m / f64::from(world.global_res());
@@ -799,7 +805,7 @@ fn run_stills(
         planet_render::annotate::annotate_with_note(
             &mut shot,
             &pose_label(&camera, &|d| field.height(d), radius_m, setup.level_m),
-            o.note.as_deref(),
+            still_note.as_deref(),
         );
         shot.write_png(&dir.join(format!("{}.png", pose.name))).map_err(|e| format!("writing {}: {e}", pose.name))?;
         let (eye_lat, _) = camera.position.0.lat_lon();

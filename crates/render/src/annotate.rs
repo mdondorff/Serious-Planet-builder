@@ -243,15 +243,20 @@ pub fn annotate_with_note(img: &mut Image, pose: &PoseLabel, note: Option<&str>)
     if let Some(note) = note.filter(|n| !n.is_empty()) {
         // Wrapped at spaces into lines that fit the width (a word longer than a line is cut), the last line just above the label.
         let fits = (img.width.saturating_sub(16) / (6 * s)).max(1) as usize;
+        // A line break in the note starts a new line (one note per line).
         let mut lines: Vec<String> = Vec::new();
-        for word in note.split(' ').filter(|w| !w.is_empty()) {
-            let word: String = word.chars().take(fits).collect();
-            match lines.last_mut() {
-                Some(l) if l.chars().count() + 1 + word.chars().count() <= fits => {
-                    l.push(' ');
-                    l.push_str(&word);
+        for para in note.split(char::from(10)) {
+            let start = lines.len();
+            for word in para.split(' ').filter(|w| !w.is_empty()) {
+                let word: String = word.chars().take(fits).collect();
+                let open = lines.len() > start;
+                match lines.last_mut() {
+                    Some(l) if open && l.chars().count() + 1 + word.chars().count() <= fits => {
+                        l.push(' ');
+                        l.push_str(&word);
+                    }
+                    _ => lines.push(word),
                 }
-                _ => lines.push(word),
             }
         }
         for (k, l) in lines.iter().rev().enumerate() {

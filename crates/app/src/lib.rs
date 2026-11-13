@@ -247,6 +247,8 @@ pub struct Options {
     pub poses: Option<PathBuf>,
     /// `--note TEXT`: a known defect and its cause, drawn above the pose label of every still of `capture-stills` (TEST-128).
     pub note: Option<String>,
+    /// `--commit DIR`: the commit of the new chain in DIR over the production base computed in memory, for the viewer and `capture-stills` (VIEW-069).
+    pub commit: Option<PathBuf>,
     /// `--no-ui`: the editor window without the UI (VIEW-011).
     pub no_ui: bool,
     /// `editor --edit`: start in the editor mode (VIEW-022); Tab toggles it in the window.
@@ -443,6 +445,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         views: None,
         poses: None,
         note: None,
+        commit: None,
         no_ui: false,
         edit: false,
         items: None,
@@ -553,6 +556,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--calibrate" => o.calibrate = true,
             "--poses" => o.poses = Some(PathBuf::from(it.next().ok_or("--poses needs a poses file")?)),
             "--note" => o.note = Some(it.next().ok_or("--note needs a text")?.clone()),
+            "--commit" => o.commit = Some(PathBuf::from(it.next().ok_or("--commit needs the folder of a commit")?)),
             "--views" => {
                 o.views = Some(it.next().ok_or("--views needs a comma-separated list")?.split(',').map(|v| v.trim().to_string()).collect())
             }
@@ -776,6 +780,29 @@ const FLIGHT_EXCLUDES: [&str; 13] = [
     "--face-net",
 ];
 const FLIGHT_ONLY: [&str; 2] = ["--size", "--out-dir"];
+
+/// `--commit DIR` (VIEW-069): the commit opens over the production base computed in memory, so the options of a stored world or another base are refused beside it, and it applies to the viewer and
+/// `capture-stills` only.
+pub fn check_commit_options(o: &Options) -> Result<(), String> {
+    if !o.given.contains("--commit") {
+        return Ok(());
+    }
+    let clash: Vec<&str> =
+        ["--store", "--erosion", "--erosion-store", "--global-res", "--allow-memory-bake", "--class-source", "--legacy-source"]
+            .into_iter()
+            .filter(|f| o.given.contains(*f))
+            .collect();
+    if !clash.is_empty() {
+        return Err(format!(
+            "--commit opens a commit over the production base computed in memory: it excludes {} (a stored world, the old layer or another in-memory bake)",
+            clash.join(", ")
+        ));
+    }
+    if !matches!(o.mode, Mode::Editor) && !stills::is_stills_scene(&o.scene) {
+        return Err("--commit applies to the editor (viewer) and to the scene `capture-stills`".into());
+    }
+    Ok(())
+}
 
 /// Reject option combinations that would be silently ignored, before any GPU work.
 fn check_flight_options(o: &Options) -> Result<(), String> {
@@ -1070,6 +1097,7 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     if o.given.contains("--note") && !stills::is_stills_scene(&o.scene) {
         return Err("--note applies to the scene `capture-stills`".into());
     }
+    check_commit_options(o)?;
     if stills::is_stills_scene(&o.scene) && o.given.contains("--flight-frames") {
         return Err("--flight-frames does not apply to `capture-stills` (one frame per pose)".into());
     }
@@ -2142,6 +2170,71 @@ mod tests {
         // A commit with no channel graph has no river source, and the note says so (STRM-086).
         assert!(on.rivers().is_none() && on.erosion_note().contains("no channel graph"), "{}", on.erosion_note());
         assert!(on.describe().contains("erosion layer"), "{}", on.describe());
+    }
+
+    // spec: VIEW-069
+    #[test]
+    fn a_commit_opened_in_memory_refuses_a_stored_world_another_base_and_other_scenes() {
+        let args = |a: &[&str]| parse_args(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>()).unwrap_or_else(|e| panic!("{a:?}: {e}"));
+        for extra in
+            [&["--store", "x"][..], &["--erosion", "on"], &["--global-res", "64"], &["--allow-memory-bake"], &["--erosion-store", "y"]]
+        {
+            let mut a = vec!["editor", "--commit", "c"];
+            a.extend_from_slice(extra);
+            let e = check_commit_options(&args(&a)).unwrap_err();
+            assert!(e.contains("excludes") && e.contains(extra[0]), "{extra:?}: {e}");
+        }
+        assert!(check_commit_options(&args(&["editor", "--commit", "c"])).is_ok());
+        assert!(check_commit_options(&args(&["test-render", "--scene", "capture-stills", "--commit", "c"])).is_ok());
+        let e = check_commit_options(&args(&["test-render", "--scene", "terrain", "--commit", "c"])).unwrap_err();
+        assert!(e.contains("editor") && e.contains("capture-stills"), "{e}");
+        assert!(check_commit_options(&args(&["editor"])).is_ok(), "no --commit, nothing to check");
+    }
+
+    // spec: VIEW-069
+    #[test]
+    fn a_commit_baked_for_another_seed_is_refused_before_any_base_is_computed() {
+        let dir = std::env::temp_dir().join(format!("planet-view069-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let world =
+            planet_cache::global_store::GlobalWorld::from_definition(&planet_world_def::WorldDefinition::single_planet(6_371_000.0, 3))
+                .unwrap()
+                .with_block_limit(4);
+        let spec = planet_cache::region_bake::RegionSpec {
+            seed: 3,
+            face: planet_core::Face(2),
+            radius_m: 6_371_000.0,
+            regional: 64,
+            region: (16, 39, 16, 39),
+            margin: 6,
+            tile: 64,
+            halo: 24,
+            rounds: 2,
+            threads: 2,
+            res: 64,
+            base_id: 7,
+            inputs_id: 11,
+            height_bounds: (-11_000.0, 9_000.0),
+            keep_channels: false,
+        };
+        let base = |d: planet_core::Vec3| 500.0 - 2400.0 * (d.x - 0.1) + 120.0 * libm::sin(40.0 * d.z);
+        let climate = |_: planet_core::Vec3| (1.0e-8, 0.0, 1.0);
+        planet_cache::region_bake::bake_region(&world, &spec, &base, &climate, &dir).expect("the fixture commit");
+        let started = std::time::Instant::now();
+        let e = worldfield::WorldTerrain::open_commit_in_memory(planet_world_def::WorldDefinition::single_planet(6_371_000.0, 4), &dir, 2)
+            .err()
+            .expect("another seed is refused");
+        assert!(e.contains("baked for seed 3") && e.contains("4"), "{e}");
+        assert!(started.elapsed().as_secs_f64() < 5.0, "refused before the in-memory bake");
+        let missing = worldfield::WorldTerrain::open_commit_in_memory(
+            planet_world_def::WorldDefinition::single_planet(6_371_000.0, 3),
+            &dir.join("none"),
+            2,
+        )
+        .err()
+        .expect("a folder without a commit is refused");
+        assert!(missing.contains("holds no commit"), "{missing}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // spec: VIEW-065
