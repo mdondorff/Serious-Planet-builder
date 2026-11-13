@@ -515,14 +515,21 @@ pub fn repro(root: &Path, args: &[String]) -> Res {
     let mut it = args.iter();
     let mut file = None;
     let (mut every, mut real, mut store, mut at_commit) = (None, false, None, false);
+    // `--window` (BUILD-054): the path replays in a window; what follows `--` goes to `planet editor`.
+    let (mut window, mut passthrough) = (false, Vec::new());
     while let Some(a) = it.next() {
         match a.as_str() {
+            "--window" => window = true,
+            "--" => {
+                passthrough = it.by_ref().cloned().collect();
+                break;
+            }
             "--real" => real = true,
             "--at-commit" => at_commit = true,
             "--every" => every = Some(it.next().ok_or("--every needs a count")?.clone()),
             "--store" => store = Some(it.next().ok_or("--store needs a directory")?.clone()),
             other if other.starts_with("--") => {
-                return Err(format!("unknown repro option '{other}' (known: --real, --every N, --store DIR, --at-commit)"))
+                return Err(format!("unknown repro option '{other}' (known: --real, --every N, --store DIR, --at-commit, --window)"))
             }
             other => file = Some(other.to_string()),
         }
@@ -537,6 +544,19 @@ pub fn repro(root: &Path, args: &[String]) -> Res {
     };
     let (bundle_name, path_name) = repro_pair(&file);
     let mut bundle = resolve(&bundle_name).map_err(|e| format!("repro bundle '{bundle_name}' not found: {e}"))?;
+    if window {
+        if at_commit || every.is_some() || store.is_some() {
+            return Err("--window does not combine with --at-commit, --every or --store (it opens the world the bundle records)".into());
+        }
+        let path_file = if file.ends_with("-path.txt") { Some(file.clone()) } else { path_name.clone() };
+        let path = path_file
+            .and_then(|p| resolve(&p).ok())
+            .ok_or_else(|| format!("--window needs the camera path (frame-<n>-path.txt) of '{file}', and none was found beside it"))?;
+        return crate::windowrepro::run(root, &bundle, &path, real, &passthrough);
+    }
+    if !passthrough.is_empty() {
+        return Err("options after `--` apply to --window only".into());
+    }
     let adapter = if real { "hardware" } else { "software" };
     // `--at-commit` (TEST-071): the replay runs in a worktree of the commit the bundle was recorded at, building into its own target
     // folder; the images still land in this tree's `target/review`.

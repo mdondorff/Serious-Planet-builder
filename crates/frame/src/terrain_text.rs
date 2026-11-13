@@ -273,13 +273,17 @@ impl TerrainPlan {
 /// The world a bundle was recorded against when the run named one (`--world`): the definition as TOML text (canonical, so its
 /// hash is the bundle's `definition_hash`), the implementation id of its height field and the in-memory bake the field read
 /// (cells per face edge). A bundle without it is the seed-only world: the reference field of `seed` (GEN-018).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BundleWorld {
     pub height_field: String,
     pub global_res: u32,
     pub definition_toml: String,
     /// The authored items of the world, one item file's TOML each (AUTH-001): the definition text carries none (VIEW-024).
     pub items: Vec<String>,
+    /// The run's `--commit DIR` (an absolute path) and `--site LAT,LON` in degrees, as the window was started with them (VIEW-071): a replay in
+    /// a window opens the same world at the same place. `None` when the run had no such option.
+    pub open_commit: Option<String>,
+    pub open_site: Option<String>,
 }
 
 /// One line: backslash, newline and carriage return escaped.
@@ -342,6 +346,12 @@ impl TerrainBundle {
             for item in &w.items {
                 s += &format!("world_item {}\n", escape_line(item));
             }
+            if let Some(dir) = &w.open_commit {
+                s += &format!("open_commit {}\n", escape_line(dir));
+            }
+            if let Some(site) = &w.open_site {
+                s += &format!("open_site {site}\n");
+            }
         }
         s += &format!("face_mapping {}\nview {}\nsize {} {}\n", r.face_mapping, r.view.name(), r.size.0, r.size.1);
         let c = &r.camera;
@@ -387,6 +397,7 @@ impl TerrainBundle {
         };
         let (mut field_id, mut global_res, mut world_toml) = (None, None, None);
         let mut world_items = Vec::new();
+        let (mut open_commit, mut open_site) = (None, None);
         let plan = TerrainPlan::from_text(plan_text)?;
         let (mut gv, mut imp, mut mv, mut seed, mut dh, mut adapter) = (None, None, None, None, 0u64, String::new());
         let mut commit = None;
@@ -406,6 +417,8 @@ impl TerrainBundle {
                 ["global_res", v] => global_res = Some(v.parse::<u32>().map_err(bad)?),
                 ["world_toml", ..] => world_toml = Some(unescape_line(line.strip_prefix("world_toml ").unwrap_or(""))?),
                 ["world_item", ..] => world_items.push(unescape_line(line.strip_prefix("world_item ").unwrap_or(""))?),
+                ["open_commit", ..] => open_commit = Some(unescape_line(line.strip_prefix("open_commit ").unwrap_or(""))?),
+                ["open_site", v] => open_site = Some(v.to_string()),
                 ["face_mapping", v] => mapping = Some(v.to_string()),
                 ["view", v] => view = Some(TerrainView::parse(v).ok_or(format!("unknown view '{v}'"))?),
                 ["size", w, h] => size = Some((w.parse::<u32>().map_err(bad)?, h.parse::<u32>().map_err(bad)?)),
@@ -447,7 +460,7 @@ impl TerrainBundle {
         let world = match (field_id, global_res, world_toml) {
             (None, None, None) => None,
             (Some(height_field), Some(global_res), Some(definition_toml)) if version >= 2 => {
-                Some(BundleWorld { height_field, global_res, definition_toml, items: world_items })
+                Some(BundleWorld { height_field, global_res, definition_toml, items: world_items, open_commit, open_site })
             }
             (Some(_), Some(_), Some(_)) => {
                 return Err("a version 1 bundle cannot record a world (version 1 is the seed-only reference field)".into())

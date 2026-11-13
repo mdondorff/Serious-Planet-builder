@@ -242,6 +242,9 @@ struct Config {
     shadow_march: bool,
     policy: AdapterPolicy,
     gen: planet_streaming::GenWorkers,
+    /// The run's `--commit` (absolute) and `--site` (`LAT,LON` degrees), recorded in an F9 bundle so that a window replay reopens the same world (VIEW-071).
+    open_commit: Option<String>,
+    open_site: Option<String>,
     initial_view: usize,
     /// Where the terrain comes from, for the title: the store the editor opened, or the in-memory preview bake (VIEW-051).
     world_label: String,
@@ -530,6 +533,8 @@ impl App<'_> {
                 global_res: self.world.global_res(),
                 definition_toml: toml,
                 items: item_texts,
+                open_commit: self.cfg.open_commit.clone(),
+                open_site: self.cfg.open_site.clone(),
             }),
             request,
             plan,
@@ -2172,6 +2177,8 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         shadow_march: o.shadow_march,
         policy,
         gen: o.gen_workers(),
+        open_commit: o.commit.as_ref().map(|p| std::path::absolute(p).unwrap_or_else(|_| p.clone()).to_string_lossy().into_owned()),
+        open_site: o.site.map(|(la, lo)| format!("{la},{lo}")),
         initial_view,
         world_label,
         base_readiness: Readiness { bake_done, bake_total, prefill_done, prefill_total, view: ViewCoverage::default() },

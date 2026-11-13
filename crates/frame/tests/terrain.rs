@@ -498,7 +498,7 @@ fn a_bundle_records_the_render_floor_and_one_without_min_level_replays_as_floor_
     assert!(!plan_terrain(&back.request).unwrap().diff(&back.plan).is_empty());
 }
 
-// spec: TEST-008
+// spec: TEST-008, VIEW-071
 #[test]
 fn a_world_bundle_records_the_definition_and_bake_and_a_version_one_bundle_still_reads() {
     use planet_frame::{BundleWorld, TerrainBundle};
@@ -512,6 +512,9 @@ fn a_world_bundle_records_the_definition_and_bake_and_a_version_one_bundle_still
         definition_toml: "schema_version = 1\n[body.0]\nradius_m = 6371000.0\n[world]\nseed = 5\n".into(),
         // The authored items travel as item-file text, one per line (VIEW-024).
         items: vec!["id = \"a\"\nname = \"back\\\\slash\"\n".into(), "id = \"b\"\n".into()],
+        // The options of the run that wrote it (VIEW-071): a replay in a window opens the same world at the same place.
+        open_commit: Some("C:\\data\\stores\\r3a e1".into()),
+        open_site: Some("-36.7498,-162.2827".into()),
     };
     let bundle = TerrainBundle {
         generator_version: 2,
@@ -527,9 +530,15 @@ fn a_world_bundle_records_the_definition_and_bake_and_a_version_one_bundle_still
     let text = bundle.to_text();
     assert!(text.starts_with("planet-terrain-repro 2\n"), "{}", text.lines().next().unwrap());
     assert!(text.contains("height_field cpu-erosion-v1\nglobal_res 256\n"), "{text}");
+    assert!(text.contains("\nopen_commit C:\\\\data\\\\stores\\\\r3a e1\nopen_site -36.7498,-162.2827\n"), "{text}");
     let back = TerrainBundle::from_text(&text).unwrap();
     assert_eq!(back.world.as_ref(), Some(&world), "the definition text and the item texts survive with their newlines");
     assert_eq!(back, bundle);
+    // A run without --commit and --site records neither line.
+    let plain = TerrainBundle { world: Some(BundleWorld { open_commit: None, open_site: None, ..world.clone() }), ..bundle.clone() };
+    let plain_text = plain.to_text();
+    assert!(!plain_text.contains("open_commit") && !plain_text.contains("open_site"), "{plain_text}");
+    assert_eq!(TerrainBundle::from_text(&plain_text).unwrap(), plain);
     // A version-1 bundle (before worlds) is the seed-only reference field: it reads, with no world.
     let seed_only = TerrainBundle { world: None, ..bundle.clone() };
     let v1 = seed_only.to_text().replacen("planet-terrain-repro 2", "planet-terrain-repro 1", 1);

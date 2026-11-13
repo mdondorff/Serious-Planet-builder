@@ -60,6 +60,9 @@ pub struct DecodeFrame {
 pub struct Gate {
     pub frames: u64,
     pub longest_ms: f64,
+    /// Frames of the stall limit (`stall::limit`, default 1 s) or more with the GPU phases counted, and the longest such total (BUILD-054).
+    pub stalls: u64,
+    pub longest_total_ms: f64,
     pub slow: Vec<SlowFrame>,
     /// The frames in which the main thread decoded a bake block, the first phase of each (a decode waits for the disk and the codec: a stall the warm-up thread should take).
     pub decoded: Vec<DecodeFrame>,
@@ -122,6 +125,10 @@ impl Gate {
             self.main_decodes += blocks;
             self.decoded.push(DecodeFrame { frame, phase: (*phase).to_string(), blocks });
         }
+        // The stalls the window's probe reports (VIEW-056) count the GPU phases too: a render submit of seconds is a stall to the owner (BUILD-054).
+        let total_ms: f64 = phases.iter().map(|p| p.1).sum();
+        self.longest_total_ms = self.longest_total_ms.max(total_ms);
+        self.stalls += u64::from(total_ms >= crate::stall::limit().as_secs_f64() * 1e3);
         let phases: Vec<(&str, f64)> = phases.iter().copied().filter(|(name, _)| !GPU_PHASES.iter().any(|g| name.starts_with(g))).collect();
         let ms: f64 = phases.iter().map(|p| p.1).sum();
         self.frames += 1;
@@ -204,7 +211,7 @@ impl Gate {
             (Some(_), Some(b), Some((d, f))) => format!("; edit: re-bake landed {b} ms after it, first drawn {d} ms after it (frame {f})"),
         };
         format!(
-            "gate: {} frames, longest {:.0} ms, {} over {FRAME_LIMIT_MS:.0} ms; main-thread block decodes {} in {} frames; held back: {} frames, {} with no edit in reach, up to {} under an edit; horizon maps baked {horizon_baked}; panics {panics}{edit}",
+            "gate: {} frames, longest {:.0} ms, {} over {FRAME_LIMIT_MS:.0} ms; main-thread block decodes {} in {} frames; held back: {} frames, {} with no edit in reach, up to {} under an edit; horizon maps baked {horizon_baked}; panics {panics}; stalls {} (frames of {:.0} ms or more with the GPU phases, longest {:.0} ms){edit}",
             self.frames,
             self.longest_ms,
             self.slow.len(),
@@ -212,7 +219,10 @@ impl Gate {
             self.decoded.len(),
             self.held_frames,
             self.held_free.len(),
-            self.held_under_edit_max
+            self.held_under_edit_max,
+            self.stalls,
+            crate::stall::limit().as_secs_f64() * 1e3,
+            self.longest_total_ms
         )
     }
 }
@@ -312,6 +322,22 @@ mod tests {
         assert!(g.failures(1, true, 0, true).is_empty());
         assert_eq!(g.held_under_edit_max, 2);
         assert!(g.report(1, 0).contains("up to 2 under an edit"));
+    }
+
+    // spec: BUILD-054
+    #[test]
+    fn a_stall_counts_the_gpu_phases_and_is_reported_without_failing_the_gate() {
+        let mut g = Gate::default();
+        g.frame(30, &[("draw", 12.0)], &[]);
+        // A render submit of 4.5 s: not a slow frame of the gate (the GPU phases are left out), but a stall of the window.
+        g.frame(31, &[("input", 2.0), ("render submit (x)", 4500.0)], &[]);
+        g.frame(32, &[("draw", 40.0), ("present (swapchain)", 300.0)], &[]);
+        g.frame(3, &[("compile", 9000.0)], &[]);
+        assert_eq!(g.stalls, 1, "the warm-up frame and the 340 ms frame do not count");
+        assert!(g.failures(1, true, 0, true).is_empty());
+        let line = g.report(1, 0);
+        assert!(line.contains("stalls 1 (frames of 1000 ms or more with the GPU phases, longest 4502 ms)"), "{line}");
+        assert!(!line.contains("edit:"), "no edit, nothing to say: {line}");
     }
 
     // spec: TEST-061
