@@ -48,7 +48,7 @@ fn legs() -> Vec<Leg> {
 
 fn rotate_about(v: Vec3, axis: Vec3, angle: f64) -> Vec3 {
     // Rodrigues' rotation of `v` about the unit `axis`.
-    let (s, c) = (angle.sin(), angle.cos());
+    let (s, c) = (libm::sin(angle), libm::cos(angle));
     v * c + axis.cross(v) * s + axis * (axis.dot(v) * (1.0 - c))
 }
 
@@ -76,7 +76,7 @@ fn main() -> Result<(), String> {
         let start_alt = alt;
         for k in 1..=steps {
             let f = k as f64 / steps as f64;
-            alt = if leg.log { start_alt * (leg.end_alt_m / start_alt).powf(f) } else { start_alt + (leg.end_alt_m - start_alt) * f };
+            alt = if leg.log { start_alt * libm::pow(leg.end_alt_m / start_alt, f) } else { start_alt + (leg.end_alt_m - start_alt) * f };
             // Move along the great circle of the heading, then turn.
             let step_m = leg.speed_mps * PERIOD_MS as f64 / 1000.0;
             let axis = dir_v.cross(heading).normalized();
@@ -88,7 +88,7 @@ fn main() -> Result<(), String> {
             let g = ground(dir_v);
             let position = dir_v * (R + g + alt);
             let pitch = leg.pitch_deg.to_radians();
-            let forward = (heading * pitch.cos() - dir_v * pitch.sin()).normalized();
+            let forward = (heading * libm::cos(pitch) - dir_v * libm::sin(pitch)).normalized();
             let up = (dir_v - forward * dir_v.dot(forward)).normalized();
             t_ms += PERIOD_MS;
             lowest = lowest.min(alt);
