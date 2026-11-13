@@ -40,11 +40,15 @@ fn snap(x: f64) -> f64 {
     }
 }
 
-/// The slope at a sample between the differences `a` (before it) and `b` (after it): their harmonic mean when they have the same sign, else 0 (Fritsch-Butland). It lies between 0
-/// and twice the smaller difference, so the cubic below stays monotone between its two samples, and it is a continuous function of `a` and `b`.
+/// The slope at a sample between the differences `a` (before it) and `b` (after it) (GEN-188): when they have the same sign, their harmonic mean `2ab / (a + b)` times
+/// `2ab / (a² + b²)` (1 when `a = b`, so a uniform slope is kept; tending to 0 as either difference does), else 0. It lies between 0 and twice the smaller difference, so the cubic
+/// below stays monotone between its two samples. It vanishes to second order where one difference changes sign, so it is C1 there: the cross pass, whose differences move with the
+/// position along the row, has no crease. The harmonic mean alone (Fritsch-Butland) kinks where a difference changes sign (a slope jump of up to 20 m per cell on a noisy layer).
 fn harmonic_slope(a: f64, b: f64) -> f64 {
-    if a * b > 0.0 {
-        2.0 * a * b / (a + b)
+    let ab = a * b;
+    if ab > 0.0 {
+        // `ab > 0` makes `a + b` non-zero and `a² + b² >= 2ab > 0`.
+        (2.0 * ab / (a + b)) * (2.0 * ab / (a * a + b * b))
     } else {
         0.0
     }

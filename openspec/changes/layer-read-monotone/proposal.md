@@ -4,9 +4,12 @@
 - On r3a-e1, 20,000 random crossings of cell-centre lines: 1.5 % of crossings jump more than 0.1 m, up to 12.5 m; half a cell off the lines, and with the clamp off, at most 0.001 m.
 
 ## What changes
-- GEN-188: the layer read is a monotone C1 cubic per axis (Hermite with harmonic-mean slopes, Fritsch-Butland), rows first, then across the rows. It never overshoots, so no clamp; it is continuous with its first derivative across every cell-centre line; at a cell centre it is the stored sample bit for bit (a position within 1e-9 cells of a centre is the centre).
+- GEN-188: the layer read is a monotone C1 cubic per axis (Hermite with a C1 slope limiter, `2ab/(a+b) * 2ab/(a²+b²)`), rows first, then across the rows. It never overshoots, so no clamp; it has no step across a cell-centre line and no crease inside a cell; at a cell centre it is the stored sample (a position within 1e-9 cells of a centre is the centre).
 - `LAYER_READ_VERSION` 1 to 2: the keys of a field that reads a layer change.
 - The range over a cap (GEN-102) is unchanged: the read stays within the four cells around the point, as before.
+
+## Spec note
+- GEN-112 (planned, in `openspec/changes/m9-bake/specs/generator-pipeline/spec.md`, not yet in the main specs) still names a "Catmull-Rom (C1) read kept within the four cells". GEN-188 replaces that wording for the runtime read; the sync of m9-bake's delta takes GEN-188's.
 
 ## Not in this change
 - The bake's twin reads: `map::change_in_face` and K7's regional field (`k7.rs`) clamp a Catmull-Rom read to the four cells the same way, so the baked data may carry the same steps along the regional cell-centre lines. Changing them changes every store's bits; reported to the lead (order #110), not changed here.
