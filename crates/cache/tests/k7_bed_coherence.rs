@@ -1,5 +1,7 @@
 //! Tier A, GEN-185, GEN-186 and TEST-134: the river beds of a committed region are coherent. Along every stored channel line the stored ground (`B + L`, read back through the commit) does not rise
-//! downstream, and the stored level of a channel point is the water surface of that ground (neither above nor below it by more than the store's steps). The fixture is the region of TEST-125.
+//! downstream, and the read-time water level of a channel point (REND-066) is the water surface of that ground. The fixture is the region of TEST-125 on a rugged base.
+//! The fixture does not reproduce R3a's inland rises (r3a-e1: 29 % of the line steps rise over 0.25 m, up to 45 m; here a few coastal steps of up to 2 m): the evidence for GEN-185 on production geometry is
+//! `k7_line_check` on R3a (cache example), whose numbers the change's design records.
 
 use std::sync::Arc;
 
