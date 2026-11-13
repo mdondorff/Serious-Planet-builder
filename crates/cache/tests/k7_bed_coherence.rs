@@ -59,6 +59,8 @@ struct Beds {
     points: usize,
     level_minus_ground: Vec<f64>,
     ground_over_level: Vec<f64>,
+    /// The coast points: a level under the sea level with land under it. The burn floors a land bed at the sea level (GEN-176), so the ground stands over such a level by design.
+    coast: Vec<(i64, i64, f64, f64)>,
 }
 
 fn measure(s: &RegionSpec, dir: &std::path::Path) -> Beds {
@@ -105,9 +107,11 @@ fn measure(s: &RegionSpec, dir: &std::path::Path) -> Beds {
                     continue;
                 }
                 out.points += 1;
-                out.level_minus_ground.push(ch.levels[k] - g);
                 if ch.levels[k] > 0.0 {
+                    out.level_minus_ground.push(ch.levels[k] - g);
                     out.ground_over_level.push(g - ch.levels[k]);
+                } else {
+                    out.coast.push((x, y, ch.levels[k], g));
                 }
             }
         }
@@ -127,10 +131,12 @@ fn the_stored_ground_does_not_rise_along_a_stored_line_and_the_burn_reaches_the_
     let at = |q: f64| lg[((lg.len() as f64 * q) as usize).min(lg.len() - 1)];
     let worst = b.rises.iter().map(|r| r.2).fold(0.0, f64::max);
     println!(
-        "TEST-134: {} land steps, {} rise over 0.25 m (largest {worst:.2} m); {} points, level - ground p1 {:.2} p50 {:.2} p99 {:.2} m; {}",
+        "TEST-134: {} land steps, {} rise over 0.25 m (largest {worst:.2} m); {} points ({} at the coast, first {:?}), level - ground p1 {:.2} p50 {:.2} p99 {:.2} m; {}",
         b.steps,
         b.rises.len(),
         b.points,
+        b.coast.len(),
+        b.coast.first(),
         at(0.01),
         at(0.5),
         at(0.99),
@@ -140,6 +146,7 @@ fn the_stored_ground_does_not_rise_along_a_stored_line_and_the_burn_reaches_the_
     assert!(b.rises.is_empty(), "{} steps rise over 0.25 m along the stored lines, the first {:?}", b.rises.len(), &b.rises[..b.rises.len().min(8)]);
     // The burn reaches the stored level wherever the level is on land: the ground stands at most the 0.5 m code of the level and the 0.25 m step of L over it (it may lie lower: incision and the final pass
     // cut under the burn; the read-time water level of REND-066 follows the ground). A level under the sea is floored at the sea level on land (GEN-176): those points are not compared.
+    assert!(b.coast.iter().all(|c| c.2 <= 0.0 && c.3 >= 0.0), "the coast points are levels under the sea with the ground floored at or over it");
     let over = b.ground_over_level.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     assert!(over <= 0.75, "the stored ground stands {over:.2} m over the stored level: the burn did not reach the level (GEN-185)");
 }
