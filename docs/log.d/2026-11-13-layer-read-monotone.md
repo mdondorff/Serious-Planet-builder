@@ -1,0 +1,1 @@
+- 2026-11-13 layer-read-monotone archived: the erosion layer read is a monotone C1 cubic per axis with a C1 slope limiter, no clamp; no step at cell-centre lines and no crease inside a cell, the stored sample at a centre (GEN-188, LAYER_READ_VERSION 2; the #108 finding).
