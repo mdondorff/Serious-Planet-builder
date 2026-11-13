@@ -1397,6 +1397,8 @@ impl App<'_> {
         st.stall.mark("the rest of the frame");
         let stall = st.stall.end();
         if let Some(g) = st.gate.as_mut() {
+            let c = &st.last_counts;
+            g.gate.counts(c.resident, c.uploaded, c.evicted, c.upload_bytes);
             g.gate.frame(st.frames, &st.stall.phases_ms(), &st.stall.main_decodes());
         }
         let Some(stall) = stall else { return };
