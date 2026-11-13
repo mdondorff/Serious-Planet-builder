@@ -137,3 +137,10 @@ Scope: K7 (ADR 0119)
 What happened: one region, two tilings. At halo 128, 0.57 % of non-line cells differ (p99 1.1 mm, max 0.31 m); at halo 64, 2.29 % (max 3.59 m, all at the seam). River line cells are bit-identical at both.
 Assumption it changes: that the halo is a margin that only has to be wide enough. Tile size and halo are inputs of K7's result and part of its key.
 Obsolete when: K7 reads region-wide inflow at the halo border.
+
+## 2026-11-13 A push is gated on the prepush in the same command
+Scope: project
+What happened: a push to PR 1482 (68cb12a3, one golden PNG) went out although its prepush had failed (test gpu: 2 known WARP d3d10warp crashes, 3 gpu_skeleton timeouts of 300-450 s under load), because the push was a separate statement after the prepush.
+Assumption it changes: CLAUDE.md "Before every push to a PR branch run `cargo xtask prepush`" assumed the push follows only a passing prepush.
+Proposed follow-up: every lane pushes with `cargo xtask prepush && git push`; nothing else.
+Obsolete when: a git pre-push hook runs the prepush.
