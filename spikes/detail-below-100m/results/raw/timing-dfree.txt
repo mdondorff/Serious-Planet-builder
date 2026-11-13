@@ -1,0 +1,2 @@
+round 0: 200000 samples on 1 thread: field without the stage 22.183 us, with 21.904 us, the stage alone 0.941 us a sample; a terrain node (33 x 33 = 1089 samples) +-0.30 ms; checksum 167082776.1 167065718.5 19994093.7
+round 1: 200000 samples on 1 thread: field without the stage 21.186 us, with 29.017 us, the stage alone 1.240 us a sample; a terrain node (33 x 33 = 1089 samples) +8.53 ms; checksum 167082776.1 167065718.5 19994093.7
