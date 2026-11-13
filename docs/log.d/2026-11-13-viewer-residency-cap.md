@@ -1,0 +1,1 @@
+- 2026-11-13 viewer-residency-cap archived: the viewer's streamer capacity is the pool or 24,000 tiles (`--resident-cap`), so a long flight evicts (VIEW-070); the gate line also reports the most tiles resident and the evictions.
