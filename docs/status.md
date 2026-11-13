@@ -22,9 +22,8 @@ Every row names an exit item (ADR 0120). Everything else is in `docs/parking.md`
 | Exit | Step | Lane |
 |---|---|---|
 | E1 | k7-bed-coherence (whole-network burn levels) and k7-line-placement (lines on the valley floor, REND-067), merged back to back; then re-bake r3a-p3 | crusader |
-| E1 | --commit draws the bake's base exactly (VIEW-072; the line placement depends on it) | explorer |
+| E1 | VIEW-072 guard (the base under --commit is already bit-equal); then ADR 0122 point 1, pinned fine detail (GEN-187) | explorer |
 | E2 | Acceptance: the owner's next long flight reads resident tiles at most and evicted from the run log | owner |
-| E4 | SPIKE-113 river part on r3a-p2, then the verdict | spikes |
 | E5 | ADRs for edits against the erosion and for inland lakes and dams, with the owner | owner |
 
 P1 closing: the owner's sign-off line (P1 E4) in `docs/milestones/P1.md` after the flight of 2026-11-13.

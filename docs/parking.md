@@ -53,3 +53,5 @@ Owner, 2026-11-12 (ADR 0120). These items are outside the current milestone, one
 - Region keep-inside for Cities (owner, 2026-10-21, Q8). Trigger: Cities.
 - Global authoring preview (owner, 2026-10-31): a coarse whole-planet preview before the bake. Trigger: after M9's bake, or SPIKE-69.
 - Coarse-first refinement of an edit (owner, 2026-10-20). Trigger: a brush case missing its budget.
+- River floodplain bounded by the valley walls (SPIKE-113, 2026-11-13): a fixed-width floodplain on the level makes causeways and cuts canyon walls. Trigger: after the line placement (REND-067) lands.
+- Window-edge outlet never lowered (SPIKE-112, 2026-11-13): `Grid::outlets` marks window edges as outlets and the breach never lowers one, so a margin lake forms behind it. Trigger: the next region-solve change.
