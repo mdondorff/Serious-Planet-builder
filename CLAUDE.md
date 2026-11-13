@@ -9,7 +9,7 @@ A planet-scale generator, editor and real-time renderer: Rust + wgpu, one binary
 3. `docs/adr/`: accepted decisions and why they were made. Edit accepted ADRs only per ADR 0078.
 4. `docs/background/`: frozen research and setup docs. **Read only when an ADR, spec or task points at a specific section**. Never treat them as requirements, never update them.
 
-Working files: `docs/status.md` (forward state only: waiting for the owner, the current queue, the current stop report, tracked items), `docs/log.md` and `docs/log.d/` (the current milestone's log; read it with `cargo xtask log`), `docs/spikes.md` (spike register), `docs/learnings.md` (findings, each with a scope). Finished milestones are archived in `docs/archive/<M>/` by the `housekeeping` skill. `docs/README.md` maps every folder.
+Working files: `docs/status.md` (forward state only: owner items, queue, stop report, tracked), `docs/log.md` and `docs/log.d/` (the current milestone's log; read it with `cargo xtask log`), `docs/spikes.md` (spike register), `docs/learnings.md` (findings, each with a scope). Finished milestones are archived in `docs/archive/<M>/` by the `housekeeping` skill. `docs/README.md` maps every folder.
 
 ## Commands (always via xtask)
 - `cargo xtask` alone lists every command.
@@ -54,7 +54,7 @@ Specs, ADRs and working files are read by agents and the owner. Write definition
 - Before every push to a PR branch run `cargo xtask prepush` (check, test fast, and test gpu when the diff touches render, shaders or another golden-producing crate), while waiting is cheap. Lavapipe-only golden differences stay CI's job (owner, 2026-10-19).
 - After every push to a PR, start `gh pr checks <n> --watch` as a background command and act on its result (fix a failure, or verify and merge). Never end a turn with CI pending and no watch running.
 - Worktrees only under `.claude/worktrees/`, never inside `target/` or a scratchpad. Remove yours once its PR is merged (`cargo xtask worktrees --prune`).
-- Temp output only under `target/` (xtask sets `TMP` there). Prepush and bake refuse below 20 GB free.
+- Data only in the repo (`target/`: temp, spike bake) or `C:/DEV/SeriousPlanetData` (`worlds/`, `lanes/`, `tmp/`; ADR 0121). Prepush and bake refuse below 20 GB free.
 - Never force-push, never rewrite `main`'s history, never commit secrets or large binaries (goldens are small PNGs; over 1 MB needs an ADR).
 
 ## When to stop and report

@@ -15,10 +15,10 @@ To message a role, send to its session name in this table. When a session is rec
 
 ## Messages
 - Every lane message goes to `opus-architect`: PR ready or merged, a failed gate, a departure from an ADR or the contract, a measurement against a contract number, being idle, a perf window, an ID request.
-- Non-urgent reports may instead be appended to `C:/DEV/planner-inbox/<lane>-outbox.md` (one entry, starting `## <time> <subject>`, ending `--- end`).
+- Non-urgent reports may instead be appended to `C:/DEV/SeriousPlanetData/lanes/<lane>-outbox.md` (one entry, starting `## <time> <subject>`, ending `--- end`).
 
 ## Rules
-1. Lane orders are entries in `C:/DEV/planner-inbox/<lane>.md` (`<lane>` is `explorer`, `crusader` or `spikes`), written only by the lead. A lane reads its file at the start of each turn. The lead sends a message only to stop or change running work.
+1. Lane orders are entries in `C:/DEV/SeriousPlanetData/lanes/<lane>.md` (`<lane>` is `explorer`, `crusader` or `spikes`), written only by the lead. A lane reads its file at the start of each turn. The lead sends a message only to stop or change running work.
 2. Every work item names the exit item of the current milestone (`docs/milestones/`) that it serves. Anything else is on `docs/parking.md`, and nobody works on it (ADR 0120).
 3. A lane merges its own PR when the conditions in the "Git" section of `CLAUDE.md` hold:
    - read `gh pr checks` all green in a separate command before merging;
