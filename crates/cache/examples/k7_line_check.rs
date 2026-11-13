@@ -172,6 +172,43 @@ fn main() -> Result<(), String> {
         d.get(d.len() * 99 / 100).copied().unwrap_or(0.0),
         d.last().copied().unwrap_or(0.0)
     );
+    // Crossings without a join: a core cell on the lines of two channels where neither ends at the other's first cell there. Rises: the steps of the in-memory lines that rise, and whether the cell before is such a crossing.
+    {
+        let mut on: std::collections::BTreeMap<(i64, i64), Vec<(usize, usize, usize)>> = std::collections::BTreeMap::new();
+        let lines: Vec<Vec<(i64, i64)>> = mem.iter().map(line_cells).collect();
+        for (ci, line) in lines.iter().enumerate() {
+            for (k, &c) in line.iter().enumerate() {
+                if core(c.0, c.1) {
+                    on.entry(c).or_default().push((ci, k, line.len()));
+                }
+            }
+        }
+        let is_join = |a: (usize, usize, usize), b: (usize, usize, usize)| (a.1 + 1 == a.2 && b.1 == 0) || (b.1 + 1 == b.2 && a.1 == 0) || (a.1 + 1 == a.2 && b.1 + 1 == b.2) || (a.1 == 0 && b.1 == 0);
+        let crossing: BTreeSet<(i64, i64)> = on
+            .iter()
+            .filter(|(_, v)| v.iter().enumerate().any(|(i, &a)| v[i + 1..].iter().any(|&b| a.0 != b.0 && !is_join(a, b))))
+            .map(|(c, _)| *c)
+            .collect();
+        let shared = on.values().filter(|v| v.len() > 1).count();
+        let (mut rises, mut at_cross, mut big, mut big_cross) = (0, 0, 0, 0);
+        for line in &lines {
+            for k in 1..line.len() {
+                let ((px, py), (x, y)) = (line[k - 1], line[k]);
+                if !(core(x, y) && core(px, py)) {
+                    continue;
+                }
+                let (p, v) = (z_at(px, py), z_at(x, y));
+                if p > 0.0 && v > 0.0 && v - p > 0.25 {
+                    rises += 1;
+                    let c = crossing.contains(&(px, py)) || crossing.contains(&(x, y));
+                    at_cross += usize::from(c);
+                    big += usize::from(v - p > 5.0);
+                    big_cross += usize::from(c && v - p > 5.0);
+                }
+            }
+        }
+        println!("tile {ti}/{tj}: shared core line cells {shared}, crossings without a join {}; rises {rises} of which at a crossing {at_cross}; over 5 m {big} of which at a crossing {big_cross}", crossing.len());
+    }
     // The in-memory channels through the spot: K7's start, z and burn flag, and the stored B + L, along the line around the spot.
     let win = |x: i64, y: i64| ((y - wj0) * w + (x - wi0)) as usize;
     for (ci, ch) in mem.iter().enumerate() {

@@ -318,3 +318,54 @@ fn an_all_false_fixed_mask_is_the_free_run_in_every_stage() {
     carve_fixed(&g, &mut b, &outlet, &p, None, 3, &none);
     assert!(a.iter().zip(&b).all(|(x, y)| x.to_bits() == y.to_bits()), "the carve");
 }
+
+/// A V-shaped valley falling 1.5 m a cell to the east, its floor on the row `floor_row` of the window, its sides rising 8 m a cell.
+fn valley_at(floor_row: f64) -> impl Fn(Vec3) -> f64 {
+    move |d: Vec3| {
+        let (x, y) = face_xy(&tile_grid(), d);
+        let (_, fy) = cell(&tile_grid(), 0, 0);
+        600.0 - 1.5 * (x - 72.0) + 8.0 * (y - (fy + floor_row)).abs()
+    }
+}
+
+// spec: GEN-186, TEST-134 (the dyke case)
+#[test]
+fn a_line_on_the_valley_side_whose_start_surface_lies_under_its_level_ends_on_the_valley_floor() {
+    // The line runs two cells up the valley side; its levels stand 60 m over the start surface, so the burn lowers nothing and the line cells are fixed at the start surface. The carve cuts the valley floor
+    // beside them: before GEN-186 the fixed line stayed as a dyke above the carved floor; now it incises with its valley.
+    let g = tile_grid();
+    let floor_row = g.halo as f64 + 40.0;
+    let line_row = g.halo as i64 + 42;
+    let base = valley_at(floor_row);
+    let ch = channel(&g, line_row, &|x, _| {
+        let (_, fy) = cell(&g, 0, 0);
+        600.0 - 1.5 * (x - 72.0) + 8.0 * (line_row as f64 + fy - (fy + floor_row)).abs() + 60.0
+    });
+    let none = |_: Vec3| 0.0;
+    let p = K7Params::standard(5, 0.0);
+    let r = k7_tile(&g, id(), &base, &none, std::slice::from_ref(&ch), &p, 2);
+    assert_eq!(r.burned, 0, "the levels stand over the start surface: the burn lowers nothing");
+    let w = g.window();
+    let (t, h) = (g.tile, g.halo);
+    let (mut above, mut bank, mut cells, mut cut) = (f64::NEG_INFINITY, f64::NEG_INFINITY, 0usize, 0.0f64);
+    for (x, y) in line_cells(&ch) {
+        let Some(c) = window_cell(&g, x, y) else { continue };
+        let (a, b) = (c % w, c / w);
+        if a < h + 4 || a >= h + t - 4 {
+            continue;
+        }
+        // the cross-section within 4 cells of the line: its low, and the bank: how far a cell between the line and the low stands over the higher of the two
+        let col: Vec<(usize, f64)> = (b.saturating_sub(4)..=(b + 4).min(w - 1)).map(|bb| (bb, r.z[bb * w + a])).collect();
+        let (lb, low) = col.iter().copied().fold((b, f64::INFINITY), |m, (bb, v)| if v < m.1 { (bb, v) } else { m });
+        let between = col.iter().filter(|(bb, _)| (*bb > lb.min(b)) && (*bb < lb.max(b))).map(|p| p.1).fold(f64::NEG_INFINITY, f64::max);
+        bank = bank.max(between - r.z[c].max(low));
+        above = above.max(r.z[c] - low);
+        cut = cut.max(base(direction(&g, x as f64, y as f64)) - r.z[c]);
+        cells += 1;
+    }
+    println!("TEST-134 dyke: {cells} line cells; the line stands at most {above:.2} m over the low of its cross-section, a bank between them at most {bank:.2} m; the line incised by up to {cut:.2} m");
+    assert!(cells > 50, "the line crosses the core: {cells} cells");
+    assert!(bank <= 0.5, "a bank of {bank:.2} m stands between the line and the valley floor beside it (GEN-186)");
+    // Before GEN-186 the fixed line stayed at the start surface, 22.6 m over the carved floor two cells away; it now incises and stands on the graded side above the floor.
+    assert!(above <= 5.0 && cut >= 10.0, "the line stands {above:.2} m over the valley floor and incised {cut:.2} m: it did not incise with its valley (GEN-186)");
+}
