@@ -1,0 +1,1 @@
+- 2026-11-13 f9-window-replay archived: F9 bundles record --commit and --site; cargo xtask repro --window replays a path in a window and counts the stalls (VIEW-071, BUILD-054).

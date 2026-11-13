@@ -10,6 +10,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// A frame over this many milliseconds fails the gate.
 pub const FRAME_LIMIT_MS: f64 = 100.0;
 
+/// The stalls the gate line names with their counts (the first ones of the run).
+const STALL_DETAIL_FRAMES: usize = 12;
+
 /// Frames at the start of a run that are not judged: shaders and pipelines compile on the first frames.
 pub const WARMUP_FRAMES: u64 = 20;
 
@@ -47,6 +50,19 @@ pub struct HeldFrame {
     pub tiles: Vec<TileId>,
 }
 
+/// A frame of the stall limit or more with the GPU phases counted, and what the streamer did in it (BUILD-054).
+#[derive(Clone, Debug, PartialEq)]
+pub struct StallFrame {
+    pub frame: u64,
+    pub ms: f64,
+    /// The longest phase of the frame.
+    pub phase: String,
+    pub resident: usize,
+    pub uploaded: u64,
+    pub evicted: u64,
+    pub upload_bytes: u64,
+}
+
 /// A frame in which the main thread decoded bake blocks itself (VIEW-061).
 #[derive(Clone, Debug, PartialEq)]
 pub struct DecodeFrame {
@@ -60,6 +76,13 @@ pub struct DecodeFrame {
 pub struct Gate {
     pub frames: u64,
     pub longest_ms: f64,
+    /// Frames of the stall limit (`stall::limit`, default 1 s) or more with the GPU phases counted, and the longest such total (BUILD-054).
+    pub stalls: u64,
+    pub longest_total_ms: f64,
+    /// Each stall with the streamer's counts of its frame, so that the resident count is told from an upload burst (BUILD-054).
+    pub stall_frames: Vec<StallFrame>,
+    /// The streamer's counts of the frame being judged: resident tiles, tiles written, tiles evicted, bytes written ([`Gate::counts`]).
+    counts: (usize, u64, u64, u64),
     pub slow: Vec<SlowFrame>,
     /// The frames in which the main thread decoded a bake block, the first phase of each (a decode waits for the disk and the codec: a stall the warm-up thread should take).
     pub decoded: Vec<DecodeFrame>,
@@ -122,6 +145,15 @@ impl Gate {
             self.main_decodes += blocks;
             self.decoded.push(DecodeFrame { frame, phase: (*phase).to_string(), blocks });
         }
+        // The stalls the window's probe reports (VIEW-056) count the GPU phases too: a render submit of seconds is a stall to the owner (BUILD-054).
+        let total_ms: f64 = phases.iter().map(|p| p.1).sum();
+        self.longest_total_ms = self.longest_total_ms.max(total_ms);
+        if total_ms >= crate::stall::limit().as_secs_f64() * 1e3 {
+            self.stalls += 1;
+            let (phase, _) = phases.iter().copied().max_by(|a, b| a.1.total_cmp(&b.1)).unwrap_or(("(no phase)", 0.0));
+            let (resident, uploaded, evicted, upload_bytes) = self.counts;
+            self.stall_frames.push(StallFrame { frame, ms: total_ms, phase: phase.to_string(), resident, uploaded, evicted, upload_bytes });
+        }
         let phases: Vec<(&str, f64)> = phases.iter().copied().filter(|(name, _)| !GPU_PHASES.iter().any(|g| name.starts_with(g))).collect();
         let ms: f64 = phases.iter().map(|p| p.1).sum();
         self.frames += 1;
@@ -130,6 +162,11 @@ impl Gate {
             let (phase, phase_ms) = phases.iter().copied().max_by(|a, b| a.1.total_cmp(&b.1)).unwrap_or(("(no phase)", 0.0));
             self.slow.push(SlowFrame { frame, ms, phase: phase.to_string(), phase_ms, decodes: blocks });
         }
+    }
+
+    /// The streamer's counts of the frame about to be judged by [`Gate::frame`]: tiles resident, written and evicted, and the bytes written.
+    pub fn counts(&mut self, resident: usize, uploaded: u64, evicted: u64, upload_bytes: u64) {
+        self.counts = (resident, uploaded, evicted, upload_bytes);
     }
 
     /// The tiles the plan of `frame` holds back, and which of them an edit reaches.
@@ -203,8 +240,26 @@ impl Gate {
             (Some(_), Some(b), None) => format!("; edit: re-bake landed {b} ms after it, not drawn yet"),
             (Some(_), Some(b), Some((d, f))) => format!("; edit: re-bake landed {b} ms after it, first drawn {d} ms after it (frame {f})"),
         };
+        // The first stalls with what the streamer did in their frames: a resident count that is high in every stall points at the count, a
+        // burst of uploads in the stall's frame at the upload (BUILD-054).
+        let detail = if self.stall_frames.is_empty() {
+            String::new()
+        } else {
+            let shown: Vec<String> = self
+                .stall_frames
+                .iter()
+                .take(STALL_DETAIL_FRAMES)
+                .map(|s| {
+                    format!(
+                        "frame {} {:.0} ms in \"{}\", resident {}, uploaded {} ({} B), evicted {}",
+                        s.frame, s.ms, s.phase, s.resident, s.uploaded, s.upload_bytes, s.evicted
+                    )
+                })
+                .collect();
+            format!("; stall frames: {}", shown.join(" | "))
+        };
         format!(
-            "gate: {} frames, longest {:.0} ms, {} over {FRAME_LIMIT_MS:.0} ms; main-thread block decodes {} in {} frames; held back: {} frames, {} with no edit in reach, up to {} under an edit; horizon maps baked {horizon_baked}; panics {panics}{edit}",
+            "gate: {} frames, longest {:.0} ms, {} over {FRAME_LIMIT_MS:.0} ms; main-thread block decodes {} in {} frames; held back: {} frames, {} with no edit in reach, up to {} under an edit; horizon maps baked {horizon_baked}; panics {panics}; stalls {} (frames of {:.0} ms or more with the GPU phases, longest {:.0} ms){detail}{edit}",
             self.frames,
             self.longest_ms,
             self.slow.len(),
@@ -212,7 +267,10 @@ impl Gate {
             self.decoded.len(),
             self.held_frames,
             self.held_free.len(),
-            self.held_under_edit_max
+            self.held_under_edit_max,
+            self.stalls,
+            crate::stall::limit().as_secs_f64() * 1e3,
+            self.longest_total_ms
         )
     }
 }
@@ -312,6 +370,30 @@ mod tests {
         assert!(g.failures(1, true, 0, true).is_empty());
         assert_eq!(g.held_under_edit_max, 2);
         assert!(g.report(1, 0).contains("up to 2 under an edit"));
+    }
+
+    // spec: BUILD-054
+    #[test]
+    fn a_stall_counts_the_gpu_phases_and_is_reported_without_failing_the_gate() {
+        let mut g = Gate::default();
+        g.frame(30, &[("draw", 12.0)], &[]);
+        // A render submit of 4.5 s: not a slow frame of the gate (the GPU phases are left out), but a stall of the window.
+        g.counts(23_100, 120, 4, 1_177_440);
+        g.frame(31, &[("input", 2.0), ("render submit (x)", 4500.0)], &[]);
+        g.counts(23_100, 0, 0, 0);
+        g.frame(32, &[("draw", 40.0), ("present (swapchain)", 300.0)], &[]);
+        g.frame(3, &[("compile", 9000.0)], &[]);
+        assert_eq!(g.stalls, 1, "the warm-up frame and the 340 ms frame do not count");
+        assert!(g.failures(1, true, 0, true).is_empty());
+        let line = g.report(1, 0);
+        assert!(line.contains("stalls 1 (frames of 1000 ms or more with the GPU phases, longest 4502 ms)"), "{line}");
+        // The stall's frame names its resident count, uploads and evictions, so a count is told from an upload burst.
+        assert!(
+            line.contains("; stall frames: frame 31 4502 ms in \"render submit (x)\", resident 23100, uploaded 120 (1177440 B), evicted 4"),
+            "{line}"
+        );
+        assert_eq!(g.stall_frames.len(), 1);
+        assert!(!line.contains("edit:"), "no edit, nothing to say: {line}");
     }
 
     // spec: TEST-061
