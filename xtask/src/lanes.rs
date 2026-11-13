@@ -152,11 +152,13 @@ fn processes() -> Vec<Proc> {
         .unwrap_or_default()
 }
 
-/// The inbox directory: `PLANET_INBOX_DIR`, else `planner-inbox` beside the main checkout.
+/// The inbox directory: `PLANET_INBOX_DIR`, else `SeriousPlanetData/lanes` beside the main checkout (ADR 0121).
 fn inbox_dir(main_root: &str) -> PathBuf {
-    std::env::var_os("PLANET_INBOX_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| Path::new(main_root).parent().map(|p| p.join("planner-inbox")).unwrap_or_default())
+    std::env::var_os("PLANET_INBOX_DIR").map(PathBuf::from).unwrap_or_else(|| default_inbox_dir(main_root))
+}
+
+fn default_inbox_dir(main_root: &str) -> PathBuf {
+    Path::new(main_root).parent().map(|p| p.join("SeriousPlanetData").join("lanes")).unwrap_or_default()
 }
 
 fn now_secs() -> u64 {
@@ -268,6 +270,13 @@ mod tests {
 
     fn entry(path: &str, branch: Option<&str>) -> Entry {
         Entry { path: path.into(), head: "abc".into(), branch: branch.map(String::from), locked: false, prunable: false }
+    }
+
+    // spec: BUILD-043
+    #[test]
+    fn the_default_inbox_is_the_lanes_folder_of_the_data_root_beside_the_checkout() {
+        let d = default_inbox_dir("C:/DEV/Serious-Planet-Builder");
+        assert_eq!(d, Path::new("C:/DEV").join("SeriousPlanetData").join("lanes"));
     }
 
     // spec: BUILD-043
