@@ -21,10 +21,10 @@ Dormant items moved to `docs/parking.md` (2026-11-12).
 Every row names an exit item (ADR 0120). Everything else is in `docs/parking.md`.
 | Exit | Step | Lane |
 |---|---|---|
-| E1 | K7 bed coherence: monotone beds, no banks; test from the diag-124 replay; R3a re-baked into a new spike store | crusader |
-| E2 | Viewer residency cap and eviction; G-RT on R3a with the frame-17426 path | explorer |
-| E3 | F9 bundles record --commit/--site; windowed path replay | explorer |
-| E4 | SPIKE-113: detail below 100 m, with a river cross-section | spikes |
+| E1 | k7-bed-coherence (whole-network burn levels) and k7-line-placement (lines on the valley floor, REND-067), merged back to back; then re-bake r3a-p3 | crusader |
+| E1 | --commit draws the bake's base exactly (VIEW-072; the line placement depends on it) | explorer |
+| E2 | Acceptance: the owner's next long flight reads resident tiles at most and evicted from the run log | owner |
+| E4 | SPIKE-113 river part on r3a-p2, then the verdict | spikes |
 | E5 | ADRs for edits against the erosion and for inland lakes and dams, with the owner | owner |
 
 P1 closing: the owner's sign-off line (P1 E4) in `docs/milestones/P1.md` after the flight of 2026-11-13.
@@ -32,7 +32,7 @@ P1 closing: the owner's sign-off line (P1 E4) in `docs/milestones/P1.md` after t
 ## Tracked
 - **River at a cube face edge** (REND-059, 2026-11-12): the store holds a segment crossing a face edge as two runs with a gap of about the H1 ratio in cells (a dry notch); the burn has the same dam, so drawn river and burned trench agree; the charts shear (x1.22 mid-edge, x1.41 at the corner). Fix (B): overlapping runs read by drawing and burn, width in metres through each face's metric: a store format change for the owner, with the face-seam work before the planet bake (REND-063 reserved).
 - **Rock K residual** (#1216, seed 14 face 2): mountain 3 km relief p50 483 against 534 m (the band edge is 2/3 of it), elevation p50 +170-225 m from the K spread (f/(1+f) is concave), not the K mean; tune in the preview round. The carve adds about 1.55 GB at 12,288 cells: measure the peak against 8 GB (CON-21) on the next pass-1 run.
-- **CI flake `gpu_stream_perf` lit-scene smoke** (2026-11-10): 240 s limit hit on Windows WARP C 4 times (11-06 to 11-10), each further one adds to the count, no limit change; times 130-240 s since the step at a600c56b (ground-detail-patch): slowness fits. TEST-106 adds times and phase marks: read them next time.
+- **CI flake `gpu_stream_perf` lit-scene smoke** (2026-11-10): 240 s limit hit on Windows WARP C 5 times (11-06 to 11-13; the 5th at 254 s on #1472), each further one adds to the count, no limit change; times 130-240 s since the step at a600c56b (ground-detail-patch): slowness fits. TEST-106 adds times and phase marks: read them next time.
 - **Older flakes** (WARP, loaded runner): `oracle_stream_smoke` (`load_running_max` 1, at least 2 expected, once; tighten its precondition, never weaken); `gpu_horizon` `a_slot_written_through_set_horizon_reads_back_as_written` (once, passes alone and on CI); `gpu_window` flight test (once, 7.5 s). On a recurrence keep the full output.
 - **Fill depth across a mountain cube edge** (keep-pits-seams, #1201): the seam gate passed on a tile seam; no mountain cube edge was in the stored faces. Blocks the planet bake (I6); run with the integrated-preview re-run.
 - **`test fast` 220-330 s** (BUILD-014): 320-329 s measured 2026-11-10 after the restart, machine busy.
