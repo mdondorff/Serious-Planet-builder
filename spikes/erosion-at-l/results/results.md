@@ -74,6 +74,7 @@ Methods from the review: Schott 2024 tested (as run, over-eroding); Barnes 2016 
 - `bake_eroded` (cache example, spike branch) writes `target/stores/r3a-p2e` (crusader worktree, commit 5c9b47bc8f045ebb, 52 tiles, 403 s). It reruns R3a's front, applies one round at L, routes rivers at L on the eroded surface (3,029 segments, 311,734 channel cells, levels = network levels), and runs K7 with the eroded surface as its start and these rivers burnt.
 - No channel graph is stored: the stored format holds H1 lines only, so no river water is drawn.
 - Finding: K7's canonical flood (GEN-173 grade) refuses a flat of the eroded surface ("too flat for the epsilon", route.rs:236); the spike bake runs K7 with the plain flood. The implementation needs the grade fixed for such flats or the plain flood in K7.
+- Diagnosis (lead 2026-11-14): the grade lifts flat cells above their chessboard level; a one-line cap fixes it (all 52 tiles bake with the canonical flood). See [k7-flat-refusal.md](k7-flat-refusal.md).
 
 ## Edits (lead 2026-11-14)
 The exact incremental path is Barnes 2016's tile scheme (the implementation, not this spike): its local part, a touched 768-cell tile flooded alone, measured 0.11 s, against 78-87 s for a full L route of the region. The perimeter graph is not built here.
