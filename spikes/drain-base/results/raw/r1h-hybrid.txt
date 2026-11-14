@@ -1,0 +1,5 @@
+LATTICE f1-8056-760-hybrid: 1366 x 1366 nodes (611 m); land nodes changed over 1 cm 417413 of 1301217 (32.08 %); lowered p50 6.98 p95 20.00 max 20.00 m, over 50 m on 0.00 % of land nodes; raised p50 137.55 p95 695.42 max 1330.17 m; mean change 64.966 m; hybrid: breach at most 20 m, then fill
+RIVERS f1-8056-760-hybrid: core 126138 channel cells; 87324 on closed basins of the start surface (69.23 % of river length); pits touching the core 16602; time nodes 19 s, front 21 s, sample 6 s, route 86 s
+RIVERS f1-8056-760-hybrid D inf m: cut p50 0.71 p95 48.27 p99 104.25 max 214.69 m, over 50 m 4.75 %; channel cells in lakes 0.00 %
+RIVERS f1-8056-760-hybrid D 20 m: cut p50 0.00 p95 6.34 p99 12.46 max 19.89 m, over 50 m 0.00 %; channel cells in lakes 38.91 %
+RELIEF f1-8056-760-hybrid: band 200 m-1 km std 9.03 m (|.| p95 18.98); 1 km block relief p50 33.6 p95 216.4 m (170312 blocks)
