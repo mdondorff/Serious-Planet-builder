@@ -4,7 +4,7 @@
 //! - with `--store`, on the stored ground B + L (an L tile is K7's ground minus B, so the regional change is in it) over the commit's tiles, the start surface around them, counted over the tiles;
 //!   `--no-key-check` reads each tile under the key its commit names (a spike branch's store) and the report says so.
 //!
-//! The window is in regional cells (12,288 a face edge) as the spikes write it; the default is R3a's (face 1, seed 14).
+//! The window is in regional cells (12,288 a face edge) as the spikes write it; the default is R1h (face 1, seed 14; the E1 region stores' window, lead 2026-11-14).
 use std::path::Path;
 use std::sync::Arc;
 
@@ -24,8 +24,8 @@ const R: f64 = 6_371_000.0;
 const LATTICE: usize = 16_384;
 const REGIONAL: usize = 12_288;
 const SECONDS_PER_YEAR: f64 = 31_557_600.0;
-/// R3a: face 1, regional cells 8,056 to 8,675 on both axes, seed 14 (the r3a stores' window).
-const R3A: [usize; 6] = [1, 8056, 8675, 760, 1379, 14];
+/// R1h: face 1, regional cells i 8,056 to 8,675, j 760 to 1,379, seed 14 (the E1 region stores' window: r3a-e1, r3a-p2, r3a-p2e).
+const R1H: [usize; 6] = [1, 8056, 8675, 760, 1379, 14];
 
 /// The base lattice's nodes over the region (the C1 read's footprint).
 struct Lattice {
@@ -93,7 +93,7 @@ fn main() -> Result<(), String> {
         k += 2;
     }
     let win: Vec<usize> = match value(&args, "--window") {
-        None => R3A.to_vec(),
+        None => R1H.to_vec(),
         Some(v) => v
             .split(',')
             .map(|x| x.parse::<usize>().map_err(|_| format!("--window face,i0,i1,j0,j1,seed, not '{v}'")))
