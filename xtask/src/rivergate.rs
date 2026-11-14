@@ -1,6 +1,6 @@
-//! `cargo xtask river-gate <store dir | window | r3a> [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--no-key-check]` (BUILD-055): the river gate's numbers on a region. Runs the `river_gate` example of
-//! `planet-cache` in release under the heavy lock: the first argument is a commit's store (counted over its tiles, on the window `--window`, default R3a) or a window
-//! `face,i0,i1,j0,j1,seed` in regional cells (`r3a` names R3a's), measured on the start surface. The report is printed, never judged: the exit status is 0 when the run ends.
+//! `cargo xtask river-gate <store dir | window> [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--no-key-check]` (BUILD-055): the river gate's numbers on a region. Runs the `river_gate` example of
+//! `planet-cache` in release under the heavy lock: the first argument is a commit's store (counted over its tiles, on the window `--window`, default R1h) or a window, measured on the start
+//! surface. A window is `face,i0,i1,j0,j1,seed` in regional cells or one of the canonical names of [`WINDOWS`] (lead, 2026-11-14). The report is printed, never judged: the exit status is 0 when the run ends.
 
 use crate::util::{run, Res};
 use std::path::Path;
@@ -8,16 +8,25 @@ use std::path::Path;
 /// The options the example takes after the target, each with a value.
 const OPTIONS: [&str; 5] = ["--window", "--margin", "--min-cells", "--d", "--threads"];
 
+/// The canonical region windows (lead, 2026-11-14): `face,i0,i1,j0,j1,seed`, 620-cell cores (with the gate's 200-cell margin SPIKE-111's 1,020-cell windows). R1h is the E1 region stores'
+/// window (r3a-e1, r3a-p2, r3a-p2e).
+pub const WINDOWS: [(&str, &str); 3] =
+    [("r1h", "1,8056,8675,760,1379,14"), ("r3a", "4,368,987,4720,5339,15"), ("r3b", "2,9968,10587,8304,8923,15")];
+
+/// A window argument: a canonical name (any case) becomes its numbers; anything else is passed as written.
+pub fn window_of(arg: &str) -> String {
+    WINDOWS.iter().find(|(n, _)| n.eq_ignore_ascii_case(arg)).map_or_else(|| arg.to_string(), |(_, w)| w.to_string())
+}
+
 /// The example's arguments for the xtask's: the target becomes `--window` or `--store`; an unknown option, a missing value or a second window is refused.
 pub fn example_args(args: &[String]) -> Result<Vec<String>, String> {
-    let usage = "usage: cargo xtask river-gate <store dir | face,i0,i1,j0,j1,seed | r3a> [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--no-key-check]";
+    let usage = "usage: cargo xtask river-gate <store dir | face,i0,i1,j0,j1,seed | r1h | r3a | r3b> [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--no-key-check]";
     let Some(target) = args.first().filter(|a| !a.starts_with("--")) else { return Err(usage.to_string()) };
     let mut out = Vec::new();
-    let window_target = target == "r3a" || target.split(',').count() == 6 && target.split(',').all(|x| x.parse::<usize>().is_ok());
+    let window = window_of(target);
+    let window_target = window.split(',').count() == 6 && window.split(',').all(|x| x.parse::<usize>().is_ok());
     if window_target {
-        if target != "r3a" {
-            out.extend(["--window".to_string(), target.clone()]);
-        }
+        out.extend(["--window".to_string(), window]);
     } else {
         out.extend(["--store".to_string(), target.clone()]);
     }
@@ -39,7 +48,7 @@ pub fn example_args(args: &[String]) -> Result<Vec<String>, String> {
         if name == "--window" && window_target {
             return Err(format!("the target is a window already: --window goes with a store; {usage}"));
         }
-        out.extend([name.to_string(), v.clone()]);
+        out.extend([name.to_string(), if name == "--window" { window_of(v) } else { v.clone() }]);
         k += 2;
     }
     Ok(out)
@@ -63,7 +72,14 @@ mod tests {
     // spec: BUILD-055
     #[test]
     fn the_target_is_a_window_or_a_store() {
-        assert_eq!(example_args(&s(&["r3a"])).unwrap(), Vec::<String>::new());
+        // The canonical names (lead, 2026-11-14): R1h is the E1 region stores' window; R3a and R3b are SPIKE-111's face 4 and face 2 windows of seed 15.
+        assert_eq!(example_args(&s(&["r1h"])).unwrap(), s(&["--window", "1,8056,8675,760,1379,14"]));
+        assert_eq!(example_args(&s(&["r3a"])).unwrap(), s(&["--window", "4,368,987,4720,5339,15"]));
+        assert_eq!(example_args(&s(&["R3B"])).unwrap(), s(&["--window", "2,9968,10587,8304,8923,15"]));
+        assert_eq!(
+            example_args(&s(&["store", "--window", "r1h"])).unwrap(),
+            s(&["--store", "store", "--window", "1,8056,8675,760,1379,14"])
+        );
         assert_eq!(
             example_args(&s(&["1,8056,8675,760,1379,14", "--d", "30"])).unwrap(),
             s(&["--window", "1,8056,8675,760,1379,14", "--d", "30"])

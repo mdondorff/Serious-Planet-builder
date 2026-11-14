@@ -1,0 +1,1 @@
+- 2026-11-14 river-gate-names (BUILD-055): the river gate takes the canonical window names r1h, r3a (face 4, seed 15) and r3b; `r3a` no longer means the E1 region stores' window (R1h).
