@@ -717,7 +717,10 @@ fn main() -> Result<(), String> {
         x >= ci0 && x < ci1 && y >= cj0 && y < cj1
     };
     // PLANET_PICS: the full-resolution core (every L cell) as f32 heights and a u8 channel mask (the L route, area at the initiation threshold), for the review's picture set (lead #118).
-    if std::env::var("PLANET_PICS").is_ok() {
+    // PLANET_PICS=window: the whole window (core and margin) instead, for poses beyond the core.
+    if let Ok(mode) = std::env::var("PLANET_PICS") {
+        let (ci0, ci1, cj0, cj1) = if mode == "window" { (x0, x0 + w as i64, y0, y0 + h as i64) } else { (ci0, ci1, cj0, cj1) };
+        println!("PICS {tag}: dump origin at L cell ({ci0}, {cj0}) of face {}", face.0);
         let (cw, chh) = ((ci1 - ci0) as usize, (cj1 - cj0) as usize);
         let mut hb: Vec<u8> = Vec::with_capacity(cw * chh * 4);
         let mut mb: Vec<u8> = Vec::with_capacity(cw * chh);
