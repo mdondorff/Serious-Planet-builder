@@ -179,10 +179,12 @@ pub fn judge(log: &str, list: &[Known], status: &str, candidates: usize) -> Resu
     // Every test that ran and did not pass must be one of the parsed failures: a status this parser does not know would otherwise hide among known ones.
     match summary_not_passed(log) {
         Some(n) if n == failed.len() => {}
-        Some(n) => return Err(format!(
+        Some(n) => {
+            return Err(format!(
             "the Summary counts {n} test(s) that did not pass, the log names {} failure(s): a failure of a kind this check does not read",
             failed.len()
-        )),
+        ))
+        }
         None => return Err("the Summary line gives no `N tests run: M passed` counts: no known class covers the run".into()),
     }
     let tracked: Vec<&Known> = list.iter().filter(|k| status.contains(&format!("**{}**", k.tracked))).collect();
@@ -335,6 +337,9 @@ mod tests {
         let unread = format!("{ABORT}\n     EXEC-FAIL [ 0.1s] (  2/235) planet::gpu_all gpu_x::y");
         assert!(judge(&log_counting(&unread, 2), &l, STATUS, 0).unwrap_err().contains("Summary counts 2"));
         assert_eq!(summary_not_passed(&log_counting(ABORT, 4)), Some(4));
+        // The real line's shape (test-gpu log of 2026-11-14 12:51): slow and skipped counts beside the others.
+        let real = "     Summary [1328.801s] 235 tests run: 231 passed (22 slow), 3 failed, 1 timed out, 3090 skipped";
+        assert_eq!(summary_not_passed(real), Some(4));
         assert!(judge(&format!("{ABORT}\n     Summary [1.0s] cancelled\n"), &l, STATUS, 0).unwrap_err().contains("no `N tests run"));
         // A golden candidate, even with only known failures.
         assert!(judge(&log(ABORT), &l, STATUS, 1).unwrap_err().contains("candidate golden"));
