@@ -1,0 +1,1 @@
+- 2026-11-14 known-tier-c (BUILD-056): prepush passes a local tier C that fails only in the tracked known classes of `xtask/known-tier-c.txt` (WARP abort 0xc0000005, the gpu_skeleton pipelined-loop timeout, gpu_preflight's 8 s bound) with no candidate golden, and prints the summary for the PR body; CI still runs tier C in full.

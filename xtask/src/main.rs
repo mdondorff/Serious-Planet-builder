@@ -10,6 +10,7 @@ mod gate;
 mod gates;
 mod heavy;
 mod k7layout;
+mod knowntierc;
 mod lanes;
 mod layering;
 mod logcmd;

@@ -217,7 +217,7 @@ pub fn run(root: &Path) -> Res {
             "check" => Box::new(|| testcmd::check(root)),
             "test fast" => Box::new(|| testcmd::test(root, &["fast".to_string()])),
             "gate --small" => Box::new(|| crate::gate::run_small(root)),
-            _ => Box::new(|| testcmd::test(root, &["gpu".to_string()])),
+            _ => Box::new(|| crate::knowntierc::gpu_step(root)),
         };
         plan.push((name, action));
     }

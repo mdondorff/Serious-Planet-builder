@@ -482,7 +482,7 @@ fn stale_pending(root: &Path) -> Res {
 }
 
 /// Candidate goldens under `target/review/candidates/<adapter>/<name>.png` that have no golden yet or differ from it.
-fn candidates(root: &Path) -> Vec<(String, String)> {
+pub fn candidates(root: &Path) -> Vec<(String, String)> {
     let base = root.join("target").join("review").join("candidates");
     let mut files = Vec::new();
     files_with_ext(&base, "png", &mut files);
