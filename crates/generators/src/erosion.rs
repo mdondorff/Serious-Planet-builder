@@ -31,9 +31,11 @@ thread_local! {
     /// The C1 stencils this thread loaded (see [`read_elevation_c1_cached`]).
     static STENCILS: std::cell::RefCell<StencilCache> = std::cell::RefCell::new(StencilCache::new());
     /// The unpinned detail at the layer cell centres this thread read, for one field (its id): the pin's memo (GEN-187).
-    static PIN_MEMO: std::cell::RefCell<(u64, std::collections::HashMap<(u8, u32, u32), f64>)> =
-        std::cell::RefCell::new((0, std::collections::HashMap::new()));
+    static PIN_MEMO: std::cell::RefCell<PinMemo> = std::cell::RefCell::new((0, std::collections::HashMap::new()));
 }
+
+/// The field's id and the detail at the cells `(face, i, j)` of its centres.
+type PinMemo = (u64, std::collections::HashMap<(u8, u32, u32), f64>);
 
 /// The most centres a thread keeps in the pin's memo before it starts over (about 6 MB).
 const PIN_MEMO_CAP: usize = 1 << 18;
