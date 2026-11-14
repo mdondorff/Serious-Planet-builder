@@ -17,17 +17,18 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 
 Dormant items moved to `docs/parking.md` (2026-11-12).
 
-## Queue (2026-11-13, milestone P2: `docs/milestones/P2.md`)
+## Queue (2026-11-14, milestone P3: `docs/milestones/P3.md`)
 Every row names an exit item (ADR 0120). Everything else is in `docs/parking.md`.
 | Exit | Step | Lane |
 |---|---|---|
-| E1 | SPIKE-114: rivers routed at L on R3a (cut share, rises, agreement with H1 at the edge, cost, store or rebuild); then the ADR | crusader |
-| E1 | VIEW-072 guard (the base under --commit is already bit-equal); then ADR 0122 point 1, pinned fine detail (GEN-187) | explorer |
-| E2 | Acceptance: the owner's next long flight reads resident tiles at most and evicted from the run log | owner |
-| E5 | Inland lakes and dams ADR, after crusader's rivers-at-L spike sets the lake numbers | owner |
+| E1 | SPIKE-115: erosion rounds at L in the region; the incremental re-route after an edit timed | crusader |
+| E1 | SPIKE-116: a base whose 100 m relief drains by construction (rivers first, the valley network) | spikes |
+| E2 | After E1's pick: rivers at L with stored geometry, whole-network levels, the lakes ADR, GEN-188's limiter in the bake reads; R3a re-baked | crusader |
+| E3 | GEN-187 (pinned detail, with the memo) merged; the owner's two flights (laptop panel, external display) | explorer, owner |
+| E4 | The thermal-dam options brief | spikes |
+| E5 | P1 and P2 closure; OpenSpec sync and archive in batches; m9-bake per ID; the independent review pass | lead, all lanes |
 
-P1 closed 2026-11-13 (owner sign-off in `docs/milestones/P1.md`).
-
+P2 closed 2026-11-14 into P3; P1 closed 2026-11-13.
 ## Tracked
 - **River at a cube face edge** (REND-059, 2026-11-12): the store holds a segment crossing a face edge as two runs with a gap of about the H1 ratio in cells (a dry notch); the burn has the same dam, so drawn river and burned trench agree; the charts shear (x1.22 mid-edge, x1.41 at the corner). Fix (B): overlapping runs read by drawing and burn, width in metres through each face's metric: a store format change for the owner, with the face-seam work before the planet bake (REND-063 reserved).
 - **Rock K residual** (#1216, seed 14 face 2): mountain 3 km relief p50 483 against 534 m (the band edge is 2/3 of it), elevation p50 +170-225 m from the K spread (f/(1+f) is concave), not the K mean; tune in the preview round. The carve adds about 1.55 GB at 12,288 cells: measure the peak against 8 GB (CON-21) on the next pass-1 run.
