@@ -165,19 +165,17 @@ pub fn load_l_tile(
     if let Some(t) = load_l_tile_keyed(store, spec, id, key)? {
         return Ok(Some(t));
     }
-    {
-        let Some(other) = store.keys_for(KIND_LAYER_TILE, tile).first().copied() else { return Ok(None) };
-        let found = store.get(KIND_LAYER_TILE, tile, other).ok().flatten().and_then(|r| r.payload.first().copied());
-        return Err(what(match found {
-            Some(PREVIOUS_CODEC_VERSION) => format!(
-                "the store holds this tile under key {other} as a record of the previous layer (codec {PREVIOUS_CODEC_VERSION}, layer version 2, with a fill channel); this build reads codec {L_CODEC_VERSION} (layer version {TILE_LAYER_VERSION}): refused, rebuild the layer"
-            ),
-            Some(c) => format!(
-                "the store holds this tile under key {other} (codec {c}), made for another base, other parameters or another kernel version; this build reads codec {L_CODEC_VERSION} (layer version {TILE_LAYER_VERSION}): refused, not mixed"
-            ),
-            None => format!("the store holds this tile under key {other} that cannot be read: refused, not mixed"),
-        }));
-    }
+    let Some(other) = store.keys_for(KIND_LAYER_TILE, tile).first().copied() else { return Ok(None) };
+    let found = store.get(KIND_LAYER_TILE, tile, other).ok().flatten().and_then(|r| r.payload.first().copied());
+    Err(what(match found {
+        Some(PREVIOUS_CODEC_VERSION) => format!(
+            "the store holds this tile under key {other} as a record of the previous layer (codec {PREVIOUS_CODEC_VERSION}, layer version 2, with a fill channel); this build reads codec {L_CODEC_VERSION} (layer version {TILE_LAYER_VERSION}): refused, rebuild the layer"
+        ),
+        Some(c) => format!(
+            "the store holds this tile under key {other} (codec {c}), made for another base, other parameters or another kernel version; this build reads codec {L_CODEC_VERSION} (layer version {TILE_LAYER_VERSION}): refused, not mixed"
+        ),
+        None => format!("the store holds this tile under key {other} that cannot be read: refused, not mixed"),
+    }))
 }
 
 /// The L tile record stored under `key` (no check that this build makes `key` for the tile): `Ok(None)` when the store holds no record under it. [`load_l_tile`] reads under the key this build makes;

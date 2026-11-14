@@ -107,7 +107,7 @@ fn a_trench_below_its_valley_is_a_canyon_and_a_uniform_lowering_only_erosion_dep
         trench[y * N + 20] -= 60.0;
     }
     let t = run(&start, &trench, &params());
-    assert!(t.canyon.count_over > 0 && t.canyon.count_over >= 30, "the trench is the river: {t:?}");
+    assert!(t.canyon.count_over >= 30, "the trench is the river: {t:?}");
     assert!(t.canyon.max_m > 50.0);
 }
 

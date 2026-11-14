@@ -381,9 +381,8 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
     }
     let w = g.w();
     let mut l_cross: Vec<Crossing> = Vec::new();
-    for c in 0..n {
-        let r = routing.receiver[c];
-        if river[c] && r != NONE && input.region[c] != input.region[r as usize] {
+    for (c, (&r, &is_river)) in routing.receiver.iter().zip(&river).enumerate() {
+        if is_river && r != NONE && input.region[c] != input.region[r as usize] {
             l_cross.push(Crossing { inside: input.region[c], x: (c % w) as f64, y: (c / w) as f64, q_m3s: 0.0 });
         }
     }
