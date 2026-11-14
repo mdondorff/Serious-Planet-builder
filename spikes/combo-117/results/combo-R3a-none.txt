@@ -1,0 +1,9 @@
+EROSION start surface: relief p50 over 2 x 2 cells 1.21 m, over 10 x 10 cells 11.32 m; front 48 s
+EROSION N 1: 1 more rounds at L in 69 s (RoundReport { rounds: [RoundStats { catchments: 21103362, largest: 1424719, in_large: 39706145 }], pre_breach: None })
+EROSION N 1: basins (>= 0.5 m, >= 16 cells, fill eps 1e-7) on 1.78 % of the river cells inside the tiles (1500 of 84450); 5 cm count 33.36 %; 48 such basins in the window; channel steps along a grid axis 42.60 % (35978 of 84450)
+EROSION N 1 D inf m: the burn under the eroded surface (the canyon): p50 0.00 p99 5.33 max 8.43 m, 0 over 50 m (0.00 %)
+EROSION N 1 D inf m: 84450 channel cells inside the tiles (28169 in a pit, 33.4 %; 0 in lakes, 0.0 %); cut under the start surface p50 3.55 p95 22.07 p99 52.30 max 200.83 m, 934 over 50 m (1.11 %); ground rises 0 of 83986, water rises 0; 1246 pits
+EROSION N 1 D 20 m: the burn under the eroded surface (the canyon): p50 0.00 p99 5.33 max 8.43 m, 0 over 50 m (0.00 %)
+EROSION N 1 D 20 m: 84450 channel cells inside the tiles (28169 in a pit, 33.4 %; 0 in lakes, 0.0 %); cut under the start surface p50 3.55 p95 22.07 p99 52.30 max 200.83 m, 934 over 50 m (1.11 %); ground rises 0 of 83986, water rises 0; 1246 pits
+EROSION N 1: edge: 34 of 84 H1 crossings (Q >= 1 m3/s) have an L crossing of the same kind within 2 km; relief p50 2 x 2 cells 1.45 m (120 % of the start), 10 x 10 cells 13.23 m (117 %); flood + route 90 s
+EROSION total 245 s
