@@ -30,7 +30,13 @@ use crate::terrain::scan_base;
 thread_local! {
     /// The C1 stencils this thread loaded (see [`read_elevation_c1_cached`]).
     static STENCILS: std::cell::RefCell<StencilCache> = std::cell::RefCell::new(StencilCache::new());
+    /// The unpinned detail at the layer cell centres this thread read, for one field (its id): the pin's memo (GEN-187).
+    static PIN_MEMO: std::cell::RefCell<(u64, std::collections::HashMap<(u8, u32, u32), f64>)> =
+        std::cell::RefCell::new((0, std::collections::HashMap::new()));
 }
+
+/// The most centres a thread keeps in the pin's memo before it starts over (about 6 MB).
+const PIN_MEMO_CAP: usize = 1 << 18;
 static NEXT_FIELD_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// Bump whenever any output of this module changes (ADR 0006); it also covers [`GLOBAL_VERSION`] through the bake key.
@@ -536,10 +542,11 @@ impl ErosionField<'_> {
                     0.0
                 } else {
                     let mut interpolant = 0.0;
-                    for (centre, w) in stencil.centres {
-                        if w > 0.0 {
-                            // The centres' reads are in a gathered batch's footprint (`gather_footprint`).
-                            interpolant += w * self.detail_via_c(src, centre, cached).1;
+                    for ((centre, w), cell) in stencil.centres.iter().zip(&stencil.cells) {
+                        if *w > 0.0 {
+                            // The centres' reads are in a gathered batch's footprint (`gather_footprint`). A centre's detail is a pure function of the field and
+                            // the cell, so this thread keeps it for the points around it (a neighbouring sample reads the same four).
+                            interpolant += w * self.centre_detail(src, *centre, *cell, cached);
                         }
                     }
                     detail - interpolant
@@ -547,6 +554,33 @@ impl ErosionField<'_> {
             }
         };
         self.compose(dir, e, detail)
+    }
+
+    /// The unpinned detail at a layer cell centre, from this thread's memo of the field's centres (GEN-187): the same value as evaluating it, bit for bit.
+    fn centre_detail(&self, src: &dyn LatticeSource, centre: Vec3, cell: (u8, u32, u32), cached: bool) -> f64 {
+        if let Some(v) = PIN_MEMO.with(|m| {
+            let m = m.borrow();
+            if m.0 == self.id {
+                m.1.get(&cell).copied()
+            } else {
+                None
+            }
+        }) {
+            return v;
+        }
+        let v = self.detail_via_c(src, centre, cached).1;
+        // A failed read (NaN, recorded) is not kept: the next read tries again.
+        if v.is_finite() {
+            PIN_MEMO.with(|m| {
+                let mut m = m.borrow_mut();
+                if m.0 != self.id || m.1.len() >= PIN_MEMO_CAP {
+                    m.0 = self.id;
+                    m.1.clear();
+                }
+                m.1.insert(cell, v);
+            });
+        }
+        v
     }
 
     /// The lattice reads of a height at `dir` for a gathered batch (GEN-020): the base and its gradient at the point and, where the detail is pinned (GEN-187), at the layer's
