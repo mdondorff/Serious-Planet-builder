@@ -1,0 +1,1 @@
+- 2026-11-14 heavy-queue (BUILD-026): heavy commands queue in arrival order through tickets beside the lock, a dead waiter's ticket is removed, and a holder past 90 minutes is named overdue in the waiters' messages (the lock is never broken).

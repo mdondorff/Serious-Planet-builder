@@ -9,12 +9,17 @@
 //! The state directory is `PLANET_STATE_DIR`, else `SeriousPlanetData/tmp/heavy` in the nearest ancestor of the workspace that has the data
 //! root (ADR 0121), else `%LOCALAPPDATA%\planet`, else `$XDG_STATE_HOME/planet`, else `~/.local/state/planet`. The data root comes before
 //! `%LOCALAPPDATA%` because the desktop app redirects `%LOCALAPPDATA%` for its sessions: a terminal and a session then saw two different locks.
+//!
+//! Waiters queue in arrival order (lead, 2026-11-14): a command that finds the lock busy, or others already queued, takes a ticket (a file in
+//! `tickets/`, named by its arrival time, held open under an OS file lock), and only the lowest live ticket tries the lock. A ticket whose file
+//! lock is free belongs to a process that has ended: the next reader removes it. A holder past [`overdue_limit`] is named overdue in the waiters'
+//! messages; the lock is never broken.
 
 use std::fs::{File, OpenOptions, TryLockError};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// How often a waiting command looks again.
 const POLL: Duration = Duration::from_secs(2);
@@ -103,6 +108,128 @@ pub enum Busy {
     Quiet(PathBuf),
     /// Another command holds the lock; what its holder file says.
     Held(String),
+    /// Other waiters queued earlier: how many, and the first one's ticket note.
+    Queued(usize, String),
+}
+
+/// A holder that has held the lock longer than this is named overdue (a parameter: `PLANET_HEAVY_OVERDUE_MIN`, default 90 minutes).
+pub const OVERDUE_DEFAULT: Duration = Duration::from_secs(90 * 60);
+
+/// The overdue limit in force.
+pub fn overdue_limit() -> Duration {
+    std::env::var("PLANET_HEAVY_OVERDUE_MIN")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map_or(OVERDUE_DEFAULT, |m| Duration::from_secs(m * 60))
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
+}
+
+/// How many whole minutes the holder of `note` has held the lock, when that is longer than `limit` (the note's "since N s after the epoch"); `None` when it
+/// is not overdue or the note names no start.
+pub fn overdue_minutes(note: &str, now: u64, limit: Duration) -> Option<u64> {
+    let since: u64 = note.split("since ").nth(1)?.split(' ').next()?.parse().ok()?;
+    let held = now.saturating_sub(since);
+    (held > limit.as_secs()).then_some(held / 60)
+}
+
+/// The waiting message for `busy`, with the holder named overdue past `limit`.
+pub fn waiting_message(busy: &Busy, what: &str, now: u64, limit: Duration) -> String {
+    let overdue = |holder: &str| match overdue_minutes(holder, now, limit) {
+        Some(m) => format!("; overdue: {}, held {m} min (the lock is never broken: the holder's lane or the owner ends it)", holder.trim()),
+        None => String::new(),
+    };
+    match busy {
+        Busy::Quiet(p) => format!(
+            "waiting: the owner's quiet flag {} is up (`cargo xtask quiet off` or deleting the file lets heavy commands run); `{what}` is queued",
+            p.display()
+        ),
+        Busy::Held(holder) => format!("waiting for {}; `{what}` is queued{}", holder.trim(), overdue(holder)),
+        Busy::Queued(ahead, first) => format!("waiting: {ahead} queued ahead (next: {}); `{what}` is queued", first.trim()),
+    }
+}
+
+fn tickets_dir(dir: &Path) -> PathBuf {
+    dir.join("tickets")
+}
+
+/// A ticket younger than this is never taken for dead: its owner may not have locked it yet.
+const TICKET_GRACE: Duration = Duration::from_secs(5);
+
+/// Tickets of one process are told apart by this counter.
+static TICKET_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// A waiter's place in the queue: its file, held open and locked while it waits; removed when dropped.
+pub struct Ticket {
+    file: Option<File>,
+    path: PathBuf,
+    /// The file name: arrival time in nanoseconds, process id, sequence (zero-padded, so the names sort in arrival order).
+    pub name: String,
+}
+
+impl Drop for Ticket {
+    fn drop(&mut self) {
+        // The handle first: a file open elsewhere cannot be removed on Windows.
+        self.file.take();
+        let _ = std::fs::remove_file(&self.path);
+        let _ = std::fs::remove_file(note_path(&self.path));
+    }
+}
+
+/// The note beside a ticket: a locked file cannot be read through another handle on Windows, so what the waiter is goes in its own file.
+fn note_path(ticket: &Path) -> PathBuf {
+    let mut p = ticket.as_os_str().to_owned();
+    p.push(".note");
+    PathBuf::from(p)
+}
+
+/// Take a ticket for `what` in the queue of `dir`.
+pub fn take_ticket(dir: &Path, what: &str) -> std::io::Result<Ticket> {
+    let t = tickets_dir(dir);
+    std::fs::create_dir_all(&t)?;
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let name = format!("{nanos:024}-{:010}-{:06}", std::process::id(), TICKET_SEQ.fetch_add(1, Ordering::SeqCst));
+    let path = t.join(&name);
+    let worktree = std::env::current_dir().ok().and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())).unwrap_or_default();
+    std::fs::write(
+        note_path(&path),
+        format!("{what} (process {}, in {worktree}, queued since {} s after the epoch)", std::process::id(), now_secs()),
+    )?;
+    let file = OpenOptions::new().read(true).write(true).create_new(true).open(&path)?;
+    file.lock()?;
+    Ok(Ticket { file: Some(file), path, name })
+}
+
+/// The live tickets of `dir` in arrival order, `(name, note)`: a ticket whose file lock is free and that is older than [`TICKET_GRACE`] belongs to an ended
+/// process and is removed.
+pub fn live_tickets(dir: &Path) -> Vec<(String, String)> {
+    let Ok(entries) = std::fs::read_dir(tickets_dir(dir)) else { return Vec::new() };
+    let mut names: Vec<(String, PathBuf)> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| (e.file_name().to_string_lossy().into_owned(), e.path()))
+        .filter(|(n, _)| !n.ends_with(".note"))
+        .collect();
+    names.sort();
+    let mut live = Vec::new();
+    for (name, path) in names {
+        let Ok(file) = OpenOptions::new().read(true).write(true).open(&path) else { continue };
+        let young = file.metadata().and_then(|m| m.modified()).ok().and_then(|m| m.elapsed().ok()).is_none_or(|age| age < TICKET_GRACE);
+        match file.try_lock() {
+            Ok(()) if !young => {
+                // Its process has ended: the system released its lock.
+                drop(file);
+                let _ = std::fs::remove_file(&path);
+                let _ = std::fs::remove_file(note_path(&path));
+            }
+            _ => {
+                drop(file);
+                live.push((name, std::fs::read_to_string(note_path(&path)).unwrap_or_default()));
+            }
+        }
+    }
+    live
 }
 
 /// Take the lock if nobody holds it and the quiet flag is not up; never waits.
@@ -150,24 +277,42 @@ pub fn acquire_in(
 ) -> std::io::Result<Option<Guard>> {
     let began = Instant::now();
     let mut last_said: Option<Instant> = None;
+    let limit = overdue_limit();
+    // This waiter's place in the queue, taken the first time it has to wait.
+    let mut ticket: Option<Ticket> = None;
     loop {
-        match try_acquire_in(dir, what)? {
+        let queue = live_tickets(dir);
+        let ahead: Vec<&(String, String)> = queue.iter().filter(|(n, _)| ticket.as_ref().is_none_or(|t| n < &t.name)).collect();
+        let tried = if let Some((_, first)) = ahead.first() {
+            // Others queued earlier: wait behind them (never take the lock ahead of the queue).
+            Err(Busy::Queued(ahead.len(), first.clone()))
+        } else {
+            try_acquire_in(dir, what)?
+        };
+        match tried {
             Ok(guard) => {
                 if last_said.is_some() {
                     say(&format!("the machine is free after {:.0} s: running `{what}`", began.elapsed().as_secs_f64()));
                 }
+                // The ticket goes with the wait.
+                drop(ticket);
                 return Ok(Some(guard));
             }
             Err(busy) => {
+                if ticket.is_none() {
+                    ticket = Some(take_ticket(dir, what)?);
+                }
                 if last_said.is_none_or(|t| t.elapsed() >= SAY_EVERY) {
                     last_said = Some(Instant::now());
-                    say(&match &busy {
-                        Busy::Quiet(p) => format!(
-                            "waiting: the owner's quiet flag {} is up (`cargo xtask quiet off` or deleting the file lets heavy commands run); `{what}` is queued",
-                            p.display()
-                        ),
-                        Busy::Held(holder) => format!("waiting for {holder}; `{what}` is queued"),
-                    });
+                    let mut m = waiting_message(&busy, what, now_secs(), limit);
+                    if let Busy::Queued(..) = busy {
+                        // The holder may be overdue while the queue waits.
+                        let holder = std::fs::read_to_string(holder_path(dir)).unwrap_or_default();
+                        if let Some(min) = overdue_minutes(&holder, now_secs(), limit) {
+                            m.push_str(&format!("; overdue: {}, held {min} min", holder.trim()));
+                        }
+                    }
+                    say(&m);
                 }
             }
         }
@@ -429,6 +574,101 @@ mod tests {
         quiet_in(&d, &["on".to_string()]).unwrap();
         assert!(quiet_age(&d).unwrap() < Duration::from_secs(5));
         assert!(matches!(try_acquire_in(&d, "x").unwrap(), Err(Busy::Quiet(_))));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: BUILD-026
+    #[test]
+    fn waiters_go_in_arrival_order_and_a_newcomer_never_jumps_the_queue() {
+        let d = dir("order");
+        let holder = try_acquire_in(&d, "test gpu").unwrap().expect("free");
+        let order = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let spawn = |name: &'static str| {
+            let (d, order) = (d.clone(), order.clone());
+            std::thread::spawn(move || {
+                let g = acquire_in(&d, name, Duration::from_millis(5), Some(Duration::from_secs(20)), &mut |_| {})
+                    .unwrap()
+                    .expect("its turn comes");
+                order.lock().unwrap().push(name);
+                std::thread::sleep(Duration::from_millis(50));
+                drop(g);
+            })
+        };
+        let a = spawn("first");
+        // The first is queued (its ticket is taken) before the second arrives.
+        while live_tickets(&d).is_empty() {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let b = spawn("second");
+        while live_tickets(&d).len() < 2 {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        drop(holder);
+        a.join().unwrap();
+        b.join().unwrap();
+        assert_eq!(*order.lock().unwrap(), vec!["first", "second"]);
+        assert!(live_tickets(&d).is_empty(), "every ticket went with its wait");
+        // The lock is free but a waiter is queued: a newcomer queues behind it instead of taking the lock.
+        let queued = take_ticket(&d, "queued earlier").unwrap();
+        let mut said = Vec::new();
+        let newcomer =
+            acquire_in(&d, "newcomer", Duration::from_millis(5), Some(Duration::from_millis(60)), &mut |m| said.push(m.to_string()))
+                .unwrap();
+        assert!(newcomer.is_none(), "the newcomer waits behind the queue");
+        assert!(said.iter().any(|m| m.contains("1 queued ahead") && m.contains("queued earlier")), "{said:?}");
+        drop(queued);
+        assert!(acquire_in(&d, "newcomer", Duration::from_millis(5), Some(Duration::from_secs(5)), &mut |_| {}).unwrap().is_some());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: BUILD-026
+    #[test]
+    fn a_dead_waiters_ticket_is_removed_and_a_young_one_is_kept() {
+        let d = dir("dead");
+        std::fs::create_dir_all(tickets_dir(&d)).unwrap();
+        // A ticket no process holds (its process ended): unlocked and older than the grace.
+        let dead = tickets_dir(&d).join("000000000000000000000001-0000000001-000000");
+        std::fs::write(&dead, "").unwrap();
+        std::fs::write(note_path(&dead), "prepush (process 1, in gone, queued since 0 s after the epoch)").unwrap();
+        File::options().write(true).open(&dead).unwrap().set_modified(SystemTime::now() - Duration::from_secs(60)).unwrap();
+        // A ticket just written, not yet locked by its owner: kept for the grace.
+        let young = tickets_dir(&d).join("000000000000000000000002-0000000002-000000");
+        std::fs::write(&young, "test (process 2)").unwrap();
+        let live = live_tickets(&d);
+        assert_eq!(live.len(), 1, "{live:?}");
+        assert!(live[0].0.ends_with("0000000002-000000"));
+        assert!(!dead.exists() && !note_path(&dead).exists(), "the dead ticket and its note are removed");
+        // A held ticket is live whatever its age.
+        std::fs::remove_file(&young).unwrap();
+        let held = take_ticket(&d, "held").unwrap();
+        File::options().write(true).open(&held.path).unwrap().set_modified(SystemTime::now() - Duration::from_secs(60)).unwrap();
+        assert_eq!(live_tickets(&d).len(), 1, "a locked ticket is live");
+        drop(held);
+        assert!(live_tickets(&d).is_empty(), "a dropped ticket is gone");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: BUILD-026
+    #[test]
+    fn a_holder_past_the_limit_is_named_overdue_and_the_lock_is_never_broken() {
+        let limit = Duration::from_secs(90 * 60);
+        let now = 1_000_000;
+        let note = |held_min: u64| format!("cargo xtask prepush (process 7, in lane, since {} s after the epoch)", now - held_min * 60);
+        assert_eq!(overdue_minutes(&note(100), now, limit), Some(100));
+        assert_eq!(overdue_minutes(&note(90), now, limit), None, "at the limit: not yet");
+        assert_eq!(overdue_minutes(&note(10), now, limit), None);
+        assert_eq!(overdue_minutes("another heavy command (no holder note)", now, limit), None);
+        let m = waiting_message(&Busy::Held(note(100)), "test", now, limit);
+        assert!(m.contains("overdue: cargo xtask prepush (process 7") && m.contains("held 100 min") && m.contains("never broken"), "{m}");
+        assert!(!waiting_message(&Busy::Held(note(10)), "test", now, limit).contains("overdue"));
+        assert_eq!(OVERDUE_DEFAULT, limit, "90 minutes to start");
+        // An overdue holder still holds: a waiter waits.
+        let d = dir("overdue");
+        let holder = try_acquire_in(&d, "stuck").unwrap().expect("free");
+        std::fs::write(holder_path(&d), note(500)).unwrap();
+        let got = acquire_in(&d, "test", Duration::from_millis(5), Some(Duration::from_millis(40)), &mut |_| {}).unwrap();
+        assert!(got.is_none(), "the lock is not broken");
+        drop(holder);
         let _ = std::fs::remove_dir_all(&d);
     }
 
