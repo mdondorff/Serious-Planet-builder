@@ -322,6 +322,51 @@ fn relief(grid: &Grid, z: &[f64], inside: &[bool], k: usize, sea: f64) -> f64 {
     r.get(r.len() / 2).copied().unwrap_or(0.0)
 }
 
+/// What a store's commit must share with the window it is measured on: its tiles are placed on the window's L grid and laid on its B.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WindowIdentity {
+    pub cells: u32,
+    pub radius_m: f64,
+    pub seed: u64,
+    pub base_id: u64,
+    /// The window's inputs identity (`RegionSpec::effective_inputs_id`: the window, margin, rounds and carve).
+    pub inputs_id: u64,
+}
+
+/// Where `commit` differs from the window, one phrase each (empty when it may be measured there). The inputs identity is checked only with the keys: a spike store's carve differs by design
+/// (`--no-key-check`).
+pub fn commit_differences(commit: &crate::l_writer::CommitSpec, window: &WindowIdentity, key_check: bool) -> Vec<String> {
+    let mut differ = Vec::new();
+    if commit.cells != window.cells {
+        differ.push(format!("cells {} (the window's {})", commit.cells, window.cells));
+    }
+    if commit.radius_m != window.radius_m {
+        differ.push(format!("radius {} m (the window's {} m)", commit.radius_m, window.radius_m));
+    }
+    if commit.seed != window.seed {
+        differ.push(format!("seed {} (the window's {})", commit.seed, window.seed));
+    }
+    if commit.base_id != window.base_id {
+        differ.push(format!("base {:016x} (the window's {:016x})", commit.base_id, window.base_id));
+    }
+    if key_check && commit.inputs_id != window.inputs_id {
+        differ.push(format!(
+            "inputs {:016x} (the window's {:016x}: another window, margin, rounds or carve)",
+            commit.inputs_id, window.inputs_id
+        ));
+    }
+    differ
+}
+
+/// The key note of a store run's input line.
+pub fn key_note(key_check: bool) -> &'static str {
+    if key_check {
+        "keys checked"
+    } else {
+        "keys not checked: spike store"
+    }
+}
+
 /// The H1 crossings of at least the discharge limit that an L crossing of the same direction matches within the distance: (matched, counted).
 pub fn edge_agreement(l: &[Crossing], h1: &[Crossing], dx_m: f64, params: &GateParams) -> (usize, usize) {
     let big: Vec<&Crossing> = h1.iter().filter(|c| c.q_m3s >= params.edge_q_m3s).collect();

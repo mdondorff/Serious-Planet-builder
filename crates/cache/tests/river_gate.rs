@@ -1,5 +1,6 @@
 //! TEST-136: the river gate's measures (BUILD-055) on small fixtures.
-use planet_cache::river_gate::{edge_agreement, measure, Crossing, GateInput, GateParams};
+use planet_cache::l_writer::CommitSpec;
+use planet_cache::river_gate::{commit_differences, edge_agreement, key_note, measure, Crossing, GateInput, GateParams, WindowIdentity};
 use planet_generators::bake::Grid;
 
 const N: usize = 40;
@@ -228,4 +229,40 @@ fn land_is_above_the_sea_level() {
     assert!(at(0.0).river_cells > 0);
     let high = at(200.0);
     assert_eq!((high.river_cells, high.relief_10_m), (0, 0.0), "the whole valley lies under a 200 m sea: {high:?}");
+}
+
+// spec: TEST-136, BUILD-055
+#[test]
+fn a_commit_of_another_grid_radius_seed_base_or_inputs_is_refused_and_a_spike_store_is_named() {
+    let window = WindowIdentity { cells: 98_304, radius_m: 6_371_000.0, seed: 14, base_id: 0xb, inputs_id: 0x1 };
+    let commit = CommitSpec {
+        res: 16_384,
+        cells: 98_304,
+        tile: 768,
+        halo: 64,
+        radius_m: 6_371_000.0,
+        seed: 14,
+        sea_level_m: 0.0,
+        canonical_flood: false,
+        width_a: 7.2,
+        width_b: 0.5,
+        base_id: 0xb,
+        inputs_id: 0x1,
+    };
+    assert!(commit_differences(&commit, &window, true).is_empty(), "the window's own commit is measured");
+    for (what, c) in [
+        ("cells", CommitSpec { cells: 49_152, ..commit }),
+        ("radius", CommitSpec { radius_m: 1_737_400.0, ..commit }),
+        ("seed", CommitSpec { seed: 7, ..commit }),
+        ("base", CommitSpec { base_id: 0xc, ..commit }),
+        ("inputs", CommitSpec { inputs_id: 0x2, ..commit }),
+    ] {
+        let d = commit_differences(&c, &window, true);
+        assert!(d.len() == 1 && d[0].starts_with(what), "{what}: {d:?}");
+    }
+    // Without the key check another inputs identity (a spike's carve) is measured; the grid, radius, seed and base are still refused.
+    assert!(commit_differences(&CommitSpec { inputs_id: 0x2, ..commit }, &window, false).is_empty());
+    assert_eq!(commit_differences(&CommitSpec { seed: 7, ..commit }, &window, false).len(), 1);
+    assert_eq!(key_note(false), "keys not checked: spike store");
+    assert_eq!(key_note(true), "keys checked");
 }

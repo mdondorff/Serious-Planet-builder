@@ -13,7 +13,7 @@ use planet_cache::l_writer::{read_l_tile, Commit};
 use planet_cache::layer_l::load_l_tile_keyed;
 use planet_cache::pack::TileStore;
 use planet_cache::region_bake::{lattice_direction, region_front, RegionSpec, LOCAL_PER_REGIONAL};
-use planet_cache::river_gate::{measure, Crossing, GateInput, GateParams};
+use planet_cache::river_gate::{commit_differences, key_note, measure, Crossing, GateInput, GateParams, WindowIdentity};
 use planet_core::{Face, TangentWarp, Vec3};
 use planet_generators::bake::tile::TileId as PassTile;
 use planet_generators::global::{read_elevation_c1, GlobalSample, LatticeSource, ReadError};
@@ -185,26 +185,9 @@ fn main() -> Result<(), String> {
         // The tiles are placed on this window's L grid and laid on its B: the commit's grid, radius, seed and base must be this window's. Its inputs identity names the window, the rounds and the
         // carve (RegionSpec::effective_inputs_id): checked with the keys, not with --no-key-check (a spike's carve differs by design).
         let cs = &commit.spec;
-        let mut differ: Vec<String> = Vec::new();
-        if cs.cells as usize != spec.local() {
-            differ.push(format!("cells {} (the window's {})", cs.cells, spec.local()));
-        }
-        if cs.radius_m != R {
-            differ.push(format!("radius {} m (the window's {R} m)", cs.radius_m));
-        }
-        if cs.seed != seed {
-            differ.push(format!("seed {} (the window's {seed})", cs.seed));
-        }
-        if cs.base_id != spec.base_id {
-            differ.push(format!("base {:016x} (the window's {:016x})", cs.base_id, spec.base_id));
-        }
-        if !no_key_check && cs.inputs_id != spec.effective_inputs_id() {
-            differ.push(format!(
-                "inputs {:016x} (the window's {:016x}: another window, margin, rounds or carve)",
-                cs.inputs_id,
-                spec.effective_inputs_id()
-            ));
-        }
+        let window =
+            WindowIdentity { cells: spec.local() as u32, radius_m: R, seed, base_id: spec.base_id, inputs_id: spec.effective_inputs_id() };
+        let differ = commit_differences(cs, &window, !no_key_check);
         if !differ.is_empty() {
             return Err(format!(
                 "{}: the commit was not baked on the window {win:?} with margin {margin}: {}",
@@ -251,7 +234,7 @@ fn main() -> Result<(), String> {
             "store {} (commit {:016x}, {read} tiles read, {outside} outside the window; {}): the stored ground B + L over its tiles, which drain to their border, window {win:?}, sea level {sea_level_m} m; the stored change's 0.25 m steps add pits to the 5 cm reference only",
             dir.display(),
             commit.id,
-            if no_key_check { "keys not checked: spike store" } else { "keys checked" }
+            key_note(!no_key_check)
         );
     }
     // H1's crossings of the region's box, in the L window's cells (an H1 cell's centre).
