@@ -15,7 +15,7 @@
 - Kernel versions: `BAKE_KERNEL_VERSION` 7 to 8 and `PASS2_KERNEL_VERSION` 9 to 10 (the canonical flood is in both passes). Stores of the old versions are other layers.
 
 ## Closes
-- Parking list: "GEN-173 bound: cells stand up to 9.8e-10 m above the ungraded flood (R3a round 3)". The excess is now 0 by construction (the lead removes the line).
+- Parking list: "GEN-173 bound: cells stand up to 9.8e-10 m above the ungraded flood (R3a round 3)". The excess is now 0 by construction; the line is removed in this PR (lead, 2026-11-14).
 
 ## Expected golden changes
 None expected: no golden scene's flats have `own` binding inside a graded flat. `cargo xtask test gpu` decides; any candidate goes through golden-review.
