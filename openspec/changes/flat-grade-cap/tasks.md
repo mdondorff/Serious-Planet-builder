@@ -1,0 +1,5 @@
+- [x] TEST-119 (f): the hump fixture fails on main (18 cells above their count).
+- [x] flood.rs: the cap in `regrade_one`; doc comment.
+- [x] Kernel versions 8 and 10.
+- [x] Generators' flood, flat, grade, partition and K7 tests pass.
+- [ ] numerics-reviewer, test gpu (golden-review if candidates), verifier.

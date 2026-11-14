@@ -158,7 +158,7 @@ fn a_region_that_the_writer_or_the_reader_cannot_file_or_whose_tiles_leave_the_w
 // spec: GEN-177, TEST-125
 #[test]
 fn the_production_constants_of_the_example_pass_the_checks_and_tiles_of_1024_do_not() {
-    // The prototype region R3a of face 1 as the example's defaults: 98,304 local cells in 128 tiles of 768 (graph blocks of 96 H1 cells).
+    // The E1 region (R1h window) of face 1 as the example's defaults: 98,304 local cells in 128 tiles of 768 (graph blocks of 96 H1 cells).
     let prod = RegionSpec {
         seed: 14,
         face: Face(1),
