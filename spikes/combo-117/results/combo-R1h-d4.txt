@@ -1,0 +1,14 @@
+EROSION D4 hand-over (4-neighbour breach at 814 m, residual damped over 400 m, sea floor) in 78 s
+EROSION start surface: relief p50 over 2 x 2 cells 7.29 m, over 10 x 10 cells 64.88 m; front 57 s
+EROSION N 1: 1 more rounds at L in 67 s (RoundReport { rounds: [RoundStats { catchments: 20460702, largest: 10795928, in_large: 45733054 }], pre_breach: None })
+EROSION N 1: basins (>= 0.5 m, >= 16 cells, fill eps 1e-7) on 2.06 % of the river cells inside the tiles (3064 of 148800); 5 cm count 22.27 %; 148 such basins in the window; channel steps along a grid axis 66.54 % (99008 of 148800)
+EROSION N 1 D inf m: the burn under the eroded surface (the canyon): p50 0.00 p99 2.29 max 4.58 m, 0 over 50 m (0.00 %)
+EROSION N 1 D inf m: 148800 channel cells inside the tiles (33137 in a pit, 22.3 %; 0 in lakes, 0.0 %); cut under the start surface p50 15.00 p95 101.38 p99 153.16 max 227.58 m, 25475 over 50 m (17.12 %); ground rises 0 of 148743, water rises 0; 486 pits
+EROSION N 1 D 20 m: the burn under the eroded surface (the canyon): p50 0.00 p99 2.29 max 4.58 m, 0 over 50 m (0.00 %)
+EROSION N 1 D 20 m: 148800 channel cells inside the tiles (33137 in a pit, 22.3 %; 0 in lakes, 0.0 %); cut under the start surface p50 15.00 p95 101.38 p99 153.16 max 227.58 m, 25475 over 50 m (17.12 %); ground rises 0 of 148743, water rises 0; 486 pits
+EROSION N 1: edge: 42 of 44 H1 crossings (Q >= 1 m3/s) have an L crossing of the same kind within 2 km; relief p50 2 x 2 cells 8.42 m (115 % of the start), 10 x 10 cells 71.50 m (110 %); flood + route 85 s
+EROSION baseline B alone: channel steps along a grid axis 47.45 % (66268 of 139650) (45 s)
+EROSION edit: the L round over the dirty catchments' box (664 x 606 cells) in 0.31 s
+EROSION edit: ridge +60 m at L cell (68506, 7510), 3135 cells edited; dirty catchments 1 with 171452 cells (0.3 % of the window), their box 664 x 606; full L route 63.7 s, re-route of the dirty catchments 0.2 s; receivers inside them equal to the full re-route: 91695, different: 79757
+EROSION edit, Barnes 2016 local part: 1 tiles of 768 cells flooded alone in 0.09 s (plus the perimeter graph)
+EROSION total 433 s
