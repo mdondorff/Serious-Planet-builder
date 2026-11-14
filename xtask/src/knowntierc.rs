@@ -144,6 +144,15 @@ fn panic_at(lines: &[&str], name: &str) -> Option<String> {
     (parts.len() == 3).then(|| format!("{}:{}", parts[0], parts[1]))
 }
 
+/// From the Summary line `... N tests run: M passed ...`: how many tests ran and did not pass (`N - M`).
+pub fn summary_not_passed(log: &str) -> Option<usize> {
+    let line = log.lines().find(|l| l.trim_start().starts_with("Summary ["))?;
+    let after = line.split("] ").nth(1)?;
+    let run: usize = after.split(" tests run").next()?.trim().split_whitespace().last()?.parse().ok()?;
+    let passed: usize = after.split("run: ").nth(1)?.split(" passed").next()?.trim().parse().ok()?;
+    run.checked_sub(passed)
+}
+
 /// Whether a known class accepts a failure.
 fn accepts(k: &Known, f: &Failure) -> bool {
     glob(&k.pattern, &f.name)
@@ -166,6 +175,15 @@ pub fn judge(log: &str, list: &[Known], status: &str, candidates: usize) -> Resu
     };
     if failed.is_empty() {
         return Err("the tier C step failed with no failed test in its log: no known class covers it".into());
+    }
+    // Every test that ran and did not pass must be one of the parsed failures: a status this parser does not know would otherwise hide among known ones.
+    match summary_not_passed(log) {
+        Some(n) if n == failed.len() => {}
+        Some(n) => return Err(format!(
+            "the Summary counts {n} test(s) that did not pass, the log names {} failure(s): a failure of a kind this check does not read",
+            failed.len()
+        )),
+        None => return Err("the Summary line gives no `N tests run: M passed` counts: no known class covers the run".into()),
     }
     let tracked: Vec<&Known> = list.iter().filter(|k| status.contains(&format!("**{}**", k.tracked))).collect();
     let mut lines = Vec::new();
@@ -255,7 +273,17 @@ mod tests {
 
     /// A nextest log as the local tier C writes it: the given status lines, then the summary.
     fn log(body: &str) -> String {
-        format!("    Starting 235 tests\n{body}\n     Summary [1328.801s] 235 tests run: 231 passed, 3 failed, 1 timed out\n{body}\n")
+        // The Summary counts the body's failures as not passed, as nextest does.
+        let n = failures(&format!("Summary [\n{body}")).map_or(0, |f| f.len());
+        log_counting(body, n)
+    }
+
+    /// [`log`] with a Summary that counts `not_passed` tests as not passed.
+    fn log_counting(body: &str, not_passed: usize) -> String {
+        format!(
+            "    Starting 235 tests\n{body}\n     Summary [1328.801s] 235 tests run: {} passed, {not_passed} failed\n{body}\n",
+            235 - not_passed
+        )
     }
 
     const ABORT: &str = "       ABORT [  55.757s] ( 11/235) planet::gpu_all gpu_flight::the_flight_matches\n           - with code 0xc0000005: Unzulässiger Zugriff (os error 998)";
@@ -303,6 +331,11 @@ mod tests {
         assert!(judge(&log(&ABORT.replace("0xc0000005", "0xc0000409")), &l, STATUS, 0).is_err());
         assert!(judge(&log(&TIMEOUT.replace("the_pipelined_loop_settles", "a_terrain_bundle_replays")), &l, STATUS, 0).is_err());
         assert!(judge(&log("     SIGSEGV [ 1.0s] (  1/235) planet::gpu_all gpu_x::y"), &l, STATUS, 0).is_err());
+        // A failure of a status this check does not read (EXEC-FAIL), beside known ones: the Summary counts it.
+        let unread = format!("{ABORT}\n     EXEC-FAIL [ 0.1s] (  2/235) planet::gpu_all gpu_x::y");
+        assert!(judge(&log_counting(&unread, 2), &l, STATUS, 0).unwrap_err().contains("Summary counts 2"));
+        assert_eq!(summary_not_passed(&log_counting(ABORT, 4)), Some(4));
+        assert!(judge(&format!("{ABORT}\n     Summary [1.0s] cancelled\n"), &l, STATUS, 0).unwrap_err().contains("no `N tests run"));
         // A golden candidate, even with only known failures.
         assert!(judge(&log(ABORT), &l, STATUS, 1).unwrap_err().contains("candidate golden"));
         // A run that did not end, and a failed step with no failed test.
