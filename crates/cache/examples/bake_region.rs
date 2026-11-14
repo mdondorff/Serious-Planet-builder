@@ -3,7 +3,7 @@
 //! rebuilt when the start-surface fix lands (architect, 2026-11-12). Writes only under the output folder, never into a store; the folder gets a README.txt that says so.
 //!
 //! Usage: `bake_region [--seed N] [--face F] [--region i0,j0,size] [--margin M] [--threads T] [--out DIR]`
-//! The region is in cells of the 12,288-cell regional grid (default: the prototype region R3a of face 1 of seed 14, as `k7_region`); the output defaults to `target/stores/g-rt-fixture`.
+//! The region is in cells of the 12,288-cell regional grid (default: the E1 region (R1h window) of face 1 of seed 14, as `k7_region`); the output defaults to `target/stores/g-rt-fixture`.
 //! Open the result with the viewer's `--erosion` pointed at the folder over a store of the same world.
 #![allow(clippy::too_many_arguments)]
 
