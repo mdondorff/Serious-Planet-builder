@@ -1631,7 +1631,7 @@ Source: Lead 2026-11-13 (order #110, under P2 E1), the #108 diagnosis of F9 fram
 - **THEN** every read lies within the range of the four cells around the point
 
 ### Requirement: GEN-187 Where the layer is read the fine detail is pinned to the stored samples
-Where the erosion layer is read (GEN-112) the fine-detail term of the field (ADR 0098) SHALL be the detail minus its bilinear interpolant from the four layer cell centres around the point, and 0 at a cell centre, so that the drawn ground equals the stored base plus the faded change at every cell centre, bit for bit. Within two cells of a cube edge the interpolant is cross-faded with the neighbouring face's as the layer's read is (GEN-112), so the term has no step at an edge. The height bounds SHALL hold the pinned detail, a batch SHALL read the centres as single reads do, and the pinning's version SHALL enter the keys of every field that reads the layer. Elsewhere the field is unchanged.
+Where the erosion layer is read (GEN-112) the field's fine-detail term (ADR 0098) SHALL be the detail minus its bilinear interpolant from the four layer cell centres around the point, 0 at a centre, so the drawn ground equals the stored base plus the faded change at every cell centre, bit for bit. Within two cells of a cube edge the interpolant is cross-faded with the neighbouring face's, so the term has no step there. The height bounds SHALL hold the pinned detail, a batch SHALL read the centres as single reads do, and the pinning's version SHALL enter the keys of every field that reads the layer.
 
 Verify: A
 Status: active
