@@ -15,7 +15,7 @@ Sources: `cargo xtask worktrees --no-size` (2026-11-14 11:00; a snapshot), `docs
 | bulldozer-role-fc3a48 | detached e581e4c1 | no merged PR | 2026-11-12 | 0 | ask bulldozer (BUILD-051 is on main: likely remove) |
 | bulldozer-status-b1 | detached df8c3cf7 | in origin/main | 2026-11-12 | 0 | remove |
 | burn | change/burn-width | PR 1362 merged | 2026-11-11 | 0 | remove |
-| coast-tilt-id | change/river-gate | open (#1505, explorer) | 2026-11-14 | 0 | keep until #1505 merges |
+| coast-tilt-id | change/river-gate-names (#1505 merged) | open (#1506, explorer) | 2026-11-14 | 0 | keep until #1506 merges |
 | crusader-main | detached 845c901b | in origin/main | 2026-11-14 | 0 | keep (crusader's base) |
 | exitbase | change/exit-base-valley | PR 1379 merged | 2026-11-11 | 0 | remove |
 | f32 | change/round-f32 | PR 1394 merged | 2026-11-12 | 0 | remove |
@@ -58,7 +58,7 @@ Sources: `cargo xtask worktrees --no-size` (2026-11-14 11:00; a snapshot), `docs
 | 3 | K7 beds are not monotone: the burn only lowers, so line heights rise downstream (r3a-e1: 63,167 of 219,390 line cells rise over 0.25 m, max 44.7 m); deep cuts (10-13 % over 50 m) come from H1 lines crossing L ridges | gprofile-read-2026-11-11.md; crusader-outbox | K7 burn (GEN-169, GEN-176, GEN-185) |
 | 4 | The stored channel level bounds the bed from above, it is no water surface: the drawn ground is below it at 83 % of channel points (median -3.8 m); on r3a-p2 the line is a raised one-cell line beside the carved low | spikes-outbox; SPIKE-113 | K7 levels, river drawing |
 | 5 | 80 % of E1's drawn "lakes" were coastal-band sea on inland ground K7 put below 0 m (4,764 cells, 3.5-42 m, 1-23 km inland); the 4,317 km2 margin lake is a window-edge outlet never lowered | lanes/digest/2026-11-13.md; SPIKE-112 | K7 sea floor, window outlets, coastal band |
-| 6 | Window names collide: SPIKE-114/115 call face 1 (8056-8675 x 760-1379, seed 14) "R3a", the spikes lane calls it R1h and uses "R3a" for face 4 seed 15 | drain-base and erosion-at-l results | spike and gate reports |
+| 6 | Window names collide: SPIKE-114/115 call face 1 (8056-8675 x 760-1379, seed 14) "R3a", the spikes lane calls it R1h and uses "R3a" for face 4 seed 15 | drain-base and erosion-at-l results | spike and gate reports; settled: canonical names R1h, R3a, R3b (lead, 2026-11-14, #1506) |
 | 7 | The 4-neighbour hand-over aligns rivers to the grid: 66.5-68.6 % of channel steps along an axis, against 47 % | combo-117 results | hand-over (ADR 0123 draft) |
 | 8 | The river network cannot be rebuilt from B: 8.0 % of channel cells agree with routing on B + regional; store the L geometry (about 0.9 MB a region) | rivers-at-l results | store format |
 | 9 | One regional-kernel round at L is the optimum: three rounds raise relief to 156/143 %, ten to 521/358 %; Schott 2024 multi-scale with unchanged parameters over-erodes (relief about 3x); K7's canonical flood refuses flats of an eroded surface | erosion-at-l results | regional kernel at L, K7 flood |
@@ -68,7 +68,7 @@ Sources: `cargo xtask worktrees --no-size` (2026-11-14 11:00; a snapshot), `docs
 | 13 | The flight stalls were viewer residency growing to 66,114 tiles with no eviction, not machine contention; with the cap a 26-min flight had 0 stalls | digest/2026-11-13-preview-round.md; digest/2026-11-14.md | viewer residency (VIEW-070) |
 | 14 | No solver path holds an inland lake: the breach cuts every basin; a 400 m dome keeps about 188 m after the rounds | SPIKE-112 | edits and lakes (ADR 0113) |
 | 15 | Memoised rounds cost 2x the resident ones: the serial area sweep (about 80 %) is recomputed whole; a per-catchment parallel sweep takes 69 s against 159 s, bit-equal | spikes-outbox | regional solver, edit path |
-| 16 | Later-stage start-surface fixes failed: the coast tilt made R3a worse at every setting (12.0-15.6 % against 9.9 %); the band's crest rings dam a basin each | bulldozer-outbox; SPIKE-111 | start surface |
+| 16 | Later-stage start-surface fixes failed: the coast tilt made R3a (face 4, seed 15) worse at every setting (12.0-15.6 % against 9.9 %); the band's crest rings dam a basin each | bulldozer-outbox; SPIKE-111 | start surface |
 | 17 | A probe that copies library code goes stale: G-LOCAL's L1 mismatch (437,249 cells) was the probe missing GEN-173's graded flood | glocal-f32-2026-11-12.md | gates and probes |
 | 18 | Under both K7 tilings the burn and breach are bit-identical; the seam difference opens only in the carve (at most 0.012 m), deposition adds the 0.087 m maximum | k7-seam-2026-11-11.md (partly in the K7 halo entry) | K7 (ADR 0119) |
 | 19 | `gpu_skeleton` timeouts come only from the two pipelined loops under CPU oversubscription on WARP (2.8 s alone, 28-69 s loaded) | spikes/gpu-skeleton/results/results.md | tier C, prepush |
