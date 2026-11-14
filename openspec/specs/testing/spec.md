@@ -1860,3 +1860,122 @@ Source: Lead 2026-11-13 (E1), REND-065, ADR 0017
 #### Scenario: Stripes
 - **WHEN** the coast is drawn as a lake with the striped mask
 - **THEN** the water ends at the stripes' edges and is a strict part of the sea's
+
+
+### Requirement: TEST-086 The world preview runs and reports the class shares
+A tier-B check SHALL run the preview for seed 1 (at a reduced size) and report the class shares of land under 60 degrees latitude, the shares of land above 2 and 4 km, the highest land and the largest step of the untapered `k` between lattice points and the shape metrics S1 to S7 of SPIKE-91, each beside TEST-082's band or its Earth reference. The report is not judged here (TEST-082 judges with the bake); the check SHALL fail if the shares do not sum to 1 or the report omits a measure.
+
+Verify: B
+Status: active
+Source: opus-planner (2026-11-01, inbox #37), GEN-103, TEST-082
+
+#### Scenario: Seed 1
+- **WHEN** the preview of seed 1 runs
+- **THEN** the class shares of land sum to 1, badlands and the sand sea are 0, and the report names every measure with its band
+
+### Requirement: TEST-087 The continents hold the land fraction, mass count, largest share and coastline bands
+A tier-B check SHALL score the land mask of seeds 1 to 5 on a 1440 x 720 grid (0.25 degrees; row 0 north, longitude wrapping, 8-connected masses, cell areas by latitude): the land fraction 27 to 31 %, the number of masses of at least 1 Mkm2 (S1) 4 to 7, the largest mass's share of land (S2) 45 to 62 %, and the coastline's box-counting dimension over boxes of 2 to 32 cells (S3) at least 1.18. It SHALL name every seed and measure that is outside its band.
+
+Verify: B
+Status: active
+Source: SPIKE-91 (gates S1 to S3), SPIKE-92, planner (2026-11-02, inbox #41), GEN-104
+
+#### Scenario: Seeds 1 to 5
+- **WHEN** the land masks of seeds 1 to 5 are scored
+- **THEN** every measure is inside its band, or the failure names the seed, the measure, its value and the band
+
+### Requirement: TEST-088 The continents hold the compactness, elongation, island and polar bands
+A tier-B check SHALL score the same masks for S9 (the area-weighted median over the masses of at least 1 Mkm2 of `4 pi A / P^2`, `P` the contour length at the level 0.5 of the mass's land fraction on a 1 degree grid, by marching squares, east-west steps scaled by the cosine of the latitude), at most 0.20; S10 (the median of `sqrt(l1 / l2)`, the eigenvalues of the area-weighted second moment in the tangent plane at the mass's mean direction), 1.5 to 2.5;
+
+Verify: B
+Status: active
+Source: SPIKE-92 rounds 2 and 3 (S9 to S11, the polar rule), planner (2026-11-02, inbox #41), GEN-104, GEN-106
+
+Detail: S11 (the masses of 10^4 to 10^6 km2), 35 to 70 islands holding 1.9 to 6 % of the land (SPIKE-92's lower bound of 2 % is relaxed by 0.1 point: seed 4 is 1.99 %); and at most 1 mass of at least 1 Mkm2 centred poleward of 70 degrees.
+
+#### Scenario: Seeds 1 to 5
+- **WHEN** the land masks of seeds 1 to 5 are scored
+- **THEN** every measure is inside its band, or the failure names the seed, the measure, its value and the band
+
+### Requirement: TEST-082 The default classes and the base elevation match Earth's shares
+A tier-B check SHALL evaluate the default source (GEN-094 to GEN-097) of seeds 1 to 5 and report each measure per seed, with the median, against its band. Unless a row says otherwise, it samples at 0.25 degree over land under 60 degrees latitude, area weighted. Earth's values are from ETOPO 2022 (SPIKE-93). The class bands (plains / hills / mountains 45-62 / 15-30 / 20-32 %) are approved (owner, 2026-11-02); the other bands are the planner's, from SPIKE-93 (2026-11-02). They replace the single-seed bands of SPIKE-80.
+| Measure | Earth | Band |
+|---|---|---|
+| Land under 500 m | 58.4 % | 50-65 % |
+
+Verify: B
+Status: active
+Source: ADR 0089 decisions 3, 5 and 7, ADR 0088/0089 accepted 2026-11-01; SPIKE-69, SPIKE-78, SPIKE-79, SPIKE-80; SPIKE-93 (Earth's bands from ETOPO), planner (2026-11-02, inbox #69 and later); the class bands (plains / hills / mountains 45-62 / 15-30 / 20-32 %) approved by the owner, 2026-11-02
+
+Detail: | Median land elevation | about 410 m | 300-550 m |
+| Median elevation of land within about 55 km of the sea | 82 m | under 200 m |
+| Land above 1 km / 2 km / 3 km / 4 km | 21.6 / 6.5 / 3.5 / 2.2 % | 17-27 / 5-10 / 2-5 / 1-3 % |
+| Highest land | 8.16 km | 7-9 km |
+| Relief classes, plains / hills / mountains | 45.7 / 24.6 / 29.7 % (R7 at 1') | 45-62 / 15-30 / 20-32 % |
+| Belt land (range of +-50 km at least 1,000 m), 0.25 degree | 17.6 % | 13-23 %; reported, gated with the convergent-only arc round (seed 4 holds 5.4 %, the median 9.7 %) |
+| p99 of the step of `k` between 40 km cells | 3.3 | reported, at most 3.5 (realism; SPIKE-93) |
+| p99 of the lattice steps of the untapered `k` (the largest step is reported) | p99 3.3 (largest 5.4) | at most 2.0 (GEN-097; gated on every seed) |
+- **Gate form:** the median of the five seeds SHALL lie within the band widened by 10 % of its width, and no seed SHALL lie outside the band by more than one band width. Earth is one sample and some worlds are more mountainous than others: the seed spread is a feature and the median carries the realism.
+- A point's relief class comes from the class weights; its elevation is the base elevation of GEN-096 before any bake or erosion.
+- Until the bake is wired the check reads the base elevation of the default source (the preview, before any bake or erosion) and its result is not the baked field's; with the bake it SHALL read the seed's global bake, and without that bake it SHALL be NOT RUN, never a pass.
+- The preview report prints each measure beside its band (TEST-086).
+
+#### Scenario: Seeds 1 to 5
+- **WHEN** the check runs on seeds 1 to 5
+- **THEN** every gated row passes the gate form, and each seed's value is printed with the median and the band
+
+### Requirement: TEST-083 Steep classes plan without a capped tile
+A tier-B check SHALL plan at production parameters (`LodParams::earth_1080p`) over a store with the erosion layer and its pyramid (STRM-066). It SHALL plan at one high-mountain, one mountain and one hill pose of the scorecard sites, each at 200 m and 2 km above the ground. At every pose:
+- no tile SHALL be capped (ADR 0074);
+- the deepest level SHALL equal today's field's (the layer switch off) at the same pose and altitude;
+- the node count SHALL be at most 1.1 times today's.
+
+Verify: B
+Status: planned
+Source: ADR 0088 point 8, ADR 0089, ADR 0088/0089 accepted 2026-11-01; SPIKE-82 (level 13-15 and 28-85 capped tiles without the pyramid), SPIKE-83 (no capped tile, 5-8 % more nodes with it); M9 criterion 6 (no degradation)
+
+Note: fails on R3a today: held-back tiles (ADR 0074), P3 E3 (lead, 2026-11-14).
+
+Detail: The report SHALL give, per pose, the nodes, the capped tiles and the deepest level against today's. The poses' altitudes and the 1.1 bound are start values. Without the layer and its pyramid the check SHALL be NOT RUN, never a pass.
+
+#### Scenario: High-mountain pose
+- **WHEN** the plan is made at the high-mountain pose at 200 m
+- **THEN** it has no capped tile, its deepest level is today's, and its node count is at most 1.1 times today's
+
+### Requirement: TEST-084 The erosion layer has no seam at tile or cube edges
+A tier-B check SHALL bake, at each of the four bake sites of SPIKE-70, the face carve (GEN-100) of the face that holds the site and two neighbouring tiles of pass 2 (GEN-101).
+- **Judged:** the p99 of the height step across the tiles' shared core edge SHALL be at most the p99 of the step between neighbouring cells one cell off the edge.
+- **Reported, not judged:** the step across a cube edge of the face carve.
+The report SHALL give both p99 and the maximum per site. The p99 comparison is a start value. Without the store the check SHALL be NOT RUN, never a pass.
+
+Verify: B
+Status: planned
+Source: ADR 0088 point 4, ADR 0088/0089 accepted 2026-11-01; SPIKE-68 (a per-tile carve leaves p99 134-172 m), SPIKE-70, SPIKE-72 (the two passes are seam-free at four of four sites once the local carve only incises)
+
+Note: a tier-B test is owed (lead, 2026-11-14).
+
+#### Scenario: Four sites
+- **WHEN** the check runs at the four bake sites
+- **THEN** at each the core-edge p99 is at most the off-edge p99, and the face carve's cube-edge step is reported
+
+### Requirement: TEST-114 The channel graph's tests
+The channel graph SHALL be tested at tier A: the codes (monotone, round trip, clamps, the stated error), the arrays against the routing's chains with the bed running minimum and the byte count, the cube-edge resolver on every face, the blocks through a store (every vertex in its block, the margin, the unit flag, refusals, the same bytes twice), and the bake that reads its channels back through the commit.
+
+Verify: A
+Status: active
+Source: GEN-170, STRM-084, architect 2026-11-11
+
+#### Scenario: Cases
+- **WHEN** the tests of `bake_channel_graph`, `graph_store` and `l_graph` run
+- **THEN** each case above has a test that cites GEN-170 or STRM-084
+
+### Requirement: TEST-111 The commit layer's tests
+The commit layer SHALL be tested at tier A on a small baked face: the source returns the stored core with no fill and `B + L` equals K7's surface within half a quantisation step, a tile outside the commit is no land and a named tile the store lacks is an error, a tile is decoded once and the cache is bounded, and the drawn commit changes only when the tiles and tables of the new one are ready while a frame in flight keeps the previous one.
+
+Verify: A
+Status: active
+Source: STRM-083, architect 2026-11-10
+
+#### Scenario: Cases
+- **WHEN** the tests of `l_layer` run
+- **THEN** each case above has a test that cites STRM-083

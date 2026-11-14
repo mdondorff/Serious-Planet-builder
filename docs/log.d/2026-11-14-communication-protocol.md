@@ -1,0 +1,1 @@
+- 2026-11-14 Lane communication protocol in docs/routing.md (owner): three levels, decision requests with a default, peers first, heavy jobs through xtask heavy, never end a turn without a wakeup, two standing items per lane.

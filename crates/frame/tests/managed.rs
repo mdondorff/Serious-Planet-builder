@@ -616,6 +616,39 @@ fn a_walk_with_eviction_keeps_every_frame_inside_the_slots_and_the_sink_never_se
     rig.settle_view(&request(position(start, 800.0 + 200.0 * 39.0), 0.3, -0.4));
 }
 
+// spec: VIEW-070, STRM-007
+#[test]
+fn a_capped_capacity_bounds_the_resident_tiles_on_a_long_flight_and_the_settled_view_is_the_exact_plan() {
+    // The unbounded run (a pool far larger than any view needs) keeps every tile it loaded; the capped run evicts the farthest
+    // and least recently used to stay inside its cap, and ends each stop at the same exact frame, with no blank frame on the way.
+    let field = Reference(1);
+    let widest = closure(plan_terrain_field(&request(here(), 0.0, -0.4), &field).unwrap().nodes.iter().map(|n| n.tile)).len();
+    let cap = widest * 2 + 10;
+    let start = Vec3::new(0.3, 0.5, 0.8);
+    let walk = |rig: &mut Rig, check_cap: bool| -> (usize, u64) {
+        let (mut peak, mut evicted) = (0, 0);
+        for k in 0..60 {
+            let req = request(position(start, 800.0 + 600.0 * f64::from(k)), 0.3, -0.4);
+            for _ in 0..4 {
+                let f = rig.step(&req);
+                if check_cap {
+                    assert!(f.counts.resident <= cap && f.counts.slots_in_use <= cap, "{:?}", f.counts);
+                    assert_eq!(f.pipeline.draw.blank, 0, "frame {k}");
+                }
+                peak = peak.max(f.counts.resident);
+                evicted += f.counts.evicted;
+            }
+        }
+        rig.settle_view(&request(position(start, 800.0 + 600.0 * 59.0), 0.3, -0.4));
+        (peak, evicted)
+    };
+    let (peak_free, evicted_free) = walk(&mut Rig::new(widest * 100), false);
+    let (peak_capped, evicted_capped) = walk(&mut Rig::new(cap), true);
+    assert!(peak_free > cap, "the control run must outgrow the cap ({peak_free} resident, cap {cap})");
+    assert_eq!(evicted_free, 0, "with free slots nothing is evicted (STRM-007)");
+    assert!(peak_capped <= cap && evicted_capped > 0, "peak {peak_capped}, evicted {evicted_capped}, cap {cap}");
+}
+
 #[derive(Default, Clone)]
 struct Counts {
     heights: Arc<AtomicUsize>,

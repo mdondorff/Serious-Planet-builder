@@ -1119,6 +1119,7 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
                 global_res: world.global_res(),
                 definition_toml: toml,
                 items: Vec::new(),
+                ..Default::default()
             };
             (world.definition().hash(), Some(section))
         } else {
@@ -2159,7 +2160,7 @@ mod tests {
         let request =
             TerrainRequest { camera, size: (256, 192), view: TerrainView::Level, lod, face_mapping: "tangent-v1".into(), seed: 5 };
         let plan = plan_terrain(&request).unwrap();
-        let world = BundleWorld { height_field: "cpu-erosion-v1".into(), global_res: 8, definition_toml: toml, items: Vec::new() };
+        let world = BundleWorld { height_field: "cpu-erosion-v1".into(), global_res: 8, definition_toml: toml, ..Default::default() };
         let bundle = TerrainBundle {
             generator_version: 2,
             implementation_id: "x".into(),
@@ -2223,7 +2224,8 @@ mod tests {
         let request = TerrainRequest { camera, size: (256, 192), view: TerrainView::Level, lod, face_mapping: "tangent-v1".into(), seed };
         let plan = plan_terrain(&request).unwrap();
         let bundle_of = |global_res: u32| {
-            let world = BundleWorld { height_field: "cpu-erosion-v1".into(), global_res, definition_toml: toml.clone(), items: Vec::new() };
+            let world =
+                BundleWorld { height_field: "cpu-erosion-v1".into(), global_res, definition_toml: toml.clone(), ..Default::default() };
             let bundle = TerrainBundle {
                 generator_version: 2,
                 implementation_id: "x".into(),

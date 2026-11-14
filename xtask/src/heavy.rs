@@ -6,7 +6,9 @@
 //! clean up; a sidecar file names the holder for the message of whoever waits. Where the state directory cannot be made, or `PLANET_HEAVY_LOCK=off`,
 //! the command runs without the lock and says so: the lock is a courtesy of the tooling, never a reason a command cannot run.
 //!
-//! The state directory is `PLANET_STATE_DIR`, else `%LOCALAPPDATA%\planet`, else `$XDG_STATE_HOME/planet`, else `~/.local/state/planet`.
+//! The state directory is `PLANET_STATE_DIR`, else `SeriousPlanetData/tmp/heavy` in the nearest ancestor of the workspace that has the data
+//! root (ADR 0121), else `%LOCALAPPDATA%\planet`, else `$XDG_STATE_HOME/planet`, else `~/.local/state/planet`. The data root comes before
+//! `%LOCALAPPDATA%` because the desktop app redirects `%LOCALAPPDATA%` for its sessions: a terminal and a session then saw two different locks.
 
 use std::fs::{File, OpenOptions, TryLockError};
 use std::io::Write;
@@ -34,9 +36,16 @@ static WARNED_EXPIRED: AtomicBool = AtomicBool::new(false);
 pub fn state_dir() -> Option<PathBuf> {
     let from_env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
     from_env("PLANET_STATE_DIR")
+        .or_else(|| data_root_state_dir(Path::new(env!("CARGO_MANIFEST_DIR"))))
         .or_else(|| from_env("LOCALAPPDATA").map(|p| p.join("planet")))
         .or_else(|| from_env("XDG_STATE_HOME").map(|p| p.join("planet")))
         .or_else(|| from_env("HOME").map(|p| p.join(".local").join("state").join("planet")))
+}
+
+/// `SeriousPlanetData/tmp/heavy` in the nearest ancestor of `start` that holds the data root `SeriousPlanetData` (ADR 0121), if any. The main
+/// checkout and every worktree under `.claude/worktrees/` find the same one.
+fn data_root_state_dir(start: &Path) -> Option<PathBuf> {
+    start.ancestors().map(|a| a.join("SeriousPlanetData")).find(|d| d.is_dir()).map(|d| d.join("tmp").join("heavy"))
 }
 
 fn lock_path(dir: &Path) -> PathBuf {
@@ -293,6 +302,26 @@ mod tests {
         let d = std::env::temp_dir().join(format!("planet-heavy-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         d
+    }
+
+    // spec: BUILD-026
+    #[test]
+    fn the_state_directory_is_the_data_roots_heavy_folder_for_the_checkout_and_every_worktree() {
+        let base = dir("data-root");
+        let data = base.join("SeriousPlanetData");
+        let main = base.join("Serious-Planet-Builder");
+        let worktree = main.join(".claude").join("worktrees").join("lane-1").join("xtask");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::create_dir_all(&worktree).unwrap();
+        let want = data.join("tmp").join("heavy");
+        assert_eq!(data_root_state_dir(&main.join("xtask")), Some(want.clone()), "the main checkout");
+        assert_eq!(data_root_state_dir(&worktree), Some(want), "a worktree finds the same folder");
+        // The nearest data root wins over any farther one (the temporary directory itself may sit below a data root on the owner's machine,
+        // so the case "no data root at all" is not testable here).
+        let inner = main.join("SeriousPlanetData");
+        std::fs::create_dir_all(&inner).unwrap();
+        assert_eq!(data_root_state_dir(&worktree), Some(inner.join("tmp").join("heavy")), "the nearest data root wins");
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     // spec: BUILD-026

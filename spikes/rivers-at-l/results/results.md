@@ -44,11 +44,11 @@ Code location: spike branch `spike/rivers-at-l` (crusader), examples in `crates/
 
 | GEN-188 (lead 2026-11-14) | |
 |---|---|
-| L cell pairs across a regional cell-centre line that jump over 0.1 m beyond their neighbours | 6,843,572 of 16,640,280 (41 %) |
+| L cell pairs across a regional cell-centre line whose second difference exceeds 0.1 m (not a clean step count: it also counts curvature, see steps 1 and 2) | 6,843,572 of 16,640,280 (41 %) |
 | channel steps running straight along such a line | 17.8 % with `B + regional`, 11.9 % with `B` alone |
 
 ## Verdict
-Routing at L does not meet the bar by itself: with every pit breached 10.6 % of the river cells are cut over 50 m, because the start surface's L pits lie on the routed paths too. With lakes kept (D = 20 m) the cut bar holds trivially, but 54 % of the river cells lie in lakes. The start surface `B + regional` is not a drainable terrain at L; the fix sits before the rivers (a region-wide L conditioning of the surface: the carve that K7 runs per tile, run once over the region), then routing at L. At the edge 36 of 44 crossings agree within 2 km; the largest inflow (158 m3/s) enters elsewhere. A reader cannot rebuild the network from `B` alone (8 % agreement): the L geometry is stored (0.9 MB) or the regional change goes into the commit. GEN-188's steps are pervasive (41 % of line pairs) and pull rivers onto the 814 m lines (17.8 % against 11.9 %).
+Routing at L does not meet the bar by itself: with every pit breached 10.6 % of the river cells are cut over 50 m, because the start surface's L pits lie on the routed paths too. With lakes kept (D = 20 m) the cut bar holds trivially, but 54 % of the river cells lie in lakes. The start surface `B + regional` is not a drainable terrain at L; the fix sits before the rivers (a region-wide L conditioning of the surface: the carve that K7 runs per tile, run once over the region), then routing at L. At the edge 36 of 44 crossings agree within 2 km; the largest inflow (158 m3/s) enters elsewhere. A reader cannot rebuild the network from `B` alone (8 % agreement): the L geometry is stored (0.9 MB) or the regional change goes into the commit. Rivers follow the 814 m lines more often than on `B` alone (17.8 % against 11.9 %); the 41 % count is not a step count (corrected in steps 1 and 2).
 
 ## Visuals
 NOT RUN: the before/after stills need a bake whose K7 burns the L-routed lines, which this spike does not build (it measures the network only). The numbers above decide whether that bake is worth making.

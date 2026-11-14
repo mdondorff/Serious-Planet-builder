@@ -11,6 +11,7 @@ pub mod envelopeperf;
 pub mod fixturebase;
 pub mod gate;
 pub mod globalperf;
+pub mod gpumem;
 pub mod horizonstep;
 pub mod horizonworld;
 /// The default cells a face edge of the level-1 preview's H0 grid (`--preview-l1`): about a second a preview.
@@ -83,6 +84,7 @@ modes:
     --draw per-draw|indirect   how the terrain renderer submits draws (REND-015): per-draw is the reference loop, indirect one multi-draw per buffer run from a CPU-built argument buffer (default indirect where the adapter supports it, else per-draw)
     --upload per-slot|batched   how a frame's tile writes reach the queue (REND-016): batched (default) writes each run of adjacent slots with one call, per-slot is the reference (one or two calls per tile); the pool contents are identical
     --gen-workers N          threads of the tile generation pool and so jobs running at once in the pipelined loop and the streaming perf scenes (STRM-020; default: the terrain share, BUDG-003; the rig keeps the pool inside that share; the plan worker's threads are separate)
+    --resident-cap N         the viewer keeps at most N tiles resident (VIEW-070; default 24000, at most the renderer's pool)
     --gen-reserve N          size the generation pool as the hardware threads less N instead of the terrain share (STRM-020; ignored when --gen-workers is given)
     --gen-ahead N            jobs queued behind the running ones so a worker that finishes between two frames takes the next at once (STRM-020; default: the worker count; 0: refill at frame boundaries only)
     --gen-priority below-normal|normal   OS priority of the generation workers (STRM-020, ADR 0046; default below-normal: the frame thread wins a core both want; no result depends on it)
@@ -123,6 +125,8 @@ pub struct Options {
     pub gen_reserve: Option<usize>,
     /// `--gen-priority below-normal|normal`: the priority of the generation workers (STRM-020, ADR 0046); below-normal when absent.
     pub gen_priority: Option<planet_streaming::Priority>,
+    /// `--resident-cap N`: the most tiles the viewer keeps resident (VIEW-070); `None` is the default, `pipelined::VIEWER_RESIDENT_CAP`.
+    pub resident_cap: Option<usize>,
     pub perf: bool,
     pub machine_ready: bool,
     /// Loaded mode (BUILD-030): the readiness gate records the load of the machine instead of refusing on it.
@@ -374,6 +378,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         upload: None,
         gen_workers: None,
         gen_priority: None,
+        resident_cap: None,
         gen_ahead: None,
         gen_reserve: None,
         perf: false,
@@ -703,6 +708,15 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--gen-reserve" => {
                 let v = it.next().ok_or("--gen-reserve needs a count")?;
                 o.gen_reserve = Some(v.parse::<usize>().map_err(|_| format!("--gen-reserve must be a non-negative integer, got '{v}'"))?)
+            }
+            "--resident-cap" => {
+                let v = it.next().ok_or("--resident-cap needs a tile count")?;
+                o.resident_cap = Some(
+                    v.parse::<usize>()
+                        .ok()
+                        .filter(|n| *n >= 1)
+                        .ok_or_else(|| format!("--resident-cap must be a positive integer, got '{v}'"))?,
+                )
             }
             "--gen-priority" => {
                 let v = it.next().ok_or("--gen-priority needs a value")?;
@@ -2238,6 +2252,89 @@ mod tests {
         .err()
         .expect("a folder without a commit is refused");
         assert!(missing.contains("holds no commit"), "{missing}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: VIEW-072
+    #[test]
+    fn the_base_under_a_commit_is_the_bakes_base_bit_for_bit_and_carries_the_commits_base_id() {
+        use planet_core::cube::{face_to_direction, TangentWarp};
+        use planet_generators::global::{read_elevation_c1, GlobalSample, LatticeSource, ReadError};
+        /// The bake's lattice: `BakeInputs::base` at the nodes of a rectangle of the face (what `bake_region`'s `base` closure reads C1).
+        struct Grid {
+            face: planet_core::Face,
+            res: u32,
+            lo: usize,
+            side: usize,
+            z: Vec<f32>,
+        }
+        impl LatticeSource for Grid {
+            fn res(&self) -> u32 {
+                self.res
+            }
+            fn at(&self, face: planet_core::Face, i: u32, j: u32) -> Result<GlobalSample, ReadError> {
+                assert_eq!(face, self.face);
+                let (i, j) = (i as usize, j as usize);
+                assert!(
+                    i >= self.lo && j >= self.lo && i - self.lo < self.side && j - self.lo < self.side,
+                    "node ({i}, {j}) outside the sampled rectangle"
+                );
+                let elevation_m = self.z[(j - self.lo) * self.side + (i - self.lo)];
+                Ok(GlobalSample { continent: 0.0, elevation_m, temperature_c: 0.0, precipitation_mm: 0.0 })
+            }
+        }
+        let dir = std::env::temp_dir().join(format!("planet-view072-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let def = planet_world_def::WorldDefinition::single_planet(6_371_000.0, 3);
+        let world = planet_cache::global_store::GlobalWorld::from_definition(&def).unwrap().with_block_limit(4);
+        let face = planet_core::Face(2);
+        let spec = planet_cache::region_bake::RegionSpec {
+            seed: 3,
+            face,
+            radius_m: 6_371_000.0,
+            regional: 128,
+            region: (32, 55, 32, 55),
+            margin: 6,
+            tile: 64,
+            halo: 24,
+            rounds: 2,
+            threads: 2,
+            res: 1024,
+            base_id: 0x6c61_7474_6963_6531 ^ 1024,
+            inputs_id: 11,
+            height_bounds: (-11_000.0, 9_000.0),
+            keep_channels: false,
+        };
+        let base = |d: planet_core::Vec3| 500.0 - 2400.0 * (d.x - 0.1) + 120.0 * libm::sin(40.0 * d.z);
+        let climate = |_: planet_core::Vec3| (1.0e-8, 0.0, 1.0);
+        planet_cache::region_bake::bake_region(&world, &spec, &base, &climate, &dir).expect("the fixture commit");
+        let opened = worldfield::WorldTerrain::open_commit_in_memory(def.clone(), &dir, 2).expect("the commit opens in memory");
+        let (read, id) = opened.bake_base().expect("a commit opened in memory has a base");
+        assert_eq!(id, spec.base_id, "the base carries the commit's base_id");
+        // The bake's side: the production base at the nodes around the cells below (a regional cell is 8 nodes of the 1,024-node face edge), read C1.
+        let inputs = planet_cache::global_store::class_inputs(&def, 3, 2);
+        let (lo, side) = (36 * 8 - 8, (50 - 36) * 8 + 24);
+        let z: Vec<f32> = (0..side * side)
+            .map(|c| {
+                inputs.base(planet_cache::region_bake::lattice_direction(face, spec.res as usize, lo + c % side, lo + c / side)) as f32
+            })
+            .collect();
+        let grid = Grid { face, res: spec.res, lo, side, z };
+        let mut compared = 0;
+        for y in (38..49).step_by(3) {
+            for x in (38..49).step_by(3) {
+                for (fx, fy) in [(0.1, 0.2), (0.5, 0.5), (0.9, 0.7)] {
+                    let n = spec.regional as f64;
+                    let d = face_to_direction(&TangentWarp, face, 2.0 * (f64::from(x) + fx) / n - 1.0, 2.0 * (f64::from(y) + fy) / n - 1.0);
+                    let want = f64::from(read_elevation_c1(&grid, &TangentWarp, d).unwrap());
+                    assert_eq!(read(d).to_bits(), want.to_bits(), "B at regional cell ({x}, {y}) + ({fx}, {fy})");
+                    compared += 1;
+                }
+            }
+        }
+        assert!(compared >= 40, "{compared} cells compared");
+        // Every other world has no commit base.
+        assert!(worldfield::WorldTerrain::open(def, 32).unwrap().bake_base().is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

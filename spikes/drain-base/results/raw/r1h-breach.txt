@@ -1,0 +1,5 @@
+LATTICE f1-8056-760-breach: 1366 x 1366 nodes (611 m); land nodes changed over 1 cm 65967 of 1301217 (5.07 %); lowered p50 23.48 p95 512.15 max 1350.17 m; raised p50 NaN p95 NaN max 0.00 m; mean change -5.168 m; 
+RIVERS f1-8056-760-breach: core 95420 channel cells; 66366 on closed basins of the start surface (69.55 % of river length); pits touching the core 11831; time nodes 21 s, front 27 s, sample 6 s, route 102 s
+RIVERS f1-8056-760-breach D inf m: cut p50 2.11 p95 126.98 p99 238.76 max 409.94 m, over 50 m 13.25 %; channel cells in lakes 0.00 %
+RIVERS f1-8056-760-breach D 20 m: cut p50 0.00 p95 5.54 p99 12.01 max 19.94 m, over 50 m 0.00 %; channel cells in lakes 47.71 %
+RELIEF f1-8056-760-breach: band 200 m-1 km std 14.71 m (|.| p95 29.79); 1 km block relief p50 59.3 p95 333.1 m (169311 blocks)

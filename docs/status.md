@@ -5,7 +5,7 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 ## Waiting for the owner
 - **/bless: `water_class_lake_mask_stripes`** (TEST-133, #1459): the first lake golden, a class view; escalated as the first of its class and for a WARP driver difference. Nothing waits on it.
 - **A new global store for the default world, seed 14**: every store on disk is refused by its keys; E1 runs on the in-memory production base (VIEW-069). Lead's recommendation: bake it after the flight, with ADR 0117's format.
-- **For M9 planning**: owner test 2026-10-27 groups E (edits on top as default, erosion keeping mass), F and G scope, the 1 m / 500 m exception (`docs/milestones/M8/owner-test-2026-10-27/README.md`); where edits sit relative to M9's erosion (D3: under the erosion by default).
+- **For later planning**: owner test 2026-10-27 groups F and G scope, the 1 m / 500 m exception (`docs/milestones/M8/owner-test-2026-10-27/README.md`). Group E (where edits sit) is settled by ADR 0113.
 - **Sunset shadow look** (ADR 0095 draft, crusader): the sky ambient as a hemisphere average is physically consistent and dark at a 7° sun; options: sky light plus a lift (planner's pick), sky light as is, or the old term. Every lit and sky golden moves with it. SPIKE-96 (sky visibility) follows the choice.
 - **Architecture re-plan** (owner, 2026-11-08; SPIKE-104, SPIKE-105): D1 = option A, conditional on a prototype and a switch-to-B gate (S1-S5); phases and gates in `docs/briefings/terrain-prototype.md`; the owner decides at the A/B gate.
 - **Smooth base as default** (GEN-107, `cpu-erosion-v2` on main): removes the 611 m "pyramid" facets; draft #1137 switches the default (no golden moves; two count pins and the water-cut range re-pinned with reasons). Decide with the erosion preview.
@@ -17,22 +17,26 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 
 Dormant items moved to `docs/parking.md` (2026-11-12).
 
-## Queue (2026-11-12, milestone P1: `docs/milestones/P1.md`)
+## Queue (2026-11-14, milestone P3: `docs/milestones/P3.md`)
 Every row names an exit item (ADR 0120). Everything else is in `docs/parking.md`.
 | Exit | Step | Lane |
 |---|---|---|
-| E4 | Owner flight of the E1 region from the crusader worktree: `cargo run --release -p planet -- editor --seed 14 --commit target/stores/r3a-e1`; sign-off line in `docs/milestones/P1.md` | owner |
+| E1 | SPIKE-115: erosion rounds at L in the region; the incremental re-route after an edit timed | crusader |
+| E1 | SPIKE-116: a base whose 100 m relief drains by construction (rivers first, the valley network) | spikes |
+| E2 | After E1's pick: rivers at L with stored geometry, whole-network levels, the lakes ADR, GEN-188's limiter in the bake reads; R3a re-baked | crusader |
+| E3 | GEN-187 (pinned detail, with the memo) merged; the owner's two flights (laptop panel, external display) | explorer, owner |
+| E4 | The thermal-dam options brief | spikes |
+| E5 | P1 and P2 closure; OpenSpec sync and archive in batches; m9-bake per ID; the independent review pass | lead, all lanes |
 
-Finishing (changeover, 2026-11-12; no successor work): SPIKE-111 ends its time-box with the report (spikes); PR #1449 parked as draft (explorer).
-
+P2 closed 2026-11-14 into P3; P1 closed 2026-11-13.
 ## Tracked
 - **River at a cube face edge** (REND-059, 2026-11-12): the store holds a segment crossing a face edge as two runs with a gap of about the H1 ratio in cells (a dry notch); the burn has the same dam, so drawn river and burned trench agree; the charts shear (x1.22 mid-edge, x1.41 at the corner). Fix (B): overlapping runs read by drawing and burn, width in metres through each face's metric: a store format change for the owner, with the face-seam work before the planet bake (REND-063 reserved).
 - **Rock K residual** (#1216, seed 14 face 2): mountain 3 km relief p50 483 against 534 m (the band edge is 2/3 of it), elevation p50 +170-225 m from the K spread (f/(1+f) is concave), not the K mean; tune in the preview round. The carve adds about 1.55 GB at 12,288 cells: measure the peak against 8 GB (CON-21) on the next pass-1 run.
-- **CI flake `gpu_stream_perf` lit-scene smoke** (2026-11-10): 240 s limit hit on Windows WARP C 4 times (11-06 to 11-10), each further one adds to the count, no limit change; times 130-240 s since the step at a600c56b (ground-detail-patch): slowness fits. TEST-106 adds times and phase marks: read them next time.
+- **CI flake `gpu_stream_perf` lit-scene smoke** (2026-11-10): 240 s limit hit on Windows WARP C 5 times (11-06 to 11-13; the 5th at 254 s on #1472), each further one adds to the count, no limit change; times 130-240 s since the step at a600c56b (ground-detail-patch): slowness fits. TEST-106 adds times and phase marks: read them next time.
 - **Older flakes** (WARP, loaded runner): `oracle_stream_smoke` (`load_running_max` 1, at least 2 expected, once; tighten its precondition, never weaken); `gpu_horizon` `a_slot_written_through_set_horizon_reads_back_as_written` (once, passes alone and on CI); `gpu_window` flight test (once, 7.5 s). On a recurrence keep the full output.
 - **Fill depth across a mountain cube edge** (keep-pits-seams, #1201): the seam gate passed on a tile seam; no mountain cube edge was in the stored faces. Blocks the planet bake (I6); run with the integrated-preview re-run.
 - **`test fast` 220-330 s** (BUILD-014): 320-329 s measured 2026-11-10 after the restart, machine busy.
-- **Local `test gpu` worse since the display changes** (2026-11-09): solo on main 956-1,400 s: 2 WARP pins (`gpu_compact_blocks`, `gpu_water` lit frames), WARP aborts 0xc0000005 (intermittent), `gpu_skeleton` timeouts (diagnosed #1442: slow only under CPU oversubscription in the two pipelined loops), `gpu_preflight` smoke. A `gpu_skeleton` timeout on CI goes to the architect. CI judges tier C.
+- **Local `test gpu` worse since the display changes** (2026-11-09): solo on main 956-1,400 s: 2 WARP pins (`gpu_compact_blocks`, `gpu_water` lit frames), WARP aborts 0xc0000005 (intermittent), `gpu_skeleton` timeouts (diagnosed #1442: slow only under CPU oversubscription in the two pipelined loops), `gpu_preflight` smoke (its refusal of a bad `--out` must come under 8 s, `gpu_preflight.rs:22`; the test took 47 s under load on 2026-11-13). A `gpu_skeleton` timeout on CI goes to the architect. CI judges tier C.
 - **Ocean square at orbit** (owner, 2026-11-03): at 12,767 km over 20 N 30 E after 240 s of flight, a light square in a ring of dark blotches on the sea; not reproduced headless. Hypotheses: clipmap shadow on water (`--no-shadow-march`, J view), the water-node cut or never-evicted WaterBook, the shadow's temporal history; needs the owner's F9 bundle.
 - **Fine-level bound looseness** (SPIKE-86): below 1 km over steep land 5.5 % of real-store poses cap leaves at levels 16-21; tile bounds are 5-37x the sampled range. Fix with M9 R4's bounds pyramid (SPIKE-83) or a per-octave tile bound, with a tier-A bound-vs-sampled test.
 - **Window checks need an unlocked desktop** (2026-10-30): on the RTX, present stalls 1.3-2.7 s or the device is lost while the session is locked or in modern standby; unlocked the dense sweep takes 26 s. The device losses since 10-18 most likely had this cause. NR handles it. Display off after 2 h (owner, 2026-10-31); the owner unlocks remotely for a batch, which the planner requests 07:00-22:00.

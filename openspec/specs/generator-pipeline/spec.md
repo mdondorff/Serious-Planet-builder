@@ -1606,3 +1606,674 @@ Source: Architect 2026-11-10 (GEN-166 row, the 200 MiB bar), inbox #125
 #### Scenario: Same bits
 - **WHEN** the plan runs with `round_f32` on a small compact cube
 - **THEN** its H1 and sediment results equal the steps run by hand on f64 heights, and the allocation marks show the heights stored f32 after the rounds and widened before the sediment pass
+
+### Requirement: GEN-188 The erosion layer's runtime read is continuous across cell-centre lines and exact at the cell centres
+The runtime read of the erosion layer (`ErosionLayer::change_at`) SHALL be a monotone C1 cubic per axis, rows first, then across them: the Hermite cubic through the two middle samples, with the slope `2ab/(a+b) * 2ab/(a²+b²)` where the neighbouring differences `a` and `b` share a sign, else 0. Away from the cube-edge blend the read SHALL stay within the four cells around the point without a clamp, step at most 1e-4 m across a cell-centre line, kink at most 5 m per cell inside a cell (scenario below), and equal the stored sample at a cell centre (`CENTRE_SNAP_CELLS`, 1e-9 cells). `LAYER_READ_VERSION` 2 enters the field's keys.
+
+Verify: A
+Status: active
+Source: Lead 2026-11-13 (order #110, under P2 E1), the #108 diagnosis of F9 frame-13715 (the four-cell clamp stepped at cell-centre lines: 1.5 % of crossings over 0.1 m on R3a, up to 12.5 m), numerics review 2026-11-13 (a harmonic-mean slope kinked inside the cells), ADR 0122 (detail pinned to the stored samples)
+
+#### Scenario: No step at a cell-centre line
+- **WHEN** a layer with cell-scale noise of 25 m is read on both sides of a cell-centre row or column, 1e-7 cells apart, at 20,000 random crossings away from the cube edges
+- **THEN** no pair differs by more than 1e-4 m
+
+#### Scenario: No crease inside a cell
+- **WHEN** the same layer is read along a 6-cell scan at 1e-4 cells, along x at a fixed fraction of a row and along y at a fixed fraction of a column, 60 scans
+- **THEN** no second difference over the step exceeds 5 m per cell (the harmonic-mean slope alone gives about 15-20)
+
+#### Scenario: The sample at a cell centre
+- **WHEN** the layer is read at the direction made from a cell's indices, on a 256-cell face and on the production face of 98,304 cells
+- **THEN** the read is the stored sample (f32 widened) bit for bit
+
+#### Scenario: No overshoot
+- **WHEN** the layer is read at random points away from the cube edges
+- **THEN** every read lies within the range of the four cells around the point
+
+### Requirement: GEN-187 Where the layer is read the fine detail is pinned to the stored samples
+Where the erosion layer is read (GEN-112) the field's fine-detail term (ADR 0098) SHALL be the detail minus its bilinear interpolant from the four layer cell centres around the point, 0 at a centre, so the drawn ground equals the stored base plus the faded change at every cell centre, bit for bit. Within two cells of a cube edge the interpolant is cross-faded with the neighbouring face's, so the term has no step there. The height bounds SHALL hold the pinned detail, a batch SHALL read the centres as single reads do, and the pinning's version SHALL enter the keys of every field that reads the layer.
+
+Verify: A
+Status: active
+Source: ADR 0122 point 1 (accepted, owner 2026-11-13), SPIKE-113, VIEW-072's probe (the drawn ground minus B + L on R3a: p50 -2.1 m, all of it the detail)
+
+#### Scenario: A cell centre
+- **WHEN** the field with the layer is read at the centre of a layer cell more than two cells from a cube edge
+- **THEN** the height is the base elevation plus the coast-faded change there, bit for bit
+
+#### Scenario: A cube edge
+- **WHEN** the field with a layer of zeros is read at pairs of points 0.13 mm apart across every cube edge and corner
+- **THEN** no pair differs by a millimetre
+
+#### Scenario: A batch over a blocked source
+- **WHEN** sparse, dense, edge and cross-face batches are read over a source with blocks
+- **THEN** every height is finite and equals the single read, and no error is recorded
+
+#### Scenario: Between the centres
+- **WHEN** it is read between centres
+- **THEN** the detail is the unpinned detail minus its interpolant from the four centres, a batch reads as single reads, and the height lies within the bounds of every cap that holds the point
+
+### Requirement: GEN-120 The bake keeps its pits and records how deep each lies below its spill level
+The bake's carves SHALL keep the pits of the carved surface in the layer's change and SHALL record each pit's depth, so that the runtime shows the filled look until lake water and a pit-tolerance rule exist:
+
+Verify: A
+Status: active
+Source: Owner 2026-11-05 (SPIKE-102 D1: keep every pit that survives the breach, store the fill depth, the runtime adds it back); SPIKE-102 section 4.1 row 2 and section 6; planner inbox #67 (the post-pass); GEN-100, GEN-101, GEN-121
+
+Detail: - pass 1 (GEN-100): the route runs over the filled copy (the flood's receivers and area), but a cell that stands below its receiver is not raised to it; it gains its uplift only, so the donors above it carve toward its floor and the basin does not eat the carve's relief (SPIKE-102 run (b): the high mountains' 3 km relief p50 0.85 of Everest's against 0.62, the mountains' 0.94 of the Alps' against 0.86, and 0.85 and 0.94 on the filled surface too). The option is `keep_pits` (on); an incise-only carve (pass 2) never raises, so it ignores it;
+- pass 2 keeps its pits (its local carve only incises) and leaves the tile's final heights as bake scratch (STRM-077); it computes no depth of its own: a window's flood cannot know a basin wider than its halo (the keep-pits preview: 152 m of disagreement across a tile seam);
+- the depth of a core cell is how far the surface the runtime shows (the exact base plus the stored change) lies below the planet-wide spill level of the pass-2 surface (GEN-121), clamped at 0, `round(depth * FILL_STEPS_PER_M)` in a 16-bit code; only the cells that are pits of the pass-2 surface (the level above their final height) are given a depth, and a cell whose exact surface stands at or above the level (an outcrop inside the basin) keeps its height with depth 0; so the filled floor of a basin is flat against the bake's exact base (`BakeInputs::base`) to the code's step, the interpolation ripple of the pass-2 base being taken out; the runtime shows the stored bake's lattice read plus the crease detail and fades the change near the coast, so a floor at runtime differs from the bake's by the lattice read's error (docs/learnings.md 2026-11-04: 3.4 m rms on mountains) and the detail, which the depth does not touch (4 steps a metre, 0.25 m, owner 2026-11-05; the step is a parameter of the channel's key); a cell at or below the sea level, and a cell on a flat at its spill level, hold 0;
+- the planes SHALL be the same bytes on any thread count (CON-14);
+- a reader that shows the filled look SHALL add the depth back to the stored change (`TileResult::with_fill_added`); a tile without a fill plane is read as it is.
+
+#### Scenario: A kept pit
+- **WHEN** a plateau with a 20 m bowl and a channel to its edge at 60 m is carved with `keep_pits` and without, and the fill depth of the kept surface is taken
+- **THEN** the kept pit stays at or under its 20 m while the filling carve raises it to over 59 m, the depth of the pit is its spill level minus its floor to 1 m, no outlet holds a depth, no depth is under 0.5 m, the same input gives the same bits, and an incise-only carve is the same bits with either setting
+
+#### Scenario: Pass 2 keeps heights, not a depth
+- **WHEN** one synthetic tile is run on 1 and on 8 threads
+- **THEN** the final heights are the same bits on both, finite, within the base's range of the base plus the change, and the tile holds no depth plane
+
+#### Scenario: The depth below the planet-wide level
+- **WHEN** the final heights of the 16 tiles of a face with basins across tile edges and across a four-tile corner are post-passed, and compared with a global flood of the assembled face
+- **THEN** every cell's code is the oracle's, and the runtime layer reads each cell as the stored change plus the depth
+
+#### Scenario: A flat floor against the exact base
+- **WHEN** a layer is baked from a smooth bowl terrain with the exact base given to the post-pass, and the basins of 20 cells or more are read as the exact base plus the stored change plus the depth
+- **THEN** the cells of one connected basin hold one surface to within the code's step (0.25 m) of their median
+
+### Requirement: GEN-121 The fill level is the planet-wide spill level of the final surface
+The fill depth of GEN-120 SHALL be a function of the whole surface and not of a tile's window: the fill level of a cell is its planet-wide spill level `L(c)`, the lowest value of the highest height along a path from the cell to an outlet (the sea), and the depth is `L(c) - z(c)`. The level SHALL be computed in the form of Barnes et al.'s parallel priority-flood (2016), minimax, with no store and no base:
+
+Verify: A
+Status: active
+Source: Owner and planner 2026-11-05 (inbox #67: the keep-pits preview's seam failure; option (a), the post-pass); SPIKE-102 section 6; GEN-120; Barnes, Lehman and Mulla 2016 (parallel priority-flood)
+
+Detail: - stage 1, per tile: a priority flood from the tile's outlets and from every non-outlet cell of its border (each a seed with its own label, the index along the perimeter), in order of height with ties by the cell index; every cell takes the label of the seed that reaches it first and `level`, the highest height on its path from that seed; the tile returns the territories' adjacency, `(a, b, w)` with `w` the lowest `max(level, level)` over the neighbouring cell pairs of two territories (8 neighbours), sorted;
+- stage 2: a graph whose nodes are the sea and the seeds of every tile; edges are the tiles' territory edges and the pairs of neighbouring border cells of two tiles with `w = max(z, z)`; the caller names the pairs, so a cube edge, a corner and a rotated gluing are pair lists like a planar seam; the planet-wide level `G` of a seed is the lowest highest-edge over the paths from the sea (Dijkstra with `max` for the sum; `+inf` where no path reaches);
+- stage 3: the level of a cell is `max(level(c), G(label(c)))`, and `level(c)` for a cell reached from an outlet of its own tile;
+- the result SHALL equal the minimax level of the whole surface bit for bit (the tests' oracle is a global flood over the same neighbour lists), and the same bits on every run (the kernels are single-threaded with a fixed order and no thread-count input, CON-14); heights that are not finite SHALL be refused.
+The level does not change GEN-100's routing (a face does not route across its cube edges): the fill level is not a route, and the pairs the caller names are where basins join. GEN-121 replaced GEN-120's pass-2 tile rule (the depth below the window's flood); the depth of GEN-120 is taken against the exact base and clamped at 0, and the kernel's `L(c) - z(c)` is against the heights it is given. The code's cap and its step stay with the caller (STRM-077); the level has no epsilon and no minimum depth: a dent of any size is a pit.
+The kernel holds no store, no tile geometry and no quantisation: The post-pass (STRM-077) feeds it the tiles' final heights (f32, exact).
+
+#### Scenario: The tiled level equals the global flood
+- **WHEN** 12 random terrains of 3 x 3 tiles of 10 cells with basins across tile edges and tile corners, a bowl of a flat 60 m floor across three tiles with a notch at 70 m to the sea, two tiles glued with a rotation (the east column of one against the top row of the other, 8-connected) with a bowl centred on the glued corner, nested basins on a plateau of equal heights, a tile of sea and a world with no outlet are levelled tile by tile and by one global flood
+- **THEN** every cell's level is the same bits in both, the wide bowl's three tiles all read 70 m, a world with no outlet reads `+inf` at every cell, the same input gives the same bits and a height that is not finite is refused; a border cell that is an outlet is the sea through `seed_of`, an edge weight that is not finite is refused, and -0.0 and 0.0 are one height
+
+#### Scenario: The perimeter
+- **WHEN** the perimeter index of every border cell of tiles of 3 x 3 to 10 x 12 cells is taken and inverted
+- **THEN** each border cell has one index, an inner cell has none, and the inverse returns the cell
+
+### Requirement: GEN-129 The carves read the runoff as discharge and the vegetation as a local erodibility factor
+Both carves SHALL take an optional runoff weight per cell and a vegetation factor in their erodibility.
+- The runoff of a place SHALL be `R = P - E` in mm a year, `E = P PET / (P^n + PET^n)^(1/n)`, `n` 2.6 (`BUDYKO_N`), `P` the annual precipitation and `PET` the potential evapotranspiration of the orographic climate (GEN-117); `R` SHALL be 0 for `P = 0`, increase with `P` and never exceed `P`.
+- The weight of a cell SHALL be `w = clamp(R / RUNOFF_REF_MM, WEIGHT_MIN, WEIGHT_MAX)` with `RUNOFF_REF_MM` 300, `WEIGHT_MIN` 0.02, `WEIGHT_MAX` 8.
+
+Verify: A
+Status: active
+Source: ADR 0104 point 3 (amended), ADR 0108, GEN-117, GEN-127, GEN-110
+
+Detail: - A routing given weights SHALL start each cell with the area `w dx^2` and share it by the multiple flow direction as before: the area it returns is the discharge `Q = sum(w dA)`, equal to the area for weights of 1; the total at the outlets SHALL be the sum of the weighted areas.
+- The carve's stream-power number SHALL be `k_dt K sqrt(Q) / dx`; a cell below a dry reach SHALL keep the discharge of the wet catchment above it. The area cap of pass 2 applies to `Q`. This amends GEN-110: the stored area channel of a bake with weights holds `round(8 log2(Q / cell area))`, an effective drainage area in cells of reference runoff; a cell whose `Q` is under one cell has code 0 (a desert cell reads as one cell) and a wet cell reads up to `log2(8)` = 3 steps of 8 (24 codes) above its area. Readers of the channel (the wetness driver of GEN-119, `drivers::AREA_LOG2_DRY` and `AREA_LOG2_WET`) read discharge; the channel is keyed through the `rock` byte, so no record of a bake without weights is read as one with them.
+- The vegetation factor SHALL be `V_FLOOR + (V_PEAK - V_FLOOR) u e^(1-u)`, `u = P / VEG_PEAK_MM`, with `VEG_PEAK_MM` 300, `V_FLOOR` 0.5, `V_PEAK` 1.5: `V_PEAK` at `u = 1`, `V_FLOOR` at `P = 0` and for `P` much larger; `BakeInputs::climate_k` SHALL multiply the lithology's K by it.
+- The `rock` key byte SHALL carry bit 2 (weights) and bit 3 (vegetation); `BakeInputs::id` SHALL fold `RUNOFF_VERSION` and a digest of the constants (`runoff::constants_identity`, pinned by a test). With no weights and no vegetation the carves SHALL be those of GEN-127 bit for bit.
+- Every Earth-specific value of the runoff and the vegetation SHALL be a named constant of `generators::runoff` with Earth as the default (ADR 0108); the PET law is the orographic climate's (GEN-117), which `pet_mm` reads.
+
+#### Scenario: The runoff in the carve
+- **WHEN** the runoff, the weight and the vegetation factor are evaluated over a grid of `P` and `T`, a routing is run with weights of 1, with a wet catchment above a dry reach and with random weights, a cone is carved with wet and dry weights, with weights of 1 and with none, a face is carved with a halo and a tile with weights read at the cells' directions, the climate erodibility and weight of a bake are read on 1 and 8 threads, and a store written with other bits is run
+- **THEN** the runoff has the limits above, the weighted area equals the unweighted for weights of 1 bit for bit and its outlet total is the weighted sum, the discharge below the dry reach is at least the wet catchment's, the dry ramp incises less than the wet one, the bytes agree for any thread count, and a mismatch of the key bits is refused
+
+### Requirement: GEN-145 H1 derives the channel graph and the basins from a routing
+H1 SHALL derive from a routing (clipped MFD area, GEN-141) the channel graph and the basins, kept apart from the diffuse field.
+- A cell with `A_d >= T` (the runoff-weighted diffuse area, `T` a parameter, default 75 km^2) SHALL start a channel; every D8 receiver of a channel cell SHALL be a channel cell or an outlet, and its filled level SHALL be lower (a channel continues downstream and does not restart).
+
+Verify: A
+Status: active
+Source: A3 sections 5.2 to 5.5 and 12.1 (G-CON), inbox #99, ADR 0111 (proposed)
+
+Detail: - The channel discharge `Q(c)` (the potential discharge, before the losses of basins; a basin's `q_out` is the discharge that continues below it) SHALL be the local term `a(c) r(c)` plus `Q` of every D8 donor (zero local term in an outlet cell); the sum of `Q` at the outlets SHALL equal the sum of the local terms over the land to a relative error of 1e-9, and `A_d` at the outlets SHALL equal the sum of the (weighted) true cell areas of the cells that drain to them to 1e-9, also across cube edges.
+- A segment SHALL run from a head or a confluence to the next confluence or the mouth, its id the hash of the body, its downstream end cell and its upstream end cell; every channel cell except the mouths SHALL be in exactly one segment (counted per cell), and every segment SHALL reach a mouth through its downstream segments.
+- A basin SHALL be a connected set of cells whose filled surface stands more than `pit_min_m` above the ground, with its floor, its spill point (the rim cell of the lowest filled level), a 16-step area and volume curve (parameters: `pit_min_m` 0.5 m; artefact below 4 cells and shallower than 2 m), its class (lake with an active outlet, endorheic without) and water level by the steady balance, and an id that is a function of its lowest cell (ties by the global cell id) only. A basin of fewer than `min_cells` cells (default 4) and shallower than `min_depth_m` SHALL be an artefact, counted and not kept; a component shallower than `pit_min_m` from floor to rim SHALL be a ramp of the flood's epsilon, counted and not kept; the inflow SHALL count each cell that drains into the basin once (superseded by the cascade of GEN-146, which also removes the flow an upstream basin lost); a basin that holds a flagged cell SHALL be of class intentional (GEN-146).
+- The run on the prototype landmass (`examples/hydro_landmass`) is a measurement, not a gate; the gates are the tier-A tests.
+
+#### Scenario: channels and basins
+- **WHEN** lands of ridges and of terraces (with and without a runoff field), and a sphere of 24 cells a face edge with water crossing cube edges, are routed with the round rules and given to H1; and a land with a bowl is given strong and no net evaporation and edited
+- **THEN** no segment is disconnected, no channel cell lacks a downhill channel receiver or an outlet, `Q` is conserved at confluences and at the outlets, a channel and a segment cross a cube edge, the bowl is one lake or one endorheic basin with its floor, spill level, curve and water level, its id moves only when its lowest cell does, and a one-cell dent is an artefact
+
+### Requirement: GEN-138 The grids of the bake may carry the physical cell metric
+A `Grid` over a window of a cube face SHALL be able to carry a physical metric: the area of each cell and the distance between neighbouring cell centres of the equiangular face (`TangentWarp`) in place of the uniform `dx^2`, `dx` and `sqrt 2 dx`.
+
+Verify: A
+Status: active
+Source: SPIKE-105 §12 F5, inbox #97 (owner D1, 2026-11-08)
+
+Detail: - The area of a cell SHALL be the exact spherical quad: the solid angle of the gnomonic patch between its edge tangents times the radius squared; the cells of a face SHALL sum to a sixth of the sphere (relative error under 1e-12 at 257 cells an edge) and the cells along opposite edges of a face SHALL be equal (the equiangular map is symmetric, so faces that meet at a cube edge agree on their edge cells).
+- The distance SHALL be the great circle between the centre directions; at the face's centre it SHALL be `dx` on the axes and `sqrt 2 dx` on the diagonals, at a corner about 0.94 `dx` on the axes, and `d(a, b) = d(b, a)`.
+- The routing SHALL take the receiver slope, the multiple-flow-direction slope and the starting area of a cell from the metric, so that the area returned at the outlets is the sum of the cell areas; the carve SHALL take the stream-power distance and the breach slope from it.
+- `CarveParams.cell_metric` SHALL be false by default, and a grid without a metric SHALL give the uniform values bit for bit; a layer baked with the switch on SHALL carry it in the layer key and one baked with it off SHALL keep its key.
+
+#### Scenario: The physical cell metric
+- **WHEN** the cells of faces of 8, 64 and 257 cells are summed, the edge cells of opposite sides compared, the distances read at the centre and at a corner, a routing is run over a face with a halo and a carve twice with the metric and once without
+- **THEN** the sums are a sixth of the sphere, the edge cells are equal, the distances are those above and symmetric, the outlets hold the total area, the two metric runs are the same bits and differ from the uniform run, and a grid without a metric gives `dx^2`, `dx` and `sqrt 2 dx` exactly
+
+### Requirement: GEN-127 The carves read the erodibility and the uplift fields
+Both carves SHALL take an optional rock: the erodibility `K(cell, z)` of GEN-116 with the lower edge of the layer the height lies in and, for pass 1, the uplift `U(cell)` of GEN-123. This amends GEN-100 and GEN-101: the class carve factor multiplies `K dt` (erodibility), and a given uplift is not scaled by it.
+- In each step, before the sweep, the erodibility of every cell SHALL be evaluated at the cell's height at the start of the step (in parallel over rows, a value per cell: the same bits for any thread count) and SHALL multiply the class carve factor in that step's implicit update; it SHALL be finite and not negative.
+
+Verify: A
+Status: active
+Source: ADR 0102, ADR 0103, GEN-100, GEN-101, GEN-116, GEN-123
+
+Detail: - A step SHALL NOT lower a cell below the lower edge of its layer by more than `LAYER_SKIP_M` (0.01 m); the room above the edge is kept as a 16-bit count of 4 mm (rounded up, so a cell may end up to 4 mm further below), a room of 262 m or more is no edge; the rest of the lowering is carried to the next step, which reads the layer below. An edge SHALL be a number; an edge above the height SHALL NOT raise a cell.
+- A given uplift SHALL replace `u_over_k`: a cell gains `k_dt * U * taper` in a step, the taper the smoothstep of the cell's starting height above the sea over `uplift_taper_m` as before; the uplift SHALL NOT be scaled by K or by the class carve factor (ADR 0103 point 3), and SHALL be finite and not negative. An erodibility without an uplift array SHALL NOT scale the uniform uplift.
+- Pass 2's local carve (incise only, no uplift) SHALL read K and the layer edge.
+- With no rock, or with `K = 1` and `U = u_over_k` (a value `f32` holds exactly, as 20) and a carve factor of 1 or none, the carve SHALL be bit for bit the carve without fields.
+- `BakeInputs::rock_k` SHALL multiply the lithology's K by `ROCK_K_SCALE` = 1.16, a fixed constant of the default lithology (a softer or harder world erodes more or less): the `c` for which the land mean of `g(c K f)` equals that of `g(f)`, `g(f) = f / (1 + f)`, `f = k_dt sqrt(A) / dx` with `A` the drainage area in cells, `P(A > a) = a^-0.43` for 1 to 1e7 cells, K the raw erodibility at the surface of land; the geometric mean over 12 seeds of the per-seed `c` (0.88 to 1.78; `k_calib`). The carve then removes the mean incision of a unit rock on the same drainage in this model; relief and elevation still differ (design notes).
+- The layer and tile keys SHALL carry the fields present (a `rock` byte: bit 0 the erodibility, bit 1 the uplift) and a run whose fields differ from the spec's SHALL be refused; `BakeInputs::id` SHALL fold `LITHOLOGY_VERSION`, `UPLIFT_VERSION` and the bits of `ROCK_K_SCALE` into the keys of every bake (a bake without fields is keyed like one with them).
+
+#### Scenario: The fields in the carve
+- **WHEN** a cone is carved with K = 1 and U = `u_over_k` (no factor and a factor of 1), with K 0.12, 1 and 1.8, with K 0 and the factor 1 and 5, with K and no uplift array, with a K that records its reads on 32 and on 130 rows, with a caprock over soft rock on a steep ramp with and without the edge over 1 and 3 steps, with an edge above the height and a NaN edge, on 1 and 8 threads, with a negative K and a negative U, and a face is carved with direction fields on 1 and 8 threads; the factor solver is run on a constant K, the lithology's lower edges are probed, and the id is built with other versions and another scale
+- **THEN** the first equals the carve without fields bit for bit, a harder rock settles higher, a K of 0 lifts each cell by exactly `steps k_dt U taper` whatever the factor, K alone leaves the uniform uplift, step 2 reads the heights that step 1 left, every cell is read once at its own height, a caprock forms a step and holds the cell in the following steps, no cell is raised by an edge above its height, the bytes agree for any thread count, the NaN edge and the negative inputs are refused, the face's change differs from the one without fields, the solver reproduces the incision of a unit rock and the constant lies among the seeds' factors, a band's lower edge is where the band below begins, and the id differs with each version and with the scale
+
+### Requirement: GEN-162 A breach does not cut below its chain exit
+Under the local clip of the round rules (the round solver's rules) a breach SHALL NOT lower a cell below the base level of its chain exit: for a receiver chain that ends in an outlet above the sea level, the base of every cell of the chain is the outlet's height, and the target of a breach is at least that base. A chain that ends at or below the sea level SHALL have no base, and every other rule set (the default rules, K7's and the sediment pass's canonical flood without the clip) SHALL keep today's breach.
+
+Verify: A
+Status: active
+Source: Architect, 2026-11-10
+
+Detail: - A depression whose exit is fixed (A3 sections 5.3 and 6) SHALL NOT get deeper from round to round through the breach.
+- A build whose outlets are all at or below the sea level SHALL be bit-identical to the build without the rule.
+
+#### Scenario: Lake behind a cut outlet
+- **WHEN** a closed bowl whose rim is its only outlet runs four rounds
+- **THEN** its median depth under the fill grows by at most 10 % of the starting depth in round 1 (the incision of the sweeps; a bowl without the breach grows by 4.6 %) and by at most 0.25 m in any later round
+
+#### Scenario: Outlet at the sea
+- **WHEN** a bowl whose rim is at the sea level runs one round
+- **THEN** no cell is more than 1 m under the fill
+
+
+### Requirement: GEN-103 The default class source and the whole-planet preview
+`planet-generators` SHALL provide the default class source of ADR 0089 decision 3 as CPU fields behind the class-weights interface of decision 1: the plate mask (GEN-094), the memberships (GEN-095) and the base elevation without the hill band (GEN-096) as pure functions of the seed and the direction, the class weights as `u8` on the lattice of GEN-093 (bilinear reads, continuous across face edges), the untapered blended `k` (GEN-097) and the hill band's amplitude from `k` (GEN-098). They SHALL use `libm` and integer hashing only and give the same bits for any thread count (CON-14). The source SHALL NOT change any stored field or `GLOBAL_VERSION`; wiring it into the bake is `m9-bake`'s.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-11-01, inbox #37), ADR 0089 decisions 1, 3 and 10, GEN-093 to GEN-098; SPIKE-77, SPIKE-79, SPIKE-80, SPIKE-91
+
+Detail: `cargo xtask preview world --seed N [--out DIR]` SHALL write, from those functions and no store, equirectangular PNGs of at least 2048 x 1024 under `target/preview/world-seed-N` or `--out`, in under a minute on the reference machine:
+- land and sea; the elevation with hillshade; today's elevation with hillshade; both side by side;
+- the plate mask with the plate margins; the plateau field and the back-arc;
+- the relief class by largest weight and by the blended weights; `k`.
+Every image SHALL carry the seed, `GLOBAL_VERSION`, `MESH_VERSION`, the class list and class source versions, the preview version, and a legend; the command SHALL also write a report of the class shares, the share of land above 2 and 4 km, the highest land, the largest step of `k` between lattice points and the share of steps over 2.0, and the shape metrics S1 to S7 of SPIKE-91 beside their Earth references (computed on the preview grid; S8 is not measured).
+
+#### Scenario: Same seed, same bytes
+- **WHEN** the lattice and the preview images of seed 1 are built on 1 and on 8 threads, and again for seed 2
+- **THEN** every lattice point's weights sum to 255, the bytes of the lattice and of every image are equal between the thread counts, and seed 2 differs from seed 1
+
+#### Scenario: Memberships and the blended k
+- **WHEN** a point has core 1 and base elevation 3500 m, another has no mask term and plateau field 1, and a third has weights 128 hills and 127 mountains
+- **THEN** the first holds weight 255 in high mountains, the second 255 in plateau, and the third's untapered `k` is `(128 x 5 + 127 x 6) / 255`
+
+### Requirement: GEN-104 The continent stage
+The global stage's continentalness SHALL be the continent stage of `planet-generators`, a pure function of the seed and the unit direction, `GLOBAL_VERSION` 6. Its raw value is the sum of:
+- the shape: an eight-octave fBm of base frequency 1.6 and gain 0.72 per octave (each octave its own layer), read at the direction plus 0.6 times a three-octave warp of frequency 1.3, times 1.7, times `0.65 + 0.35 * 4 w (1 - w)`;
+
+Verify: A
+Status: active
+Source: SPIKE-92 round 3 (H2r3), planner (2026-11-02, inbox #41), ADR 0089 decision 10
+
+Detail: - the craton bias `0.8 * sum` of the lobe weights `smoothstep(0, 0.25, z) exp(-(u^2 + v^2))`, `z` the cosine of the angle to the lobe's centre (the weight is 0 behind it, and fades over `z < 0.25` so that the bias is continuous across the great circle 90 degrees from the centre), `u` and `v` the tangent angles `atan2` of the direction's components along the lobe's major and minor axes and `z`, over its radii, read at the direction plus 0.3 times the warp, with `w = min(1, sum)`;
+- the islands (GEN-106).
+A craton is a chain of lobes; the cratons hold the land shares 0.50, 0.26, 0.10, 0.06, 0.03, 0.02, 0.01, 0.01 of 29 % of the sphere (a cap of half-angle `r` holds `2 pi (1 - cos r)`), the two largest (0.50 and 0.26, at least 20 % of the land) as 3 lobes, a craton of 4 to 20 % as 1 to 3 (drawn), the others one; a lobe has aspect `a` uniform in 1.5 to 2.5 (radii `r sqrt(a)` and `r / sqrt(a)`), lobe centres 0.6 times the sum of the two major radii apart on a spine that turns by up to 1.2 rad per lobe, and craton centres at least the two extents plus 0.1 rad apart (up to 200 draws). The per-seed offset is the `1 - 0.29` quantile of the raw value over 20,000 directions of a Fibonacci sphere; the continentalness is the raw value minus the offset plus the sea level. The octave series is normalised by its full weight sum, so that a value with fewer octaves is the full value without its detail terms. Two such values SHALL be exposed: the smooth value (the first 4 octaves, no islands) for the distances of the class source (GEN-094), and the coarse value (the first 3 octaves, no islands) for the landform driver. The landform driver and the hill band's strength read the coarse value (GEN-064, whose text this change edits in `openspec/specs`, synced here because `m9-bake` removes GEN-064 and its delta cannot also modify it). `GLOBAL_VERSION` is 6 (`m9-bake`'s GEN-096 makes it 7). Every term SHALL read the 3D direction (no latitude or longitude), use `libm` and integer hashing only, and give the same bits for any thread count (CON-14). The constants are start values (SPIKE-92); R7 tunes them.
+
+#### Scenario: Pure and thread-independent
+- **WHEN** the continentalness of seed 14 is evaluated on 1 and on 8 threads at 2000 directions, including the poles and cube edges
+- **THEN** the bits are equal
+
+### Requirement: GEN-105 The craton layout and plate draws are retried deterministically
+The continent stage SHALL draw its craton layout from the seed, then from derived seeds (draw `t` = 1 to 11 uses `seed xor (0x53927e7e * (t + 1))`, 12 draws in all), until a coarse land map (2 degree cells, 29 % of the area by the raw value's quantile, 8-connected, longitude wrapping) has 4 to 7 masses of at least 1 Mkm2 and the largest holds 47 to 60 % of the land; else it SHALL keep the draw with the lowest cost `max(0, 4 - n) + max(0, n - 7) + 10 (max(0, 0.47 - s) + max(0, s - 0.60))`, the first on ties.
+
+Verify: A
+Status: active
+Source: SPIKE-92 (the layout retry), planner (2026-11-02, inbox #41); belts on the continents (round 2)
+
+Detail: The class source SHALL draw its plates by the same kind of retry (GEN-094): up to 64 draws, draw 0 from the seed and draw `t` = 1 to 63 from `splitmix(seed xor (t << 40) xor 0x71a7e500)`, the first draw with the highest score kept. The island term (GEN-106) is part of the layout score, so changing it, or any constant of the shape, is a layout change: the kept draw of seeds 1 to 5 is pinned (draws 2, 1, 1, 2, 3 for seeds 1 to 5 and 1 for seed 14, the reference world) and a swap needs a declared re-pin. Sorts SHALL use a total order with an index tie-break; the grids and the draw order are fixed (CON-14).
+
+#### Scenario: A retry is a pure function of the seed
+- **WHEN** the continentalness and the class weights of seed 2 are built twice, on different thread counts
+- **THEN** the same draws are kept and the bits are identical
+
+### Requirement: GEN-106 Islands lie off the craton margins on a smaller warp
+The islands term SHALL be `1.3 * near * f`, with `near = exp(-((w - 0.2) / 0.15)^2)` (`w` the clamped lobe sum of GEN-104: islands lie just offshore of the craton margins) and `f` a four-octave fBm of base frequency 3.0 and gain 0.6, read at the direction plus 0.3 times the warp (half the shape's), so that the high-frequency noise is not stretched into parallel striations.
+
+Verify: B
+Status: active
+Source: SPIKE-92 round 3 (island fields' striations), planner (2026-11-02, inbox #41)
+
+#### Scenario: Islands
+- **WHEN** the land mask of seeds 1 to 5 is scored on a 1440 x 720 grid
+- **THEN** TEST-088's island band holds
+
+
+### Requirement: GEN-094 The plate mask and the uplift fields
+The default class source SHALL compute, as pure functions of the seed and the direction:
+
+Verify: A
+Status: active
+Source: ADR 0089 decision 3, ADR 0088/0089 accepted 2026-11-01; SPIKE-79 (14 plates, warp 0.35), SPIKE-80 (width variety, flanks, back-arc), SPIKE-91 (belt width, segments, rings); planner critiques of the preview (2026-11-01 and 2026-11-02, inbox #39 and #40); numerics review of the preview (the jumps at plate bisectors)
+
+Note: GEN-123's uplift field (ADR 0103) may overtake the uplift part (lead, 2026-11-14).
+
+Detail: - **Plates:** 14 centres and Euler-pole rotation vectors (rates 0.3 to 1.0, dimensionless) from a hash of the seed and a draw index; up to 64 draws (draw 0 the seed itself, then derived seeds) are scored by the share of land (8192 points of a Fibonacci sphere) that lies near a convergent margin, `(1 - smoothstep(150, 450 km, d)) smoothstep(0.05, 0.35, convergence)` of its two nearest plates, and the first draw with the highest score is kept, so that the belts stand on the continents (GEN-105); the direction warped by 0.35 times a two-octave fBm of frequency 1.3. A plate's **land share** is the fraction of its area that is land, from 2048 points of a Fibonacci sphere assigned by the warped direction's nearest centre.
+- **Pairs:** the pairs (nearest, second), (nearest, third) and (second, third) of the three nearest centres of the warped direction, with angles `a1` to `a4` for the four nearest. Every term below is the largest over the pairs, each pair's term weighted by the product of its two plates' weights, a plate of rank `r` (1 to 3) weighing `smoothstep(0, 0.05 rad, a4 - a_r)` (so a plate has weight 0 where it trades places with the fourth, and two plates that trade places keep their weights), and for (second, third) also by `1 - smoothstep(0, 0.04 rad, a2 - a1)`. Each pair's term is symmetric in its two plates, so the mask is continuous where the nearest plate changes. (The pair's signed distance below is positive on the side of the plate with the lower index, which is what keeps the term continuous where the nearest plate changes.)
+- **Margin distance** `d` of a pair: half the angular difference of its two centres' angles, times the body's radius. The preview uses 6,371 km; the bake SHALL read the body's radius from the definition (CON-11).
+- **Convergence** of a pair: the difference of the two plates' velocities (rotation vector cross direction) against the unit margin normal (from the first towards the second centre, in the tangent plane), positive where they move towards each other.
+- **Distances to the coast and to the coastal line:** the signed `(land depth - 0.10) / |gradient|` (`d_c`, positive inland of the line) and `land depth / |gradient|` for the coast, both of the smooth land depth (the continent stage without its detail octaves and islands, GEN-104: the full value's gradient changes several times over one lattice cell), the gradient by central differences of 0.004 rad along the axes x, y and z with the radial part removed (a first-order estimate, valid near the line, the gradient floored at 1e-9).
+- **Core:** the larger of a belt `smoothstep(0.05, 0.35, convergence) max(0, 1 - |u - b| / W_b)` and a coastal belt `a o near smoothstep(0.05, 0.35, convergence) max(0, 1 - |d_c - b| / (0.8 W_b))`, times the strike factor. Here `u` is the signed distance to the margin of the pair (positive on the side of the plate with the lower index, so that it is continuous where the nearest plate changes), `d_c` the signed distance to the line at land depth 0.10, and `b = 120 km` times a two-octave fBm of frequency 3.0 in `[-1, 1]` bends the trace of the belt sideways. `W = 200 + 220 n` km with `n` a two-octave fBm of frequency 2.5 in `[0, 1]`; `W_b = max(125 km, W (0.55 + 0.45 s) (0.9 + 0.2 h))`, so that a belt tapers in width as well as in height towards the ends of its segment, never under 125 km (the coastal belt's half-width 0.8 W_b is at least 100 km). `a = smoothstep(0.38, 0.56)` of a two-octave fBm of frequency 0.9 in `[0, 1]`; `o = c_x (1 - c_y) + c_y (1 - c_x)` is 1 where one plate of the pair is oceanic and the other not, with `c = smoothstep(0.15, 0.40, land share)`; `near = 1 - smoothstep(250, 500 km, d)`. The coastal belt thus lies only where a convergent margin with an oceanic side is within a few hundred km. The strike factor is `s (0.45 + 0.55 h)`, with `s = smoothstep(0.25, 0.55, g)`, `g` a two-octave fBm of frequency 2.8 in `[0, 1]` (gaps between segments where it is low), and `h` a two-octave fBm of frequency 5.0 in `[0, 1]` (the height and width along the strike).
+- **Flank:** the same terms at three times `W_b` (bent the same way), also times the strike factor (the mask exposes it as `strike`). **Old margin:** `(1 - smoothstep(-0.05, 0.15, convergence)) max(0, 1 - d / 300 km)`.
+- **Back-arc:** for the pairs with the nearest plate: `smoothstep(0.7, 0.95, convergence) (1 - smoothstep(450, 700 km, d)) smoothstep(0, 150 km, d) smoothstep(0, 150 km, d1) smoothstep(0.1, 0.5, inland) smoothstep(-0.08, 0.08, share_nearest - share_other)`, `d1` the distance to the nearest margin: it is 0 at a margin and prefers the plate with the larger land share smoothly.
+- **Hilly country:** `smoothstep(0.50, 0.76, c_h) smoothstep(0.1, 0.4, smooth land depth)`, `c_h` a three-octave fBm of frequency 2.2 in `[0, 1]` (hills away from the belts; the smooth depth, because the rough `inland` changes several times over one lattice cell).
+- **Plateau field:** `smoothstep(0.45, 0.70, c) smoothstep(0.2, 0.6, inland) (1 - smoothstep(0.2, 0.6, max(flank, back-arc)))`, `c` a three-octave fBm of frequency 1.6.
+Core, flank and old margin SHALL be multiplied by the coast gate `smoothstep(50, 300 km, distance to the smooth coast) smoothstep(0, 0.3, smooth land depth) smoothstep(0, 0.2, land depth)`, 0 where the smooth or the full land depth is not positive (no belt in the sea or on land the smooth coast does not hold; no belt stops at the coast in a step), where land depth is the continentalness minus the sea level and `inland` is the bake's `smoothstep(0.02, 0.35, land depth)` (`global.rs` `terrain`). The mask SHALL replace the range zone as the mountain strength. No gate of the mask SHALL switch over less than 100 km. The numbers here are start values (SPIKE-79, SPIKE-80, round 1 of the preview iteration); R7 tunes them. The planet-wide check of the belts is TEST-082.
+
+#### Scenario: Pure and continuous
+- **WHEN** the mask is evaluated on 1 and 8 threads, at points 1e-12 either side of cube edges and corners, and at points 1e-9 rad either side of a plate bisector
+- **THEN** both runs give identical bits, the points either side of a cube edge differ by under 1e-9 in every term, and those either side of a bisector by under 1e-6 in core, flank, old margin, back-arc, plateau field and `e0` in km
+
+### Requirement: GEN-095 The default classes follow rules over the mask
+The default class weights SHALL be memberships blended by smoothsteps, then normalised by GEN-093. Here `e_class` is the base elevation of GEN-096 without the hill band (GEN-098), which breaks the loop between the classes and the band, and with the ridge factor `0.5 + 0.5 r` replaced by 0.75, so that the weights do not follow the ridge noise's fine structure (GEN-097's limit on the step of `k`):
+- mountains `mt = smoothstep(0, 0.4, max(core, flank))` (the membership rises over the belt's width and covers its flanks, so that the class weights change over the belt and not in one lattice step), of which high mountains `mt smoothstep(1000, 5500 m, e_class)` and mountains the rest;
+
+Verify: A
+Status: active
+Source: ADR 0089 decision 3, ADR 0088/0089 accepted 2026-11-01; SPIKE-77, SPIKE-80; planner (2026-11-01): the plateau as the difference
+
+Detail: - hills `(1 - mt) smoothstep(0.1, 0.35, max(flank, old margin, hilly))`;
+- plateau `(1 - mt - hills) smoothstep(0.3, 0.6, max(plateau field, back-arc))`, so that the memberships partition 1 before the normalisation;
+- the rest `1 - mt - hills - plateau`, rolling plain by `smoothstep(0.45, 0.6)` of a three-octave fBm of frequency 3.0, else plain.
+Badlands and sand sea SHALL have weight 0 in the default source; class paint (ADR 0089 decision 8) or a derived source sets them. The thresholds are start values (SPIKE-80); R7 tunes them. The planet-wide check of the class shares is TEST-082.
+
+#### Scenario: Memberships
+- **WHEN** a lattice point has core 1, `e_class` 5500 m, and another has core 0, flank 0, old margin 0 and plateau field 1
+- **THEN** the first holds weight 255 in high mountains and the second 255 in plateau
+
+### Requirement: GEN-097 Amplitudes per class
+Each class SHALL carry the relief driver `k`, the fine-crease floor, the carve factor (a factor on the carve's `K dt`, ADR 0089's `K t`) and the deposition's `kc`, blended by the class weights:
+| Class | `k` | Crease floor | Carve factor | `kc` |
+|---|---|---|---|---|
+| plain | 1 | 0.2 | 1 | 1e5 |
+| rolling plain | 1 | 0.35 | 1 | 1e5 |
+| hills | 5 | 0 | 1 | 1e5 |
+| mountains | 6 | 0 | 1 | 1e5 |
+| high mountains | 7.5 | 0 | 1 | 1e5 |
+
+Verify: A
+Status: active
+Source: ADR 0089 decisions 5 and 6, ADR 0088 point 1, ADR 0088/0089 accepted 2026-11-01; SPIKE-73, SPIKE-76, SPIKE-77, SPIKE-78, SPIKE-80, SPIKE-81
+
+Detail: | plateau | 1 | 0 | 1 | 1e5 |
+| badlands | 2 | 0 | 1 | 1e5 |
+| sand sea | 0.35 | 0 | 0.5 | 1e5 |
+- The blended `k` SHALL be tapered to 1 by `1 + smoothstep(0, 400 m, m) (k - 1)` towards the coast, with `m` the ring mean (GEN-099).
+- The 99th percentile of the steps of the untapered blended `k` between neighbouring lattice points SHALL be at most 2.0 (owner, 2026-11-02: the limit applies to 99 % of the steps, not to every step); the largest step is reported, not gated. The limit is a parameter of the bake (`max_step`, default 2.0). A class paint item SHALL be feathered over at least `ceil(|delta k| / max_step)` lattice cells, so that it adds no step over `max_step`.
+- The crease and detail amplitudes SHALL no longer depend on the landform driver or on the base elevation above 300 m. The erosion field's version SHALL become 3.
+On seeds 1 to 5 the default source's p99 is 1.4 to 1.8 and its largest step 5.1 to 5.8 (0.4 % of the steps are over 2.0): a belt's flank changes by 0.2 to 0.3 of its core over one 40 km cell and the classes differ by 4 to 6 in `k`. Earth has 6.7 % of 40 km pairs over 2.0 (largest 5.4, p99 3.3), so the p99 form is the engine's own smoothness rule, not a realism target.
+The table and the limit are start values (SPIKE-73, SPIKE-76 to SPIKE-81; `kc` from SPIKE-64); R7 tunes them on the scorecard. The planet-wide check of the step limit is TEST-082.
+
+#### Scenario: Blended amplitudes
+- **WHEN** a lattice point holds weights 128 hills and 127 mountains
+- **THEN** its untapered `k` is `(128 x 5 + 127 x 6) / 255`, and at a ring mean of 0 m the tapered `k` is 1
+
+### Requirement: GEN-098 The hill band follows the class
+The hill band SHALL keep GEN-064's three octaves, weights, warped direction and coast ramp, and SHALL take the amplitude `30 + 145 smoothstep(1, 5, k) + 650 smoothstep(5, 7.5, k)` m from the untapered blended `k` (GEN-097) instead of the range zone's mountain strength. `HILL_BAND_MAX_M` SHALL become 825 m.
+
+Verify: A
+Status: active
+Source: ADR 0089 decision 6, ADR 0088/0089 accepted 2026-11-01; SPIKE-80 (the hill landforms fail criterion 1 without the band), SPIKE-82
+
+Detail: Where the class is mountains or high mountains the band SHALL be x4.5 as high (the factor is blended by the two classes' weight), its noise a ridged multifractal of five octaves (16, 8, 4, 2 and 1 km, each octave weighted by the previous one's ridge so that the ridges stay connected) in place of the three octaves, blended by the same weight, and centred (0.45 of the unit noise, its mean, is subtracted, so that the larger band does not lift the median elevation); land SHALL stay at least 1 m above the sea level where the base is (the shore of the continent stage is kept). A cap's bounds SHALL carry the band's per-octave noise bounds at the cap: for the hill octaves as before (`HILL_BAND_MAX_M`), and where the mountain weights are not 0 the ridged octaves' bound in `[0, 1]` and the factor 4.5 (the band's maximum is `0.55 * 4.5 * 825` m, about 2.0 km, and its minimum `-0.45 * 4.5 * 825` m before the land floor), all inside the clamp of 9000 m. The curve and the factors are start values (SPIKE-80; SPIKE-101, SPIKE-102 run a: x4.5 ridged centred reaches 0.79 of Everest's 3 km relief on the base); R7 tunes them. `CLASS_SOURCE_VERSION` SHALL become 6.
+
+#### Scenario: Band by class
+- **WHEN** the band is evaluated at the same direction with `k` 1, 5 and 7.5
+- **THEN** its amplitude is 30, 175 and 825 m, and its value lies in the bounds of every cap that holds the direction
+
+#### Scenario: The mountain band
+- **WHEN** the band is evaluated at 500 or more land points whose mountain and high-mountain weights sum to over 0.99
+- **THEN** its value lies in `[-0.45, 0.55]` of `4.5` times the amplitude of GEN-098's curve, and its mean is within 0.05 of that amplitude of 0
+
+### Requirement: GEN-099 The relief channels and the runtime base field
+The bake SHALL compute two channels on the coupled lattice (2048 cells per face edge, about 4.9 km), as f32 with min and max per 32 x 32 block:
+- the relief driver `k` (GEN-097, tapered);
+- the ring mean `m`, the mean of the bake's elevation at the point and at the 8 compass points of a ring of 10 km radius (9 samples, a fixed order; the compass is east and north, east being the Z axis crossed with the direction (the Y axis at a pole), so the ring's orientation is continuous over every face edge and diagonal and a point shared by two faces has the same value on both).
+
+Verify: A
+Status: active
+Source: ADR 0088 points 1 and 2, ADR 0088/0089 accepted 2026-11-01; m9-bake PR 1 computes `m` from the existing bake; SPIKE-66 (the 10 km ring; a runtime stencil breaks batch reads and bounds)
+
+Detail: The tapered `k` is `1 + smoothstep(0, 400 m, m) (k - 1)` of the class weights' blended driver (GEN-097). The channels are computed from the direction alone (the bake's elevation and the class weights as inputs), f64 with `libm`, stored as f32, and the same bytes for any thread count. A block's range covers the points of its cells (including the shared row and column of the next block). `RELIEF_CHANNELS_VERSION` 1 (`relief_channels.rs`).
+The runtime base field SHALL be `m + k (e - m)` plus `k` times the creases (above the erosion layer's grid only the octaves GEN-109's band keeps, where the layer read calls it), with `e` the bake, each term one read at the point. It is behind a switch (`ErosionField::with_relief`), off by default:
+- off: `k` is 1 and `m` is not read, today's field bit for bit, its key and implementation id unchanged;
+- on: the implementation id is `cpu-erosion-v1+relief`, and the inputs hash folds the channels' identity (a hash of their content), their resolution and the channels' version; the body's relief scale SHALL be 1 (the channels are of the bake as it is), else the switch returns an error naming the scale;
+- the reader (`relief_lattice.rs`) interpolates the stored f32 points in f64, continuous across face edges, takes the channels' cells per face edge from the channels (a coarse planet pass and a full one read through the same code), and returns an error naming the face for a channel with a value that is not finite.
+
+#### Scenario: One read per term
+- **WHEN** the base field is evaluated for a batch of directions
+- **THEN** each direction reads `e`, `k` and `m` once at its point, and the batch equals bit for bit the heights evaluated one by one (GEN-020)
+
+### Requirement: GEN-100 Pass 1 carves each cube face on a coarse grid
+The bake's first pass SHALL, per cube face:
+- sample the base field (GEN-099) once per cell of 814 m (one point sample per cell);
+- carve it with implicit stream power with uplift (`U / K` 20, `K dt` 0.05 times the carve factor of GEN-097), 20 steps, not to steady state; the uplift of a cell is tapered by its starting height `h` above the sea level, `smoothstep(0, 60 m, h)` of it (a coastal plain that barely erodes is not lifted by the whole 20 m: owner 2026-11-04, the coast diagnosis);
+
+Verify: A, B
+Status: planned
+Source: ADR 0088 point 4.1, ADR 0088/0089 accepted 2026-11-01; SPIKE-62, SPIKE-65, SPIKE-66, SPIKE-70, SPIKE-71
+
+Note: a tier-B test is owed; the K7 chain (ADR 0119) overtook the bake plan (lead, 2026-11-14).
+
+Detail: - breach after each route (the next fill sees the breached surface): from the leaves down, the receiver of a cell that stands higher than 0.1 % of the cell distance below it is lowered to that level, by at most `breach_max_m` for each donor that reaches it (500 m, SPIKE-101: with 50 m the carve fills the basins the hill band leaves and the layer halves the high mountains' relief; 0.62 of Everest's 3 km relief and 0.91 of the Alps' with 500 m), never an outlet (the sea and the face's border cells) and never below the sea level; an option `breach_height_scale_m` (off, 0) scales the limit from 50 m at the sea level to `breach_max_m` over that height of the receiver above it;
+- keep the pits (GEN-120): the route runs over the filled copy, but a cell that stands below its receiver is not raised to the filled level, it only gains its uplift (`keep_pits`, on; an incise-only carve ignores it), and the face's own cells' depth below the flood of the carved heights is kept as the face's fill depth;
+- keep land above the sea level (plus the flood's epsilon) whatever depth the sea outlets have;
+- route with Barnes' improved priority flood (epsilon 1 mm), jittered D8 receivers (the jitter an integer hash of the GLOBAL cell and the direction, so a cell routes alike in every window that holds it) and the order from the receivers, and the drainage area by multiple flow direction (Freeman, exponent 1.1: a cell shares its area among its lower neighbours in proportion to the slope to the power 1.1, highest cells first, ties by the cell index; an outlet passes nothing on) which drives the carve while the receivers stay D8 (a D8 area imprints the grid's eight directions as staircase valleys: SPIKE-98 diagnosis, owner 2026-11-03), re-routing every 5th step; the carve factor multiplies `K dt` and the uplift (`U / K` stays 20); a height or factor that is not finite, a flood without an outlet or with an epsilon that is not positive SHALL be refused;
+- not route across cube edges: each face is carved on its own grid extended by a halo of `ceil(cells / 128)` cells (at least 4) beyond each edge over the plane that continues the face, so the face's own border is an ordinary cell; the stored change keeps the halo; a reader SHALL cross-fade the faces within the halo's width of an edge (the face's own weight 1 and a neighbour's `1 - smoothstep(distance to the shared edge / halo)`, normalised; at a corner both neighbours count), so that the change is continuous across the edges and around the corners; a halo of half the face or more SHALL be refused.
+It SHALL keep each face's change as a record of the layer store (STRM-065) and checkpoint per face. The constants are start values (SPIKE-62, SPIKE-65, SPIKE-66, SPIKE-70, SPIKE-71).
+
+#### Scenario: The breach limit
+- **WHEN** a basin ringed by a 400 m dam is carved for one step with the default breach and with a limit of 50 m, and with the height scaling at 2000 m
+- **THEN** the dam is lowered further with the default than with 50 m, the scaled limit gives a dam between the two, and `breach_height_scale_m` is part of the layer key
+
+#### Scenario: The uplift is tapered
+- **WHEN** a plain at 3 m and a plateau at 500 m, each ringed by outlets, are carved with the taper of 40 m and without it
+- **THEN** the plain is lifted by over 5 m without the taper and by under 1.5 m with it, the plateau's bits are the same with and without it, and a carve without uplift is the same with either setting
+
+#### Scenario: The change over the shallow sea
+- **WHEN** pass 1 runs on a face of a low plain beside a shallow sea, and the change is read at the cell centres and at 4 x 4 points a cell (as pass 2 reads it) wherever the base is at or below the sea level, with the taper of 40 m and without it
+- **THEN** without the taper the uplift of the shore bleeds more than 2 m onto the sea points, with it the change over the sea is at most 0.01 m
+
+#### Scenario: A small face
+- **WHEN** pass 1 runs on a synthetic face of 64 x 64 cells uninterrupted on 1 thread (the reference), on 8 threads, and on 1 thread killed and resumed
+- **THEN** the second and third runs equal the reference byte for byte
+
+#### Scenario: The area is shared
+- **WHEN** the routing runs on a plane falling along a diagonal, with two jitter streams
+- **THEN** the receivers differ and the areas are the same bits; the area is mirror-symmetric about the diagonal, a cell off the diagonal holds more than its own cell, and the area leaving the outlets is the area of the grid
+
+#### Scenario: One face timed (B)
+- **WHEN** pass 1 runs on one face of the store at 814 m
+- **THEN** its time and peak memory are reported, not bounded (SPIKE-71's about 3 min and 5.5 GB are superseded: SPIKE-98 measured about 17 to 23 minutes a face at 10 threads with the area by multiple flow direction)
+
+### Requirement: GEN-101 Pass 2 works per tile of the layer's grid
+The bake's second pass SHALL work per tile of the layer grid: 98,304 cells per face edge (101.8 m), tiles of 3,072 x 3,072 core cells with a 128-cell halo (SPIKE-61's tiles; SPIKE-98 measured the same core as at 256 except near the edges). Per tile it SHALL take:
+
+Verify: A, B
+Status: active
+Source: ADR 0088 points 4.2 and 6, ADR 0088/0089 accepted 2026-11-01; SPIKE-61, SPIKE-64, SPIKE-70, SPIKE-71, SPIKE-72, SPIKE-73
+
+Detail: - the base field, evaluated on every 4th cell of the window and interpolated between by Catmull-Rom kept within the range of the four nodes around the point (the base is 86 % of a tile's cost; the stored change is taken against this interpolated window, so the interpolation error cancels in it: design.md), plus the face carve's change (read by Catmull-Rom (C1) in a face, kept within the range of the four cells around the point (a Catmull-Rom spline overshoots by up to 7.4 % of a step beside a sharp feature, which would read a one-cell channel as a levee and could put a coastal plain below the sea), since a bilinear read leaves a crease along every cell line of the pass-1 grid that the carve and the viewer would show; cross-faded within the halo of a cube edge: GEN-100);
+- a local carve of catchments up to 96 cells (1 km^2 at 101.8 m) that only incises: no fill, no breach, no uplift (the routing of GEN-100, the area by multiple flow direction);
+- thermal at a critical slope of 33 degrees, perturbed by up to 25 % (an integer hash of the unordered pair of global cell ids), moving 1/8 of the excess per pass (a share over 1/8 SHALL be refused: a cell would overshoot), at most 300 passes, on active cells (the cells that moved and their neighbours: bit for bit the run over every cell); a pair over the critical difference by under 1 mm does not move (the excess would never reach 0), and a cell whose height rounding leaves unchanged wakes no neighbour; the sweep keeps a cell at or below the lowest final height of its donors; land above the sea level off the grid's border gives, any cell receives;
+- one deposition sweep (on its own route, whose area is by multiple flow direction too) with `kc` (1e5 uniform while every class of GEN-097 has 1e5; per class when they differ) and `zeta` 0.5 on a route of its own on the carved and thermally settled window (the load of a cell is its donors' plus its eroded column; it fills the depression first (at most to the receiver's carved height plus half the filled drop: a closed bowl's route does not become a pillar of the bowl's fill), then `zeta` of the excess over the capacity `kc sqrt(A) S` settles, at most to the filled level plus half the drop to the receiver; what reaches an outlet leaves; eroded = deposited + exported).
+- a pit spreading after the sweep (`pit_min_m` 0.5 m, at most `pit_passes` 32): a land cell whose 8 neighbours are inside the grid's border, none at or below the sea level, and all higher than it by more than `pit_min_m` rises by 0.8 of its depth below the lowest neighbour while its 8 neighbours each fall by an eighth of that rise, so the sum of the heights is unchanged; the pits are taken in cell order, the pass repeats until none is deeper than `pit_min_m` (the neighbours' fall can make a smaller one), and the border cells are never lowered; serial and deterministic.
+It SHALL store the core's change against the base field (STRM-065) and checkpoint per tile, with per tile the cells that still gave in the last thermal pass (the unsettled slopes at the pass cap; the pass cap is the only bound on thermal: no wall-clock budget, which would make the result depend on the machine, CON-14). The tile grid, the halo and the tiles of a run (every land tile, or a region list) are parameters of the run; the local carve runs 10 steps without uplift, breach or fill, with the drainage area capped at 96 cells (1 km^2 at 101.8 m; the cap follows the cell size, so a coarse planet pass keeps the same number of cells), and a window's cells follow the global cell of the face's grid in the jitter and the thermal's pair hash. Every kernel SHALL be a Jacobi gather or a fixed topological sweep in f64 with `libm`. The constants are start values (SPIKE-61, SPIKE-64, SPIKE-70, SPIKE-72). The seam check is TEST-084.
+
+#### Scenario: Thermal on active cells
+- **WHEN** thermal runs on one synthetic tile of 3,584 cells a side (the kernel defaults of 100 passes of 1/16, 4 threads; the production setting is set in `Pass2Params::standard`), an upland and a steeper one
+- **THEN** it keeps the mass, gives the bytes of the run over every cell, evaluates at most 5 % (upland) or 25 % (steeper) of the cells of the full run, and takes 5 s on the reference machine for the upland (the test bounds the time by ADR 0087's loaded margin; the cost grows steeply with relief: see the design)
+
+#### Scenario: The base is sampled sparsely
+- **WHEN** the base of a window is sampled every 4 cells and interpolated, on 1 and on 8 threads
+- **THEN** the bytes are equal, the value at a node is the field's, and between the nodes it is within 5 m of a field of amplitude 550 m and wavelength over 20 cells and always within the range of the four nodes around the point (so a cliff does not put a coastal plain below the sea)
+
+#### Scenario: The pass-1 change is read smoothly
+- **WHEN** the pass-1 change is read at the centre of a cell and just before and after it, along each axis
+- **THEN** the value at the centre is the cell's, and the slope before equals the slope after to 3 % (a bilinear read does not)
+
+#### Scenario: The read stays in range
+- **WHEN** the pass-1 change holds one cell of -100 m among zeros and is read at points around it
+- **THEN** every read lies between -100 and 0 m
+
+#### Scenario: Pits are spread
+- **WHEN** a land with pits of 3 to 70 m (two adjacent, one beside the border, one beside the sea) is spread with a threshold of 0.5 m, and a tile of the synthetic planet is run
+- **THEN** no pit over 0.5 m is left, the sum of the heights is unchanged to 1e-9, the border and the sea cells keep their bits, the same input gives the same bits, a pass count of 0 moves nothing, and no one-cell pit over 0.5 m is left in the tile's core
+
+#### Scenario: A bowl's fill is not a pillar
+- **WHEN** the deposition sweep runs on a closed bowl of 80 m in a plateau
+- **THEN** what was eroded is deposited or exported to 1e-9 and no cell of the bowl rises by 60 m or more
+
+#### Scenario: Incise only
+- **WHEN** pass 2's local carve runs on a synthetic tile with a closed basin
+- **THEN** no cell ends higher than its input, and the basin is not filled
+
+### Requirement: GEN-110 Pass 1 keeps the drainage area of its final route
+Pass 1 SHALL return, with the face's change, the drainage area of the face's own cells from the last route of its carve (by multiple flow direction, GEN-100) as one byte a cell: `round(8 log2(area / cell area))`, so 0 is a cell's own area, one step is a ninth more area, and 255 is 2^31.9 cells; a larger area is stored as 255. The face's change SHALL be the same bytes with and without the area, and the codes the same bytes on any thread count (CON-14). The area serves the viewer's ground materials and detail; it is not an input of pass 2.
+
+Verify: A
+Status: active
+Source: owner 2026-11-04 (planner inbox #58.3, M9 plan I5a(c)); GEN-100
+
+#### Scenario: The area codes
+- **WHEN** pass 1 runs on a synthetic face on 1 and on 2 threads, with and without the area
+- **THEN** the change is equal in both, the codes are equal on both thread counts, a cell with nothing above it has code 0, and some cell has at least 8 (an area of two cells)
+
+### Requirement: GEN-111 Pass 2 keeps the deposited depth of its core
+Pass 2 SHALL return, with the core's change, one byte plane over the core: the depth deposited as a square-root code, `round(12 sqrt(m))` of the depth in metres (0 to 451.6 m; the step is 0.10 m at 0.3 m, 0.12 m at 0.5 m, 0.17 m at 1 m and 0.53 m at 10 m, so the material thresholds of 0.3, 0.5 and 1 m are resolved; from 449.8 m on it is stored as 255, which decodes to 451.56 m; owner 2026-11-05, after the linear 1 m form of 2026-11-04):
+
+Verify: A
+Status: active
+Source: owner 2026-11-04 (planner inbox #58.3, M9 plan I5a(c); the one-plane, 1 m form chosen on the sizes); GEN-101
+
+Detail: - deposited is the deposition sweep's rise plus thermal's gain, `max(0, z_final - z_thermal) + max(0, z_thermal - ref)`, `ref` the base plus the pass-1 change where it is positive (a raise by uplift or a filled pit is not a deposit);
+- the depth removed is not stored: a reader derives it as `max(0, deposited - change)` with the layer's change at the cell (`removed_depth_m`); it is exact where pass 1 did not raise the cell, short by the raise where it did (15 % of mountain land and 35 % of hills in seed 14's samples), and clipped where the deposited depth is at the code's end (451.6 m); on a cell that only gained material the derived removal is at most half a step of the code plus half a step of the change (0.21 m at 1 m of deposit; the change is stored in steps of 0.25 m), so a rock or scree mask must threshold above that, not at `> 0`;
+- the plane SHALL be the same bytes on any thread count.
+It serves the viewer's ground materials (soil and scree where deposited, rock where the change is deep and little is deposited).
+
+#### Scenario: The deposited depth and what is removed
+- **WHEN** one synthetic tile is run with a face change of -30 m, of +10 m and with none
+- **THEN** the plane holds deposits in places and none elsewhere, the codes are 0 for 0 m, 12 for 1 m, 255 from 449.8 m (decoding to 451.56 m), strictly increasing with a step of at most 0.11 m at 0.3 m, 0.12 m at 0.5 m, 0.18 m at 1 m and 0.56 m at 10 m, the round trip is within half a step in the square root, and the depth removed that is derived from a cell's deposited depth and change is never negative and is at most the pass-1 raise (zero where pass 1 did not raise) away from deposited minus change, within the code's step
+
+### Requirement: GEN-102 Cap bounds read the layer's pyramid
+The field's height bounds over a cap SHALL take the layer's part from the layer's min/max pyramid (STRM-066):
+- the nodes the cap reaches, widened by 4 cells (2 for the stencil, 2 for the cross-fade at a cube edge), on every face it touches; a node wholly inside is taken whole;
+- below the 32-cell blocks only for a cap of at most 8 cells' radius, down to nodes of 2 cells;
+- a cap that reaches more than 36 tiles takes the layer's global range;
+- the layer adds the product of that range and the coast fade's interval over the cap's base elevation (GEN-113).
+
+Verify: A
+Status: active
+Source: ADR 0088 points 3 and 8, ADR 0088/0089 accepted 2026-11-01; SPIKE-82, SPIKE-83 (the steep classes plan to level 18 with no capped tile, 2.5-4 us per lookup)
+
+Detail: With the relief channels on the bounds SHALL also take:
+- the channels' range `[k_min, k_max, m_min, m_max]` over the cap: the union of the ranges of the blocks the cap touches, from a pyramid of the block ranges (a node wholly inside the cap is taken whole), and for a block the cap only touches the min and max of the lattice points of the nodes of 2 cells it touches;
+- the base `m + k (e - m) + k detail` over the intervals of `e`, `m`, `k` and the detail (products of intervals, a sound bound that ignores the correlation of `e` and `m`);
+- the planet-wide bound `max|1 - k| max|m| + k_max (max|e| + max|detail|)`, from `(1 - k) m + k (e + detail)`.
+Because each pyramid level holds the range of the levels below and of the nodes, the bounds of nested caps SHALL nest (LOD-012). The plan check at production parameters is TEST-083.
+
+#### Scenario: Sound and nested
+- **WHEN** 20,000 random caps of radius 1e-6 to 0.01 rad over a synthetic layer are bounded, rims and face edges included, each with a nested cap inside it
+- **THEN** every sampled height lies in its cap's bounds, and each inner cap's bounds lie within its outer cap's (within LOD-012's slack)
+
+### Requirement: GEN-112 The runtime read of the erosion layer
+`ErosionField::with_layer(layer, sea_level)` MAY add the stored layer (STRM-065) to a relief field; without the call the field is today's, bit for bit:
+- it switches the crease band of the bake on (GEN-109) and needs no relief channels (without them the base is the lattice read at `k` 1, `m` unread);
+- the layer's change is the stored change with the pit depth added back (GEN-120, until lake water and a pit-tolerance rule exist), and the pyramid (GEN-102) and the range of the manifest hold that sum;
+- the height is the base (the relief base with the channels) plus the layer's change times the coast fade (GEN-113), not scaled by `k`;
+
+Verify: A
+Status: active
+Source: ADR 0088 point 5 as amended by ADR 0100 (the runtime read is C1, with the coast fade and the cube-edge cross-fade; owner 2026-11-04), ADR 0098, ADR 0099; m9-bake PR 6
+
+Detail: - the change is the monotone C1 read of the cell centres (GEN-188), within the four cells around the point, reading the neighbouring tiles' cells, clamped at a face edge and cross-faded over 2 cells with the neighbouring face's read; a tile the layer lacks is 0;
+- the fine detail is pinned to the cell centres (GEN-187).
+
+#### Scenario: Off and zeros
+- **WHEN** the call is not made, or the layer holds only zeros
+- **THEN** without the call every height equals the relief field's to the bit; with zeros it is the band's field with the pinned detail (GEN-187), on both bases
+
+#### Scenario: The read
+- **WHEN** the change is read at cell centres, at random points, along cell lines and across tile seams, and a tile of the layer is absent
+- **THEN** a centre reads its stored value, every read lies within its four cells' range, the one-sided slopes at a knot agree, a cell of an absent tile counts as 0, the stencil reads the neighbouring tile's cells, and a batch of heights equals the single reads' bits
+
+#### Scenario: The cube edge
+- **WHEN** a layer that is a smooth function of the direction is read within 1e-9 rad either side of every cube edge and around every corner
+- **THEN** the reads differ by under a millimetre, where one face's clamped read alone steps by about a cell's change
+
+### Requirement: GEN-113 The coast fade of the layer
+The layer's change SHALL be multiplied by a smoothstep fade of the bake's elevation `e`: 0 at or below the sea level, 1 from 3 m above it. The sea level is the one `with_layer` is given (the definition's). The fade follows `e`, not the relief base `m + k (e - m)`, and the bounds take its interval over the cap's base elevation.
+
+Verify: A
+Status: active
+Source: Owner 2026-11-04 (the coast remedy, I5c), ADR 0100; m9-bake PR 6
+
+#### Scenario: Coast and order
+- **WHEN** heights are read over land, over the first 3 m above the sea level and over the sea
+- **THEN** land adds the change, a point at elevation `e` inside the first 3 m adds the fade's share of it, the sea adds none, and the change is not scaled by `k`
+
+### Requirement: GEN-114 The keys of a layered field
+A field with the layer on SHALL fold the layer's identity, the sea level, the fade's width and the read's version into its inputs hash, and its implementation id SHALL gain `+layer` over the band's. The field's version SHALL NOT change. `with_layer` SHALL be refused after the crease band, and the relief channels SHALL be refused after the layer; without the channels the id is `cpu-erosion-v1+band+layer` (v2 over the C1 base).
+
+Verify: A
+Status: active
+Source: ADR 0098 consequence (the id and the hash change when the band is on), ADR 0100; m9-bake PR 6
+
+#### Scenario: Keys
+- **WHEN** the layer, its sea level or the call order changes
+- **THEN** the inputs hash differs, the implementation id gains `+layer`, the version is unchanged, the ids differ with and without the channels, and the refusals name the problem
+
+### Requirement: GEN-170 The channel graph as compact arrays
+The bake SHALL keep the segments of H1 as compact arrays built before the discharges are released: per segment its first cell and vertex count, per vertex the direction of the step into it, the routed discharge `Q_w` as a `u16` on a log scale and the bed level as an `i16` count of 0.5 m.
+- The `Q_w` code is 0 for none, else steps of equal ratio from 1e-4 to 1e7 m3/s; a read is within 1.94e-4 of the stored value and K7's burn reads the dequantised value, so the burn and the drawing use one width.
+
+Verify: A
+Status: active
+Source: Architect 2026-11-10 and 2026-11-11, item 15 PR 7
+
+Detail: - The bed level is the running minimum of the H1 surface along the segment, rounded down: the stored bed is never above the surface.
+- Per segment, the vertex ranges under a lake's water are kept (the lake entry before a range, the spill cell at its end): the producer's pieces.
+- An H1 cell one step outside a face resolves across the cube edge as the graph joins it; a corner quadrant has none.
+
+#### Scenario: Chains and codes
+- **WHEN** a hydrology's graph is built
+- **THEN** every chain equals the routing's, every `Q_w` is within the step and every bed does not rise downstream
+
+### Requirement: GEN-148 K7 runs on the base read, with the channels burned in
+K7 SHALL start a tile from `B + C1(regional change)`, `B` read at every cell of the window (no stride) and the regional change read by a C1 read of the regional grid, burn the channels in, run the breach of pass 1 at the local grid, then the incising carve, thermal, the deposition sweep and the pit spreading, and report the change against `B`.
+- The burn-in SHALL lower the cells of the 8-connected line along each segment to the segment's level profile, interpolated linearly, and SHALL NOT raise a cell.
+
+Verify: A
+Status: active
+Source: A3 sections 3.1 to 3.3 and 12.1 (G-SURF), briefing item 11, inbox #104
+
+Detail: - The pits (land cells with a fill depth of at least 0.5 m) SHALL be reported after each stage: the start, the burn-in, the breach alone, the incision, the whole pass.
+- A dam across a channel SHALL be a pit before the burn-in and SHALL NOT be one after it.
+- The result SHALL be the same bits on any thread count.
+- The stored change SHALL read back at the centres of the cells as the bake's surface (before quantisation) and within half a step of `QUANT_STEP_M` after.
+- The difference of the runtime's `B + C1(L)` and the bake's `C1(z)` at the vertices of the store lattice SHALL be reported (maximum, 50th and 99th percentile, the nodes over 0.25 m, their positions, and the two other readings: `B` plus the unclamped `C1(L)`, and the clamped read of the composed `B + L`). G-SURF is the gate at the centres of the local cells, where the bake defines its heights (owner, 2026-11-09): 0 before quantisation, at most half a step after. The vertices are the diagnostic G-SURF-I (GEN-154): 192 of 28,900 nodes (0.66 %) are over 0.25 m after quantisation on the prototype tile, maximum 2.55 m; reported, the clamp stays.
+- The runs of `examples/k7_region` (the pit shares and the G-SURF numbers on a tile of the prototype region) are measurements, not gates; the gates are the tier-A tests.
+
+#### Scenario: K7 on a tile
+- **WHEN** a tile of a small planet with a valley, a dam across it and a channel along its axis is run through K7, with and without the channel, on 1 and 2 threads
+- **THEN** the dam is a pit at the start and is not one after the burn-in, the channel's cells are at its profile, the bits do not depend on the thread count, and the stored change reads back at the cells' centres as the bake's surface
+
+### Requirement: GEN-155 The sediment balance SHALL be the same under every partition the pass has
+The deposition's balance per catchment SHALL be reported term by term, and the totals and the per-catchment terms SHALL not depend on how the region is partitioned.
+- `catchment_terms` SHALL return for every catchment of the sweep's own route its outlet, cell count, eroded, raised and exported volumes and the relative residual of `eroded - raised - exported`; `catchment_balance` SHALL be the sum of those terms.
+- The compact cube and the masked cube SHALL give the same catchments, the same terms (bit for bit, the residual included) and the same heights; the cells outside the landmass SHALL be left alone.
+
+Verify: A
+Status: active
+Source: A3 section 6.7 G-SED, inbox #116
+
+Detail: - The whole sediment pass SHALL give the same heights and report on any thread count, on a region that thermal cuts into more than two pieces.
+- The sums of the terms SHALL match the eroded column read from the heights and the rise read from the volume change (relative 1e-9); the catchments, grouped by outlet, SHALL add up to the whole (1e-12) with the identity under 1e-9 in each group. This is the accounting of a cut along the divides, not a cut of the pass.
+- The partition varied is stated in the test; a spatial cut of the pass is not built (open).
+
+#### Scenario: a compact landmass under three partitions
+- **WHEN** a corner-cap landmass of a sphere of 24 cells a face edge is carved for two rounds and the sediment pass runs on the compact and the masked cube, on 1, 3 and 8 threads, and its catchments are grouped by outlet id modulo 2, 3 and 5
+- **THEN** the terms, the heights and the report are the same bits under the first two partitions, and under the third the groups' totals add up to the whole's with the identity at most 1e-9 in every group
+
+### Requirement: GEN-160 K7 floods with the canonical flood by a parameter
+K7 SHALL, with `canonical_flood` on, flood with the canonical flood (cells visited by level, then cell id; A3 section 6.4) in its pit statistics, its incising carve and its deposition sweep, and with it off SHALL give the bits of the plain-flood K7.
+- The default pass 2 (`deposit_on_own_route`, `carve` with its default rules) SHALL be bit for bit as before.
+- K7 SHALL give the same bits on any thread count with either setting.
+- The change of the stored `L` against the plain flood SHALL be reported (cells changed, maximum, share over 0.25 m).
+
+Verify: A
+Status: active
+Source: A3 section 6.4, inbox #114
+
+#### Scenario: a tile with a chain beside two outlets
+- **WHEN** the pit statistics and the deposition's surface are read on a flat chain between two sea cells, and K7 runs on a small tile with the plain and with the canonical flood
+- **THEN** the plain statistics count the chain's lifted cells and the canonical ones none, the plain K7 equals the digest taken before this change, and the canonical K7 is the same bits on 1 and 2 threads
+
+### Requirement: GEN-182 K7's tile layout is part of its definition
+K7 SHALL be defined over a fixed tile grid of each cube face (ADR 0119): the face's `n x n` cell lattice cut into square tiles of `tile` cells an edge, tile `(ti, tj)` covering the cells `[ti x tile, (ti + 1) x tile) x [tj x tile, (tj + 1) x tile)` (the grid origin is the face's cell `(0, 0)`), each solved in a window of its core plus a halo of `halo` cells on every side. The layout SHALL be a pure function of the face lattice `n`, of `k` and of the profile, never of the request order, the region asked for, the thread count or the schedule:
+
+Verify: B
+Status: planned
+Source: ADR 0119 (owner, 2026-11-12); architect D119 item 1
+
+Detail: - `tile` divides `n`, is a multiple of the base stride (4) and is more than twice `halo`; `halo` is at most `n / 8` and, for a tile with channels, at least `DISC_RADIUS_MAX` plus the smallest profile carry (GEN-169), so that the halo holds the trench disc and the profile's carry; K7 SHALL refuse a layout that breaks any of these, naming the parameter;
+- the layout's values (current value: `TileGrid` and `K7Params` as built; 128 halo cells at the decision) SHALL be inputs of K7's key, with the width law and the flood rules; a different layout is a different generator definition, a new key and no reuse of results; a change of tile size or halo is a generator change with a re-bake, never a free setting;
+- for one layout, input set and version, K7's result SHALL be bit-identical under any thread count, schedule, order and worker assignment (CON-14, CON-30), and no tile's result SHALL depend on which other tiles were asked for.
+
+At a region edge: a region SHALL be the union of whole tiles of the canonical grid, and K7's result for a tile SHALL be the result the same tile has in any other region or in the planet; a region edge adds no tile border, no halo of its own and no outlet. At a coast: cells at or below the sea level (a key input) are the outlets of a window, are neither lowered nor carry (GEN-169, GEN-176), and a window that holds sea runs the same rules as one that does not. At the window's border: the border is an outlet of the window's flood and the cells within `halo` of it are not part of the tile's result. At a cube-face edge: the halo past the face edge is the extended plane of the face (as built); how the tiles of two faces agree there is NOT yet defined and SHALL be settled with the face-seam work (REND-063) before any planet bake; the architect decides whether K7 results at face edges are canonical before then.
+
+K7 is not validated against an unpartitioned reference (ADR 0119 point 4): CON-08's partition-invariance and border-agreement checks are replaced, for K7, by the tier B execution test (TEST-130) and the seam gate G-SEAM.
+
+#### Scenario: One layout, many schedules
+- **WHEN** K7 runs on one layout with 1, 3 and 8 threads and two schedules
+- **THEN** every tile's result is the same bits
+
+#### Scenario: A region
+- **WHEN** a region is baked for a set of whole tiles and the same tiles are baked as part of a larger region
+- **THEN** the results of the shared tiles are the same bits
+
+#### Scenario: A different layout
+- **WHEN** the halo or the tile size changes
+- **THEN** the key changes and no stored result of the other layout is reused
+
+### Requirement: GEN-156 The stored change L of the K7 chain is measured as kind 13 records
+The measurement SHALL encode the core of the local change L of every 1,024-cell tile of the prototype region, from K7 with the channels burned in, as kind 13 counts streams and report the bytes per land cell, the spread over tiles and the extrapolation to an Earth-sized body.
+- A stream SHALL decode to every cell within half a quantisation step (0.125 m) of L.
+- The extrapolation SHALL name its land-cell count and say that the region is one area, not a global figure.
+- The measurement SHALL NOT decide a store format; gate G-STORE is not closed by it.
+
+Verify: D
+Review: the measurement table of `openspec/changes/l-store/design.md`, judged by the architect (A3 section 12.1 gives G-STORE as a numeric gate)
+Status: planned
+Source: A3 section 10 (G-STORE), inbox #106 step 2
+
+#### Scenario: the prototype region
+- **WHEN** `k7_region 200 8 store` is followed by `l_measure`
+- **THEN** the report lists every tile with its bytes and land cells, the pooled, median and highest bytes per land cell, and the Earth-scale size at the pooled and at the highest rate, with a round-trip error of at most 0.125 m
+
+### Requirement: GEN-154 G-SURF is gated at the cell centres and the vertices are reported as G-SURF-I on the stored change
+The surface gate SHALL read the runtime's `B + L` against the bake's surface at the centres of the local cells with `L` as the store keeps it, and SHALL report the lattice vertices as G-SURF-I without gating them.
+- The gate at the centres SHALL hold: at most 1e-9 m before quantisation and half a quantisation step after.
+- The stored change SHALL read back as the quantisation the gate uses (`round(L / step)` in `i16` counts times the step).
+
+Verify: A
+Status: active
+Source: A3 section 12.1 (G-SURF, G-SURF-I), owner 2026-11-09, inbox #105 step 3
+
+Detail: - G-SURF-I SHALL report the 50th, 95th and 99th percentile and the maximum of the difference at the vertices, the share over 0.25 m, the vertices and those over 0.25 m by the bake's local step height (up to 5 m, over 5 m up to 20 m, over 20 m), the largest quotient of the difference and the step height, the spatial concentration (the bins of 64 cells with vertices over 0.25 m against the bins with vertices, and the most in one bin) and the overshoot of the unclamped read of `L`.
+- G-SURF-I SHALL also report the error against the local base slope (the difference over the largest rise of `B` across one cell, over the vertices whose rise is at least 1 m: 99th percentile and maximum, and their number) and the overshoot of the runtime read beyond the range of the four composed cells (maximum and the vertices over 0.25 m).
+- The clamp of the C1 read SHALL stay.
+
+#### Scenario: a smooth tile, with and without a burnt channel
+- **WHEN** K7 runs on a small tile and the gate is read
+- **THEN** the centres hold, every vertex is in one step class and one bin, the percentiles are ordered, and a core of change encoded as a kind 13 stream decodes to the gate's quantised values
+
+### Requirement: GEN-164 H0 read from a stored bake equals the in-memory H0 at cube edges and corners
+H0 read from a stored bake SHALL equal the in-memory H0 within the store's quantisation step at the cells of a cube edge and of a cube corner: the height of an H0 cell is the C1 read of the field at the cell's centre, the rainfall and temperature the bilinear read, with samples beyond a face edge taken from the face it meets.
+- The production block codec is lossless, so the step is 0 and the two reads SHALL be equal bit for bit on every cell, every edge cell's stencil reaching over its face edge.
+- A block the store does not hold SHALL make the read an error, never a placeholder.
+
+Verify: A
+Status: active
+Source: Architect 2026-11-10 (item 3's stored-field read), GEN-139, GEN-107
+
+#### Scenario: A stored bake across the cube edges
+- **WHEN** a 16-cell bake in blocks of 4 is stored and the H0 cells of a 12-cell face edge are read from the store and from the in-memory bake
+- **THEN** every height, rainfall and temperature of the 864 cells, 6 x 44 edge cells and 24 corner cells included, has equal bits, and a read from an empty store is an error

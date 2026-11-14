@@ -242,6 +242,11 @@ struct Config {
     shadow_march: bool,
     policy: AdapterPolicy,
     gen: planet_streaming::GenWorkers,
+    /// The most tiles the streamer keeps resident (`--resident-cap`, VIEW-070).
+    resident_cap: usize,
+    /// The run's `--commit` (absolute) and `--site` (`LAT,LON` degrees), recorded in an F9 bundle so that a window replay reopens the same world (VIEW-071).
+    open_commit: Option<String>,
+    open_site: Option<String>,
     initial_view: usize,
     /// Where the terrain comes from, for the title: the store the editor opened, or the in-memory preview bake (VIEW-051).
     world_label: String,
@@ -354,6 +359,10 @@ struct Running {
     warm_prev: Option<(u64, planet_core::Vec3)>,
     /// What the scheduler counted in the last frame, for a stall report.
     last_counts: planet_frame::managed::FrameCounts,
+    /// The residency over the run, printed when the window closes (VIEW-070).
+    residency: crate::pipelined::ResidencyLog,
+    /// The GPU allocator after the start-up (VIEW-070): the closing lines set it beside the end.
+    gpu_start: String,
     last_ms: Option<u64>,
     last_gpu_sample: Instant,
     gpu_ms: Option<f64>,
@@ -445,6 +454,8 @@ struct App<'w> {
     state: Option<Running>,
     error: Option<String>,
     summary: Option<String>,
+    /// What the residency did over the run, taken when the window closes or the smoke run ends (the state may be gone by then, VIEW-070).
+    closing: Option<String>,
 }
 
 /// How long a window size must hold before the 3D target is made again at it, milliseconds (an edge drag sends a size per mouse move).
@@ -530,6 +541,8 @@ impl App<'_> {
                 global_res: self.world.global_res(),
                 definition_toml: toml,
                 items: item_texts,
+                open_commit: self.cfg.open_commit.clone(),
+                open_site: self.cfg.open_site.clone(),
             }),
             request,
             plan,
@@ -563,7 +576,7 @@ impl App<'_> {
         }
         let first = self.request(self.cameras[0], TerrainView::ALL[cfg.initial_view], false);
         // The 384 floor tiles load here, before frame 0 (STRM-001): the title shows how many are in.
-        let mut rig = Rig::new_with_progress(&ctx, self.world, &first, cfg.gen, &mut |done, total| {
+        let mut rig = Rig::new_with_progress(&ctx, self.world, &first, cfg.gen, Some(cfg.resident_cap), &mut |done, total| {
             window.set_title(&planet_frame::viewer::roots_title(done, total));
         })?;
         crate::stall::phase_mark("floor tiles");
@@ -613,6 +626,7 @@ impl App<'_> {
         // The free camera's ground is read on a thread of its own, with the blocks under the camera pinned (VIEW-061, CON-22).
         let ground_world = self.world.clone();
         let ground = crate::cameraground::CameraGround::new(std::sync::Arc::new(move |d| ground_world.ground_pinned(d)));
+        let gpu_start = crate::gpumem::line(&ctx, "at the start");
         self.state = Some(Running {
             ground,
             ui,
@@ -634,6 +648,8 @@ impl App<'_> {
             stall: Default::default(),
             warm_prev: None,
             last_counts: Default::default(),
+            residency: Default::default(),
+            gpu_start,
             last_ms: None,
             last_gpu_sample: Instant::now(),
             gpu_ms: None,
@@ -927,7 +943,7 @@ impl App<'_> {
             // The gate holds the first pose of its path while the edit script runs, then replays the path in real time.
             let camera = match st.gate.as_mut() {
                 Some(g) => {
-                    let edit_done = st.edit.as_ref().is_none_or(|e| e.smoke_finished());
+                    let edit_done = crate::gate::edit_done(cfg.edit, st.edit.as_ref().map(|e| e.smoke_finished()));
                     if edit_done {
                         let at = *g.edit_done_at.get_or_insert(st.frames);
                         if st.frames >= at + gate_settle_frames() {
@@ -1008,6 +1024,7 @@ impl App<'_> {
                 })?;
             st.counts.coarse_lod_frames += u64::from(st.viewer.coarse_lod);
             st.last_counts = frame.counts;
+            st.residency.note(frame.counts.resident, frame.counts.evicted);
             st.stall.mark("plan and residency (begin_frame)");
             // A refusal of the plan for the base parameters degrades the frame (it draws the newest plan in hand); it is said once, never fatal.
             // One line, one report file and one title notice per cause (kind and level) in 5 s; the title counts all of them.
@@ -1025,6 +1042,8 @@ impl App<'_> {
                 let held: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().filter(|n| n.capped).map(|n| n.tile).collect();
                 let under = st.edit.as_ref().map_or(&[][..], |e| e.capped_under_edit());
                 g.gate.held(st.frames, &held, under);
+                let region = self.world.commit_region();
+                g.gate.held_where(&held, &|t| region.is_some_and(|r| r.contains(t.center_direction(&planet_core::cube::TangentWarp))));
             }
             let capped = frame.pipeline.draw.plan.nodes.iter().filter(|n| n.capped).count();
             if let Some(line) = st.capped_log.observe(capped, now_ms) {
@@ -1392,6 +1411,8 @@ impl App<'_> {
         st.stall.mark("the rest of the frame");
         let stall = st.stall.end();
         if let Some(g) = st.gate.as_mut() {
+            let c = &st.last_counts;
+            g.gate.counts(c.resident, c.uploaded, c.evicted, c.upload_bytes);
             g.gate.frame(st.frames, &st.stall.phases_ms(), &st.stall.main_decodes());
         }
         let Some(stall) = stall else { return };
@@ -1709,7 +1730,19 @@ impl ApplicationHandler for App<'_> {
             }
         }
         match event {
-            WindowEvent::CloseRequested => el.exit(),
+            WindowEvent::CloseRequested => {
+                self.closing = self.state.as_ref().map(|st| {
+                    format!(
+                        "{}
+{}
+{}",
+                        st.residency.line(self.cfg.resident_cap),
+                        st.gpu_start,
+                        crate::gpumem::line(&st.ctx, "at the end")
+                    )
+                });
+                el.exit()
+            }
             WindowEvent::ModifiersChanged(m) => {
                 if let Some(st) = self.state.as_mut() {
                     st.ctrl = m.state().control_key();
@@ -1872,6 +1905,16 @@ impl ApplicationHandler for App<'_> {
                 match drawn {
                     Ok(true) => {
                         self.summary = self.state.as_ref().map(smoke_summary);
+                        self.closing = self.state.as_ref().map(|st| {
+                            format!(
+                                "{}
+{}
+{}",
+                                st.residency.line(self.cfg.resident_cap),
+                                st.gpu_start,
+                                crate::gpumem::line(&st.ctx, "at the end")
+                            )
+                        });
                         el.exit();
                     }
                     Ok(false) => {
@@ -2172,6 +2215,9 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         shadow_march: o.shadow_march,
         policy,
         gen: o.gen_workers(),
+        resident_cap: o.resident_cap.unwrap_or(crate::pipelined::VIEWER_RESIDENT_CAP),
+        open_commit: o.commit.as_ref().map(|p| std::path::absolute(p).unwrap_or_else(|_| p.clone()).to_string_lossy().into_owned()),
+        open_site: o.site.map(|(la, lo)| format!("{la},{lo}")),
         initial_view,
         world_label,
         base_readiness: Readiness { bake_done, bake_total, prefill_done, prefill_total, view: ViewCoverage::default() },
@@ -2213,6 +2259,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         state: None,
         error: None,
         summary: None,
+        closing: None,
     };
     event_loop.run_app(&mut app).map_err(|e| format!("{NO_DISPLAY}the event loop failed: {e}"))?;
     if std::env::var_os("PLANET_TIMING").is_some() {
@@ -2223,6 +2270,10 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     }
     if let Some(st) = &app.state {
         writeln!(out, "{}", st.adapter_line).map_err(err)?;
+    }
+    // A normal flight says what the residency did, the evidence of the cap (VIEW-070).
+    if let Some(line) = &app.closing {
+        writeln!(out, "{line}").map_err(err)?;
     }
     match app.summary {
         Some(s) => writeln!(out, "planet editor [smoke ok]: {s}").map_err(err),
@@ -2241,6 +2292,10 @@ fn gate_finish(g: &GateRun) -> Result<(), String> {
     }
     let failures = g.gate.failures(0, false, panics, std::env::var_os("PLANET_GATE_SOFTWARE").is_none());
     if failures.is_empty() {
+        Ok(())
+    } else if crate::gate::measure_mode() {
+        // A replay that measures (`cargo xtask repro --window`, BUILD-054) has no verdict to fail: the counters are the result, and the run ends like any other.
+        println!("gate (measure, not judged):\n  {}", failures.join("\n  "));
         Ok(())
     } else {
         Err(format!("gate FAILED:\n  {}", failures.join("\n  ")))

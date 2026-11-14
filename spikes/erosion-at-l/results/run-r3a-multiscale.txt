@@ -1,0 +1,13 @@
+EROSION start surface: relief p50 over 2 x 2 cells 7.39 m, over 10 x 10 cells 67.63 m; front 44 s
+EROSION multi-scale: 3 rounds at 407 m (2040 x 2040) in 10 s
+EROSION multi-scale: 3 rounds at 204 m (4080 x 4080) in 49 s
+EROSION multi-scale: 3 rounds at 102 m (8160 x 8160) in 253 s
+EROSION multi-scale breach (radii 8, 4, 2, 1) in 328 s
+EROSION N 99 D inf m: the burn under the eroded surface (the canyon): p50 0.00 p99 59.81 max 500.50 m, 1735 over 50 m (1.25 %)
+EROSION N 99 D inf m: 138959 channel cells inside the tiles (34285 in a pit, 24.7 %; 0 in lakes, 0.0 %); cut under the start surface p50 317.36 p95 699.27 p99 970.87 max 1746.68 m, 129034 over 50 m (92.86 %); ground rises 0 of 132836, water rises 0; 4668 pits
+EROSION N 99 D 20 m: the burn under the eroded surface (the canyon): p50 0.00 p99 0.00 max 0.23 m, 0 over 50 m (0.00 %)
+EROSION N 99 D 20 m: 138959 channel cells inside the tiles (34285 in a pit, 24.7 %; 25960 in lakes, 18.7 %); cut under the start surface p50 304.28 p95 678.35 p99 753.62 max 1114.14 m, 125120 over 50 m (90.04 %); ground rises 171 of 132836, water rises 0; 4668 pits
+EROSION N 99: edge: 33 of 44 H1 crossings (Q >= 1 m3/s) have an L crossing of the same kind within 2 km; relief p50 2 x 2 cells 24.63 m (333 % of the start), 10 x 10 cells 200.58 m (297 %); flood + route 108 s
+EROSION edit: ridge +60 m at L cell (68506, 7510), 3135 cells edited; dirty catchments 8 with 17398 cells (0.0 % of the window), their box 206 x 177; full L route 77.6 s, re-route of the dirty catchments 0.0 s; receivers inside them equal to the full re-route: 9384, different: 8014
+EROSION edit, Barnes 2016 local part: 1 tiles of 768 cells flooded alone in 0.11 s (plus the perimeter graph)
+EROSION total 885 s

@@ -32,6 +32,7 @@ mod testcmd;
 mod testlog;
 mod threadscan;
 mod util;
+mod windowrepro;
 mod worktrees;
 
 use std::process::ExitCode;
@@ -51,6 +52,7 @@ const USAGE: &str = "cargo xtask <command>
   accept <milestone>   run milestone acceptance, e.g. M0; M4 also judges the perf logs of a streaming window (--logs DIR, default perf/logs) and refuses without a valid one
   store [--res N] [--relief-scale S] [--link DIR]   build the production store (default 16384 cells, into target/stores/global<N>) and point the editor at it, or only link an existing one (VIEW-052); with --relief-scale S (1 to 4) an exaggerated world into its own store, and the editor command line for it (WDEF-017)
   repro <bundle> [--real] [--every N] [--store DIR]   replay a repro bundle or an F9 path; --store DIR replays a bundle of a stored bake read-only (TEST-071)
+  repro <frame-N-path.txt> --window [--real] [-- OPTIONS]   replay the path in a window over the bundle's world (its --commit and --site), count the stalls (BUILD-054)
   capture stills --poses FILE [--store DIR | --allow-memory-bake --global-res N] [--out-dir DIR] [--size WxH] [--views A,B] [--smoke]   one PNG per pose of the poses file over the base terrain of a world, with the horizon maps near the eye baked (TEST-048; default directory target/review/m8-stills)
   perf [--machine-ready] [--loaded]   performance harness on Rasierklinge; the harness measures readiness and refuses (ADR 0020); --loaded records the load instead of refusing on it (ADR 0087, BUILD-030);
                            --machine-ready is the owner's override. Only the architect session runs it

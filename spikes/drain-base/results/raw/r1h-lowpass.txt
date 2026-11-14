@@ -1,0 +1,5 @@
+LATTICE f1-8056-760-lowpass: 1366 x 1366 nodes (611 m); land nodes changed over 1 cm 1299487 of 1301217 (99.87 %); lowered p50 13.89 p95 144.03 max 705.54 m, over 50 m on 9.64 % of land nodes; raised p50 14.04 p95 104.38 max 476.45 m; mean change 0.006 m; lowpass: radius 2 nodes twice
+RIVERS f1-8056-760-lowpass: core 118618 channel cells; 72013 on closed basins of the start surface (60.71 % of river length); pits touching the core 5755; time nodes 21 s, front 21 s, sample 6 s, route 88 s
+RIVERS f1-8056-760-lowpass D inf m: cut p50 0.02 p95 48.41 p99 99.09 max 271.99 m, over 50 m 4.78 %; channel cells in lakes 0.00 %
+RIVERS f1-8056-760-lowpass D 20 m: cut p50 0.00 p95 3.64 p99 10.06 max 19.93 m, over 50 m 0.00 %; channel cells in lakes 35.86 %
+RELIEF f1-8056-760-lowpass: band 200 m-1 km std 7.98 m (|.| p95 16.86); 1 km block relief p50 38.7 p95 243.8 m (170737 blocks)

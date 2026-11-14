@@ -1,0 +1,1 @@
+- 2026-11-14 openspec-sync-crusader-2: h0-stored-read archived; GEN-164 synced as active (h0_stored_read); docs only.

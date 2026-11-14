@@ -460,13 +460,14 @@ Source: opus-planner (2026-10-23), ADR 0078
 - **THEN** the first two pass, the third and fourth fail naming the ADR, the proposed ADR is not checked, and no base gives no error
 
 ### Requirement: BUILD-026 Heavy commands queue on one machine-wide lock and obey the owner's quiet flag
-`cargo xtask test` (every form), `prepush`, `perf`, `capture`, `accept`, `store` and `heavy <command>` SHALL take one lock outside every worktree (the file `heavy.lock` in the state directory: `PLANET_STATE_DIR`, else `%LOCALAPPDATA%\planet`, else `$XDG_STATE_HOME/planet`, else `~/.local/state/planet`) before they run, and a second one SHALL wait for the first instead of running beside it, saying "waiting for <holder>" (what, process, worktree) at the start of the wait and every 30 seconds. The lock SHALL be an operating-system file lock, so that it is released when the holder's process ends however it ends.
+`cargo xtask test` (every form), `prepush`, `perf`, `capture`, `accept`, `store` and `heavy <command>` SHALL take one lock outside every worktree (the file `heavy.lock` in the state directory: `PLANET_STATE_DIR`, else `SeriousPlanetData/tmp/heavy` in the nearest ancestor of the workspace that holds the data root (ADR 0121), else `%LOCALAPPDATA%\planet`, else `$XDG_STATE_HOME/planet`, else `~/.local/state/planet`) before they run, and a second one SHALL wait for the first instead of running beside it, saying "waiting for <holder>" (what, process, worktree) at the start of the wait and every 30 seconds. The lock SHALL be an operating-system file lock, so that it is released when the holder's process ends however it ends.
 
 Verify: A
 Status: active
 Source: opus-planner (2026-10-25): three lanes' runs each got about one core; the owner needs to clear the machine without messaging anyone
 
 #### Detail
+The data root comes before `%LOCALAPPDATA%` because the desktop app redirects `%LOCALAPPDATA%` for its sessions, and a terminal and a session must see one lock.
 While the file `quiet` exists in the state directory every heavy command SHALL wait before it takes the lock and say that the flag is up (`cargo xtask quiet on|off|status` makes and removes it); a command already running SHALL finish. A flag older than 60 minutes SHALL be ignored, with a warning that names its age (the owner can forget it), and `quiet on` SHALL renew it. A heavy command SHALL set `PLANET_HEAVY_HELD` to its process id for its children, and a process whose `PLANET_HEAVY_HELD` names the process of the holder note SHALL take nothing and wait for nothing (a stale or wrong value is no pass). A state directory that cannot be used, or `PLANET_HEAVY_LOCK=off`, SHALL run the command without the lock and say so, and a heavy command run inside another in the same process SHALL take the lock once. `check`, `spec-lint`, `layering` and the other light commands SHALL not take it.
 
 #### Scenario: A queue
@@ -822,3 +823,37 @@ Source: ADR 0120 point 5 (owner, 2026-11-12), lead 2026-11-12
 #### Scenario: An open item without a row
 - **WHEN** an exit item is open and no queue row names it
 - **THEN** the command names the item and exits non-zero; a done item needs no row
+
+### Requirement: BUILD-054 repro replays a recorded path in a window and counts the stalls
+`cargo xtask repro <frame-N-path.txt | bundle> --window [--real] [-- OPTIONS]` SHALL replay the camera path in real time in `planet editor --smoke` (the gate's path replay, TEST-061) over the world its bundle records (VIEW-071); options after `--` go to the editor. The run measures: the gate's failures are printed, not raised, and its output is kept under `target/repro-window`. It SHALL print the gate line (stalls of 1 s or more with the GPU phases counted, each with its frame's resident, written and evicted tiles; the held-back tiles and how many lie over the commit's region). With `--real` a locked desktop is NOT RUN. It SHALL refuse a non-terrain bundle, a missing path file, and `--at-commit`, `--every` or `--store`.
+
+Verify: A
+Status: active
+Source: Lead 2026-11-13 (P2 E3), crusader's #124 diagnosis (no windowed path replay), VIEW-026, TEST-061
+
+#### Scenario: The stalls of a path
+- **WHEN** the gate line of a replay reads "stalls 7 (frames of 1000 ms or more with the GPU phases, longest 6400 ms)"
+- **THEN** the verdict says 7 stalls and the options of the world the run opened
+
+#### Scenario: A stall with its counts
+- **WHEN** a frame of 4.5 s has 23,100 tiles resident, 120 written and 4 evicted
+- **THEN** the gate line names the frame, its longest phase and those three counts, so that a resident count is told from an upload burst
+
+#### Scenario: A render submit counts
+- **WHEN** a frame spends 4.5 s in its render submit and nothing else is slow
+- **THEN** it is a stall of the report and not a failure of the gate's frame limit
+
+#### Scenario: A replay that the gate would fail
+- **WHEN** the plan holds tiles back with no edit in reach during a replay
+- **THEN** the gate line says how many distinct tiles were held, at which levels and how many lie over the commit's region, the failure is printed as not judged, and the run ends normally with its closing lines
+
+### Requirement: BUILD-051 The determinism manifest covers the region bake at several thread counts
+`generate --manifest` SHALL write, after the existing lines, the lines `regionbake t1`, `regionbake t1again` and `regionbake t8`: a 64-bit hash of every file of the region bake fixture (`planet_cache::region_bake::determinism_fixture`), baked at one thread twice and at eight threads. The three hashes of one run SHALL be equal. The CI determinism job's manifest diff SHALL compare them across Windows and Linux.
+
+Verify: A
+Status: active
+Source: Architect 2026-11-11 (ADR 0114; external review condition 3), owner 2026-11-12 (approved lists get a queue row), GEN-003, GEN-177
+
+#### Scenario: A thread count or a repeat that changes a byte
+- **WHEN** the fixture is baked at one thread twice and at eight threads
+- **THEN** the three hashes are equal; a bake whose bytes differ at another thread count, in a repeat, or on the other operating system fails the tier A test or the manifest diff naming the line

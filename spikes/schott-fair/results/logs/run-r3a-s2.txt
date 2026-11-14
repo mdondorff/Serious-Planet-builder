@@ -1,0 +1,11 @@
+$ target/spike116/drain_base118b.exe --face 4 --region 368,987,4720,5339 --seed 15 --variant none --max-rounds 2 --out target/spike118
+LATTICE f4-368-4720-none: 1365 x 1366 nodes (611 m); land nodes changed over 1 cm 0 of 1301106 (0.00 %); lowered p50 NaN p95 NaN max 0.00 m, over 50 m on 0.00 % of land nodes; raised p50 NaN p95 NaN max 0.00 m; mean change 0.000 m; 
+TRANSFER d4: the 814 m breach lowered 48799 of 727003 land cells: p50 0.42 p95 12.22 max 347.28 m; over 50 m 463 (0.06 % of land); residual damped over 400 m (floored at the sea level + 5 mm); SCHOTT (K scaled true, uplift false, retarget true radius 4, at most 2 rounds a scale, tol 0.1 m): 407 m: 2 rounds (last mean |dz| 2.423 m), K x 0.500, 6 s; 204 m: 2 rounds (last mean |dz| 0.831 m), K x 0.250, 31 s; 102 m: 2 rounds (last mean |dz| 0.317 m), K x 0.125, 140 s; multi-scale breach (8, 4, 2, 1, then plain) 183 s
+RIVERS f4-368-4720-none-td4: core 122624 channel cells; 32811 on closed basins of the start surface (26.76 % of river length); pits touching the core 107; time nodes 17 s, front 31 s, sample 436 s, route 90 s
+BASINS117 f4-368-4720-none-td4: river length on basins at least 0.5 m deep and 16 cells: 0.00 % (0 of 122624); basins counted 113 of 171 in the window; by N: N4 0.00 % N8 0.00 % N16 0.00 % N32 0.00 % N64 0.00 %
+LOWERED f4-368-4720-none-td4: river cells under the hand-over p50 1.91 p95 21.35 p99 57.22 max 161.55 m, over 50 m 1.41 %, raised over 1 m 0.04 %; land cells lowered over 50 m 0.04 % (p99 12.11 m)
+RIVERS f4-368-4720-none-td4 D inf m: cut p50 0.00 p95 0.73 p99 1.75 max 6.06 m, over 50 m 0.00 %; channel cells in lakes 0.00 %
+RIVERS f4-368-4720-none-td4 D 20 m: cut p50 0.00 p95 0.73 p99 1.75 max 6.06 m, over 50 m 0.00 %; channel cells in lakes 0.00 %
+AXIS117 f4-368-4720-none-td4: channel steps along a grid axis 46.1 % (56578 of 122624); relief p50 range 2 x 2 1.14 m, 10 x 10 9.23 m
+RELIEF f4-368-4720-none-td4: band 200 m-1 km std 1.99 m (|.| p95 3.23); 1 km block relief p50 9.2 p95 59.7 m (198914 blocks)
+TOTAL f4-368-4720-none-td4 607 s

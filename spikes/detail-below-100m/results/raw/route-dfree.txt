@@ -1,0 +1,18 @@
+open 256.0 s; 27943 segments
+levels: 21715 channel points on land (h > sea + 5 m), first point of each segment at its cell centre
+  composed ground - stored level: p5 -29.83 p25 -8.87 p50 -3.75 p75 -1.59 p95 0.30
+  ground without the crease detail (e + fade * L) - level: p5 -27.64 p25 -6.15 p50 -1.39 p75 -0.06 p95 0.09
+  crease detail: p5 -5.41 p25 -2.76 p50 -1.50 p75 -0.47 p95 0.78
+  q in [0, 1) m3/s: 5296 points, ground - level p5 -19.60 p25 -5.32 p50 -2.69 p75 -1.14 p95 0.50
+  q in [1, 10) m3/s: 11577 points, ground - level p5 -21.06 p25 -7.32 p50 -3.34 p75 -1.44 p95 0.34
+  q in [10, 100) m3/s: 4007 points, ground - level p5 -48.14 p25 -18.68 p50 -7.67 p75 -3.20 p95 -0.24
+  q in [100, 1000000000000) m3/s: 835 points, ground - level p5 -41.11 p25 -21.86 p50 -12.71 p75 -7.36 p95 -2.54
+xsec: river ch 1548 seg 422 at the anchor: q 0.78 m3/s, width 6.4 m, depth 0.30 m, level 625.07 m, anchor 13.5 m from its line; river heading (local) 318.3 deg
+box 1200 x 1200 at 5 m (6000 m): field before 6.22 s, after 8.96 s on 8 threads
+fine routing (5 m): 1429314 land cells, 10686 wet (drawn river), 0 lake; drains to the same river or outlet before and after: 1409300 (98.60 %); of the 1281046 draining to a river before: 98.71 % the same river after
+  before: filled depth over 0.5 m on 25740 land cells (1.80 %), deepest 15.00 m; land within 100 m of a drawn river's edge below its water: 21830 of 51105 (42.72 %)
+  after: filled depth over 0.5 m on 39189 land cells (2.74 %), deepest 17.57 m; land within 100 m of a drawn river's edge below its water: 21848 of 51105 (42.75 %)
+after - before on land: mean -0.086 m, |.| p50 1.25 p95 4.45 max 12.59 m
+100 m blocks (60 x 60 block means of the fine grid; outlets: blocks with drawn-river water, the sea, the box edge): receivers equal on 3127 of 3275 non-outlet blocks (95.48 %), D8 areas equal on 2622 (80.06 %); largest block-mean change 5.36 m
+stored samples: 3800 L cell centres in the box (76 x 50): bit-equal before and after 147 (3.868 %), largest change 1.016e1 m; steepest-descent receivers on the centres equal 3161 (83.184 %)
+store files equal before and after: true

@@ -25,7 +25,7 @@ Owner, 2026-11-12 (ADR 0120). These items are outside the current milestone, one
   - band slope cap GEN-179 (merged, off);
   - monotone plateau GEN-183 (PR #1449, verified, parked as draft);
   - the valley network, candidate C (SPIKE-111, finishing its time-box).
-- The coast tilt GEN-180 is dropped (2026-11-12): it does not drain the plains.
+- The coast tilt GEN-180 is dropped (2026-11-12): it does not drain the plains. Its switch and tests are removed (2026-11-14), and the change is archived without a sync.
 - Flag PR GEN-181/TEST-129 (`--band-cap`, `--coast-tilt`, plateau switch on generate and test-render) and the production-path picture sheet (R1h, R3b, switches off against on, DEM reference beside it).
 - Starting-surface bars (z0 basins over 30 cells at most 7 % of land, depth p95 at most 270 m) and the switch-on, after the owner's look approval.
 - The valley-network decision brief: a world-level stored lattice (format, CON-10) and a new starting-surface design.
@@ -53,3 +53,7 @@ Owner, 2026-11-12 (ADR 0120). These items are outside the current milestone, one
 - Region keep-inside for Cities (owner, 2026-10-21, Q8). Trigger: Cities.
 - Global authoring preview (owner, 2026-10-31): a coarse whole-planet preview before the bake. Trigger: after M9's bake, or SPIKE-69.
 - Coarse-first refinement of an edit (owner, 2026-10-20). Trigger: a brush case missing its budget.
+- River floodplain bounded by the valley walls (SPIKE-113, 2026-11-13): a fixed-width floodplain on the level makes causeways and cuts canyon walls. Trigger: after the line placement (REND-067) lands.
+- Window-edge outlet never lowered (SPIKE-112, 2026-11-13): `Grid::outlets` marks window edges as outlets and the breach never lowers one, so a margin lake forms behind it. Trigger: the next region-solve change.
+- OpenSpec clean-up: 72 open changes, many M8/M9 work done, superseded or dropped; spikes audits (done, superseded, still wanted), owning lanes archive in batches (owner, 2026-11-13: P3's first item). Trigger: P3 starts.
+- Edit wash-out (SPIKE-112, 2026-11-13): a 400 m dome under the erosion ends about 200 m high; tune how strongly an edit holds against the rounds. Trigger: the editor work under ADR 0113.

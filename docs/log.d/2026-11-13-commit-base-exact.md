@@ -1,0 +1,1 @@
+- 2026-11-13 commit-base-exact archived: the base under --commit equals the bake's B bit for bit (probe), `WorldTerrain::bake_base()` gives B and the commit's base_id; the 1-7 m between drawn ground and B + L is the crease detail (VIEW-072).

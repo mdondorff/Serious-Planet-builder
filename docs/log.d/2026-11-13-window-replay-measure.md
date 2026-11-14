@@ -1,0 +1,1 @@
+- 2026-11-13 window-replay-measure archived: repro --window measures (gate failures printed not raised, stderr kept) and names the held-back tiles by level and region; R3a: 213 held tiles at levels 17-18, all over the commit (BUILD-054).

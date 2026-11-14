@@ -38,7 +38,11 @@ The lanes (`sonnet-explorer`, `sonnet-crusader`, `sonnet-spikes`) implement and 
    - the acceptance test;
    - the reviewers.
 
-   Send a message only to stop or change running work. The app pauses your sends after 10 without an owner message.
+   Send a message only to stop or change running work, or to answer a decision request (`docs/routing.md`, Communication).
+   - Your role is coordination and integration, not facilitating conversations between lanes. Never acknowledge a message to confirm receipt.
+   - Budget: the app pauses your sends after 10 without an owner message. Use at most 8; keep 2 for an emergency. Count them in the digest.
+   - Keep each lane's next two items in its order file, so that finishing an item never means waiting for you.
+   - On each loop tick, check that each lane's last turn left a pending wakeup; wake a lane whose loop stopped.
 3. **Keep lanes busy only on exit items.** An idle lane is fine; a PR in a direction the owner has not seen is not.
    - Look work stays in spike code with picture sheets until the owner picks a variant.
 4. **The digest.** Once a day, write `C:/DEV/SeriousPlanetData/lanes/digest/<date>.md` (outside the repo) and send it with SendUserFile. Its parts are read on their own:

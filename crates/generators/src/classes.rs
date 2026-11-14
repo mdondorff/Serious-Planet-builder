@@ -199,8 +199,6 @@ pub struct ClassSource {
     shelf: ShelfProfile,
     /// The distance to the coast of the field on a lattice (GEN-136), built on the first read of a sea point.
     coast: std::sync::OnceLock<std::sync::Arc<CoastLattice>>,
-    /// The coast lattice of the coast tilt (GEN-180): the same field with its own cap, the tilt's `D` (the shelf's lattice is capped at the shelf and slope width, 170 km on Earth, so a longer ramp would saturate early). Built on the first land read with the tilt on; `D` is its key.
-    tilt_coast: std::sync::Mutex<Option<(u64, std::sync::Arc<CoastLattice>)>>,
     /// The threads the coast lattice is built on (0: the machine's, at most 16); the bytes do not depend on it.
     coast_threads: usize,
 }
@@ -223,7 +221,6 @@ impl ClassSource {
                 plate_draw: t,
                 shelf: ShelfProfile::earth(),
                 coast: std::sync::OnceLock::new(),
-                tilt_coast: std::sync::Mutex::new(None),
                 coast_threads: 0,
             };
             let score =
@@ -282,28 +279,6 @@ impl ClassSource {
             memo.push((key, lattice.clone()));
             lattice
         })
-    }
-
-    /// The coast lattice of the tilt for the distance `d_km` (GEN-180): signed distance to the coast of the field up to `d_km`, built once per `D` on the machine's threads (the bytes do not depend on the count).
-    fn tilt_lattice(&self, d_km: f64) -> std::sync::Arc<CoastLattice> {
-        let mut guard = self.tilt_coast.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((bits, lattice)) = guard.as_ref() {
-            if *bits == d_km.to_bits() {
-                return lattice.clone();
-            }
-        }
-        let threads =
-            if self.coast_threads > 0 { self.coast_threads } else { std::thread::available_parallelism().map_or(1, |n| n.get()).min(16) };
-        let lattice = std::sync::Arc::new(CoastLattice::build(
-            &|d| crate::global::continent_land_depth(self.seed, d),
-            &|_| 0.0,
-            self.shelf.coast_lattice_cells,
-            d_km,
-            self.radius_m / 1000.0,
-            threads,
-        ));
-        *guard = Some((d_km.to_bits(), lattice.clone()));
-        lattice
     }
 
     fn build_coast_lattice(&self) -> CoastLattice {
@@ -550,11 +525,6 @@ impl ClassSource {
 
     /// The default source at the unit direction `d`: the mask, the base elevation without the hill band (GEN-096), and the class weights (GEN-095).
     pub fn eval(&self, d: Vec3) -> ClassPoint {
-        self.eval_with(d, &coast_tilt())
-    }
-
-    /// [`ClassSource::eval`] under the given coast tilt (GEN-180): the tilt is added to `e0` after the class weights are decided, so it moves no class.
-    pub fn eval_with(&self, d: Vec3, tilt: &CoastTilt) -> ClassPoint {
         let t = terrain(self.seed, d);
         let terms = self.mask_terms(d, t.land_depth, t.inland);
         let coast = if t.land_depth < 0.0 {
@@ -578,15 +548,6 @@ impl ClassSource {
             + PLATEAU_UPLIFT_M * terms.plateau_field)
             .clamp(MIN_ELEVATION_M, MAX_ELEVATION_M);
         let weights = class_weights(&terms, e_smooth, rolling);
-        // The coast tilt (GEN-180): a rise of the coast plains with the distance inland, weighted by the plain and rolling-plain weights (mountains, plateaus and hills get none).
-        let e0 = if tilt.is_on() && t.land_depth > 0.0 {
-            let (signed_km, _) = self.tilt_lattice(tilt.d_km).read(d);
-            // Faded in over the true coast ramp of the field, so that the lattice's coast (within a cell of the field's) leaves no step at the shore.
-            let fade = smoothstep(0.0, TRUE_COAST_RAMP, t.land_depth);
-            (e0 + tilt.height_m((-signed_km).max(0.0), fade * (weights[PLAIN] + weights[ROLLING]))).clamp(MIN_ELEVATION_M, MAX_ELEVATION_M)
-        } else {
-            e0
-        };
         ClassPoint { terms, land_depth: t.land_depth, e0, weights }
     }
 
@@ -1048,65 +1009,4 @@ fn ridged_octave_signals(seed: u64, t: &Terrain, turned: bool) -> [f64; 5] {
         freq *= 2.0;
     }
     out
-}
-
-// ---- the coast tilt (GEN-180): a regional rise of the coast plains away from the sea, off by default ----
-
-/// The coast tilt `t` in metres per km as the bits of an f64: 0 is off. A process-wide switch like the band rules (GEN-179).
-static COAST_TILT_T: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-/// The tilt's distance `D` in km as the bits of an f64.
-static COAST_TILT_D: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0x4059_0000_0000_0000);
-
-/// The coast tilt of GEN-180: `added(d) = t x D x s(d / D)` metres at `d` km inland of the coast, with the ramp `s(x) = x (2 - x)` for `x` in `[0, 1]` and 1 beyond (so the added height never exceeds
-/// `t x D` and its slope is 2 t at the coast and 0 at `D`), weighted by the coast-plain class weight.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CoastTilt {
-    /// `t` in metres per km; 0 is off.
-    pub t_m_per_km: f64,
-    /// `D` in km.
-    pub d_km: f64,
-}
-
-impl CoastTilt {
-    /// The tilt off: the build before GEN-180.
-    pub const OFF: CoastTilt = CoastTilt { t_m_per_km: 0.0, d_km: 100.0 };
-
-    /// Whether the tilt is on.
-    pub fn is_on(&self) -> bool {
-        self.t_m_per_km > 0.0
-    }
-
-    /// The fold of the tilt into an identity word: unchanged while off, mixed with `t` and `D` while on.
-    pub fn fold(&self, identity: u64) -> u64 {
-        if self.is_on() {
-            planet_core::hash::hash_u64s(0x7469_6c74_0001, &[identity, self.t_m_per_km.to_bits(), self.d_km.to_bits()])
-        } else {
-            identity
-        }
-    }
-
-    /// The height in metres added `dist_km` inland of the coast where the coast-plain class weight is `weight` in `[0, 1]`: `weight x t x D x s(dist / D)`; 0 when off.
-    pub fn height_m(&self, dist_km: f64, weight: f64) -> f64 {
-        if !self.is_on() {
-            return 0.0;
-        }
-        let x = (dist_km / self.d_km).clamp(0.0, 1.0);
-        weight * self.t_m_per_km * self.d_km * x * (2.0 - x)
-    }
-}
-
-/// Sets the coast tilt of the process (GEN-180): `t` in metres per km (0 switches it off) over `d_km` km.
-pub fn set_coast_tilt(t_m_per_km: f64, d_km: f64) {
-    assert!(t_m_per_km.is_finite() && t_m_per_km >= 0.0, "the coast tilt t is finite and not negative, not {t_m_per_km}");
-    assert!(d_km.is_finite() && d_km > 0.0, "the coast tilt distance D is finite and positive, not {d_km}");
-    COAST_TILT_T.store(t_m_per_km.to_bits(), std::sync::atomic::Ordering::Relaxed);
-    COAST_TILT_D.store(d_km.to_bits(), std::sync::atomic::Ordering::Relaxed);
-}
-
-/// The coast tilt the process runs with (GEN-180).
-pub fn coast_tilt() -> CoastTilt {
-    CoastTilt {
-        t_m_per_km: f64::from_bits(COAST_TILT_T.load(std::sync::atomic::Ordering::Relaxed)),
-        d_km: f64::from_bits(COAST_TILT_D.load(std::sync::atomic::Ordering::Relaxed)),
-    }
 }

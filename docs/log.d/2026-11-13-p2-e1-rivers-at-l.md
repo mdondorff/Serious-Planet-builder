@@ -1,0 +1,1 @@
+- 2026-11-13 P2 E1: rivers routed at L inside regions agreed in principle (owner); SPIKE-114 measures first.

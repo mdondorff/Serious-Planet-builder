@@ -1,0 +1,5 @@
+LATTICE f2-9968-8304-none: 1365 x 1366 nodes (611 m); land nodes changed over 1 cm 0 of 1584104 (0.00 %); lowered p50 NaN p95 NaN max 0.00 m, over 50 m on 0.00 % of land nodes; raised p50 NaN p95 NaN max 0.00 m; mean change 0.000 m; 
+RIVERS f2-9968-8304-none: core 168517 channel cells; 109371 on closed basins of the start surface (64.90 % of river length); pits touching the core 10974; time nodes 18 s, front 33 s, sample 5 s, route 99 s
+RIVERS f2-9968-8304-none D inf m: cut p50 0.13 p95 25.31 p99 52.11 max 106.74 m, over 50 m 1.15 %; channel cells in lakes 0.00 %
+RIVERS f2-9968-8304-none D 20 m: cut p50 0.00 p95 6.24 p99 11.95 max 19.95 m, over 50 m 0.00 %; channel cells in lakes 25.34 %
+RELIEF f2-9968-8304-none: band 200 m-1 km std 3.65 m (|.| p95 6.99); 1 km block relief p50 10.5 p95 87.7 m (218259 blocks)

@@ -1,0 +1,13 @@
+LATTICE f1-8056-760-none: 1366 x 1366 nodes (611 m); land nodes changed over 1 cm 0 of 1301217 (0.00 %); lowered p50 NaN p95 NaN max 0.00 m, over 50 m on 0.00 % of land nodes; raised p50 NaN p95 NaN max 0.00 m; mean change 0.000 m; 
+RIVERS f1-8056-760-none: core 112140 channel cells; 79891 on closed basins of the start surface (71.24 % of river length); pits touching the core 10586; time nodes 18 s, front 22 s, sample 5 s, route 80 s
+RIVERS f1-8056-760-none D inf m: cut p50 1.38 p95 67.73 p99 127.46 max 287.28 m, over 50 m 8.18 %; channel cells in lakes 0.00 %
+RIVERS f1-8056-760-none D 20 m: cut p50 0.00 p95 5.06 p99 11.11 max 19.98 m, over 50 m 0.00 %; channel cells in lakes 47.69 %
+DIAG f1-8056-760-none solved surface at 814 m: 16164 channel cells in the core, on closed basins 5.92 % (over 5 m 0.10 %); land cells in pits 1895
+DIAG f1-8056-760-none B alone: 139650 channel cells in the core, on closed basins 71.89 % (over 5 m deep 44.42 %) [1 mm a cell fill, SPIKE-114]; strict fill 65.46 % (over 5 m 44.26 %)
+DIAG f1-8056-760-none solved regional surface alone (bilinear): 142130 channel cells in the core, on closed basins 74.46 % (over 5 m deep 44.22 %) [1 mm a cell fill, SPIKE-114]; strict fill 66.93 % (over 5 m 44.01 %)
+DIAG f1-8056-760-none B + regional (the start surface): 112140 channel cells in the core, on closed basins 71.24 % (over 5 m deep 46.25 %) [1 mm a cell fill, SPIKE-114]; strict fill 69.28 % (over 5 m 46.13 %)
+DIAG f1-8056-760-none solved surface breached over 4 neighbours, bilinear: 146034 channel cells in the core, on closed basins 30.74 % (over 5 m deep 4.98 %) [1 mm a cell fill, SPIKE-114]; strict fill 25.19 % (over 5 m 4.90 %)
+DIAG f1-8056-760-none the D4 breach (step 0.01 m) lowered 39484 of 724357 land regional cells: p50 9.42 p95 147.98 max 743.64 m; over 50 m 7430 (1.03 % of land)
+DIAG f1-8056-760-none D4 surface + B's sub-814 m residual damped over 400 m toward its channels: 136815 channel cells in the core, on closed basins 30.52 % (over 5 m deep 4.47 %) [1 mm a cell fill, SPIKE-114]; strict fill 26.30 % (over 5 m 4.43 %)
+DIAG f1-8056-760-none relief of that surface: band 200 m-1 km std 10.32 m (the start surface's is printed under RELIEF)
+RELIEF f1-8056-760-none: band 200 m-1 km std 11.43 m (|.| p95 24.93); 1 km block relief p50 53.0 p95 303.7 m (170071 blocks)

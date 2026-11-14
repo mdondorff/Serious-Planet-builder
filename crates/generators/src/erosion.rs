@@ -30,7 +30,15 @@ use crate::terrain::scan_base;
 thread_local! {
     /// The C1 stencils this thread loaded (see [`read_elevation_c1_cached`]).
     static STENCILS: std::cell::RefCell<StencilCache> = std::cell::RefCell::new(StencilCache::new());
+    /// The unpinned detail at the layer cell centres this thread read, for one field (its id): the pin's memo (GEN-187).
+    static PIN_MEMO: std::cell::RefCell<PinMemo> = std::cell::RefCell::new((0, std::collections::HashMap::new()));
 }
+
+/// The field's id and the detail at the cells `(face, i, j)` of its centres.
+type PinMemo = (u64, std::collections::HashMap<(u8, u32, u32), f64>);
+
+/// The most centres a thread keeps in the pin's memo before it starts over (about 6 MB).
+const PIN_MEMO_CAP: usize = 1 << 18;
 static NEXT_FIELD_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// Bump whenever any output of this module changes (ADR 0006); it also covers [`GLOBAL_VERSION`] through the bake key.
@@ -54,6 +62,14 @@ pub const EROSION_BAND_IMPLEMENTATION_ID: &str = "cpu-erosion-v1+relief+band";
 pub const EROSION_C1_BAND_IMPLEMENTATION_ID: &str = "cpu-erosion-v2+relief+band";
 /// Bump whenever the crease band's weights or the way they apply change (it enters the inputs hash of a field with the band on).
 pub const CREASE_BAND_VERSION: u32 = 1;
+/// The version of the detail pinned to the layer's samples (GEN-187, ADR 0122 point 1): it enters the keys of every field that reads the layer.
+pub const PINNED_DETAIL_VERSION: u32 = 1;
+
+/// How far, in layer cells of angle, the cell centres a pinned point reads lie from it: the reach the bounds and a batch's footprint widen by (GEN-187). A centre of the point's own
+/// face with a weight lies less than one cell away along each face axis, and the arc of a step along either axis of `TangentWarp` is at most one cell per cell, so it lies within 2
+/// cells; within the edge blend (2 cells of an edge) the neighbouring face's centres lie within the blend plus that, so 4.
+const PIN_REACH_CELLS: f64 = 4.0;
+
 /// The implementation id of a field that reads the erosion layer (GEN-112) over the v1 base.
 pub const EROSION_LAYER_IMPLEMENTATION_ID: &str = "cpu-erosion-v1+relief+band+layer";
 /// The crease band without the relief channels (`k` 1, `m` unread) over the v1 base (GEN-109).
@@ -365,6 +381,7 @@ impl ErosionField<'_> {
                 sea_level_m.to_bits(),
                 crate::erosion_layer::COAST_FADE_M.to_bits(),
                 u64::from(crate::erosion_layer::LAYER_READ_VERSION),
+                u64::from(PINNED_DETAIL_VERSION),
             ],
         );
         f.layer = Some((layer, sea_level_m));
@@ -419,7 +436,9 @@ impl ErosionField<'_> {
     /// The largest height the field takes in magnitude at its relief scale (WDEF-017): the elevation clamp times the scale plus the deepest incision; with the relief channels on,
     /// `max|1 - k| max|m| + k_max` times that (`m + k (e - m) + k detail = (1 - k) m + k (e + detail)`).
     fn max_abs_height(&self) -> f64 {
-        let today = MAX_ELEVATION_M.max(-MIN_ELEVATION_M) * self.relief + DETAIL_DOWN_M;
+        // The detail lies in [-0.75 A, 0.25 A]; pinned where the layer is read (GEN-187) it is the difference of two such values, within [-A, A].
+        let detail = if self.layer.is_some() { AMPLITUDE_MAX_M } else { DETAIL_DOWN_M };
+        let today = MAX_ELEVATION_M.max(-MIN_ELEVATION_M) * self.relief + detail;
         // The layer adds its change times a fade of at most 1: the largest magnitude of its planet-wide range, a sound bound.
         let layer = self.layer.as_ref().map_or(0.0, |(l, _)| {
             let (lo, hi) = l.global_range();
@@ -442,6 +461,12 @@ impl ErosionField<'_> {
     #[doc(hidden)]
     pub fn base_bounds(&self, centre: Vec3, angular_radius: f64) -> Option<(f64, f64)> {
         scan_base(&self.src, centre, angular_radius, self.c1).ok().flatten().map(|s| (s.lo, s.hi))
+    }
+
+    /// The fine-detail term at a direction as ADR 0098 sets it, before any pinning (GEN-187). For tests.
+    #[doc(hidden)]
+    pub fn detail_unpinned(&self, dir: Vec3) -> f64 {
+        self.detail_via_c(&self.src, dir, false).1
     }
 
     /// The ground elevation of the bake at a direction, without creases.
@@ -508,6 +533,89 @@ impl ErosionField<'_> {
     }
 
     fn height_via_c(&self, src: &dyn LatticeSource, dir: Vec3, cached: bool) -> f64 {
+        let (e, detail) = self.detail_via_c(src, dir, cached);
+        // GEN-187 (ADR 0122 point 1): where the layer is read the detail is pinned to the stored samples: minus its bilinear interpolant from the four
+        // surrounding cell centres of the layer, so it is 0 at every centre and the ground there is the stored base plus the change.
+        let detail = match &self.layer {
+            None => detail,
+            Some((layer, _)) => {
+                let stencil = layer.centres_around(dir);
+                if stencil.at_centre {
+                    0.0
+                } else {
+                    let mut interpolant = 0.0;
+                    for ((centre, w), cell) in stencil.centres.iter().zip(&stencil.cells) {
+                        if *w > 0.0 {
+                            // The centres' reads are in a gathered batch's footprint (`gather_footprint`). A centre's detail is a pure function of the field and
+                            // the cell, so this thread keeps it for the points around it (a neighbouring sample reads the same four).
+                            interpolant += w * self.centre_detail(src, *centre, *cell, cached);
+                        }
+                    }
+                    detail - interpolant
+                }
+            }
+        };
+        self.compose(dir, e, detail)
+    }
+
+    /// The unpinned detail at a layer cell centre, from this thread's memo of the field's centres (GEN-187): the same value as evaluating it, bit for bit.
+    fn centre_detail(&self, src: &dyn LatticeSource, centre: Vec3, cell: (u8, u32, u32), cached: bool) -> f64 {
+        if let Some(v) = PIN_MEMO.with(|m| {
+            let m = m.borrow();
+            if m.0 == self.id {
+                m.1.get(&cell).copied()
+            } else {
+                None
+            }
+        }) {
+            return v;
+        }
+        let v = self.detail_via_c(src, centre, cached).1;
+        // A failed read (NaN, recorded) is not kept: the next read tries again.
+        if v.is_finite() {
+            PIN_MEMO.with(|m| {
+                let mut m = m.borrow_mut();
+                if m.0 != self.id || m.1.len() >= PIN_MEMO_CAP {
+                    m.0 = self.id;
+                    m.1.clear();
+                }
+                m.1.insert(cell, v);
+            });
+        }
+        v
+    }
+
+    /// The lattice reads of a height at `dir` for a gathered batch (GEN-020): the base and its gradient at the point and, where the detail is pinned (GEN-187), at the layer's
+    /// cell centres the pin reads.
+    fn gather_footprint(&self, g: &dyn LatticeSource, dir: Vec3) {
+        self.base_via(g, dir);
+        self.gradient_via(g, dir);
+        if let Some((layer, _)) = &self.layer {
+            let stencil = layer.centres_around(dir);
+            if !stencil.at_centre {
+                for (centre, w) in stencil.centres {
+                    if w > 0.0 {
+                        self.base_via(g, centre);
+                        self.gradient_via(g, centre);
+                    }
+                }
+            }
+        }
+    }
+
+    /// The reach in bake cells of a height's reads around its point: the gradient's, and the pin's centres where the layer is read (GEN-187).
+    fn gather_reach(&self) -> u32 {
+        match &self.layer {
+            None => GRADIENT_REACH_CELLS,
+            Some((layer, _)) => {
+                let pin = libm::ceil(PIN_REACH_CELLS * f64::from(self.src.res()) / layer.cells() as f64) as u32;
+                GRADIENT_REACH_CELLS + pin
+            }
+        }
+    }
+
+    /// The base elevation at `dir` and the fine-detail term there as ADR 0098 sets it (the crease octaves, banded where the band is on).
+    fn detail_via_c(&self, src: &dyn LatticeSource, dir: Vec3, cached: bool) -> (f64, f64) {
         let e = self.base_via_c(src, dir, cached);
         let slope = self.gradient_via_c(src, dir, cached) / self.radius_m;
         let c = carve(slope);
@@ -526,6 +634,11 @@ impl ErosionField<'_> {
             }
             None => detail_m(self.seed, dir, e, c, l),
         };
+        (e, detail)
+    }
+
+    /// The height from the base elevation `e` and the detail term: the relief base, then the layer's change.
+    fn compose(&self, dir: Vec3, e: f64, detail: f64) -> f64 {
         let base = match &self.relief_channels {
             None => e + detail,
             // GEN-099: each term one read at the point.
@@ -555,20 +668,14 @@ impl HeightField for ErosionField<'_> {
 
     /// The lattice cells of the whole batch are read once, grouped by bake block (GEN-020): the same values, in the caller's order.
     fn heights_until(&self, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> Vec<f64> {
-        let footprint = |g: &dyn LatticeSource, d: Vec3| {
-            self.base_via(g, d);
-            self.gradient_via(g, d);
-        };
-        crate::global::eval_gathered(&self.src, dirs, stop, &footprint, Some(GRADIENT_REACH_CELLS), &|s, d| self.height_via_c(s, d, true))
+        let footprint = |g: &dyn LatticeSource, d: Vec3| self.gather_footprint(g, d);
+        crate::global::eval_gathered(&self.src, dirs, stop, &footprint, Some(self.gather_reach()), &|s, d| self.height_via_c(s, d, true))
     }
 
     /// [`HeightField::heights_until`] with the distinct blocks of the batch read on `threads` threads (GEN-020, LOD-009).
     fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), par: &dyn planet_core::par::Par) -> Vec<f64> {
-        let footprint = |g: &dyn LatticeSource, d: Vec3| {
-            self.base_via(g, d);
-            self.gradient_via(g, d);
-        };
-        crate::global::eval_gathered_threads(&self.src, dirs, stop, par, &footprint, Some(GRADIENT_REACH_CELLS), &|s, d| {
+        let footprint = |g: &dyn LatticeSource, d: Vec3| self.gather_footprint(g, d);
+        crate::global::eval_gathered_threads(&self.src, dirs, stop, par, &footprint, Some(self.gather_reach()), &|s, d| {
             self.height_via_c(s, d, true)
         })
     }
@@ -624,10 +731,7 @@ impl HeightField for ErosionField<'_> {
         dirs: &[Vec3],
         stop: &dyn Fn() -> bool,
     ) -> (Vec<f64>, crate::climate::ClimateTexture) {
-        let footprint = |g: &dyn LatticeSource, d: Vec3| {
-            self.base_via(g, d);
-            self.gradient_via(g, d);
-        };
+        let footprint = |g: &dyn LatticeSource, d: Vec3| self.gather_footprint(g, d);
         let climate = |s: &dyn LatticeSource| match crate::climate::climate_tile_direct(s, id) {
             Ok(c) => c,
             Err(e) => {
@@ -640,7 +744,7 @@ impl HeightField for ErosionField<'_> {
             dirs,
             stop,
             &footprint,
-            Some(GRADIENT_REACH_CELLS),
+            Some(self.gather_reach()),
             &|s, d| self.height_via_c(s, d, true),
             &climate,
         )
@@ -708,12 +812,68 @@ impl HeightField for ErosionField<'_> {
     /// over the intervals of the four terms (the range of the channels over the cap from [`crate::relief_lattice::ReliefLattice::range_over_cap`]).
     fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
         let global = (-self.max_abs_height(), self.max_abs_height());
+        let Some((blo, bhi, dlo, dhi)) = self.base_and_detail_range(centre, angular_radius) else {
+            return global;
+        };
+        // GEN-187: where the layer is read the detail is pinned: the detail at the point minus its interpolant from the layer's cell centres around it, which lie within
+        // `PIN_REACH_CELLS` cells of the point; the interpolant is a convex combination of the detail over the cap widened by that reach.
+        let (dlo, dhi) = match &self.layer {
+            None => (dlo, dhi),
+            Some((layer, _)) => {
+                let reach = PIN_REACH_CELLS * core::f64::consts::FRAC_PI_2 / layer.cells() as f64;
+                let (wlo, whi) = match self.base_and_detail_range(centre, (angular_radius + reach) * (1.0 + 1e-9)) {
+                    Some((_, _, wlo, whi)) => (wlo, whi),
+                    None => (-DETAIL_DOWN_M, 0.25 * AMPLITUDE_MAX_M),
+                };
+                (dlo - whi, dhi - wlo)
+            }
+        };
+        let pad = |x: f64| 1e-6 + x.abs() * 1.2e-7;
+        let (l, h) = match &self.relief_channels {
+            None => (blo + dlo, bhi + dhi),
+            // `m + k (e - m) + k detail` over the intervals of `e`, `m`, `k` and the detail: the products of intervals (GEN-099, GEN-102).
+            Some(r) => {
+                let [klo, khi, mlo, mhi] = r.range_over_cap(centre, angular_radius);
+                let product = |alo: f64, ahi: f64, blo_: f64, bhi_: f64| {
+                    let p = [alo * blo_, alo * bhi_, ahi * blo_, ahi * bhi_];
+                    (p.iter().cloned().fold(f64::INFINITY, f64::min), p.iter().cloned().fold(f64::NEG_INFINITY, f64::max))
+                };
+                let (rise_lo, rise_hi) = product(klo, khi, blo - mhi, bhi - mlo);
+                let (det_lo, det_hi) = product(klo, khi, dlo, dhi);
+                (mlo + rise_lo + det_lo, mhi + rise_hi + det_hi)
+            }
+        };
+        // GEN-102, GEN-112: the layer's change over the cap (from its pyramid, or the global range for a cap too wide) times the fade over the cap's base interval.
+        let (l, h) = match &self.layer {
+            None => (l, h),
+            Some((layer, sea)) => {
+                let (clo, chi) = match layer.range_over_cap(centre, angular_radius) {
+                    Ok(Some(r)) => r,
+                    Ok(None) => layer.global_range(),
+                    Err(e) => {
+                        self.fail_text(&e);
+                        return global;
+                    }
+                };
+                let (flo, fhi) = (crate::erosion_layer::coast_fade(blo, *sea), crate::erosion_layer::coast_fade(bhi, *sea));
+                let p = [flo * clo, flo * chi, fhi * clo, fhi * chi];
+                (l + p.iter().cloned().fold(f64::INFINITY, f64::min), h + p.iter().cloned().fold(f64::NEG_INFINITY, f64::max))
+            }
+        };
+        ((l - pad(l)).max(global.0), (h + pad(h)).min(global.1))
+    }
+}
+
+impl ErosionField<'_> {
+    /// The base range `(blo, bhi)` over a cap and the range `(dlo, dhi)` of the unpinned detail term over it (the parts of [`HeightField::height_bounds`] before the relief channels and the
+    /// layer), or `None` where the cap takes the global range (a cap too wide for the scan, or a read error, recorded).
+    fn base_and_detail_range(&self, centre: Vec3, angular_radius: f64) -> Option<(f64, f64, f64, f64)> {
         let base = match scan_base(&self.src, centre, angular_radius, self.c1) {
             Ok(Some(s)) => s,
-            Ok(None) => return global,
+            Ok(None) => return None,
             Err(e) => {
                 self.fail(&e);
-                return global;
+                return None;
             }
         };
         let (blo, bhi) = (base.lo, base.hi);
@@ -729,7 +889,7 @@ impl HeightField for ErosionField<'_> {
                     let lip = f64::from(self.src.res()) * (wide.max_du + wide.max_dv);
                     let g_centre = self.gradient(centre);
                     if g_centre.is_nan() {
-                        return global;
+                        return None;
                     }
                     // The 2.5 (the exact worst case of the sum is 2.45) also absorbs the gap between chord and arc at a very fine
                     // bake: do not tighten it without redoing that argument.
@@ -745,7 +905,7 @@ impl HeightField for ErosionField<'_> {
                 Ok(None) => (carve(0.0), 1.0),
                 Err(e) => {
                     self.fail(&e);
-                    return global;
+                    return None;
                 }
             }
         } else {
@@ -803,39 +963,7 @@ impl HeightField for ErosionField<'_> {
             }
             None => detail_range(None),
         };
-        let pad = |x: f64| 1e-6 + x.abs() * 1.2e-7;
-        let (l, h) = match &self.relief_channels {
-            None => (blo + dlo, bhi + dhi),
-            // `m + k (e - m) + k detail` over the intervals of `e`, `m`, `k` and the detail: the products of intervals (GEN-099, GEN-102).
-            Some(r) => {
-                let [klo, khi, mlo, mhi] = r.range_over_cap(centre, angular_radius);
-                let product = |alo: f64, ahi: f64, blo_: f64, bhi_: f64| {
-                    let p = [alo * blo_, alo * bhi_, ahi * blo_, ahi * bhi_];
-                    (p.iter().cloned().fold(f64::INFINITY, f64::min), p.iter().cloned().fold(f64::NEG_INFINITY, f64::max))
-                };
-                let (rise_lo, rise_hi) = product(klo, khi, blo - mhi, bhi - mlo);
-                let (det_lo, det_hi) = product(klo, khi, dlo, dhi);
-                (mlo + rise_lo + det_lo, mhi + rise_hi + det_hi)
-            }
-        };
-        // GEN-102, GEN-112: the layer's change over the cap (from its pyramid, or the global range for a cap too wide) times the fade over the cap's base interval.
-        let (l, h) = match &self.layer {
-            None => (l, h),
-            Some((layer, sea)) => {
-                let (clo, chi) = match layer.range_over_cap(centre, angular_radius) {
-                    Ok(Some(r)) => r,
-                    Ok(None) => layer.global_range(),
-                    Err(e) => {
-                        self.fail_text(&e);
-                        return global;
-                    }
-                };
-                let (flo, fhi) = (crate::erosion_layer::coast_fade(blo, *sea), crate::erosion_layer::coast_fade(bhi, *sea));
-                let p = [flo * clo, flo * chi, fhi * clo, fhi * chi];
-                (l + p.iter().cloned().fold(f64::INFINITY, f64::min), h + p.iter().cloned().fold(f64::NEG_INFINITY, f64::max))
-            }
-        };
-        ((l - pad(l)).max(global.0), (h + pad(h)).min(global.1))
+        Some((blo, bhi, dlo, dhi))
     }
 }
 

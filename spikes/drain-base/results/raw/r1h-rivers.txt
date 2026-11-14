@@ -1,0 +1,5 @@
+LATTICE f1-8056-760-rivers: 1366 x 1366 nodes (611 m); land nodes changed over 1 cm 1282551 of 1301217 (98.57 %); lowered p50 8.16 p95 396.74 max 1382.65 m, over 50 m on 1.47 % of land nodes; raised p50 19.49 p95 110.09 max 285.56 m; mean change 27.381 m; rivers: blur radius 3 nodes, channels at 16 km2 (4.9 % of the window's nodes), hillslope 1200 m
+RIVERS f1-8056-760-rivers: core 93195 channel cells; 56899 on closed basins of the start surface (61.05 % of river length); pits touching the core 10607; time nodes 20 s, front 21 s, sample 6 s, route 100 s
+RIVERS f1-8056-760-rivers D inf m: cut p50 0.32 p95 91.81 p99 225.59 max 529.95 m, over 50 m 10.00 %; channel cells in lakes 0.00 %
+RIVERS f1-8056-760-rivers D 20 m: cut p50 0.00 p95 4.90 p99 11.75 max 19.93 m, over 50 m 0.00 %; channel cells in lakes 39.60 %
+RELIEF f1-8056-760-rivers: band 200 m-1 km std 13.74 m (|.| p95 28.16); 1 km block relief p50 59.8 p95 334.2 m (169560 blocks)

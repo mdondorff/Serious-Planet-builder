@@ -1309,3 +1309,179 @@ Source: Architect 2026-11-12 (item 15 PR 8), STRM-085, REND-059
 #### Scenario: A commit without a graph
 - **WHEN** a stored world is opened with a commit that holds no channel graph
 - **THEN** it has no river source and its note says "no channel graph"
+
+### Requirement: STRM-076 The layer's fill depth is stored beside the other channels
+The pit depth of GEN-120 SHALL be stored in the layer's tile store as record kind 17 (`LayerFill`), versioned and keyed like the channels of STRM-072:
+- one record per tile filed like kind 13: `codec (u8, value 2) | tile (u32 LE) | key (16 bytes) |` a brotli stream of the core's 16-bit codes (GEN-120; 0.25 m steps, owner 2026-11-05, a key parameter; the rows' wrapping differences, little-endian), written by the post-pass (STRM-077);
+
+Verify: A
+Status: active
+Source: Owner 2026-11-05 (SPIKE-102 D1); planner inbox #67; STRM-065, STRM-072, GEN-120
+
+Detail: - the key is the channels' key (STRM-072) with the step of the code (`FILL_STEPS_PER_M`) among the scales it holds, so a change of the code is another layer and never a mix; `CHANNELS_VERSION` 3; codec 1 records (8-bit codes, keep-pits #1192) are another key and are never read; kind 16 (a face's pass-1 depth) is not used;
+- a record found under another key SHALL be refused naming both keys;
+- the runtime layer (`StoreLayer`) adds the tile's depth to its change when it builds the tile, so the pyramid (GEN-102) holds the sum; the bake's manifest range (STRM-074) is the range of that sum; a tile with no fill record is built as it is stored.
+
+#### Scenario: Keys
+- **WHEN** the keys of the fill and the scratch heights are compared with the deposited depth's
+- **THEN** they differ, and the step of the code is 4 a metre
+
+### Requirement: STRM-077 The fill depth is written by a post-pass over the tiles' final heights
+Pass 2 SHALL leave each tile's final core heights (f32 metres, `tile x tile`) as record kind 18 (`LayerHeights`) in a scratch store of its own, keyed like the channels; the post-pass `layer_fillpass::run_fill_pass` SHALL read only those and write kind 17 (STRM-076):
+
+Verify: A
+Status: active
+Source: planner inbox #67 (seam fix, option (a)); GEN-121, STRM-076
+
+Detail: - stage 1: the labelled flood of each core (GEN-121; the outlets are the cells at or below the sea level that the field bake's ocean connectivity (GEN-022, ADR 0041 point 2) calls ocean, read at the cell's direction: ocean when any of the four bake vertices of the lattice cell holding the direction is ocean (the water field's wet rule without the wet-floor term: a cell below the sea level on a dry vertex quad is an inland basin even where the water field draws a lake); a cell at or below the sea level that it does not call ocean is an inland basin, filled like any pit and counted in the report as `inland_low_cells` (of the tiles written); without a field store every such cell is an outlet) gives its territory edges and, for each border cell, its seed and height; then the graph: the tiles' edges and every pair of neighbouring border cells of two tiles of the run (`fillgeom::border_neighbours`: inside a face and across a cube edge or corner by the direction mapping the readers use), `w = max(z, z)`; a border cell whose neighbour is in a tile that is not in the run drains to the sea there, at its own height; then stage 3, per tile: the flood again, the level `max(level, G(label))` and the depth `level - z` as 16-bit codes; nothing but the heights is kept between the stages;
+- the depth SHALL equal the depth below the planet-wide spill level of the assembled surface (GEN-121), the tiles a run does not hold being sea (a run over a region needs a margin that holds whole basins);
+- the post-pass SHALL write the same bytes on any thread count, skip a tile that holds a fill record under the current key, and refuse a tile whose scratch heights are missing, naming the tile; a cell whose level no path from the sea reaches is written as 0 and counted;
+- the surface that is flooded is the pass-2 surface (the window's interpolated base plus the change); the depth written is taken against the exact base plus the stored change at the cells that are pits of that surface (the post-pass takes the base closure and reads the tiles' stored change), clamped at 0 (planner and owner path 2026-11-05: the interpolation ripple of the base, p99 26 m on a mountain tile, is taken out of the filled floor; the cells above the level stay as outcrops), and the report counts the clamped cells;
+- the post-pass SHALL refuse a tile directory that was filled for another set of tiles (the depth depends on which tiles a run holds) or another outlet mask (a sidecar file `fill-pass-tiles.txt` in the directory holds the tile-set hash and the outlet identity, `all` without a field store, else the lattice resolution and the store directory's name, so two stores of one name are not told apart; a store copied without it bypasses the guard), do nothing when every tile of the run holds its fill, and refuse a run whose scratch store lacks a tile before it floods any; pass 2 SHALL NOT recompute a tile that holds its fill record only for its scratch heights; a neighbour pair that is dropped because the neighbouring cell is not on its tile's border is counted in the report;
+- the keys of kinds 17 and 18 carry the post-pass kernels' version (`FILL_KERNEL_VERSION`); a bump re-keys the scratch heights too (a leftover scratch is refused, never reused);
+- the depth is taken against the base pass 2 was run with (a caller's closure, not part of the key: the layer's `inputs_id` identifies the field); the filled change changes the erosion depth the channel reader derives in a basin by the removed ripple (STRM-075);
+- the scratch store SHALL be deleted once the post-pass has run (`bake layer` does so): it holds 38 MB a tile before compression and is not part of the layer.
+
+#### Scenario: Bytes, resume and refusals
+- **WHEN** the post-pass runs on 1 and on 8 threads over the 16 tiles of a face, runs again, is asked for a depth under another layer's key, and is given a tile the scratch store lacks
+- **THEN** the packs are the same bytes, the second run writes nothing, the other layer's key is refused naming both keys, and the missing tile is refused naming it
+
+#### Scenario: A region
+- **WHEN** the post-pass runs over two tiles of a face whose basin spills into a tile it does not hold
+- **THEN** the basin at the run's border is not filled: the tiles not held are sea; the same directory refuses a run over all the tiles of the face (another set of tiles)
+
+#### Scenario: A rerun without scratch
+- **WHEN** the post-pass has run, the scratch store is gone, and pass 2 and the post-pass are run again with a fresh scratch store
+- **THEN** pass 2 recomputes no tile and the post-pass writes nothing and needs no heights
+
+#### Scenario: The neighbours of a border cell
+- **WHEN** the neighbouring cells of other tiles are named for the border cells of the tiles of a face and across a cube edge and corner
+- **THEN** inside a face an edge cell touches three cells of the next tile, a corner cell five cells of three tiles, an inner cell none, and the relation is symmetric; across a cube edge the neighbours are border cells of the next face and mostly mutual, and a corner reaches two other faces
+
+### Requirement: STRM-065 The erosion layer is a separate store beside the bake
+The erosion layer SHALL be stored as its own store beside the global bake (`global16384`), which it SHALL NOT rewrite. It SHALL hold these records:
+- each tile's core change against the base field (GEN-101);
+- each face's pass-1 change (GEN-100), kept until the layer is complete and then dropped;
+- the drainage area and the depth channels (STRM-072).
+
+Verify: A
+Status: active
+Source: ADR 0088 points 4 and 7, M9 draft decision 7 (owner: a separate layer first), ADR 0088/0089 accepted 2026-11-01; SPIKE-61 (tile changes about 7-10 GB); record kind 12 (the face change, about 3.7 GB for six faces at full resolution) approved by the owner 2026-11-03 as temporary working data, dropped after the final layer with `--keep-pass1` to keep it (PR 5)
+
+Detail: The store SHALL be keyed by the bake's stage key, the versions of the class-weights and relief channels and the kernels' parameters (ADR 0006). Records are written per tile and per face, so that a bake resumes from its last complete checkpoint. A reader SHALL refuse a layer whose key does not match the bake it opens, naming both keys. The face change SHALL be record kind 12 (`LayerFace`), one record per cube face filed under the face's level-0 tile: `codec (u8, value 1) | cells (u32 LE) | halo (u32 LE) | key (16 bytes) |` the face's f32 plane of `cells + 2 halo` cells a side (the halo of GEN-100; row `j` outer, then `i`, little-endian). The key carries the bake's stage key as its source, the bake's resolution (tag 4), the cells (tag 1) and, under tag 15, the layer version, the version of the pass-1 kernels (`BAKE_KERNEL_VERSION`), whether the carve factor is applied, the halo, the radius, the sea level, the seed, every parameter of the carve and `inputs_id`, an identity of the base field's and the carve factor's inputs that the caller supplies (the class source's and class list's versions in PR 4; the relief channels' hash joins it when the runtime reads them, PR 6); a face stored under another key SHALL be an error naming that key and the expected one, never a recompute or a mix. Liveness (STRM-013): a record of kind 12 is judged like the bake's blocks (generator version, hash version and node set id equal the world's). A tile's change SHALL be record kind 13 (`LayerTile`), one record per tile filed under the tile's quadtree id at the level whose `2^level` tiles a face edge are the tile grid (a grid whose tiles a face edge are not a power of two is refused): `codec (u8, value 2) | tile (u32 LE, core cells a side) | land cells (u64) | thermal passes (u32) | thermal cells still moving at the pass cap (u64) | eroded, deposited, exported (f64 each, cubic metres, totals over the tile's window) | clamped cells (u64: core cells beyond the range) | key (16 bytes) |` a brotli stream (quality 5, window 22 bits; owner 2026-11-03 after SPIKE-97) of the core's change against the base field as `i16` counts of 0.25 m (clamped to the range; row `j` outer, then `i`; the change contains the pass-1 change), each row stored as its first count and the wrapping differences along the row (about 0.92 bytes a land cell, 20 GB for the planet at 0.25 m, lossless against the quantised change). A decoder SHALL refuse a codec value it does not know and a stream that does not hold exactly `tile x tile x 2` bytes, reserving no more than that. The read side SHALL keep a bounded cache of decoded tiles, so that the render tiles of one tile's square decode it once (SPIKE-97: a decode per render tile would cost 3.1 times terrain's share). The key carries the bake's stage key as its source, the bake's resolution (the grid-resolution tag), the cells a face edge (the resolution tag) and, under tag 16, the layer version, the kernel version, the tile grid (cells, tile, halo, radius), every parameter of pass 2, `inputs_id`, whether the carve factor is applied and a digest of the keys of the six pass-1 face records the tile was computed from; a tile stored under another key SHALL be an error naming that key and the expected one. Liveness (STRM-013) is judged like the bake's blocks. The pass-1 face records SHALL be dropped (their store removed) after a complete planet pass unless the run keeps them (`--keep-pass1`); a run over a region of tiles keeps them. Kind 12 is temporary working data (approved by the owner on 2026-11-03); kind 13 is the layer itself; its codec was chosen by the owner on 2026-11-03 (brotli, SPIKE-97) and the rest of its layout and key await the owner's approval of the persisted format (planner, 2026-11-03: persisted formats are the owner's call).
+
+#### Scenario: Resume and refusal
+- **WHEN** a layer bake is killed after some tiles and resumed, and its layer is later opened against a bake with another key
+- **THEN** the resumed layer equals an uninterrupted one byte for byte, and the second open is refused with both keys named
+
+### Requirement: STRM-066 The layer has a min/max pyramid
+The layer SHALL hold, with each tile, the min and max of each block of 32 x 32 cells of the tile's core, of each coarser level from 2 x 2 blocks below, and of the whole tile. It SHALL be stored with its tile or built when the tile is decoded (PR 6 builds it at decode, in f32, exactly over the dequantised core), and read through a `planet-generators` trait that `planet-cache` implements (CON-02). A stored pyramid holds `u16` over `[-H, H]` with `H` the body field's `max_abs_height_m`, the min rounded down and the max up.
+
+Verify: A
+Status: active
+Source: ADR 0088 point 8, ADR 0088/0089 accepted 2026-11-01; SPIKE-83 (32 x 32 blocks; about 90 MB for the planet, built in seconds); built at decode accepted by the planner 2026-11-04 (kind 13's format stays as it is)
+
+#### Scenario: Exact, rounded outward and nested
+- **WHEN** a tile's pyramid is built at decode, or stored and read back, for tiles of 96, 100 and 40 cells
+- **THEN** each node's range equals (built) or holds with an outward error under two steps (stored) the range of its cells, and each coarser node holds its children's range
+
+### Requirement: STRM-067 The class weights are stored with the bake
+The class-weights lattice (GEN-093, its geometry and its `u8` weights) SHALL be stored with the global bake as one channel with its class-list version, because class paint makes it more than a function of the seed. A store whose class-list version differs from the generator's SHALL be refused, naming both versions. A store without the channel SHALL open as before the channel existed.
+
+Verify: A
+Status: active
+Source: ADR 0089 decisions 1 and 8, ADR 0080 point 3 (its "not stored" ends with ADR 0089's acceptance), ADR 0088/0089 accepted 2026-11-01
+
+Detail: The channel is record kind 11 (`GlobalClassWeights`), one record per cube face filed under the face's level-0 tile; its key carries the bake's stage key as its source, the bake's resolution under tag 4, the cells per face edge under tag 1 and the number of classes under tag 14 (not the class-list version, so that a store of another version is found and refused). A record's payload is `codec (u8, value 1) | class-list version (u32 LE) | class-source version (u32 LE) | cells (u32 LE) | the lattice's content hash (16 bytes) |` the face's weights (`u8`, row `j` outer, then `i`, 8 bytes a point). A store with records of the kind but of another class-list version, an incomplete face set or weights that do not match the hash is an error naming the record. The reader returns the stored class-source version and the caller compares it with the generator's (the key does not carry it); the class weights SHALL be loaded before the relief channels, because a changed class-list version is refused for the weights but reads as absent for the channels. The layout is in the m9-bake design.
+
+#### Scenario: Old and new stores
+- **WHEN** `global16384` (without the channel) and a new store with the channel are opened
+- **THEN** the old store opens unchanged, the new one reads the weights byte for byte as written, and a store of another class-list version is refused
+
+### Requirement: STRM-068 The relief channels are stored with block ranges
+The relief channels of GEN-099 (`k` and `m`, f32 on the coupled lattice, min and max per 32 x 32 block) SHALL be stored beside the global bake, versioned, as record kind 10 (`GlobalRelief`), one record per cube face filed under the face's level-0 tile: `codec (u8, value 1) | cells (u32 LE) |` the face's `k` plane then `m` plane (f32 little-endian, row `j` outer, then `i`). The block ranges are not stored: the reader recomputes them from the planes.
+
+Verify: A
+Status: active
+Source: ADR 0088 point 1, ADR 0088/0089 accepted 2026-11-01; SPIKE-66, m9-bake design
+
+Detail: The key carries the bake's stage key as its source, the bake's resolution (tag 4), the cells (tag 1) and, under tag 13, the channels' version, the class-list and class-source versions, the hash of the class lattice the channels were computed from, the step limit `max_step`, the ring radius and the taper: a changed lattice, version or parameter reads as absent, never as wrong. A store without the kind opens and reads as absent (the same as before the channel existed). Liveness (STRM-013): records of kinds 10 and 11 are judged like the bake's blocks (generator version, hash version and node set id equal the world's); a stale record is dropped by compaction. Together with the class-weights channel (STRM-067) they SHALL stay under 1 GB for a planet of Earth's size; the limit is a start value from the m9-bake design.
+
+#### Scenario: Block ranges and size
+- **WHEN** the channels of a synthetic bake are stored and read back, and their size for a planet is computed from the lattice sizes
+- **THEN** every value lies in its block's stored range, and the planet size is under 1 GB
+
+### Requirement: STRM-072 The layer's channels are stored beside kinds 12 and 13
+The drainage area (GEN-110) and the deposited depth (GEN-111) SHALL be stored in the layer's store as record kinds 14 and 15, versioned and keyed, and read through a small API:
+- kind 14 (`LayerArea`), one record per cube face filed under the face's root tile: `codec (u8, value 1) | cells (u32 LE, pass 1's cells a face edge) | key (16 bytes) |` a brotli stream (quality 5, window 22 bits) of the face's own cells as area codes (row `j` outer, then `i`), each row as its first byte and the wrapping differences along the row;
+
+Verify: A
+Status: active
+Source: owner 2026-11-04 (planner inbox #58.3, M9 plan I5a(c)); STRM-065, GEN-110, GEN-111
+
+Detail: - kind 15 (`LayerDepth`), one record per tile filed like kind 13: `codec (u8, value 1) | tile (u32 LE) | key (16 bytes) |` a brotli stream of the deposited plane of the core (codes of GEN-111, a square-root code `round(12 sqrt(m))`, same row coding; the scale and the factor 12 are in the key, `CHANNELS_VERSION` 4); the depth removed is derived by the reader as `max(0, deposited - change)` from the tile's kind 13;
+- the keys carry, under tag 17, the channels' version, the scales of the codes and the key parameters of the layer they were made beside (the pass-1 layer's for kind 14, the tile layer's for kind 15), so a channel of another layer is an error naming both keys, never a recompute or a mix;
+- a decoder refuses an unknown codec and a stream that does not decode to exactly the expected bytes, and reserves no more than that;
+- the pass-1 store is temporary (STRM-065): the areas are copied beside the tiles before it is dropped, and a run over a layer stored before the channels existed computes the missing channels and writes what is stored no second time;
+- liveness (STRM-013) is judged like the bake's blocks; a store without the kinds opens and reads as absent;
+- the read API (`LayerChannels`) SHALL return, at a direction, the drainage area as log2 of cells (bilinear in codes over the four pass-1 cells around the point) and the deposited depth in metres (bilinear in metres between the cell centres around the point, read across tile borders; `removed_depth_m(deposited, change)` gives the depth removed; the area is not blended across a cube edge, where a catchment is cut at each face's halo), with bounded caches of the decoded faces and tiles; where the store holds no record it returns none.
+The size of the channels for a planet SHALL be reported with the run that makes them, not bounded (the one-plane, 1 m form was chosen by the owner on 2026-11-04 at about 0.13 to 0.17 bytes a land cell for the depth, about 4 GB for the planet beside kind 13's 20 GB, 24 GB together; the rest of the persisted format awaits the owner's approval).
+
+#### Scenario: The channels come back as computed
+- **WHEN** three tiles are run into stores on 1 and on 8 threads and the six faces' areas are copied from the pass-1 store
+- **THEN** the pack bytes are equal on both thread counts, the stored depth of every tile equals the computed one, a tile without a record reads as none, the copy writes nothing the second time, and the stored area equals the pass-1 store's
+
+#### Scenario: Refusal and completion
+- **WHEN** a depth is read under another layer's parameters, a record under the right key has its stream cut, and a store holds a tile without its depth
+- **THEN** the first is an error naming both keys, the second an error naming the tile, and a run computes the third tile again, stores its depth only (the tile record stays one), and skips it on the next run
+
+#### Scenario: The reader
+- **WHEN** the depth is read at the centre of a core cell and the area at the same direction
+- **THEN** the depth equals the cell's stored depth within 1 mm and the area is between 0 and 32 in log2 cells (at least one cell)
+
+
+### Requirement: STRM-078 The store of a landmass build is measured from real pack records
+The G-STORE measurement SHALL encode a build's state as pack records in tiles of 208 km and report, per item of A3 section 10, the records, the payload bytes and the bytes on disk with record headers and index entries, per land cell.
+- Items without a builder SHALL be labelled estimated.
+- The measurement SHALL NOT decide a store format.
+- Gate G-STORE is not closed by this requirement.
+
+Verify: D
+Review: the measurement table of the g-store change (its design notes in PR #1316, removed at the archive), judged by the planner (the gate is a numeric gate, A3 section 12.1)
+Status: planned
+Source: A3 section 10 (G-STORE)
+
+#### Scenario: the prototype landmass at two resolutions
+- **WHEN** `landmass_scale 1 8 dump` and `landmass_scale 2 8 dump` are followed by `store_measure 1` and `store_measure 2`
+- **THEN** the report lists every item with bytes on disk per land cell, and the written pack and index sizes match the sum of the records and index entries
+
+### Requirement: STRM-084 The channel graph is a stored kind read through the commit
+The bake SHALL store the channel graph as one record of kind 20 per L tile, holding the pieces of the segments inside the tile's block of H1 cells and one H1 cell beyond it, and the commit record SHALL name the blocks (commit layout version 3).
+- A piece is a run of vertices of one segment on one face: the segment id and part, its first vertex's index, the segment's vertex count and all its lake cuts (so the producer's pieces follow from any one piece), the planar steps, the `Q_w` and bed codes.
+
+Verify: A
+Status: active
+Source: Architect 2026-11-10 and 2026-11-11
+
+Detail: - A damaged record, another layout or key, or a block other than the one asked is refused naming the record; a count the payload cannot hold is an error.
+- A feed over the commit reads the blocks a window touches and returns K7's channels; a graph in area units is refused by the writer.
+- Channels read through the commit give the L tiles of a bake that had them in memory.
+
+#### Scenario: Round trip
+- **WHEN** a face is baked with a graph and then baked again with the channels read through its commit
+- **THEN** every L tile of the second bake equals the first byte for byte
+
+### Requirement: STRM-083 The runtime reads L through a commit and draws one commit at a time
+The runtime SHALL read the L tiles of the new chain through the commit their bake wrote, as the surface change `L` with nothing added back, and SHALL swap the drawn commit only when every needed part of the new one is ready.
+- A tile the commit does not name is a tile with no land; a named tile the store lacks, a key other than the commit spec's, a damaged record or a change outside the layer's range is an error naming the tile.
+- Tiles are decoded once while they stay in a bounded cache; the layer's identity is the commit id.
+
+Verify: A
+Status: active
+Source: Architect 2026-11-10, A3 section 7.4, CON-22
+
+Detail: - A new commit becomes the drawn one when the tiles the caller needs of it read and its basin tables are in the store; until then the previous commit is drawn, and a frame reads one commit only.
+
+#### Scenario: Swap
+- **WHEN** a new commit is offered with a table or a tile not yet in the store, and then complete
+- **THEN** the previous commit stays drawn until the new one is complete, and a frame in flight keeps reading the previous commit

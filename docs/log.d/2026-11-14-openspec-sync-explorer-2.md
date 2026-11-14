@@ -1,0 +1,1 @@
+- 2026-11-14 OpenSpec sync batch 2 (explorer, P3 E5): m9-generator-round-1, -1b, -2, -3, region-12288, breach-and-ridged-band and deposit-depth-code archived; GEN-104, GEN-105, GEN-106, TEST-087 and TEST-088 synced as active.

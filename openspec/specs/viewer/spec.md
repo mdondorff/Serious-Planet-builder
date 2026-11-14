@@ -1345,3 +1345,48 @@ Source: Lead 2026-11-13 (E1, option b; E4 is the owner flying it), TEST-128, REN
 #### Scenario: Start over the region
 - **WHEN** the viewer opens a commit, without `--site` and with it
 - **THEN** the camera starts over the centre of the commit's tiles or the site, the title says "inside the region", and over the default site it would say "outside the region: coarse base"
+
+### Requirement: VIEW-071 An F9 bundle records the commit and the site of the run
+An F9 repro bundle written by a window started with `--commit DIR` or `--site LAT,LON` SHALL record them in the bundle's head as `open_commit PATH` (absolute, escaped as a world line) and `open_site LAT,LON` (degrees), so that a replay opens the same world at the same place. A run without them records neither line. The bundle format stays version 2; a bundle without the lines reads as before, and the lines survive a write and a read. The lines are read by `cargo xtask repro --window` (BUILD-054) and decide nothing in the plan replay of VIEW-026.
+
+Verify: A
+Status: active
+Source: Lead 2026-11-13 (P2 E3), crusader's #124 diagnosis (a bundle without --commit cannot be replayed faithfully), VIEW-024, VIEW-069
+
+#### Scenario: A bundle of a commit flight
+- **WHEN** a bundle records `open_commit` and `open_site` and is written and read back
+- **THEN** both values are equal after the read, a path with a space and a backslash included, and a bundle of a run without them has neither line
+
+### Requirement: VIEW-070 The viewer keeps at most a capped number of tiles resident
+The viewer's streamer SHALL count its capacity as the smaller of the renderer's pool slots (STRM-006) and the resident-tile cap, 24,000 tiles by default (`--resident-cap N` overrides it). At the cap the streamer evicts by STRM-007; the draw set with its ancestors and the roots are never evicted. The cap is above R of the standard views (20,517 slots, 10 % of the mid tier), so with every tile of R resident eviction changes no pixel. The perf scenes keep the pool as their capacity. A window prints on closing `planet editor: resident tiles at most N, evicted M (cap C)` and the device allocator's memory at the start and the end (allocated, reserved, the largest allocations).
+
+Verify: A
+Status: active
+Source: Lead 2026-11-13 (P2 E2), crusader's #124 diagnosis (resident tiles grew from 10,922 to 66,114 in a 25 min flight; stalls of 4 to 6.5 s), STRM-007
+
+#### Scenario: A long flight
+- **WHEN** the managed loop walks 60 stops, 600 m apart, with a capacity of twice the widest view plus 10, and again with a pool 100 times the widest view
+- **THEN** the capped run never has more resident tiles or slots in use than the cap, shows no blank frame, evicts tiles and settles at the exact plan, and the pool run grows beyond the cap and evicts nothing
+
+#### Scenario: The capacity rule
+- **WHEN** the pool holds 205,170 slots, or 13,678, and the cap is 24,000
+- **THEN** the capacity is 24,000, or 13,678
+
+#### Scenario: Floor tiles that land late
+- **WHEN** the clipmap shadow pass has floor tiles pending that were not resident in the renderer when the cube was written, and a frame brings no new floor set
+- **THEN** the pending tiles are written alone and the cube is not required to be covered by them; a floor set that arrives is the whole cube and replaces them
+
+### Requirement: VIEW-072 The base under a commit is the bake's base
+A world that opened a commit in memory (VIEW-069) SHALL give its base B as the bake read it: `bake_base()` returns the C1 read (GEN-107) of the exact lattice of `BakeInputs::base` over the commit's rectangle, equal bit for bit to `bake_region`'s base closure at every cell of the commit's tiles, and the commit's `base_id`; every other world returns none. The drawn ground is B plus the crease detail of the field (GEN-109) plus the layer's change, so it differs from B + L by the detail and not by the base.
+
+Verify: A
+Status: active
+Source: Lead 2026-11-13 (P2 E1; the premise was a base difference, the probe found none), crusader's #125 line check, VIEW-069, REND-067
+
+#### Scenario: B at the cells of the commit
+- **WHEN** a commit baked over a region is opened in memory and B is read at cells inside its tiles
+- **THEN** each value equals the C1 read of the production base sampled at the lattice nodes, bit for bit, and the id is the commit's `base_id`
+
+#### Scenario: Another world
+- **WHEN** a world of the in-memory bake is asked for its bake base
+- **THEN** it has none
