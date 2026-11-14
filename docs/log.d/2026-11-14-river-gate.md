@@ -1,0 +1,1 @@
+- 2026-11-14 river-gate (BUILD-055, TEST-136): `cargo xtask river-gate` prints P3's river numbers (closed basins, canyon, erosion depth, lakes at D, relief, H1 edge) on a window or a store; R3a's start surface has 67.3 % of river length in basins, the r3a-e1 store 18.8 %.

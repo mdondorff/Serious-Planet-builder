@@ -23,6 +23,7 @@ mod preview;
 mod process;
 mod repocheck;
 mod retired;
+mod rivergate;
 mod scratch;
 mod speclint;
 mod stages;
@@ -47,6 +48,7 @@ const USAGE: &str = "cargo xtask <command>
   prepush              before every push to a PR branch: check, test fast, and test gpu when the diff against origin/main touches a golden-producing path (render, frame, shaders, generators, ...); prints each step's time and one verdict line (BUILD-016); refuses a working tree that differs from HEAD, since the push sends the commit (BUILD-037)
   layering             crate layering and GPU-free dependency check (CON-02)
   k7-layout [--write-baseline]  the layout report of K7 (BUILD-052): the fixture's tile layout against an alternative, compared with docs/gates/k7-layout-baseline.txt; REVIEW above twice the baseline p99 or max; exit 0; prepush runs it when K7 files change
+  river-gate <store dir | face,i0,i1,j0,j1,seed | r3a> [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--no-key-check]   the river gate (BUILD-055): closed basins on river length (0.5 m, 16 cells), the canyon under the valley and the erosion depth, lakes at D, relief at 200 m and 1 km against the start surface, edge agreement with H1, on a store (its commit's tiles) or a window's start surface; release, under the heavy lock; exit 0
   spec-lint            trace IDs, tiers, requirement coverage (CON-16)
   log [--since YYYY-MM-DD] [--limit N]   the project log: fragments of docs/log.d/ and the entries of docs/log.md, newest first (BUILD-010)
   accept <milestone>   run milestone acceptance, e.g. M0; M4 also judges the perf logs of a streaming window (--logs DIR, default perf/logs) and refuses without a valid one
@@ -106,6 +108,7 @@ fn main() -> ExitCode {
         Some("gate") => heavy::with(&format!("gate {}", args[1..].join(" ")), || gate::run_gate(&root, &args[1..])),
         Some("layering") => layering::run(&root),
         Some("k7-layout") => heavy::with("k7-layout", || k7layout::run(&root, &args[1..])),
+        Some("river-gate") => heavy::with(&format!("river-gate {}", args[1..].join(" ")), || rivergate::run_gate(&root, &args[1..])),
         Some("spec-lint") => speclint::run(&root),
         Some("log") => logcmd::run(&root, &args[1..]),
         Some("accept") => {
