@@ -1,0 +1,1 @@
+- 2026-11-14 openspec-sync-crusader-1: ten merged changes archived (channel-graph, g-surf, gsed-partition, k7-canonical, k7-layout, k7-manifest, k7-probe-emit, l-store, layer-source-l, determinism-threads); GEN-148, GEN-154, GEN-155, GEN-160, GEN-170, STRM-083, STRM-084, TEST-111, TEST-114, BUILD-051 synced as active, GEN-156 and GEN-182 as planned (no citing test); docs only.

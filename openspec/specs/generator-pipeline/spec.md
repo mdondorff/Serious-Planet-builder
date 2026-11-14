@@ -1855,3 +1855,127 @@ Source: SPIKE-92 round 3 (island fields' striations), planner (2026-11-02, inbox
 - **WHEN** the land mask of seeds 1 to 5 is scored on a 1440 x 720 grid
 - **THEN** TEST-088's island band holds
 
+### Requirement: GEN-170 The channel graph as compact arrays
+The bake SHALL keep the segments of H1 as compact arrays built before the discharges are released: per segment its first cell and vertex count, per vertex the direction of the step into it, the routed discharge `Q_w` as a `u16` on a log scale and the bed level as an `i16` count of 0.5 m.
+- The `Q_w` code is 0 for none, else steps of equal ratio from 1e-4 to 1e7 m3/s; a read is within 1.94e-4 of the stored value and K7's burn reads the dequantised value, so the burn and the drawing use one width.
+
+Verify: A
+Status: active
+Source: Architect 2026-11-10 and 2026-11-11, item 15 PR 7
+
+Detail: - The bed level is the running minimum of the H1 surface along the segment, rounded down: the stored bed is never above the surface.
+- Per segment, the vertex ranges under a lake's water are kept (the lake entry before a range, the spill cell at its end): the producer's pieces.
+- An H1 cell one step outside a face resolves across the cube edge as the graph joins it; a corner quadrant has none.
+
+#### Scenario: Chains and codes
+- **WHEN** a hydrology's graph is built
+- **THEN** every chain equals the routing's, every `Q_w` is within the step and every bed does not rise downstream
+
+### Requirement: GEN-148 K7 runs on the base read, with the channels burned in
+K7 SHALL start a tile from `B + C1(regional change)`, `B` read at every cell of the window (no stride) and the regional change read by a C1 read of the regional grid, burn the channels in, run the breach of pass 1 at the local grid, then the incising carve, thermal, the deposition sweep and the pit spreading, and report the change against `B`.
+- The burn-in SHALL lower the cells of the 8-connected line along each segment to the segment's level profile, interpolated linearly, and SHALL NOT raise a cell.
+
+Verify: A
+Status: active
+Source: A3 sections 3.1 to 3.3 and 12.1 (G-SURF), briefing item 11, inbox #104
+
+Detail: - The pits (land cells with a fill depth of at least 0.5 m) SHALL be reported after each stage: the start, the burn-in, the breach alone, the incision, the whole pass.
+- A dam across a channel SHALL be a pit before the burn-in and SHALL NOT be one after it.
+- The result SHALL be the same bits on any thread count.
+- The stored change SHALL read back at the centres of the cells as the bake's surface (before quantisation) and within half a step of `QUANT_STEP_M` after.
+- The difference of the runtime's `B + C1(L)` and the bake's `C1(z)` at the vertices of the store lattice SHALL be reported (maximum, 50th and 99th percentile, the nodes over 0.25 m, their positions, and the two other readings: `B` plus the unclamped `C1(L)`, and the clamped read of the composed `B + L`). G-SURF is the gate at the centres of the local cells, where the bake defines its heights (owner, 2026-11-09): 0 before quantisation, at most half a step after. The vertices are the diagnostic G-SURF-I (GEN-154): 192 of 28,900 nodes (0.66 %) are over 0.25 m after quantisation on the prototype tile, maximum 2.55 m; reported, the clamp stays.
+- The runs of `examples/k7_region` (the pit shares and the G-SURF numbers on a tile of the prototype region) are measurements, not gates; the gates are the tier-A tests.
+
+#### Scenario: K7 on a tile
+- **WHEN** a tile of a small planet with a valley, a dam across it and a channel along its axis is run through K7, with and without the channel, on 1 and 2 threads
+- **THEN** the dam is a pit at the start and is not one after the burn-in, the channel's cells are at its profile, the bits do not depend on the thread count, and the stored change reads back at the cells' centres as the bake's surface
+
+### Requirement: GEN-155 The sediment balance SHALL be the same under every partition the pass has
+The deposition's balance per catchment SHALL be reported term by term, and the totals and the per-catchment terms SHALL not depend on how the region is partitioned.
+- `catchment_terms` SHALL return for every catchment of the sweep's own route its outlet, cell count, eroded, raised and exported volumes and the relative residual of `eroded - raised - exported`; `catchment_balance` SHALL be the sum of those terms.
+- The compact cube and the masked cube SHALL give the same catchments, the same terms (bit for bit, the residual included) and the same heights; the cells outside the landmass SHALL be left alone.
+
+Verify: A
+Status: active
+Source: A3 section 6.7 G-SED, inbox #116
+
+Detail: - The whole sediment pass SHALL give the same heights and report on any thread count, on a region that thermal cuts into more than two pieces.
+- The sums of the terms SHALL match the eroded column read from the heights and the rise read from the volume change (relative 1e-9); the catchments, grouped by outlet, SHALL add up to the whole (1e-12) with the identity under 1e-9 in each group. This is the accounting of a cut along the divides, not a cut of the pass.
+- The partition varied is stated in the test; a spatial cut of the pass is not built (open).
+
+#### Scenario: a compact landmass under three partitions
+- **WHEN** a corner-cap landmass of a sphere of 24 cells a face edge is carved for two rounds and the sediment pass runs on the compact and the masked cube, on 1, 3 and 8 threads, and its catchments are grouped by outlet id modulo 2, 3 and 5
+- **THEN** the terms, the heights and the report are the same bits under the first two partitions, and under the third the groups' totals add up to the whole's with the identity at most 1e-9 in every group
+
+### Requirement: GEN-160 K7 floods with the canonical flood by a parameter
+K7 SHALL, with `canonical_flood` on, flood with the canonical flood (cells visited by level, then cell id; A3 section 6.4) in its pit statistics, its incising carve and its deposition sweep, and with it off SHALL give the bits of the plain-flood K7.
+- The default pass 2 (`deposit_on_own_route`, `carve` with its default rules) SHALL be bit for bit as before.
+- K7 SHALL give the same bits on any thread count with either setting.
+- The change of the stored `L` against the plain flood SHALL be reported (cells changed, maximum, share over 0.25 m).
+
+Verify: A
+Status: active
+Source: A3 section 6.4, inbox #114
+
+#### Scenario: a tile with a chain beside two outlets
+- **WHEN** the pit statistics and the deposition's surface are read on a flat chain between two sea cells, and K7 runs on a small tile with the plain and with the canonical flood
+- **THEN** the plain statistics count the chain's lifted cells and the canonical ones none, the plain K7 equals the digest taken before this change, and the canonical K7 is the same bits on 1 and 2 threads
+
+### Requirement: GEN-182 K7's tile layout is part of its definition
+K7 SHALL be defined over a fixed tile grid of each cube face (ADR 0119): the face's `n x n` cell lattice cut into square tiles of `tile` cells an edge, tile `(ti, tj)` covering the cells `[ti x tile, (ti + 1) x tile) x [tj x tile, (tj + 1) x tile)` (the grid origin is the face's cell `(0, 0)`), each solved in a window of its core plus a halo of `halo` cells on every side. The layout SHALL be a pure function of the face lattice `n`, of `k` and of the profile, never of the request order, the region asked for, the thread count or the schedule:
+
+Verify: B
+Status: planned
+Source: ADR 0119 (owner, 2026-11-12); architect D119 item 1
+
+Detail: - `tile` divides `n`, is a multiple of the base stride (4) and is more than twice `halo`; `halo` is at most `n / 8` and, for a tile with channels, at least `DISC_RADIUS_MAX` plus the smallest profile carry (GEN-169), so that the halo holds the trench disc and the profile's carry; K7 SHALL refuse a layout that breaks any of these, naming the parameter;
+- the layout's values (current value: `TileGrid` and `K7Params` as built; 128 halo cells at the decision) SHALL be inputs of K7's key, with the width law and the flood rules; a different layout is a different generator definition, a new key and no reuse of results; a change of tile size or halo is a generator change with a re-bake, never a free setting;
+- for one layout, input set and version, K7's result SHALL be bit-identical under any thread count, schedule, order and worker assignment (CON-14, CON-30), and no tile's result SHALL depend on which other tiles were asked for.
+
+At a region edge: a region SHALL be the union of whole tiles of the canonical grid, and K7's result for a tile SHALL be the result the same tile has in any other region or in the planet; a region edge adds no tile border, no halo of its own and no outlet. At a coast: cells at or below the sea level (a key input) are the outlets of a window, are neither lowered nor carry (GEN-169, GEN-176), and a window that holds sea runs the same rules as one that does not. At the window's border: the border is an outlet of the window's flood and the cells within `halo` of it are not part of the tile's result. At a cube-face edge: the halo past the face edge is the extended plane of the face (as built); how the tiles of two faces agree there is NOT yet defined and SHALL be settled with the face-seam work (REND-063) before any planet bake; the architect decides whether K7 results at face edges are canonical before then.
+
+K7 is not validated against an unpartitioned reference (ADR 0119 point 4): CON-08's partition-invariance and border-agreement checks are replaced, for K7, by the tier B execution test (TEST-130) and the seam gate G-SEAM.
+
+#### Scenario: One layout, many schedules
+- **WHEN** K7 runs on one layout with 1, 3 and 8 threads and two schedules
+- **THEN** every tile's result is the same bits
+
+#### Scenario: A region
+- **WHEN** a region is baked for a set of whole tiles and the same tiles are baked as part of a larger region
+- **THEN** the results of the shared tiles are the same bits
+
+#### Scenario: A different layout
+- **WHEN** the halo or the tile size changes
+- **THEN** the key changes and no stored result of the other layout is reused
+
+### Requirement: GEN-156 The stored change L of the K7 chain is measured as kind 13 records
+The measurement SHALL encode the core of the local change L of every 1,024-cell tile of the prototype region, from K7 with the channels burned in, as kind 13 counts streams and report the bytes per land cell, the spread over tiles and the extrapolation to an Earth-sized body.
+- A stream SHALL decode to every cell within half a quantisation step (0.125 m) of L.
+- The extrapolation SHALL name its land-cell count and say that the region is one area, not a global figure.
+- The measurement SHALL NOT decide a store format; gate G-STORE is not closed by it.
+
+Verify: D
+Review: the measurement table of `openspec/changes/l-store/design.md`, judged by the architect (A3 section 12.1 gives G-STORE as a numeric gate)
+Status: planned
+Source: A3 section 10 (G-STORE), inbox #106 step 2
+
+#### Scenario: the prototype region
+- **WHEN** `k7_region 200 8 store` is followed by `l_measure`
+- **THEN** the report lists every tile with its bytes and land cells, the pooled, median and highest bytes per land cell, and the Earth-scale size at the pooled and at the highest rate, with a round-trip error of at most 0.125 m
+
+### Requirement: GEN-154 G-SURF is gated at the cell centres and the vertices are reported as G-SURF-I on the stored change
+The surface gate SHALL read the runtime's `B + L` against the bake's surface at the centres of the local cells with `L` as the store keeps it, and SHALL report the lattice vertices as G-SURF-I without gating them.
+- The gate at the centres SHALL hold: at most 1e-9 m before quantisation and half a quantisation step after.
+- The stored change SHALL read back as the quantisation the gate uses (`round(L / step)` in `i16` counts times the step).
+
+Verify: A
+Status: active
+Source: A3 section 12.1 (G-SURF, G-SURF-I), owner 2026-11-09, inbox #105 step 3
+
+Detail: - G-SURF-I SHALL report the 50th, 95th and 99th percentile and the maximum of the difference at the vertices, the share over 0.25 m, the vertices and those over 0.25 m by the bake's local step height (up to 5 m, over 5 m up to 20 m, over 20 m), the largest quotient of the difference and the step height, the spatial concentration (the bins of 64 cells with vertices over 0.25 m against the bins with vertices, and the most in one bin) and the overshoot of the unclamped read of `L`.
+- G-SURF-I SHALL also report the error against the local base slope (the difference over the largest rise of `B` across one cell, over the vertices whose rise is at least 1 m: 99th percentile and maximum, and their number) and the overshoot of the runtime read beyond the range of the four composed cells (maximum and the vertices over 0.25 m).
+- The clamp of the C1 read SHALL stay.
+
+#### Scenario: a smooth tile, with and without a burnt channel
+- **WHEN** K7 runs on a small tile and the gate is read
+- **THEN** the centres hold, every vertex is in one step class and one bin, the percentiles are ordered, and a core of change encoded as a kind 13 stream decodes to the gate's quantised values
