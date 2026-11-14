@@ -68,3 +68,50 @@ Scope: project (streaming cache, LOD, authored items; STRM-027, STRM-034)
 - An edit announced with where the items changed lets the cache keep every tile the change cannot reach (`SelectionCache::note_item_change`); the content keys stay the guarantee for anything not announced. Test the reach rule against the real tile hashes, on small bodies too: the touch test's relative margin is a millionth of `reach / R`.
 - Obsolete when the read set of a coarse tile stops listing its cover nodes one by one.
 
+
+## Moved 2026-11-14 (P1/P2 closure, explorer #147): M9-era entries, superseded or done; still true unless a later entry says otherwise
+
+## 2026-10-29 A CPU latched at 17 % performance inflates every timing
+Scope: project (perf windows, Rasierklinge)
+- On 2026-10-29 the CPU stayed at about 17 % `PercentProcessorPerformance` under load all day (firmware latch); an EC reset (power button held 30 s) restored it.
+- Check `Win32_PerfFormattedData_Counters_ProcessorInformation` under a short load before a perf window and treat numbers from a latched day as invalid.
+- Obsolete when: a BIOS update removes the latch.
+
+## 2026-11-01 The clipmap gather needs one atomic, against ADR 0085 point 9
+Scope: render (REND-047, REND-053; ADR 0085 point 9)
+- Point 9 says layer 1 uses no atomics. Overlapping blocks written by unordered dispatches raced on the software adapter (an incremental gather differed from a full one at random). The gather now clears, claims (`atomicMax` of the job index) and writes, so the finest block wins in any dispatch order.
+- The result of an integer maximum does not depend on order, which is what point 9 protects. REND-053 now says that (the march, upsample and temporal passes stay atomic-free; a tier A scan checks the shaders). The ADR wording needs a one-line amendment (ADR 0078): "no atomics except the owner pass's integer `atomicMax`".
+- Obsolete when the gather resolves overlaps without an atomic (for example one thread per texel scanning the level's blocks, or a spatial index of winners).
+
+## 2026-11-02 A belt narrower than about 190 km cannot meet GEN-097's step limit of 2.0
+Scope: generators (GEN-094, GEN-097; `classes.rs`)
+- The class lattice has a cell of about 39 km and `k` runs from 1 to 7.5, so a step of at most 2.0 needs the weights to change over about 130 km (190 km for a smoothstep). Gaussian belts of 130 km half-width gave steps of 6.5; tent belts of 220 to 500 km and gates over 250 km give 4.9, with 0.22 % of steps over 2.0.
+- A pair of plates must contribute a term that does not change when the two plates swap (distance, convergence and the continental difference are symmetric), and the third plate's weight must fall to 0 where it trades places with the fourth; otherwise the mask jumps at plate bisectors and triple junctions (the straight edges of iteration 0).
+- Obsolete when the limit is restated (a feathering rule, a smaller `k` range) or the lattice is finer.
+
+## 2026-11-02 A rough coast has no gradient at the lattice's scale
+Scope: generators (continent stage GEN-104, class source GEN-094, landform driver GEN-064)
+- The continent value has 8 octaves at gain 0.72 (wavelengths down to about 30 km), so `land depth / |gradient|` is not a distance to the coast: on seed 1 the coast gate went from 0.0003 to 0.70 over one 40 km lattice cell and the step of `k` was 6.5.
+- The class source's coast distances and coastal arcs read the smooth value (4 octaves, no islands), the landform driver the coarse value (3 octaves); both are the full value without its detail terms (the octave series is normalised by its full weight sum, or the low octaves would be rescaled). A driver on the full value fails the lattice's closeness test (0.05 to 0.33 against 0.03).
+- Obsolete when the bake replaces the landform driver (m9-bake) and the class lattice's cell is finer than the roughest octave.
+
+## 2026-11-02 The coast gate on the rough depth sets the largest steps of k
+Scope: generators (class source GEN-094, GEN-097's step limit)
+- The coast gate switched at the full continent value's coast, which is rough at the lattice's scale: the gate went from 0 to 0.6 over one 40 km cell (largest `k` step 6.0).
+- Ramping over the smooth depth (0.3) and the true depth (0.2) took it to 5.1-5.8; the rest is geometric (a belt flank changes by 0.2-0.3 of its core per cell while the classes differ by 4-6 in `k`).
+- Plate draws beyond 64 widen the seed spread (seed 2's land above 2 km went to 27.7 % at 256 draws): the retry scores land at a convergent margin, not relief.
+- Obsolete when the arcs are convergent-only or the owner moves GEN-097 to a p99 form.
+
+## 2026-11-04 The runtime lattice and the surface the layer was carved on are two generators
+Scope: project (M9 bake; the erosion layer's runtime read, GEN-112)
+What happened: on seed 14, mountains tile 2/12/10, the stored bake's surface (`global::sample`, the legacy generator, read C1 from a 611 m lattice) is 2,064 m rms from `BakeInputs::base` (the class source the layer was carved on): p5 -3,372 m, p95 +125 m; the relief channels `m + k (e - m)` (512-cell estimate) leave 2,061 m. A lattice of `BakeInputs::base` itself read C1 is 3.4 m rms (p95 5.5 m, max 28 m) at 611 m, 4.9 m at 1.2 km, 2.0 m at 305 m.
+Assumption it changes: that the layer can be added to the runtime base plus `k` and `m`; and that the lattice of a store is the surface a bake read.
+Proposed follow-up: the product's field bake is made from the class source and carries `BakeInputs::id()` (the viewer refuses `--erosion on` without that marker); `with_layer` needs no relief channels.
+Obsolete when: the field bake is made from the class source and the legacy generator is retired.
+
+## 2026-11-05 The stored change of keep-pits includes the pits
+Scope: project (GEN-120, STRM-075)
+What happened: the stored change (kind 13) keeps the pits and the runtime adds kind 17 back, so `removed_depth_m` on the stored change counts a pit as erosion; `erosion_depth_m` adds the pit depth first.
+Assumption it changes: that kind 13 is the change the viewer draws.
+Obsolete when: lake water replaces the filled look.
+
