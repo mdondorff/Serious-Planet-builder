@@ -14,8 +14,9 @@
 | window replay of frame-17426-path.txt: held-back frames (ADR 0074) | 2,755 of 13,518 (20.4 %) | 1,518 of 9,345 (16.2 %) |
 | held tiles: distinct, levels, most at once | 217, 17-18, 102 | 232, 17-18, 111 |
 | frames drawn over the same path | 13,518 | 9,345 (31 % fewer: the pin's cost, 5 detail sums a sample) |
+| with the per-thread memo of the centres' detail | | 14,237 frames; held 2,934 (20.6 %), 237 tiles at levels 17-18 |
 
-- The held tiles barely move: the steep ground is the one-cell trenches and banks of the stored L (K7), not the detail. The frame count drop is the pin's cost on the frame thread's height reads; a per-batch memo of the centres' detail (not done) would take most of it.
+- The held tiles barely move: the steep ground is the one-cell trenches and banks of the stored L (K7), not the detail. The memo takes the pin's cost back to the frame count of main.
 
 ## Not in this change
 - ADR 0122 point 2 (detail 0 on a river line's trench): waits for crusader's REND-067 line placement.
