@@ -653,6 +653,7 @@ fn main() -> Result<(), String> {
     }
     let tag = if transfer.is_empty() { tag } else { format!("{tag}-t{transfer}") };
     let tag = if round_l { format!("{tag}-round") } else { tag };
+    let tag = if std::env::var("PLANET_SCHOTT").is_ok() { format!("{tag}-schott") } else { tag };
     let t_sample = t0.elapsed().as_secs_f64();
     let h1_runoff: Vec<f32> = (0..rw * rh)
         .map(|c| {
@@ -715,7 +716,23 @@ fn main() -> Result<(), String> {
         let (x, y) = (x0 + (c % w) as i64, y0 + (c / w) as i64);
         x >= ci0 && x < ci1 && y >= cj0 && y < cj1
     };
-    let mut log = std::fs::OpenOptions::new().create(true).append(true).open(out.join("metrics.txt")).map_err(|e| e.to_string())?;
+    // PLANET_PICS: the full-resolution core (every L cell) as f32 heights and a u8 channel mask (the L route, area at the initiation threshold), for the review's picture set (lead #118).
+    if std::env::var("PLANET_PICS").is_ok() {
+        let (cw, chh) = ((ci1 - ci0) as usize, (cj1 - cj0) as usize);
+        let mut hb: Vec<u8> = Vec::with_capacity(cw * chh * 4);
+        let mut mb: Vec<u8> = Vec::with_capacity(cw * chh);
+        for y in cj0..cj1 {
+            for x in ci0..ci1 {
+                let c = (y - y0) as usize * w + (x - x0) as usize;
+                hb.extend_from_slice(&(zr[c] as f32).to_le_bytes());
+                mb.push(u8::from(channel[c]));
+            }
+        }
+        std::fs::write(out.join(format!("{tag}-full-{cw}x{chh}.f32")), hb).map_err(|e| e.to_string())?;
+        std::fs::write(out.join(format!("{tag}-chan-{cw}x{chh}.u8")), mb).map_err(|e| e.to_string())?;
+        println!("PICS {tag}: wrote the {cw} x {chh} core heights and channel mask");
+    }
+    let mut log =std::fs::OpenOptions::new().create(true).append(true).open(out.join("metrics.txt")).map_err(|e| e.to_string())?;
     writeln!(log, "{lat_line}").unwrap();
     if !transfer_line.is_empty() {
         writeln!(log, "{tag} {transfer_line}").unwrap();
