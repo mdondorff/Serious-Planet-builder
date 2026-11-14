@@ -1,0 +1,1 @@
+- 2026-11-14 known-tier-c-2 (BUILD-056): the draw-flag test's local timeout joins the known classes (spikes/gpu-skeleton); gpu_preflight's refusal text and 8 s bound are two assertions, and only the bound is a known class.

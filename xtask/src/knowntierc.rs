@@ -291,16 +291,16 @@ mod tests {
     const ABORT: &str = "       ABORT [  55.757s] ( 11/235) planet::gpu_all gpu_flight::the_flight_matches\n           - with code 0xc0000005: Unzulässiger Zugriff (os error 998)";
     const TIMEOUT: &str =
         "     TIMEOUT [ 331.391s] (188/235) planet::gpu_all gpu_skeleton::the_pipelined_loop_settles_on_the_synchronous_frame";
-    const PREFLIGHT: &str = "        FAIL [  39.481s] ( 19/235) planet::gpu_all gpu_preflight::the_preflight_smoke_prints_the_host_facts_and_a_reading_and_never_refuses\n    thread 'gpu_preflight::the_preflight_smoke_prints_the_host_facts_and_a_reading_and_never_refuses' (23588) panicked at crates\\app\\tests\\gpu_preflight.rs:22:5:\n    the refusal took 47 s";
+    const PREFLIGHT: &str = "        FAIL [  39.481s] ( 19/235) planet::gpu_all gpu_preflight::the_preflight_smoke_prints_the_host_facts_and_a_reading_and_never_refuses\n    thread 'gpu_preflight::the_preflight_smoke_prints_the_host_facts_and_a_reading_and_never_refuses' (23588) panicked at crates\\app\\tests\\gpu_preflight.rs:24:9:\n    the refusal took 47 s";
 
     // spec: BUILD-056
     #[test]
     fn the_tracked_list_parses_and_every_line_names_its_tracked_entry() {
         let l = list();
-        assert_eq!(l.len(), 3);
+        assert_eq!(l.len(), 4);
         assert!(l.iter().all(|k| k.tracked == "Local `test gpu` worse since the display changes"));
         assert_eq!(l[0].outcome, Outcome::Abort("0xc0000005".into()));
-        assert_eq!(l[2].outcome, Outcome::PanicAt("gpu_preflight.rs:22".into()));
+        assert_eq!(l[2].outcome, Outcome::PanicAt("gpu_preflight.rs:24".into()));
         assert!(parse_list("a | maybe | b").unwrap_err().contains("outcome `maybe`"));
         assert!(parse_list("a | timeout").unwrap_err().contains("expected"));
     }
@@ -313,7 +313,7 @@ mod tests {
         assert!(s[0].starts_with("tier C: 3 known-class failure(s), listed"), "{s:?}");
         assert!(s.iter().any(|l| l.contains("gpu_flight::the_flight_matches (abort 0xc0000005")));
         assert!(s.iter().any(|l| l.contains("gpu_skeleton::the_pipelined_loop_settles_on_the_synchronous_frame (timeout")));
-        assert!(s.iter().any(|l| l.contains("gpu_preflight::") && l.contains("panic at crates/app/tests/gpu_preflight.rs:22")));
+        assert!(s.iter().any(|l| l.contains("gpu_preflight::") && l.contains("panic at crates/app/tests/gpu_preflight.rs:24")));
         assert_eq!(s.len(), 4, "each failure once, though the log repeats them after the summary");
     }
 
@@ -327,8 +327,17 @@ mod tests {
             .unwrap_err()
             .contains("gpu_water::the_lit_frame_matches_its_golden"));
         // The known test failing elsewhere than its bound.
-        let elsewhere = PREFLIGHT.replace("gpu_preflight.rs:22:5", "gpu_preflight.rs:40:5");
+        let elsewhere = PREFLIGHT.replace("gpu_preflight.rs:24:9", "gpu_preflight.rs:40:5");
         assert!(judge(&log(&elsewhere), &l, STATUS, 0).is_err(), "gpu_preflight failing at another line is not the 8 s bound");
+        // The refusal text (line 23) is a property, not the bound: not covered.
+        let text = PREFLIGHT.replace("gpu_preflight.rs:24:9", "gpu_preflight.rs:23:5");
+        assert!(judge(&log(&text), &l, STATUS, 0).is_err(), "a wrong refusal text is no known class");
+        // The draw-flag test's timeout (the two pipelined loops under oversubscription, spikes/gpu-skeleton) is covered.
+        let draw = TIMEOUT.replace(
+            "the_pipelined_loop_settles_on_the_synchronous_frame",
+            "the_draw_flag_selects_the_path_and_every_loop_draws_the_same_frame_on_either",
+        );
+        assert!(judge(&log(&draw), &l, STATUS, 0).is_ok());
         // Another abort code, another gpu_skeleton test timing out, a crash signal.
         assert!(judge(&log(&ABORT.replace("0xc0000005", "0xc0000409")), &l, STATUS, 0).is_err());
         assert!(judge(&log(&TIMEOUT.replace("the_pipelined_loop_settles", "a_terrain_bundle_replays")), &l, STATUS, 0).is_err());
@@ -354,7 +363,7 @@ mod tests {
         let l = list();
         let without = "## Tracked\n- **Something else**\n";
         assert!(judge(&log(ABORT), &l, without, 0).is_err(), "no Tracked entry: no class");
-        assert_eq!(untracked(&l, without).len(), 3);
+        assert_eq!(untracked(&l, without).len(), l.len());
         assert!(untracked(&l, STATUS).is_empty());
     }
 
