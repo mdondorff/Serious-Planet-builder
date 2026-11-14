@@ -58,6 +58,18 @@ fn main() -> Result<(), String> {
         (nums.first().copied().unwrap_or(68_728), nums.get(1).copied().unwrap_or(5_536), nums.get(2).copied().unwrap_or(12));
     let threads: usize = args.iter().position(|a| a == "--threads").map_or(8, |k| args[k + 1].parse().expect("--threads T"));
     let (seed, face, margin) = (14u64, Face(1), 200usize);
+    // `--at LAT,LON` (degrees): the square around the local cell under that place (face 1, the commit's), instead of X Y.
+    let (sx, sy) = match args.iter().position(|a| a == "--at") {
+        Some(k) => {
+            let v: Vec<f64> = args[k + 1].split(',').map(|s| s.trim().parse().expect("--at LAT,LON")).collect();
+            let d = Vec3::from_lat_lon(v[0].to_radians(), v[1].to_radians());
+            let (f, s, t) = planet_core::cube::direction_to_face(&TangentWarp, d);
+            assert_eq!(f, face, "--at must lie on face 1");
+            let n = 98_304.0;
+            (libm::floor((s + 1.0) * 0.5 * n) as i64, libm::floor((t + 1.0) * 0.5 * n) as i64)
+        }
+        None => (sx, sy),
+    };
     let def = WorldDefinition::single_planet(R, seed);
     let inputs = class_inputs(&def, seed, threads);
 
@@ -85,7 +97,7 @@ fn main() -> Result<(), String> {
     println!("{}", world.base_note());
     let field = world.field()?;
 
-    let (mut d_base, mut d_exact, mut d_ground, mut d_band) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let (mut d_base, mut d_exact, mut d_ground, mut d_band, mut d_corner) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
     for y in sy - radius..=sy + radius {
         for x in sx - radius..=sx + radius {
             let d = face_to_direction(&TangentWarp, face, 2.0 * (x as f64 + 0.5) / n_local - 1.0, 2.0 * (y as f64 + 0.5) / n_local - 1.0);
@@ -98,6 +110,9 @@ fn main() -> Result<(), String> {
             d_exact.push(exact - b);
             d_ground.push(ground - (b + l));
             d_band.push(ground - (b_viewer + l));
+            // Between four centres (the corner of the cell): what the drawn ground adds there.
+            let c = face_to_direction(&TangentWarp, face, 2.0 * (x as f64 + 1.0) / n_local - 1.0, 2.0 * (y as f64 + 1.0) / n_local - 1.0);
+            d_corner.push(field.height(c) - (bake_b(c) + layer.change_at(c)?));
             if (x - sx).abs() <= 1 && (y - sy).abs() <= 1 {
                 println!("({x},{y}) B bake {b:.3}  B viewer {b_viewer:.3}  exact base {exact:.3}  L {l:.3}  B+L {:.3}  viewer ground {ground:.3}", b + l);
             }
@@ -108,6 +123,7 @@ fn main() -> Result<(), String> {
         ("exact BakeInputs::base - bake B (what the C1 lattice read loses)", &mut d_exact),
         ("viewer ground - (bake B + L)", &mut d_ground),
         ("viewer ground - (viewer base + L)  (the terms on top of the base)", &mut d_band),
+        ("between the centres (cell corners): viewer ground - (bake B + L)", &mut d_corner),
     ] {
         let (min, p50, p99, max) = (pct(v, 0.0), pct(v, 0.5), pct(v, 0.99), pct(v, 1.0));
         let abs_max = v.iter().fold(0.0f64, |m, x| m.max(x.abs()));

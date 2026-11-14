@@ -182,6 +182,20 @@ pub struct ErosionLayer {
     id: u64,
 }
 
+/// A cell centre: its direction, its weight and its cell `(face, i, j)`.
+type FaceCentre = (Vec3, f64, (u8, u32, u32));
+
+/// The cell centres around a direction with their weights ([`ErosionLayer::centres_around`], GEN-187).
+#[derive(Clone, Debug, PartialEq)]
+pub struct CentreStencil {
+    /// The direction is a cell centre away from a cube edge: a pinned term is 0 there.
+    pub at_centre: bool,
+    /// The centres with their weights (the weights sum to 1): four on the own face, and four more of each neighbouring face within [`EDGE_BLEND_CELLS`] of a cube edge.
+    pub centres: Vec<(Vec3, f64)>,
+    /// The cell `(face, i, j)` of each centre, in the order of `centres`: a key a reader can memoise the centre's term by.
+    pub cells: Vec<(u8, u32, u32)>,
+}
+
 /// A tile of a stencil, looked up once: its index in the face and the tile (`None`: the layer holds none).
 type HeldTile = ((u32, u32), Option<Arc<LayerTile>>);
 
@@ -203,6 +217,11 @@ impl ErosionLayer {
         Ok(ErosionLayer { src, id })
     }
 
+    /// Cells a face edge of the layer's grid.
+    pub fn cells(&self) -> usize {
+        self.src.grid().cells
+    }
+
     /// The identity of the layer as a field reads it.
     pub fn id(&self) -> u64 {
         self.id
@@ -211,6 +230,65 @@ impl ErosionLayer {
     /// The range of the change over the whole planet.
     pub fn global_range(&self) -> (f64, f64) {
         self.src.global_range()
+    }
+
+    /// The cell centres of the layer around the unit direction `d`, each with its weight, and whether `d` is a cell centre itself (GEN-187, ADR 0122): what a term pinned to the stored
+    /// samples subtracts. On its own face these are the four centres around the point with their bilinear weights, at the coordinates of [`ErosionLayer::change_at`] (snapped to a centre
+    /// within [`CENTRE_SNAP_CELLS`], clamped to the face's cells), so a direction made from a cell's indices is a centre. Within [`EDGE_BLEND_CELLS`] of a cube edge the stencil is
+    /// cross-faded with the neighbouring face's, with the weights of `change_at`, so the pinned term meets itself across the edge; there a point is never a centre.
+    pub fn centres_around(&self, d: Vec3) -> CentreStencil {
+        let n = self.src.grid().cells as f64;
+        let (face, s, t) = direction_to_face(&TangentWarp, d);
+        let (own, at_centre) = self.face_centres(face, d);
+        let (x, y) = ((s + 1.0) * 0.5 * n, (t + 1.0) * 0.5 * n);
+        let beyond = 1.0 + 2.0 / n;
+        let neighbour = |so: f64, to: f64| direction_to_face(&TangentWarp, face_to_direction(&TangentWarp, face, so, to)).0;
+        let weight = |dist: f64| {
+            let u = (dist / EDGE_BLEND_CELLS).min(1.0);
+            1.0 - u * u * (3.0 - 2.0 * u)
+        };
+        let mut faces: Vec<([FaceCentre; 4], f64)> = vec![(own, 1.0)];
+        let (dx, dy) = (x.min(n - x), y.min(n - y));
+        if dx < EDGE_BLEND_CELLS {
+            faces.push((self.face_centres(neighbour(if x < n - x { -beyond } else { beyond }, t), d).0, weight(dx)));
+        }
+        if dy < EDGE_BLEND_CELLS {
+            faces.push((self.face_centres(neighbour(s, if y < n - y { -beyond } else { beyond }), d).0, weight(dy)));
+        }
+        let total: f64 = faces.iter().map(|f| f.1).sum();
+        let centres = faces.iter().flat_map(|(c, wf)| c.iter().map(move |(dir, w, _)| (*dir, w * wf / total))).collect();
+        let cells = faces.iter().flat_map(|(c, _)| c.iter().map(|(_, _, k)| *k)).collect();
+        CentreStencil { at_centre: at_centre && faces.len() == 1, centres, cells }
+    }
+
+    /// The four centres of `face` around `d` read on the plane of that face (a direction of a neighbouring face at the plane's continuation, clamped to the face's cells), with their
+    /// bilinear weights and cells, and whether `d` is a centre of that face.
+    fn face_centres(&self, face: Face, d: Vec3) -> ([FaceCentre; 4], bool) {
+        let n = self.src.grid().cells;
+        let w = d.dot(face.normal());
+        let plane = |u: f64| libm::atan(u) / core::f64::consts::FRAC_PI_4;
+        let (s, t) = (plane(d.dot(face.u_axis()) / w), plane(d.dot(face.v_axis()) / w));
+        let top = (n - 1) as f64;
+        let (x, y) = (snap(((s + 1.0) * 0.5 * n as f64 - 0.5).clamp(0.0, top)), snap(((t + 1.0) * 0.5 * n as f64 - 0.5).clamp(0.0, top)));
+        let (i, j) = ((x as usize).min(n - 2), (y as usize).min(n - 2));
+        let (fx, fy) = (x - i as f64, y - j as f64);
+        let whole = |f: f64| f == 0.0 || f == 1.0;
+        let centre = |a: usize, b: usize, w: f64| -> FaceCentre {
+            (
+                face_to_direction(&TangentWarp, face, 2.0 * (a as f64 + 0.5) / n as f64 - 1.0, 2.0 * (b as f64 + 0.5) / n as f64 - 1.0),
+                w,
+                (face.0, a as u32, b as u32),
+            )
+        };
+        (
+            [
+                centre(i, j, (1.0 - fx) * (1.0 - fy)),
+                centre(i + 1, j, fx * (1.0 - fy)),
+                centre(i, j + 1, (1.0 - fx) * fy),
+                centre(i + 1, j + 1, fx * fy),
+            ],
+            whole(fx) && whole(fy),
+        )
     }
 
     /// The layer's change at the unit direction `d`: the monotone C1 cubic of the cells around the point, first along each row, then across the rows (GEN-188; the cell centres being the
