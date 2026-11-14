@@ -1,0 +1,9 @@
+RIVERS GEN-188 steps of the regional read at its cell-centre lines: 8986064 of 16640280 line-crossing L cell pairs jump over 0.1 m beyond their neighbours
+RIVERS conditioning 250 s (on: true)
+RIVERS region 8160 x 8160 L cells (66.6 M); front 119 s, start surface 6 s, fill 291 s, route 130 s, accumulation 1 s; channel cells (area >= 75 km2) 328686 in the window, 195376 inside the commit's tiles; 338 pits
+RIVERS D inf m: 195376 channel cells inside the tiles (24974 in a pit of the start surface, 0 in lakes); cut under the start surface p50 11.00 p95 114.02 p99 250.55 max 937.66 m, 31993 over 50 m (16.38 %); ground rises over 0.25 m 0 of 195189 steps, water rises 0
+RIVERS D 20 m: 195376 channel cells inside the tiles (24974 in a pit of the start surface, 5692 in lakes); cut under the start surface p50 10.15 p95 102.17 p99 179.00 max 437.75 m, 29119 over 50 m (14.90 %); ground rises over 0.25 m 800 of 195189 steps, water rises 0
+RIVERS edge: H1 crossings with Q >= 1 m3/s 44 (10 out), L crossings 55 (12 out); 38 H1 crossings have an L crossing of the same kind within 2 km; farther: ["out (68867,6083) Q 2 at 2.7 km", "in (69411,6923) Q 3 at 3.7 km", "out (69403,6947) Q 15 at 6.9 km", "in (69411,6987) Q 16 at 2.9 km", "in (69411,7739) Q 158 at 5.0 km", "out (69403,8787) Q 1 at 109.4 km"]
+RIVERS along the regional cell-centre lines: B + regional 46215 of 195376 channel steps (23.65 %), B alone 25696 of 216678 (11.86 %) (a straight step on one of the 2 of 8 columns or rows next to a line)
+RIVERS store or rebuild: stored L geometry ~ 1.0 MB for the commit's tiles (1 direction byte + 2 bytes Q + 2 bytes level a channel cell); rebuild from B alone 66 s for the region window (sample, flood, route, accumulate); channel cells inside the tiles on B + regional 195376, on B alone 216678, in both 15413 (7.9 % of B + regional's)
+RIVERS total 619 s

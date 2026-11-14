@@ -52,3 +52,22 @@ Routing at L does not meet the bar by itself: with every pit breached 10.6 % of 
 
 ## Visuals
 NOT RUN: the before/after stills need a bake whose K7 burns the L-routed lines, which this spike does not build (it measures the network only). The numbers above decide whether that bake is worth making.
+
+## Steps 1 and 2 (lead 2026-11-14)
+| R3a, inside the commit's tiles | clamped regional read | GEN-188 limiter | limiter + region-wide K7 carve before routing |
+|---|---|---|---|
+| pits of the routed surface | 27,636 | 30,555 | 338 |
+| channel cells in a pit | 134,564 of 184,118 (73 %) | 145,716 of 193,281 (75 %) | 24,974 of 195,376 (13 %, pits of the start surface) |
+| D = inf: cut over 50 m under the start surface | 10.55 % | 10.92 % | 16.38 % (p50 11 m, max 938 m) |
+| D = 20 m: cut over 50 m | 0.00 % | 0.00 % | 14.90 % |
+| D = 20 m: channel cells in lakes | 99,820 (54 %) | 110,237 (57 %) | 5,692 (2.9 %) |
+| D = 20 m: ground / water rises over 0.25 m | 43,893 / 268 | 47,250 / 261 | 800 / 0 |
+| channel steps straight along a regional cell-centre line (B alone: 11.9 %) | 17.8 % | 18.8 % | 23.7 % |
+| edge: H1 crossings matched within 2 km | 36 of 44 | 38 of 44 | 38 of 44 |
+| wall / peak commit | 185 s / - | 233 s / - | 619 s (carve 250 s, fill 291 s) / 6.26 GB |
+- The step count of the regional read is not a clean step detector: it counts second differences over 0.1 m and rose with the step-free limiter (6.84 M to 8.99 M), so it also counts the read's curvature. The earlier "41 % step" overstated the clamp.
+- The limiter does not make the start surface drainable (pits and cuts unchanged within 1-2 %): the clamp is not the cause.
+- The region-wide carve drains the surface (338 pits), but its breach cuts the canyons itself: 16 % of the river cells lie over 50 m under the start surface, deeper than without it.
+
+## Verdict after steps 1 and 2
+None of the variants meets the 1 % bar without half the rivers in lakes. The start surface `B + regional` holds L-scale closed basins on most river paths (73-75 % of channel length); a river through them is either cut to their bottoms (breach: 10-16 % of river cells over 50 m) or held as a lake (D = 20 m: 54-57 % of river cells). The clamp of the regional read is not the cause; the relief of `B` at L is. Routing at L does not remove that choice; it only puts the river where the water goes. The decision (canyons, lakes, or a base whose L relief drains) is the ADR's.
