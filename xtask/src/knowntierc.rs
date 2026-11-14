@@ -148,7 +148,7 @@ fn panic_at(lines: &[&str], name: &str) -> Option<String> {
 pub fn summary_not_passed(log: &str) -> Option<usize> {
     let line = log.lines().find(|l| l.trim_start().starts_with("Summary ["))?;
     let after = line.split("] ").nth(1)?;
-    let run: usize = after.split(" tests run").next()?.trim().split_whitespace().last()?.parse().ok()?;
+    let run: usize = after.split(" tests run").next()?.split_whitespace().last()?.parse().ok()?;
     let passed: usize = after.split("run: ").nth(1)?.split(" passed").next()?.trim().parse().ok()?;
     run.checked_sub(passed)
 }
