@@ -23,6 +23,7 @@ pub mod meshpack;
 pub mod pack;
 pub mod region_bake;
 pub mod relief_store;
+pub mod river_gate;
 pub mod river_read;
 pub mod stage_key;
 pub mod tiles;

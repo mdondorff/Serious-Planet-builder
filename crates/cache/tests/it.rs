@@ -56,6 +56,8 @@ mod pack;
 mod region_bake;
 #[path = "relief_store.rs"]
 mod relief_store;
+#[path = "river_gate.rs"]
+mod river_gate;
 #[path = "stage_keys.rs"]
 mod stage_keys;
 #[path = "stamp_keys.rs"]
