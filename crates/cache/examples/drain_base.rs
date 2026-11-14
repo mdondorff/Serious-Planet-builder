@@ -20,6 +20,8 @@ const LATTICE: usize = 16_384;
 const REGIONAL: usize = 12_288;
 const SECONDS_PER_YEAR: f64 = 31_557_600.0;
 const NONE: u32 = u32::MAX;
+/// SPIKE-118: the hand-over surface before the Schott pipeline (the reference of how far the pipeline lowered the rivers).
+static HAND: std::sync::OnceLock<Vec<f64>> = std::sync::OnceLock::new();
 
 struct Lattice {
     face: Face,
@@ -234,6 +236,137 @@ fn pct(v: &mut [f64], f: f64) -> f64 {
     }
     v.sort_by(f64::total_cmp);
     v[((v.len() - 1) as f64 * f) as usize]
+}
+
+/// The block mean of an L-resolution array over `f` x `f` cells (a scale of `f` L cells).
+fn block_mean(w: usize, h: usize, v: &[f64], f: usize) -> (Vec<f64>, usize, usize) {
+    let (ws, hs) = (w / f, h / f);
+    let mut o = vec![0.0; ws * hs];
+    for j in 0..hs {
+        for i in 0..ws {
+            let mut s = 0.0;
+            for y in 0..f {
+                for x in 0..f {
+                    s += v[(j * f + y) * w + i * f + x];
+                }
+            }
+            o[j * ws + i] = s / (f * f) as f64;
+        }
+    }
+    (o, ws, hs)
+}
+
+/// Bilinear upsampling of a scale-`f` array (cell `i` centred at L coordinate `i f + f/2 - 1/2`) to scale `g` (`g < f`, both in L cells).
+fn upsample(src: &[f64], wf: usize, hf: usize, f: usize, wg: usize, hg: usize, g: usize) -> Vec<f64> {
+    let mut o = vec![0.0; wg * hg];
+    for j in 0..hg {
+        for i in 0..wg {
+            let (x, y) = ((i * g) as f64 + g as f64 / 2.0 - 0.5, (j * g) as f64 + g as f64 / 2.0 - 0.5);
+            let (u, v) = (((x - (f as f64 / 2.0 - 0.5)) / f as f64).clamp(0.0, (wf - 1) as f64), ((y - (f as f64 / 2.0 - 0.5)) / f as f64).clamp(0.0, (hf - 1) as f64));
+            let (i0, j0) = ((u as usize).min(wf - 2), (v as usize).min(hf - 2));
+            let (fu, fv) = (u - i0 as f64, v - j0 as f64);
+            let a = |ii: usize, jj: usize| src[jj * wf + ii];
+            o[j * wg + i] = (a(i0, j0) * (1.0 - fu) + a(i0 + 1, j0) * fu) * (1.0 - fv) + (a(i0, j0 + 1) * (1.0 - fu) + a(i0 + 1, j0 + 1) * fu) * fv;
+        }
+    }
+    o
+}
+
+/// SPIKE-118: Schott et al. 2024 with per-scale parameters, from the 4-neighbour hand-over `z` (L resolution, replaced by the result). At 407, 204 and 101.8 m: the input is the coarser
+/// result upsampled (bilinear) plus the hand-over detail band between the two scales; the regional kernel runs toward steady state (at most `--max-rounds` rounds, stopping when the mean
+/// change on land falls under `--tol` m a round) with K scaled with the cell size and no uplift (the 814 m solve applied it); the elevation retargeting of the paper pulls the low
+/// frequencies of the result (a box mean of radius `--retarget` cells, twice) back to those of the input. Then the multi-scale breach (radii 8, 4, 2, 1 L cells, then a plain breach).
+fn schott(args: &[String], z: &mut Vec<f64>, w: usize, h: usize, front: &planet_cache::region_bake::RegionFront, threads: usize) -> String {
+    let max_rounds: usize = arg(args, "--max-rounds").map_or(4, |v| v.parse().unwrap());
+    let tol: f64 = arg(args, "--tol").map_or(0.1, |v| v.parse().unwrap());
+    let rt: i64 = arg(args, "--retarget").map_or(4, |v| v.parse().unwrap());
+    let k_scale_on = std::env::var("PLANET_SCHOTT_KFIX").is_err();
+    let uplift_on = std::env::var("PLANET_SCHOTT_UPLIFT").is_ok();
+    let retarget_on = std::env::var("PLANET_SCHOTT_NORETARGET").is_err();
+    let mut carve = planet_generators::bake::carve::CarveParams {
+        steps: 5,
+        reroute_every: 5,
+        round_rules: planet_generators::bake::route::RoundRules::default(),
+        cell_metric: false,
+        window_cut: true,
+        ..planet_generators::bake::carve::CarveParams::default()
+    };
+    front.solve.precision.apply(&mut carve);
+    carve.round_f32 = false;
+    let k0 = carve.k_dt;
+    let u0 = carve.u_over_k;
+    let hand = z.clone();
+    let mut notes = Vec::new();
+    let mut prev: Option<(Vec<f64>, usize, usize, usize)> = None;
+    let t0 = std::time::Instant::now();
+    for f in [4usize, 2, 1] {
+        let ts = t0.elapsed().as_secs_f64();
+        let (hf, ws, hs) = if f == 1 { (hand.clone(), w, h) } else { block_mean(w, h, &hand, f) };
+        let input: Vec<f64> = match &prev {
+            None => hf.clone(),
+            Some((tp, wp, hp, fp)) => {
+                // The coarser result upsampled, plus the hand-over detail between the two scales.
+                let up_t = upsample(tp, *wp, *hp, *fp, ws, hs, f);
+                let (hp_mean, _, _) = block_mean(w, h, &hand, *fp);
+                let up_h = upsample(&hp_mean, *wp, *hp, *fp, ws, hs, f);
+                (0..ws * hs).map(|c| if hf[c] > 0.0 { up_t[c] + (hf[c] - up_h[c]) } else { hf[c] }).collect()
+            }
+        };
+        let cell = 101.8 * f as f64;
+        let gs = planet_generators::bake::Grid::new(ws, hs, cell);
+        let outs = gs.outlets(&input, 0.0);
+        carve.k_dt = if k_scale_on { k0 * cell / 814.0 } else { k0 };
+        carve.u_over_k = if uplift_on { u0 } else { 0.0 };
+        let mut t = input.clone();
+        let mut rounds = 0usize;
+        let mut last = f64::NAN;
+        for _ in 0..max_rounds {
+            let before = t.clone();
+            let _ = planet_generators::bake::round::solve_rounds(&gs, &mut t, &outs, &carve, 1, &threads, front.solve.stream);
+            rounds += 1;
+            let (mut sum, mut n) = (0.0, 0usize);
+            for c in 0..ws * hs {
+                if before[c] > 0.0 {
+                    sum += (t[c] - before[c]).abs();
+                    n += 1;
+                }
+            }
+            last = sum / n.max(1) as f64;
+            if last < tol {
+                break;
+            }
+        }
+        if retarget_on {
+            let d: Vec<f64> = input.iter().zip(&t).map(|(a, b)| a - b).collect();
+            let lp = box_mean(ws, hs, &box_mean(ws, hs, &d, rt), rt);
+            for c in 0..ws * hs {
+                if input[c] > 0.0 {
+                    t[c] += lp[c];
+                }
+            }
+        }
+        notes.push(format!("{cell:.0} m: {rounds} rounds (last mean |dz| {last:.3} m), K x {:.3}, {:.0} s", carve.k_dt / k0, t0.elapsed().as_secs_f64() - ts));
+        prev = Some((t, ws, hs, f));
+    }
+    let (mut t, _, _, _) = prev.expect("the finest scale");
+    let tb = t0.elapsed().as_secs_f64();
+    let outlet: Vec<bool> = (0..w * h).map(|c| c % w == 0 || c / w == 0 || c % w == w - 1 || c / w == h - 1 || t[c] <= 0.0).collect();
+    for r in [8i64, 4, 2, 1] {
+        let mut b = t.clone();
+        let _ = breach(w, h, &mut b, &outlet, 1.0e-3);
+        let d: Vec<f64> = t.iter().zip(&b).map(|(a, bb)| a - bb).collect();
+        let g = box_mean(w, h, &box_mean(w, h, &d, r), r);
+        for c in 0..w * h {
+            t[c] -= g[c];
+        }
+    }
+    let _ = breach(w, h, &mut t, &outlet, 1.0e-3);
+    notes.push(format!("multi-scale breach (8, 4, 2, 1, then plain) {:.0} s", t0.elapsed().as_secs_f64() - tb));
+    *z = t;
+    format!(
+        "SCHOTT (K scaled {k_scale_on}, uplift {uplift_on}, retarget {retarget_on} radius {rt}, at most {max_rounds} rounds a scale, tol {tol} m): {}",
+        notes.join("; ")
+    )
 }
 
 fn main() -> Result<(), String> {
@@ -485,12 +618,41 @@ fn main() -> Result<(), String> {
         for c in 0..w * h {
             let u = (dist[c] / hill).min(1.0);
             let sm = u * u * (3.0 - 2.0 * u);
-            z0[c] = if zr4[c] > 0.0 { zr4[c] + sm * (zb[c] - zbr[c]) } else { zr4[c] };
+            // Land stays land: the residual never takes a cell of the drained surface under the sea level plus 5 mm.
+            z0[c] = if zr4[c] > 0.0 { (zr4[c] + sm * (zb[c] - zbr[c])).max(zr4[c].min(0.005)) } else { zr4[c] };
         }
-        transfer_line += &format!("; residual damped over {hill} m");
+        transfer_line += &format!("; residual damped over {hill} m (floored at the sea level + 5 mm)");
+        if std::env::var("PLANET_SCHOTT").is_ok() {
+            drop(dist);
+            drop(zb);
+            drop(zbr);
+            let _ = HAND.set(z0.clone());
+            let line = schott(&args, &mut z0, w, h, &front, threads);
+            transfer_line += &format!("; {line}");
+        }
         println!("{transfer_line}");
     }
+    // PLANET_ROUND_L: one round of the regional kernel at L over the window (SPIKE-115 / SPIKE-117 parameters), for the comparison and the picture sheet.
+    let round_l = std::env::var("PLANET_ROUND_L").is_ok();
+    if round_l {
+        let mut carve = planet_generators::bake::carve::CarveParams {
+            steps: 5,
+            reroute_every: 5,
+            round_rules: planet_generators::bake::route::RoundRules::default(),
+            cell_metric: false,
+            window_cut: true,
+            ..planet_generators::bake::carve::CarveParams::default()
+        };
+        front.solve.precision.apply(&mut carve);
+        carve.round_f32 = false;
+        let gl = planet_generators::bake::Grid::new(w, h, 101.8);
+        let ol = gl.outlets(&z0, 0.0);
+        let tr = std::time::Instant::now();
+        let _ = planet_generators::bake::round::solve_rounds(&gl, &mut z0, &ol, &carve, 1, &threads, front.solve.stream);
+        println!("ROUND_L one round at L in {:.0} s", tr.elapsed().as_secs_f64());
+    }
     let tag = if transfer.is_empty() { tag } else { format!("{tag}-t{transfer}") };
+    let tag = if round_l { format!("{tag}-round") } else { tag };
     let t_sample = t0.elapsed().as_secs_f64();
     let h1_runoff: Vec<f32> = (0..rw * rh)
         .map(|c| {
@@ -579,6 +741,90 @@ fn main() -> Result<(), String> {
     );
     println!("{l1}");
     writeln!(log, "{l1}").unwrap();
+    // SPIKE-117 basin metric (agreed with crusader): a basin counts when it is at least 0.5 m deep and covers at least N cells, under a fill with epsilon 1e-7 m a cell (flats are not basins).
+    {
+        let n_min: usize = std::env::var("PLANET_BASIN_N").ok().and_then(|v| v.parse().ok()).unwrap_or(16);
+        let d_min: f64 = std::env::var("PLANET_BASIN_DEPTH").ok().and_then(|v| v.parse().ok()).unwrap_or(0.5);
+        let fs = planet_generators::bake::flood::priority_flood_with(&g, &zr, &outlet, 1.0e-7, false);
+        let mut lab = vec![u32::MAX; w * h];
+        let mut keep: Vec<bool> = Vec::new();
+        let mut size_depth: Vec<(usize, f64)> = Vec::new();
+        for s0 in 0..w * h {
+            if fs[s0] - zr[s0] <= 1.0e-4 || lab[s0] != u32::MAX {
+                continue;
+            }
+            let id = keep.len() as u32;
+            let (mut maxd, mut cells) = (0.0f64, 0usize);
+            let mut stack = vec![s0];
+            lab[s0] = id;
+            while let Some(c) = stack.pop() {
+                maxd = maxd.max(fs[c] - zr[c]);
+                cells += 1;
+                let (cx, cy) = ((c % w) as i64, (c / w) as i64);
+                for (dx, dy) in NB {
+                    let (nx, ny) = (cx + dx, cy + dy);
+                    if nx < 0 || ny < 0 || nx >= w as i64 || ny >= h as i64 {
+                        continue;
+                    }
+                    let qq = ny as usize * w + nx as usize;
+                    if fs[qq] - zr[qq] > 1.0e-4 && lab[qq] == u32::MAX {
+                        lab[qq] = id;
+                        stack.push(qq);
+                    }
+                }
+            }
+            keep.push(maxd >= d_min && cells >= n_min);
+            size_depth.push((cells, maxd));
+        }
+        let (mut ch, mut on) = (0usize, 0usize);
+        for c in 0..w * h {
+            if channel[c] && inside(c) {
+                ch += 1;
+                on += usize::from(lab[c] != u32::MAX && keep[lab[c] as usize]);
+            }
+        }
+        let counted = keep.iter().filter(|&&k| k).count();
+        let mut other = String::new();
+        for nn in [4usize, 8, 16, 32, 64] {
+            let (mut ch2, mut on2) = (0usize, 0usize);
+            for c in 0..w * h {
+                if channel[c] && inside(c) {
+                    ch2 += 1;
+                    on2 += usize::from(lab[c] != u32::MAX && { let (sz, dp) = size_depth[lab[c] as usize]; sz >= nn && dp >= d_min });
+                }
+            }
+            other += &format!(" N{nn} {:.2} %", 100.0 * on2 as f64 / ch2.max(1) as f64);
+        }
+        let l117 = format!(
+            "BASINS117 {tag}: river length on basins at least {d_min} m deep and {n_min} cells: {:.2} % ({on} of {ch}); basins counted {counted} of {} in the window; by N:{other}",
+            100.0 * on as f64 / ch.max(1) as f64,
+            keep.len()
+        );
+        println!("{l117}");
+        writeln!(log, "{l117}").unwrap();
+    }
+    if let Some(hand) = HAND.get() {
+        let mut low: Vec<f64> = (0..w * h).filter(|&c| channel[c] && inside(c)).map(|c| hand[c] - zr[c]).collect();
+        let n_l = low.len();
+        let over = low.iter().filter(|v| **v > 50.0).count();
+        let up = low.iter().filter(|v| **v < -1.0).count();
+        let mut land: Vec<f64> = (0..w * h).filter(|&c| inside(c) && hand[c] > 0.0).map(|c| hand[c] - zr[c]).collect();
+        let land_over = land.iter().filter(|v| **v > 50.0).count();
+        let n_land = land.len();
+        let ll = format!(
+            "LOWERED {tag}: river cells under the hand-over p50 {:.2} p95 {:.2} p99 {:.2} max {:.2} m, over 50 m {:.2} %, raised over 1 m {:.2} %; land cells lowered over 50 m {:.2} % (p99 {:.2} m)",
+            pct(&mut low, 0.5),
+            pct(&mut low, 0.95),
+            pct(&mut low, 0.99),
+            low.last().copied().unwrap_or(0.0),
+            100.0 * over as f64 / n_l.max(1) as f64,
+            100.0 * up as f64 / n_l.max(1) as f64,
+            100.0 * land_over as f64 / n_land.max(1) as f64,
+            pct(&mut land, 0.99)
+        );
+        println!("{ll}");
+        writeln!(log, "{ll}").unwrap();
+    }
     for d_max in [f64::INFINITY, 20.0] {
         let lake = |c: usize| label[c] != u32::MAX && depth_of[label[c] as usize] > d_max;
         let drained = |c: usize| if lake(c) { filled[c] } else { zr[c] };
@@ -763,6 +1009,48 @@ fn main() -> Result<(), String> {
         writeln!(log, "{l_b}
 {l_r}
 {l_c}").unwrap();
+    }
+    // As SPIKE-117: the share of channel steps along a grid axis (a 4-neighbour step), and the relief as the p50 of the height range in 2 x 2 and 10 x 10 windows on land.
+    {
+        let (mut steps, mut axis) = (0usize, 0usize);
+        for c in 0..w * h {
+            let r = routing.receiver[c];
+            if r == none || !channel[c] || !inside(c) {
+                continue;
+            }
+            let (cx, cy, rx, ry) = (c % w, c / w, r as usize % w, r as usize / w);
+            steps += 1;
+            axis += usize::from(cx == rx || cy == ry);
+        }
+        let range_p50 = |k: usize| -> f64 {
+            let mut v: Vec<f64> = Vec::new();
+            for by in (0..h - k).step_by(k) {
+                for bx in (0..w - k).step_by(k) {
+                    let c0 = by * w + bx;
+                    if !inside(c0) || zr[c0] <= 0.0 {
+                        continue;
+                    }
+                    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+                    for yy in 0..k {
+                        for xx in 0..k {
+                            let q = zr[(by + yy) * w + bx + xx];
+                            lo = lo.min(q);
+                            hi = hi.max(q);
+                        }
+                    }
+                    v.push(hi - lo);
+                }
+            }
+            pct(&mut v, 0.5)
+        };
+        let la = format!(
+            "AXIS117 {tag}: channel steps along a grid axis {:.1} % ({axis} of {steps}); relief p50 range 2 x 2 {:.2} m, 10 x 10 {:.2} m",
+            100.0 * axis as f64 / steps.max(1) as f64,
+            range_p50(2),
+            range_p50(10)
+        );
+        println!("{la}");
+        writeln!(log, "{la}").unwrap();
     }
     // Relief at 200 m - 1 km on land in the core: the std of (box mean over 2 cells - box mean over 10 cells), and the range in 1 km blocks (10 x 10 L cells).
     let (b1, b5) = (box_mean(w, h, &z0, 1), box_mean(w, h, &z0, 5));
