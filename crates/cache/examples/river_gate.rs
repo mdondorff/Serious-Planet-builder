@@ -115,8 +115,9 @@ fn main() -> Result<(), String> {
     }
     let (face, seed) = (Face(win[0] as u8), win[5] as u64);
     let region = (win[1], win[2], win[3], win[4]);
-    if region.0 < margin + 1 || region.2 < margin + 1 || region.1 + margin + 1 >= REGIONAL || region.3 + margin + 1 >= REGIONAL {
-        return Err(format!("the window {region:?} with the margin {margin} reaches past the face"));
+    // The C1 read meets base nodes 3 below and 4 above the margin's (to_node below): the window keeps 4 regional cells of the face beyond its margin on each side.
+    if region.0 < margin + 4 || region.2 < margin + 4 || region.1 + margin + 4 >= REGIONAL || region.3 + margin + 4 >= REGIONAL {
+        return Err(format!("the window {region:?} with the margin {margin} reaches within 4 regional cells of the face's edge"));
     }
     let def = WorldDefinition::single_planet(R, seed);
     let inputs = class_inputs(&def, seed, threads);
@@ -176,10 +177,42 @@ fn main() -> Result<(), String> {
     let mut surface = start.clone();
     let mut inside = in_box.clone();
     let mut label = format!("start surface of the window {win:?}, margin {margin}, counted over the region's box");
+    let mut sea_level_m = 0.0;
     if let Some(dir) = store {
         let commit = Commit::read(dir)?.ok_or_else(|| format!("{}: no commit record", dir.display()))?;
         let world = Arc::new(GlobalWorld::from_definition(&def).map_err(|e| format!("{e:?}"))?);
         let tiles = TileStore::open(dir, world.params()).map_err(|e| format!("{}: {e}", dir.display()))?;
+        // The tiles are placed on this window's L grid and laid on its B: the commit's grid, radius, seed and base must be this window's. Its inputs identity names the window, the rounds and the
+        // carve (RegionSpec::effective_inputs_id): checked with the keys, not with --no-key-check (a spike's carve differs by design).
+        let cs = &commit.spec;
+        let mut differ: Vec<String> = Vec::new();
+        if cs.cells as usize != spec.local() {
+            differ.push(format!("cells {} (the window's {})", cs.cells, spec.local()));
+        }
+        if cs.radius_m != R {
+            differ.push(format!("radius {} m (the window's {R} m)", cs.radius_m));
+        }
+        if cs.seed != seed {
+            differ.push(format!("seed {} (the window's {seed})", cs.seed));
+        }
+        if cs.base_id != spec.base_id {
+            differ.push(format!("base {:016x} (the window's {:016x})", cs.base_id, spec.base_id));
+        }
+        if !no_key_check && cs.inputs_id != spec.effective_inputs_id() {
+            differ.push(format!(
+                "inputs {:016x} (the window's {:016x}: another window, margin, rounds or carve)",
+                cs.inputs_id,
+                spec.effective_inputs_id()
+            ));
+        }
+        if !differ.is_empty() {
+            return Err(format!(
+                "{}: the commit was not baked on the window {win:?} with margin {margin}: {}",
+                dir.display(),
+                differ.join(", ")
+            ));
+        }
+        sea_level_m = cs.sea_level_m;
         let l_spec = commit.spec.l_spec();
         let t = l_spec.grid.tile;
         inside = vec![false; w * h];
@@ -215,7 +248,7 @@ fn main() -> Result<(), String> {
             return Err(format!("{}: none of the commit's {} tiles lies inside the window {win:?}", dir.display(), commit.tiles.len()));
         }
         label = format!(
-            "store {} (commit {:016x}, {read} tiles read, {outside} outside the window; {}): the stored ground B + L over its tiles, the start surface around them, window {win:?}",
+            "store {} (commit {:016x}, {read} tiles read, {outside} outside the window; {}): the stored ground B + L over its tiles, which drain to their border, window {win:?}, sea level {sea_level_m} m; the stored change's 0.25 m steps add pits to the 5 cm reference only",
             dir.display(),
             commit.id,
             if no_key_check { "keys not checked: spike store" } else { "keys checked" }
@@ -249,7 +282,7 @@ fn main() -> Result<(), String> {
         }
     });
     let grid = planet_generators::bake::Grid::new(w, h, front.solve.grid.dx() / l as f64);
-    let outlet = grid.outlets(&surface, 0.0);
+    let outlet = grid.outlets(&surface, sea_level_m);
     let report = measure(
         &GateInput {
             grid: &grid,
@@ -260,6 +293,8 @@ fn main() -> Result<(), String> {
             region: &in_box,
             h1: &h1,
             seed: front.solve.stream,
+            sea_level_m,
+            outside_drains: store.is_some(),
         },
         &params,
     );

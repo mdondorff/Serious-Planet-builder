@@ -29,7 +29,21 @@ fn run(start: &[f64], surface: &[f64], p: &GateParams) -> planet_cache::river_ga
     let g = Grid::new(N, N, DX);
     let outlet = g.outlets(surface, 0.0);
     let all = vec![true; N * N];
-    measure(&GateInput { grid: &g, start, surface, outlet: &outlet, inside: &all, region: &all, h1: &[], seed: 7 }, p)
+    measure(
+        &GateInput {
+            grid: &g,
+            start,
+            surface,
+            outlet: &outlet,
+            inside: &all,
+            region: &all,
+            h1: &[],
+            seed: 7,
+            sea_level_m: 0.0,
+            outside_drains: false,
+        },
+        p,
+    )
 }
 
 // spec: TEST-136, BUILD-055
@@ -150,4 +164,68 @@ fn the_report_is_the_same_for_the_same_input_and_names_every_measure() {
         assert!(lines.iter().any(|l| l.starts_with(&format!("RIVER-GATE {m}"))), "no {m} line in {lines:?}");
     }
     assert!(lines.iter().any(|l| l.contains("no H1 crossing")), "an input without H1 says so");
+}
+
+// spec: TEST-136, BUILD-055
+#[test]
+fn a_store_s_tiles_drain_to_their_border_so_the_start_surface_around_them_dams_no_river() {
+    // The candidate burns the floor 10 m deep over the tiles (y >= 10); below them the start surface stands 10 m higher at the border (the floor falls 1 m a cell: a 10-cell pit).
+    let start = valley();
+    let mut surface = start.clone();
+    for y in 10..N {
+        surface[y * N + 20] -= 10.0;
+    }
+    let g = Grid::new(N, N, DX);
+    let outlet = g.outlets(&surface, 0.0);
+    let tiles: Vec<bool> = (0..N * N).map(|c| c / N >= 10).collect();
+    let gate = |drains: bool| {
+        measure(
+            &GateInput {
+                grid: &g,
+                start: &start,
+                surface: &surface,
+                outlet: &outlet,
+                inside: &tiles,
+                region: &tiles,
+                h1: &[],
+                seed: 7,
+                sea_level_m: 0.0,
+                outside_drains: drains,
+            },
+            &GateParams { basin_cells: 4, ..params() },
+        )
+    };
+    let dammed = gate(false);
+    assert!(dammed.basins >= 1 && dammed.basin_river_cells > 0, "without the drained border the step at y = 10 dams the burn: {dammed:?}");
+    let drained = gate(true);
+    assert_eq!((drained.basins, drained.basin_river_cells), (0, 0), "{drained:?}");
+}
+
+// spec: TEST-136, BUILD-055
+#[test]
+fn land_is_above_the_sea_level() {
+    let z = valley();
+    let g = Grid::new(N, N, DX);
+    let all = vec![true; N * N];
+    let at = |sea: f64| {
+        let outlet = g.outlets(&z, sea);
+        measure(
+            &GateInput {
+                grid: &g,
+                start: &z,
+                surface: &z,
+                outlet: &outlet,
+                inside: &all,
+                region: &all,
+                h1: &[],
+                seed: 7,
+                sea_level_m: sea,
+                outside_drains: false,
+            },
+            &params(),
+        )
+    };
+    assert!(at(0.0).river_cells > 0);
+    let high = at(200.0);
+    assert_eq!((high.river_cells, high.relief_10_m), (0, 0.0), "the whole valley lies under a 200 m sea: {high:?}");
 }

@@ -74,6 +74,10 @@ pub struct GateInput<'a> {
     pub h1: &'a [Crossing],
     /// The routing's jitter seed.
     pub seed: u64,
+    /// The sea level (metres): land is above it.
+    pub sea_level_m: f64,
+    /// Every cell outside `inside` is an outlet: a store's tiles drain to their border, so the start surface around them (without the candidate's burn) dams no river leaving the tiles.
+    pub outside_drains: bool,
 }
 
 /// The p99 and the maximum of a set of values (0 for none).
@@ -295,7 +299,7 @@ fn valley_floor(grid: &Grid, z: &[f64], c: usize) -> f64 {
 }
 
 /// The p50 of the height range of the land blocks of `k x k` cells that lie inside (blocks tiled from the grid's corner).
-fn relief(grid: &Grid, z: &[f64], inside: &[bool], k: usize) -> f64 {
+fn relief(grid: &Grid, z: &[f64], inside: &[bool], k: usize, sea: f64) -> f64 {
     let (w, h) = (grid.w(), grid.h());
     let mut r: Vec<f64> = Vec::new();
     for by in (0..h.saturating_sub(k - 1)).step_by(k) {
@@ -309,7 +313,7 @@ fn relief(grid: &Grid, z: &[f64], inside: &[bool], k: usize) -> f64 {
                     hi = hi.max(z[c]);
                 }
             }
-            if all_inside && lo > 0.0 {
+            if all_inside && lo > sea {
                 r.push(hi - lo);
             }
         }
@@ -337,13 +341,23 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         [input.start.len(), input.surface.len(), input.outlet.len(), input.inside.len(), input.region.len()].iter().all(|&l| l == n),
         "one start height, surface height, outlet, inside and region flag per cell ({n} cells)"
     );
-    let z = input.surface;
-    let (routing, route_filled) = route_rules_filled(g, z, input.outlet, ROUTE_EPSILON_M, input.seed, 0.0, None, RoundRules::default());
+    // With `outside_drains`, the cells outside are outlets below the sea for the routing and the floods (an outlet keeps its height in a flood, so it must stand below every cell it drains);
+    // the valley ring and the relief read the surface itself.
+    let drained = |c: usize| input.outside_drains && !input.inside[c];
+    let lowered: Vec<f64>;
+    let z: &[f64] = if input.outside_drains {
+        lowered = (0..n).map(|c| if drained(c) { input.surface[c].min(input.sea_level_m - 1.0) } else { input.surface[c] }).collect();
+        &lowered
+    } else {
+        input.surface
+    };
+    let outlet: Vec<bool> = (0..n).map(|c| input.outlet[c] || drained(c)).collect();
+    let (routing, route_filled) = route_rules_filled(g, z, &outlet, ROUTE_EPSILON_M, input.seed, 0.0, None, RoundRules::default());
     let area = areas(g, &routing);
-    let river: Vec<bool> = (0..n).map(|c| area[c] >= params.channel_area_m2 && z[c] > 0.0).collect();
+    let river: Vec<bool> = (0..n).map(|c| area[c] >= params.channel_area_m2 && z[c] > input.sea_level_m).collect();
     let (reference, _) = pits(g, z, &route_filled, REFERENCE_WET_M);
     drop(route_filled);
-    let filled = priority_flood_with(g, z, input.outlet, BASIN_EPSILON_M, false);
+    let filled = priority_flood_with(g, z, &outlet, BASIN_EPSILON_M, false);
     let (label, pits) = pits(g, z, &filled, BASIN_WET_M);
     let is_basin = |&(d, k): &(f64, usize)| d >= params.basin_depth_m && k >= params.basin_cells;
     let basin = |c: usize| label[c] != u32::MAX && is_basin(&pits[label[c] as usize]);
@@ -360,7 +374,7 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         basin_cells += usize::from(basin(c));
         reference_cells += usize::from(reference[c] != u32::MAX);
         lake_cells += usize::from(lake(c));
-        let floor = valley_floor(g, z, c);
+        let floor = valley_floor(g, input.surface, c);
         canyon.push(floor - with_lakes[c]);
         canyon_b.push(floor - breached[c]);
         erosion.push(input.start[c] - with_lakes[c]);
@@ -384,10 +398,10 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         canyon: tail(canyon, params.cut_m),
         canyon_breached: tail(canyon_b, params.cut_m),
         erosion: tail(erosion, params.cut_m),
-        relief_2_start_m: relief(g, input.start, input.inside, 2),
-        relief_2_m: relief(g, z, input.inside, 2),
-        relief_10_start_m: relief(g, input.start, input.inside, 10),
-        relief_10_m: relief(g, z, input.inside, 10),
+        relief_2_start_m: relief(g, input.start, input.inside, 2, input.sea_level_m),
+        relief_2_m: relief(g, input.surface, input.inside, 2, input.sea_level_m),
+        relief_10_start_m: relief(g, input.start, input.inside, 10, input.sea_level_m),
+        relief_10_m: relief(g, input.surface, input.inside, 10, input.sea_level_m),
         edge_h1,
         edge_matched,
     }

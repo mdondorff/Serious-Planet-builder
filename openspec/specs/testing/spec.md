@@ -1990,3 +1990,7 @@ Source: Lead 2026-11-14 (explorer #143), BUILD-055
 #### Scenario: The pit limits
 - **WHEN** a 25-cell pit 3 m deep lies on the river
 - **THEN** it is one closed basin with a cell minimum of 4 or 16, none with 26, and a 9-cell or 0.3 m pit is none
+
+#### Scenario: A store's border and the sea
+- **WHEN** a burn ends at the edge of the counted tiles above a higher start surface, or the sea stands over the valley
+- **THEN** the drained border leaves no basin there, and no cell under the sea is a river cell
