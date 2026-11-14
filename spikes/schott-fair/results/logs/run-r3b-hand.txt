@@ -1,0 +1,9 @@
+$ target/spike116/drain_base118.exe --face 2 --region 9968,10587,8304,8923 --seed 15 --variant none --out target/spike118
+LATTICE f2-9968-8304-none: 1365 x 1366 nodes (611 m); land nodes changed over 1 cm 0 of 1584104 (0.00 %); lowered p50 NaN p95 NaN max 0.00 m, over 50 m on 0.00 % of land nodes; raised p50 NaN p95 NaN max 0.00 m; mean change 0.000 m; 
+TRANSFER d4: the 814 m breach lowered 51717 of 883611 land cells: p50 3.44 p95 47.39 max 208.27 m; over 50 m 2384 (0.27 % of land); residual damped over 400 m (floored at the sea level + 5 mm)
+RIVERS f2-9968-8304-none-td4: core 208946 channel cells; 58542 on closed basins of the start surface (28.02 % of river length); pits touching the core 7882; time nodes 19 s, front 33 s, sample 90 s, route 101 s
+BASINS117 f2-9968-8304-none-td4: river length on basins at least 0.5 m deep and 16 cells: 11.64 % (24312 of 208946); basins counted 2235 of 27593 in the window; by N: N4 14.63 % N8 12.84 % N16 11.64 % N32 10.25 % N64 8.93 %
+RIVERS f2-9968-8304-none-td4 D inf m: cut p50 0.00 p95 1.98 p99 4.72 max 12.23 m, over 50 m 0.00 %; channel cells in lakes 0.00 %
+RIVERS f2-9968-8304-none-td4 D 20 m: cut p50 0.00 p95 1.98 p99 4.72 max 12.23 m, over 50 m 0.00 %; channel cells in lakes 0.00 %
+RELIEF f2-9968-8304-none-td4: band 200 m-1 km std 3.08 m (|.| p95 5.79); 1 km block relief p50 10.2 p95 82.4 m (217884 blocks)
+TOTAL f2-9968-8304-none-td4 274 s

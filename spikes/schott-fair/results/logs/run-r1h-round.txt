@@ -1,0 +1,10 @@
+$ target/spike116/drain_base118c.exe --face 1 --region 8056,8675,760,1379 --seed 14 --variant none --out target/spike118
+LATTICE f1-8056-760-none: 1366 x 1366 nodes (611 m); land nodes changed over 1 cm 0 of 1301217 (0.00 %); lowered p50 NaN p95 NaN max 0.00 m, over 50 m on 0.00 % of land nodes; raised p50 NaN p95 NaN max 0.00 m; mean change 0.000 m; 
+ROUND_L one round at L in 68 s
+RIVERS f1-8056-760-none-round: core 111584 channel cells; 7207 on closed basins of the start surface (6.46 % of river length); pits touching the core 583; time nodes 19 s, front 26 s, sample 73 s, route 259 s
+BASINS117 f1-8056-760-none-round: river length on basins at least 0.5 m deep and 16 cells: 0.98 % (1093 of 111584); basins counted 190 of 19218 in the window; by N: N4 1.09 % N8 1.06 % N16 0.98 % N32 0.83 % N64 0.67 %
+RIVERS f1-8056-760-none-round D inf m: cut p50 0.00 p95 0.01 p99 0.93 max 4.54 m, over 50 m 0.00 %; channel cells in lakes 0.00 %
+RIVERS f1-8056-760-none-round D 20 m: cut p50 0.00 p95 0.01 p99 0.93 max 4.54 m, over 50 m 0.00 %; channel cells in lakes 0.00 %
+AXIS117 f1-8056-760-none-round: channel steps along a grid axis 47.4 % (52920 of 111584); relief p50 range 2 x 2 6.67 m, 10 x 10 59.29 m
+RELIEF f1-8056-760-none-round: band 200 m-1 km std 13.93 m (|.| p95 30.19); 1 km block relief p50 59.3 p95 328.4 m (170071 blocks)
+TOTAL f1-8056-760-none-round 517 s

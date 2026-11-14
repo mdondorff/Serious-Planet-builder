@@ -1,0 +1,10 @@
+$ target/spike116/drain_base118.exe --face 2 --region 9968,10587,8304,8923 --seed 15 --variant none --out target/spike118
+LATTICE f2-9968-8304-none: 1365 x 1366 nodes (611 m); land nodes changed over 1 cm 0 of 1584104 (0.00 %); lowered p50 NaN p95 NaN max 0.00 m, over 50 m on 0.00 % of land nodes; raised p50 NaN p95 NaN max 0.00 m; mean change 0.000 m; 
+TRANSFER d4: the 814 m breach lowered 51717 of 883611 land cells: p50 3.44 p95 47.39 max 208.27 m; over 50 m 2384 (0.27 % of land); residual damped over 400 m (floored at the sea level + 5 mm); SCHOTT (K scaled true, uplift false, retarget true radius 4, at most 4 rounds a scale, tol 0.1 m): 407 m: 4 rounds (last mean |dz| 2.856 m), K x 0.500, 14 s; 204 m: 4 rounds (last mean |dz| 1.010 m), K x 0.250, 66 s; 102 m: 4 rounds (last mean |dz| 0.353 m), K x 0.125, 335 s; multi-scale breach (8, 4, 2, 1, then plain) 176 s
+RIVERS f2-9968-8304-none-td4: core 179793 channel cells; 10220 on closed basins of the start surface (5.68 % of river length); pits touching the core 61; time nodes 18 s, front 33 s, sample 679 s, route 115 s
+BASINS117 f2-9968-8304-none-td4: river length on basins at least 0.5 m deep and 16 cells: 0.00 % (0 of 179793); basins counted 240 of 295 in the window; by N: N4 0.00 % N8 0.00 % N16 0.00 % N32 0.00 % N64 0.00 %
+LOWERED f2-9968-8304-none-td4: river cells under the hand-over p50 20.13 p95 90.23 p99 127.14 max 179.88 m, over 50 m 21.20 %, raised over 1 m 0.99 %; land cells lowered over 50 m 0.97 % (p99 49.45 m)
+RIVERS f2-9968-8304-none-td4 D inf m: cut p50 0.00 p95 0.00 p99 0.51 max 2.09 m, over 50 m 0.00 %; channel cells in lakes 0.00 %
+RIVERS f2-9968-8304-none-td4 D 20 m: cut p50 0.00 p95 0.00 p99 0.51 max 2.09 m, over 50 m 0.00 %; channel cells in lakes 0.00 %
+RELIEF f2-9968-8304-none-td4: band 200 m-1 km std 5.98 m (|.| p95 12.94); 1 km block relief p50 15.4 p95 125.1 m (217792 blocks)
+TOTAL f2-9968-8304-none-td4 884 s
