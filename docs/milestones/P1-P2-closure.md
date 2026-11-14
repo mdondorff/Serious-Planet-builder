@@ -15,7 +15,7 @@ Sources: `cargo xtask worktrees --no-size` (2026-11-14 11:00; a snapshot), `docs
 | bulldozer-role-fc3a48 | detached e581e4c1 | no merged PR | 2026-11-12 | 0 | ask bulldozer (BUILD-051 is on main: likely remove) |
 | bulldozer-status-b1 | detached df8c3cf7 | in origin/main | 2026-11-12 | 0 | remove |
 | burn | change/burn-width | PR 1362 merged | 2026-11-11 | 0 | remove |
-| coast-tilt-id | change/river-gate-names (#1505 merged) | open (#1506, explorer) | 2026-11-14 | 0 | keep until #1506 merges |
+| coast-tilt-id | docs/p1-p2-closure (river gate #1505, #1506 merged) | this report's PR | 2026-11-14 | 0 | keep (explorer's current worktree) |
 | crusader-main | detached 845c901b | in origin/main | 2026-11-14 | 0 | keep (crusader's base) |
 | exitbase | change/exit-base-valley | PR 1379 merged | 2026-11-11 | 0 | remove |
 | f32 | change/round-f32 | PR 1394 merged | 2026-11-12 | 0 | remove |
