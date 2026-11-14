@@ -1981,7 +1981,7 @@ Source: STRM-083, architect 2026-11-10
 - **THEN** each case above has a test that cites STRM-083
 
 ### Requirement: TEST-136 The river gate's measures on fixtures
-Tier-A fixtures SHALL check the river gate (BUILD-055): a draining valley has no basin, canyon, erosion depth or lake; a pit on its river is a closed basin only from 0.5 m and the cell minimum (default 16), while SPIKE-114's reference counts a 0.3 m pit; a basin over D is a lake with no canyon below it, and the same basin breached is a canyon; a trench 60 m under its valley is a canyon, a surface lowered 60 m everywhere only erosion depth; half the relief reads 50 %; an H1 crossing is matched only by an L crossing of its direction within 2 km; the same input gives the same report; the xtask refuses bad arguments.
+Tier-A fixtures SHALL check the river gate (BUILD-055): a draining valley has no basin, valley depth, burn, erosion depth or lake; a pit on its river is a closed basin only from 0.5 m and 16 cells, while SPIKE-114's reference counts a 0.3 m pit; a basin over D is a lake with no burn below it, and the same basin breached is a burn; a 60 m trench is valley depth, no burn; a surface lowered 60 m everywhere only erosion depth; half the relief reads 50 %; an H1 crossing is matched only by an L crossing of its direction within 2 km; the same input gives the same report; the xtask refuses bad arguments.
 
 Verify: A
 Status: active
