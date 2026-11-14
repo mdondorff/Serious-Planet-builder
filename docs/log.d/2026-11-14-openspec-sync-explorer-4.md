@@ -1,0 +1,1 @@
+- 2026-11-14 OpenSpec sync batch 4 (explorer, P3 E5): g-store archived; STRM-078 synced as planned (a measurement, no test cites it; the G-STORE extension is parked).
