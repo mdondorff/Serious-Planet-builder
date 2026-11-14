@@ -12,7 +12,6 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 - **World-build share values** (ADR 0097, BUDG-014): terrain 40 %, future content 40 %, margin 20 % of a 24 h day, proposed; confirm or change.
 - **Ocean square at orbit** (owner test 2026-11-03, `docs/dev_screenshots/2026-11-03-ocean-square-*.jpg`): press F9 when it shows again; the bundle lets crusader replay it (Tracked).
 - **Cliffs** (SPIKE-94, #1082): asset library or procedural only; the Alps' 4.3 % of area above 45° as the v1 coverage. Trigger: after M9's generator rounds.
-- **ADR 0110 acceptance** gates item 15 PR 5b (it retires ADR 0101 point 3); CON-08: resolved by constitution v1.7 (ADR 0116, #1335). ADRs 0110-0115: architect's text pass in P0, then owner acceptance.
 - **Optional, when convenient:** the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); excluding the repo's `target` folders from Windows Search indexing.
 
 Dormant items moved to `docs/parking.md` (2026-11-12).
@@ -21,10 +20,9 @@ Dormant items moved to `docs/parking.md` (2026-11-12).
 Every row names an exit item (ADR 0120). Everything else is in `docs/parking.md`.
 | Exit | Step | Lane |
 |---|---|---|
-| E1 | SPIKE-115: erosion rounds at L in the region; the incremental re-route after an edit timed | crusader |
-| E1 | SPIKE-116: a base whose 100 m relief drains by construction (rivers first, the valley network) | spikes |
+| E1 | ADR 0123 (draft #1499) after the owner's external review: the equal-terms comparison (crusader) and the picture set (spikes) for the review document | crusader, spikes, lead |
 | E2 | After E1's pick: rivers at L with stored geometry, whole-network levels, the lakes ADR, GEN-188's limiter in the bake reads; R3a re-baked | crusader |
-| E3 | GEN-187 (pinned detail, with the memo) merged; the owner's two flights (laptop panel, external display) | explorer, owner |
+| E3 | The owner's two flights (laptop panel, external display) | owner |
 | E4 | The thermal-dam options brief | spikes |
 | E5 | P1 and P2 closure; OpenSpec sync and archive in batches; m9-bake per ID; the independent review pass | lead, all lanes |
 
