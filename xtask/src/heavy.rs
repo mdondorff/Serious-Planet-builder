@@ -316,11 +316,12 @@ mod tests {
         let want = data.join("tmp").join("heavy");
         assert_eq!(data_root_state_dir(&main.join("xtask")), Some(want.clone()), "the main checkout");
         assert_eq!(data_root_state_dir(&worktree), Some(want), "a worktree finds the same folder");
-        let lone = dir("no-data-root");
-        std::fs::create_dir_all(lone.join("repo").join("xtask")).unwrap();
-        assert_eq!(data_root_state_dir(&lone.join("repo").join("xtask")), None, "no data root: the fallbacks apply");
+        // The nearest data root wins over any farther one (the temporary directory itself may sit below a data root on the owner's machine,
+        // so the case "no data root at all" is not testable here).
+        let inner = main.join("SeriousPlanetData");
+        std::fs::create_dir_all(&inner).unwrap();
+        assert_eq!(data_root_state_dir(&worktree), Some(inner.join("tmp").join("heavy")), "the nearest data root wins");
         let _ = std::fs::remove_dir_all(&base);
-        let _ = std::fs::remove_dir_all(&lone);
     }
 
     // spec: BUILD-026
