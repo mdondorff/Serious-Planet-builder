@@ -9,7 +9,7 @@
 - Lead, 2026-11-14: a bug fix of an active rule; it does not wait for ADR 0123.
 
 ## What changes
-- GEN-173: a graded level is at most the cell's chessboard level. Where that bound binds, the cell drains to its chessboard parent.
+- GEN-173: a graded level is at most the cell's chessboard level. Where that bound binds, the cell keeps its chessboard parent as a lower neighbour.
 - New scenario: a flat with a hump.
 - TEST-119 (f): a seeded rough low plain with a planted cell; it fails on main (18 cells up to 3.5 epsilon above their count) and passes with the cap.
 - Kernel versions: `BAKE_KERNEL_VERSION` 7 to 8 and `PASS2_KERNEL_VERSION` 9 to 10 (the canonical flood is in both passes). Stores of the old versions are other layers.

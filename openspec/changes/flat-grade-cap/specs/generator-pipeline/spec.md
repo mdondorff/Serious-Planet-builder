@@ -1,6 +1,6 @@
 ## MODIFIED Requirements
 ### Requirement: GEN-173 Flats are graded by distance to the pour points
-The canonical flood SHALL grade a flat by the Euclidean distance to its lower rim, not by the chessboard count: the level is `base + epsilon d / sqrt 2`, `d` the distance in cells to the nearest rim cell, every cell kept above the neighbour it drains to. A graded level SHALL be at most the cell's chessboard level; where that bound binds, the cell drains to its chessboard parent. A flat whose Chebyshev diameter exceeds `halo - 1` cells, or that touches the border of the grid, keeps the chessboard grade. The grade SHALL be a function of the flat and its rim only, so the resident flood and the partitioned route give the same bits on any tiling. No cell SHALL stand above its chessboard count.
+The canonical flood SHALL grade a flat by the Euclidean distance to its lower rim, not by the chessboard count: the level is `base + epsilon d / sqrt 2`, `d` the distance in cells to the nearest rim cell, every cell kept above the neighbour it drains to. A graded level SHALL be at most the cell's chessboard level; where that bound binds, the cell keeps its chessboard parent as a lower neighbour. A flat whose Chebyshev diameter exceeds `halo - 1` cells, or that touches the border of the grid, keeps the chessboard grade. The grade SHALL be a function of the flat and its rim only, so the resident flood and the partitioned route give the same bits on any tiling. No cell SHALL stand above its chessboard count.
 
 Verify: A
 Status: active

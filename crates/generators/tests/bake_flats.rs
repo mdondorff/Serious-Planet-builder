@@ -273,22 +273,30 @@ fn rough_plain(n: usize, amp: f64, seed: u64) -> (Grid, Vec<f64>, Vec<bool>) {
 fn a_flat_with_a_hump_is_never_graded_above_its_chessboard_level_and_the_cell_beside_it_still_drains() {
     use planet_generators::bake::flood::priority_flood_ungraded;
     let n = 48;
-    let (grid, mut z, outlet) = rough_plain(n, 64.0, 146);
-    // A cell beside the flat, above its neighbours' chessboard levels plus epsilon, so it is not lifted and drains into the flat.
-    z[19 * n + 24] = 0.040_132_38;
-    let chess = priority_flood_ungraded(&grid, &z, &outlet, EPS, true);
-    let graded = priority_flood_with(&grid, &z, &outlet, EPS, true);
-    assert!(graded.iter().zip(&chess).any(|(g, c)| g < c), "the fixture has a graded flat");
-    let above: Vec<(usize, f64)> = (0..n * n).filter(|&p| graded[p] > chess[p]).map(|p| (p, (graded[p] - chess[p]) / EPS)).collect();
-    assert!(
-        above.is_empty(),
-        "{} cells stand above their chessboard level (cell, excess in epsilon): {:?}",
-        above.len(),
-        &above[..above.len().min(6)]
-    );
-    let stuck: Vec<usize> =
-        (0..n * n).filter(|&p| !outlet[p] && (0..8).filter_map(|d| grid.neighbour(p, d)).all(|q| graded[q] >= graded[p])).collect();
-    assert!(stuck.is_empty(), "cells without a lower neighbour after the grade: {stuck:?}");
-    // The routing takes a receiver for every cell (it asserted at route.rs:236 before the cap).
-    let _ = route_rules(&grid, &z, &outlet, EPS, 7, 0.0, None, RoundRules { clip_mfd: MfdClip::Off, canonical_flood: true });
+    // At the sea and near the highest summits (the rounding of `base + epsilon rank` there).
+    for offset in [0.0, 8_999.0] {
+        let (grid, mut z, outlet) = rough_plain(n, 64.0, 146);
+        // A cell beside the flat, above its neighbours' chessboard levels plus epsilon, so it is not lifted and drains into the flat.
+        z[19 * n + 24] = 0.040_132_38;
+        for h in z.iter_mut() {
+            *h += offset;
+        }
+        let chess = priority_flood_ungraded(&grid, &z, &outlet, EPS, true);
+        let graded = priority_flood_with(&grid, &z, &outlet, EPS, true);
+        assert!(graded.iter().zip(&chess).any(|(g, c)| g < c), "the fixture has a graded flat");
+        let above: Vec<(usize, f64)> = (0..n * n).filter(|&p| graded[p] > chess[p]).map(|p| (p, (graded[p] - chess[p]) / EPS)).collect();
+        assert!(
+            above.is_empty(),
+            "offset {offset} m: {} cells stand above their chessboard level (cell, excess in epsilon): {:?}",
+            above.len(),
+            &above[..above.len().min(6)]
+        );
+        let stuck: Vec<usize> =
+            (0..n * n).filter(|&p| !outlet[p] && (0..8).filter_map(|d| grid.neighbour(p, d)).all(|q| graded[q] >= graded[p])).collect();
+        assert!(stuck.is_empty(), "offset {offset} m: cells without a lower neighbour after the grade: {stuck:?}");
+        let sunk: Vec<usize> = (0..n * n).filter(|&p| chess[p] > z[p] && graded[p] <= z[p]).collect();
+        assert!(sunk.is_empty(), "offset {offset} m: lifted cells graded onto or below their ground: {sunk:?}");
+        // The routing takes a receiver for every cell (it asserted at route.rs:236 before the cap).
+        let _ = route_rules(&grid, &z, &outlet, EPS, 7, 0.0, None, RoundRules { clip_mfd: MfdClip::Off, canonical_flood: true });
+    }
 }
