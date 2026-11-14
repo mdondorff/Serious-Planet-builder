@@ -1,0 +1,12 @@
+# River review (lead #118): the owner's frame-43680 (F3, canal-like river) in the E1 region (R1h window: face 1, seed 14, i 8056-8675, j 760-1379; store r3a-e1), low sun. From SPIKE-113's poses-43680.toml.
+[place]
+lat = -38.90206
+lon = -165.99522
+
+[[pose]]
+name = "f43680-lowsun"
+altitude_m = 352.0
+back_m = 850.0
+heading_deg = 100.75
+pitch_deg = 12.1
+sun_local_hours = 17.5
