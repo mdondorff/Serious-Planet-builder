@@ -25,7 +25,7 @@ Owner, 2026-11-12 (ADR 0120). These items are outside the current milestone, one
   - band slope cap GEN-179 (merged, off);
   - monotone plateau GEN-183 (PR #1449, verified, parked as draft);
   - the valley network, candidate C (SPIKE-111, finishing its time-box).
-- The coast tilt GEN-180 is dropped (2026-11-12): it does not drain the plains.
+- The coast tilt GEN-180 is dropped (2026-11-12): it does not drain the plains. Its switch and tests are removed (2026-11-14), and the change is archived without a sync.
 - Flag PR GEN-181/TEST-129 (`--band-cap`, `--coast-tilt`, plateau switch on generate and test-render) and the production-path picture sheet (R1h, R3b, switches off against on, DEM reference beside it).
 - Starting-surface bars (z0 basins over 30 cells at most 7 % of land, depth p95 at most 270 m) and the switch-on, after the owner's look approval.
 - The valley-network decision brief: a world-level stored lattice (format, CON-10) and a new starting-surface design.

@@ -1,0 +1,1 @@
+- 2026-11-14 coast-tilt archived without a sync: the dropped coast tilt (GEN-180, 2026-11-12) removed from the class source with its tests (TEST-131); off, it changed no key and no height.
