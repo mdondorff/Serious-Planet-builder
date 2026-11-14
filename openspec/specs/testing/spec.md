@@ -1896,3 +1896,25 @@ Detail: S11 (the masses of 10^4 to 10^6 km2), 35 to 70 islands holding 1.9 to 6 
 #### Scenario: Seeds 1 to 5
 - **WHEN** the land masks of seeds 1 to 5 are scored
 - **THEN** every measure is inside its band, or the failure names the seed, the measure, its value and the band
+
+### Requirement: TEST-114 The channel graph's tests
+The channel graph SHALL be tested at tier A: the codes (monotone, round trip, clamps, the stated error), the arrays against the routing's chains with the bed running minimum and the byte count, the cube-edge resolver on every face, the blocks through a store (every vertex in its block, the margin, the unit flag, refusals, the same bytes twice), and the bake that reads its channels back through the commit.
+
+Verify: A
+Status: active
+Source: GEN-170, STRM-084, architect 2026-11-11
+
+#### Scenario: Cases
+- **WHEN** the tests of `bake_channel_graph`, `graph_store` and `l_graph` run
+- **THEN** each case above has a test that cites GEN-170 or STRM-084
+
+### Requirement: TEST-111 The commit layer's tests
+The commit layer SHALL be tested at tier A on a small baked face: the source returns the stored core with no fill and `B + L` equals K7's surface within half a quantisation step, a tile outside the commit is no land and a named tile the store lacks is an error, a tile is decoded once and the cache is bounded, and the drawn commit changes only when the tiles and tables of the new one are ready while a frame in flight keeps the previous one.
+
+Verify: A
+Status: active
+Source: STRM-083, architect 2026-11-10
+
+#### Scenario: Cases
+- **WHEN** the tests of `l_layer` run
+- **THEN** each case above has a test that cites STRM-083

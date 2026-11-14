@@ -1357,3 +1357,34 @@ Detail: - stage 1: the labelled flood of each core (GEN-121; the outlets are the
 #### Scenario: The neighbours of a border cell
 - **WHEN** the neighbouring cells of other tiles are named for the border cells of the tiles of a face and across a cube edge and corner
 - **THEN** inside a face an edge cell touches three cells of the next tile, a corner cell five cells of three tiles, an inner cell none, and the relation is symmetric; across a cube edge the neighbours are border cells of the next face and mostly mutual, and a corner reaches two other faces
+
+### Requirement: STRM-084 The channel graph is a stored kind read through the commit
+The bake SHALL store the channel graph as one record of kind 20 per L tile, holding the pieces of the segments inside the tile's block of H1 cells and one H1 cell beyond it, and the commit record SHALL name the blocks (commit layout version 3).
+- A piece is a run of vertices of one segment on one face: the segment id and part, its first vertex's index, the segment's vertex count and all its lake cuts (so the producer's pieces follow from any one piece), the planar steps, the `Q_w` and bed codes.
+
+Verify: A
+Status: active
+Source: Architect 2026-11-10 and 2026-11-11
+
+Detail: - A damaged record, another layout or key, or a block other than the one asked is refused naming the record; a count the payload cannot hold is an error.
+- A feed over the commit reads the blocks a window touches and returns K7's channels; a graph in area units is refused by the writer.
+- Channels read through the commit give the L tiles of a bake that had them in memory.
+
+#### Scenario: Round trip
+- **WHEN** a face is baked with a graph and then baked again with the channels read through its commit
+- **THEN** every L tile of the second bake equals the first byte for byte
+
+### Requirement: STRM-083 The runtime reads L through a commit and draws one commit at a time
+The runtime SHALL read the L tiles of the new chain through the commit their bake wrote, as the surface change `L` with nothing added back, and SHALL swap the drawn commit only when every needed part of the new one is ready.
+- A tile the commit does not name is a tile with no land; a named tile the store lacks, a key other than the commit spec's, a damaged record or a change outside the layer's range is an error naming the tile.
+- Tiles are decoded once while they stay in a bounded cache; the layer's identity is the commit id.
+
+Verify: A
+Status: active
+Source: Architect 2026-11-10, A3 section 7.4, CON-22
+
+Detail: - A new commit becomes the drawn one when the tiles the caller needs of it read and its basin tables are in the store; until then the previous commit is drawn, and a frame reads one commit only.
+
+#### Scenario: Swap
+- **WHEN** a new commit is offered with a table or a tile not yet in the store, and then complete
+- **THEN** the previous commit stays drawn until the new one is complete, and a frame in flight keeps reading the previous commit
