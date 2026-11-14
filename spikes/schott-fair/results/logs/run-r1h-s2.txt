@@ -1,0 +1,11 @@
+$ target/spike116/drain_base118b.exe --face 1 --region 8056,8675,760,1379 --seed 14 --variant none --max-rounds 2 --out target/spike118
+LATTICE f1-8056-760-none: 1366 x 1366 nodes (611 m); land nodes changed over 1 cm 0 of 1301217 (0.00 %); lowered p50 NaN p95 NaN max 0.00 m, over 50 m on 0.00 % of land nodes; raised p50 NaN p95 NaN max 0.00 m; mean change 0.000 m; 
+TRANSFER d4: the 814 m breach lowered 38985 of 724357 land cells: p50 9.77 p95 148.95 max 743.64 m; over 50 m 7430 (1.03 % of land); residual damped over 400 m (floored at the sea level + 5 mm); SCHOTT (K scaled true, uplift false, retarget true radius 4, at most 2 rounds a scale, tol 0.1 m): 407 m: 2 rounds (last mean |dz| 11.010 m), K x 0.500, 6 s; 204 m: 2 rounds (last mean |dz| 3.828 m), K x 0.250, 29 s; 102 m: 2 rounds (last mean |dz| 1.334 m), K x 0.125, 143 s; multi-scale breach (8, 4, 2, 1, then plain) 166 s
+RIVERS f1-8056-760-none-td4: core 133284 channel cells; 3157 on closed basins of the start surface (2.37 % of river length); pits touching the core 61; time nodes 17 s, front 22 s, sample 422 s, route 91 s
+BASINS117 f1-8056-760-none-td4: river length on basins at least 0.5 m deep and 16 cells: 0.00 % (0 of 133284); basins counted 114 of 148 in the window; by N: N4 0.00 % N8 0.00 % N16 0.00 % N32 0.00 % N64 0.00 %
+LOWERED f1-8056-760-none-td4: river cells under the hand-over p50 15.16 p95 110.56 p99 168.90 max 255.31 m, over 50 m 20.73 %, raised over 1 m 3.13 %; land cells lowered over 50 m 1.23 % (p99 54.42 m)
+RIVERS f1-8056-760-none-td4 D inf m: cut p50 0.00 p95 0.00 p99 0.20 max 1.68 m, over 50 m 0.00 %; channel cells in lakes 0.00 %
+RIVERS f1-8056-760-none-td4 D 20 m: cut p50 0.00 p95 0.00 p99 0.20 max 1.68 m, over 50 m 0.00 %; channel cells in lakes 0.00 %
+AXIS117 f1-8056-760-none-td4: channel steps along a grid axis 56.7 % (75558 of 133284); relief p50 range 2 x 2 7.09 m, 10 x 10 60.87 m
+RELIEF f1-8056-760-none-td4: band 200 m-1 km std 12.65 m (|.| p95 27.72); 1 km block relief p50 60.9 p95 319.8 m (170101 blocks)
+TOTAL f1-8056-760-none-td4 583 s
