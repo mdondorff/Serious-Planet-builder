@@ -77,7 +77,7 @@ Sources: `cargo xtask worktrees --no-size` (2026-11-14 11:00; a snapshot), `docs
 | 22 | A default-on stage switched after one measurement made its defect worse (the round-0 breach needed a second PR to switch off) | ADR 0118, ADR 0120 | generators, process |
 | 23 | The width law never reaches a visible size on the prototype region (widest trench 1.9 cells); the drawn width's one-cell floor makes tributaries as wide as the main stem | gsurfi-reread-2026-11-11.md; preview-round F6 | K7 width, river drawing |
 
-Proposal: the owning lanes record rows 1-17 and 19-23 with `/learning` (one entry each, with its scope); row 18 extends the K7 halo entry.
+Recorded: all 23 in `docs/learnings.md` (2026-11-14, lead #147); six M9-era entries and the first CPU-latch entry moved to `docs/archive/M9/learnings.md` to stay within the 20 KB cap.
 
 ## 3. `docs/status.md` lines that name finished work
 | Line | What is finished | Proposal |
@@ -97,4 +97,4 @@ Proposal: the owning lanes record rows 1-17 and 19-23 with `/learning` (one entr
 - Thermal-dam options brief: not written (P3 E4).
 - Worktrees of merged branches pruned: section 1.
 - Learnings recorded: section 2.
-- One-page close and sign-off: none for P1 or P2; P2.md "Sign-off: (none yet)"; ADR 0117 proposed; ADR 0123 a draft (#1499).
+- One-page close and sign-off: P1 has the owner's sign-off (P1.md, 2026-11-13: approved as direction); P2 has none (P2.md "Sign-off: (none yet)"), and no one-page close exists for either; ADR 0117 proposed; ADR 0123 a draft (#1499).

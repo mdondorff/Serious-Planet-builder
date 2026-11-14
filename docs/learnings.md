@@ -1,6 +1,6 @@
 # Learnings
 
-Added with `/learning`. Each entry names its scope, the assumption it changes, the follow-up and when it becomes obsolete. A learning is promoted (a spec line, a `CLAUDE.md` line or a test that cites it), kept while still active and surprising, or archived with its milestone (ADR 0075). Cap: 20 KB. Archives: `docs/archive/M0-M3/learnings.md`, `docs/archive/M4/learnings.md`, `docs/archive/M6/learnings.md` (M5 and M6, and the full text of the entries below), `docs/archive/M7/learnings.md`.
+Added with `/learning`. Each entry names its scope, the assumption it changes, the follow-up and when it becomes obsolete. A learning is promoted (a spec line, a `CLAUDE.md` line or a test that cites it), kept while still active and surprising, or archived with its milestone (ADR 0075). Cap: 20 KB. Archives: `docs/archive/M0-M3/learnings.md`, `docs/archive/M4/learnings.md`, `docs/archive/M6/learnings.md` (M5 and M6, and the full text of the entries below), `docs/archive/M7/learnings.md`, `docs/archive/M9/learnings.md`.
 
 ## 2026-10-15 GPU milliseconds depend on how long the GPU has been loaded
 Scope: project (perf comparisons)
@@ -25,23 +25,10 @@ Scope: project (tier C detectors, TEST-068 to TEST-070)
 - Two TEST-069 cases passed on black frames: an "identical pixels" check holds trivially for an empty image.
 - Every still-frame or flicker detector also asserts that the frame draws terrain (a minimum of non-sky, non-black pixels).
 
-## 2026-10-29 A CPU latched at 17 % performance inflates every timing
-Scope: project (perf windows, Rasierklinge)
-- On 2026-10-29 the CPU stayed at about 17 % `PercentProcessorPerformance` under load all day (firmware latch); an EC reset (power button held 30 s) restored it.
-- Check `Win32_PerfFormattedData_Counters_ProcessorInformation` under a short load before a perf window and treat numbers from a latched day as invalid.
-- Obsolete when: a BIOS update removes the latch.
-
 ## 2026-10-30 Window presentation on the RTX needs an unlocked desktop
 Scope: project (real-GPU window tests, the real-store gate, acceptance)
 - While the Windows session is locked or in modern standby, present stalls 1.3 to 2.7 s or the device is lost; unlocked, the same test passes in 26 s. A remote unlock (Chrome Remote Desktop) counts.
 - Headless scenes, the software adapter and CI are unaffected. Window checks report NOT RUN when locked (TEST-073).
-
-
-## 2026-11-01 The clipmap gather needs one atomic, against ADR 0085 point 9
-Scope: render (REND-047, REND-053; ADR 0085 point 9)
-- Point 9 says layer 1 uses no atomics. Overlapping blocks written by unordered dispatches raced on the software adapter (an incremental gather differed from a full one at random). The gather now clears, claims (`atomicMax` of the job index) and writes, so the finest block wins in any dispatch order.
-- The result of an integer maximum does not depend on order, which is what point 9 protects. REND-053 now says that (the march, upsample and temporal passes stay atomic-free; a tier A scan checks the shaders). The ADR wording needs a one-line amendment (ADR 0078): "no atomics except the owner pass's integer `atomicMax`".
-- Obsolete when the gather resolves overlaps without an atomic (for example one thread per texel scanning the level's blocks, or a spatial index of winners).
 
 ## 2026-11-01 nextest runs each test in its own process: an in-memory fixture shares nothing
 Scope: tests (nextest; SPIKE-84 fix 2)
@@ -49,31 +36,12 @@ Scope: tests (nextest; SPIKE-84 fix 2)
 - A fixture worth sharing lives on disk (`CARGO_TARGET_TMPDIR`), named by the test binary, built into a private directory and renamed into place (`crates/cache/tests/support/concurrent_source.rs`).
 - Obsolete if the tests move to a runner that shares one process per binary.
 
-## 2026-11-02 A belt narrower than about 190 km cannot meet GEN-097's step limit of 2.0
-Scope: generators (GEN-094, GEN-097; `classes.rs`)
-- The class lattice has a cell of about 39 km and `k` runs from 1 to 7.5, so a step of at most 2.0 needs the weights to change over about 130 km (190 km for a smoothstep). Gaussian belts of 130 km half-width gave steps of 6.5; tent belts of 220 to 500 km and gates over 250 km give 4.9, with 0.22 % of steps over 2.0.
-- A pair of plates must contribute a term that does not change when the two plates swap (distance, convergence and the continental difference are symmetric), and the third plate's weight must fall to 0 where it trades places with the fourth; otherwise the mask jumps at plate bisectors and triple junctions (the straight edges of iteration 0).
-- Obsolete when the limit is restated (a feathering rule, a smaller `k` range) or the lattice is finer.
-
 ## 2026-11-01 An edit re-keys coarse tiles far beyond its reach
 Scope: project (editor refresh find; WDEF-008, STRM-070, ADR 0045 point 7)
 - A coarse tile (levels 0-5 at Earth's radius) that holds an item reads its region summary over its cells and `margin_rings` rings of cells, sized for the 40 km maximum reach plus whole cells: about 13 rings (450-500 km) at level 5, the whole body at levels 0-2. Any edit anchored there re-keys it, whatever its own reach.
 - The editor's find named a tile only when the edit's reach touched it, so such tiles were never marked stale and stayed on their old version (the `gpu_edit_perf` flake: 8 substituted nodes, nothing pending). The find now walks `neighbors8` from the anchor cells and compares with the rings (edit-stale-diagnostics).
 - ADR 0045 point 7 meant about one coarse tile per level per edit; today's margins re-key more (a Tracked architect item).
 - Obsolete when the summary margins are sized from the reaches present, or coarse keys stop reading margins.
-
-## 2026-11-02 A rough coast has no gradient at the lattice's scale
-Scope: generators (continent stage GEN-104, class source GEN-094, landform driver GEN-064)
-- The continent value has 8 octaves at gain 0.72 (wavelengths down to about 30 km), so `land depth / |gradient|` is not a distance to the coast: on seed 1 the coast gate went from 0.0003 to 0.70 over one 40 km lattice cell and the step of `k` was 6.5.
-- The class source's coast distances and coastal arcs read the smooth value (4 octaves, no islands), the landform driver the coarse value (3 octaves); both are the full value without its detail terms (the octave series is normalised by its full weight sum, or the low octaves would be rescaled). A driver on the full value fails the lattice's closeness test (0.05 to 0.33 against 0.03).
-- Obsolete when the bake replaces the landform driver (m9-bake) and the class lattice's cell is finer than the roughest octave.
-
-## 2026-11-02 The coast gate on the rough depth sets the largest steps of k
-Scope: generators (class source GEN-094, GEN-097's step limit)
-- The coast gate switched at the full continent value's coast, which is rough at the lattice's scale: the gate went from 0 to 0.6 over one 40 km cell (largest `k` step 6.0).
-- Ramping over the smooth depth (0.3) and the true depth (0.2) took it to 5.1-5.8; the rest is geometric (a belt flank changes by 0.2-0.3 of its core per cell while the classes differ by 4-6 in `k`).
-- Plate draws beyond 64 widen the seed spread (seed 2's land above 2 km went to 27.7 % at 256 draws): the retry scores land at a convergent margin, not relief.
-- Obsolete when the arcs are convergent-only or the owner moves GEN-097 to a p99 form.
 
 ## 2026-11-03 Edit finds must cover in-flight tiles
 Scope: project (editor refresh find; STRM-026, STRM-071)
@@ -95,19 +63,6 @@ What happened: nextest `count:N/K` gave tier A+B parts of 535 s and 209 s, and t
 Assumption it changes: that equal test counts give equal job times.
 Proposed follow-up: none; A+B runs `hash:N/3` (stable when tests are added); check a split by replaying recorded durations before changing it.
 Obsolete when: CI splits by recorded durations.
-
-## 2026-11-04 The runtime lattice and the surface the layer was carved on are two generators
-Scope: project (M9 bake; the erosion layer's runtime read, GEN-112)
-What happened: on seed 14, mountains tile 2/12/10, the stored bake's surface (`global::sample`, the legacy generator, read C1 from a 611 m lattice) is 2,064 m rms from `BakeInputs::base` (the class source the layer was carved on): p5 -3,372 m, p95 +125 m; the relief channels `m + k (e - m)` (512-cell estimate) leave 2,061 m. A lattice of `BakeInputs::base` itself read C1 is 3.4 m rms (p95 5.5 m, max 28 m) at 611 m, 4.9 m at 1.2 km, 2.0 m at 305 m.
-Assumption it changes: that the layer can be added to the runtime base plus `k` and `m`; and that the lattice of a store is the surface a bake read.
-Proposed follow-up: the product's field bake is made from the class source and carries `BakeInputs::id()` (the viewer refuses `--erosion on` without that marker); `with_layer` needs no relief channels.
-Obsolete when: the field bake is made from the class source and the legacy generator is retired.
-
-## 2026-11-05 The stored change of keep-pits includes the pits
-Scope: project (GEN-120, STRM-075)
-What happened: the stored change (kind 13) keeps the pits and the runtime adds kind 17 back, so `removed_depth_m` on the stored change counts a pit as erosion; `erosion_depth_m` adds the pit depth first.
-Assumption it changes: that kind 13 is the change the viewer draws.
-Obsolete when: lake water replaces the filled look.
 
 ## 2026-11-09 The plain flood's FIFO inflates pits with scale
 Scope: project (GEN-159, GEN-141, A3 6.4)
@@ -144,3 +99,95 @@ What happened: a push to PR 1482 (68cb12a3, one golden PNG) went out although it
 Assumption it changes: CLAUDE.md "Before every push to a PR branch run `cargo xtask prepush`" assumed the push follows only a passing prepush.
 Proposed follow-up: every lane pushes with `cargo xtask prepush && git push`; nothing else.
 Obsolete when: a git pre-push hook runs the prepush.
+
+## 2026-11-14 The L basins come from the 814 m to L hand-over, not from B
+Scope: project (hand-over 814 m to L; P3 E1)
+- The solved 814 m surface drains at its grid (5.9 % of river length on closed basins); read at L it has 74.5 %: a D8 diagonal between two higher cells is a saddle in any bilinear or C1 read. Five B-stage variants leave 61-70 % against 71 % (spikes/drain-base/results/results.md, #1498).
+
+## 2026-11-14 The basin metric decides a river verdict
+Scope: project (river gate, BUILD-055)
+- "Any pit over 5 cm" fails SPIKE-115's flat windows (29.1 %, 13.7 %); basins of 0.5 m and 16 cells under a 1e-7 m fill give 0-4.6 % on the same kind of surface (spikes/combo-117/results/results.md). State the metric with every share.
+
+## 2026-11-14 K7 beds are not monotone
+Scope: K7 (GEN-169, GEN-176, GEN-185)
+- The burn only lowers, so line heights rise downstream: on r3a-e1 (R1h window) 63,167 of 219,390 line cells rise over 0.25 m (max 44.7 m). Cuts over 50 m come from H1 lines crossing L ridges (gprofile-read-2026-11-11.md; crusader's outbox).
+
+## 2026-11-14 A stored channel level bounds the bed from above
+Scope: project (K7 levels, river drawing)
+- The drawn ground lies below it at 83 % of channel points (median -3.8 m, p5 -30 m); on r3a-p2 the line is a raised one-cell line beside the carved low (SPIKE-113). It is no water surface.
+
+## 2026-11-14 E1's drawn "lakes" were mostly sea on inland ground below 0 m
+Scope: project (K7 sea floor, window outlets, coastal band)
+- 80 % were coastal-band water on 4,764 cells K7 put 3.5-42 m below 0 m, 1-23 km inland; the 4,317 km2 margin lake is a window-edge outlet never lowered (SPIKE-112; lanes digest 2026-11-13).
+
+## 2026-11-14 Name a window by face, box and seed
+Scope: project (spike and gate reports)
+- SPIKE-114/115 called face 1, 8056-8675 x 760-1379, seed 14 "R3a"; the spikes lane called it R1h and used R3a for face 4, seed 15. Canonical: R1h, R3a, R3b (lead, 2026-11-14; #1506).
+
+## 2026-11-14 A 4-neighbour hand-over aligns rivers to the grid
+Scope: project (hand-over, ADR 0123 draft)
+- 66.5-68.6 % of channel steps run along an axis, against 47 % for B alone or one round at L (spikes/combo-117/results/results.md).
+
+## 2026-11-14 The river network cannot be rebuilt from B
+Scope: project (store format, river geometry)
+- Only 8.0 % of channel cells agree with routing on B + regional: store the L geometry (about 0.9 MB a region) or the regional change (spikes/rivers-at-l/results/results.md).
+
+## 2026-11-14 One regional-kernel round at L is the optimum
+Scope: project (regional kernel at L; K7 flood)
+- Three rounds raise the relief to 156/143 %, ten to 521/358 %; Schott 2024 multi-scale with unchanged parameters gives about 3x. K7's canonical flood refuses flats of an eroded surface (spikes/erosion-at-l/results/results.md).
+
+## 2026-11-14 Rounds and routing at L are not tile-bounded
+Scope: project (partitioning, CON-30)
+- The largest catchment holds 5.07 M cells against 0.59 M in a tile, with 27,636 pits; a region stage, or Barnes 2016's exact tiled flood (spikes/erosion-at-l/results/results.md).
+
+## 2026-11-14 The layer read's clamp made steps at L cell-centre lines
+Scope: project (layer read GEN-188; the bake's reads)
+- Max 12.5 m, 1.5 % of crossings over 0.1 m (0.001 m without the clamp); the bake's twin reads clamp the same way. SPIKE-114's "41 % steps" counted curvature too (spikes' outbox; rivers-at-l results).
+
+## 2026-11-14 The drawn ground differed from B + L by the crease detail only
+Scope: project (runtime detail, GEN-187, VIEW-072)
+- 1-7 m (p50 -2.1 m), seen as water flowing uphill; the base was bit-equal. Pinning the detail cost 31 % of frames until a memo (ADR 0122; #1490).
+
+## 2026-11-14 The flight stalls were viewer residency, not machine load
+Scope: project (viewer residency VIEW-070, G-RT)
+- Resident tiles grew from 10,922 to 66,114 with no eviction (2-10 s stalls above about 20k); with the cap a 26-min flight had 0 stalls (#1473, #1485).
+
+## 2026-11-14 No solver path keeps an inland lake
+Scope: project (edits and lakes, GEN-162, ADR 0113)
+- The breach cuts every basin; a 400 m dome keeps about 188 m after the rounds (SPIKE-112).
+
+## 2026-11-14 Memoised rounds recompute the serial area sweep
+Scope: project (regional solver, edit path)
+- About 80 % of a round, so memoised rounds take 2x resident ones (159 s a round at 1.42e8 land cells); a per-catchment parallel sweep: 69 s on 8 threads, bit-equal (spikes' outbox).
+
+## 2026-11-14 Later-stage start-surface fixes failed
+Scope: project (start surface; GEN-180 removed)
+- The coast tilt made R3a worse at every setting (12.0-15.6 % against 9.9 %); the band's crest rings dam a basin each (SPIKE-109, SPIKE-111; #1500).
+
+## 2026-11-14 A probe that copies library code goes stale
+Scope: project (gates and probes)
+- G-LOCAL's L1 mismatch (437,249 cells, up to 691 m) was the probe missing GEN-173's graded flood; with it, 0 of 1,040,400 differ (glocal-f32-2026-11-12.md). Probes call the library.
+
+## 2026-11-14 K7's seam difference opens in the carve
+Scope: K7 (ADR 0119)
+- Under both tilings the burn and breach are bit-identical; the carve differs on 7,032 cells (at most 0.012 m), deposition adds the 0.087 m maximum (k7-seam-2026-11-11.md).
+
+## 2026-11-14 gpu_skeleton times out only under CPU oversubscription
+Scope: project (tier C, prepush)
+- The two pipelined loops take 2.8 s alone and 28-69 s with 20-80 busy processes on WARP; the RTX is unaffected (spikes/gpu-skeleton/results/results.md).
+
+## 2026-11-14 The CPU latch recurs
+Scope: project (perf windows, Rasierklinge)
+- About 15-17 % `PercentProcessorPerformance` under load on 2026-10-29 and 2026-11-13; an EC reset (power button 30 s) cleared both; SPIKE-113's timings were void. Check under load before a window. Obsolete when a BIOS update removes it.
+
+## 2026-11-14 Messages pause after 10 sends, and order files wake nobody
+Scope: project (lane process)
+- Without an owner message the app pauses a lane's sends; an idle lane does not read its order file (explorer idle about 5 h on 2026-11-14; ADR 0118).
+
+## 2026-11-14 A default-on stage after one measurement made its defect worse
+Scope: project (generators, process)
+- The round-0 breach needed a second PR to switch off; three later-stage basin fixes were dropped (ADR 0118, ADR 0120).
+
+## 2026-11-14 The width law never reaches a visible size on the prototype
+Scope: project (K7 width GEN-165, river drawing)
+- Widest trench 1.9 cells; the drawn width's one-cell floor makes tributaries as wide as the main stem (gsurfi-reread-2026-11-11.md).
