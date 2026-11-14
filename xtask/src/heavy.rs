@@ -1,5 +1,6 @@
-//! The machine-wide heavy-run lock (BUILD-026): `test`, `prepush`, `perf`, `capture`, `accept` and `store` take one lock outside every worktree and
-//! wait their turn instead of running in parallel (three lanes' runs each got about one core: serialised, each finishes sooner), and the owner's
+//! The machine-wide heavy-run lock (BUILD-026): `test`, `prepush`, `capture`, `accept` and `store` take one of `PLANET_HEAVY_SLOTS` slots (default 2;
+//! owner, 2026-11-14: short jobs waited behind long probes) outside every worktree and wait their turn when all are held; `perf`, `gate` (but
+//! `--small`), `repro --window` and `heavy --exclusive` wait until no slot is held and hold them all (timing needs the machine alone). The owner's
 //! quiet flag file makes every heavy command wait for as long as it exists, so that the owner can clear the machine without messaging anyone.
 //!
 //! The lock is an OS file lock (`File::try_lock`), which the system releases when the process ends however it ends, so there is no stale lock to
@@ -53,12 +54,53 @@ fn data_root_state_dir(start: &Path) -> Option<PathBuf> {
     start.ancestors().map(|a| a.join("SeriousPlanetData")).find(|d| d.is_dir()).map(|d| d.join("tmp").join("heavy"))
 }
 
-fn lock_path(dir: &Path) -> PathBuf {
-    dir.join("heavy.lock")
+/// The lock file of slot `k`: slot 0 keeps the single lock's name, so an older xtask (one slot) shares slot 0 with this one.
+fn lock_path(dir: &Path, k: usize) -> PathBuf {
+    if k == 0 {
+        dir.join("heavy.lock")
+    } else {
+        dir.join(format!("heavy.lock.{k}"))
+    }
 }
 
-fn holder_path(dir: &Path) -> PathBuf {
-    dir.join("heavy.holder")
+/// The holder note of slot `k` (slot 0 keeps the single lock's name).
+fn holder_path(dir: &Path, k: usize) -> PathBuf {
+    if k == 0 {
+        dir.join("heavy.holder")
+    } else {
+        dir.join(format!("heavy.holder.{k}"))
+    }
+}
+
+/// The highest slot count a reader looks at for holder notes (a `PLANET_HEAVY_SLOTS` above it is capped).
+const MAX_SLOTS: usize = 8;
+
+/// The ordinary slots (`PLANET_HEAVY_SLOTS`, default 2, 1 to [`MAX_SLOTS`]; owner, 2026-11-14).
+pub fn slot_count() -> usize {
+    std::env::var("PLANET_HEAVY_SLOTS").ok().and_then(|v| v.trim().parse::<usize>().ok()).map_or(2, |n| n.clamp(1, MAX_SLOTS))
+}
+
+/// What a command asks for: one of `slots` slots, or all of them (`exclusive`: timing and window runs need the machine alone).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Req {
+    pub slots: usize,
+    pub exclusive: bool,
+}
+
+impl Req {
+    /// One slot of the configured count.
+    pub fn shared() -> Req {
+        Req { slots: slot_count(), exclusive: false }
+    }
+    /// Every slot of the configured count.
+    pub fn exclusive() -> Req {
+        Req { slots: slot_count(), exclusive: true }
+    }
+}
+
+/// The holder notes present, in slot order.
+fn holder_notes(dir: &Path) -> Vec<String> {
+    (0..MAX_SLOTS).filter_map(|k| std::fs::read_to_string(holder_path(dir, k)).ok()).filter(|n| !n.trim().is_empty()).collect()
 }
 
 /// The owner's flag file: while it exists every heavy command waits.
@@ -76,24 +118,36 @@ pub fn quiet_age(dir: &Path) -> Option<Duration> {
 /// then the caller is its child and the lock is already its own.
 pub fn parent_holds(dir: &Path, parent: Option<&str>) -> bool {
     let Some(pid) = parent.filter(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit())) else { return false };
-    std::fs::read_to_string(holder_path(dir)).is_ok_and(|note| note.contains(&format!("(process {pid},")))
+    holder_notes(dir).iter().any(|note| note.contains(&format!("(process {pid},")))
 }
 
-/// The lock while a heavy command runs; dropping it lets the next in the queue go.
+/// The slots while a heavy command runs; dropping it lets the next in the queue go.
 pub struct Guard {
-    file: Option<File>,
-    dir: Option<PathBuf>,
+    /// The slot locks held (one, every slot for an exclusive run, none for a child of the holder or an unlocked run).
+    files: Vec<File>,
+    /// Their holder notes, removed on drop.
+    holders: Vec<PathBuf>,
     /// This guard set [`HELD`] and clears it.
     outer: bool,
 }
 
+impl Guard {
+    fn none() -> Guard {
+        Guard { files: Vec::new(), holders: Vec::new(), outer: false }
+    }
+    /// How many slots this guard holds.
+    pub fn slots_held(&self) -> usize {
+        self.files.len()
+    }
+}
+
 impl Drop for Guard {
     fn drop(&mut self) {
-        if let Some(dir) = &self.dir {
-            let _ = std::fs::remove_file(holder_path(dir));
+        for h in &self.holders {
+            let _ = std::fs::remove_file(h);
         }
-        // The file lock goes with the handle.
-        self.file.take();
+        // The file locks go with the handles.
+        self.files.clear();
         if self.outer {
             std::env::remove_var(PARENT_ENV);
             HELD.store(false, Ordering::SeqCst);
@@ -106,7 +160,7 @@ impl Drop for Guard {
 pub enum Busy {
     /// The quiet flag file exists.
     Quiet(PathBuf),
-    /// Another command holds the lock; what its holder file says.
+    /// Other commands hold the slots; their holder notes, joined by " | ".
     Held(String),
     /// Other waiters queued earlier: how many, and the first one's ticket note.
     Queued(usize, String),
@@ -135,11 +189,20 @@ pub fn overdue_minutes(note: &str, now: u64, limit: Duration) -> Option<u64> {
     (held > limit.as_secs()).then_some(held / 60)
 }
 
-/// The waiting message for `busy`, with the holder named overdue past `limit`.
+/// The overdue phrases of the holders among `holders` (notes joined by " | ") past `limit`, each naming its holder.
+pub fn overdue_phrases(holders: &str, now: u64, limit: Duration) -> String {
+    holders.split(" | ").filter_map(|h| overdue_minutes(h, now, limit).map(|m| format!("; overdue: {}, held {m} min", h.trim()))).collect()
+}
+
+/// The waiting message for `busy`, with each holder past `limit` named overdue.
 pub fn waiting_message(busy: &Busy, what: &str, now: u64, limit: Duration) -> String {
-    let overdue = |holder: &str| match overdue_minutes(holder, now, limit) {
-        Some(m) => format!("; overdue: {}, held {m} min (the lock is never broken: the holder's lane or the owner ends it)", holder.trim()),
-        None => String::new(),
+    let overdue = |holders: &str| {
+        let o = overdue_phrases(holders, now, limit);
+        if o.is_empty() {
+            o
+        } else {
+            format!("{o} (the lock is never broken: the holder's lane or the owner ends it)")
+        }
     };
     match busy {
         Busy::Quiet(p) => format!(
@@ -232,8 +295,8 @@ pub fn live_tickets(dir: &Path) -> Vec<(String, String)> {
     live
 }
 
-/// Take the lock if nobody holds it and the quiet flag is not up; never waits.
-pub fn try_acquire_in(dir: &Path, what: &str) -> std::io::Result<Result<Guard, Busy>> {
+/// Take a free slot (or, exclusive, every slot) if the quiet flag is not up; never waits.
+pub fn try_acquire_in(dir: &Path, what: &str, req: Req) -> std::io::Result<Result<Guard, Busy>> {
     std::fs::create_dir_all(dir)?;
     if let Some(age) = quiet_age(dir) {
         if age < QUIET_EXPIRES {
@@ -248,29 +311,49 @@ pub fn try_acquire_in(dir: &Path, what: &str) -> std::io::Result<Result<Guard, B
             );
         }
     }
-    let file = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(lock_path(dir))?;
-    match file.try_lock() {
-        Ok(()) => {
-            let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-            let worktree =
-                std::env::current_dir().ok().and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())).unwrap_or_default();
-            let text = format!("{what} (process {}, in {worktree}, since {secs} s after the epoch)", std::process::id());
-            std::fs::File::create(holder_path(dir)).and_then(|mut f| f.write_all(text.as_bytes()))?;
-            Ok(Ok(Guard { file: Some(file), dir: Some(dir.to_path_buf()), outer: false }))
+    let slots = req.slots.clamp(1, MAX_SLOTS);
+    // The slots taken: one (the first free) or, exclusive, all in slot order (released again if any is busy).
+    let mut taken: Vec<(usize, File)> = Vec::new();
+    let mut busy: Vec<usize> = Vec::new();
+    for k in 0..slots {
+        let file = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(lock_path(dir, k))?;
+        match file.try_lock() {
+            Ok(()) => {
+                taken.push((k, file));
+                if !req.exclusive {
+                    break;
+                }
+            }
+            Err(TryLockError::WouldBlock) => busy.push(k),
+            Err(TryLockError::Error(e)) => return Err(e),
         }
-        Err(TryLockError::WouldBlock) => {
-            let holder = std::fs::read_to_string(holder_path(dir)).unwrap_or_default();
-            let holder = if holder.is_empty() { "another heavy command (no holder note)".to_string() } else { holder };
-            Ok(Err(Busy::Held(holder)))
-        }
-        Err(TryLockError::Error(e)) => Err(e),
     }
+    if taken.is_empty() || (req.exclusive && !busy.is_empty()) {
+        // Not a slot free, or (exclusive) not every slot: hold none, and name the holders of the busy slots.
+        taken.clear();
+        let notes: Vec<String> =
+            busy.iter().filter_map(|&k| std::fs::read_to_string(holder_path(dir, k)).ok()).filter(|n| !n.trim().is_empty()).collect();
+        let holders = if notes.is_empty() { "another heavy command (no holder note)".to_string() } else { notes.join(" | ") };
+        return Ok(Err(Busy::Held(holders)));
+    }
+    let worktree = std::env::current_dir().ok().and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())).unwrap_or_default();
+    let mut guard = Guard::none();
+    for (k, file) in taken {
+        let place = if req.exclusive { "exclusive".to_string() } else { format!("slot {} of {slots}", k + 1) };
+        let text = format!("{what} (process {}, in {worktree}, since {} s after the epoch, {place})", std::process::id(), now_secs());
+        let h = holder_path(dir, k);
+        std::fs::File::create(&h).and_then(|mut f| f.write_all(text.as_bytes()))?;
+        guard.files.push(file);
+        guard.holders.push(h);
+    }
+    Ok(Ok(guard))
 }
 
 /// Wait for the lock (and the quiet flag to go), saying why every 30 s; `give_up` ends the wait with `None` (for tests; a command waits for good).
 pub fn acquire_in(
     dir: &Path,
     what: &str,
+    req: Req,
     poll: Duration,
     give_up: Option<Duration>,
     say: &mut dyn FnMut(&str),
@@ -287,7 +370,7 @@ pub fn acquire_in(
             // Others queued earlier: wait behind them (never take the lock ahead of the queue).
             Err(Busy::Queued(ahead.len(), first.clone()))
         } else {
-            try_acquire_in(dir, what)?
+            try_acquire_in(dir, what, req)?
         };
         match tried {
             Ok(guard) => {
@@ -306,11 +389,8 @@ pub fn acquire_in(
                     last_said = Some(Instant::now());
                     let mut m = waiting_message(&busy, what, now_secs(), limit);
                     if let Busy::Queued(..) = busy {
-                        // The holder may be overdue while the queue waits.
-                        let holder = std::fs::read_to_string(holder_path(dir)).unwrap_or_default();
-                        if let Some(min) = overdue_minutes(&holder, now_secs(), limit) {
-                            m.push_str(&format!("; overdue: {}, held {min} min", holder.trim()));
-                        }
+                        // A holder may be overdue while the queue waits.
+                        m.push_str(&overdue_phrases(&holder_notes(dir).join(" | "), now_secs(), limit));
                     }
                     say(&m);
                 }
@@ -325,42 +405,45 @@ pub fn acquire_in(
 
 /// [`acquire_in`] for a process that may be a child of the holder: when `parent` (the `PLANET_HEAVY_HELD` of its environment) names the process
 /// of the holder note, the lock is already its parent's and it takes nothing and waits for nothing.
+#[allow(clippy::too_many_arguments)]
 pub fn acquire_dir(
     dir: &Path,
     what: &str,
+    req: Req,
     parent: Option<&str>,
     poll: Duration,
     give_up: Option<Duration>,
     say: &mut dyn FnMut(&str),
 ) -> std::io::Result<Option<Guard>> {
     if parent_holds(dir, parent) {
-        return Ok(Some(Guard { file: None, dir: None, outer: false }));
+        return Ok(Some(Guard::none()));
     }
-    acquire_in(dir, what, poll, give_up, say)
+    acquire_in(dir, what, req, poll, give_up, say)
 }
 
-/// The lock for a heavy command `what`: waits its turn, prints why it waits, and never fails (a state directory that cannot be made, or
-/// `PLANET_HEAVY_LOCK=off`, runs the command unlocked and says so).
-pub fn acquire(what: &str) -> Guard {
+/// The slot for a heavy command `what` (all slots when `exclusive`): waits its turn, prints why it waits, and never fails (a state directory that cannot
+/// be made, or `PLANET_HEAVY_LOCK=off`, runs the command unlocked and says so).
+pub fn acquire(what: &str, exclusive: bool) -> Guard {
     let unlocked = |why: &str| {
         eprintln!("heavy-run lock: {why}; `{what}` runs without it");
-        Guard { file: None, dir: None, outer: false }
+        Guard::none()
     };
     if std::env::var("PLANET_HEAVY_LOCK").is_ok_and(|v| v == "off") {
         return unlocked("PLANET_HEAVY_LOCK=off");
     }
     if HELD.swap(true, Ordering::SeqCst) {
         // A heavy command inside a heavy command of this process: the outer one holds it.
-        return Guard { file: None, dir: None, outer: false };
+        return Guard::none();
     }
     let Some(dir) = state_dir() else {
         HELD.store(false, Ordering::SeqCst);
         return unlocked("no state directory (set PLANET_STATE_DIR)");
     };
     let parent = std::env::var(PARENT_ENV).ok();
-    match acquire_dir(&dir, what, parent.as_deref(), POLL, None, &mut |m| eprintln!("heavy-run lock: {m}")) {
+    let req = if exclusive { Req::exclusive() } else { Req::shared() };
+    match acquire_dir(&dir, what, req, parent.as_deref(), POLL, None, &mut |m| eprintln!("heavy-run lock: {m}")) {
         Ok(Some(mut guard)) => {
-            if guard.file.is_some() {
+            if guard.slots_held() > 0 {
                 // This process holds it now: its children (a `cargo xtask` run by a script, a test binary) inherit the id and do not wait.
                 guard.outer = true;
                 std::env::set_var(PARENT_ENV, std::process::id().to_string());
@@ -378,9 +461,15 @@ pub fn acquire(what: &str) -> Guard {
     }
 }
 
-/// Run `f` as the heavy command `what`.
+/// Run `f` as the heavy command `what` in one slot.
 pub fn with<T>(what: &str, f: impl FnOnce() -> T) -> T {
-    let _guard = acquire(what);
+    let _guard = acquire(what, false);
+    f()
+}
+
+/// Run `f` as the heavy command `what` with every slot (timing and window runs: the machine alone).
+pub fn with_exclusive<T>(what: &str, f: impl FnOnce() -> T) -> T {
+    let _guard = acquire(what, true);
     f()
 }
 
@@ -413,15 +502,16 @@ pub fn quiet_in(dir: &Path, args: &[String]) -> Result<(), String> {
             println!("quiet: off: queued heavy commands go on");
         }
         Some("status") | None => {
-            let holder = std::fs::read_to_string(holder_path(dir)).unwrap_or_default();
+            let holder = holder_notes(dir).join("\n  ");
             println!(
-                "quiet flag: {} ({})\nheavy lock holder note: {}",
+                "quiet flag: {} ({})\nheavy lock holders ({} slots):\n  {}",
                 match quiet_age(dir) {
                     None => "down".to_string(),
                     Some(a) if a < QUIET_EXPIRES => format!("up, {} min old", a.as_secs() / 60),
                     Some(a) => format!("EXPIRED, {} min old: ignored", a.as_secs() / 60),
                 },
                 flag.display(),
+                slot_count(),
                 if holder.is_empty() { "none" } else { holder.trim() }
             );
         }
@@ -430,18 +520,36 @@ pub fn quiet_in(dir: &Path, args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// `cargo xtask heavy <command> [args]`: run any command (a diagnostic example, a capture) under the lock.
+/// Whether `heavy`'s arguments ask for the exclusive mode, and the command after the flag.
+pub fn wrapped_mode(args: &[String]) -> (bool, &[String]) {
+    match args.first().map(String::as_str) {
+        Some("--exclusive") => (true, &args[1..]),
+        _ => (false, args),
+    }
+}
+
+/// `cargo xtask heavy [--exclusive] <command> [args]`: run any command (a diagnostic example, a capture) in a slot, or with `--exclusive` with every slot
+/// (a timing run).
 pub fn run_wrapped(root: &Path, args: &[String]) -> Result<(), String> {
+    let (exclusive, args) = wrapped_mode(args);
     let Some(program) = args.first() else {
-        return Err("heavy needs a command: `cargo xtask heavy cargo run --release -p planet --example ...`".into());
+        return Err("heavy needs a command: `cargo xtask heavy [--exclusive] cargo run --release -p planet --example ...`".into());
     };
     let rest: Vec<&str> = args[1..].iter().map(String::as_str).collect();
-    with(&args.join(" "), || crate::util::run(root, program, &rest, &[]))
+    let run = || crate::util::run(root, program, &rest, &[]);
+    if exclusive {
+        with_exclusive(&args.join(" "), run)
+    } else {
+        with(&args.join(" "), run)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The single lock of the tests written before the slots: one slot, shared.
+    const ONE: Req = Req { slots: 1, exclusive: false };
 
     fn dir(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("planet-heavy-{}-{name}", std::process::id()));
@@ -473,21 +581,22 @@ mod tests {
     #[test]
     fn a_second_heavy_command_waits_and_names_the_holder_and_goes_when_the_first_is_done() {
         let d = dir("lock");
-        let first = try_acquire_in(&d, "test gpu").unwrap().expect("the machine is free");
+        let first = try_acquire_in(&d, "test gpu", ONE).unwrap().expect("the machine is free");
         let mut said = Vec::new();
         let second =
-            acquire_in(&d, "prepush", Duration::from_millis(10), Some(Duration::from_millis(60)), &mut |m| said.push(m.to_string()))
+            acquire_in(&d, "prepush", ONE, Duration::from_millis(10), Some(Duration::from_millis(60)), &mut |m| said.push(m.to_string()))
                 .unwrap();
         assert!(second.is_none(), "the lock is held: the second waits");
         assert!(said.iter().any(|m| m.contains("waiting for test gpu") && m.contains("`prepush` is queued")), "{said:?}");
-        match try_acquire_in(&d, "x").unwrap() {
+        match try_acquire_in(&d, "x", ONE).unwrap() {
             Err(Busy::Held(h)) => assert!(h.starts_with("test gpu (process "), "{h}"),
             other => panic!("{:?}", other.map(|_| ())),
         }
         drop(first);
         let mut said = Vec::new();
         let third =
-            acquire_in(&d, "prepush", Duration::from_millis(10), Some(Duration::from_secs(5)), &mut |m| said.push(m.to_string())).unwrap();
+            acquire_in(&d, "prepush", ONE, Duration::from_millis(10), Some(Duration::from_secs(5)), &mut |m| said.push(m.to_string()))
+                .unwrap();
         assert!(third.is_some(), "the lock is free again");
         assert!(said.is_empty(), "no message when nobody waited: {said:?}");
         let _ = std::fs::remove_dir_all(&d);
@@ -501,12 +610,13 @@ mod tests {
         std::fs::write(quiet_path(&d), "x").unwrap();
         let mut said = Vec::new();
         let got =
-            acquire_in(&d, "test", Duration::from_millis(10), Some(Duration::from_millis(50)), &mut |m| said.push(m.to_string())).unwrap();
+            acquire_in(&d, "test", ONE, Duration::from_millis(10), Some(Duration::from_millis(50)), &mut |m| said.push(m.to_string()))
+                .unwrap();
         assert!(got.is_none(), "the flag is up: nothing runs");
         assert!(said.iter().any(|m| m.contains("quiet flag") && m.contains("`test` is queued")), "{said:?}");
-        assert_eq!(try_acquire_in(&d, "x").unwrap().err(), Some(Busy::Quiet(quiet_path(&d))));
+        assert_eq!(try_acquire_in(&d, "x", ONE).unwrap().err(), Some(Busy::Quiet(quiet_path(&d))));
         std::fs::remove_file(quiet_path(&d)).unwrap();
-        assert!(try_acquire_in(&d, "test").unwrap().is_ok(), "the flag is down: the command goes");
+        assert!(try_acquire_in(&d, "test", ONE).unwrap().is_ok(), "the flag is down: the command goes");
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -514,12 +624,12 @@ mod tests {
     #[test]
     fn a_waiter_in_another_thread_goes_as_soon_as_the_holder_lets_go() {
         let d = dir("thread");
-        let first = try_acquire_in(&d, "capture stills").unwrap().expect("free");
+        let first = try_acquire_in(&d, "capture stills", ONE).unwrap().expect("free");
         let d2 = d.clone();
         let waiter = std::thread::Builder::new()
             .name("test-waiter".into())
             .spawn(move || {
-                acquire_in(&d2, "perf", Duration::from_millis(10), Some(Duration::from_secs(10)), &mut |_| {}).unwrap().is_some()
+                acquire_in(&d2, "perf", ONE, Duration::from_millis(10), Some(Duration::from_secs(10)), &mut |_| {}).unwrap().is_some()
             })
             .unwrap();
         std::thread::sleep(Duration::from_millis(100));
@@ -532,21 +642,22 @@ mod tests {
     #[test]
     fn a_child_of_the_holder_does_not_wait_for_its_parents_lock() {
         let d = dir("child");
-        let parent = try_acquire_in(&d, "prepush").unwrap().expect("free");
+        let parent = try_acquire_in(&d, "prepush", ONE).unwrap().expect("free");
         let me = std::process::id().to_string();
         // The environment of a child says whose lock it is: it takes nothing and waits for nothing, however short its patience.
-        let got = acquire_dir(&d, "test gpu", Some(&me), Duration::from_millis(10), Some(Duration::from_millis(30)), &mut |m| {
+        let got = acquire_dir(&d, "test gpu", ONE, Some(&me), Duration::from_millis(10), Some(Duration::from_millis(30)), &mut |m| {
             panic!("waited: {m}")
         })
         .unwrap();
         let child = got.expect("the child goes at once");
-        assert!(child.file.is_none(), "it holds no lock of its own");
+        assert_eq!(child.slots_held(), 0, "it holds no lock of its own");
         drop(child);
-        assert!(try_acquire_in(&d, "x").unwrap().is_err(), "the parent still holds the lock after the child is done");
+        assert!(try_acquire_in(&d, "x", ONE).unwrap().is_err(), "the parent still holds the lock after the child is done");
         // Not a child: another process id, an empty or non-numeric value, no value; and no holder any more.
         for env in [Some("1"), Some(""), Some("abc"), Some("12x"), None] {
             assert!(!parent_holds(&d, env), "{env:?}");
-            let waited = acquire_dir(&d, "other", env, Duration::from_millis(10), Some(Duration::from_millis(30)), &mut |_| {}).unwrap();
+            let waited =
+                acquire_dir(&d, "other", ONE, env, Duration::from_millis(10), Some(Duration::from_millis(30)), &mut |_| {}).unwrap();
             assert!(waited.is_none(), "{env:?} is no child: it waits for the lock");
         }
         drop(parent);
@@ -561,19 +672,19 @@ mod tests {
         std::fs::create_dir_all(&d).unwrap();
         quiet_in(&d, &["on".to_string()]).unwrap();
         assert!(quiet_age(&d).unwrap() < Duration::from_secs(5));
-        assert!(matches!(try_acquire_in(&d, "x").unwrap(), Err(Busy::Quiet(_))), "a fresh flag holds");
+        assert!(matches!(try_acquire_in(&d, "x", ONE).unwrap(), Err(Busy::Quiet(_))), "a fresh flag holds");
         // The owner forgot it: two hours old.
         let old = std::time::SystemTime::now() - Duration::from_secs(2 * 60 * 60);
         File::options().write(true).open(quiet_path(&d)).unwrap().set_modified(old).unwrap();
         let age = quiet_age(&d).unwrap();
         assert!(age >= Duration::from_secs(2 * 60 * 60 - 5) && age >= QUIET_EXPIRES, "{age:?}");
-        let got = try_acquire_in(&d, "x").unwrap();
+        let got = try_acquire_in(&d, "x", ONE).unwrap();
         assert!(got.is_ok(), "an expired flag is ignored (with a warning naming its age)");
         drop(got);
         // `quiet on` renews it: the flag holds again.
         quiet_in(&d, &["on".to_string()]).unwrap();
         assert!(quiet_age(&d).unwrap() < Duration::from_secs(5));
-        assert!(matches!(try_acquire_in(&d, "x").unwrap(), Err(Busy::Quiet(_))));
+        assert!(matches!(try_acquire_in(&d, "x", ONE).unwrap(), Err(Busy::Quiet(_))));
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -581,12 +692,12 @@ mod tests {
     #[test]
     fn waiters_go_in_arrival_order_and_a_newcomer_never_jumps_the_queue() {
         let d = dir("order");
-        let holder = try_acquire_in(&d, "test gpu").unwrap().expect("free");
+        let holder = try_acquire_in(&d, "test gpu", ONE).unwrap().expect("free");
         let order = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let spawn = |name: &'static str| {
             let (d, order) = (d.clone(), order.clone());
             std::thread::spawn(move || {
-                let g = acquire_in(&d, name, Duration::from_millis(5), Some(Duration::from_secs(20)), &mut |_| {})
+                let g = acquire_in(&d, name, ONE, Duration::from_millis(5), Some(Duration::from_secs(20)), &mut |_| {})
                     .unwrap()
                     .expect("its turn comes");
                 order.lock().unwrap().push(name);
@@ -612,12 +723,12 @@ mod tests {
         let queued = take_ticket(&d, "queued earlier").unwrap();
         let mut said = Vec::new();
         let newcomer =
-            acquire_in(&d, "newcomer", Duration::from_millis(5), Some(Duration::from_millis(60)), &mut |m| said.push(m.to_string()))
+            acquire_in(&d, "newcomer", ONE, Duration::from_millis(5), Some(Duration::from_millis(60)), &mut |m| said.push(m.to_string()))
                 .unwrap();
         assert!(newcomer.is_none(), "the newcomer waits behind the queue");
         assert!(said.iter().any(|m| m.contains("1 queued ahead") && m.contains("queued earlier")), "{said:?}");
         drop(queued);
-        assert!(acquire_in(&d, "newcomer", Duration::from_millis(5), Some(Duration::from_secs(5)), &mut |_| {}).unwrap().is_some());
+        assert!(acquire_in(&d, "newcomer", ONE, Duration::from_millis(5), Some(Duration::from_secs(5)), &mut |_| {}).unwrap().is_some());
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -664,12 +775,117 @@ mod tests {
         assert_eq!(OVERDUE_DEFAULT, limit, "90 minutes to start");
         // An overdue holder still holds: a waiter waits.
         let d = dir("overdue");
-        let holder = try_acquire_in(&d, "stuck").unwrap().expect("free");
-        std::fs::write(holder_path(&d), note(500)).unwrap();
-        let got = acquire_in(&d, "test", Duration::from_millis(5), Some(Duration::from_millis(40)), &mut |_| {}).unwrap();
+        let holder = try_acquire_in(&d, "stuck", ONE).unwrap().expect("free");
+        std::fs::write(holder_path(&d, 0), note(500)).unwrap();
+        let got = acquire_in(&d, "test", ONE, Duration::from_millis(5), Some(Duration::from_millis(40)), &mut |_| {}).unwrap();
         assert!(got.is_none(), "the lock is not broken");
         drop(holder);
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    const TWO: Req = Req { slots: 2, exclusive: false };
+    const ALL: Req = Req { slots: 2, exclusive: true };
+
+    // spec: BUILD-026
+    #[test]
+    fn two_ordinary_jobs_run_side_by_side_and_a_third_waits_naming_both() {
+        let d = dir("slots");
+        let a = try_acquire_in(&d, "prepush", TWO).unwrap().expect("slot 1 is free");
+        let b = try_acquire_in(&d, "test gpu", TWO).unwrap().expect("slot 2 is free beside the first");
+        assert_eq!((a.slots_held(), b.slots_held()), (1, 1));
+        let notes = holder_notes(&d);
+        assert!(notes[0].starts_with("prepush (process ") && notes[0].ends_with("slot 1 of 2)"), "{notes:?}");
+        assert!(notes[1].starts_with("test gpu (process ") && notes[1].ends_with("slot 2 of 2)"), "{notes:?}");
+        match try_acquire_in(&d, "capture", TWO).unwrap() {
+            Err(Busy::Held(h)) => assert!(h.contains("prepush (process") && h.contains(" | test gpu (process"), "{h}"),
+            other => panic!("{:?}", other.map(|_| ())),
+        }
+        drop(a);
+        let c = try_acquire_in(&d, "capture", TWO).unwrap().expect("the freed slot");
+        assert!(holder_notes(&d).iter().any(|n| n.starts_with("capture") && n.ends_with("slot 1 of 2)")));
+        drop((b, c));
+        assert!(holder_notes(&d).is_empty(), "every note went with its slot");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: BUILD-026
+    #[test]
+    fn an_exclusive_run_waits_for_every_slot_and_holds_them_all() {
+        let d = dir("exclusive");
+        let a = try_acquire_in(&d, "prepush", TWO).unwrap().expect("free");
+        match try_acquire_in(&d, "perf", ALL).unwrap() {
+            Err(Busy::Held(h)) => assert!(h.starts_with("prepush (process") && !h.contains(" | "), "only the busy slot is named: {h}"),
+            other => panic!("one slot is held: the exclusive run waits ({:?})", other.map(|_| ())),
+        }
+        assert_eq!(holder_notes(&d).len(), 1, "the failed exclusive try left no note and holds nothing");
+        drop(a);
+        let e = try_acquire_in(&d, "perf", ALL).unwrap().expect("every slot free");
+        assert_eq!(e.slots_held(), 2);
+        assert!(holder_notes(&d).iter().all(|n| n.starts_with("perf (process") && n.ends_with("exclusive)")));
+        assert!(try_acquire_in(&d, "test", TWO).unwrap().is_err(), "an ordinary job waits while the exclusive run holds both");
+        drop(e);
+        assert!(try_acquire_in(&d, "test", TWO).unwrap().is_ok());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: BUILD-026
+    #[test]
+    fn a_queued_exclusive_run_blocks_later_ordinary_jobs_so_it_is_not_starved() {
+        let d = dir("starve");
+        let holder = try_acquire_in(&d, "probe", TWO).unwrap().expect("free");
+        let order = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let spawn = |name: &'static str, req: Req| {
+            let (d, order) = (d.clone(), order.clone());
+            std::thread::spawn(move || {
+                let g = acquire_in(&d, name, req, Duration::from_millis(5), Some(Duration::from_secs(20)), &mut |_| {})
+                    .unwrap()
+                    .expect("its turn comes");
+                order.lock().unwrap().push(name);
+                std::thread::sleep(Duration::from_millis(50));
+                drop(g);
+            })
+        };
+        let e = spawn("perf", ALL);
+        while live_tickets(&d).is_empty() {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        // Slot 2 is free, but the exclusive run queued first: the ordinary job queues behind it.
+        let o = spawn("prepush", TWO);
+        while live_tickets(&d).len() < 2 {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(order.lock().unwrap().is_empty(), "nobody passed the queued exclusive run");
+        drop(holder);
+        e.join().unwrap();
+        o.join().unwrap();
+        assert_eq!(*order.lock().unwrap(), vec!["perf", "prepush"]);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: BUILD-026
+    #[test]
+    fn the_overdue_warning_names_each_overdue_holder() {
+        let (now, limit) = (1_000_000u64, Duration::from_secs(90 * 60));
+        let note = |what: &str, min: u64| format!("{what} (process 7, in lane, since {} s after the epoch, slot 1 of 2)", now - min * 60);
+        let held = format!("{} | {}", note("probe", 120), note("prepush", 10));
+        let m = waiting_message(&Busy::Held(held), "test", now, limit);
+        assert!(m.contains("overdue: probe (process 7") && m.contains("held 120 min"), "{m}");
+        assert!(!m.contains("overdue: prepush"), "{m}");
+        assert_eq!(overdue_phrases(&note("prepush", 10), now, limit), "");
+    }
+
+    // spec: BUILD-026
+    #[test]
+    fn heavy_takes_the_exclusive_flag_before_the_command_and_the_slots_are_a_parameter() {
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let a = s(&["--exclusive", "cargo", "run"]);
+        assert_eq!(wrapped_mode(&a), (true, &a[1..]));
+        let b = s(&["cargo", "run", "--exclusive"]);
+        assert_eq!(wrapped_mode(&b), (false, &b[..]), "only a leading flag");
+        assert_eq!(Req::shared().slots, slot_count());
+        assert!(Req::exclusive().exclusive && !Req::shared().exclusive);
+        assert!((1..=MAX_SLOTS).contains(&slot_count()));
     }
 
     // spec: BUILD-026
