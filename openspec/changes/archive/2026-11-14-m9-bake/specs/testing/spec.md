@@ -34,7 +34,7 @@ A tier-B check SHALL evaluate the default source (GEN-094 to GEN-097) of seeds 1
 - The preview report prints each measure beside its band (TEST-086).
 
 Verify: B
-Status: planned
+Status: active
 Source: ADR 0089 decisions 3, 5 and 7, ADR 0088/0089 accepted 2026-11-01; SPIKE-69, SPIKE-78, SPIKE-79, SPIKE-80; SPIKE-93 (Earth's bands from ETOPO), planner (2026-11-02, inbox #69 and later); the class bands (plains / hills / mountains 45-62 / 15-30 / 20-32 %) approved by the owner, 2026-11-02
 
 #### Scenario: Seeds 1 to 5

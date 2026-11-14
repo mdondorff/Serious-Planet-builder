@@ -26,7 +26,7 @@ The default class source SHALL compute, as pure functions of the seed and the di
 Core, flank and old margin SHALL be multiplied by the coast gate `smoothstep(50, 300 km, distance to the smooth coast) smoothstep(0, 0.3, smooth land depth) smoothstep(0, 0.2, land depth)`, 0 where the smooth or the full land depth is not positive (no belt in the sea or on land the smooth coast does not hold; no belt stops at the coast in a step), where land depth is the continentalness minus the sea level and `inland` is the bake's `smoothstep(0.02, 0.35, land depth)` (`global.rs` `terrain`). The mask SHALL replace the range zone as the mountain strength. No gate of the mask SHALL switch over less than 100 km. The numbers here are start values (SPIKE-79, SPIKE-80, round 1 of the preview iteration); R7 tunes them. The planet-wide check of the belts is TEST-082.
 
 Verify: A
-Status: planned
+Status: active
 Source: ADR 0089 decision 3, ADR 0088/0089 accepted 2026-11-01; SPIKE-79 (14 plates, warp 0.35), SPIKE-80 (width variety, flanks, back-arc), SPIKE-91 (belt width, segments, rings); planner critiques of the preview (2026-11-01 and 2026-11-02, inbox #39 and #40); numerics review of the preview (the jumps at plate bisectors)
 
 #### Scenario: Pure and continuous
@@ -42,7 +42,7 @@ The default class weights SHALL be memberships blended by smoothsteps, then norm
 Badlands and sand sea SHALL have weight 0 in the default source; class paint (ADR 0089 decision 8) or a derived source sets them. The thresholds are start values (SPIKE-80); R7 tunes them. The planet-wide check of the class shares is TEST-082.
 
 Verify: A
-Status: planned
+Status: active
 Source: ADR 0089 decision 3, ADR 0088/0089 accepted 2026-11-01; SPIKE-77, SPIKE-80; planner (2026-11-01): the plateau as the difference
 
 #### Scenario: Memberships
@@ -85,7 +85,7 @@ On seeds 1 to 5 the default source's p99 is 1.4 to 1.8 and its largest step 5.1 
 The table and the limit are start values (SPIKE-73, SPIKE-76 to SPIKE-81; `kc` from SPIKE-64); R7 tunes them on the scorecard. The planet-wide check of the step limit is TEST-082.
 
 Verify: A
-Status: planned
+Status: active
 Source: ADR 0089 decisions 5 and 6, ADR 0088 point 1, ADR 0088/0089 accepted 2026-11-01; SPIKE-73, SPIKE-76, SPIKE-77, SPIKE-78, SPIKE-80, SPIKE-81
 
 #### Scenario: Blended amplitudes
@@ -96,7 +96,7 @@ Source: ADR 0089 decisions 5 and 6, ADR 0088 point 1, ADR 0088/0089 accepted 202
 The hill band SHALL keep GEN-064's three octaves, weights, warped direction and coast ramp, and SHALL take the amplitude `30 + 145 smoothstep(1, 5, k) + 650 smoothstep(5, 7.5, k)` m from the untapered blended `k` (GEN-097) instead of the range zone's mountain strength. `HILL_BAND_MAX_M` SHALL become 825 m. Where the class is mountains or high mountains the band SHALL be x4.5 as high (the factor is blended by the two classes' weight), its noise a ridged multifractal of five octaves (16, 8, 4, 2 and 1 km, each octave weighted by the previous one's ridge so that the ridges stay connected) in place of the three octaves, blended by the same weight, and centred (0.45 of the unit noise, its mean, is subtracted, so that the larger band does not lift the median elevation); land SHALL stay at least 1 m above the sea level where the base is (the shore of the continent stage is kept). A cap's bounds SHALL carry the band's per-octave noise bounds at the cap: for the hill octaves as before (`HILL_BAND_MAX_M`), and where the mountain weights are not 0 the ridged octaves' bound in `[0, 1]` and the factor 4.5 (the band's maximum is `0.55 * 4.5 * 825` m, about 2.0 km, and its minimum `-0.45 * 4.5 * 825` m before the land floor), all inside the clamp of 9000 m. The curve and the factors are start values (SPIKE-80; SPIKE-101, SPIKE-102 run a: x4.5 ridged centred reaches 0.79 of Everest's 3 km relief on the base); R7 tunes them. `CLASS_SOURCE_VERSION` SHALL become 6.
 
 Verify: A
-Status: planned
+Status: active
 Source: ADR 0089 decision 6, ADR 0088/0089 accepted 2026-11-01; SPIKE-80 (the hill landforms fail criterion 1 without the band), SPIKE-82
 
 #### Scenario: Band by class
@@ -118,7 +118,7 @@ The runtime base field SHALL be `m + k (e - m)` plus `k` times the creases (abov
 - the reader (`relief_lattice.rs`) interpolates the stored f32 points in f64, continuous across face edges, takes the channels' cells per face edge from the channels (a coarse planet pass and a full one read through the same code), and returns an error naming the face for a channel with a value that is not finite.
 
 Verify: A
-Status: planned
+Status: active
 Source: ADR 0088 points 1 and 2, ADR 0088/0089 accepted 2026-11-01; m9-bake PR 1 computes `m` from the existing bake; SPIKE-66 (the 10 km ring; a runtime stencil breaks batch reads and bounds)
 
 #### Scenario: One read per term
@@ -174,7 +174,7 @@ The bake's second pass SHALL work per tile of the layer grid: 98,304 cells per f
 It SHALL store the core's change against the base field (STRM-065) and checkpoint per tile, with per tile the cells that still gave in the last thermal pass (the unsettled slopes at the pass cap; the pass cap is the only bound on thermal: no wall-clock budget, which would make the result depend on the machine, CON-14). The tile grid, the halo and the tiles of a run (every land tile, or a region list) are parameters of the run; the local carve runs 10 steps without uplift, breach or fill, with the drainage area capped at 96 cells (1 km^2 at 101.8 m; the cap follows the cell size, so a coarse planet pass keeps the same number of cells), and a window's cells follow the global cell of the face's grid in the jitter and the thermal's pair hash. Every kernel SHALL be a Jacobi gather or a fixed topological sweep in f64 with `libm`. The constants are start values (SPIKE-61, SPIKE-64, SPIKE-70, SPIKE-72). The seam check is TEST-084.
 
 Verify: A, B
-Status: planned
+Status: active
 Source: ADR 0088 points 4.2 and 6, ADR 0088/0089 accepted 2026-11-01; SPIKE-61, SPIKE-64, SPIKE-70, SPIKE-71, SPIKE-72, SPIKE-73
 
 #### Scenario: Thermal on active cells
@@ -209,7 +209,7 @@ Source: ADR 0088 points 4.2 and 6, ADR 0088/0089 accepted 2026-11-01; SPIKE-61, 
 Pass 1 SHALL return, with the face's change, the drainage area of the face's own cells from the last route of its carve (by multiple flow direction, GEN-100) as one byte a cell: `round(8 log2(area / cell area))`, so 0 is a cell's own area, one step is a ninth more area, and 255 is 2^31.9 cells; a larger area is stored as 255. The face's change SHALL be the same bytes with and without the area, and the codes the same bytes on any thread count (CON-14). The area serves the viewer's ground materials and detail; it is not an input of pass 2.
 
 Verify: A
-Status: planned
+Status: active
 Source: owner 2026-11-04 (planner inbox #58.3, M9 plan I5a(c)); GEN-100
 
 #### Scenario: The area codes
@@ -224,7 +224,7 @@ Pass 2 SHALL return, with the core's change, one byte plane over the core: the d
 It serves the viewer's ground materials (soil and scree where deposited, rock where the change is deep and little is deposited).
 
 Verify: A
-Status: planned
+Status: active
 Source: owner 2026-11-04 (planner inbox #58.3, M9 plan I5a(c); the one-plane, 1 m form chosen on the sizes); GEN-101
 
 #### Scenario: The deposited depth and what is removed
@@ -244,7 +244,7 @@ With the relief channels on the bounds SHALL also take:
 Because each pyramid level holds the range of the levels below and of the nodes, the bounds of nested caps SHALL nest (LOD-012). The plan check at production parameters is TEST-083.
 
 Verify: A
-Status: planned
+Status: active
 Source: ADR 0088 points 3 and 8, ADR 0088/0089 accepted 2026-11-01; SPIKE-82, SPIKE-83 (the steep classes plan to level 18 with no capped tile, 2.5-4 us per lookup)
 
 #### Scenario: Sound and nested
@@ -256,15 +256,16 @@ Source: ADR 0088 points 3 and 8, ADR 0088/0089 accepted 2026-11-01; SPIKE-82, SP
 - it switches the crease band of the bake on (GEN-109) and needs no relief channels (without them the base is the lattice read at `k` 1, `m` unread);
 - the layer's change is the stored change with the pit depth added back (GEN-120, until lake water and a pit-tolerance rule exist), and the pyramid (GEN-102) and the range of the manifest hold that sum;
 - the height is the base (the relief base with the channels) plus the layer's change times the coast fade (GEN-113), not scaled by `k`;
-- the change is a Catmull-Rom (C1) read of the cell centres, kept within the four cells around the point, reading the neighbouring tiles' cells, clamped at a face edge and cross-faded over 2 cells with the neighbouring face's read; a tile the layer lacks is 0.
+- the change is the monotone C1 read of the cell centres (GEN-188), within the four cells around the point, reading the neighbouring tiles' cells, clamped at a face edge and cross-faded over 2 cells with the neighbouring face's read; a tile the layer lacks is 0;
+- the fine detail is pinned to the cell centres (GEN-187).
 
 Verify: A
-Status: planned
+Status: active
 Source: ADR 0088 point 5 as amended by ADR 0100 (the runtime read is C1, with the coast fade and the cube-edge cross-fade; owner 2026-11-04), ADR 0098, ADR 0099; m9-bake PR 6
 
 #### Scenario: Off and zeros
 - **WHEN** the call is not made, or the layer holds only zeros
-- **THEN** every height equals the relief field's (with the band, for zeros) to the bit, on both bases
+- **THEN** without the call every height equals the relief field's to the bit; with zeros it is the band's field with the pinned detail (GEN-187), on both bases
 
 #### Scenario: The read
 - **WHEN** the change is read at cell centres, at random points, along cell lines and across tile seams, and a tile of the layer is absent
@@ -278,7 +279,7 @@ Source: ADR 0088 point 5 as amended by ADR 0100 (the runtime read is C1, with th
 The layer's change SHALL be multiplied by a smoothstep fade of the bake's elevation `e`: 0 at or below the sea level, 1 from 3 m above it. The sea level is the one `with_layer` is given (the definition's). The fade follows `e`, not the relief base `m + k (e - m)`, and the bounds take its interval over the cap's base elevation.
 
 Verify: A
-Status: planned
+Status: active
 Source: Owner 2026-11-04 (the coast remedy, I5c), ADR 0100; m9-bake PR 6
 
 #### Scenario: Coast and order
@@ -289,7 +290,7 @@ Source: Owner 2026-11-04 (the coast remedy, I5c), ADR 0100; m9-bake PR 6
 A field with the layer on SHALL fold the layer's identity, the sea level, the fade's width and the read's version into its inputs hash, and its implementation id SHALL gain `+layer` over the band's. The field's version SHALL NOT change. `with_layer` SHALL be refused after the crease band, and the relief channels SHALL be refused after the layer; without the channels the id is `cpu-erosion-v1+band+layer` (v2 over the C1 base).
 
 Verify: A
-Status: planned
+Status: active
 Source: ADR 0098 consequence (the id and the hash change when the band is on), ADR 0100; m9-bake PR 6
 
 #### Scenario: Keys
