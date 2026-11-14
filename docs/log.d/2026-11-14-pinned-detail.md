@@ -1,0 +1,1 @@
+- 2026-11-14 pinned-detail archived: where the layer is read the fine detail is pinned to the layer's cell centres; the drawn ground equals the stored B + L at every centre (R3a: was p50 -1.6 m), held-back frames 20.4 % to 16.2 %, 31 % fewer frames on the replay path (GEN-187, ADR 0122 point 1).
