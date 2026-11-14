@@ -1,0 +1,1 @@
+- 2026-11-14 OpenSpec sync batch 3 (explorer, P3 E5): m9-bake archived; 24 requirements synced (18 active, GEN-093, GEN-096, GEN-100, TEST-081, TEST-083 and TEST-084 planned); GEN-112 names GEN-188's read and GEN-187's pinned detail; its REMOVED block left out (GEN-061, GEN-062, GEN-064 still hold in code and specs).
