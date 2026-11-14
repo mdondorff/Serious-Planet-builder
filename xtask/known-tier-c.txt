@@ -6,4 +6,5 @@
 # A line whose Tracked title is not in docs/status.md is ignored with a warning: remove the line when its Tracked entry goes.
 * | abort 0xc0000005 | Local `test gpu` worse since the display changes
 gpu_skeleton::the_pipelined_loop_* | timeout | Local `test gpu` worse since the display changes
-gpu_preflight::the_preflight_smoke_prints_the_host_facts_and_a_reading_and_never_refuses | panic at gpu_preflight.rs:22 | Local `test gpu` worse since the display changes
+gpu_preflight::the_preflight_smoke_prints_the_host_facts_and_a_reading_and_never_refuses | panic at gpu_preflight.rs:24 | Local `test gpu` worse since the display changes
+gpu_skeleton::the_draw_flag_selects_the_path_and_every_loop_draws_the_same_frame_on_either | timeout | Local `test gpu` worse since the display changes

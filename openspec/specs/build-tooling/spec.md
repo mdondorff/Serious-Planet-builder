@@ -897,11 +897,11 @@ When `cargo xtask prepush` runs `test gpu` and it fails, prepush SHALL read that
 
 Verify: A
 Status: active
-Source: Lead 2026-11-14 (explorer #149), codifying the architect's rule of 2026-11-09 (known local tier-C classes: WARP aborts 0xc0000005, gpu_skeleton timeouts, gpu_preflight's 8 s bound); BUILD-016, BUILD-026
+Source: Lead 2026-11-14 (explorer #149; after #1515 the draw-flag timeout and gpu_preflight's bound split from its text), codifying the architect's rule of 2026-11-09 (known local tier-C classes: WARP aborts 0xc0000005, gpu_skeleton timeouts, gpu_preflight's 8 s bound); BUILD-016, BUILD-026
 Detail: It changes no test and no tolerance. A list line whose Tracked entry is gone is ignored with a warning. A failure of a listed test with another outcome (another exit code, another test of the same binary timing out, a panic at another line) is not covered.
 
 #### Scenario: Known classes only
-- **WHEN** tier C fails with a WARP abort 0xc0000005, the gpu_skeleton pipelined-loop timeout and gpu_preflight's panic at line 22, and no candidate is written
+- **WHEN** tier C fails with a WARP abort 0xc0000005, the gpu_skeleton pipelined-loop timeout and gpu_preflight's panic at its 8 s bound (an assertion of its own, apart from the refusal text), and no candidate is written
 - **THEN** prepush passes the step and prints "tier C: 3 known-class failure(s), listed" with one line each
 
 #### Scenario: Anything else
