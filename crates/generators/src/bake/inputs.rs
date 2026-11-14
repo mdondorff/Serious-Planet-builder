@@ -164,6 +164,7 @@ impl BakeInputs {
         // The turned lattices of the bands (GEN-140): the word is unchanged while the switch is off.
         let h = rules.fold(h);
         let h = crate::classes::coast_tilt().fold(h);
+        let h = crate::classes::plateau_rim().fold(h);
         crate::height::turned_noise_word(h)
     }
 }
