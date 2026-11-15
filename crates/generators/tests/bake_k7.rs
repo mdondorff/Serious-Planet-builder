@@ -753,3 +753,44 @@ fn a_halo_of_exactly_the_cap_plus_the_smallest_carry_is_accepted() {
     let small = TileGrid { cells: 384, tile: 48, halo: 8, radius_m: g.radius_m };
     let _ = k7_tile(&small, TileId { face: Face(1), ti: 3, tj: 4 }, &base, &|_| 0.0, &[], &K7Params::standard(5, 0.0), 1);
 }
+
+/// The window read of the runtime (GEN-188) at `(x, y)`: [`monotone_read`] over the 4 x 4 stencil, the window's edge clamped as the gate's read clamps it.
+fn runtime_read(v: &[f64], w: usize, x: f64, y: f64) -> f64 {
+    let (i, j) = ((x as usize).min(w - 2), (y as usize).min(w - 2));
+    let (fx, fy) = (x - i as f64, y - j as f64);
+    let at = |a: i64, b: i64| v[b.clamp(0, w as i64 - 1) as usize * w + a.clamp(0, w as i64 - 1) as usize];
+    let mut p = [[0.0; 4]; 4];
+    for (row, dj) in p.iter_mut().zip(-1..=2i64) {
+        *row = [at(i as i64 - 1, j as i64 + dj), at(i as i64, j as i64 + dj), at(i as i64 + 1, j as i64 + dj), at(i as i64 + 2, j as i64 + dj)];
+    }
+    planet_generators::erosion_layer::monotone_read(p, fx, fy)
+}
+
+// spec: GEN-148, GEN-154 (the external review's F3, 2026-11-15: G-SURF read the retired clamped Catmull-Rom while the runtime reads the monotone cubic)
+#[test]
+fn the_surface_gate_reads_a_field_as_the_runtime_draws_it() {
+    use planet_generators::bake::k7::gate_read;
+    // The review's trench: a row 0, -2, -22, -21 read halfway between -2 and -22 (constant along the other axis).
+    let w = 6;
+    let row = [0.0, 0.0, -2.0, -22.0, -21.0, -21.0];
+    let v: Vec<f64> = (0..w * w).map(|k| row[k % w]).collect();
+    let (x, y) = (2.5, 2.5);
+    let want = planet_generators::erosion_layer::monotone_cubic([0.0, -2.0, -22.0, -21.0], 0.5);
+    assert!((runtime_read(&v, w, x, y) - want).abs() < 1e-12, "the stencil helper is the runtime's read");
+    assert!(
+        (gate_read(&v, w, x, y) - want).abs() < 1e-12,
+        "the gate reads the trench as the runtime does: gate {} m, runtime {want} m",
+        gate_read(&v, w, x, y)
+    );
+    // And on a rough field at many points: the same values, to rounding.
+    let w = 12;
+    let v: Vec<f64> = (0..w * w).map(|k| 40.0 * libm::sin(1.7 * (k % w) as f64) * libm::cos(0.9 * (k / w) as f64) + 3.0 * (k % 5) as f64).collect();
+    let mut worst = 0.0f64;
+    for a in 0..40 {
+        for b in 0..40 {
+            let (x, y) = (1.0 + 8.0 * a as f64 / 40.0, 1.0 + 8.0 * b as f64 / 40.0);
+            worst = worst.max((gate_read(&v, w, x, y) - runtime_read(&v, w, x, y)).abs());
+        }
+    }
+    assert!(worst < 1e-12, "the gate's read differs from the runtime's by up to {worst} m on a rough field");
+}

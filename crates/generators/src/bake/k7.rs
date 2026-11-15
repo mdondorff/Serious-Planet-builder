@@ -862,6 +862,11 @@ fn read_c1(v: &[f64], w: usize, x: f64, y: f64) -> f64 {
     r.clamp(around.iter().copied().fold(f64::INFINITY, f64::min), around.iter().copied().fold(f64::NEG_INFINITY, f64::max))
 }
 
+/// The read G-SURF makes of a window field `v` (`w x w`, centres at the integer coordinates) at `(x, y)` (GEN-148, GEN-154).
+pub fn gate_read(v: &[f64], w: usize, x: f64, y: f64) -> f64 {
+    read_c1(v, w, x, y)
+}
+
 /// G-SURF on a tile: the runtime's surface `B + C1(L)` against the bake's `C1(z)` at the lattice nodes (the vertices of the store lattice, every `lattice_step` local cells) inside the core, two cells in from its
 /// edge (the read needs its neighbours), with `L = z - B` as stored (quantised to `QUANT_STEP_M`) and unquantised; and at the centres of the same region's cells.
 pub fn surface_gate(g: &TileGrid, id: TileId, base: &(dyn Fn(Vec3) -> f64 + Sync), r: &K7Result, lattice_step: usize) -> SurfaceGate {

@@ -67,6 +67,17 @@ pub fn monotone_cubic(p: [f64; 4], t: f64) -> f64 {
     h00 * p[1] + h10 * m1 + h01 * p[2] + h11 * m2
 }
 
+/// The runtime's read of a field on a grid of cell centres (GEN-188): the tensor product of [`monotone_cubic`] over the 4 x 4 stencil `p[row][column]` around the point, the rows first
+/// (each at `fx`), then the column of their values (at `fy`). `p[1][1]` is the cell at the floor of the point, `fx` and `fy` the point's offsets from it in `[0, 1]`. The K11 read and G-SURF both call
+/// it, so the gate measures the surface the runtime draws (GEN-148, GEN-154).
+pub fn monotone_read(p: [[f64; 4]; 4], fx: f64, fy: f64) -> f64 {
+    let mut rows = [0.0; 4];
+    for (r, row) in rows.iter_mut().zip(p) {
+        *r = monotone_cubic(row, fx);
+    }
+    monotone_cubic(rows, fy)
+}
+
 /// The fade of the change at a point whose bake elevation is `e` over a sea at `sea_level_m`: 0 at the sea level and below, 1 from [`COAST_FADE_M`] above it, a smoothstep between.
 pub fn coast_fade(e: f64, sea_level_m: f64) -> f64 {
     smoothstep(0.0, COAST_FADE_M, e - sea_level_m)
@@ -352,12 +363,11 @@ impl ErosionLayer {
             Ok(held[pos].1.as_ref().map_or(0.0, |tile| f64::from(tile.cell(a % g.tile, b % g.tile))))
         };
         let (ii, jj) = (i as i64, j as i64);
-        let mut rows = [0.0; 4];
-        for (r, dj) in rows.iter_mut().zip(-1..=2) {
-            let p = [cell(ii - 1, jj + dj)?, cell(ii, jj + dj)?, cell(ii + 1, jj + dj)?, cell(ii + 2, jj + dj)?];
-            *r = monotone_cubic(p, fx);
+        let mut p = [[0.0; 4]; 4];
+        for (row, dj) in p.iter_mut().zip(-1..=2) {
+            *row = [cell(ii - 1, jj + dj)?, cell(ii, jj + dj)?, cell(ii + 1, jj + dj)?, cell(ii + 2, jj + dj)?];
         }
-        Ok(monotone_cubic(rows, fy))
+        Ok(monotone_read(p, fx, fy))
     }
 
     /// The range `(lowest, highest)` that holds the change at every direction within `angular_radius` of `centre` (GEN-102): the union of the ranges of the pyramid nodes (and of the
