@@ -567,17 +567,22 @@ fn main() -> Result<(), String> {
     // damped to 0 toward the channels of that surface over `--hill` m. Replaces `B + regional` for every metric below.
     let transfer = std::env::var("PLANET_TRANSFER").unwrap_or_default();
     let mut transfer_line = String::new();
-    if transfer == "d4" {
+    // E3 (P3, spikes D and E; spike code, never merged): PLANET_TRANSFER=d8tri is variant D: the solved surface breached over 8 neighbours, read at L by triangles split along each quad's D8
+    // diagonal (drainage-preserving), B's residual damped as for d4, then a multi-scale breach (radii 8, 4, 2, 1 L cells, then plain) whose lowering is capped at 2x the residual amplitude
+    // (p95 of |residual| over the window's land); no L round. PLANET_TRANSFER=d8tri-e is variant E: D with the residual attenuated toward the channels over `--hill-e` m (default 1,200)
+    // and smoothed along the downslope direction of the drained surface (+-`--orient` L cells, default 4): relief oriented along the valleys (Genevaux 2013 on the residual).
+    let d8 = transfer == "d8tri" || transfer == "d8tri-e";
+    if transfer == "d4" || d8 {
         let (rw_, rh_) = (front.solve.rw, front.solve.rh);
         let mut zs4 = front.solve.zs.clone();
         let reg_eps: f64 = arg(&args, "--reg-eps").map_or(0.01, |v| v.parse().unwrap());
-        let lowered = breach_nb(rw_, rh_, &mut zs4, &front.solve.outlet, reg_eps, &NB4, 0.005);
+        let lowered = breach_nb(rw_, rh_, &mut zs4, &front.solve.outlet, reg_eps, if d8 { &NB[..] } else { &NB4[..] }, 0.005);
         let land_reg = front.solve.zs.iter().filter(|v| **v > 0.0).count();
         let mut low: Vec<f64> = lowered.iter().copied().filter(|v| *v > 0.01).collect();
         let over50 = low.iter().filter(|v| **v > 50.0).count();
         let nl = low.len();
         transfer_line = format!(
-            "TRANSFER d4: the 814 m breach lowered {nl} of {land_reg} land cells: p50 {:.2} p95 {:.2} max {:.2} m; over 50 m {over50} ({:.2} % of land)",
+            "TRANSFER {transfer}: the 814 m breach lowered {nl} of {land_reg} land cells: p50 {:.2} p95 {:.2} max {:.2} m; over 50 m {over50} ({:.2} % of land)",
             pct(&mut low, 0.5),
             pct(&mut low, 0.95),
             low.last().copied().unwrap_or(0.0),
@@ -595,9 +600,65 @@ fn main() -> Result<(), String> {
                 })
                 .collect()
         };
-        let zr4 = bil(&zs4);
+        // D: each quad of 4 solve nodes is split along the diagonal its D8 flow takes (a node draining to the opposite corner of the quad); with no diagonal flow in the quad, along
+        // the diagonal of the lower mean height (the valley side). Receivers by steepest descent over 8 neighbours (diagonals over sqrt 2) on the breached surface.
+        let recv8: Vec<usize> = (0..rw_ * rh_)
+            .map(|c| {
+                let (cx, cy) = ((c % rw_) as i64, (c / rw_) as i64);
+                let (mut best, mut bs) = (usize::MAX, 0.0f64);
+                for &(dx, dy) in &NB {
+                    let (nx, ny) = (cx + dx, cy + dy);
+                    if nx < 0 || ny < 0 || nx >= rw_ as i64 || ny >= rh_ as i64 {
+                        continue;
+                    }
+                    let q = ny as usize * rw_ + nx as usize;
+                    let s = (zs4[c] - zs4[q]) / if dx != 0 && dy != 0 { std::f64::consts::SQRT_2 } else { 1.0 };
+                    if s > bs {
+                        (best, bs) = (q, s);
+                    }
+                }
+                best
+            })
+            .collect();
+        // true: split along 00-11 ("\"), false: along 10-01 ("/"), per quad (ix, iy) of the solve grid.
+        let main_diag: Vec<bool> = (0..(rw_ - 1) * (rh_ - 1))
+            .map(|k| {
+                let (ix, iy) = (k % (rw_ - 1), k / (rw_ - 1));
+                let (n00, n10, n01, n11) = (iy * rw_ + ix, iy * rw_ + ix + 1, (iy + 1) * rw_ + ix, (iy + 1) * rw_ + ix + 1);
+                if recv8[n00] == n11 || recv8[n11] == n00 {
+                    true
+                } else if recv8[n10] == n01 || recv8[n01] == n10 {
+                    false
+                } else {
+                    zs4[n00] + zs4[n11] <= zs4[n10] + zs4[n01]
+                }
+            })
+            .collect();
+        let tri = |zz: &[f64]| -> Vec<f64> {
+            (0..w * h)
+                .map(|c| {
+                    let (fx, fy) = (((c % w) as f64 - (lr - 1.0) / 2.0) / lr, ((c / w) as f64 - (lr - 1.0) / 2.0) / lr);
+                    let (ix, iy) = ((fx.floor().max(0.0) as usize).min(rw_ - 2), (fy.floor().max(0.0) as usize).min(rh_ - 2));
+                    let (u, v) = ((fx - ix as f64).clamp(0.0, 1.0), (fy - iy as f64).clamp(0.0, 1.0));
+                    let at = |x: usize, y: usize| zz[y * rw_ + x];
+                    let (z00, z10, z01, z11) = (at(ix, iy), at(ix + 1, iy), at(ix, iy + 1), at(ix + 1, iy + 1));
+                    if main_diag[iy * (rw_ - 1) + ix] {
+                        if u >= v {
+                            z00 + u * (z10 - z00) + v * (z11 - z10)
+                        } else {
+                            z00 + v * (z01 - z00) + u * (z11 - z01)
+                        }
+                    } else if u + v <= 1.0 {
+                        z00 + u * (z10 - z00) + v * (z01 - z00)
+                    } else {
+                        z11 + (1.0 - u) * (z01 - z11) + (1.0 - v) * (z10 - z11)
+                    }
+                })
+                .collect()
+        };
+        let zr4 = if d8 { tri(&zs4) } else { bil(&zs4) };
         let reg_b: Vec<f64> = (0..rw_ * rh_).map(|c| base(front.solve.face_spec.halo_direction((front.solve.ri0 + c % rw_) as i64, (front.solve.rj0 + c / rw_) as i64))).collect();
-        let zbr = bil(&reg_b);
+        let zbr = if d8 { tri(&reg_b) } else { bil(&reg_b) };
         let zb = sample(&|d: Vec3| base(d));
         let gg = planet_generators::bake::Grid::new(w, h, 101.8);
         let o4 = gg.outlets(&zr4, 0.0);
@@ -613,15 +674,96 @@ fn main() -> Result<(), String> {
         let thr = planet_generators::bake::hydro::HydroParams::default().initiation_m2;
         let chan4: Vec<bool> = (0..w * h).map(|c| a4[c] >= thr && zr4[c] > 0.0).collect();
         drop(a4);
-        let hill: f64 = arg(&args, "--hill").map_or(400.0, |v| v.parse().unwrap());
+        let hill: f64 = if transfer == "d8tri-e" {
+            arg(&args, "--hill-e").map_or(1200.0, |v| v.parse().unwrap())
+        } else {
+            arg(&args, "--hill").map_or(400.0, |v| v.parse().unwrap())
+        };
         let dist = chamfer(w, h, &chan4, 101.8);
+        let mut res: Vec<f64> = (0..w * h).map(|c| zb[c] - zbr[c]).collect();
+        if transfer == "d8tri-e" {
+            // Oriented: the residual averaged along the downslope direction of the drained surface (central differences), +-k cells, bilinear taps.
+            let k: i64 = arg(&args, "--orient").map_or(4, |v| v.parse().unwrap());
+            let src = res.clone();
+            let at = |x: f64, y: f64| -> f64 {
+                let (x, y) = (x.clamp(0.0, (w - 1) as f64 - 1e-9), y.clamp(0.0, (h - 1) as f64 - 1e-9));
+                let (ix, iy) = (x.floor() as usize, y.floor() as usize);
+                let (fx, fy) = (x - ix as f64, y - iy as f64);
+                let ix1 = (ix + 1).min(w - 1);
+                let iy1 = (iy + 1).min(h - 1);
+                (src[iy * w + ix] * (1.0 - fx) + src[iy * w + ix1] * fx) * (1.0 - fy) + (src[iy1 * w + ix] * (1.0 - fx) + src[iy1 * w + ix1] * fx) * fy
+            };
+            let rows = h.div_ceil(threads.max(1));
+            std::thread::scope(|s| {
+                for (t, chunk) in res.chunks_mut(rows * w).enumerate() {
+                    let (at, zr4) = (&at, &zr4);
+                    s.spawn(move || {
+                        for (i, v) in chunk.iter_mut().enumerate() {
+                            let c = t * rows * w + i;
+                            let (x, y) = (c % w, c / w);
+                            let (xl, xr, yd, yu) = (x.saturating_sub(1), (x + 1).min(w - 1), y.saturating_sub(1), (y + 1).min(h - 1));
+                            let (gx, gy) = (zr4[y * w + xr] - zr4[y * w + xl], zr4[yu * w + x] - zr4[yd * w + x]);
+                            let g = (gx * gx + gy * gy).sqrt();
+                            if g < 1e-9 {
+                                continue;
+                            }
+                            let (dx, dy) = (-gx / g, -gy / g);
+                            let mut sum = 0.0;
+                            for j in -k..=k {
+                                sum += at(x as f64 + dx * j as f64, y as f64 + dy * j as f64);
+                            }
+                            *v = sum / (2 * k + 1) as f64;
+                        }
+                    });
+                }
+            });
+        }
         for c in 0..w * h {
             let u = (dist[c] / hill).min(1.0);
             let sm = u * u * (3.0 - 2.0 * u);
             // Land stays land: the residual never takes a cell of the drained surface under the sea level plus 5 mm.
-            z0[c] = if zr4[c] > 0.0 { (zr4[c] + sm * (zb[c] - zbr[c])).max(zr4[c].min(0.005)) } else { zr4[c] };
+            z0[c] = if zr4[c] > 0.0 { (zr4[c] + sm * res[c]).max(zr4[c].min(0.005)) } else { zr4[c] };
         }
         transfer_line += &format!("; residual damped over {hill} m (floored at the sea level + 5 mm)");
+        if d8 && std::env::var("PLANET_SCHOTT").is_err() {
+            // The multi-scale breach (Schott 2024's final stage), each cell lowered at most `cap` in all: cap = --cap-mult (default 2) x p95 |residual| over the window's land.
+            let mult: f64 = arg(&args, "--cap-mult").map_or(2.0, |v| v.parse().unwrap());
+            let mut amp: Vec<f64> = (0..w * h).filter(|&c| zr4[c] > 0.0).map(|c| res[c].abs()).collect();
+            let cap = mult * pct(&mut amp, 0.95);
+            let start = z0.clone();
+            let outlet: Vec<bool> = (0..w * h).map(|c| c % w == 0 || c / w == 0 || c % w == w - 1 || c / w == h - 1 || z0[c] <= 0.0).collect();
+            let tb = std::time::Instant::now();
+            for r in [8i64, 4, 2, 1] {
+                let mut b = z0.clone();
+                let _ = breach(w, h, &mut b, &outlet, 1.0e-3);
+                let d: Vec<f64> = z0.iter().zip(&b).map(|(a, bb)| a - bb).collect();
+                let g = box_mean(w, h, &box_mean(w, h, &d, r), r);
+                for c in 0..w * h {
+                    if !outlet[c] {
+                        z0[c] = (z0[c] - g[c]).max(start[c] - cap);
+                    }
+                }
+            }
+            let mut b = z0.clone();
+            let _ = breach(w, h, &mut b, &outlet, 1.0e-3);
+            let mut over = 0usize;
+            for c in 0..w * h {
+                if !outlet[c] {
+                    if b[c] < start[c] - cap {
+                        over += 1;
+                    }
+                    z0[c] = b[c].max(start[c] - cap);
+                }
+            }
+            let mut low: Vec<f64> = (0..w * h).filter(|&c| !outlet[c]).map(|c| start[c] - z0[c]).filter(|v| *v > 0.01).collect();
+            let nl = low.len();
+            transfer_line += &format!(
+                "; capped multi-scale breach (8, 4, 2, 1, plain), cap {cap:.2} m ({mult} x p95 |residual|): lowered {nl} cells, p50 {:.2} p95 {:.2} m; the plain breach wanted more than the cap on {over} cells (left as pits); {:.0} s",
+                pct(&mut low, 0.5),
+                pct(&mut low, 0.95),
+                tb.elapsed().as_secs_f64()
+            );
+        }
         if std::env::var("PLANET_SCHOTT").is_ok() {
             drop(dist);
             drop(zb);
@@ -734,6 +876,13 @@ fn main() -> Result<(), String> {
         std::fs::write(out.join(format!("{tag}-full-{cw}x{chh}.f32")), hb).map_err(|e| e.to_string())?;
         std::fs::write(out.join(format!("{tag}-chan-{cw}x{chh}.u8")), mb).map_err(|e| e.to_string())?;
         println!("PICS {tag}: wrote the {cw} x {chh} core heights and channel mask");
+    }
+    // PLANET_START_OUT=<dir>: the final surface over the whole L window (margin included) as raw little-endian f64, for bake_eroded --start (E3, explorer's binary).
+    if let Ok(dir) = std::env::var("PLANET_START_OUT") {
+        let path = std::path::Path::new(&dir).join(format!("{tag}-start-{w}x{h}.f64"));
+        let bytes: Vec<u8> = zr.iter().flat_map(|v| v.to_le_bytes()).collect();
+        std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+        println!("START {tag}: wrote {} ({w} x {h}, origin at L cell ({x0}, {y0}) of face {})", path.display(), face.0);
     }
     let mut log =std::fs::OpenOptions::new().create(true).append(true).open(out.join("metrics.txt")).map_err(|e| e.to_string())?;
     writeln!(log, "{lat_line}").unwrap();
