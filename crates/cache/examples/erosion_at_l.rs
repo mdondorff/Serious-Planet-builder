@@ -678,20 +678,70 @@ fn main() -> Result<(), String> {
         let (anchor_lat, anchor_lon) = (-36.75f64.to_radians() - (4.0 * 814.0 / 6_371_000.0), -162.28f64.to_radians());
         let anchor = Vec3::from_lat_lon(anchor_lat, anchor_lon);
         let (_, s, t) = planet_core::cube::direction_to_face(&TangentWarp, anchor);
-        let (ax, ay) = (((s + 1.0) * 0.5 * n) as i64 - x0, ((t + 1.0) * 0.5 * n) as i64 - y0);
+        let (mut ax, mut ay) = (((s + 1.0) * 0.5 * n) as i64 - x0, ((t + 1.0) * 0.5 * n) as i64 - y0);
+        // SPIKE-120 item 4: PLANET_EDIT=mainstem moves the ridge onto the main stem of the largest catchment inside the region (the outlet root with the most cells), at the point halfway up the
+        // stem (the upstream walk along the largest donor), turned across the river's local direction.
+        let mut across_ns = false;
+        if std::env::var("PLANET_EDIT").ok().as_deref() == Some("mainstem") {
+            let r = &base_routing;
+            let mut area = vec![1u64; w * h];
+            for &c in r.order.iter().rev() {
+                let rc = r.receiver[c as usize];
+                if rc != none {
+                    area[rc as usize] += area[c as usize];
+                }
+            }
+            let mut best_root = (0u64, usize::MAX);
+            for c in 0..w * h {
+                if r.receiver[c] == none && area[c] > best_root.0 {
+                    best_root = (area[c], c);
+                }
+            }
+            // the donors of each cell: walk up along the largest
+            let mut up: Vec<u32> = vec![none; w * h];
+            for c in 0..w * h {
+                let rc = r.receiver[c];
+                if rc != none && (up[rc as usize] == none || area[c] > area[up[rc as usize] as usize]) {
+                    up[rc as usize] = c as u32;
+                }
+            }
+            let mut stem = vec![best_root.1];
+            while up[*stem.last().unwrap()] != none {
+                stem.push(up[*stem.last().unwrap()] as usize);
+            }
+            let mid = stem[stem.len() / 2];
+            let nxt = stem[(stem.len() / 2 + 1).min(stem.len() - 1)];
+            let (dx, dy) = ((nxt % w) as i64 - (mid % w) as i64, (nxt / w) as i64 - (mid / w) as i64);
+            across_ns = dx.abs() > dy.abs();
+            (ax, ay) = ((mid % w) as i64, (mid / w) as i64);
+            println!(
+                "EROSION edit mainstem: the largest catchment drains {} cells ({:.0} km2) to ({}, {}); its stem is {} cells; the ridge crosses it at ({}, {}), {} cells upstream of the ridge, {}",
+                best_root.0,
+                best_root.0 as f64 * cell_m * cell_m / 1e6,
+                best_root.1 % w,
+                best_root.1 / w,
+                stem.len(),
+                ax,
+                ay,
+                area[mid],
+                if across_ns { "north-south" } else { "east-west" }
+            );
+        }
         let mut ze = z.clone();
         let mut edited: Vec<usize> = Vec::new();
         let half_len = (8000.0 / cell_m) as i64;
         let half_w = (600.0 / cell_m) as i64;
         let blend = (600.0 / cell_m) as i64;
-        for dy in -(half_w + blend)..=(half_w + blend) {
+        for dy in -(half_len + blend)..=(half_len + blend) {
             for dx in -(half_len + blend)..=(half_len + blend) {
                 let (x, y) = (ax + dx, ay + dy);
                 if x < 0 || y < 0 || x >= w as i64 || y >= h as i64 {
                     continue;
                 }
-                let ex = ((dx.abs() - half_len).max(0) as f64) / blend as f64;
-                let ey = ((dy.abs() - half_w).max(0) as f64) / blend as f64;
+                // the ridge's long axis: east-west, or north-south across a river that runs east-west (SPIKE-120 item 4)
+                let (lx, ly) = if across_ns { (dy, dx) } else { (dx, dy) };
+                let ex = ((lx.abs() - half_len).max(0) as f64) / blend as f64;
+                let ey = ((ly.abs() - half_w).max(0) as f64) / blend as f64;
                 let f = (1.0 - ex.max(ey)).clamp(0.0, 1.0);
                 if f > 0.0 {
                     let c = y as usize * w + x as usize;
@@ -714,7 +764,9 @@ fn main() -> Result<(), String> {
             }
             root
         };
+        let td = t0.elapsed().as_secs_f64();
         let (root_a, root_b) = (root_of(&base_routing), root_of(&full));
+        println!("EROSION edit discovery: the roots before and after in {:.2} s, after the full re-route of {t_full:.1} s it needs", t0.elapsed().as_secs_f64() - td);
         let mut dirty_roots: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
         for &c in &edited {
             dirty_roots.insert(root_a[c]);
