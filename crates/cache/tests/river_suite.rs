@@ -360,13 +360,13 @@ fn a_corridor_routes_a_trunk_around_a_partial_dam_but_not_through_a_narrow_one()
     for x in 16..=24 {
         dam[10 * N + x] += 60.0;
     }
-    let narrow = planet_cache::river_suite::trunk_corridor(&g, &dam, &inside, &floor, 2.0, 50.0);
+    let narrow = planet_cache::river_suite::trunk_corridor(&g, &dam, &inside, &floor, 2.0, 50.0, None);
     assert_eq!((narrow.reaches, narrow.reaches_over), (1, 1), "a 2-cell corridor cannot leave the dam: {narrow:?}");
     // The minimax route comes down at x = 18 (its minimum 115 m at y = 11: 104 + y) and steps diagonally onto the dam at (19, 10), 172 m: 57 m, less than the
     // 59 m of crossing straight down the floor (170 m over 111 m).
     assert!((narrow.deepest_m - 57.0).abs() <= 0.11, "{narrow:?}");
     // 6 cells reach x = 14 and 26, outside the dam: the route climbs the side about 10 m and passes.
-    let wide = planet_cache::river_suite::trunk_corridor(&g, &dam, &inside, &floor, 6.0, 50.0);
+    let wide = planet_cache::river_suite::trunk_corridor(&g, &dam, &inside, &floor, 6.0, 50.0, None);
     assert_eq!((wide.reaches, wide.reaches_over, wide.vertices_over, wide.deepest_m), (1, 0, 0, 0.0), "{wide:?}");
     assert!(wide.vertices >= 40, "the route's cells inside are counted: {wide:?}");
     // A dam across the whole valley stays over in any corridor.
@@ -374,7 +374,7 @@ fn a_corridor_routes_a_trunk_around_a_partial_dam_but_not_through_a_narrow_one()
     for x in 0..N {
         full[10 * N + x] += 60.0;
     }
-    assert_eq!(planet_cache::river_suite::trunk_corridor(&g, &full, &inside, &floor, 20.0, 50.0).reaches_over, 1);
+    assert_eq!(planet_cache::river_suite::trunk_corridor(&g, &full, &inside, &floor, 20.0, 50.0, None).reaches_over, 1);
     // Through the gate: k_c 1, 2 and 4 of 814 m on 100 m cells reach past the partial dam; the polyline itself does not.
     let outlet = g.outlets(&dam, 0.0);
     let p = params();
@@ -396,7 +396,9 @@ fn a_corridor_routes_a_trunk_around_a_partial_dam_but_not_through_a_narrow_one()
     );
     assert_eq!(r.trunk.reaches_over, 1);
     assert!(r.trunk_corridors.iter().all(|t| t.reaches_over == 0), "{:?}", r.trunk_corridors);
-    assert!(r.corridor_line().contains("k_c 1 (814 m): 0 of 1 reaches"), "{}", r.corridor_line());
+    // The window's bar: half the start's 10 x 10 relief (27 m here), at least 10 m.
+    assert_eq!(r.corridor_bar_m, planet_cache::river_suite::corridor_bar_m(r.relief_10_start_m));
+    assert!(r.corridor_line().contains("k_c 1 (814 m) 100.00 % of 1 reaches pass"), "{}", r.corridor_line());
     assert!(r.fields().iter().any(|(k, v)| *k == "trunk_c4_reaches_over" && v == "0"));
 }
 
@@ -422,13 +424,47 @@ fn a_corridor_route_bypasses_a_pit_whose_low_minimum_would_make_a_later_rise_a_b
     assert_eq!(polyline.reaches_over, 1);
     assert!((polyline.deepest_m - 105.0).abs() < 1e-9, "{polyline:?}");
     // A corridor of 4 cells lets the route pass beside the pit: the highest running minimum (100 m) keeps the ridge within 45 m.
-    let wide = planet_cache::river_suite::trunk_corridor(&g, &z, &inside, &line, 4.0, 50.0);
+    let wide = planet_cache::river_suite::trunk_corridor(&g, &z, &inside, &line, 4.0, 50.0, None);
     assert_eq!((wide.reaches, wide.reaches_over, wide.deepest_m), (1, 0, 0.0), "{wide:?}");
     // A corridor of 1 cell holds no way around (the pit spans y 9..=11): the route must cross it, 105 m.
-    let narrow = planet_cache::river_suite::trunk_corridor(&g, &z, &inside, &line, 1.0, 50.0);
+    let narrow = planet_cache::river_suite::trunk_corridor(&g, &z, &inside, &line, 1.0, 50.0, None);
     assert_eq!(narrow.reaches_over, 1, "{narrow:?}");
     assert!((narrow.deepest_m - 105.0).abs() <= 0.11, "{narrow:?}");
     // The same input gives the same bits.
-    assert_eq!(planet_cache::river_suite::trunk_corridor(&g, &z, &inside, &line, 4.0, 50.0), wide);
-    assert_eq!(planet_cache::river_suite::trunk_corridor(&g, &z, &inside, &line, 1.0, 50.0), narrow);
+    assert_eq!(planet_cache::river_suite::trunk_corridor(&g, &z, &inside, &line, 4.0, 50.0, None), wide);
+    assert_eq!(planet_cache::river_suite::trunk_corridor(&g, &z, &inside, &line, 1.0, 50.0, None), narrow);
+}
+
+// spec: TEST-137, BUILD-057
+#[test]
+fn the_corridor_bar_scales_with_relief_and_snapping_moves_ends_and_crossings_to_their_lowest_cells() {
+    use planet_cache::river_suite::{corridor_bar_m, trunk_corridor, Snap};
+    // The bar: R1h's start relief 54.9 m gives 27.45 m; a flat window 10 m; a mountain 50 m.
+    assert_eq!((corridor_bar_m(54.9), corridor_bar_m(5.0), corridor_bar_m(400.0)), (27.45, 10.0, 50.0));
+    let g = Grid::new(N, N, DX);
+    let inside = vec![true; N * N];
+    let all = vec![true; N * N];
+    // A plateau at 100 m; the raw end of the reach, cell (30, 10), on a 170 m spike: the route must end 70 m above its minimum. Snapped, the node moves to the
+    // lowest cell within 3 cells (the plateau, ties by cell id) and the reach passes.
+    let mut z = vec![100.0; N * N];
+    z[10 * N + 30] = 170.0;
+    let line = vec![vec![(2.0, 10.0), (30.0, 10.0)]];
+    let snap = Snap { node_radius: 3.0, region: &all };
+    assert_eq!(trunk_corridor(&g, &z, &inside, &line, 6.0, 50.0, None).reaches_over, 1);
+    let s = trunk_corridor(&g, &z, &inside, &line, 6.0, 50.0, Some(&snap));
+    assert_eq!((s.reaches, s.reaches_over), (1, 0), "{s:?}");
+    // A crossing: the region is x <= 19, its edge column x = 19 a 160 m wall but for a gap at (19, 15), 5 cells off the line. A 6-cell corridor finds the gap from
+    // the raw ends; snapped, the reach must cross at the lowest edge cell within 3 cells of H1's crossing, which is the wall, and it fails.
+    let mut wall = vec![100.0; N * N];
+    for y in 0..N {
+        wall[y * N + 19] = 160.0;
+    }
+    wall[15 * N + 19] = 100.0;
+    let region: Vec<bool> = (0..N * N).map(|c| c % N <= 19).collect();
+    let across = vec![vec![(4.0, 10.0), (12.0, 10.0), (20.0, 10.0), (28.0, 10.0), (34.0, 10.0)]];
+    let raw = trunk_corridor(&g, &wall, &inside, &across, 6.0, 50.0, None);
+    assert_eq!(raw.reaches_over, 0, "{raw:?}");
+    let snapped = trunk_corridor(&g, &wall, &inside, &across, 6.0, 50.0, Some(&Snap { node_radius: 3.0, region: &region }));
+    assert_eq!(snapped.reaches_over, 1, "{snapped:?}");
+    assert!((snapped.deepest_m - 60.0).abs() <= 0.11, "{snapped:?}");
 }

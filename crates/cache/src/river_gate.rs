@@ -5,7 +5,9 @@ use planet_generators::bake::flood::priority_flood_with;
 use planet_generators::bake::route::{route_rules_filled, RoundRules, Routing, NONE};
 use planet_generators::bake::Grid;
 
-use crate::river_suite::{measure_suite, trunk_burn, trunk_corridor, SuiteInput, SuiteReport, TrunkReport, CORRIDOR_K};
+use crate::river_suite::{
+    corridor_bar_m, measure_suite, trunk_burn, trunk_corridor, Snap, SuiteInput, SuiteReport, TrunkReport, CORRIDOR_K,
+};
 
 /// The routing's flood grade between cells (the spikes' 1e-3 m).
 pub const ROUTE_EPSILON_M: f64 = 1.0e-3;
@@ -104,38 +106,30 @@ fn tail(mut v: Vec<f64>, over: f64) -> Tail {
     Tail { count_over: v.iter().filter(|&&x| x > over).count(), p50_m: at(0.5), p99_m: at(0.99), max_m: v.last().copied().unwrap_or(0.0) }
 }
 
-/// The column names of the corridor trunk measure, one row per [`CORRIDOR_K`] (k_c 1, 2, 4).
-const CORRIDOR_FIELDS: [[&str; 8]; 3] = [
-    [
-        "trunk_c1_reaches",
-        "trunk_c1_reaches_over",
-        "trunk_c1_reaches_over_pct",
-        "trunk_c1_vertices",
-        "trunk_c1_vertices_over",
-        "trunk_c1_vertices_over_pct",
-        "trunk_c1_deepest_m",
-        "trunk_c1_deepest_reach",
-    ],
-    [
-        "trunk_c2_reaches",
-        "trunk_c2_reaches_over",
-        "trunk_c2_reaches_over_pct",
-        "trunk_c2_vertices",
-        "trunk_c2_vertices_over",
-        "trunk_c2_vertices_over_pct",
-        "trunk_c2_deepest_m",
-        "trunk_c2_deepest_reach",
-    ],
-    [
-        "trunk_c4_reaches",
-        "trunk_c4_reaches_over",
-        "trunk_c4_reaches_over_pct",
-        "trunk_c4_vertices",
-        "trunk_c4_vertices_over",
-        "trunk_c4_vertices_over_pct",
-        "trunk_c4_deepest_m",
-        "trunk_c4_deepest_reach",
-    ],
+/// The column names of one corridor form (`trunk_c<k>[s]_...`; `s` the snapped form).
+macro_rules! corridor_names {
+    ($p:literal) => {
+        [
+            concat!("trunk_", $p, "_reaches"),
+            concat!("trunk_", $p, "_reaches_over"),
+            concat!("trunk_", $p, "_reaches_passing_pct"),
+            concat!("trunk_", $p, "_vertices"),
+            concat!("trunk_", $p, "_vertices_over"),
+            concat!("trunk_", $p, "_vertices_over_pct"),
+            concat!("trunk_", $p, "_deepest_m"),
+            concat!("trunk_", $p, "_deepest_reach"),
+        ]
+    };
+}
+
+/// The column names of the corridor trunk measure: one row per [`CORRIDOR_K`] (k_c 1, 2, 4) with raw H1 ends, then the same snapped (lead #159).
+const CORRIDOR_FIELDS: [[&str; 8]; 6] = [
+    corridor_names!("c1"),
+    corridor_names!("c2"),
+    corridor_names!("c4"),
+    corridor_names!("c1s"),
+    corridor_names!("c2s"),
+    corridor_names!("c4s"),
 ];
 
 /// The gate's numbers.
@@ -176,8 +170,11 @@ pub struct GateReport {
     /// H1's trunk reaches against the surface (BUILD-057): the vertices more than `cut_m` above their reach's running minimum; `trunks_given` says whether the input had reaches.
     pub trunk: TrunkReport,
     pub trunks_given: bool,
-    /// The same along each reach's minimax route inside its corridor of `k_c x h1_cell_m`, one per [`CORRIDOR_K`] (lead #158).
+    /// The same along each reach's minimax route inside its corridor of `k_c x h1_cell_m`, one per [`CORRIDOR_K`] (lead #158), against the window's bar
+    /// `corridor_bar_m` (#159): from H1's raw ends, and snapped (the nodes to the lowest cell within one H1 cell, the region's edge crossed at its lowest cell).
     pub trunk_corridors: Vec<TrunkReport>,
+    pub trunk_corridors_snapped: Vec<TrunkReport>,
+    pub corridor_bar_m: f64,
 }
 
 fn share(n: usize, of: usize) -> f64 {
@@ -297,11 +294,12 @@ impl GateReport {
             ("trunk_deepest_m", m(self.trunk.deepest_m)),
             ("trunk_deepest_reach", c(self.trunk.deepest_reach)),
         ];
-        for (names, t) in CORRIDOR_FIELDS.iter().zip(&self.trunk_corridors) {
+        f.push(("corridor_bar_m", m(self.corridor_bar_m)));
+        for (names, t) in CORRIDOR_FIELDS.iter().zip(self.trunk_corridors.iter().chain(&self.trunk_corridors_snapped)) {
             let values = [
                 c(t.reaches),
                 c(t.reaches_over),
-                pct(t.reaches_over, t.reaches),
+                pct(t.reaches - t.reaches_over, t.reaches),
                 c(t.vertices),
                 c(t.vertices_over),
                 pct(t.vertices_over, t.vertices),
@@ -416,28 +414,31 @@ impl GateReport {
         if !self.trunks_given {
             return "RIVER-GATE trunks in corridors: no H1 trunk reach in the input".to_string();
         }
-        let parts: Vec<String> = CORRIDOR_K
-            .iter()
-            .zip(&self.trunk_corridors)
-            .map(|(k, t)| {
-                format!(
-                    "k_c {k} ({:.0} m): {} of {} reaches ({:.2} %), {} of {} route vertices ({:.2} %), deepest {:.2} m on reach {}",
-                    k * self.params.h1_cell_m,
-                    t.reaches_over,
-                    t.reaches,
-                    share(t.reaches_over, t.reaches),
-                    t.vertices_over,
-                    t.vertices,
-                    share(t.vertices_over, t.vertices),
-                    t.deepest_m,
-                    t.deepest_reach
-                )
-            })
-            .collect();
+        let part = |form: &str, rows: &[TrunkReport]| -> String {
+            let p: Vec<String> = CORRIDOR_K
+                .iter()
+                .zip(rows)
+                .map(|(k, t)| {
+                    format!(
+                        "k_c {k} ({:.0} m) {:.2} % of {} reaches pass ({} over; {} of {} route vertices over), deepest {:.2} m on reach {}",
+                        k * self.params.h1_cell_m,
+                        share(t.reaches - t.reaches_over, t.reaches),
+                        t.reaches,
+                        t.reaches_over,
+                        t.vertices_over,
+                        t.vertices,
+                        t.deepest_m,
+                        t.deepest_reach
+                    )
+                })
+                .collect();
+            format!("{form}: {}", p.join("; "))
+        };
         format!(
-            "RIVER-GATE trunks in corridors: the minimax route of each reach inside its corridor still stands more than {} m above its running minimum on {}",
-            self.params.cut_m,
-            parts.join("; ")
+            "RIVER-GATE trunks in corridors (a reach passes when its minimax route inside its corridor keeps within {:.1} m of its running minimum, the window's bar): {} | {}",
+            self.corridor_bar_m,
+            part("raw H1 ends", &self.trunk_corridors),
+            part("snapped", &self.trunk_corridors_snapped)
         )
     }
 
@@ -797,6 +798,11 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         ring_depth: &ring_depth,
         pairs: &pairs,
     });
+    // The corridor measure (#159): the bar scales with the start's relief, the corridors and the snap disc with the H1 cell.
+    let relief_10_start_m = relief(g, input.start, input.inside, 10, input.sea_level_m);
+    let bar = corridor_bar_m(relief_10_start_m);
+    let cell_h1 = params.h1_cell_m / g.dx();
+    let snap = Snap { node_radius: cell_h1, region: input.region };
     GateReport {
         params: *params,
         river_cells,
@@ -812,7 +818,7 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         erosion: tail(erosion, params.cut_m),
         relief_2_start_m: relief(g, input.start, input.inside, 2, input.sea_level_m),
         relief_2_m: relief(g, input.surface, input.inside, 2, input.sea_level_m),
-        relief_10_start_m: relief(g, input.start, input.inside, 10, input.sea_level_m),
+        relief_10_start_m,
         relief_10_m: relief(g, input.surface, input.inside, 10, input.sea_level_m),
         edge_h1,
         edge_matched,
@@ -821,7 +827,12 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         trunks_given: !input.trunks.is_empty(),
         trunk_corridors: CORRIDOR_K
             .iter()
-            .map(|k| trunk_corridor(g, input.surface, input.inside, input.trunks, k * params.h1_cell_m / g.dx(), params.cut_m))
+            .map(|k| trunk_corridor(g, input.surface, input.inside, input.trunks, k * cell_h1, bar, None))
             .collect(),
+        trunk_corridors_snapped: CORRIDOR_K
+            .iter()
+            .map(|k| trunk_corridor(g, input.surface, input.inside, input.trunks, k * cell_h1, bar, Some(&snap)))
+            .collect(),
+        corridor_bar_m: bar,
     }
 }

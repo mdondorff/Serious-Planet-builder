@@ -609,10 +609,11 @@ fn corridor(w: usize, h: usize, line: &[(f64, f64)], radius: f64) -> Option<(std
     Some((index, cells))
 }
 
-/// Whether a route inside the corridor leads from `from` to `to` with every cell at most `d` above the running minimum of the route so far; on success the route
-/// (cells, upstream first). A higher running minimum leaves every later step at least as much room (a step is allowed when the cell stands at most `d` above it,
-/// and the minimum only falls), so a search that keeps each cell's highest reachable minimum, highest first and ties by cell id, is exact (the maximin form of
-/// Dijkstra's search).
+/// A route inside the corridor from `from` to `to` with every cell at most `d` above the running minimum of the route so far, the minimum starting at
+/// `start_label` (`+inf` for a reach's first leg); on success the route (cells, upstream first) and its final running minimum. A higher running minimum leaves
+/// every later step at least as much room (a step is allowed when the cell stands at most `d` above it, and the minimum only falls), so a search that keeps each
+/// cell's highest reachable minimum, highest first and ties by cell id, is exact (the maximin form of Dijkstra's search).
+#[allow(clippy::too_many_arguments)]
 fn corridor_route(
     w: usize,
     z: &[f64],
@@ -621,13 +622,18 @@ fn corridor_route(
     from: usize,
     to: usize,
     d: f64,
-) -> Option<Vec<usize>> {
+    start_label: f64,
+) -> Option<(Vec<usize>, f64)> {
+    if z[from] - start_label > d {
+        return None;
+    }
     let mut label = vec![f64::NEG_INFINITY; cells.len()];
     let mut parent = vec![usize::MAX; cells.len()];
     let mut done = vec![false; cells.len()];
     let mut heap = std::collections::BinaryHeap::new();
-    label[index[&from]] = z[from];
-    heap.push(Key(z[from], from));
+    let l0 = start_label.min(z[from]);
+    label[index[&from]] = l0;
+    heap.push(Key(l0, from));
     while let Some(Key(l, c)) = heap.pop() {
         let ci = index[&c];
         if done[ci] || l < label[ci] {
@@ -642,7 +648,7 @@ fn corridor_route(
                 route.push(cells[k]);
             }
             route.reverse();
-            return Some(route);
+            return Some((route, l));
         }
         let (cx, cy) = ((c % w) as i64, (c / w) as i64);
         for (dx, dy) in [(-1i64, -1i64), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
@@ -666,31 +672,119 @@ fn corridor_route(
     None
 }
 
-/// The corridor form of [`trunk_burn`] (lead #158): each reach routed inside its corridor of `radius` cells from its first to its last point (the nearest cells) by
-/// the route that minimises the largest rise above its running minimum. A reach counts over when no route keeps within `bar_m`; its minimax rise is found to
-/// 0.1 m by bisection, and the vertices over the bar along that route are counted (vertices inside only). `vertices` counts the cells of the routes inside.
-pub fn trunk_corridor(grid: &Grid, z: &[f64], inside: &[bool], reaches: &[Vec<(f64, f64)>], radius: f64, bar_m: f64) -> TrunkReport {
+/// The route through the waypoints (leg after leg, the running minimum carried over), or `None` when a leg has no route within `d`.
+fn waypoint_route(
+    w: usize,
+    z: &[f64],
+    index: &std::collections::HashMap<usize, usize>,
+    cells: &[usize],
+    points: &[usize],
+    d: f64,
+) -> Option<Vec<usize>> {
+    let (mut route, mut label) = (vec![points[0]], f64::INFINITY);
+    for leg in points.windows(2) {
+        let (part, l) = corridor_route(w, z, index, cells, leg[0], leg[1], d, label)?;
+        route.extend_from_slice(&part[1..]);
+        label = l;
+    }
+    Some(route)
+}
+
+/// The lowest cell (ties by cell id) among the grid cells within `radius` cells of `p` that `keep` admits; `None` when there is none.
+fn lowest_in_disc(grid: &Grid, z: &[f64], p: (f64, f64), radius: f64, keep: impl Fn(usize) -> bool) -> Option<usize> {
+    let (w, h) = (grid.w() as i64, grid.h() as i64);
+    let (x0, x1) = (((p.0 - radius).floor() as i64).max(0), ((p.0 + radius).ceil() as i64).min(w - 1));
+    let (y0, y1) = (((p.1 - radius).floor() as i64).max(0), ((p.1 + radius).ceil() as i64).min(h - 1));
+    let mut best: Option<usize> = None;
+    for y in y0..=y1 {
+        for x in x0..=x1 {
+            let c = (y * w + x) as usize;
+            if libm::hypot(x as f64 - p.0, y as f64 - p.1) > radius || !keep(c) {
+                continue;
+            }
+            if best.is_none_or(|b| z[c] < z[b] || (z[c] == z[b] && c < b)) {
+                best = Some(c);
+            }
+        }
+    }
+    best
+}
+
+/// The snapped form of the corridor measure (#159): a reach's ends (H1's nodes) snap to the lowest L cell within `node_radius` cells, ties by cell id (all reaches
+/// meeting at a node share it: the snap depends on the node's position only), and a reach that crosses the region's edge passes through the lowest edge cell
+/// (a cell of the region with a 4-neighbour outside it) within `node_radius` cells of the midpoint of H1's crossing step, ties by cell id.
+pub struct Snap<'a> {
+    pub node_radius: f64,
+    pub region: &'a [bool],
+}
+
+/// The corridor form of [`trunk_burn`] (leads #158 and #159): each reach routed inside its corridor of `radius` cells from its first to its last point (the nearest
+/// cells, or with `snap` the snapped nodes and the crossing cells) by the route that minimises the largest rise above its running minimum. A reach counts over
+/// when no route keeps within `bar_m`; its minimax rise is found to 0.1 m by bisection, and the vertices over the bar along that route are counted (vertices
+/// inside only). `vertices` counts the cells of the routes inside. A reach whose end lies outside the grid or its corridor, whose corridor does not join its
+/// waypoints, or that has no point inside is skipped.
+pub fn trunk_corridor(
+    grid: &Grid,
+    z: &[f64],
+    inside: &[bool],
+    reaches: &[Vec<(f64, f64)>],
+    radius: f64,
+    bar_m: f64,
+    snap: Option<&Snap>,
+) -> TrunkReport {
     let (w, h) = (grid.w(), grid.h());
     let mut r = TrunkReport::default();
     let cell_of = |p: (f64, f64)| (p.1.round() as usize).min(h - 1) * w + (p.0.round() as usize).min(w - 1);
     for (k, line) in reaches.iter().enumerate() {
         let Some((index, cells)) = corridor(w, h, line, radius) else { continue };
-        let (from, to) = (cell_of(line[0]), cell_of(line[line.len() - 1]));
-        if !index.contains_key(&from) || !index.contains_key(&to) || !line.iter().any(|&p| inside[cell_of(p)]) {
+        if !line.iter().any(|&p| inside[cell_of(p)]) {
+            continue;
+        }
+        let (first, last) = (line[0], line[line.len() - 1]);
+        let mut points: Vec<usize> = Vec::new();
+        match snap {
+            None => points.extend([cell_of(first), cell_of(last)]),
+            Some(s) => {
+                let at_node = |p: (f64, f64)| lowest_in_disc(grid, z, p, s.node_radius, |_| true);
+                let Some(a) = at_node(first) else { continue };
+                points.push(a);
+                let region = |c: usize| s.region[c];
+                let edge = |c: usize| {
+                    let (x, y) = (c % w, c / w);
+                    region(c)
+                        && [(x > 0).then(|| c - 1), (x + 1 < w).then(|| c + 1), (y > 0).then(|| c - w), (y + 1 < h).then(|| c + w)]
+                            .into_iter()
+                            .flatten()
+                            .any(|n| !region(n))
+                };
+                for pair in line.windows(2) {
+                    if region(cell_of(pair[0])) != region(cell_of(pair[1])) {
+                        let mid = (0.5 * (pair[0].0 + pair[1].0), 0.5 * (pair[0].1 + pair[1].1));
+                        if let Some(x) = lowest_in_disc(grid, z, mid, s.node_radius, edge) {
+                            points.push(x);
+                        }
+                    }
+                }
+                let Some(b) = at_node(last) else { continue };
+                points.push(b);
+                points.dedup();
+            }
+        }
+        if points.len() < 2 || points.iter().any(|p| !index.contains_key(p)) {
             continue;
         }
         // No route rises more than the corridor's height range above its running minimum (the bed may fall below the start first).
         let top = cells.iter().map(|&c| z[c]).fold(f64::NEG_INFINITY, f64::max) - cells.iter().map(|&c| z[c]).fold(f64::INFINITY, f64::min);
-        let route = match corridor_route(w, z, &index, &cells, from, to, bar_m) {
+        let route = match waypoint_route(w, z, &index, &cells, &points, bar_m) {
             Some(route) => route,
             None => {
                 // over the bar: bisect the minimax rise in (bar, top]
                 let (mut lo, mut hi) = (bar_m, top.max(bar_m));
-                // At the height range every step is allowed: no route means the corridor does not join the reach's ends (8-neighbour), and the reach is skipped.
-                let Some(mut best) = corridor_route(w, z, &index, &cells, from, to, hi) else { continue };
+                // At the height range every step is allowed: no route means the corridor does not join the waypoints (8-neighbour), and the reach is skipped.
+                let Some(mut best) = waypoint_route(w, z, &index, &cells, &points, hi) else { continue };
                 while hi - lo > 0.1 {
                     let mid = 0.5 * (lo + hi);
-                    match corridor_route(w, z, &index, &cells, from, to, mid) {
+                    match waypoint_route(w, z, &index, &cells, &points, mid) {
                         Some(route) => (hi, best) = (mid, route),
                         None => lo = mid,
                     }
@@ -723,4 +817,9 @@ pub fn trunk_corridor(grid: &Grid, z: &[f64], inside: &[bool], reaches: &[Vec<(f
         }
     }
     r
+}
+
+/// The corridor rise bar of a window (#159): `min(50, max(10, 0.5 x` the start's p50 relief over 10 x 10 cells`))`, metres.
+pub fn corridor_bar_m(relief_10_start_m: f64) -> f64 {
+    (0.5 * relief_10_start_m).clamp(10.0, 50.0)
 }

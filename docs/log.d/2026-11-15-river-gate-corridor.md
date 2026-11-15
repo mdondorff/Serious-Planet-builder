@@ -1,1 +1,1 @@
-- 2026-11-15 river-gate-corridor (BUILD-057, TEST-137): the trunk column also routes each H1 reach inside corridors of 1, 2 and 4 H1 cells by its minimax route, the E4 note's test of whether KR can carry trunks without a cut.
+- 2026-11-15 river-gate-corridor (BUILD-057, TEST-137): the trunk column routes each H1 reach inside corridors of 1, 2 (required) and 4 H1 cells by its minimax route, raw and with snapped nodes and edge crossings, against a bar per window (the E4 note's test of whether KR can carry trunks without a cut).
