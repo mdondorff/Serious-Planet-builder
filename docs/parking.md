@@ -16,7 +16,6 @@ Owner, 2026-11-12 (ADR 0120). These items are outside the current milestone, one
 - Per-round convergence indicators (spikes).
 - GEN-175 follow-ups: the narrowed-fill refusal; remove `PlanParams::standard`.
 - GEN-173 spec text: define how a flat and its rim are found and the grade order, so the flood can be checked independently (E2 trace, 2026-11-13).
-- GEN-173 bound: cells stand up to 9.8e-10 m above the ungraded flood (R3a round 3); a derived bound (formula) or a fix, never "up to rounding" without a derivation.
 - K7 carves below sea level inland: R3a, 4,764 cells 3.5-42 m below 0 m, 1-23 km from the sea (p50 14 km); the starting surface and the rounds leave them at or above 0 m; the coastal band (ADR 0056) floods them as sea ponds. Fix at the source: a carve never goes below its outlet level (E1 stills, 2026-11-13).
 - Ledger row for the k=4 memory pair (10,565 against 11,136 MiB, hashes equal; #1447).
 
@@ -57,3 +56,4 @@ Owner, 2026-11-12 (ADR 0120). These items are outside the current milestone, one
 - Window-edge outlet never lowered (SPIKE-112, 2026-11-13): `Grid::outlets` marks window edges as outlets and the breach never lowers one, so a margin lake forms behind it. Trigger: the next region-solve change.
 - OpenSpec clean-up: 72 open changes, many M8/M9 work done, superseded or dropped; spikes audits (done, superseded, still wanted), owning lanes archive in batches (owner, 2026-11-13: P3's first item). Trigger: P3 starts.
 - Edit wash-out (SPIKE-112, 2026-11-13): a 400 m dome under the erosion ends about 200 m high; tune how strongly an edit holds against the rounds. Trigger: the editor work under ADR 0113.
+- River planform layer (meandering; external reviewer C, 2026-11-15): a reach-level vector model between H1 and the terrain (centreline, width, discharge profile, valley envelope, planform parameters); its slot is reserved in P3's D-2 contract. First a small experiment on three reaches (low-gradient, confined, steep): the drainage centreline against a procedural meander against a curvature-driven evolution; later Howard-type migration, cutoffs and floodplains. Trigger: after P3's D-1 has a winner.

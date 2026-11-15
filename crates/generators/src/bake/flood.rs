@@ -97,7 +97,7 @@ const FLAT_STEP: f64 = 1e-6;
 /// The flats of a canonical filled surface graded by Euclidean distance (GEN-173, SPIKE-108). A cell is lifted when `filled > z`; its parent is the neighbour whose level plus `epsilon` is its level
 /// (the lowest by (level, id)); a flat is a connected set of lifted cells with one pour level (the level of the non-lifted cell their parent chains end at). A flat whose Chebyshev diameter is at most
 /// `bound`, and none of whose cells lies on the border of the grid (it does not touch the window's outer ring: it may be larger than the window shows), is regraded to `base + epsilon d / sqrt 2` where `d`
-/// is the Euclidean distance in cells to the nearest lower rim cell (propagated offsets, Dijkstra by (d squared, cell id)); each cell stays strictly above its parent. A larger flat keeps the
+/// is the Euclidean distance in cells to the nearest lower rim cell (propagated offsets, Dijkstra by (d squared, cell id)); each cell stays strictly above its parent and never above its chessboard level. A larger flat keeps the
 /// chessboard grade. The result depends only on the cells of the flat and its rim, never on a tiling. Cube grids are left as they are.
 pub fn regrade_flats(
     grid: &Grid,
@@ -296,7 +296,9 @@ fn regrade_one(
     }
     assert!(done.iter().all(|&d| d), "a flat of {m} cells at {base} m has a cell its lower rim does not reach (cell {})", cells[0]);
     for (j, &c) in cells.iter().enumerate() {
-        writes.push((c, base + epsilon * rank[j]));
+        // Never above the chessboard level (GEN-173): a rank raised by `own` passes down the Euclidean parents to cells nearer the pour by count, and a cell beside the flat that
+        // drains into them would lose its lower neighbour. Where the cap binds, the chessboard parent (one epsilon lower, itself capped) is the lower neighbour.
+        writes.push((c, (base + epsilon * rank[j]).min(filled[c as usize])));
     }
 }
 

@@ -10,6 +10,7 @@ mod gate;
 mod gates;
 mod heavy;
 mod k7layout;
+mod knowntierc;
 mod lanes;
 mod layering;
 mod logcmd;
@@ -23,6 +24,7 @@ mod preview;
 mod process;
 mod repocheck;
 mod retired;
+mod rivergate;
 mod scratch;
 mod speclint;
 mod stages;
@@ -47,6 +49,7 @@ const USAGE: &str = "cargo xtask <command>
   prepush              before every push to a PR branch: check, test fast, and test gpu when the diff against origin/main touches a golden-producing path (render, frame, shaders, generators, ...); prints each step's time and one verdict line (BUILD-016); refuses a working tree that differs from HEAD, since the push sends the commit (BUILD-037)
   layering             crate layering and GPU-free dependency check (CON-02)
   k7-layout [--write-baseline]  the layout report of K7 (BUILD-052): the fixture's tile layout against an alternative, compared with docs/gates/k7-layout-baseline.txt; REVIEW above twice the baseline p99 or max; exit 0; prepush runs it when K7 files change
+  river-gate <store dir | face,i0,i1,j0,j1,seed | r1h | r3a | r3b | m1 | f1> [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--no-key-check]   the river gate (BUILD-055): closed basins on river length (0.5 m, 16 cells), the valley depth (1-2 cells) and the burn (K7's cut), ring 2-4 and the erosion depth, lakes at D, relief at 200 m and 1 km against the start surface, edge agreement with H1, and the measurement suite (BUILD-057: gradient, valley width, asymmetry, drainage density, catchment ratio, seam, narrowness, slope-area, relief spectrum), on a store (its commit's tiles) or a window's start surface; release, under the heavy lock; exit 0
   spec-lint            trace IDs, tiers, requirement coverage (CON-16)
   log [--since YYYY-MM-DD] [--limit N]   the project log: fragments of docs/log.d/ and the entries of docs/log.md, newest first (BUILD-010)
   accept <milestone>   run milestone acceptance, e.g. M0; M4 also judges the perf logs of a streaming window (--logs DIR, default perf/logs) and refuses without a valid one
@@ -74,7 +77,7 @@ const USAGE: &str = "cargo xtask <command>
   cache-verify <dir> [--world <file>|--seed N] [--sample N] [--allow-stale]   regenerate a sample of a tile store from the definition and compare (STRM-004)
   cache-compact <dir> [--world <file>|--seed N] [--cap-bytes N]   rewrite a tile store keeping the records the definition still produces, evicting the oldest packs first under a cap (STRM-013)
   ci-stats [--runs N] | --record --since YYYY-MM-DD [--until YYYY-MM-DD]   median and p90 of each CI job over the last N (default 20) completed main runs, read with gh; a median over 16 min is flagged (BUILD-014)
-  heavy <command> [args]   run any command (a diagnostic example, a replay) under the machine-wide heavy-run lock
+  heavy [--exclusive] <command> [args]   run any command (a diagnostic example, a replay) in one of the heavy-run lock's slots (PLANET_HEAVY_SLOTS, default 2); --exclusive waits for every slot and holds them all (timing runs; perf, gate and repro --window are exclusive by default) (BUILD-026)
   preview world [--seed N] [--out DIR]   (default seed 14, the reference world) the whole-planet preview of the default class source (GEN-103): equirectangular PNGs at 2048x1024 (land and sea; elevation with hillshade, today's and the new side by side; the plate mask; plateau and back-arc; relief classes, argmax and blended; k) with the seed, versions and a legend, and a report of the class shares; CPU only, no store, about 10 s; default out target/preview/world-seed-N
   bake layer [--face-res N] [--planet-res N] [--tile N] [--halo N] [--region FILE] [--keep-pass1] [--seed N] [--out DIR] [--threads N] [--map-width W]   (m9-bake PR 5, GEN-101) pass 1 then pass 2 of the erosion layer: every land tile of the --planet-res grid (default 3072 cells a face edge, tiles of 3072) or the tiles of a region file (`face tile_i tile_j` a line, at most 64), checkpointed per face and per tile (a killed run resumes), the maps and tiles.txt in DIR; pass 1 is dropped after a complete planet pass unless --keep-pass1; above 12,288 only with a region
   bake pass1 [--planet-res N] [--seed N] [--out DIR] [--threads N] [--faces LIST] [--map-width W]   (m9-bake, GEN-100) pass 1 of the erosion layer at a reduced resolution (default 768 cells per face edge; above 4096 refused: a full bake needs the planner's go), one face at a time into a layer store in DIR/layer (a killed run resumes), then the maps of the carved base; prints the wall time and the peak memory of each face
@@ -103,17 +106,26 @@ fn main() -> ExitCode {
         Some("prepush") => {
             heavy::with("prepush", || disk::check(&root, "prepush").and_then(|_| scratch::begin(&root)).and_then(|_| prepush::run(&root)))
         }
-        Some("gate") => heavy::with(&format!("gate {}", args[1..].join(" ")), || gate::run_gate(&root, &args[1..])),
+        // The gate times frames in a window: exclusive; `--small` runs headless on the software adapter in a slot.
+        Some("gate") if args.iter().any(|a| a == "--small") => {
+            heavy::with(&format!("gate {}", args[1..].join(" ")), || gate::run_gate(&root, &args[1..]))
+        }
+        Some("gate") => heavy::with_exclusive(&format!("gate {}", args[1..].join(" ")), || gate::run_gate(&root, &args[1..])),
         Some("layering") => layering::run(&root),
         Some("k7-layout") => heavy::with("k7-layout", || k7layout::run(&root, &args[1..])),
+        Some("river-gate") => heavy::with(&format!("river-gate {}", args[1..].join(" ")), || rivergate::run_gate(&root, &args[1..])),
         Some("spec-lint") => speclint::run(&root),
         Some("log") => logcmd::run(&root, &args[1..]),
         Some("accept") => {
             heavy::with(&format!("accept {}", args[1..].join(" ")), || scratch::begin(&root).and_then(|_| accept::run(&root, &args[1..])))
         }
+        // A window replay times frames: the machine alone (BUILD-026 exclusive); a headless replay stays unlocked as before.
+        Some("repro") if args.iter().any(|a| a == "--window") => {
+            heavy::with_exclusive(&format!("repro {}", args[1..].join(" ")), || testcmd::repro(&root, &args[1..]))
+        }
         Some("repro") => testcmd::repro(&root, &args[1..]),
         Some("store") => heavy::with("store", || disk::check(&root, "store").and_then(|_| storecmd::run_store(&root, &args[1..]))),
-        Some("perf") => heavy::with(&format!("perf {}", args[1..].join(" ")), || testcmd::perf(&root, &args[1..])),
+        Some("perf") => heavy::with_exclusive(&format!("perf {}", args[1..].join(" ")), || testcmd::perf(&root, &args[1..])),
         Some("capture") => heavy::with(&format!("capture {}", args[1..].join(" ")), || testcmd::capture_cmd(&root, &args[1..])),
         Some("package") => heavy::with(&format!("package {}", args[1..].join(" ")), || package::run(&root, &args[1..])),
         Some("preview") => heavy::with(&format!("preview {}", args[1..].join(" ")), || preview::run_cmd(&root, &args[1..])),

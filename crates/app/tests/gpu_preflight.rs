@@ -19,7 +19,9 @@ fn the_preflight_smoke_prints_the_host_facts_and_a_reading_and_never_refuses() {
     let bad: Vec<String> = bad.iter().map(|s| s.to_string()).collect();
     let started = std::time::Instant::now();
     let e = planet::run(&bad, &mut Vec::new()).unwrap_err();
-    assert!(e.contains("give a directory") && started.elapsed().as_secs() < 8, "{e}");
+    let took = started.elapsed();
+    assert!(e.contains("give a directory"), "{e}");
+    assert!(took.as_secs() < 8, "the refusal took {took:?}: it comes before anything is measured, within 8 s ({e})");
     assert!(out.contains("SMOKE RUN") && out.contains("AC power:") && out.contains("power plan:"), "{out}");
     assert!(out.contains("round 1:") && !out.contains("round 2:"), "one round in a smoke run: {out}");
     assert!(out.contains("PREFLIGHT OK") || out.contains("PREFLIGHT REFUSED"), "{out}");

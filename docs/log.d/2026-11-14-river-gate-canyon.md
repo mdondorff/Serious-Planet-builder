@@ -1,0 +1,1 @@
+- 2026-11-14 river-gate-canyon (BUILD-055, TEST-136): the river gate prints the canyon as two numbers, the valley depth at 1-2 cells (the canyon a viewer sees, bar relative to GLO-30) and K7's burn below the surface; ring 2-4 and the erosion depth stay as further lines.

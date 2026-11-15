@@ -459,15 +459,17 @@ Source: opus-planner (2026-10-23), ADR 0078
 - **WHEN** an accepted ADR changes only its status line, changes its body and gains a well-formed Maintained line, changes its body without one, or gains a Maintained line with a bad date or kind; and a proposed ADR changes its body
 - **THEN** the first two pass, the third and fourth fail naming the ADR, the proposed ADR is not checked, and no base gives no error
 
-### Requirement: BUILD-026 Heavy commands queue on one machine-wide lock and obey the owner's quiet flag
-`cargo xtask test` (every form), `prepush`, `perf`, `capture`, `accept`, `store` and `heavy <command>` SHALL take one lock outside every worktree (the file `heavy.lock` in the state directory: `PLANET_STATE_DIR`, else `SeriousPlanetData/tmp/heavy` in the nearest ancestor of the workspace that holds the data root (ADR 0121), else `%LOCALAPPDATA%\planet`, else `$XDG_STATE_HOME/planet`, else `~/.local/state/planet`) before they run, and a second one SHALL wait for the first instead of running beside it, saying "waiting for <holder>" (what, process, worktree) at the start of the wait and every 30 seconds. The lock SHALL be an operating-system file lock, so that it is released when the holder's process ends however it ends.
+### Requirement: BUILD-026 Heavy commands queue on machine-wide slots and obey the owner's quiet flag
+`cargo xtask test` (every form), `prepush`, `capture`, `accept`, `store` and `heavy <command>` SHALL take one of the heavy-run slots outside every worktree (`PLANET_HEAVY_SLOTS`, default 2) before they run, and a command that finds every slot held SHALL wait, saying "waiting for <holders>" (what, process, worktree, slot) at the start of the wait and every 30 seconds. `perf`, `gate` (but `gate --small`), `repro --window` and `heavy --exclusive <command>` SHALL wait until no slot is held and hold every slot while they run. A slot SHALL be an operating-system file lock, so that it is released when the holder's process ends however it ends.
 
 Verify: A
 Status: active
-Source: opus-planner (2026-10-25): three lanes' runs each got about one core; the owner needs to clear the machine without messaging anyone
+Source: opus-planner (2026-10-25): three lanes' runs each got about one core; the owner needs to clear the machine without messaging anyone; lead 2026-11-14 (queue order, overdue warning: a later waiter took the lock first; a hung holder blocks everyone without a word); owner 2026-11-14 ("Please do": two slots, exclusive timing and window runs; short jobs waited behind 30-60 min probes)
 
 #### Detail
+The slots are the files `heavy.lock` (slot 1, the single lock's name, so an older xtask shares it), `heavy.lock.1`, ... in the state directory: `PLANET_STATE_DIR`, else `SeriousPlanetData/tmp/heavy` in the nearest ancestor of the workspace that holds the data root (ADR 0121), else `%LOCALAPPDATA%\planet`, else `$XDG_STATE_HOME/planet`, else `~/.local/state/planet`. Each held slot has a holder note naming its slot, or "exclusive".
 The data root comes before `%LOCALAPPDATA%` because the desktop app redirects `%LOCALAPPDATA%` for its sessions, and a terminal and a session must see one lock.
+Waiters SHALL go in arrival order: a command that finds no slot it can take, or other waiters queued, SHALL take a ticket (a file in `tickets/` of the state directory named by its arrival time, held under an operating-system file lock, with a note beside it), and only the oldest live ticket SHALL try the slots (an ordinary one the first free slot, an exclusive one every slot); a newcomer SHALL queue behind the tickets even while a slot is free, so an exclusive waiter is never starved by later ordinary jobs. A ticket whose file lock is free and that is older than 5 seconds belongs to an ended process and SHALL be removed by the next reader. Each holder that has held its slot longer than the overdue limit (`PLANET_HEAVY_OVERDUE_MIN`, default 90 minutes) SHALL be named in the waiters' messages as "overdue: <holder note>, held N min"; a slot SHALL never be broken automatically.
 While the file `quiet` exists in the state directory every heavy command SHALL wait before it takes the lock and say that the flag is up (`cargo xtask quiet on|off|status` makes and removes it); a command already running SHALL finish. A flag older than 60 minutes SHALL be ignored, with a warning that names its age (the owner can forget it), and `quiet on` SHALL renew it. A heavy command SHALL set `PLANET_HEAVY_HELD` to its process id for its children, and a process whose `PLANET_HEAVY_HELD` names the process of the holder note SHALL take nothing and wait for nothing (a stale or wrong value is no pass). A state directory that cannot be used, or `PLANET_HEAVY_LOCK=off`, SHALL run the command without the lock and say so, and a heavy command run inside another in the same process SHALL take the lock once. `check`, `spec-lint`, `layering` and the other light commands SHALL not take it.
 
 #### Scenario: A queue
@@ -481,6 +483,22 @@ While the file `quiet` exists in the state directory every heavy command SHALL w
 #### Scenario: A flag the owner forgot
 - **WHEN** the flag is two hours old, and then `quiet on` is run
 - **THEN** the first is ignored with a warning naming the age and the second holds again
+
+#### Scenario: Arrival order
+- **WHEN** two commands queue behind a holder one after the other, and a third arrives while the lock is free but one is still queued
+- **THEN** the first queued runs first, the second next, and the third waits saying how many are queued ahead; a dead waiter's ticket is removed
+
+#### Scenario: An overdue holder
+- **WHEN** a holder has held its slot 100 minutes with the limit at 90, beside another holder of 10 minutes
+- **THEN** the waiters' message says "overdue: <its holder note>, held 100 min" and nothing about the other, and the waiters still wait
+
+#### Scenario: Two slots
+- **WHEN** two ordinary jobs start, and then a third
+- **THEN** the first two run side by side in slots 1 and 2, the third waits naming both holders, and it takes the slot the first one frees
+
+#### Scenario: An exclusive run
+- **WHEN** `perf` starts while one slot is held, and an ordinary job arrives after it while the other slot is free
+- **THEN** `perf` waits until no slot is held and then holds both, its notes say "exclusive", and the ordinary job runs only after `perf`
 
 #### Scenario: A child of the holder
 - **WHEN** a process whose `PLANET_HEAVY_HELD` is the holder's id asks for the lock, and then ones with another id, an empty or a non-numeric value, and none
@@ -857,3 +875,62 @@ Source: Architect 2026-11-11 (ADR 0114; external review condition 3), owner 2026
 #### Scenario: A thread count or a repeat that changes a byte
 - **WHEN** the fixture is baked at one thread twice and at eight threads
 - **THEN** the three hashes are equal; a bake whose bytes differ at another thread count, in a repeat, or on the other operating system fails the tier A test or the manifest diff naming the line
+
+### Requirement: BUILD-055 The river gate prints the river numbers of a region
+`cargo xtask river-gate <store dir | window>` SHALL print, in release and under the heavy lock, on one region at L: the share of river cells inside in closed basins (at least 0.5 m deep and 16 cells, `--min-cells`) beside SPIKE-114's 5 cm reference; the valley depth (surface 1 to 2 cells out above the river cell, the canyon a viewer sees) and the burn (surface above the river level, K7's cut), each a share over 50 m; ring 2-4 and the erosion depth; the share in lakes deeper than D (`--d`, default 20 m); p50 relief at 2 x 2 and 10 x 10 cells beside the start's; H1's edge crossings matched within 2 km. It SHALL exit 0.
+
+Verify: A
+Status: active
+Source: Lead 2026-11-14 (explorer #143, P3 E1 and E2), SPIKE-114, SPIKE-115, crusader 2026-11-14 (surfaces, canyon, N), TEST-136, lead 2026-11-14 (canonical window names), lead 2026-11-14 (DEC crusader-4: the canyon as valley depth and burn), spikes 2026-11-15 (SPIKE-119: windows M1 and F1)
+Detail: The valley depth is the p50 of the surface at Chebyshev distance 1 to 2 (102-204 m) above the surface at the river cell; its bar is relative to Earth: at most the share of a GLO-30 tile with 1 to 2 x the window's relief at 10 x 10 cells; the gate prints that relief beside the share, and the GLO-30 share comes from the review table, not from the gate. The burn is the surface at the river cell above the river level, every basin breached and with the lakes of D kept. Ring 2-4 is the p50 of the surface 2 to 4 cells out above the river level (the valley depth there plus the burn). A window is `face,i0,i1,j0,j1,seed` in regional cells or a canonical name: R1h face 1, 8056-8675 x 760-1379, seed 14 (the E1 region stores' window, the default); R3a face 4, 368-987 x 4720-5339, seed 15; R3b face 2, 9968-10587 x 8304-8923, seed 15; M1 (mountain belt) face 4, 6600-7219 x 10200-10819, seed 15; F1 (low-gradient river landscape) face 4, 4800-5419 x 3300-3919, seed 15. The basins are found under a fill of 1e-7 m a cell. A window measures its start surface (the base's C1 read B plus the regional field) over the region's box. A store measures its stored ground B + L (an L tile is K7's ground minus B) over the commit's tiles, with the start surface around them, its tiles draining to their border, at the commit's sea level; a commit of another grid, radius, seed, base or (with the keys) inputs identity is refused; `--no-key-check` reads each tile under the key its commit names and the report says "keys not checked". An H1 crossing counts with Q of at least 1 m3/s. An unknown option, a missing value, a second window and `--no-key-check` without a store are refused.
+
+#### Scenario: A window
+- **WHEN** the gate runs on `r1h`, `r3a`, `r3b`, `m1` or `f1`
+- **THEN** it measures that canonical window and prints one line each for rivers, basins, valley depth, burn, ring 2-4, erosion depth, lakes, relief and edge, and exits 0
+
+#### Scenario: A spike store
+- **WHEN** the gate runs on a spike branch's store with `--no-key-check`
+- **THEN** it names the commit and prints "keys not checked: spike store"
+
+### Requirement: BUILD-056 Prepush passes local tier C failures of known classes only, with a summary
+When `cargo xtask prepush` runs `test gpu` and it fails, prepush SHALL read that run's log and pass the step only when the run ended, at least one test failed, every failed test matches a line of `xtask/known-tier-c.txt` (a test pattern, an outcome: `abort 0x<code>`, `timeout` or `panic at <file>:<line>`, and the bold title of the `docs/status.md` Tracked entry it cites, which must be present) and no candidate golden was written. It SHALL then print "tier C: N known-class failure(s), listed" and one line per failure, for the PR body. Any other failure, any candidate, or a run without a summary SHALL fail the step. The list is local only: CI runs tier C in full on every push.
+
+Verify: A
+Status: active
+Source: Lead 2026-11-14 (explorer #149; after #1515 the draw-flag timeout and gpu_preflight's bound split from its text), codifying the architect's rule of 2026-11-09 (known local tier-C classes: WARP aborts 0xc0000005, gpu_skeleton timeouts, gpu_preflight's 8 s bound); BUILD-016, BUILD-026
+Detail: It changes no test and no tolerance. A list line whose Tracked entry is gone is ignored with a warning. A failure of a listed test with another outcome (another exit code, another test of the same binary timing out, a panic at another line) is not covered.
+
+#### Scenario: Known classes only
+- **WHEN** tier C fails with a WARP abort 0xc0000005, the gpu_skeleton pipelined-loop timeout and gpu_preflight's panic at its 8 s bound (an assertion of its own, apart from the refusal text), and no candidate is written
+- **THEN** prepush passes the step and prints "tier C: 3 known-class failure(s), listed" with one line each
+
+#### Scenario: Anything else
+- **WHEN** another test fails beside them, or a candidate golden is written, or the run has no summary
+- **THEN** prepush fails the step and names the uncovered failure
+
+### Requirement: BUILD-057 The river gate's measurement suite
+`cargo xtask river-gate` (BUILD-055) SHALL print, after the gate lines and from the same input (a window's start surface or a store's baked ground), one line per metric, each beside the absolute count it is taken over: the gradient, the valley width, the cross-section asymmetry, the drainage density, the catchment ratio at H1 crossings, the seam at the region's edge, the narrowness ratio, the slope-area scaling and the relief power spectrum. The lines SHALL be the same bits for the same input.
+
+Verify: A
+Status: active
+Source: Lead 2026-11-15 (explorer #151, P3 E1; the owner's rewrite of P3 after the external review), BUILD-055, TEST-137
+Detail: One definition per metric; the bars come from the spikes' Earth benchmark (windows, transects and the GLO-30 reference, #121), not from this requirement.
+- conventions: the quantile f of n sorted values is the value at index floor(n f) (the upper median for p50); 0 for none; a log is log10; a least-squares fit with fewer than two points is 0;
+- gradient: a river step is a river cell inside to its receiver when that is a river cell; it is uphill when the receiver's surface stands more than 0.25 m above it; printed: uphill steps, steps, the largest rise;
+- valley width: across the flow (perpendicular to the step to the receiver) the surface is walked in cell steps, bilinear, up to 64 cells to each side, to where it first stands more than the depth above the river cell's surface, the crossing interpolated; the width is both sides in metres; a side that reaches 64 cells or the grid's edge is capped and counted; the depth is 10 m, and half the cell's ring 2-4 depth, where a ring 2-4 depth under 2 m counts the cell as flat; printed: p50, p90, cells, capped sides, flat cells;
+- asymmetry: |L - R| / (L + R), where L and R are the mean of the surface at the points 2, 3 and 4 cells out on each side (bilinear) minus the river cell's surface, a negative mean counting as 0; cells with L + R under 1 m or a point outside the grid are left out; printed: p50, p90, cells;
+- drainage density: the river steps' length inside (a diagonal step is the cell width times the square root of 2) over the land area inside (cells above the sea level), km/km2;
+- catchment ratio: each H1 crossing of Q at least 1 m3/s gives L's drainage area at the nearest L crossing of its direction within 2 km over its Q; the median of these is the implied runoff (m2 per m3/s); printed: the pairs, the implied runoff, p10 and p90 of each value over the median (1 when L carries H1's catchment at every crossing); no pair without an H1 crossing;
+- seam: |dz| of the surface between 4-neighbours with one cell inside the region's box and one outside (count, p50, p99, maximum), against p50 and p99 between 4-neighbours both inside;
+- narrowness: the valley depth (BUILD-055) over the ring 2-4 depth above the river cell, over river cells whose ring 2-4 depth is at least 1 m (p50, p90, cells); and the p50 valley depth over the p50 ring 2-4 depth, both over every river cell inside;
+- slope-area: land cells inside with a receiver, a positive slope (the surface drop over the step length) and an area of at least 4 cells; bin b holds areas from 4 x 10^(b/2) cells; per bin the p50 slope and the cells; theta is minus the fitted slope of log p50 slope against log (the bin's lower area x 10^0.25), over the bins of at least 30 cells;
+- spectrum: the largest power-of-two square of at least 8 and at most 1024 cells in the bounding box of the cells inside, centred in it (none below 8); the mean removed; a Hann window w(i) = 0.5 - 0.5 cos(2 pi (i + 0.5) / n) in each axis; the 2-D FFT; the power |F|^2 over the sum of the window's squares, averaged per octave o of the radial wavenumber k (cycles per square, floor(log2 k) = o, 1 <= k < n); beta is the fitted slope of log power against log (1.5 x 2^o) over the octaves from o = 1; printed for the surface and for the start.
+
+
+#### Scenario: A store
+- **WHEN** the gate runs on a store
+- **THEN** the nine suite lines are measured on the stored ground B + L over the commit's tiles, with the same definitions as on a window
+
+#### Scenario: Metrics of a valley
+- **WHEN** the surface is a V valley with a river on its floor
+- **THEN** the width at 10 m, the asymmetry, the narrowness and the density have the values of its geometry (TEST-137)

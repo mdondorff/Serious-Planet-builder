@@ -1,0 +1,10 @@
+# Known local tier-C failure classes (BUILD-056). Local prepush only: CI runs tier C in full on every push and judges it.
+# A prepush whose `test gpu` fails only in these classes, with no golden mismatch and no candidate, passes with a summary for the PR body.
+# One class per line: <test pattern> | <outcome> | <docs/status.md Tracked entry, its bold title as written there>
+#   test pattern: the test's name as nextest prints it after the binary id (`binary::test`); `*` matches any run of characters.
+#   outcome: `abort 0x<code>` (the process ended with that code), `timeout` (nextest's slow-timeout), `panic at <file>:<line>` (a FAIL whose panic is at that line).
+# A line whose Tracked title is not in docs/status.md is ignored with a warning: remove the line when its Tracked entry goes.
+* | abort 0xc0000005 | Local `test gpu` worse since the display changes
+gpu_skeleton::the_pipelined_loop_* | timeout | Local `test gpu` worse since the display changes
+gpu_preflight::the_preflight_smoke_prints_the_host_facts_and_a_reading_and_never_refuses | panic at gpu_preflight.rs:24 | Local `test gpu` worse since the display changes
+gpu_skeleton::the_draw_flag_selects_the_path_and_every_loop_draws_the_same_frame_on_either | timeout | Local `test gpu` worse since the display changes

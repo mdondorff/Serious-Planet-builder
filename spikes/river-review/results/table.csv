@@ -1,0 +1,16 @@
+window,variant,basins_pct,valley_depth_ring12_pct,valley_depth_ring24_pct,burn_below_drained_surface_pct,erosion_depth_pct,lakes_d20_pct,relief_2x2_m,relief_10x10_m,edge_matched,edge_h1,axis_share_pct,source
+R1h,today,67.28,0.01,2.74,7.90,0.00,47.53,5.89,54.91,36,44,47.2,crusader river gate; axis spikes
+R1h,round only,0.98,5.29,16.50,0.00,30.75,0.00,6.71,61.61,36,44,47.4,crusader river gate; axis spikes
+R1h,D4 only,21.77,0.04,3.49,0.00,5.70,3.98,5.80,52.31,42,44,69.5,crusader river gate; axis spikes
+R1h,D4 + round,2.05,9.95,21.08,0.00,21.16,0.00,6.83,58.77,42,44,66.6,crusader river gate; axis spikes
+R3a,today,53.69,0.00,0.02,0.01,0.00,1.63,0.98,9.34,34,84,44.4,crusader river gate; axis spikes
+R3a,round only,1.78,0.20,0.76,0.00,1.10,0.00,1.18,11.01,33,84,42.6,crusader river gate; axis spikes
+R3a,D4 only,15.16,0.00,0.00,0.00,0.06,0.00,0.95,8.35,43,84,54.6,crusader river gate; axis spikes
+R3a,D4 + round,0.00,0.21,0.65,0.00,0.75,0.00,1.17,9.87,43,84,49.9,crusader river gate; axis spikes
+R3b,today,62.40,0.00,0.06,1.21,0.00,25.29,1.18,10.71,74,93,45.9,crusader river gate; axis spikes
+R3b,round only,4.40,0.74,3.20,0.00,6.00,0.00,1.33,12.10,74,93,45.5,crusader river gate; axis spikes
+R3b,D4 only,11.44,0.00,0.02,0.00,1.70,0.00,1.18,10.30,72,93,72.3,crusader river gate; axis spikes
+R3b,D4 + round,0.19,0.90,4.32,0.00,6.17,0.00,1.35,11.67,73,93,68.6,crusader river gate; axis spikes
+R1h,Schott-fair,0.00,,,0.00,,0.00,7.09,60.87,,,56.7,spikes drain_base (SPIKE-118)
+R3a,Schott-fair,0.00,,,0.00,,0.00,1.14,9.23,,,46.1,spikes drain_base (SPIKE-118)
+R3b,Schott-fair,0.00,,,0.00,,0.00,1.45,12.23,,,53.5,spikes drain_base (SPIKE-118)

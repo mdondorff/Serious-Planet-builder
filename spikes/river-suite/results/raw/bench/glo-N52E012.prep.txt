@@ -1,0 +1,2 @@
+PREP glo-N52E012.f64 665 1093
+COUNTS src C:/DEV/SeriousPlanetData/dem/glo30-samples/Copernicus_DSM_COG_10_N52_00_E012_00_DEM.tif: 2400 x 3600 pixels (1.500" x 1.000", 28.24 x 30.92 m at lat 52.500), no-data pixels 0; cells 665 x 1093 of 101.8 m, pixels a cell 3.60 x 3.29; cells without data 0; cells at or below 0 m 0; land z p5/p50/p95 27/44/132 m; min 18.4 m

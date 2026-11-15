@@ -1,0 +1,13 @@
+# River review (lead #118): the owner's frame-33547 (F2, a gorge, "water flows uphill") in the E1 region (R1h window: face 1, seed 14, i 8056-8675, j 760-1379; store r3a-e1), low sun.
+# From the last sample of the F9 capture's path (frame-33547-path.txt): eye at 38.44170 S 166.17788 W, 102 m above the ground, heading 38.96 deg, 4.78 deg down, fov 91; the anchor is 1,200 m ahead where the view ray meets the ground.
+[place]
+lat = -38.43330
+lon = -166.16921
+
+[[pose]]
+name = "f33547-lowsun"
+altitude_m = 102.0
+back_m = 1200.0
+heading_deg = 38.96
+pitch_deg = 4.78
+sun_local_hours = 17.5

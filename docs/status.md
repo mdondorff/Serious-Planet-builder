@@ -12,21 +12,20 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 - **World-build share values** (ADR 0097, BUDG-014): terrain 40 %, future content 40 %, margin 20 % of a 24 h day, proposed; confirm or change.
 - **Ocean square at orbit** (owner test 2026-11-03, `docs/dev_screenshots/2026-11-03-ocean-square-*.jpg`): press F9 when it shows again; the bundle lets crusader replay it (Tracked).
 - **Cliffs** (SPIKE-94, #1082): asset library or procedural only; the Alps' 4.3 % of area above 45° as the v1 coverage. Trigger: after M9's generator rounds.
-- **ADR 0110 acceptance** gates item 15 PR 5b (it retires ADR 0101 point 3); CON-08: resolved by constitution v1.7 (ADR 0116, #1335). ADRs 0110-0115: architect's text pass in P0, then owner acceptance.
 - **Optional, when convenient:** the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); excluding the repo's `target` folders from Windows Search indexing.
 
 Dormant items moved to `docs/parking.md` (2026-11-12).
 
-## Queue (2026-11-14, milestone P3: `docs/milestones/P3.md`)
-Every row names an exit item (ADR 0120). Everything else is in `docs/parking.md`.
+## Queue (2026-11-15, milestone P3: `docs/milestones/P3.md`, rewritten after the external review)
+Every row names an exit item (ADR 0120). Everything else is in `docs/parking.md`; the P4 draft holds what moved out of P3.
 | Exit | Step | Lane |
 |---|---|---|
-| E1 | SPIKE-115: erosion rounds at L in the region; the incremental re-route after an edit timed | crusader |
-| E1 | SPIKE-116: a base whose 100 m relief drains by construction (rivers first, the valley network) | spikes |
-| E2 | After E1's pick: rivers at L with stored geometry, whole-network levels, the lakes ADR, GEN-188's limiter in the bake reads; R3a re-baked | crusader |
-| E3 | GEN-187 (pinned detail, with the memo) merged; the owner's two flights (laptop panel, external display) | explorer, owner |
-| E4 | The thermal-dam options brief | spikes |
-| E5 | P1 and P2 closure; OpenSpec sync and archive in batches; m9-bake per ID; the independent review pass | lead, all lanes |
+| E1 | The store-path suite test; `river-gate --table`, one table over stores and windows for E3 | explorer |
+| E1 | The mountain and low-gradient windows, transects and cross-section figures, the GLO-30 benchmark documented and widened (SPIKE-119) | spikes |
+| E2 | SPIKE-120: the baked R1h store with the round, breach against carve, Schott through the gate, the worst-case main-stem edit | crusader |
+| E3 | The controlled comparison after E1: A crusader, B and C explorer, D to F spikes | crusader, explorer, spikes |
+| E4 | The river hierarchy and boundary design note, then ADRs for D-2 and D-3 | lead |
+| E5 | Lakes and basins on E3's winner, then the D-4 ADR | spikes, lead |
 
 P2 closed 2026-11-14 into P3; P1 closed 2026-11-13.
 ## Tracked
@@ -36,7 +35,7 @@ P2 closed 2026-11-14 into P3; P1 closed 2026-11-13.
 - **Older flakes** (WARP, loaded runner): `oracle_stream_smoke` (`load_running_max` 1, at least 2 expected, once; tighten its precondition, never weaken); `gpu_horizon` `a_slot_written_through_set_horizon_reads_back_as_written` (once, passes alone and on CI); `gpu_window` flight test (once, 7.5 s). On a recurrence keep the full output.
 - **Fill depth across a mountain cube edge** (keep-pits-seams, #1201): the seam gate passed on a tile seam; no mountain cube edge was in the stored faces. Blocks the planet bake (I6); run with the integrated-preview re-run.
 - **`test fast` 220-330 s** (BUILD-014): 320-329 s measured 2026-11-10 after the restart, machine busy.
-- **Local `test gpu` worse since the display changes** (2026-11-09): solo on main 956-1,400 s: 2 WARP pins (`gpu_compact_blocks`, `gpu_water` lit frames), WARP aborts 0xc0000005 (intermittent), `gpu_skeleton` timeouts (diagnosed #1442: slow only under CPU oversubscription in the two pipelined loops), `gpu_preflight` smoke (its refusal of a bad `--out` must come under 8 s, `gpu_preflight.rs:22`; the test took 47 s under load on 2026-11-13). A `gpu_skeleton` timeout on CI goes to the architect. CI judges tier C.
+- **Local `test gpu` worse since the display changes** (2026-11-09): solo on main 956-1,400 s: 2 WARP pins (`gpu_compact_blocks`, `gpu_water` lit frames), WARP aborts 0xc0000005 (intermittent), `gpu_skeleton` timeouts (diagnosed #1442: slow only under CPU oversubscription in the two pipelined loops), `gpu_preflight` smoke (its refusal of a bad `--out` must come under 8 s, `gpu_preflight.rs:24`; the test took 47 s under load on 2026-11-13). A `gpu_skeleton` timeout on CI goes to the architect. CI judges tier C.
 - **Ocean square at orbit** (owner, 2026-11-03): at 12,767 km over 20 N 30 E after 240 s of flight, a light square in a ring of dark blotches on the sea; not reproduced headless. Hypotheses: clipmap shadow on water (`--no-shadow-march`, J view), the water-node cut or never-evicted WaterBook, the shadow's temporal history; needs the owner's F9 bundle.
 - **Fine-level bound looseness** (SPIKE-86): below 1 km over steep land 5.5 % of real-store poses cap leaves at levels 16-21; tile bounds are 5-37x the sampled range. Fix with M9 R4's bounds pyramid (SPIKE-83) or a per-octave tile bound, with a tier-A bound-vs-sampled test.
 - **Window checks need an unlocked desktop** (2026-10-30): on the RTX, present stalls 1.3-2.7 s or the device is lost while the session is locked or in modern standby; unlocked the dense sweep takes 26 s. The device losses since 10-18 most likely had this cause. NR handles it. Display off after 2 h (owner, 2026-10-31); the owner unlocks remotely for a batch, which the planner requests 07:00-22:00.
