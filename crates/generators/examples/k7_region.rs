@@ -168,7 +168,11 @@ fn main() {
         let (i0, i1, j0, j1) = (region.0 * 8 / 1024, (region.1 * 8 + 7) / 1024, region.2 * 8 / 1024, (region.3 * 8 + 7) / 1024);
         (j0..=j1).flat_map(|tj| (i0..=i1).map(move |ti| TileId { face, ti: ti as u32, tj: tj as u32 })).collect()
     } else {
-        vec![TileId { face, ti: (8390 * 8 + 4) as u32 / 1024, tj: (958 * 8 + 4) as u32 / 1024 }]
+        // PLANET_K7_TILE=ti,tj picks another tile of the face (the ledger's river tiles); the default is the prototype tile (65, 7)
+        match std::env::var("PLANET_K7_TILE").ok().and_then(|v| v.split_once(',').map(|(a, b)| (a.parse::<u32>(), b.parse::<u32>()))) {
+            Some((Ok(ti), Ok(tj))) => vec![TileId { face, ti, tj }],
+            _ => vec![TileId { face, ti: (8390 * 8 + 4) as u32 / 1024, tj: (958 * 8 + 4) as u32 / 1024 }],
+        }
     };
     for id in ids {
         let (t, h) = (g.tile as i64, g.halo as i64);
