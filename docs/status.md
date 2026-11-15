@@ -16,15 +16,16 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 
 Dormant items moved to `docs/parking.md` (2026-11-12).
 
-## Queue (2026-11-14, milestone P3: `docs/milestones/P3.md`)
-Every row names an exit item (ADR 0120). Everything else is in `docs/parking.md`.
+## Queue (2026-11-15, milestone P3: `docs/milestones/P3.md`, rewritten after the external review)
+Every row names an exit item (ADR 0120). Everything else is in `docs/parking.md`; the P4 draft holds what moved out of P3.
 | Exit | Step | Lane |
 |---|---|---|
-| E1 | ADR 0123 (draft #1499) after the owner's external review: the equal-terms comparison (crusader) and the picture set (spikes) for the review document | crusader, spikes, lead |
-| E2 | After E1's pick: rivers at L with stored geometry, whole-network levels, the lakes ADR, GEN-188's limiter in the bake reads; R3a re-baked | crusader |
-| E3 | The owner's two flights (laptop panel, external display) | owner |
-| E4 | The thermal-dam options brief | spikes |
-| E5 | P1 and P2 closure; OpenSpec sync and archive in batches; m9-bake per ID; the independent review pass | lead, all lanes |
+| E1 | river-gate extended: counts and the new metrics (gradient, valley width, asymmetry, drainage density, area conservation, boundary continuity, narrowness, slope-area, spectrum) | explorer |
+| E1 | The mountain and low-gradient windows, transects and cross-section figures, the GLO-30 benchmark documented and widened (SPIKE-119) | spikes |
+| E2 | SPIKE-120: the baked R1h store with the round, breach against carve, Schott through the gate, the worst-case main-stem edit | crusader |
+| E3 | The controlled comparison A-F, after E1 | crusader, spikes |
+| E4 | The river hierarchy and boundary design note, then ADRs for D-2 and D-3 | lead |
+| E5 | Lakes and basins on E3's winner, then the D-4 ADR | spikes, lead |
 
 P2 closed 2026-11-14 into P3; P1 closed 2026-11-13.
 ## Tracked
