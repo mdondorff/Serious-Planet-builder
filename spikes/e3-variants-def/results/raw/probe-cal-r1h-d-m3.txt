@@ -1,0 +1,7 @@
+TRANSFER d8tri: the 814 m breach lowered 3191 of 724357 land cells: p50 0.17 p95 58.66 max 687.07 m; over 50 m 175 (0.02 % of land); residual damped over 400 m (floored at the sea level + 5 mm); capped multi-scale breach (8, 4, 2, 1, plain), cap 3 x local sigma (radius 8 cells): p50 13.42 p95 77.21 m: lowered 14431715 cells, p50 0.09 p95 3.68 m; the plain breach wanted more than the cap on 44131 cells (left as pits); 235 s
+RIVERS f1-8056-760-none-td8tri: core 110545 channel cells; 8328 on closed basins of the start surface (7.53 % of river length); pits touching the core 917; time nodes 25 s, front 26 s, sample 345 s, route 111 s
+BASINS117 f1-8056-760-none-td8tri: river length on basins at least 0.5 m deep and 16 cells: 5.97 % (6595 of 110545); basins counted 886 of 2253 in the window; by N: N4 6.74 % N8 6.47 % N16 5.97 % N32 4.89 % N64 3.49 %
+RIVERS f1-8056-760-none-td8tri D inf m: cut p50 0.00 p95 0.10 p99 10.00 max 37.31 m, over 50 m 0.00 %; channel cells in lakes 0.00 %
+RIVERS f1-8056-760-none-td8tri D 20 m: cut p50 0.00 p95 0.00 p99 5.71 max 19.69 m, over 50 m 0.00 %; channel cells in lakes 0.87 %
+AXIS117 f1-8056-760-none-td8tri: channel steps along a grid axis 46.9 % (51891 of 110545); relief p50 range 2 x 2 6.07 m, 10 x 10 52.83 m
+RELIEF f1-8056-760-none-td8tri: band 200 m-1 km std 11.03 m (|.| p95 24.02); 1 km block relief p50 52.8 p95 293.7 m (169349 blocks)
