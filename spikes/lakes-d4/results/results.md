@@ -99,5 +99,89 @@ On the A store it is gone.
 - what to judge: the water lies in a closed hollow at a level, not on a slope; the river enters and leaves at the spill; the shore follows the ground, with no straight cut through the rim.
 - A variant that changes the base (E) needs its stated route into the viewer (VIEW-069 opens a commit over the in-memory production base). The command is smoked once by crusader before hand-over.
 
+## D-4 notes (lead #150, 2026-11-15; from the owner's external review, F1)
+**Level against H1, a reported number** (lead, 2026-11-15): a protected lake keeps the fine surface's own spill level, not H1's (raising the rim would build an artificial shore step). D-4 reports the difference per lake.
+
+| Lake | H1 level | Level at L (SPIKE-124, R1h) | Difference |
+|---|---|---|---|
+| H1 lake 0 (0563b44fc93a2d1d) | 4.60 m | 4.05 m (main body, 47.2 km2) | -0.55 m |
+
+**Area bookkeeping (review F1.3):**
+- `hydro.rs` builds `curve_a` over the basin's members only (`filled - z > 0.5 m`).
+- `lakes.rs` adds the shallow shore cells to `Lakes::water`.
+- For H1 lake 0 that gives `Lake::area_m2` 49.9 km2 against a wet mask of 107 regional cells (about 71.0 km2 at 814.4 m). The L footprint below the spill is 5,317 cells (55.1 km2).
+- SPIKE-124's "half the area" was not this bookkeeping. Survival was measured at L by SPIKE-123's classifier on the stored ground, and the stage trace showed a real leak: K7 lowered the rim by up to 7.6 m, and the lake held 25.7 km2 before the K7 fix and 55.8 km2 after.
+- D-4 should give the record and the mask one definition of a lake's area.
+
+**Into D-4's scope (not now):**
+- **Dry-slope routing in an endorheic basin (F1.1, `lakes.rs:237-252`):** the routing runs on the filled surface, whose grade inside a basin points to the spill, so a channel entering on the sill side never reaches the water and runs uphill on the ground to the dry sill. K7 would burn it as an uphill trench. The review's fix: re-route the dry depression cells of a non-overflowing basin on a depression-local flood seeded from its water.
+- **`e_open` (F1.2, `hydro.rs:323, 356`):** an unweighted mean over every depression cell up to the spill, against ADR 0114's true cell areas, and over dry walls rather than the water at each level. The review's fix: an area-weighted evaporation curve `evap_m3s[k] = sum over z <= h_k of a(c) E_open(c)` beside `curve_a`.
+- Both are latent today: SPIKE-123 found no endorheic basin in this climate.
+
+**The failing tier-A test** (on branch spike/lakes-protect, `crates/generators/tests/bake_lakes.rs`, commit 76b7c02c, never merged; review F1's bowl, heights shifted by +500 m):
+- It **fails on main: 333 dry channel cells of the basin step uphill toward the sill.**
+- Its setup holds: one kept basin, endorheic.
+- It is D-4's test to make pass.
+
+```rust
+/// The external review's F1 (2026-11-15) as a tier-A test, heights shifted by +500 m so nothing lies below the sea outlet: a 32 x 32 asymmetric bowl, floor 300 m at (8, 16), spill 550 m at
+/// (28, 16) (a notch to the east border), a tributary trough from (24, 6) south to (24, 16) at about 510 m, then west, descending to the lake. An open-water evaporation keeps the lake endorheic.
+/// Every channel cell of the basin that stands above its water must flow downhill on the ground (toward the shore), never up to the dry sill.
+// spec: GEN-145, GEN-163 (D-4: review F1; fails on main: the filled routing sends the dry slope's channel uphill to the sill)
+#[test]
+fn a_tributary_on_the_sill_side_of_an_endorheic_lake_flows_down_to_the_shore_not_up_to_the_sill() {
+    const N: usize = 32;
+    let at = |i: usize, j: usize| j * N + i;
+    let mut z: Vec<f64> = (0..N * N)
+        .map(|p| {
+            let (i, j) = ((p % N) as f64, (p / N) as f64);
+            300.0 + 15.0 * libm::hypot(i - 8.0, j - 16.0)
+        })
+        .collect();
+    // the rim: the border high, but one notch east of the spill
+    for p in 0..N * N {
+        let (i, j) = (p % N, p / N);
+        if i == 0 || j == 0 || i == N - 1 || j == N - 1 {
+            z[p] = 900.0;
+        }
+    }
+    z[at(28, 16)] = 550.0;
+    z[at(29, 16)] = 540.0;
+    z[at(30, 16)] = 530.0;
+    z[at(31, 16)] = 520.0;
+    // the tributary: south along i = 24 from j = 6 (520 m) to j = 16 (510 m), then west to the lake (510 m down to 360 m at i = 12)
+    for j in 6..=16 {
+        z[at(24, j)] = 520.0 - (j - 6) as f64;
+    }
+    for i in 12..24 {
+        z[at(i, 16)] = 360.0 + 150.0 * (i - 12) as f64 / 12.0;
+    }
+    let g = Grid::new(N, N, 800.0);
+    let outlet = g.outlets(&z, 0.0);
+    let routing = route_rules(&g, &z, &outlet, EPS, 3, 0.0, None, RoundRules::ROUND);
+    let filled = priority_flood_with(&g, &z, &outlet, EPS, true);
+    let runoff = vec![1.0e-8f32; N * N];
+    let evap = vec![2.0e-7f32; N * N];
+    let p = HydroParams { initiation_m2: 3.0 * 800.0 * 800.0, ..HydroParams::default() };
+    let hydro = hydrology(&g, &z, &filled, &routing, &outlet, Some(&runoff), Some(&evap), &p);
+    assert_eq!(hydro.basins.len(), 1, "one kept basin");
+    let b = &hydro.basins[0];
+    assert_eq!(b.class, BasinClass::Endorheic, "the evaporation keeps the lake closed: level {} m, spill {} m", b.water_level_m, b.spill_m);
+    let lakes = lakes_from_hydro(&g, &routing, &hydro, &z);
+    let water: std::collections::HashSet<u32> = lakes.water.iter().map(|&(c, _)| c).collect();
+    let mut uphill = Vec::new();
+    for c in 0..N * N {
+        if !hydro.channel[c] || hydro.label[c] != 0 || water.contains(&(c as u32)) || z[c] < b.water_level_m {
+            continue;
+        }
+        let r = routing.receiver[c];
+        if r != NONE && z[r as usize] > z[c] + 0.25 {
+            uphill.push((c % N, c / N, z[c], z[r as usize]));
+        }
+    }
+    assert!(uphill.is_empty(), "{} dry channel cells of the basin step uphill toward the sill: {:?}", uphill.len(), &uphill[..uphill.len().min(6)]);
+}
+```
+
 ## Visuals
 None: counts only. Pictures come with the G-LAKE flight on E3's winner.
