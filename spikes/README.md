@@ -137,5 +137,6 @@ One row per spike, open and closed, across all milestones (owner, 2026-11-04; ho
 | SPIKE-01, SPIKE-02, SPIKE-05 | no folder; their reports are in the archives only |
 | SPIKE-03, SPIKE-04, SPIKE-06, SPIKE-07 | no folder; their frozen images are in [docs/spikes/](../docs/spikes/) |
 | SPIKE-10 | never used |
+| SPIKE-122 | [e3-variants-def](e3-variants-def/results/) | Do D (8-neighbour hand-over on D8-diagonal triangles, capped multi-scale breach), E (D on an oriented residual) and F (Schott fair) pass G-DRAIN and G-INCISION on five windows against A? | All four pass both bars everywhere; D and E erode and lift least, A and F drain most; the breach cap sets drainage, not incision | D-1 decides on erosion, relief and edge agreement, not the bars; fix the ridge lowering of the spread breach if D or E is chosen | closed |
 | SPIKE-96 | planned only: [spikes/sky-visibility/results/plan.md](sky-visibility/results/plan.md) (#1116); no register row, no folder |
 | compact-storage-buffer, tile-format-duality, warp-compact-atmosphere, warp-crash | explorations of 2026-10-16/17 without an Id or register row (rows above with Id "-") |
