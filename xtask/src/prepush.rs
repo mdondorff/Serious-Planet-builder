@@ -145,6 +145,11 @@ fn sweep_stale_worktrees(root: &Path) {
 
 /// The steps `prepush` runs for a diff, in order (BUILD-016, BUILD-021): `spec-lint` alone when no changed path is a crate path, else
 /// `check` and `test fast`; `test gpu` after them when a golden-producing path changed.
+/// Whether a pre-push run of `changed` needs a heavy slot (BUILD-026): a plan of spec-lint alone (a docs-only diff, no K7 file) runs in seconds and takes none.
+pub fn needs_slot(changed: &[String]) -> bool {
+    plan_steps(changed).iter().any(|s| !s.ends_with("spec-lint")) || changed.iter().any(|p| crate::k7layout::touches_k7(p))
+}
+
 pub fn plan_steps(changed: &[String]) -> Vec<&'static str> {
     let mut steps = vec!["merged spec-lint"];
     steps.extend(if no_crate_changed(changed) { vec!["spec-lint"] } else { vec!["check", "test fast"] });
@@ -429,5 +434,13 @@ R  a.md -> docs/b.md
         assert!(!line.contains('\n'));
         let bad = verdict_line(&[ok("check", 20.0), Step { name: "test fast".into(), secs: 9.0, ok: false }], false);
         assert_eq!(bad, "prepush FAILED at test fast after 29 s: check ok 20 s, test fast FAILED 9 s");
+    }
+
+    // spec: BUILD-026
+    #[test]
+    fn a_docs_only_prepush_needs_no_heavy_slot_and_any_crate_or_k7_path_does() {
+        assert!(!needs_slot(&paths(&["docs/status.md", "openspec/specs/build-tooling/spec.md", "spikes/x/results/results.md"])));
+        assert!(needs_slot(&paths(&["docs/status.md", "xtask/src/heavy.rs"])));
+        assert!(needs_slot(&paths(&["crates/generators/src/bake/k7.rs"])));
     }
 }

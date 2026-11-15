@@ -1,9 +1,10 @@
 """SPIKE-119: fixed river transects and cross-section figures (P3 E1).
 
 pick  <window> : choose the window's 3 transects on today's surface (B + regional) and append them to transects.csv.
-plot  <window> <out.png> [--extra label=file.csv]... : one figure: a locator map, then one cross-section per transect with every variant and a GLO-30 valley at matched relief, at one vertical scale.
+plot  <window> <out.png> [--only-today] [--title T] [--extra label=file.csv]... : one figure: a locator map, then one cross-section per transect with every variant and a GLO-30 valley at matched relief, at one vertical scale.
       --extra adds a variant sampled elsewhere (a baked store, another lane's surface): a CSV with columns window, id, k, gx, gy, z_m, one row per sample, k = 0..n-1 with
       n = floor(hypot(gx1 - gx0, gy1 - gy0) / 0.5) + 1 at t = k / (n - 1) along the transect's line (face L cells, every 0.5 cells), z_m the absolute height (m), bilinear.
+      --only-today draws today's start surface alone of the probe variants (for baked variants via --extra); --title replaces the figure title ({label}, {span}).
       Rows of other windows are ignored; a transect without rows is drawn without that variant; positions are checked against the line (within 0.01 cells).
 
 Rule (deterministic, written once, the same for every window):
@@ -242,12 +243,12 @@ def extra_profile(rows, r):
     return (t - 0.5) * length * CELL, np.array([z for *_, z in rows])
 
 
-def plot(win, out_png, extras=()):
+def plot(win, out_png, extras=(), only_today=False, title=None):
     face, i0, i1, j0, j1, seed, d, stem, kind, label, pool = WIN[win]
     with open(CSV) as f:
         rows = [r for r in csv.DictReader(f) if r['window'] == win]
     surf = {}
-    for var, name, col in VAR:
+    for var, name, col in (VAR[:1] if only_today else VAR):
         try:
             surf[var] = load(win, var)
         except FileNotFoundError:
@@ -259,7 +260,7 @@ def plot(win, out_png, extras=()):
         rx, ry = int(float(r['river_gx']) - ox), int(float(r['river_gy']) - oy)
         base = z0[ry, rx]
         lines = []
-        for var, name, col in VAR:
+        for var, name, col in (VAR[:1] if only_today else VAR):
             if var in surf:
                 dist, v = sample(surf[var][0], x0, y0, x1, y1)
                 lines.append((name, col, dist, v - base))
@@ -312,7 +313,7 @@ def plot(win, out_png, extras=()):
         ax.set_xlabel('km across the river (0 = the river cell)'); ax.set_ylabel("m, relative to today's river cell")
         ax.legend(fontsize=7, loc='upper center', ncol=3)
         ax.grid(alpha=0.3)
-    fig.suptitle(f'{label}: river cross-sections, every variant (start surfaces from the drain_base probe, not baked) and a GLO-30 valley at matched relief; '
+    fig.suptitle(title.format(label=label, span=span) if title else f'{label}: river cross-sections, every variant (start surfaces from the drain_base probe, not baked) and a GLO-30 valley at matched relief; '
                  f'one vertical scale ({span:.0f} m a panel)', fontsize=11)
     fig.text(0.01, 0.003, 'GLO-30: produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union '
              'and ESA; all rights reserved. The organisations in charge of the Copernicus programme by law or by delegation do not incur any liability for any use of the Copernicus WorldDEM-30.',
@@ -326,12 +327,18 @@ if __name__ == '__main__':
     if sys.argv[1] == 'pick':
         pick(sys.argv[2])
     elif sys.argv[1] == 'plot':
-        extras = []
+        extras, only_today, title = [], False, None
         a = sys.argv[4:]
         while a:
+            if a[0] == '--only-today':
+                only_today, a = True, a[1:]
+                continue
+            if a[0] == '--title' and len(a) >= 2:
+                title, a = a[1], a[2:]
+                continue
             if a[0] != '--extra' or len(a) < 2 or '=' not in a[1]:
-                raise SystemExit('usage: transects.py plot <window> <out.png> [--extra label=file.csv]...')
+                raise SystemExit('usage: transects.py plot <window> <out.png> [--only-today] [--title T] [--extra label=file.csv]...')
             label, path = a[1].split('=', 1)
             extras.append((label, read_extra(path, sys.argv[2])))
             a = a[2:]
-        plot(sys.argv[2], sys.argv[3], extras)
+        plot(sys.argv[2], sys.argv[3], extras, only_today, title)

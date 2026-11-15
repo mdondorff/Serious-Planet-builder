@@ -1,0 +1,19 @@
+RIVER-GATE input: store C:/DEV/SeriousPlanetData/tmp/e3-def/stores/r3a-start-r0 (commit 06e0844a83aab7c7, 51 tiles read, 0 outside the window; keys not checked: spike store): the stored ground B + L over its tiles, which drain to their border, window [4, 368, 987, 4720, 5339, 15], sea level 0 m; the stored change's 0.25 m steps add pits to the 5 cm reference only; 8160 x 8160 L cells of 101.8 m
+RIVER-GATE rivers: 88984 river cells inside (drainage area >= 75 km2, land)
+RIVER-GATE basins: 20.75 % of river length in closed basins (18460 of 88984 cells; 1256 basins of >= 0.5 m depth and >= 16 cells, fill epsilon 1e-7 m; bar <= 10 %); SPIKE-114 reference (any pit of 0.05 m): 37.73 %
+RIVER-GATE valley depth: 0.01 % of river cells over 50 m below the p50 of the surface 1 to 2 cells out (the canyon a viewer sees; 7 cells, p50 0.50 m, p99 9.34 m, max 55.98 m); bar: at most the share of a GLO-30 tile with 1 to 2 x this window's relief at 10 x 10 cells (11.44 m; the review table gives the reference)
+RIVER-GATE burn: 0.00 % of river cells with the river level over 50 m below their surface, every basin breached (0 cells, p99 1.94 m, max 27.00 m; K7's cut); with the lakes of D 20 m kept 0.00 % (0 cells)
+RIVER-GATE ring 2-4: 0.03 % of river cells with the river level over 50 m below the p50 of the surface 2 to 4 cells out at D 20 m (31 cells, p99 17.42 m, max 76.34 m; the valley depth at 2 to 4 cells plus the burn); every basin breached 0.03 % (31 cells, max 76.34 m)
+RIVER-GATE erosion depth: the river level under the start surface at D 20 m p50 1.30 p99 21.09 max 120.39 m, 62 cells over 50 m (0.07 %)
+RIVER-GATE lakes: 0.05 % of river cells in lakes at D 20 m (41 cells)
+RIVER-GATE relief: p50 over 2 x 2 cells 1.25 m against the start's 1.05 m (119 %), over 10 x 10 cells 11.44 m against 9.97 m (115 %)
+RIVER-GATE edge: 27 of 84 H1 crossings (Q >= 1 m3/s) have an L crossing of the same direction within 2000 m (32.1 %)
+RIVER-GATE gradient: 1597 of 88457 river steps rise by more than 0.25 m (1.81 %; largest 26.91 m)
+RIVER-GATE valley width: at 10 m above the river cell p50 2727 m p90 7715 m (88984 cells, 10447 sides capped at 64 cells); at half the ring 2-4 depth p50 268 m p90 587 m (23851 cells, 195 sides capped, 65133 cells with a flat ring)
+RIVER-GATE asymmetry: |L - R| / (L + R) of the rise 2 to 4 cells out: p50 0.46 p90 1.00 (78364 cells)
+RIVER-GATE drainage density: 0.044 km/km2 (11072.3 km of river over 253854.1 km2 of land)
+RIVER-GATE catchment: 27 matched H1 crossings; implied runoff (L area per H1 discharge) 4.362e7 m2 per m3/s; the ratio to it p10 0.07 p90 1.44
+RIVER-GATE seam: 19840 neighbour pairs across the region's edge, |dz| p50 0.45 m p99 8.78 m max 55.66 m; inside the region p50 0.34 m p99 7.12 m
+RIVER-GATE narrowness: valley depth (ring 1-2) over ring 2-4 depth p50 0.51 p90 0.91 (49068 cells); of the two p50s 0.45
+RIVER-GATE slope-area: theta 0.26 over bins (area in cells: slope p50 (cells)) 4:0.0096(5399414) 13:0.0091(2818075) 40:0.0084(1186447) 126:0.0072(480953) 400:0.0071(281579) 1265:0.0045(137704) 4000:0.0027(68684) 12649:0.0015(28160) 40000:0.0010(6475) 126491:0.0008(3046) 400000:0.0008(175)
+RIVER-GATE spectrum: 1024 x 1024 cells, power per octave from wavenumber 1 (m2) 2.567e6 5.593e5 1.338e5 2.050e4 3.086e3 1.967e2 7.407e0 9.422e-2 1.577e-2 1.411e-2; slope beta -3.57; the start's 1024 x 1024: 2.759e6 5.926e5 1.394e5 2.064e4 2.895e3 1.624e2 5.306e0 8.255e-3 1.897e-4 1.687e-5; beta -4.67
