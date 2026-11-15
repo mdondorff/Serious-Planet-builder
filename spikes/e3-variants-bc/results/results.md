@@ -1,6 +1,7 @@
 # SPIKE-121: E3 variants B and C (explorer)
 
 Opened: 2026-11-15
+Closed: 2026-11-15
 Question: Does one round of the regional kernel at L drain and incise correctly once its K dt is scaled to the L cell (B), and with controlled hillslope diffusion added (C)?
 Why it matters: P3 E3, the controlled comparison for D-1 (how drainage becomes valid at L). The variants are A (crusader), B and C (explorer), D to F (spikes). The exit needs one variant that passes G-DRAIN and G-INCISION separately, with acceptable cross-sections, on all five windows.
 Time box: 1 day of agent work after the E1-rest PR (#1527).
@@ -132,3 +133,48 @@ B (K dt x 1/4) and C at kappa 0.003 (derived), 0.01, 0.03 and 0.1 on R1h, from t
 - The trunks: in the mountain window, about 31 to 33 % of H1's trunk reaches stand more than 50 m above their running minimum in every variant, up to 923 m. Elsewhere it is 0 to 10 %. No variant of A, B and C lets KR carry m1's trunks without a burn.
 - Edge agreement is the window's property more than the variant's: R3a 25 to 27 %, f1 34.5 % in all three.
 - Not yet judged: the cross-sections on the T1 to T3 figures (spikes' tool; the CSVs follow).
+
+## Cross-sections (T1 to T3, all six variants)
+Spikes' figures from `transects.py plot` (SPIKE-119), copied here. Each shows A, B, C, D, E and F baked (B + L after K7), today's start and a GLO-30 valley at matched relief, one vertical scale per figure. B and C's samples are in `xsec/` (window, id, k, gx, gy, z_m; 197 samples a transect).
+- B and C follow A within a few metres almost everywhere. Every variant tracks today's start surface. None forms GLO-30's narrow incised valley at matched relief: R3b T2's 120 m canyon and R1h T1's side valleys have no counterpart.
+- A cuts the deepest notch at the river cell. B and C lie above it:
+
+| Transect | A, m | B and C, m |
+|---|---|---|
+| R1h T3 | about -40 | about -10 |
+| R3b T2 | -22 | about -10 |
+| f1 T2 | -5 | about 0 |
+
+- R1h T2: A, B and C share a trough about 55 m below the river 4 km right of it; D, E and F do not make it (spikes' reading).
+- m1: all variants lie up to 400 m below today's ridges on T1 and T2 alike. C does not round the valley walls visibly at this scale.
+- Judgement of "acceptable cross-sections" is the lead's and the owner's (#155). These notes are what the figures show.
+
+## Result
+| | A | B (K dt x 1/4) | C (B + kappa 0.03) |
+|---|---|---|---|
+| G-DRAIN on all five windows | pass | pass | fails on m1 (11.59 %) |
+| G-INCISION on all five windows | pass | pass | pass |
+| Calibration on R1h | none | derived 1/8 fails G-INCISION; 1/4 passes | derived 3e-3 barely acts; 0.1 fails G-DRAIN; 0.03 kept |
+| Trunks needing a cut over 50 m (m1) | 3,218 of 10,371 | 3,420 | 3,332 |
+
+- B passes both gates on all five windows. It drains better than A on four of five and incises more than A on R1h and m1.
+- The derived K dt scaling is not what makes B pass: the 1/4 that passes is calibrated, and smaller scales fail. The incision comes from K7's cut on top of the round, and a stronger round leaves K7 less to cut.
+- C's operator-split diffusion costs drainage in proportion to relief; it is not a candidate as built.
+- No variant carries m1's trunks without a burn (the E4 note's "KR does not cut"). That is a finding for D-1 and E4, not a bar of #155.
+- Follow-ups, not run: C with a re-route between sweeps (it changes a second thing against B); B and C with crusader's lake protection (SPIKE-124).
+
+## Visuals
+![R1h: A to F on T1 to T3](images/xsec-abcdef-r1h.png)
+R1h, all six variants, today and GLO-30 on T1 to T3 (spikes' figure, software render of baked stores).
+
+![R3a: A to F on T1 to T3](images/xsec-abcdef-r3a.png)
+R3a, the same layout; vertical exaggeration about x118.
+
+![R3b: A to F on T1 to T3](images/xsec-abcdef-r3b.png)
+R3b, the same layout; the GLO-30 canyon on T2 has no counterpart in any variant.
+
+![m1: A to F on T1 to T3](images/xsec-abcdef-m1.png)
+m1 (mountain), the same layout; 3,054 m a panel.
+
+![f1: A to F on T1 to T3](images/xsec-abcdef-f1.png)
+f1 (low gradient), the same layout.
