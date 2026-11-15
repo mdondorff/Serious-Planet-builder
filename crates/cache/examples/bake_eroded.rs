@@ -221,6 +221,17 @@ fn main() -> Result<(), String> {
         }
     }
     let t_round = t0.elapsed().as_secs_f64();
+    // Spikes' #128 (agreed 2026-11-15): `--dump-pre-k7 <file.f64>` writes the surface K7 starts from (after the L round, C's diffusion, or a `--start` file) over the
+    // whole L window, raw LE f64 in `--start`'s layout; `--stop-pre-k7` ends the run there (no store). Neither changes the bake.
+    if let Some(path) = opt(&args, "--dump-pre-k7") {
+        let bytes: Vec<u8> = z1.iter().flat_map(|v| v.to_le_bytes()).collect();
+        std::fs::write(path, bytes).map_err(|e| format!("{path}: {e}"))?;
+        println!("BAKE-E pre-K7 surface ({w} x {h} f64) into {path}");
+    }
+    if args.iter().any(|a| a == "--stop-pre-k7") {
+        println!("BAKE-E stopped before K7 (--stop-pre-k7) after {:.0} s", t0.elapsed().as_secs_f64());
+        return Ok(());
+    }
     // Rivers routed at L on the eroded surface: channel cells by area (75 km2), the discharge from H1's runoff, the network levels (all breach), cut into segments between confluences.
     let routing = planet_generators::bake::route::route_rules(&g, &z1, &outlet, 1.0e-3, front.solve.stream, 0.0, None, rules);
     let none = planet_generators::bake::route::NONE;
