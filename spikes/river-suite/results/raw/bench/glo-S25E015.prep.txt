@@ -1,0 +1,2 @@
+PREP glo-S25E015.f64 995 1093
+COUNTS src C:/DEV/SeriousPlanetData/dem/glo30-samples/Copernicus_DSM_COG_10_S25_00_E015_00_DEM/Copernicus_DSM_COG_10_S25_00_E015_00_DEM.tif: 3600 x 3600 pixels (1.000" x 1.000", 28.14 x 30.92 m at lat -24.500), no-data pixels 0; cells 995 x 1093 of 101.8 m, pixels a cell 3.62 x 3.29; cells without data 0; cells at or below 0 m 0; land z p5/p50/p95 469/787/1066 m; min 375.1 m

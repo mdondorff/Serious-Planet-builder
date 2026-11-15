@@ -1,0 +1,2 @@
+PREP glo-N70W154.f64 365 1093
+COUNTS src C:/DEV/SeriousPlanetData/dem/glo30-samples/Copernicus_DSM_COG_10_N70_00_W154_00_DEM/Copernicus_DSM_COG_10_N70_00_W154_00_DEM.tif: 1200 x 3600 pixels (3.000" x 1.000", 30.97 x 30.92 m at lat 70.500), no-data pixels 0; cells 365 x 1093 of 101.8 m, pixels a cell 3.28 x 3.29; cells without data 0; cells at or below 0 m 116844; land z p5/p50/p95 0/29/56 m; min -2.0 m

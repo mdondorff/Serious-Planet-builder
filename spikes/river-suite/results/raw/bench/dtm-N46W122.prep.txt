@@ -1,0 +1,2 @@
+PREP dtm-N46W122.f64 752 1093
+COUNTS src C:/DEV/SeriousPlanetData/dem/3dep-1as/USGS_1_n47w122.tif: 3600 x 3600 pixels (1.000" x 1.000", 21.29 x 30.92 m at lat 46.500), no-data pixels 0; cells 752 x 1093 of 101.8 m, pixels a cell 4.78 x 3.29; cells without data 0; cells at or below 0 m 0; land z p5/p50/p95 570/1231/1886 m; min 264.0 m
