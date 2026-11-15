@@ -9,9 +9,14 @@ use std::path::Path;
 const OPTIONS: [&str; 5] = ["--window", "--margin", "--min-cells", "--d", "--threads"];
 
 /// The canonical region windows (lead, 2026-11-14): `face,i0,i1,j0,j1,seed`, 620-cell cores (with the gate's 200-cell margin SPIKE-111's 1,020-cell windows). R1h is the E1 region stores'
-/// window (r3a-e1, r3a-p2, r3a-p2e).
-pub const WINDOWS: [(&str, &str); 3] =
-    [("r1h", "1,8056,8675,760,1379,14"), ("r3a", "4,368,987,4720,5339,15"), ("r3b", "2,9968,10587,8304,8923,15")];
+/// window (r3a-e1, r3a-p2, r3a-p2e). M1 (mountain belt) and F1 (low-gradient river landscape) are SPIKE-119's (spikes, 2026-11-15).
+pub const WINDOWS: [(&str, &str); 5] = [
+    ("r1h", "1,8056,8675,760,1379,14"),
+    ("r3a", "4,368,987,4720,5339,15"),
+    ("r3b", "2,9968,10587,8304,8923,15"),
+    ("m1", "4,6600,7219,10200,10819,15"),
+    ("f1", "4,4800,5419,3300,3919,15"),
+];
 
 /// A window argument: a canonical name (any case) becomes its numbers; anything else is passed as written.
 pub fn window_of(arg: &str) -> String {
@@ -20,7 +25,7 @@ pub fn window_of(arg: &str) -> String {
 
 /// The example's arguments for the xtask's: the target becomes `--window` or `--store`; an unknown option, a missing value or a second window is refused.
 pub fn example_args(args: &[String]) -> Result<Vec<String>, String> {
-    let usage = "usage: cargo xtask river-gate <store dir | face,i0,i1,j0,j1,seed | r1h | r3a | r3b> [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--no-key-check]";
+    let usage = "usage: cargo xtask river-gate <store dir | face,i0,i1,j0,j1,seed | r1h | r3a | r3b | m1 | f1> [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--no-key-check]";
     let Some(target) = args.first().filter(|a| !a.starts_with("--")) else { return Err(usage.to_string()) };
     let mut out = Vec::new();
     let window = window_of(target);
@@ -75,6 +80,8 @@ mod tests {
         // The canonical names (lead, 2026-11-14): R1h is the E1 region stores' window; R3a and R3b are SPIKE-111's face 4 and face 2 windows of seed 15.
         assert_eq!(example_args(&s(&["r1h"])).unwrap(), s(&["--window", "1,8056,8675,760,1379,14"]));
         assert_eq!(example_args(&s(&["r3a"])).unwrap(), s(&["--window", "4,368,987,4720,5339,15"]));
+        assert_eq!(example_args(&s(&["M1"])).unwrap(), s(&["--window", "4,6600,7219,10200,10819,15"]));
+        assert_eq!(example_args(&s(&["f1"])).unwrap(), s(&["--window", "4,4800,5419,3300,3919,15"]));
         assert_eq!(example_args(&s(&["R3B"])).unwrap(), s(&["--window", "2,9968,10587,8304,8923,15"]));
         assert_eq!(
             example_args(&s(&["store", "--window", "r1h"])).unwrap(),
