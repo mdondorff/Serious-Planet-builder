@@ -1,0 +1,1 @@
+- 2026-11-15 river-gate-suite (BUILD-057, TEST-137): the river gate prints nine more shape metrics (gradient, valley width, asymmetry, drainage density, catchment ratio, seam, narrowness, slope-area, relief spectrum) on a window and on a store.

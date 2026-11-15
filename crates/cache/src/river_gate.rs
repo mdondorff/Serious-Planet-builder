@@ -5,6 +5,8 @@ use planet_generators::bake::flood::priority_flood_with;
 use planet_generators::bake::route::{route_rules_filled, RoundRules, Routing, NONE};
 use planet_generators::bake::Grid;
 
+use crate::river_suite::{measure_suite, SuiteInput, SuiteReport};
+
 /// The routing's flood grade between cells (the spikes' 1e-3 m).
 pub const ROUTE_EPSILON_M: f64 = 1.0e-3;
 /// The basin flood's grade between cells (SPIKE-117/118's 1e-7 m): its graded flats stand far below [`BASIN_WET_M`].
@@ -130,6 +132,8 @@ pub struct GateReport {
     /// H1 crossings of the edge (Q at least the limit), and those an L crossing matches.
     pub edge_h1: usize,
     pub edge_matched: usize,
+    /// The measurement suite (BUILD-057).
+    pub suite: SuiteReport,
 }
 
 fn share(n: usize, of: usize) -> f64 {
@@ -245,6 +249,9 @@ impl GateReport {
             ),
             edge,
         ]
+        .into_iter()
+        .chain(self.suite.lines())
+        .collect()
     }
 }
 
@@ -413,6 +420,22 @@ pub fn edge_agreement(l: &[Crossing], h1: &[Crossing], dx_m: f64, params: &GateP
     (matched, big.len())
 }
 
+/// The matched H1 crossings of at least the discharge limit as (the nearest matching L crossing's drainage area in m2, the H1 discharge in m3/s); `l_area` is one area per L crossing.
+pub fn edge_pairs(l: &[Crossing], l_area: &[f64], h1: &[Crossing], dx_m: f64, params: &GateParams) -> Vec<(f64, f64)> {
+    h1.iter()
+        .filter(|c| c.q_m3s >= params.edge_q_m3s)
+        .filter_map(|hc| {
+            l.iter()
+                .zip(l_area)
+                .filter(|(c, _)| c.inside == hc.inside)
+                .map(|(c, &a)| (libm::hypot(c.x - hc.x, c.y - hc.y) * dx_m, a))
+                .filter(|&(d, _)| d <= params.edge_m)
+                .min_by(|a, b| a.0.total_cmp(&b.0))
+                .map(|(_, a)| (a, hc.q_m3s))
+        })
+        .collect()
+}
+
 /// Measures `input` under `params`: routes the surface at L, finds the closed basins and the river cells, the levels for every basin breached and for the lakes of D, the canyon against the valley,
 /// the erosion depth against the start surface, the relief and the edge.
 pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
@@ -448,6 +471,7 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
     let (mut river_cells, mut basin_cells, mut reference_cells, mut lake_cells) = (0usize, 0usize, 0usize, 0usize);
     let (mut canyon, mut canyon_b, mut erosion) = (Vec::new(), Vec::new(), Vec::new());
     let (mut valley, mut burn, mut burn_b) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut near_depth, mut ring_depth) = (Vec::new(), Vec::new());
     for c in 0..n {
         if !river[c] || !input.inside[c] {
             continue;
@@ -457,22 +481,42 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         reference_cells += usize::from(reference[c] != u32::MAX);
         lake_cells += usize::from(lake(c));
         let here = input.surface[c];
-        valley.push(valley_floor(g, input.surface, c, NEAR_RING) - here);
+        let near = valley_floor(g, input.surface, c, NEAR_RING) - here;
+        valley.push(near);
+        near_depth.push(near);
         burn.push(here - with_lakes[c]);
         burn_b.push(here - breached[c]);
         let floor = valley_floor(g, input.surface, c, VALLEY_RING);
+        ring_depth.push(floor - here);
         canyon.push(floor - with_lakes[c]);
         canyon_b.push(floor - breached[c]);
         erosion.push(input.start[c] - with_lakes[c]);
     }
     let w = g.w();
     let mut l_cross: Vec<Crossing> = Vec::new();
+    let mut l_area: Vec<f64> = Vec::new();
     for (c, (&r, &is_river)) in routing.receiver.iter().zip(&river).enumerate() {
         if is_river && r != NONE && input.region[c] != input.region[r as usize] {
             l_cross.push(Crossing { inside: input.region[c], x: (c % w) as f64, y: (c / w) as f64, q_m3s: 0.0 });
+            l_area.push(area[c]);
         }
     }
     let (edge_matched, edge_h1) = edge_agreement(&l_cross, input.h1, g.dx(), params);
+    let pairs = edge_pairs(&l_cross, &l_area, input.h1, g.dx(), params);
+    let suite = measure_suite(&SuiteInput {
+        grid: g,
+        start: input.start,
+        surface: input.surface,
+        receiver: &routing.receiver,
+        area: &area,
+        river: &river,
+        inside: input.inside,
+        region: input.region,
+        sea_level_m: input.sea_level_m,
+        near_depth: &near_depth,
+        ring_depth: &ring_depth,
+        pairs: &pairs,
+    });
     GateReport {
         params: *params,
         river_cells,
@@ -492,5 +536,6 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         relief_10_m: relief(g, input.surface, input.inside, 10, input.sea_level_m),
         edge_h1,
         edge_matched,
+        suite,
     }
 }
