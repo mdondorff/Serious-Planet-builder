@@ -5,6 +5,8 @@ use planet_generators::bake::flood::priority_flood_with;
 use planet_generators::bake::route::{route_rules_filled, RoundRules, Routing, NONE};
 use planet_generators::bake::Grid;
 
+use crate::river_suite::{measure_suite, SuiteInput, SuiteReport};
+
 /// The routing's flood grade between cells (the spikes' 1e-3 m).
 pub const ROUTE_EPSILON_M: f64 = 1.0e-3;
 /// The basin flood's grade between cells (SPIKE-117/118's 1e-7 m): its graded flats stand far below [`BASIN_WET_M`].
@@ -15,6 +17,8 @@ pub const BASIN_WET_M: f64 = 1.0e-3;
 pub const REFERENCE_WET_M: f64 = 0.05;
 /// The valley floor's cross-section around a river cell: the cells 2 to 4 cells out (Chebyshev distance).
 pub const VALLEY_RING: (i64, i64) = (2, 4);
+/// The near ring of the valley depth (the canyon a viewer sees): the cells 1 to 2 cells out (102-204 m at L; lead, 2026-11-14, DEC crusader-4).
+pub const NEAR_RING: (i64, i64) = (1, 2);
 
 /// The gate's limits.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -108,7 +112,14 @@ pub struct GateReport {
     pub reference_river_cells: usize,
     /// River cells inside that lie in a basin deeper than D (lakes).
     pub lake_river_cells: usize,
-    /// The canyon: the river level below the p50 of its valley ring, with the lakes of D kept and with every basin breached.
+    /// The valley depth (the canyon a viewer sees; lead, 2026-11-14, DEC crusader-4): the p50 of the surface 1 to 2 cells out ([`NEAR_RING`]) above the surface
+    /// at the river cell.
+    pub valley: Tail,
+    /// The burn (K7's cut): the surface at the river cell above the river level, with every basin breached and with the lakes of D kept.
+    pub burn_breached: Tail,
+    pub burn: Tail,
+    /// Ring 2-4 (the first canyon measure, kept as a line): the p50 of the surface 2 to 4 cells out ([`VALLEY_RING`]) above the river level, with the lakes of D
+    /// kept and with every basin breached; it is the valley depth at 2 to 4 cells plus the burn.
     pub canyon: Tail,
     pub canyon_breached: Tail,
     /// The erosion depth: the start surface minus the river level, with the lakes of D kept.
@@ -121,6 +132,8 @@ pub struct GateReport {
     /// H1 crossings of the edge (Q at least the limit), and those an L crossing matches.
     pub edge_h1: usize,
     pub edge_matched: usize,
+    /// The measurement suite (BUILD-057).
+    pub suite: SuiteReport,
 }
 
 fn share(n: usize, of: usize) -> f64 {
@@ -145,6 +158,12 @@ impl GateReport {
     pub fn canyon_share(&self) -> f64 {
         share(self.canyon.count_over, self.river_cells)
     }
+    pub fn valley_share(&self) -> f64 {
+        share(self.valley.count_over, self.river_cells)
+    }
+    pub fn burn_share(&self) -> f64 {
+        share(self.burn_breached.count_over, self.river_cells)
+    }
 
     /// The printed report: one line per measure, the same bits for the same input.
     pub fn lines(&self) -> Vec<String> {
@@ -162,6 +181,7 @@ impl GateReport {
             )
         };
         let (r0, r1) = VALLEY_RING;
+        let (n0, n1) = NEAR_RING;
         vec![
             format!("RIVER-GATE rivers: {} river cells inside (drainage area >= {:.0} km2, land)", self.river_cells, p.channel_area_m2 / 1.0e6),
             format!(
@@ -175,7 +195,28 @@ impl GateReport {
                 share(self.reference_river_cells, self.river_cells)
             ),
             format!(
-                "RIVER-GATE canyon: {:.2} % of river cells over {} m below the p50 of their valley ({r0} to {r1} cells out) at D {} m ({} cells, p99 {:.2} m, max {:.2} m; bar <= 1 %); every basin breached {:.2} % ({} cells, max {:.2} m)",
+                "RIVER-GATE valley depth: {:.2} % of river cells over {} m below the p50 of the surface {n0} to {n1} cells out (the canyon a viewer sees; {} cells, p50 {:.2} m, p99 {:.2} m, max {:.2} m); bar: at most the share of a GLO-30 tile with 1 to 2 x this window's relief at 10 x 10 cells ({:.2} m; the review table gives the reference)",
+                self.valley_share(),
+                p.cut_m,
+                self.valley.count_over,
+                self.valley.p50_m,
+                self.valley.p99_m,
+                self.valley.max_m,
+                self.relief_10_m
+            ),
+            format!(
+                "RIVER-GATE burn: {:.2} % of river cells with the river level over {} m below their surface, every basin breached ({} cells, p99 {:.2} m, max {:.2} m; K7's cut); with the lakes of D {} m kept {:.2} % ({} cells)",
+                self.burn_share(),
+                p.cut_m,
+                self.burn_breached.count_over,
+                self.burn_breached.p99_m,
+                self.burn_breached.max_m,
+                p.lake_depth_m,
+                share(self.burn.count_over, self.river_cells),
+                self.burn.count_over
+            ),
+            format!(
+                "RIVER-GATE ring 2-4: {:.2} % of river cells with the river level over {} m below the p50 of the surface {r0} to {r1} cells out at D {} m ({} cells, p99 {:.2} m, max {:.2} m; the valley depth at 2 to 4 cells plus the burn); every basin breached {:.2} % ({} cells, max {:.2} m)",
                 self.canyon_share(),
                 p.cut_m,
                 p.lake_depth_m,
@@ -208,6 +249,9 @@ impl GateReport {
             ),
             edge,
         ]
+        .into_iter()
+        .chain(self.suite.lines())
+        .collect()
     }
 }
 
@@ -280,11 +324,10 @@ fn levels(routing: &Routing, river: &[bool], drained: impl Fn(usize) -> f64) -> 
     level
 }
 
-/// The p50 of the surface over the valley ring of cell `c` (the cells of the grid at a Chebyshev distance in [`VALLEY_RING`]).
-fn valley_floor(grid: &Grid, z: &[f64], c: usize) -> f64 {
+/// The p50 of the surface over a ring of cell `c`: the cells of the grid at a Chebyshev distance from `r0` to `r1` ([`NEAR_RING`], [`VALLEY_RING`]).
+fn valley_floor(grid: &Grid, z: &[f64], c: usize, (r0, r1): (i64, i64)) -> f64 {
     let (w, h) = (grid.w() as i64, grid.h() as i64);
     let (cx, cy) = ((c % grid.w()) as i64, (c / grid.w()) as i64);
-    let (r0, r1) = VALLEY_RING;
     let mut ring: Vec<f64> = Vec::with_capacity(((2 * r1 + 1) * (2 * r1 + 1)) as usize);
     for dy in -r1..=r1 {
         for dx in -r1..=r1 {
@@ -377,6 +420,22 @@ pub fn edge_agreement(l: &[Crossing], h1: &[Crossing], dx_m: f64, params: &GateP
     (matched, big.len())
 }
 
+/// The matched H1 crossings of at least the discharge limit as (the nearest matching L crossing's drainage area in m2, the H1 discharge in m3/s); `l_area` is one area per L crossing.
+pub fn edge_pairs(l: &[Crossing], l_area: &[f64], h1: &[Crossing], dx_m: f64, params: &GateParams) -> Vec<(f64, f64)> {
+    h1.iter()
+        .filter(|c| c.q_m3s >= params.edge_q_m3s)
+        .filter_map(|hc| {
+            l.iter()
+                .zip(l_area)
+                .filter(|(c, _)| c.inside == hc.inside)
+                .map(|(c, &a)| (libm::hypot(c.x - hc.x, c.y - hc.y) * dx_m, a))
+                .filter(|&(d, _)| d <= params.edge_m)
+                .min_by(|a, b| a.0.total_cmp(&b.0))
+                .map(|(_, a)| (a, hc.q_m3s))
+        })
+        .collect()
+}
+
 /// Measures `input` under `params`: routes the surface at L, finds the closed basins and the river cells, the levels for every basin breached and for the lakes of D, the canyon against the valley,
 /// the erosion depth against the start surface, the relief and the edge.
 pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
@@ -411,6 +470,8 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
     let with_lakes = levels(&routing, &river, |c| if lake(c) { filled[c] } else { z[c] });
     let (mut river_cells, mut basin_cells, mut reference_cells, mut lake_cells) = (0usize, 0usize, 0usize, 0usize);
     let (mut canyon, mut canyon_b, mut erosion) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut valley, mut burn, mut burn_b) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut near_depth, mut ring_depth) = (Vec::new(), Vec::new());
     for c in 0..n {
         if !river[c] || !input.inside[c] {
             continue;
@@ -419,19 +480,43 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         basin_cells += usize::from(basin(c));
         reference_cells += usize::from(reference[c] != u32::MAX);
         lake_cells += usize::from(lake(c));
-        let floor = valley_floor(g, input.surface, c);
+        let here = input.surface[c];
+        let near = valley_floor(g, input.surface, c, NEAR_RING) - here;
+        valley.push(near);
+        near_depth.push(near);
+        burn.push(here - with_lakes[c]);
+        burn_b.push(here - breached[c]);
+        let floor = valley_floor(g, input.surface, c, VALLEY_RING);
+        ring_depth.push(floor - here);
         canyon.push(floor - with_lakes[c]);
         canyon_b.push(floor - breached[c]);
         erosion.push(input.start[c] - with_lakes[c]);
     }
     let w = g.w();
     let mut l_cross: Vec<Crossing> = Vec::new();
+    let mut l_area: Vec<f64> = Vec::new();
     for (c, (&r, &is_river)) in routing.receiver.iter().zip(&river).enumerate() {
         if is_river && r != NONE && input.region[c] != input.region[r as usize] {
             l_cross.push(Crossing { inside: input.region[c], x: (c % w) as f64, y: (c / w) as f64, q_m3s: 0.0 });
+            l_area.push(area[c]);
         }
     }
     let (edge_matched, edge_h1) = edge_agreement(&l_cross, input.h1, g.dx(), params);
+    let pairs = edge_pairs(&l_cross, &l_area, input.h1, g.dx(), params);
+    let suite = measure_suite(&SuiteInput {
+        grid: g,
+        start: input.start,
+        surface: input.surface,
+        receiver: &routing.receiver,
+        area: &area,
+        river: &river,
+        inside: input.inside,
+        region: input.region,
+        sea_level_m: input.sea_level_m,
+        near_depth: &near_depth,
+        ring_depth: &ring_depth,
+        pairs: &pairs,
+    });
     GateReport {
         params: *params,
         river_cells,
@@ -439,6 +524,9 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         basin_river_cells: basin_cells,
         reference_river_cells: reference_cells,
         lake_river_cells: lake_cells,
+        valley: tail(valley, params.cut_m),
+        burn_breached: tail(burn_b, params.cut_m),
+        burn: tail(burn, params.cut_m),
         canyon: tail(canyon, params.cut_m),
         canyon_breached: tail(canyon_b, params.cut_m),
         erosion: tail(erosion, params.cut_m),
@@ -448,5 +536,6 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         relief_10_m: relief(g, input.surface, input.inside, 10, input.sea_level_m),
         edge_h1,
         edge_matched,
+        suite,
     }
 }
