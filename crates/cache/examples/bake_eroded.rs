@@ -1,7 +1,10 @@
 //! SPIKE-115 (spike branch, never merged): a spike bake of R3a whose K7 starts from one round of the regional kernel at L and burns rivers routed at L, for the picture pair.
 //! SPIKE-114's metrics, the relief kept, and the cost of re-routing the dirty catchments after a ridge edit against a full L route.
 //!
-//! Usage: `erosion_at_l <commit dir> [--threads T]` (R3a of face 1, seed 14, margin 200); PLANET_ROUNDS_MAX stops after that many rounds.
+//! Usage: `bake_eroded --out <commit dir> [--window W] [--k-scale S] [--diffusion KAPPA] [--start <file.f64>] [--rounds 0|1] [--threads T]` (margin 200). W is
+//! `face,i0,i1,j0,j1,seed` or r1h (the default), r3a, r3b, m1, f1. SPIKE-121 (E3): S scales K dt (variant B), KAPPA adds that many explicit diffusion sweeps as the round has
+//! steps (variant C), the start file (8160 x 8160 LE f64 over the L window, margin included) replaces B + regional and `--rounds 0` skips the L round (spikes' D to F). A variant
+//! other than A mixes its file and parameters into the inputs identity; A keeps its bits.
 use std::path::{Path, PathBuf};
 
 
@@ -40,12 +43,54 @@ impl LatticeSource for Lattice {
     }
 }
 
+/// The canonical windows of the river gate (BUILD-055): `face,i0,i1,j0,j1,seed` in regional cells.
+const WINDOWS: [(&str, [usize; 6]); 5] = [
+    ("r1h", [1, 8056, 8675, 760, 1379, 14]),
+    ("r3a", [4, 368, 987, 4720, 5339, 15]),
+    ("r3b", [2, 9968, 10587, 8304, 8923, 15]),
+    ("m1", [4, 6600, 7219, 10200, 10819, 15]),
+    ("f1", [4, 4800, 5419, 3300, 3919, 15]),
+];
+
+fn opt<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
+    args.iter().position(|a| a == name).map(|k| args.get(k + 1).map(String::as_str).expect("an option takes a value"))
+}
+
+/// FNV-1a over bytes: the identity of a start file and the variant's parameters.
+fn fnv(bytes: impl IntoIterator<Item = u8>, mut h: u64) -> u64 {
+    for b in bytes {
+        h = (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
 fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let _ = Path::new(&args[0]);
     let threads: usize = args.iter().position(|a| a == "--threads").map_or(8, |k| args[k + 1].parse().expect("--threads T"));
-    let (seed, face, margin) = (14u64, Face(1), 200usize);
-    let (i0, j0, size) = (2014 * 4, 190 * 4, (2168 * 4 + 3) - 2014 * 4 + 1);
+    // SPIKE-121 (E3): the window, B's K dt scale, C's diffusion, a start surface (spikes' D to F) and the L rounds. The defaults are A on R1h, the same bits as before.
+    let win: [usize; 6] = match opt(&args, "--window") {
+        None => WINDOWS[0].1,
+        Some(v) => match WINDOWS.iter().find(|(n, _)| n.eq_ignore_ascii_case(v)) {
+            Some((_, w)) => *w,
+            None => {
+                let p: Vec<usize> = v.split(',').map(|x| x.parse().map_err(|_| format!("--window face,i0,i1,j0,j1,seed or a name, not '{v}'"))).collect::<Result<_, _>>()?;
+                p.try_into().map_err(|_| format!("--window takes six numbers, not '{v}'"))?
+            }
+        },
+    };
+    let k_scale: f64 = opt(&args, "--k-scale").map_or(Ok(1.0), str::parse).map_err(|_| "--k-scale takes a number")?;
+    let kappa: f64 = opt(&args, "--diffusion").map_or(Ok(0.0), str::parse).map_err(|_| "--diffusion takes a number")?;
+    let l_rounds: usize = opt(&args, "--rounds").map_or(Ok(1), str::parse).map_err(|_| "--rounds takes 0 or 1")?;
+    if !(k_scale > 0.0 && k_scale.is_finite()) || !(0.0..=0.25).contains(&kappa) || l_rounds > 1 {
+        return Err(format!("--k-scale > 0 ({k_scale}), --diffusion in 0..=0.25 for a stable explicit step ({kappa}), --rounds 0 or 1 ({l_rounds})"));
+    }
+    let start_file = opt(&args, "--start").map(PathBuf::from);
+    let (seed, face, margin) = (win[5] as u64, Face(win[0] as u8), 200usize);
+    let (i0, j0, size) = (win[1], win[3], win[2] - win[1] + 1);
+    if win[4] - win[3] + 1 != size {
+        return Err(format!("the window {win:?} is not square: the bake lays a square region"));
+    }
     let t0 = std::time::Instant::now();
     let def = WorldDefinition::single_planet(R, seed);
 
@@ -122,6 +167,22 @@ fn main() -> Result<(), String> {
             }
         });
     }
+    // B + regional: K7's change is taken against it, so a start file's surface (spikes' D to F) is what K7 starts from.
+    let z_ref = z0.clone();
+    let mut identity = 0u64;
+    if let Some(path) = &start_file {
+        let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        if bytes.len() != w * h * 8 {
+            return Err(format!("{}: {} bytes, the window's L grid is {w} x {h} f64 ({} bytes)", path.display(), bytes.len(), w * h * 8));
+        }
+        for (c, v) in bytes.chunks_exact(8).enumerate() {
+            z0[c] = f64::from_le_bytes(v.try_into().expect("8 bytes"));
+        }
+        identity = fnv(bytes.iter().copied(), 0xcbf2_9ce4_8422_2325);
+    }
+    if k_scale != 1.0 || kappa != 0.0 || l_rounds != 1 {
+        identity = fnv(k_scale.to_le_bytes().into_iter().chain(kappa.to_le_bytes()).chain((l_rounds as u64).to_le_bytes()), identity ^ 0x5350_494b_4531_3231);
+    }
     // One round of the regional kernel at L over the region (SPIKE-115's N = 1).
     let g = planet_generators::bake::Grid::new(w, h, cell_m);
     let outlet = g.outlets(&z0, 0.0);
@@ -136,8 +197,29 @@ fn main() -> Result<(), String> {
     };
     front.solve.precision.apply(&mut carve);
     carve.round_f32 = false;
+    // B: K dt scaled (the step's uplift `u_over_k * k_dt` with it: the same dt).
+    carve.k_dt *= k_scale;
     let mut z1 = z0.clone();
-    let _ = planet_generators::bake::round::solve_rounds(&g, &mut z1, &outlet, &carve, 1, &threads, front.solve.stream);
+    if l_rounds == 1 {
+        let _ = planet_generators::bake::round::solve_rounds(&g, &mut z1, &outlet, &carve, 1, &threads, front.solve.stream);
+    }
+    // C: after the round's carve steps, as many explicit sweeps of `z += kappa * lap5(z)` over the cells that are no outlet and stand above the sea (an operator split; the sea and the
+    // outlets keep their heights; the grid's border cells are outlets).
+    if kappa > 0.0 {
+        for _ in 0..carve.steps {
+            let prev = z1.clone();
+            for y in 1..h - 1 {
+                for x in 1..w - 1 {
+                    let c = y * w + x;
+                    if outlet[c] || prev[c] <= 0.0 {
+                        continue;
+                    }
+                    let lap = prev[c - 1] + prev[c + 1] + prev[c - w] + prev[c + w] - 4.0 * prev[c];
+                    z1[c] = (prev[c] + kappa * lap).max(carve.epsilon);
+                }
+            }
+        }
+    }
     let t_round = t0.elapsed().as_secs_f64();
     // Rivers routed at L on the eroded surface: channel cells by area (75 km2), the discharge from H1's runoff, the network levels (all breach), cut into segments between confluences.
     let routing = planet_generators::bake::route::route_rules(&g, &z1, &outlet, 1.0e-3, front.solve.stream, 0.0, None, rules);
@@ -217,7 +299,7 @@ fn main() -> Result<(), String> {
         channel.iter().filter(|&&b| b).count()
     );
     // K7's start surface is the eroded one: the regional term plus the round's change at the L cell under the direction.
-    let change: Vec<f32> = z1.iter().zip(&z0).map(|(a, b)| (a - b) as f32).collect();
+    let change: Vec<f32> = z1.iter().zip(&z_ref).map(|(a, b)| (a - b) as f32).collect();
     let regional_eroded = |d: Vec3| -> f64 {
         let (f, s, t) = planet_core::cube::direction_to_face(&TangentWarp, d);
         let r = front.regional_field.at(d);
@@ -232,19 +314,21 @@ fn main() -> Result<(), String> {
     };
     let feed = planet_cache::l_writer::MemoryFeed { face, channels, discharge: true };
     let world = GlobalWorld::from_definition(&def).map_err(|e| format!("{e:?}"))?;
+    // A variant other than A names itself in the inputs identity (its start file and parameters), so the gate's key check tells the stores apart; A keeps the identity it had.
+    let inputs_id = spec.effective_inputs_id() ^ identity;
     let basin = planet_cache::basin_table::BasinSpec {
         hydro: planet_generators::bake::hydro::HydroParams::default(),
         tile_cells: spec.tile as u32,
         tiles_per_edge: spec.tiles_per_edge(),
         base_id: spec.base_id,
-        inputs_id: spec.effective_inputs_id(),
+        inputs_id,
     };
     let l_spec = planet_cache::layer_l::LTileSpec {
         grid: planet_generators::bake::tile::TileGrid { cells: spec.local(), tile: spec.tile, halo: spec.halo, radius_m: spec.radius_m },
         // the plain flood in K7: the canonical flood refuses flats of the eroded surface (SPIKE-115 finding)
         k7: planet_generators::bake::k7::K7Params::standard(spec.seed, 0.0),
         base_id: spec.base_id,
-        inputs_id: spec.effective_inputs_id(),
+        inputs_id,
     };
     let h1_cell = |f: u8, i: i64, j: i64| {
         let (i, j) = (i - ri0 as i64, j - rj0 as i64);
@@ -274,7 +358,9 @@ fn main() -> Result<(), String> {
     std::fs::write(
         out.join("README.txt"),
         format!(
-            "SPIKE-115 SPIKE BAKE, not the world bake: R3a's window (face 1, seed 14), K7 started from one round of the regional kernel at L and fed with rivers routed at L (no channel graph stored: the format holds H1 lines only, so no river water is drawn). Commit {:016x}, {} tiles. Branch spike/erosion-at-l.\n",
+            "SPIKE BAKE, not the world bake (SPIKE-115, SPIKE-120, SPIKE-121): window {win:?} (face, i0, i1, j0, j1, seed), K7 started from {} of the regional kernel at L (K dt x {k_scale}, diffusion {kappa}), start surface {}, fed with rivers routed at L (no channel graph stored: the format holds H1 lines only, so no river water is drawn). Commit {:016x}, {} tiles, inputs identity {inputs_id:016x}. Branch spike/e3-variants-bc.\n",
+            if l_rounds == 1 { "one round" } else { "no round" },
+            start_file.as_ref().map_or_else(|| "B + regional".to_string(), |p| p.display().to_string()),
             commit.id,
             tiles.len()
         ),
