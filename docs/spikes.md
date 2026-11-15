@@ -25,6 +25,7 @@ Per-spike register sections of M5 and M6: `docs/archive/M6/spikes.md`. Closed sp
 | SPIKE-118 | Schott 2024 done fairly against the 4-neighbour drain plus one round at L (P3 E1) | closed 2026-11-14: no; it drains fully (0.00 % basins) but costs 2-5x the L round, raises 200 m relief 19-23 %, carves 1.4-20.7 % of river cells over 50 m and has no local edit path; its final breach and retargeting transfer | `spikes/schott-fair/results/results.md` |
 | SPIKE-119 | River measurement suite: windows M1 and F1, 15 transects, the GLO-30 benchmark (P3 E1) | closed 2026-11-15: M1 and F1 gate aliases; benchmark on 21 tiles, the DSM inflates basins 1.3-2.9x | `spikes/river-suite/results/results.md` |
 | SPIKE-120 | The critical reads' verification items (P3 E2) | closed 2026-11-15: the breach drains and cuts the narrow incision; baked store 0.58 % basins; edit discovery needs a full route | `spikes/verification/results/results.md` |
+| SPIKE-121 | E3 variants B, C against A on five windows (P3 E3) | closed 2026-11-15: B passes both bars (K dt x 1/4); C fails G-DRAIN on M1 | `spikes/e3-variants-bc/results/results.md` |
 | SPIKE-122 | E3 variants D, E, F against A on five windows (P3 E3) | closed 2026-11-15: all pass both bars; D and E erode least (A up to 82 %) | `spikes/e3-variants-def/results/results.md` |
 | SPIKE-123 | Lakes as objects (E5) | closed 11-15: A keeps 2-40 lakes | `spikes/lakes-d4/results/results.md` |
 | SPIKE-124 | Protect lakes (E5) | closed 11-15: K7 leak fixed | `spikes/lakes-protect/results/results.md` |
