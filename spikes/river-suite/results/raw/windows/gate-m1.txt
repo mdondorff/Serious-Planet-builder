@@ -1,0 +1,9 @@
+$ cargo run --release -q -p planet-cache --example river_gate -- --window 4,6600,7219,10200,10819,15
+RIVER-GATE input: start surface of the window [4, 6600, 7219, 10200, 10819, 15], margin 200, counted over the region's box; 8160 x 8160 L cells of 101.8 m
+RIVER-GATE rivers: 178827 river cells inside (drainage area >= 75 km2, land)
+RIVER-GATE basins: 87.96 % of river length in closed basins (157303 of 178827 cells; 13267 basins of >= 0.5 m depth and >= 16 cells, fill epsilon 1e-7 m; bar <= 10 %); SPIKE-114 reference (any pit of 0.05 m): 89.05 %
+RIVER-GATE canyon: 5.20 % of river cells over 50 m below the p50 of their valley (2 to 4 cells out) at D 20 m (9306 cells, p99 118.19 m, max 332.77 m; bar <= 1 %); every basin breached 58.86 % (105265 cells, max 1306.89 m)
+RIVER-GATE erosion depth: the river level under the start surface at D 20 m p50 -100.93 p99 4.24 max 53.36 m, 2 cells over 50 m (0.00 %)
+RIVER-GATE lakes: 87.08 % of river cells in lakes at D 20 m (155718 cells)
+RIVER-GATE relief: p50 over 2 x 2 cells 42.06 m against the start's 42.06 m (100 %), over 10 x 10 cells 378.68 m against 378.68 m (100 %)
+RIVER-GATE edge: 61 of 82 H1 crossings (Q >= 1 m3/s) have an L crossing of the same direction within 2000 m (74.4 %)

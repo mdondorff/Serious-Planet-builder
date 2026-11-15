@@ -1,0 +1,20 @@
+MATCH r1h T1 GLO-30 N42W123 relief 603.8 m area 2476 km2
+MATCH r1h T2 GLO-30 N36W113 relief 453.0 m area 2258 km2
+MATCH r1h T3 GLO-30 N57W005 relief 242.0 m area 173 km2
+wrote spikes/river-suite/results/images/xsec-r1h.png
+MATCH r3a T1 GLO-30 N41W096 relief 16.0 m area 2374 km2
+MATCH r3a T2 GLO-30 N31W004 relief 29.3 m area 319 km2
+MATCH r3a T3 GLO-30 N31W004 relief 20.9 m area 191 km2
+wrote spikes/river-suite/results/images/xsec-r3a.png
+MATCH r3b T1 GLO-30 S25E015 relief 188.8 m area 4813 km2
+MATCH r3b T2 GLO-30 N31W004 relief 145.3 m area 341 km2
+MATCH r3b T3 GLO-30 N31W004 relief 34.7 m area 342 km2
+wrote spikes/river-suite/results/images/xsec-r3b.png
+MATCH m1 T1 GLO-30 N27E086 relief 1767.3 m area 2401 km2
+MATCH m1 T2 GLO-30 N46W122 relief 673.9 m area 698 km2
+MATCH m1 T3 GLO-30 N36W113 relief 164.0 m area 141 km2
+wrote spikes/river-suite/results/images/xsec-m1.png
+MATCH f1 T1 GLO-30 N33W092 relief 10.0 m area 2007 km2
+MATCH f1 T2 GLO-30 N52E012 relief 78.8 m area 433 km2
+MATCH f1 T3 GLO-30 S04W061 relief 28.1 m area 133 km2
+wrote spikes/river-suite/results/images/xsec-f1.png

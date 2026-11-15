@@ -1,0 +1,20 @@
+GRID input glo-N35W076.f64 (890 x 1093 cells of 101.8 m, sea level 0 m, border 10)
+GRID gate RIVER-GATE rivers: 0 river cells inside (drainage area >= 75 km2, land)
+GRID gate RIVER-GATE basins: 0.00 % of river length in closed basins (0 of 0 cells; 136 basins of >= 0.5 m depth and >= 16 cells, fill epsilon 1e-7 m; bar <= 10 %); SPIKE-114 reference (any pit of 0.05 m): 0.00 %
+GRID gate RIVER-GATE valley depth: 0.00 % of river cells over 50 m below the p50 of the surface 1 to 2 cells out (the canyon a viewer sees; 0 cells, p50 0.00 m, p99 0.00 m, max 0.00 m); bar: at most the share of a GLO-30 tile with 1 to 2 x this window's relief at 10 x 10 cells (10.81 m; the review table gives the reference)
+GRID gate RIVER-GATE burn: 0.00 % of river cells with the river level over 50 m below their surface, every basin breached (0 cells, p99 0.00 m, max 0.00 m; K7's cut); with the lakes of D 20 m kept 0.00 % (0 cells)
+GRID gate RIVER-GATE ring 2-4: 0.00 % of river cells with the river level over 50 m below the p50 of the surface 2 to 4 cells out at D 20 m (0 cells, p99 0.00 m, max 0.00 m; the valley depth at 2 to 4 cells plus the burn); every basin breached 0.00 % (0 cells, max 0.00 m)
+GRID gate RIVER-GATE erosion depth: the river level under the start surface at D 20 m p50 0.00 p99 0.00 max 0.00 m, 0 cells over 50 m (0.00 %)
+GRID gate RIVER-GATE lakes: 0.00 % of river cells in lakes at D 20 m (0 cells)
+GRID gate RIVER-GATE relief: p50 over 2 x 2 cells 1.70 m against the start's 1.70 m (100 %), over 10 x 10 cells 10.81 m against 10.81 m (100 %)
+GRID gate RIVER-GATE edge: no H1 crossing of the region's edge in the input
+GRID gate RIVER-GATE gradient: 0 of 0 river steps rise by more than 0.25 m (0.00 %; largest 0.00 m)
+GRID gate RIVER-GATE valley width: at 10 m above the river cell p50 0 m p90 0 m (0 cells, 0 sides capped at 64 cells); at half the ring 2-4 depth p50 0 m p90 0 m (0 cells, 0 sides capped, 0 cells with a flat ring)
+GRID gate RIVER-GATE asymmetry: |L - R| / (L + R) of the rise 2 to 4 cells out: p50 0.00 p90 0.00 (0 cells)
+GRID gate RIVER-GATE drainage density: 0.000 km/km2 (0.0 km of river over 976.4 km2 of land)
+GRID gate RIVER-GATE catchment: 0 matched H1 crossings; implied runoff (L area per H1 discharge) 0.000e0 m2 per m3/s; the ratio to it p10 0.00 p90 0.00
+GRID gate RIVER-GATE seam: 0 neighbour pairs across the region's edge, |dz| p50 0.00 m p99 0.00 m max 0.00 m; inside the region p50 0.00 m p99 3.09 m
+GRID gate RIVER-GATE narrowness: valley depth (ring 1-2) over ring 2-4 depth p50 0.00 p90 0.00 (0 cells); of the two p50s 0.00
+GRID gate RIVER-GATE slope-area: theta 0.21 over bins (area in cells: slope p50 (cells)) 4:0.0046(10557) 13:0.0037(4105) 40:0.0028(2036) 126:0.0026(974) 400:0.0026(437) 1265:0.0011(152)
+GRID gate RIVER-GATE spectrum: 512 x 512 cells, power per octave from wavenumber 1 (m2) 1.758e1 5.551e1 2.636e1 1.227e1 4.423e0 8.032e-1 1.246e-1 2.143e-2 3.149e-3; slope beta -2.05; the start's 512 x 512: 1.758e1 5.551e1 2.636e1 1.227e1 4.423e0 8.032e-1 1.246e-1 2.143e-2 3.149e-3; beta -2.05
+GRID counts: 933510 cells inside, 94217 land, 839293 sea or outlet; river cells (area >= 75 km2) 0; >= 300 km2 0; >= 1,000 km2 0; >= 10,000 km2 0; >= 100,000 km2 0; largest drained area inside 41 km2

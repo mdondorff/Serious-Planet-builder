@@ -1,0 +1,2 @@
+PREP glo-N43W102.f64 793 1093
+COUNTS src C:/DEV/SeriousPlanetData/dem/glo30-samples/Copernicus_DSM_COG_10_N43_00_W102_00_DEM.tif: 3600 x 3600 pixels (1.000" x 1.000", 22.43 x 30.92 m at lat 43.500), no-data pixels 0; cells 793 x 1093 of 101.8 m, pixels a cell 4.54 x 3.29; cells without data 0; cells at or below 0 m 0; land z p5/p50/p95 676/816/1018 m; min 583.0 m
