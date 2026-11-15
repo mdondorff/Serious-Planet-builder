@@ -348,3 +348,52 @@ fn a_trunk_over_a_dam_needs_a_burn_and_one_down_a_draining_floor_none() {
     assert!(r.fields().iter().any(|(k, v)| *k == "trunk_vertices_over" && v == "1"));
     assert_eq!(run(&z).trunk_line(), "RIVER-GATE trunks: no H1 trunk reach in the input");
 }
+
+// spec: TEST-137, BUILD-057
+#[test]
+fn a_corridor_routes_a_trunk_around_a_partial_dam_but_not_through_a_narrow_one() {
+    let g = Grid::new(N, N, DX);
+    let inside = vec![true; N * N];
+    let floor = vec![vec![(20.0, 39.0), (20.0, 0.0)]];
+    // A 60 m dam across the valley floor only (x 16..=24) at y = 10; the sides rise 2 m a cell.
+    let mut dam = valley(2.0, 2.0);
+    for x in 16..=24 {
+        dam[10 * N + x] += 60.0;
+    }
+    let narrow = planet_cache::river_suite::trunk_corridor(&g, &dam, &inside, &floor, 2.0, 50.0);
+    assert_eq!((narrow.reaches, narrow.reaches_over), (1, 1), "a 2-cell corridor cannot leave the dam: {narrow:?}");
+    assert!((narrow.deepest_m - 59.0).abs() <= 0.11, "the minimax route crosses at the floor, 59 m over its minimum: {narrow:?}");
+    // 6 cells reach x = 14 and 26, outside the dam: the route climbs the side about 10 m and passes.
+    let wide = planet_cache::river_suite::trunk_corridor(&g, &dam, &inside, &floor, 6.0, 50.0);
+    assert_eq!((wide.reaches, wide.reaches_over, wide.vertices_over, wide.deepest_m), (1, 0, 0, 0.0), "{wide:?}");
+    assert!(wide.vertices >= 40, "the route's cells inside are counted: {wide:?}");
+    // A dam across the whole valley stays over in any corridor.
+    let mut full = valley(2.0, 2.0);
+    for x in 0..N {
+        full[10 * N + x] += 60.0;
+    }
+    assert_eq!(planet_cache::river_suite::trunk_corridor(&g, &full, &inside, &floor, 20.0, 50.0).reaches_over, 1);
+    // Through the gate: k_c 1, 2 and 4 of 814 m on 100 m cells reach past the partial dam; the polyline itself does not.
+    let outlet = g.outlets(&dam, 0.0);
+    let p = params();
+    let r = measure(
+        &GateInput {
+            grid: &g,
+            start: &dam,
+            surface: &dam,
+            outlet: &outlet,
+            inside: &inside,
+            region: &inside,
+            h1: &[],
+            seed: 7,
+            sea_level_m: 0.0,
+            outside_drains: false,
+            trunks: &floor,
+        },
+        &p,
+    );
+    assert_eq!(r.trunk.reaches_over, 1);
+    assert!(r.trunk_corridors.iter().all(|t| t.reaches_over == 0), "{:?}", r.trunk_corridors);
+    assert!(r.corridor_line().contains("k_c 1 (814 m): 0 of 1 reaches"), "{}", r.corridor_line());
+    assert!(r.fields().iter().any(|(k, v)| *k == "trunk_c4_reaches_over" && v == "0"));
+}

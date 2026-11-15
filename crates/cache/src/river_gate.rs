@@ -5,7 +5,7 @@ use planet_generators::bake::flood::priority_flood_with;
 use planet_generators::bake::route::{route_rules_filled, RoundRules, Routing, NONE};
 use planet_generators::bake::Grid;
 
-use crate::river_suite::{measure_suite, trunk_burn, SuiteInput, SuiteReport, TrunkReport};
+use crate::river_suite::{measure_suite, trunk_burn, trunk_corridor, SuiteInput, SuiteReport, TrunkReport, CORRIDOR_K};
 
 /// The routing's flood grade between cells (the spikes' 1e-3 m).
 pub const ROUTE_EPSILON_M: f64 = 1.0e-3;
@@ -37,6 +37,8 @@ pub struct GateParams {
     pub edge_m: f64,
     /// of the H1 crossings carrying at least this discharge (m3/s).
     pub edge_q_m3s: f64,
+    /// The H1 cell size (metres): a trunk corridor's radius is `k_c` of it.
+    pub h1_cell_m: f64,
 }
 
 impl Default for GateParams {
@@ -49,6 +51,7 @@ impl Default for GateParams {
             channel_area_m2: planet_generators::bake::hydro::HydroParams::default().initiation_m2,
             edge_m: 2000.0,
             edge_q_m3s: 1.0,
+            h1_cell_m: 814.0,
         }
     }
 }
@@ -101,6 +104,40 @@ fn tail(mut v: Vec<f64>, over: f64) -> Tail {
     Tail { count_over: v.iter().filter(|&&x| x > over).count(), p50_m: at(0.5), p99_m: at(0.99), max_m: v.last().copied().unwrap_or(0.0) }
 }
 
+/// The column names of the corridor trunk measure, one row per [`CORRIDOR_K`] (k_c 1, 2, 4).
+const CORRIDOR_FIELDS: [[&str; 8]; 3] = [
+    [
+        "trunk_c1_reaches",
+        "trunk_c1_reaches_over",
+        "trunk_c1_reaches_over_pct",
+        "trunk_c1_vertices",
+        "trunk_c1_vertices_over",
+        "trunk_c1_vertices_over_pct",
+        "trunk_c1_deepest_m",
+        "trunk_c1_deepest_reach",
+    ],
+    [
+        "trunk_c2_reaches",
+        "trunk_c2_reaches_over",
+        "trunk_c2_reaches_over_pct",
+        "trunk_c2_vertices",
+        "trunk_c2_vertices_over",
+        "trunk_c2_vertices_over_pct",
+        "trunk_c2_deepest_m",
+        "trunk_c2_deepest_reach",
+    ],
+    [
+        "trunk_c4_reaches",
+        "trunk_c4_reaches_over",
+        "trunk_c4_reaches_over_pct",
+        "trunk_c4_vertices",
+        "trunk_c4_vertices_over",
+        "trunk_c4_vertices_over_pct",
+        "trunk_c4_deepest_m",
+        "trunk_c4_deepest_reach",
+    ],
+];
+
 /// The gate's numbers.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GateReport {
@@ -139,6 +176,8 @@ pub struct GateReport {
     /// H1's trunk reaches against the surface (BUILD-057): the vertices more than `cut_m` above their reach's running minimum; `trunks_given` says whether the input had reaches.
     pub trunk: TrunkReport,
     pub trunks_given: bool,
+    /// The same along each reach's minimax route inside its corridor of `k_c x h1_cell_m`, one per [`CORRIDOR_K`] (lead #158).
+    pub trunk_corridors: Vec<TrunkReport>,
 }
 
 fn share(n: usize, of: usize) -> f64 {
@@ -178,7 +217,7 @@ impl GateReport {
         let m = |v: f64| format!("{v:.2}");
         let r = |v: f64| format!("{v:.3}");
         let c = |k: usize| k.to_string();
-        vec![
+        let mut f = vec![
             ("river_cells", c(n)),
             ("basins", c(self.basins)),
             ("basin_cells", c(self.basin_river_cells)),
@@ -257,7 +296,21 @@ impl GateReport {
             ("trunk_vertices_over_pct", pct(self.trunk.vertices_over, self.trunk.vertices)),
             ("trunk_deepest_m", m(self.trunk.deepest_m)),
             ("trunk_deepest_reach", c(self.trunk.deepest_reach)),
-        ]
+        ];
+        for (names, t) in CORRIDOR_FIELDS.iter().zip(&self.trunk_corridors) {
+            let values = [
+                c(t.reaches),
+                c(t.reaches_over),
+                pct(t.reaches_over, t.reaches),
+                c(t.vertices),
+                c(t.vertices_over),
+                pct(t.vertices_over, t.vertices),
+                m(t.deepest_m),
+                c(t.deepest_reach),
+            ];
+            f.extend(names.iter().copied().zip(values));
+        }
+        f
     }
 
     /// The fields as one printed line: `RIVER-GATE fields: name=value ...` (values hold no space).
@@ -353,7 +406,39 @@ impl GateReport {
         .into_iter()
         .chain(self.suite.lines())
         .chain(std::iter::once(self.trunk_line()))
+        .chain(std::iter::once(self.corridor_line()))
         .collect()
+    }
+
+    /// The corridor trunk line (BUILD-057, lead #158): per `k_c`, the reaches whose best route inside the corridor still rises more than the bar above its running
+    /// minimum.
+    pub fn corridor_line(&self) -> String {
+        if !self.trunks_given {
+            return "RIVER-GATE trunks in corridors: no H1 trunk reach in the input".to_string();
+        }
+        let parts: Vec<String> = CORRIDOR_K
+            .iter()
+            .zip(&self.trunk_corridors)
+            .map(|(k, t)| {
+                format!(
+                    "k_c {k} ({:.0} m): {} of {} reaches ({:.2} %), {} of {} route vertices ({:.2} %), deepest {:.2} m on reach {}",
+                    k * self.params.h1_cell_m,
+                    t.reaches_over,
+                    t.reaches,
+                    share(t.reaches_over, t.reaches),
+                    t.vertices_over,
+                    t.vertices,
+                    share(t.vertices_over, t.vertices),
+                    t.deepest_m,
+                    t.deepest_reach
+                )
+            })
+            .collect();
+        format!(
+            "RIVER-GATE trunks in corridors: the minimax route of each reach inside its corridor still stands more than {} m above its running minimum on {}",
+            self.params.cut_m,
+            parts.join("; ")
+        )
     }
 
     /// The trunk line (BUILD-057; the E4 note's "KR does not cut").
@@ -734,5 +819,9 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         suite,
         trunk: trunk_burn(g, input.surface, input.inside, input.trunks, params.cut_m),
         trunks_given: !input.trunks.is_empty(),
+        trunk_corridors: CORRIDOR_K
+            .iter()
+            .map(|k| trunk_corridor(g, input.surface, input.inside, input.trunks, k * params.h1_cell_m / g.dx(), params.cut_m))
+            .collect(),
     }
 }

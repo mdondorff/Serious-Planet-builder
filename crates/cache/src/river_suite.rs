@@ -552,3 +552,173 @@ pub fn trunk_burn(grid: &Grid, z: &[f64], inside: &[bool], reaches: &[Vec<(f64, 
     }
     r
 }
+
+/// The corridors of the trunk column (BUILD-057, lead #158): the radius of a reach's corridor in H1 cells (`k_c`; the E4 note §3.3).
+pub const CORRIDOR_K: [f64; 3] = [1.0, 2.0, 4.0];
+
+/// A key for the corridor search's heap: the label (lower first), then the cell id (lower first).
+#[derive(PartialEq)]
+struct Key(f64, usize);
+impl Eq for Key {}
+impl PartialOrd for Key {
+    fn partial_cmp(&self, o: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(o))
+    }
+}
+impl Ord for Key {
+    fn cmp(&self, o: &Self) -> std::cmp::Ordering {
+        // reversed: `BinaryHeap` pops the largest
+        o.0.total_cmp(&self.0).then(o.1.cmp(&self.1))
+    }
+}
+
+/// The cells of a reach's corridor: those within `radius` cells of its polyline (Euclidean, to the segments), as (cell, id in the corridor) and the corridor's
+/// size; `None` when an end lies outside the grid.
+fn corridor(w: usize, h: usize, line: &[(f64, f64)], radius: f64) -> Option<(std::collections::HashMap<usize, usize>, Vec<usize>)> {
+    let inside_grid = |p: (f64, f64)| p.0 >= 0.0 && p.1 >= 0.0 && p.0 <= (w - 1) as f64 && p.1 <= (h - 1) as f64;
+    if line.len() < 2 || !inside_grid(line[0]) || !inside_grid(line[line.len() - 1]) {
+        return None;
+    }
+    let (mut x0, mut x1, mut y0, mut y1) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+    for &(x, y) in line {
+        (x0, x1, y0, y1) = (x0.min(x), x1.max(x), y0.min(y), y1.max(y));
+    }
+    let clamp = |v: f64, n: usize| (v.max(0.0) as usize).min(n - 1);
+    let (bx0, bx1, by0, by1) =
+        (clamp((x0 - radius).floor(), w), clamp((x1 + radius).ceil(), w), clamp((y0 - radius).floor(), h), clamp((y1 + radius).ceil(), h));
+    let seg_dist = |px: f64, py: f64| {
+        line.windows(2)
+            .map(|s| {
+                let ((ax, ay), (bx, by)) = (s[0], s[1]);
+                let (dx, dy) = (bx - ax, by - ay);
+                let l2 = dx * dx + dy * dy;
+                let t = if l2 > 0.0 { (((px - ax) * dx + (py - ay) * dy) / l2).clamp(0.0, 1.0) } else { 0.0 };
+                libm::hypot(px - ax - t * dx, py - ay - t * dy)
+            })
+            .fold(f64::INFINITY, f64::min)
+    };
+    let (mut index, mut cells) = (std::collections::HashMap::new(), Vec::new());
+    for y in by0..=by1 {
+        for x in bx0..=bx1 {
+            if seg_dist(x as f64, y as f64) <= radius {
+                index.insert(y * w + x, cells.len());
+                cells.push(y * w + x);
+            }
+        }
+    }
+    Some((index, cells))
+}
+
+/// Whether a route inside the corridor leads from `from` to `to` with every cell at most `d` above the running minimum of the route so far; on success the route
+/// (cells, upstream first). Lower running minima dominate, so a search that keeps each cell's lowest reachable minimum (lowest first, ties by cell id) is exact.
+fn corridor_route(
+    w: usize,
+    z: &[f64],
+    index: &std::collections::HashMap<usize, usize>,
+    cells: &[usize],
+    from: usize,
+    to: usize,
+    d: f64,
+) -> Option<Vec<usize>> {
+    let mut label = vec![f64::INFINITY; cells.len()];
+    let mut parent = vec![usize::MAX; cells.len()];
+    let mut done = vec![false; cells.len()];
+    let mut heap = std::collections::BinaryHeap::new();
+    label[index[&from]] = z[from];
+    heap.push(Key(z[from], from));
+    while let Some(Key(l, c)) = heap.pop() {
+        let ci = index[&c];
+        if done[ci] || l > label[ci] {
+            continue;
+        }
+        done[ci] = true;
+        if c == to {
+            let mut route = vec![c];
+            let mut k = ci;
+            while parent[k] != usize::MAX {
+                k = parent[k];
+                route.push(cells[k]);
+            }
+            route.reverse();
+            return Some(route);
+        }
+        let (cx, cy) = ((c % w) as i64, (c / w) as i64);
+        for (dx, dy) in [(-1i64, -1i64), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
+            let (nx, ny) = (cx + dx, cy + dy);
+            if nx < 0 || ny < 0 || nx >= w as i64 {
+                continue;
+            }
+            let n = ny as usize * w + nx as usize;
+            let Some(&ni) = index.get(&n) else { continue };
+            if done[ni] || z[n] - l > d {
+                continue;
+            }
+            let nl = l.min(z[n]);
+            if nl < label[ni] {
+                label[ni] = nl;
+                parent[ni] = ci;
+                heap.push(Key(nl, n));
+            }
+        }
+    }
+    None
+}
+
+/// The corridor form of [`trunk_burn`] (lead #158): each reach routed inside its corridor of `radius` cells from its first to its last point (the nearest cells) by
+/// the route that minimises the largest rise above its running minimum. A reach counts over when no route keeps within `bar_m`; its minimax rise is found to
+/// 0.1 m by bisection, and the vertices over the bar along that route are counted (vertices inside only). `vertices` counts the cells of the routes inside.
+pub fn trunk_corridor(grid: &Grid, z: &[f64], inside: &[bool], reaches: &[Vec<(f64, f64)>], radius: f64, bar_m: f64) -> TrunkReport {
+    let (w, h) = (grid.w(), grid.h());
+    let mut r = TrunkReport::default();
+    let cell_of = |p: (f64, f64)| (p.1.round() as usize).min(h - 1) * w + (p.0.round() as usize).min(w - 1);
+    for (k, line) in reaches.iter().enumerate() {
+        let Some((index, cells)) = corridor(w, h, line, radius) else { continue };
+        let (from, to) = (cell_of(line[0]), cell_of(line[line.len() - 1]));
+        if !index.contains_key(&from) || !index.contains_key(&to) || !line.iter().any(|&p| inside[cell_of(p)]) {
+            continue;
+        }
+        // No route rises more than the corridor's height range above its running minimum (the bed may fall below the start first).
+        let top = cells.iter().map(|&c| z[c]).fold(f64::NEG_INFINITY, f64::max) - cells.iter().map(|&c| z[c]).fold(f64::INFINITY, f64::min);
+        let route = match corridor_route(w, z, &index, &cells, from, to, bar_m) {
+            Some(route) => route,
+            None => {
+                // over the bar: bisect the minimax rise in (bar, top]
+                let (mut lo, mut hi) = (bar_m, top.max(bar_m));
+                let mut best =
+                    corridor_route(w, z, &index, &cells, from, to, hi).expect("a route exists below the corridor's highest cell");
+                while hi - lo > 0.1 {
+                    let mid = 0.5 * (lo + hi);
+                    match corridor_route(w, z, &index, &cells, from, to, mid) {
+                        Some(route) => (hi, best) = (mid, route),
+                        None => lo = mid,
+                    }
+                }
+                best
+            }
+        };
+        let (mut bed, mut seen, mut over) = (f64::INFINITY, 0usize, 0usize);
+        let mut deepest = (0.0f64, (0.0, 0.0));
+        for &c in &route {
+            bed = bed.min(z[c]);
+            if !inside[c] {
+                continue;
+            }
+            seen += 1;
+            let depth = z[c] - bed;
+            if depth > bar_m {
+                over += 1;
+                if depth > deepest.0 {
+                    deepest = (depth, ((c % w) as f64, (c / w) as f64));
+                }
+            }
+        }
+        r.reaches += 1;
+        r.vertices += seen;
+        r.reaches_over += usize::from(over > 0);
+        r.vertices_over += over;
+        if deepest.0 > r.deepest_m {
+            (r.deepest_m, r.deepest_reach, r.deepest_at) = (deepest.0, k, deepest.1);
+        }
+    }
+    r
+}
