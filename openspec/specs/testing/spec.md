@@ -1790,11 +1790,13 @@ Source: GEN-172, architect 2026-11-12
 - **THEN** each of (a), (b) and (c) has an assertion that cites GEN-172
 
 ### Requirement: TEST-119 The flat-grade tests
-The flat grade SHALL be tested at tier A: (a) a square pit has no straight diagonal run over 12 cells where the chessboard flood has one of 29; (b) the grade is `epsilon d / sqrt 2` within 5 % of the distance, never above the chessboard count, every cell drains; (c) the same bits on a rerun and on a translated window; (d) a flat of diameter exactly at the bound is graded and one cell wider keeps the chessboard grade, and on two tilings (a tile corner inside the flat) the partitioned surface equals the resident one bit for bit; (e) the tests of GEN-159 and GEN-162 assert the exact grade and keep their intent; (f) on a rough low plain (seeded, heights up to 64 epsilon) with a cell planted beside a flat, no graded cell stands above its chessboard level and every cell drains.
+The flat grade SHALL be tested at tier A: (a) a square pit has no straight diagonal run over 12 cells where the chessboard flood has one of 29; (b) the grade is `epsilon d / sqrt 2` within 5 % of the distance, never above the chessboard count, every cell drains; (c) to (f) as in the detail.
 
 Verify: A
 Status: active
 Source: GEN-173, architect 2026-11-12
+
+Detail: The cases are (c) the same bits on a rerun and on a translated window; (d) a flat of diameter exactly at the bound is graded and one cell wider keeps the chessboard grade, and on two tilings (a tile corner inside the flat) the partitioned surface equals the resident one bit for bit; (e) the tests of GEN-159 and GEN-162 assert the exact grade and keep their intent; (f) on a rough low plain (seeded, heights up to 64 epsilon) with a cell planted beside a flat, no graded cell stands above its chessboard level and every cell drains.
 
 #### Scenario: Cases
 - **WHEN** the tests of `bake_flats` and `bake_round` run

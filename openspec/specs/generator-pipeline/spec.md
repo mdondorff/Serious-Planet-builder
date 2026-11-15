@@ -1542,11 +1542,13 @@ Source: Architect, 2026-11-12 (SPIKE-107)
 - **AND** for a masked grid the border is the border of its rectangle; the caller sets the kind of an outlet (the flag), it is not inferred from heights
 
 ### Requirement: GEN-173 Flats are graded by distance to the pour points
-The canonical flood SHALL grade a flat by the Euclidean distance to its lower rim, not by the chessboard count: the level is `base + epsilon d / sqrt 2`, `d` the distance in cells to the nearest rim cell, every cell kept above the neighbour it drains to. A graded level SHALL be at most the cell's chessboard level; where that bound binds, the cell keeps its chessboard parent as a lower neighbour. A flat whose Chebyshev diameter exceeds `halo - 1` cells, or that touches the border of the grid, keeps the chessboard grade. The grade SHALL be a function of the flat and its rim only, so the resident flood and the partitioned route give the same bits on any tiling. No cell SHALL stand above its chessboard count.
+The canonical flood SHALL grade a flat by the Euclidean distance to its lower rim, not by the chessboard count: the level is `base + epsilon d / sqrt 2`, `d` the distance in cells to the nearest rim cell, every cell kept above the neighbour it drains to. A graded level SHALL be at most the cell's chessboard level; where that bound binds, the cell keeps its chessboard parent as a lower neighbour. No cell SHALL stand above its chessboard count.
 
 Verify: A
 Status: active
 Source: Architect, 2026-11-12 (SPIKE-108); the cap and its drain: lead, 2026-11-14 (K7 refusal on the L-eroded surface, spikes/erosion-at-l/results/k7-flat-refusal.md)
+
+Detail: A flat whose Chebyshev diameter exceeds `halo - 1` cells, or that touches the border of the grid, keeps the chessboard grade. The grade SHALL be a function of the flat and its rim only, so the resident flood and the partitioned route give the same bits on any tiling.
 
 #### Scenario: A square pit with one pour point
 - **WHEN** a square pit drains through one outlet in its wall
