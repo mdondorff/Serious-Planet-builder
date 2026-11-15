@@ -57,5 +57,50 @@ Code location: branch spike/lakes-protect (local, never merged), cut from explor
 4. Key: the protected stores have the same commit id as the unprotected one (39038c59), because the inputs identity does not carry the switch. A production form must put the protection into the key (CON-07).
 5. For B and C: the switch sits on a branch cut from spike/e3-variants-bc. Explorer reuses it as one switch, and the rule is the same for every variant.
 
+## Addendum: the leak traced and fixed (lead #149, 2026-11-15)
+**Method:** `PLANET_TRACE_LAKE=0` writes lake 0's rim-area box (304 x 176 L cells) at each stage:
+- `z0`: the start surface;
+- `z1`: after the round, the protection and the dam (`bake_eroded`);
+- the stored ground after K7 (`river_gate --ring-lake 0`).
+
+Lists in `target/review/lakes-protect/`: `lake0-stage-deltas.txt` (per rim-area cell: `z0`, `z1`, stored ground and the deltas) and the trace files.
+
+**Per stage:**
+
+| Stage | Lake 0 below its spill (4.60 m) |
+|---|---|
+| Start surface `z0` | closed: the 5,549 cells below the spill connected to the footprint stay inside the rim area |
+| After the round and the protection `z1` | closed except its overflow: a sill at exactly the spill (the round cut a channel through the rim, the restore raised the sill cells back to 4.60 m) |
+| Stored ground after K7 (before the fix) | drained. 5,365 of 13,952 rim-area cells stand more than 0.3 m below `min(z1, spill)`; the worst, around L (3398-3406, 4254-4255), fall from 7.0-7.8 m to 0.2-0.4 m. The low body (level 1.55 m) spills at window L (3271, 4286), a footprint cell that K7 lowered from 1.87 to 1.55 m |
+
+**Cause:** K7's pass 2 (local carve and breach, thermal, deposition, pit spreading) acts on the protected cells. It knows only its channel cells as fixed (GEN-176). The drop is far beyond the stored change's 0.25 m steps, so the store read is ruled out.
+
+**Fix at that stage:**
+- K7 keeps the protected cells (footprint and rim area) fixed, as it keeps its channel cells (GEN-176).
+- No L channel runs in a lake (above), so the final channel pass does not touch them either.
+- In the spike the mask reaches K7 through a process-wide hook that `bake_eroded` sets (unset: the same bits). A production form carries the mask in K7's tile inputs and its key.
+
+**Re-run on R1h** (store `r1h-a-k7fix`, the same key caveat):
+
+| Measure | Before the K7 fix | After |
+|---|---|---|
+| Kept lakes at H1 lake 0 | 11.9 km2 at 4.69 m and 13.8 km2 at 1.55 m | **47.2 km2 at 4.05 m** and 8.6 km2 at 4.69 m (55.8 km2; H1's footprint 5,317 L cells, about 55 km2) |
+| Artefacts at lake 0 | 151 | 1 |
+| Rim-area cells more than 0.3 m below `min(z1, spill)` | 5,365 | 43, none in the footprint: a line (degree 1-2), the outflow river K7 burns by design |
+| G-DRAIN, protected lakes counted as lakes | 0.19 % | 0.23 % |
+| Basins, lakes counted as basins | 1.40 % | 2.67 % (the kept lakes are closed by design) |
+| 5 km ring: valley depth ring 1-2 | 0.00 % (469 river cells) | 0.00 % (473) |
+| 5 km ring: basins (>= 0.5 m, >= 16 cells) | 3 | 3 (unprotected A: 0) |
+| Window: kept lakes | 41 (39.3 km2) | 58 (94.6 km2) |
+| Edge | 34 of 44 | 34 of 44 |
+
+- The main body's level (4.05 m) is the L start surface's own spill at L (3390, 4255): the L rim stands below H1's 4.60 m there, and the restore keeps `min(z0, spill)`. It is within the fixture's 1 m of H1's level.
+- To hold H1's level exactly, the rule would raise every rim cell below the spill, not only the rim area's outer edge. That adds a step around the shore; it is left as a choice.
+- The 3 small basins in the 5 km ring (the unprotected store has none) are a cost of the protection; their place was not traced.
+
+**Verdict:** the leak was K7. With the four parts (footprint as outlets in the round, the rim restore and dam, no L channel in a lake, K7 fixed cells), H1 lake 0 survives variant A on R1h over its whole area, at 0.55 m under H1's level. Still open:
+- the trunk through the lake (1.0-1.6 against 484 m3/s; D-2, the lead);
+- the key of the switch (CON-07).
+
 ## Visuals
-None: counts only. The G-LAKE flight (#146) waits for E3's winner and full survival.
+None: counts and cell lists only (`target/review/lakes-protect/`, not committed). The G-LAKE flight (#146) waits for E3's winner.

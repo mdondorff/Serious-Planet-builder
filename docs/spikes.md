@@ -26,6 +26,6 @@ Per-spike register sections of M5 and M6: `docs/archive/M6/spikes.md`. Closed sp
 | SPIKE-119 | The river measurement suite: a mountain and a low-gradient window, fixed transects with cross-sections, the GLO-30 benchmark documented and widened (P3 E1) | closed 2026-11-15: M1 (face 4, relief 379 m) and F1 (face 4, relief 11.6 m, a continental trunk) on seed 15, river-gate aliases; 15 fixed transects with a cross-section tool; GLO-30 benchmark on 21 tiles plus 4 bare-earth DTMs: the DSM inflates basins 1.3-2.9x and flat-ground relief 3x; a large river is not measurable on one tile | `spikes/river-suite/results/results.md` |
 | SPIKE-120 | The critical reads' verification items (P3 E2) | closed 2026-11-15: the breach drains and cuts the narrow incision; baked store 0.58 % basins; edit discovery needs a full route | `spikes/verification/results/results.md` |
 | SPIKE-123 | Lakes as objects (E5) | closed 11-15: A keeps 2-40 lakes | `spikes/lakes-d4/results/results.md` |
-| SPIKE-124 | Protect lakes (E5) | closed 11-15: partial | `spikes/lakes-protect/results/results.md` |
+| SPIKE-124 | Protect lakes (E5) | closed 11-15: K7 leak fixed | `spikes/lakes-protect/results/results.md` |
 
 Every exploration gets a `SPIKE-NN` entry.
