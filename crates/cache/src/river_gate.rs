@@ -5,6 +5,8 @@ use planet_generators::bake::flood::priority_flood_with;
 use planet_generators::bake::route::{route_rules_filled, RoundRules, Routing, NONE};
 use planet_generators::bake::Grid;
 
+use crate::river_suite::{measure_suite, trunk_burn, SuiteInput, SuiteReport, TrunkReport};
+
 /// The routing's flood grade between cells (the spikes' 1e-3 m).
 pub const ROUTE_EPSILON_M: f64 = 1.0e-3;
 /// The basin flood's grade between cells (SPIKE-117/118's 1e-7 m): its graded flats stand far below [`BASIN_WET_M`].
@@ -15,6 +17,8 @@ pub const BASIN_WET_M: f64 = 1.0e-3;
 pub const REFERENCE_WET_M: f64 = 0.05;
 /// The valley floor's cross-section around a river cell: the cells 2 to 4 cells out (Chebyshev distance).
 pub const VALLEY_RING: (i64, i64) = (2, 4);
+/// The near ring of the valley depth (the canyon a viewer sees): the cells 1 to 2 cells out (102-204 m at L; lead, 2026-11-14, DEC crusader-4).
+pub const NEAR_RING: (i64, i64) = (1, 2);
 
 /// The gate's limits.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -78,6 +82,8 @@ pub struct GateInput<'a> {
     pub sea_level_m: f64,
     /// Every cell outside `inside` is an outlet: a store's tiles drain to their border, so the start surface around them (without the candidate's burn) dams no river leaving the tiles.
     pub outside_drains: bool,
+    /// H1's trunk reaches in the grid's cells, each upstream first (empty when the input has none; the trunk line then says so).
+    pub trunks: &'a [Vec<(f64, f64)>],
 }
 
 /// The p99 and the maximum of a set of values (0 for none).
@@ -108,7 +114,14 @@ pub struct GateReport {
     pub reference_river_cells: usize,
     /// River cells inside that lie in a basin deeper than D (lakes).
     pub lake_river_cells: usize,
-    /// The canyon: the river level below the p50 of its valley ring, with the lakes of D kept and with every basin breached.
+    /// The valley depth (the canyon a viewer sees; lead, 2026-11-14, DEC crusader-4): the p50 of the surface 1 to 2 cells out ([`NEAR_RING`]) above the surface
+    /// at the river cell.
+    pub valley: Tail,
+    /// The burn (K7's cut): the surface at the river cell above the river level, with every basin breached and with the lakes of D kept.
+    pub burn_breached: Tail,
+    pub burn: Tail,
+    /// Ring 2-4 (the first canyon measure, kept as a line): the p50 of the surface 2 to 4 cells out ([`VALLEY_RING`]) above the river level, with the lakes of D
+    /// kept and with every basin breached; it is the valley depth at 2 to 4 cells plus the burn.
     pub canyon: Tail,
     pub canyon_breached: Tail,
     /// The erosion depth: the start surface minus the river level, with the lakes of D kept.
@@ -121,6 +134,11 @@ pub struct GateReport {
     /// H1 crossings of the edge (Q at least the limit), and those an L crossing matches.
     pub edge_h1: usize,
     pub edge_matched: usize,
+    /// The measurement suite (BUILD-057).
+    pub suite: SuiteReport,
+    /// H1's trunk reaches against the surface (BUILD-057): the vertices more than `cut_m` above their reach's running minimum; `trunks_given` says whether the input had reaches.
+    pub trunk: TrunkReport,
+    pub trunks_given: bool,
 }
 
 fn share(n: usize, of: usize) -> f64 {
@@ -145,6 +163,108 @@ impl GateReport {
     pub fn canyon_share(&self) -> f64 {
         share(self.canyon.count_over, self.river_cells)
     }
+    pub fn valley_share(&self) -> f64 {
+        share(self.valley.count_over, self.river_cells)
+    }
+    pub fn burn_share(&self) -> f64 {
+        share(self.burn_breached.count_over, self.river_cells)
+    }
+
+    /// Every number of the report as (column, value), counts beside their percentages: the columns of `cargo xtask river-gate --table` (BUILD-057). The names are fixed; a new number is a new column.
+    pub fn fields(&self) -> Vec<(&'static str, String)> {
+        let s = &self.suite;
+        let n = self.river_cells;
+        let pct = |k: usize, of: usize| format!("{:.2}", share(k, of));
+        let m = |v: f64| format!("{v:.2}");
+        let r = |v: f64| format!("{v:.3}");
+        let c = |k: usize| k.to_string();
+        vec![
+            ("river_cells", c(n)),
+            ("basins", c(self.basins)),
+            ("basin_cells", c(self.basin_river_cells)),
+            ("basin_pct", pct(self.basin_river_cells, n)),
+            ("reference_cells", c(self.reference_river_cells)),
+            ("reference_pct", pct(self.reference_river_cells, n)),
+            ("valley_over_cells", c(self.valley.count_over)),
+            ("valley_over_pct", pct(self.valley.count_over, n)),
+            ("valley_p50_m", m(self.valley.p50_m)),
+            ("valley_p99_m", m(self.valley.p99_m)),
+            ("burn_over_cells", c(self.burn_breached.count_over)),
+            ("burn_over_pct", pct(self.burn_breached.count_over, n)),
+            ("burn_p99_m", m(self.burn_breached.p99_m)),
+            ("burn_lakes_over_cells", c(self.burn.count_over)),
+            ("burn_lakes_over_pct", pct(self.burn.count_over, n)),
+            ("ring24_over_cells", c(self.canyon.count_over)),
+            ("ring24_over_pct", pct(self.canyon.count_over, n)),
+            ("ring24_breached_over_cells", c(self.canyon_breached.count_over)),
+            ("ring24_breached_over_pct", pct(self.canyon_breached.count_over, n)),
+            ("erosion_p50_m", m(self.erosion.p50_m)),
+            ("erosion_p99_m", m(self.erosion.p99_m)),
+            ("erosion_over_cells", c(self.erosion.count_over)),
+            ("erosion_over_pct", pct(self.erosion.count_over, n)),
+            ("lake_cells", c(self.lake_river_cells)),
+            ("lake_pct", pct(self.lake_river_cells, n)),
+            ("relief2_m", m(self.relief_2_m)),
+            ("relief2_start_m", m(self.relief_2_start_m)),
+            ("relief10_m", m(self.relief_10_m)),
+            ("relief10_start_m", m(self.relief_10_start_m)),
+            ("edge_h1", c(self.edge_h1)),
+            ("edge_matched", c(self.edge_matched)),
+            ("edge_pct", pct(self.edge_matched, self.edge_h1)),
+            ("steps", c(s.steps)),
+            ("uphill_steps", c(s.uphill_steps)),
+            ("uphill_pct", pct(s.uphill_steps, s.steps)),
+            ("uphill_max_m", m(s.uphill_max_m)),
+            ("width10_cells", c(s.width_fixed.n)),
+            ("width10_p50_m", format!("{:.0}", s.width_fixed.p50)),
+            ("width10_p90_m", format!("{:.0}", s.width_fixed.p90)),
+            ("width10_capped_sides", c(s.width_fixed_capped)),
+            ("widthhalf_cells", c(s.width_half.n)),
+            ("widthhalf_p50_m", format!("{:.0}", s.width_half.p50)),
+            ("widthhalf_p90_m", format!("{:.0}", s.width_half.p90)),
+            ("widthhalf_capped_sides", c(s.width_half_capped)),
+            ("widthhalf_flat_cells", c(s.width_half_flat)),
+            ("asym_cells", c(s.asymmetry.n)),
+            ("asym_p50", r(s.asymmetry.p50)),
+            ("asym_p90", r(s.asymmetry.p90)),
+            ("density_km_per_km2", format!("{:.4}", s.density_km_per_km2)),
+            ("river_km", format!("{:.1}", s.river_km)),
+            ("land_km2", format!("{:.1}", s.land_km2)),
+            ("catchment_pairs", c(s.conservation_pairs)),
+            ("catchment_runoff_m2_per_m3s", format!("{:.4e}", s.implied_runoff)),
+            ("catchment_p10", r(s.conservation_p10)),
+            ("catchment_p90", r(s.conservation_p90)),
+            ("seam_pairs", c(s.seam_pairs)),
+            ("seam_p50_m", m(s.seam_p50_m)),
+            ("seam_p99_m", m(s.seam_p99_m)),
+            ("seam_max_m", m(s.seam_max_m)),
+            ("interior_p50_m", m(s.interior_p50_m)),
+            ("interior_p99_m", m(s.interior_p99_m)),
+            ("narrow_cells", c(s.narrowness.n)),
+            ("narrow_p50", r(s.narrowness.p50)),
+            ("narrow_p90", r(s.narrowness.p90)),
+            ("narrow_of_p50", r(s.narrowness_of_p50)),
+            ("slope_area_bins_fitted", c(s.slope_area.iter().filter(|b| b.cells >= crate::river_suite::SA_BIN_MIN_CELLS).count())),
+            ("theta", r(s.theta)),
+            ("spectrum_n", c(s.spectrum.n)),
+            ("beta", r(s.spectrum.beta)),
+            ("beta_start", r(s.spectrum_start.beta)),
+            ("trunk_reaches", c(self.trunk.reaches)),
+            ("trunk_reaches_over", c(self.trunk.reaches_over)),
+            ("trunk_reaches_over_pct", pct(self.trunk.reaches_over, self.trunk.reaches)),
+            ("trunk_vertices", c(self.trunk.vertices)),
+            ("trunk_vertices_over", c(self.trunk.vertices_over)),
+            ("trunk_vertices_over_pct", pct(self.trunk.vertices_over, self.trunk.vertices)),
+            ("trunk_deepest_m", m(self.trunk.deepest_m)),
+            ("trunk_deepest_reach", c(self.trunk.deepest_reach)),
+        ]
+    }
+
+    /// The fields as one printed line: `RIVER-GATE fields: name=value ...` (values hold no space).
+    pub fn fields_line(&self) -> String {
+        let f: Vec<String> = self.fields().into_iter().map(|(k, v)| format!("{k}={v}")).collect();
+        format!("RIVER-GATE fields: {}", f.join(" "))
+    }
 
     /// The printed report: one line per measure, the same bits for the same input.
     pub fn lines(&self) -> Vec<String> {
@@ -162,6 +282,7 @@ impl GateReport {
             )
         };
         let (r0, r1) = VALLEY_RING;
+        let (n0, n1) = NEAR_RING;
         vec![
             format!("RIVER-GATE rivers: {} river cells inside (drainage area >= {:.0} km2, land)", self.river_cells, p.channel_area_m2 / 1.0e6),
             format!(
@@ -175,7 +296,28 @@ impl GateReport {
                 share(self.reference_river_cells, self.river_cells)
             ),
             format!(
-                "RIVER-GATE canyon: {:.2} % of river cells over {} m below the p50 of their valley ({r0} to {r1} cells out) at D {} m ({} cells, p99 {:.2} m, max {:.2} m; bar <= 1 %); every basin breached {:.2} % ({} cells, max {:.2} m)",
+                "RIVER-GATE valley depth: {:.2} % of river cells over {} m below the p50 of the surface {n0} to {n1} cells out (the canyon a viewer sees; {} cells, p50 {:.2} m, p99 {:.2} m, max {:.2} m); bar: at most the share of a GLO-30 tile with 1 to 2 x this window's relief at 10 x 10 cells ({:.2} m; the review table gives the reference)",
+                self.valley_share(),
+                p.cut_m,
+                self.valley.count_over,
+                self.valley.p50_m,
+                self.valley.p99_m,
+                self.valley.max_m,
+                self.relief_10_m
+            ),
+            format!(
+                "RIVER-GATE burn: {:.2} % of river cells with the river level over {} m below their surface, every basin breached ({} cells, p99 {:.2} m, max {:.2} m; K7's cut); with the lakes of D {} m kept {:.2} % ({} cells)",
+                self.burn_share(),
+                p.cut_m,
+                self.burn_breached.count_over,
+                self.burn_breached.p99_m,
+                self.burn_breached.max_m,
+                p.lake_depth_m,
+                share(self.burn.count_over, self.river_cells),
+                self.burn.count_over
+            ),
+            format!(
+                "RIVER-GATE ring 2-4: {:.2} % of river cells with the river level over {} m below the p50 of the surface {r0} to {r1} cells out at D {} m ({} cells, p99 {:.2} m, max {:.2} m; the valley depth at 2 to 4 cells plus the burn); every basin breached {:.2} % ({} cells, max {:.2} m)",
                 self.canyon_share(),
                 p.cut_m,
                 p.lake_depth_m,
@@ -208,6 +350,32 @@ impl GateReport {
             ),
             edge,
         ]
+        .into_iter()
+        .chain(self.suite.lines())
+        .chain(std::iter::once(self.trunk_line()))
+        .collect()
+    }
+
+    /// The trunk line (BUILD-057; the E4 note's "KR does not cut").
+    pub fn trunk_line(&self) -> String {
+        let t = &self.trunk;
+        if !self.trunks_given {
+            return "RIVER-GATE trunks: no H1 trunk reach in the input".to_string();
+        }
+        format!(
+            "RIVER-GATE trunks: {} of {} H1 trunk reaches inside ({:.2} %) and {} of {} vertices ({:.2} %) stand more than {} m above their reach's running minimum (the burn KR would need); deepest {:.2} m on reach {} at cell ({:.0}, {:.0})",
+            t.reaches_over,
+            t.reaches,
+            share(t.reaches_over, t.reaches),
+            t.vertices_over,
+            t.vertices,
+            share(t.vertices_over, t.vertices),
+            self.params.cut_m,
+            t.deepest_m,
+            t.deepest_reach,
+            t.deepest_at.0,
+            t.deepest_at.1
+        )
     }
 }
 
@@ -280,11 +448,10 @@ fn levels(routing: &Routing, river: &[bool], drained: impl Fn(usize) -> f64) -> 
     level
 }
 
-/// The p50 of the surface over the valley ring of cell `c` (the cells of the grid at a Chebyshev distance in [`VALLEY_RING`]).
-fn valley_floor(grid: &Grid, z: &[f64], c: usize) -> f64 {
+/// The p50 of the surface over a ring of cell `c`: the cells of the grid at a Chebyshev distance from `r0` to `r1` ([`NEAR_RING`], [`VALLEY_RING`]).
+fn valley_floor(grid: &Grid, z: &[f64], c: usize, (r0, r1): (i64, i64)) -> f64 {
     let (w, h) = (grid.w() as i64, grid.h() as i64);
     let (cx, cy) = ((c % grid.w()) as i64, (c / grid.w()) as i64);
-    let (r0, r1) = VALLEY_RING;
     let mut ring: Vec<f64> = Vec::with_capacity(((2 * r1 + 1) * (2 * r1 + 1)) as usize);
     for dy in -r1..=r1 {
         for dx in -r1..=r1 {
@@ -358,6 +525,77 @@ pub fn commit_differences(commit: &crate::l_writer::CommitSpec, window: &WindowI
     differ
 }
 
+/// The L window a store is laid on: its corner in the face's L cells and its size.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LWindow {
+    pub face: planet_core::Face,
+    pub x0: i64,
+    pub y0: i64,
+    pub w: usize,
+    pub h: usize,
+}
+
+/// Lays a commit's stored ground on the window (BUILD-055's store mode): every tile of the commit on the window's face that lies wholly inside it is read through the reader (`read_l_tile`, or
+/// under the commit's own key without `key_check`), and its cells get B (`base` at the face's L cell) plus the tile's change and count as inside. Returns (tiles read, tiles outside); no tile read
+/// is an error.
+#[allow(clippy::too_many_arguments)]
+pub fn lay_store_ground(
+    tiles: &crate::pack::TileStore,
+    world: &crate::global_store::GlobalWorld,
+    commit: &crate::l_writer::Commit,
+    key_check: bool,
+    win: LWindow,
+    base: &(dyn Fn(i64, i64) -> f64 + Sync),
+    threads: usize,
+    surface: &mut [f64],
+    inside: &mut [bool],
+) -> Result<(usize, usize), String> {
+    let LWindow { face, x0, y0, w, h } = win;
+    assert!(surface.len() == w * h && inside.len() == w * h, "one surface height and inside flag per window cell");
+    let l_spec = commit.spec.l_spec();
+    let t = l_spec.grid.tile;
+    let (mut read, mut outside) = (0usize, 0usize);
+    for (&(f, ti, tj), &key) in &commit.tiles {
+        let (tx0, ty0) = (i64::from(ti) * t as i64 - x0, i64::from(tj) * t as i64 - y0);
+        if f != face.0 || tx0 < 0 || ty0 < 0 || tx0 as usize + t > w || ty0 as usize + t > h {
+            outside += 1;
+            continue;
+        }
+        let id = planet_generators::bake::tile::TileId { face, ti, tj };
+        let tile = if key_check {
+            crate::l_writer::read_l_tile(tiles, world, commit.spec.res, &l_spec, commit, id)
+        } else {
+            crate::layer_l::load_l_tile_keyed(tiles, &l_spec, id, key)
+        }
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("the commit names tile {f}/{ti}/{tj} but the store does not hold it"))?;
+        // The stored ground: B plus the tile's change (K7's ground minus B, which holds the regional change already). Rows over scoped threads: the same values on any thread count.
+        let mut ground = vec![0f64; t * t];
+        let rows = t.div_ceil(threads.max(1)).max(1);
+        std::thread::scope(|s| {
+            for (k, chunk) in ground.chunks_mut(rows * t).enumerate() {
+                let core = &tile.core;
+                s.spawn(move || {
+                    for (q, v) in chunk.iter_mut().enumerate() {
+                        let p = k * rows * t + q;
+                        *v = base(x0 + tx0 + (p % t) as i64, y0 + ty0 + (p / t) as i64) + f64::from(core[p]);
+                    }
+                });
+            }
+        });
+        for (p, g) in ground.iter().enumerate() {
+            let c = (ty0 as usize + p / t) * w + tx0 as usize + p % t;
+            surface[c] = *g;
+            inside[c] = true;
+        }
+        read += 1;
+    }
+    if read == 0 {
+        return Err(format!("none of the commit's {} tiles lies inside the window", commit.tiles.len()));
+    }
+    Ok((read, outside))
+}
+
 /// The key note of a store run's input line.
 pub fn key_note(key_check: bool) -> &'static str {
     if key_check {
@@ -375,6 +613,22 @@ pub fn edge_agreement(l: &[Crossing], h1: &[Crossing], dx_m: f64, params: &GateP
         .filter(|hc| l.iter().filter(|c| c.inside == hc.inside).any(|c| libm::hypot(c.x - hc.x, c.y - hc.y) * dx_m <= params.edge_m))
         .count();
     (matched, big.len())
+}
+
+/// The matched H1 crossings of at least the discharge limit as (the nearest matching L crossing's drainage area in m2, the H1 discharge in m3/s); `l_area` is one area per L crossing.
+pub fn edge_pairs(l: &[Crossing], l_area: &[f64], h1: &[Crossing], dx_m: f64, params: &GateParams) -> Vec<(f64, f64)> {
+    h1.iter()
+        .filter(|c| c.q_m3s >= params.edge_q_m3s)
+        .filter_map(|hc| {
+            l.iter()
+                .zip(l_area)
+                .filter(|(c, _)| c.inside == hc.inside)
+                .map(|(c, &a)| (libm::hypot(c.x - hc.x, c.y - hc.y) * dx_m, a))
+                .filter(|&(d, _)| d <= params.edge_m)
+                .min_by(|a, b| a.0.total_cmp(&b.0))
+                .map(|(_, a)| (a, hc.q_m3s))
+        })
+        .collect()
 }
 
 /// Measures `input` under `params`: routes the surface at L, finds the closed basins and the river cells, the levels for every basin breached and for the lakes of D, the canyon against the valley,
@@ -411,6 +665,8 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
     let with_lakes = levels(&routing, &river, |c| if lake(c) { filled[c] } else { z[c] });
     let (mut river_cells, mut basin_cells, mut reference_cells, mut lake_cells) = (0usize, 0usize, 0usize, 0usize);
     let (mut canyon, mut canyon_b, mut erosion) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut valley, mut burn, mut burn_b) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut near_depth, mut ring_depth) = (Vec::new(), Vec::new());
     for c in 0..n {
         if !river[c] || !input.inside[c] {
             continue;
@@ -419,19 +675,43 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         basin_cells += usize::from(basin(c));
         reference_cells += usize::from(reference[c] != u32::MAX);
         lake_cells += usize::from(lake(c));
-        let floor = valley_floor(g, input.surface, c);
+        let here = input.surface[c];
+        let near = valley_floor(g, input.surface, c, NEAR_RING) - here;
+        valley.push(near);
+        near_depth.push(near);
+        burn.push(here - with_lakes[c]);
+        burn_b.push(here - breached[c]);
+        let floor = valley_floor(g, input.surface, c, VALLEY_RING);
+        ring_depth.push(floor - here);
         canyon.push(floor - with_lakes[c]);
         canyon_b.push(floor - breached[c]);
         erosion.push(input.start[c] - with_lakes[c]);
     }
     let w = g.w();
     let mut l_cross: Vec<Crossing> = Vec::new();
+    let mut l_area: Vec<f64> = Vec::new();
     for (c, (&r, &is_river)) in routing.receiver.iter().zip(&river).enumerate() {
         if is_river && r != NONE && input.region[c] != input.region[r as usize] {
             l_cross.push(Crossing { inside: input.region[c], x: (c % w) as f64, y: (c / w) as f64, q_m3s: 0.0 });
+            l_area.push(area[c]);
         }
     }
     let (edge_matched, edge_h1) = edge_agreement(&l_cross, input.h1, g.dx(), params);
+    let pairs = edge_pairs(&l_cross, &l_area, input.h1, g.dx(), params);
+    let suite = measure_suite(&SuiteInput {
+        grid: g,
+        start: input.start,
+        surface: input.surface,
+        receiver: &routing.receiver,
+        area: &area,
+        river: &river,
+        inside: input.inside,
+        region: input.region,
+        sea_level_m: input.sea_level_m,
+        near_depth: &near_depth,
+        ring_depth: &ring_depth,
+        pairs: &pairs,
+    });
     GateReport {
         params: *params,
         river_cells,
@@ -439,6 +719,9 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         basin_river_cells: basin_cells,
         reference_river_cells: reference_cells,
         lake_river_cells: lake_cells,
+        valley: tail(valley, params.cut_m),
+        burn_breached: tail(burn_b, params.cut_m),
+        burn: tail(burn, params.cut_m),
         canyon: tail(canyon, params.cut_m),
         canyon_breached: tail(canyon_b, params.cut_m),
         erosion: tail(erosion, params.cut_m),
@@ -448,5 +731,8 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         relief_10_m: relief(g, input.surface, input.inside, 10, input.sea_level_m),
         edge_h1,
         edge_matched,
+        suite,
+        trunk: trunk_burn(g, input.surface, input.inside, input.trunks, params.cut_m),
+        trunks_given: !input.trunks.is_empty(),
     }
 }

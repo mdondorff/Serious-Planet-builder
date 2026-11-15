@@ -1790,15 +1790,17 @@ Source: GEN-172, architect 2026-11-12
 - **THEN** each of (a), (b) and (c) has an assertion that cites GEN-172
 
 ### Requirement: TEST-119 The flat-grade tests
-The flat grade SHALL be tested at tier A: (a) a square pit has no straight diagonal run over 12 cells where the chessboard flood has one of 29; (b) the grade is `epsilon d / sqrt 2` within 5 % of the distance, never above the chessboard count, every cell drains; (c) the same bits on a rerun and on a translated window; (d) a flat of diameter exactly at the bound is graded and one cell wider keeps the chessboard grade, and on two tilings (a tile corner inside the flat) the partitioned surface equals the resident one bit for bit; (e) the tests of GEN-159 and GEN-162 assert the exact grade and keep their intent.
+The flat grade SHALL be tested at tier A: (a) a square pit has no straight diagonal run over 12 cells where the chessboard flood has one of 29; (b) the grade is `epsilon d / sqrt 2` within 5 % of the distance, never above the chessboard count, every cell drains; (c) to (f) as in the detail.
 
 Verify: A
 Status: active
 Source: GEN-173, architect 2026-11-12
 
+Detail: The cases are (c) the same bits on a rerun and on a translated window; (d) a flat of diameter exactly at the bound is graded and one cell wider keeps the chessboard grade, and on two tilings (a tile corner inside the flat) the partitioned surface equals the resident one bit for bit; (e) the tests of GEN-159 and GEN-162 assert the exact grade and keep their intent; (f) on a rough low plain (seeded, heights up to 64 epsilon) with a cell planted beside a flat, no graded cell stands above its chessboard level and every cell drains.
+
 #### Scenario: Cases
 - **WHEN** the tests of `bake_flats` and `bake_round` run
-- **THEN** each of (a) to (e) has an assertion that cites GEN-173
+- **THEN** each of (a) to (f) has an assertion that cites GEN-173
 
 ### Requirement: TEST-124 The K7 bed and fixed-channel tests
 The K7 channel rules SHALL be tested at tier A: (a) a line across a low coastal plain has no land bed below the sea level and the profile holds; (b) a burned trench in steep terrain keeps its depth through the whole pass, fixed cells are bit-unchanged by thermal, deposition and pit spreading, and the exported volume equals what would have entered them; (c) the cutoff counts include sub-sea cells and the burn's own; (d) the G-PROFILE tests of TEST-116 hold their properties.
@@ -1981,7 +1983,7 @@ Source: STRM-083, architect 2026-11-10
 - **THEN** each case above has a test that cites STRM-083
 
 ### Requirement: TEST-136 The river gate's measures on fixtures
-Tier-A fixtures SHALL check the river gate (BUILD-055): a draining valley has no basin, canyon, erosion depth or lake; a pit on its river is a closed basin only from 0.5 m and the cell minimum (default 16), while SPIKE-114's reference counts a 0.3 m pit; a basin over D is a lake with no canyon below it, and the same basin breached is a canyon; a trench 60 m under its valley is a canyon, a surface lowered 60 m everywhere only erosion depth; half the relief reads 50 %; an H1 crossing is matched only by an L crossing of its direction within 2 km; the same input gives the same report; the xtask refuses bad arguments.
+Tier-A fixtures SHALL check the river gate (BUILD-055): a draining valley has no basin, valley depth, burn, erosion depth or lake; a pit on its river is a closed basin only from 0.5 m and 16 cells, while SPIKE-114's reference counts a 0.3 m pit; a basin over D is a lake with no burn below it, and the same basin breached is a burn; a 60 m trench is valley depth, no burn; a surface lowered 60 m everywhere only erosion depth; half the relief reads 50 %; an H1 crossing is matched only by an L crossing of its direction within 2 km; the same input gives the same report; the xtask refuses bad arguments.
 
 Verify: A
 Status: active
@@ -1994,3 +1996,11 @@ Source: Lead 2026-11-14 (explorer #143), BUILD-055
 #### Scenario: A store's border and the sea
 - **WHEN** a burn ends at the edge of the counted tiles above a higher start surface, or the sea stands over the valley
 - **THEN** the drained border leaves no basin there, and no cell under the sea is a river cell
+
+### Requirement: TEST-137 The river gate's measurement suite on fixtures
+Tier-A fixtures SHALL check each metric of the suite (BUILD-057) against a fixture whose value follows from its geometry, and that the same input gives the same report.
+
+Verify: A
+Status: active
+Source: Lead 2026-11-15 (explorer #151), BUILD-057, lead 2026-11-15 (explorer #152)
+Detail: a draining valley has no uphill step and a 3 m pit on its river has one; the width at 10 m of a valley with sides of 2 m a cell is 1,000 m, narrower for 4 m a cell and capped on a flat floor; a symmetric valley has asymmetry 0 and sides of 4 and 2 m a cell 1/3; the density is the river length over the land area; an H1 crossing matched at the region's edge gives one catchment pair and ratio 1, a seam of 1 m steps reads 40 pairs against 2 m inside, and a 50 m step at the edge shows in the seam only; edge pairs take the nearest crossing of the direction within 2 km; the narrowness is under 0.7 for a V and over 0.85 for a trench; a small baked store read through the reader lays B plus each tile's change at its cells, on any thread count and without the key check, and gives the report of the same surface laid by hand, a window short of a tile column leaves its tiles outside and another face reads none and is refused; every number is one named field with a count before every percentage; the table's rows parse from the fields line and render to markdown and CSV; a trunk down a draining floor needs no burn, one over a 60 m dam needs 59 m at the dam, not counted at a 60 m bar or outside the counted cells; the slope-area exponent is 0 for a ramp and positive for a profile steeper upstream; a sinusoid of period 8 cells peaks at octave 2 and of 16 cells at octave 1, and a flat surface has no power; one line per metric is printed and the same input gives the same report.

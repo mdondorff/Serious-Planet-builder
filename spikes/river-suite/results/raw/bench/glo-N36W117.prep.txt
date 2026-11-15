@@ -1,0 +1,2 @@
+PREP glo-N36W117.f64 879 1093
+COUNTS src C:/DEV/SeriousPlanetData/dem/glo30-samples/Copernicus_DSM_COG_10_N36_00_W117_00_DEM.tif: 3600 x 3600 pixels (1.000" x 1.000", 24.86 x 30.92 m at lat 36.500), no-data pixels 0; cells 879 x 1093 of 101.8 m, pixels a cell 4.09 x 3.29; cells without data 0; cells at or below 0 m 66466; land z p5/p50/p95 309/951/1535 m; min -87.5 m
