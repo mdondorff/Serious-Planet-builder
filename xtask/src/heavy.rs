@@ -194,6 +194,25 @@ pub fn overdue_phrases(holders: &str, now: u64, limit: Duration) -> String {
     holders.split(" | ").filter_map(|h| overdue_minutes(h, now, limit).map(|m| format!("; overdue: {}, held {m} min", h.trim()))).collect()
 }
 
+/// The phrase naming the holders (notes joined by " | ") that an xtask older than the slots and the ticket queue wrote: its note names no slot ("slot k of n" or
+/// "exclusive"), or there is no note. Such a binary (a `target/debug/xtask.exe` run directly instead of through `cargo xtask`) takes `heavy.lock` without
+/// queueing (lead #156).
+pub fn pre_queue_phrase(holders: &str) -> String {
+    let old: Vec<&str> = holders
+        .split(" | ")
+        .map(str::trim)
+        .filter(|h| h.contains("(process ") && !h.contains(" slot ") && !h.contains("exclusive)"))
+        .collect();
+    if old.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "; held by an xtask older than the ticket queue, which does not queue: {} (run heavy commands through `cargo xtask`, which rebuilds it)",
+            old.join(" | ")
+        )
+    }
+}
+
 /// The waiting message for `busy`, with each holder past `limit` named overdue.
 pub fn waiting_message(busy: &Busy, what: &str, now: u64, limit: Duration) -> String {
     let overdue = |holders: &str| {
@@ -209,7 +228,7 @@ pub fn waiting_message(busy: &Busy, what: &str, now: u64, limit: Duration) -> St
             "waiting: the owner's quiet flag {} is up (`cargo xtask quiet off` or deleting the file lets heavy commands run); `{what}` is queued",
             p.display()
         ),
-        Busy::Held(holder) => format!("waiting for {}; `{what}` is queued{}", holder.trim(), overdue(holder)),
+        Busy::Held(holder) => format!("waiting for {}; `{what}` is queued{}{}", holder.trim(), overdue(holder), pre_queue_phrase(holder)),
         Busy::Queued(ahead, first) => format!("waiting: {ahead} queued ahead (next: {}); `{what}` is queued", first.trim()),
     }
 }
@@ -277,7 +296,16 @@ pub fn live_tickets(dir: &Path) -> Vec<(String, String)> {
     names.sort();
     let mut live = Vec::new();
     for (name, path) in names {
-        let Ok(file) = OpenOptions::new().read(true).write(true).open(&path) else { continue };
+        // A ticket that cannot be opened (it was removed meanwhile: gone; any other error: kept) still queues its waiter: skipping it would let later arrivals
+        // take a slot ahead of it (lead #156).
+        let file = match OpenOptions::new().read(true).write(true).open(&path) {
+            Ok(f) => f,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => {
+                live.push((name, std::fs::read_to_string(note_path(&path)).unwrap_or_default()));
+                continue;
+            }
+        };
         let young = file.metadata().and_then(|m| m.modified()).ok().and_then(|m| m.elapsed().ok()).is_none_or(|age| age < TICKET_GRACE);
         match file.try_lock() {
             Ok(()) if !young => {
@@ -901,5 +929,45 @@ mod tests {
         quiet_in(&d, &["off".to_string()]).unwrap();
         assert!(quiet_in(&d, &["maybe".to_string()]).is_err());
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: BUILD-026
+    #[test]
+    fn a_ticket_that_cannot_be_opened_still_queues_its_waiter_and_a_removed_one_does_not() {
+        let d = dir("unopenable");
+        let t = tickets_dir(&d);
+        std::fs::create_dir_all(&t).unwrap();
+        // A ticket name that is a directory: opening it as a file fails with an error other than NotFound.
+        std::fs::create_dir_all(t.join("000000000000000000000001-0000000001-000000")).unwrap();
+        std::fs::write(
+            t.join("000000000000000000000001-0000000001-000000.note"),
+            "older waiter (process 1, in w, queued since 1 s after the epoch)",
+        )
+        .unwrap();
+        let live = live_tickets(&d);
+        assert_eq!(live.len(), 1, "{live:?}");
+        assert!(live[0].1.starts_with("older waiter"), "{live:?}");
+        // A newcomer queues behind it even though every slot is free.
+        let mut said = Vec::new();
+        let got =
+            acquire_in(&d, "later", ONE, Duration::from_millis(5), Some(Duration::from_millis(30)), &mut |m| said.push(m.to_string()))
+                .unwrap();
+        assert!(got.is_none(), "the later arrival waits behind the ticket it could not open");
+        assert!(said.iter().any(|m| m.contains("1 queued ahead (next: older waiter")), "{said:?}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: BUILD-026
+    #[test]
+    fn a_holder_note_without_a_slot_is_named_as_an_xtask_older_than_the_queue() {
+        let old = "test gpu (process 8008, in w, since 1794748947 s after the epoch)";
+        let new = "test fast (process 9, in w, since 1794748947 s after the epoch, slot 2 of 2)";
+        let all = "perf (process 7, in w, since 1794748947 s after the epoch, exclusive)";
+        let m = waiting_message(&Busy::Held(format!("{old} | {new}")), "prepush", 1_794_748_950, OVERDUE_DEFAULT);
+        assert!(m.contains("held by an xtask older than the ticket queue, which does not queue: test gpu (process 8008"), "{m}");
+        assert!(!m.contains("queue: test fast"), "{m}");
+        for quiet in [new, all, "another heavy command (no holder note)"] {
+            assert_eq!(pre_queue_phrase(quiet), "", "{quiet}");
+        }
     }
 }
