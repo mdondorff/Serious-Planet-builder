@@ -761,7 +761,12 @@ fn runtime_read(v: &[f64], w: usize, x: f64, y: f64) -> f64 {
     let at = |a: i64, b: i64| v[b.clamp(0, w as i64 - 1) as usize * w + a.clamp(0, w as i64 - 1) as usize];
     let mut p = [[0.0; 4]; 4];
     for (row, dj) in p.iter_mut().zip(-1..=2i64) {
-        *row = [at(i as i64 - 1, j as i64 + dj), at(i as i64, j as i64 + dj), at(i as i64 + 1, j as i64 + dj), at(i as i64 + 2, j as i64 + dj)];
+        *row = [
+            at(i as i64 - 1, j as i64 + dj),
+            at(i as i64, j as i64 + dj),
+            at(i as i64 + 1, j as i64 + dj),
+            at(i as i64 + 2, j as i64 + dj),
+        ];
     }
     planet_generators::erosion_layer::monotone_read(p, fx, fy)
 }
@@ -784,7 +789,8 @@ fn the_surface_gate_reads_a_field_as_the_runtime_draws_it() {
     );
     // And on a rough field at many points: the same values, to rounding.
     let w = 12;
-    let v: Vec<f64> = (0..w * w).map(|k| 40.0 * libm::sin(1.7 * (k % w) as f64) * libm::cos(0.9 * (k / w) as f64) + 3.0 * (k % 5) as f64).collect();
+    let v: Vec<f64> =
+        (0..w * w).map(|k| 40.0 * libm::sin(1.7 * (k % w) as f64) * libm::cos(0.9 * (k / w) as f64) + 3.0 * (k % 5) as f64).collect();
     let mut worst = 0.0f64;
     for a in 0..40 {
         for b in 0..40 {
