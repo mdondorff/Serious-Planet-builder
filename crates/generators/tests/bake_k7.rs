@@ -782,9 +782,10 @@ fn the_surface_gate_reads_a_field_as_the_runtime_draws_it() {
     let v: Vec<f64> = (0..w * w).map(|k| row[k % w]).collect();
     let (x, y) = (2.5, 2.5);
     let want = planet_generators::erosion_layer::monotone_cubic([0.0, -2.0, -22.0, -21.0], 0.5);
-    assert!((runtime_read(&v, w, x, y) - want).abs() < 1e-12, "the stencil helper is the runtime's read");
-    assert!(
-        (gate_read(&v, w, x, y) - want).abs() < 1e-12,
+    assert_eq!(runtime_read(&v, w, x, y).to_bits(), want.to_bits(), "the stencil helper is the runtime's read");
+    assert_eq!(
+        gate_read(&v, w, x, y).to_bits(),
+        want.to_bits(),
         "the gate reads the trench as the runtime does: gate {} m, runtime {want} m",
         gate_read(&v, w, x, y)
     );
@@ -792,12 +793,15 @@ fn the_surface_gate_reads_a_field_as_the_runtime_draws_it() {
     let w = 12;
     let v: Vec<f64> =
         (0..w * w).map(|k| 40.0 * libm::sin(1.7 * (k % w) as f64) * libm::cos(0.9 * (k / w) as f64) + 3.0 * (k % 5) as f64).collect();
-    let mut worst = 0.0f64;
     for a in 0..40 {
         for b in 0..40 {
             let (x, y) = (1.0 + 8.0 * a as f64 / 40.0, 1.0 + 8.0 * b as f64 / 40.0);
-            worst = worst.max((gate_read(&v, w, x, y) - runtime_read(&v, w, x, y)).abs());
+            // the same operations in the same order: the same bits
+            assert_eq!(
+                gate_read(&v, w, x, y).to_bits(),
+                runtime_read(&v, w, x, y).to_bits(),
+                "the gate's read at ({x}, {y}) on a rough field"
+            );
         }
     }
-    assert!(worst < 1e-12, "the gate's read differs from the runtime's by up to {worst} m on a rough field");
 }

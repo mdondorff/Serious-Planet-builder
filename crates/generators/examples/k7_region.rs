@@ -308,7 +308,7 @@ fn main() {
             "  G-SURF at {} lattice nodes: runtime minus bake max {:.4} m unquantised, {:.4} m with L in steps of 0.25 m (of which B re-read from the local cells: {:.4} m); at the core's cell centres {:.1e} m and {:.4} m",
             gate.nodes, gate.max_unquantised_m, gate.max_quantised_m, gate.max_base_resample_m, gate.max_centres_unquantised_m, gate.max_centres_quantised_m
         );
-            println!("  other readings at the nodes (L quantised): B plus the retired clamped Catmull-Rom read of L: max {:.4} m; the runtime's read of the composed B + L: max {:.4} m", gate.max_retired_c1_quantised_m, gate.max_compose_quantised_m);
+            println!("  other readings at the nodes (L quantised): B plus the retired clamped Catmull-Rom read of L: max {:.4} m; the clamped C1 read of the composed B + L: max {:.4} m", gate.max_retired_c1_quantised_m, gate.max_compose_quantised_m);
             spatial(&g, &r, &gate);
             println!(
                 "  G-SURF-I at the nodes: by the bake's local step height (up to 5 m, to 20 m, over 20 m) nodes {:?}, over 0.25 m {:?}; largest difference over step height {:.3}; the nodes over 0.25 m fall in {} of {} bins of 64 cells with nodes, at most {} in one bin; p95 {:.4} m",
