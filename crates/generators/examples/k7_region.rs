@@ -168,7 +168,11 @@ fn main() {
         let (i0, i1, j0, j1) = (region.0 * 8 / 1024, (region.1 * 8 + 7) / 1024, region.2 * 8 / 1024, (region.3 * 8 + 7) / 1024);
         (j0..=j1).flat_map(|tj| (i0..=i1).map(move |ti| TileId { face, ti: ti as u32, tj: tj as u32 })).collect()
     } else {
-        vec![TileId { face, ti: (8390 * 8 + 4) as u32 / 1024, tj: (958 * 8 + 4) as u32 / 1024 }]
+        // PLANET_K7_TILE=ti,tj picks another tile of the face (the ledger's river tiles); the default is the prototype tile (65, 7)
+        match std::env::var("PLANET_K7_TILE").ok().and_then(|v| v.split_once(',').map(|(a, b)| (a.parse::<u32>(), b.parse::<u32>()))) {
+            Some((Ok(ti), Ok(tj))) => vec![TileId { face, ti, tj }],
+            _ => vec![TileId { face, ti: (8390 * 8 + 4) as u32 / 1024, tj: (958 * 8 + 4) as u32 / 1024 }],
+        }
     };
     for id in ids {
         let (t, h) = (g.tile as i64, g.halo as i64);
@@ -308,7 +312,7 @@ fn main() {
             "  G-SURF at {} lattice nodes: runtime minus bake max {:.4} m unquantised, {:.4} m with L in steps of 0.25 m (of which B re-read from the local cells: {:.4} m); at the core's cell centres {:.1e} m and {:.4} m",
             gate.nodes, gate.max_unquantised_m, gate.max_quantised_m, gate.max_base_resample_m, gate.max_centres_unquantised_m, gate.max_centres_quantised_m
         );
-            println!("  other readings at the nodes (L quantised): B plus the unclamped read of L: max {:.4} m; the clamped read of the composed B + L: max {:.4} m; the unclamped read of L overshoots its clamped read by up to {:.2} m", gate.max_unclamped_l_quantised_m, gate.max_compose_quantised_m, gate.max_l_overshoot_m);
+            println!("  other readings at the nodes (L quantised): B plus the retired clamped Catmull-Rom read of L: max {:.4} m; the clamped C1 read of the composed B + L: max {:.4} m", gate.max_retired_c1_quantised_m, gate.max_compose_quantised_m);
             spatial(&g, &r, &gate);
             println!(
                 "  G-SURF-I at the nodes: by the bake's local step height (up to 5 m, to 20 m, over 20 m) nodes {:?}, over 0.25 m {:?}; largest difference over step height {:.3}; the nodes over 0.25 m fall in {} of {} bins of 64 cells with nodes, at most {} in one bin; p95 {:.4} m",

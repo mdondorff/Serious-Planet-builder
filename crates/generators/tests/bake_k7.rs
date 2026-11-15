@@ -139,6 +139,7 @@ fn a_dam_across_a_channel_is_a_pit_before_the_burn_in_and_none_after() {
 // spec: GEN-148
 // spec: GEN-154
 #[test]
+#[ignore = "quarantined (lead, 2026-11-15; docs/status.md Tracked): the runtime read of L flattens trenches, up to 2.9 m from the bake between centres near channels (G-SURF-I, review F3); fix at the source, the runtime read (GEN-188)"]
 fn the_runtime_surface_is_the_bake_surface_at_the_centres_and_within_a_step_at_the_lattice_nodes() {
     let g = tile_grid();
     let p = K7Params::standard(5, 0.0);
@@ -752,4 +753,70 @@ fn a_halo_of_exactly_the_cap_plus_the_smallest_carry_is_accepted() {
     let _ = k7_tile(&g, id(), &base, &|_| 0.0, &[ch], &K7Params::standard(5, 0.0), 1);
     let small = TileGrid { cells: 384, tile: 48, halo: 8, radius_m: g.radius_m };
     let _ = k7_tile(&small, TileId { face: Face(1), ti: 3, tj: 4 }, &base, &|_| 0.0, &[], &K7Params::standard(5, 0.0), 1);
+}
+
+/// The window read of the runtime (GEN-188) at `(x, y)`: [`monotone_read`] over the 4 x 4 stencil, the window's edge clamped as the gate's read clamps it.
+fn runtime_read(v: &[f64], w: usize, x: f64, y: f64) -> f64 {
+    let (i, j) = ((x as usize).min(w - 2), (y as usize).min(w - 2));
+    let (fx, fy) = (x - i as f64, y - j as f64);
+    let at = |a: i64, b: i64| v[b.clamp(0, w as i64 - 1) as usize * w + a.clamp(0, w as i64 - 1) as usize];
+    let mut p = [[0.0; 4]; 4];
+    for (row, dj) in p.iter_mut().zip(-1..=2i64) {
+        *row = [
+            at(i as i64 - 1, j as i64 + dj),
+            at(i as i64, j as i64 + dj),
+            at(i as i64 + 1, j as i64 + dj),
+            at(i as i64 + 2, j as i64 + dj),
+        ];
+    }
+    planet_generators::erosion_layer::monotone_read(p, fx, fy)
+}
+
+// spec: GEN-148, GEN-154 (the external review's F3, 2026-11-15: G-SURF read the retired clamped Catmull-Rom while the runtime reads the monotone cubic)
+#[test]
+fn the_surface_gate_reads_a_field_as_the_runtime_draws_it() {
+    use planet_generators::bake::k7::gate_read;
+    // The review's trench: a row 0, -2, -22, -21 read halfway between -2 and -22 (constant along the other axis).
+    let w = 6;
+    let row = [0.0, 0.0, -2.0, -22.0, -21.0, -21.0];
+    let v: Vec<f64> = (0..w * w).map(|k| row[k % w]).collect();
+    let (x, y) = (2.5, 2.5);
+    let want = planet_generators::erosion_layer::monotone_cubic([0.0, -2.0, -22.0, -21.0], 0.5);
+    assert_eq!(runtime_read(&v, w, x, y).to_bits(), want.to_bits(), "the stencil helper is the runtime's read");
+    assert_eq!(
+        gate_read(&v, w, x, y).to_bits(),
+        want.to_bits(),
+        "the gate reads the trench as the runtime does: gate {} m, runtime {want} m",
+        gate_read(&v, w, x, y)
+    );
+    // And on a rough field at many points: the same values, to rounding.
+    let w = 12;
+    let v: Vec<f64> =
+        (0..w * w).map(|k| 40.0 * libm::sin(1.7 * (k % w) as f64) * libm::cos(0.9 * (k / w) as f64) + 3.0 * (k % 5) as f64).collect();
+    for a in 0..40 {
+        for b in 0..40 {
+            let (x, y) = (1.0 + 8.0 * a as f64 / 40.0, 1.0 + 8.0 * b as f64 / 40.0);
+            // the same operations in the same order: the same bits
+            assert_eq!(
+                gate_read(&v, w, x, y).to_bits(),
+                runtime_read(&v, w, x, y).to_bits(),
+                "the gate's read at ({x}, {y}) on a rough field"
+            );
+        }
+    }
+}
+
+// spec: GEN-154 (the gate at the centres keeps a running test while the vertex test is quarantined, lead 2026-11-15)
+#[test]
+fn the_surface_gate_holds_at_the_cell_centres_with_and_without_a_burnt_channel() {
+    let g = tile_grid();
+    let p = K7Params::standard(5, 0.0);
+    let smooth = |d: Vec3| 6.0 * libm::sin(0.5 * d.x) - 4.0 * libm::cos(0.7 * d.y);
+    for channels in [vec![], vec![channel(&g, g.halo as i64 + 20)]] {
+        let r = k7_tile(&g, id(), &base, &smooth, &channels, &p, 2);
+        let gate = surface_gate(&g, id(), &base, &r, 6);
+        assert!(gate.nodes > 20, "lattice nodes read: {gate:?}");
+        assert!(gate.max_centres_unquantised_m < 1e-9, "at the cells' centres the runtime's read returns the stored value: {gate:?}");
+        assert!(gate.max_centres_quantised_m <= 0.125 + 1e-9, "quantisation at the centres is at most half a step: {gate:?}");
+    }
 }

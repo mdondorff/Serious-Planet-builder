@@ -806,12 +806,10 @@ pub struct SurfaceGate {
     pub max_quantised_m: f64,
     /// Nodes over 0.25 m after quantisation, at most 4,096 of them: the window coordinates (cell-index space) and the difference.
     pub failing: Vec<(f64, f64, f64)>,
-    /// The two other ways of reading the surface at a node, against the bake's `C1(z)`, with `L` quantised: `B` plus the unclamped Catmull-Rom read of `L` (largest difference), and the clamped read of
-    /// the composed `B + L` at the four cells around the point (largest difference).
-    pub max_unclamped_l_quantised_m: f64,
+    /// The two other ways of reading the surface at a node, against the bake's `C1(z)`, with `L` quantised: `B` plus the retired clamped Catmull-Rom read of `L` (largest difference; what G-SURF-I
+    /// measured before GEN-188's read reached the gate), and the clamped read of the composed `B + L` at the four cells around the point (largest difference).
+    pub max_retired_c1_quantised_m: f64,
     pub max_compose_quantised_m: f64,
-    /// The largest overshoot of the unclamped read of `L` beyond its clamped read at the nodes.
-    pub max_l_overshoot_m: f64,
     /// The 50th and 99th percentile of the quantised difference over the nodes, and the number of nodes over the quantised bound of A3 (0.25 m).
     pub p50_quantised_m: f64,
     pub p99_quantised_m: f64,
@@ -835,19 +833,9 @@ pub struct SurfaceGate {
     pub max_error_over_rise: f64,
     pub p99_error_over_rise: f64,
     pub nodes_with_rise: usize,
-    /// G-SURF-I, overshoot: the largest amount by which the runtime read `B(node) + C1(L)(node)` lies outside the range of the composed values `B + L` (quantised) at the four cells around the node, and the nodes over 0.25 m.
+    /// G-SURF-I, overshoot: the largest amount by which the runtime read `B(node) + R(L)(node)` lies outside the range of the composed values `B + L` (quantised) at the four cells around the node, and the nodes over 0.25 m.
     pub max_runtime_overshoot_m: f64,
     pub runtime_overshoot_nodes: usize,
-}
-
-/// The Catmull-Rom read of `v` at `(x, y)` without the clamp to the four cells (linear in `v`).
-fn read_c1_unclamped(v: &[f64], w: usize, x: f64, y: f64) -> f64 {
-    let (i, j) = ((x as usize).min(w - 2), (y as usize).min(w - 2));
-    let (fx, fy) = (x - i as f64, y - j as f64);
-    let at = |a: i64, b: i64| v[b.clamp(0, w as i64 - 1) as usize * w + a.clamp(0, w as i64 - 1) as usize];
-    let (ii, jj) = (i as i64, j as i64);
-    let row = |dj: i64| catmull_rom([at(ii - 1, jj + dj), at(ii, jj + dj), at(ii + 1, jj + dj), at(ii + 2, jj + dj)], fx);
-    catmull_rom([row(-1), row(0), row(1), row(2)], fy)
 }
 
 /// A C1 read of the window field `v` (`w x w`, centres at the integer coordinates) at `(x, y)`, with the clamp of [`RegionField`].
@@ -862,7 +850,22 @@ fn read_c1(v: &[f64], w: usize, x: f64, y: f64) -> f64 {
     r.clamp(around.iter().copied().fold(f64::INFINITY, f64::min), around.iter().copied().fold(f64::NEG_INFINITY, f64::max))
 }
 
-/// G-SURF on a tile: the runtime's surface `B + C1(L)` against the bake's `C1(z)` at the lattice nodes (the vertices of the store lattice, every `lattice_step` local cells) inside the core, two cells in from its
+/// The read G-SURF makes of a window field `v` (`w x w`, centres at the integer coordinates) at `(x, y)` (GEN-148, GEN-154): the runtime's read, [`crate::erosion_layer::monotone_read`] over the
+/// 4 x 4 stencil (GEN-188), the window's edge clamped. Without `coast_fade`, which waits on the owner's decision with D-2 (lead, 2026-11-15).
+pub fn gate_read(v: &[f64], w: usize, x: f64, y: f64) -> f64 {
+    let (i, j) = ((x as usize).min(w - 2), (y as usize).min(w - 2));
+    let (fx, fy) = (x - i as f64, y - j as f64);
+    let at = |a: i64, b: i64| v[b.clamp(0, w as i64 - 1) as usize * w + a.clamp(0, w as i64 - 1) as usize];
+    let (ii, jj) = (i as i64, j as i64);
+    let mut p = [[0.0; 4]; 4];
+    for (row, dj) in p.iter_mut().zip(-1..=2) {
+        *row = [at(ii - 1, jj + dj), at(ii, jj + dj), at(ii + 1, jj + dj), at(ii + 2, jj + dj)];
+    }
+    crate::erosion_layer::monotone_read(p, fx, fy)
+}
+
+/// G-SURF on a tile: the runtime's surface `B + R(L)` against the bake's `C1(z)`, `R` the runtime's read of the stored change ([`gate_read`], GEN-188) and `C1` the bake's clamped Catmull-Rom read of its
+/// own window, at the lattice nodes (the vertices of the store lattice, every `lattice_step` local cells) inside the core, two cells in from its
 /// edge (the read needs its neighbours), with `L = z - B` as stored (quantised to `QUANT_STEP_M`) and unquantised; and at the centres of the same region's cells.
 pub fn surface_gate(g: &TileGrid, id: TileId, base: &(dyn Fn(Vec3) -> f64 + Sync), r: &K7Result, lattice_step: usize) -> SurfaceGate {
     let (w, t, h) = (g.window(), g.tile as i64, g.halo as i64);
@@ -892,8 +895,8 @@ pub fn surface_gate(g: &TileGrid, id: TileId, base: &(dyn Fn(Vec3) -> f64 + Sync
             let bake = read_c1(&r.z, w, x, y);
             out.nodes += 1;
             out.max_base_resample_m = out.max_base_resample_m.max(libm::fabs(b_node - read_c1(&r.b, w, x, y)));
-            out.max_unquantised_m = out.max_unquantised_m.max(libm::fabs(b_node + read_c1(&l, w, x, y) - bake));
-            let dq = libm::fabs(b_node + read_c1(&lq, w, x, y) - bake);
+            out.max_unquantised_m = out.max_unquantised_m.max(libm::fabs(b_node + gate_read(&l, w, x, y) - bake));
+            let dq = libm::fabs(b_node + gate_read(&lq, w, x, y) - bake);
             out.max_quantised_m = out.max_quantised_m.max(dq);
             diffs.push(dq);
             let (cx, cy) = ((x as i64).clamp(0, w as i64 - 1), (y as i64).clamp(0, w as i64 - 1));
@@ -930,7 +933,7 @@ pub fn surface_gate(g: &TileGrid, id: TileId, base: &(dyn Fn(Vec3) -> f64 + Sync
             let around = [zq[cj * w + ci], zq[cj * w + ci + 1], zq[(cj + 1) * w + ci], zq[(cj + 1) * w + ci + 1]];
             let (alo, ahi) =
                 (around.iter().copied().fold(f64::INFINITY, f64::min), around.iter().copied().fold(f64::NEG_INFINITY, f64::max));
-            let runtime = b_node + read_c1(&lq, w, x, y);
+            let runtime = b_node + gate_read(&lq, w, x, y);
             let over = (alo - runtime).max(runtime - ahi).max(0.0);
             out.max_runtime_overshoot_m = out.max_runtime_overshoot_m.max(over);
             if over > f64::from(QUANT_STEP_M) {
@@ -944,10 +947,8 @@ pub fn surface_gate(g: &TileGrid, id: TileId, base: &(dyn Fn(Vec3) -> f64 + Sync
             if dq > f64::from(QUANT_STEP_M) && out.failing.len() < 4096 {
                 out.failing.push((x, y, dq));
             }
-            out.max_unclamped_l_quantised_m =
-                out.max_unclamped_l_quantised_m.max(libm::fabs(b_node + read_c1_unclamped(&lq, w, x, y) - bake));
+            out.max_retired_c1_quantised_m = out.max_retired_c1_quantised_m.max(libm::fabs(b_node + read_c1(&lq, w, x, y) - bake));
             out.max_compose_quantised_m = out.max_compose_quantised_m.max(libm::fabs(read_c1(&zq, w, x, y) - bake));
-            out.max_l_overshoot_m = out.max_l_overshoot_m.max(libm::fabs(read_c1_unclamped(&lq, w, x, y) - read_c1(&lq, w, x, y)));
         }
     }
     diffs.sort_by(|a, b| a.total_cmp(b));
@@ -972,8 +973,8 @@ pub fn surface_gate(g: &TileGrid, id: TileId, base: &(dyn Fn(Vec3) -> f64 + Sync
             // The C1 reads at a centre (the coordinates are the integer cell indices): the stored value comes back.
             let (x, y) = (i as f64, j as f64);
             let bake = read_c1(&r.z, w, x, y);
-            out.max_centres_unquantised_m = out.max_centres_unquantised_m.max(libm::fabs(r.b[c] + read_c1(&l, w, x, y) - bake));
-            out.max_centres_quantised_m = out.max_centres_quantised_m.max(libm::fabs(r.b[c] + read_c1(&lq, w, x, y) - bake));
+            out.max_centres_unquantised_m = out.max_centres_unquantised_m.max(libm::fabs(r.b[c] + gate_read(&l, w, x, y) - bake));
+            out.max_centres_quantised_m = out.max_centres_quantised_m.max(libm::fabs(r.b[c] + gate_read(&lq, w, x, y) - bake));
         }
     }
     out
