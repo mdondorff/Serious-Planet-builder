@@ -77,3 +77,26 @@ Five stores of R1h from one binary (a07b404c): A (K dt x 1) and B at 1/2, 1/4, 1
 - The calibration picks the scale nearest the derived 1/8 that passes on R1h: **1/4** (1.57 %). It also has the lowest ring 2-4 share and the best edge agreement. B is K dt x 1/4 on every window.
 - Finding: the incision the gate counts comes from K7's channel cut on top of the round, not from the round. The round's K dt sets how much of the valley K7 has to make.
 - The trunks: about 8 % of H1's trunk reaches stand more than 50 m above their running minimum in every variant, A included, up to 378 m deep. No K dt scale carries the trunks without a burn on R1h.
+
+## C: calibration on R1h
+B (K dt x 1/4) and C at kappa 0.003 (derived), 0.01, 0.03 and 0.1 on R1h, from the same binary. Full table: `table-c-calibration-r1h.csv` and `.md`.
+
+| kappa | 0 (B) | 0.003 (derived) | 0.01 | 0.03 | 0.1 |
+|---|---|---|---|---|---|
+| basins % (G-DRAIN, bar 10) | 0.47 | 1.03 | 2.23 | 6.23 | **13.75** |
+| valley depth over 50 m, % (cells) (G-INCISION, bar 1.80) | 1.57 (2,791) | 1.42 (2,526) | 1.17 (2,090) | 0.96 (1,719) | 0.79 (1,407) |
+| valley depth p99, m | 56.3 | 55.5 | 52.5 | 48.9 | 42.8 |
+| ring 2-4 over 50 m, % | 3.76 | 3.54 | 3.11 | 2.65 | 2.15 |
+| uphill river steps over 0.25 m, % | 0.10 | 0.14 | 0.29 | 0.75 | 1.53 |
+| width at 10 m p50, m | 700 | 713 | 731 | 759 | 798 |
+| narrowness p50 | 0.412 | 0.406 | 0.396 | 0.380 | 0.381 |
+| relief 2 x 2 / 10 x 10, m | 8.06 / 69.6 | 8.03 / 69.4 | 7.98 / 69.1 | 7.86 / 68.5 | 7.61 / 66.9 |
+| slope-area theta | 0.340 | 0.336 | 0.342 | 0.352 | 0.364 |
+| trunk reaches over 50 m (of 5,297) | 434 | 430 | 424 | 403 | 349 |
+| edge matched, % | 86.4 | 86.4 | 88.6 | 86.4 | 86.4 |
+
+- Diffusion widens the valleys K7 cuts and lowers every incision number, monotonically.
+- It also fills channel cells after the carve has routed, so closed basins and uphill steps grow just as fast. kappa 0.1 fails G-DRAIN.
+- The derived kappa (3e-3) barely acts, as the derivation said: the 2-cell mode decays by about 0.89 over the 5 sweeps.
+- The calibration picks the largest kappa that keeps G-DRAIN: **0.03** (basins 6.23 %, valley depth 0.96 %). C is K dt x 1/4 plus kappa 0.03 on every window.
+- The basins come from the operator split. Re-routing between sweeps would drain them, but that changes a second thing against B; it is noted as a follow-up, not run.
