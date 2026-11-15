@@ -54,8 +54,17 @@ fn a_draining_valley_has_no_basin_no_cut_no_lake_and_keeps_its_relief() {
     let r = run(&z, &z, &params());
     assert!(r.river_cells > 20, "the valley floor carries a river: {} cells", r.river_cells);
     assert_eq!(
-        (r.basins, r.basin_river_cells, r.lake_river_cells, r.canyon.count_over, r.canyon_breached.count_over, r.erosion.count_over),
-        (0, 0, 0, 0, 0, 0),
+        (
+            r.basins,
+            r.basin_river_cells,
+            r.lake_river_cells,
+            r.canyon.count_over,
+            r.canyon_breached.count_over,
+            r.erosion.count_over,
+            r.valley.count_over,
+            r.burn_breached.count_over
+        ),
+        (0, 0, 0, 0, 0, 0, 0, 0),
         "{r:?}"
     );
     assert_eq!(r.relief_2_m, r.relief_2_start_m);
@@ -101,7 +110,7 @@ fn a_trench_below_its_valley_is_a_canyon_and_a_uniform_lowering_only_erosion_dep
     let lower: Vec<f64> = start.iter().map(|z| z - 60.0).collect();
     let e = run(&start, &lower, &params());
     assert!(e.erosion.count_over > 0 && e.erosion.p50_m > 50.0, "{e:?}");
-    assert_eq!(e.canyon.count_over, 0, "{e:?}");
+    assert_eq!((e.canyon.count_over, e.valley.count_over, e.burn_breached.count_over), (0, 0, 0), "no valley depth, no burn: {e:?}");
     // A trench 60 m deep along the floor (x = 20, y 0..=38, open to the outlet edge): the river runs 60 m under its valley ring.
     let mut trench = start.clone();
     for y in 0..=38 {
@@ -110,6 +119,9 @@ fn a_trench_below_its_valley_is_a_canyon_and_a_uniform_lowering_only_erosion_dep
     let t = run(&start, &trench, &params());
     assert!(t.canyon.count_over >= 30, "the trench is the river: {t:?}");
     assert!(t.canyon.max_m > 50.0);
+    // The trench is the valley a viewer sees (60 m under the cells 1 to 2 out), not a burn: the river runs on its bed.
+    assert!(t.valley.count_over >= 30 && t.valley_share() > 0.0, "{t:?}");
+    assert_eq!(t.burn_breached.count_over, 0, "{t:?}");
 }
 
 // spec: TEST-136, BUILD-055
@@ -120,6 +132,9 @@ fn a_deep_basin_is_a_lake_at_d_and_a_canyon_when_breached() {
     assert!(r.lake_river_cells > 0 && r.lake_share() > 0.0, "60 m is over D = 20 m: {r:?}");
     assert_eq!(r.canyon.count_over, 0, "the lake's water is the level downstream: no cut");
     assert!(r.canyon_breached.count_over > 0, "breached, the river runs 60 m under the floor below the pit: {r:?}");
+    // That is a burn (K7's cut under the surface), not a valley: with the lake kept, no burn.
+    assert!(r.burn_breached.count_over > 0 && r.burn_share() > 0.0, "{r:?}");
+    assert_eq!(r.burn.count_over, 0, "{r:?}");
     let deep_d = run(&z, &z, &GateParams { lake_depth_m: 100.0, ..params() });
     assert_eq!(deep_d.lake_river_cells, 0);
     assert!(deep_d.canyon.count_over > 0 && deep_d.canyon_share() > 0.0, "no lake at D = 100 m: the pit is breached");
@@ -161,7 +176,7 @@ fn the_report_is_the_same_for_the_same_input_and_names_every_measure() {
     assert_eq!(a, b);
     let lines = a.lines();
     assert_eq!(lines, b.lines());
-    for m in ["rivers", "basins", "canyon", "erosion depth", "lakes", "relief", "edge"] {
+    for m in ["rivers", "basins", "valley depth", "burn", "ring 2-4", "erosion depth", "lakes", "relief", "edge"] {
         assert!(lines.iter().any(|l| l.starts_with(&format!("RIVER-GATE {m}"))), "no {m} line in {lines:?}");
     }
     assert!(lines.iter().any(|l| l.contains("no H1 crossing")), "an input without H1 says so");
