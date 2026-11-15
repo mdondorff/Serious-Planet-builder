@@ -100,3 +100,35 @@ B (K dt x 1/4) and C at kappa 0.003 (derived), 0.01, 0.03 and 0.1 on R1h, from t
 - The derived kappa (3e-3) barely acts, as the derivation said: the 2-cell mode decays by about 0.89 over the 5 sweeps.
 - The calibration picks the largest kappa that keeps G-DRAIN: **0.03** (basins 6.23 %, valley depth 0.96 %). C is K dt x 1/4 plus kappa 0.03 on every window.
 - The basins come from the operator split. Re-routing between sweeps would drain them, but that changes a second thing against B; it is noted as a follow-up, not run.
+
+## A, B and C on the five windows
+15 stores from one binary (a07b404c): A, B (K dt x 1/4) and C (B + kappa 0.03), each on R1h, R3a, R3b, m1 and f1. One `river-gate --table` run read all of them (main 8c503df0 and the spike's `--xsec`, `--no-key-check`). Full table: `table-abc-five-windows.csv` and `.md`.
+
+| Window | Variant | Basins % (G-DRAIN, bar 10) | Valley depth over 50 m, % (cells) | G-INCISION bar | Pass | Ring 2-4 % | Width 10 m p50, m | Narrowness p50 | Uphill % | Trunk reaches over 50 m (of) | Deepest trunk vertex, m | Edge % |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| R1h | A | 0.58 | 1.26 (2,225) | 1.80 | yes | 4.82 | 634 | 0.365 | 0.09 | 539 (5,297) | 357 | 77.3 |
+| R1h | B | 0.47 | 1.57 (2,791) | 1.80 | yes | 3.76 | 700 | 0.412 | 0.10 | 434 (5,297) | 361 | 86.4 |
+| R1h | C | 6.23 | 0.96 (1,719) | 1.80 | yes | 2.65 | 759 | 0.380 | 0.75 | 403 (5,297) | 367 | 86.4 |
+| R3a | A | 0.05 | 0.08 (49) | 0.10 | yes | 0.42 | 1,571 | 0.385 | 0.02 | 17 (12,750) | 96 | 25.0 |
+| R3a | B | 0.00 | 0.02 (12) | 0.10 | yes | 0.10 | 2,047 | 0.442 | 0.00 | 1 (12,750) | 52 | 26.2 |
+| R3a | C | 1.13 | 0.00 (3) | 0.10 | yes | 0.06 | 2,213 | 0.422 | 0.23 | 0 (12,750) | 0 | 27.4 |
+| R3b | A | 0.25 | 0.01 (25) | 0.10 | yes | 0.12 | 1,152 | 0.379 | 0.04 | 45 (8,797) | 129 | 68.8 |
+| R3b | B | 0.03 | 0.01 (28) | 0.10 | yes | 0.04 | 1,377 | 0.417 | 0.01 | 31 (8,797) | 141 | 69.9 |
+| R3b | C | 3.30 | 0.02 (39) | 0.10 | yes | 0.03 | 1,428 | 0.393 | 0.44 | 30 (8,797) | 129 | 72.0 |
+| m1 | A | 3.50 | 16.49 (40,781) | 40.80 | yes | 33.25 | 271 | 0.442 | 0.52 | 3,218 (10,371) | 892 | 81.7 |
+| m1 | B | 3.32 | 22.23 (55,429) | 40.80 | yes | 38.38 | 188 | 0.527 | 0.65 | 3,420 (10,371) | 923 | 79.3 |
+| m1 | C | **11.59** | 16.98 (42,619) | 40.80 | **no (G-DRAIN)** | 31.92 | 257 | 0.483 | 1.23 | 3,332 (10,371) | 921 | 82.9 |
+| f1 | A | 0.18 | 0.00 (1) | 0.10 | yes | 0.00 | 1,414 | 0.375 | 0.04 | 6 (10,587) | 112 | 34.5 |
+| f1 | B | 0.00 | 0.00 (0) | 0.10 | yes | 0.00 | 1,527 | 0.396 | 0.00 | 6 (10,587) | 57 | 34.5 |
+| f1 | C | 2.90 | 0.00 (0) | 0.10 | yes | 0.00 | 1,620 | 0.376 | 0.46 | 5 (10,587) | 56 | 34.5 |
+
+- On the numbers, A and B pass G-DRAIN and G-INCISION separately on all five windows. C fails G-DRAIN on m1: the diffusion's basins (operator split, no re-route) grow with relief.
+- B against A:
+  - B drains better on every window but m1 (basins 0.00 to 0.47 % against 0.05 to 0.58 %).
+  - B has fewer uphill steps and wider valleys at 10 m on the low-relief windows (R3a 2,047 against 1,571 m).
+  - B carries the trunks better on R1h, R3a and R3b, and the same on f1.
+  - B incises more than A on R1h and m1 (valley depth 1.57 against 1.26 %; 22.23 against 16.49 %), with narrower valleys there (m1 width 188 against 271 m, narrowness 0.527 against 0.442).
+- C widens the valleys of R1h, R3a and R3b further and empties R3a's trunk deficit. It pays in basins and uphill steps on every window.
+- The trunks: in the mountain window, about 31 to 33 % of H1's trunk reaches stand more than 50 m above their running minimum in every variant, up to 923 m. Elsewhere it is 0 to 10 %. No variant of A, B and C lets KR carry m1's trunks without a burn.
+- Edge agreement is the window's property more than the variant's: R3a 25 to 27 %, f1 34.5 % in all three.
+- Not yet judged: the cross-sections on the T1 to T3 figures (spikes' tool; the CSVs follow).
