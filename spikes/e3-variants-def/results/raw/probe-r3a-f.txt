@@ -1,0 +1,10 @@
+LATTICE f4-368-4720-none: 1365 x 1366 nodes (611 m); land nodes changed over 1 cm 0 of 1301106 (0.00 %); lowered p50 NaN p95 NaN max 0.00 m, over 50 m on 0.00 % of land nodes; raised p50 NaN p95 NaN max 0.00 m; mean change 0.000 m; 
+TRANSFER d4: the 814 m breach lowered 48799 of 727003 land cells: p50 0.42 p95 12.22 max 347.28 m; over 50 m 463 (0.06 % of land); residual damped over 400 m (floored at the sea level + 5 mm); SCHOTT (K scaled true, uplift false, retarget true radius 4, at most 2 rounds a scale, tol 0.1 m): 407 m: 2 rounds (last mean |dz| 2.423 m), K x 0.500, 8 s; 204 m: 2 rounds (last mean |dz| 0.831 m), K x 0.250, 36 s; 102 m: 2 rounds (last mean |dz| 0.317 m), K x 0.125, 161 s; multi-scale breach (8, 4, 2, 1, then plain) 240 s
+START f4-368-4720-none-td4-schott: wrote C:/DEV/SeriousPlanetData/tmp/e3-def/start\f4-368-4720-none-td4-schott-start-8160x8160.f64 (8160 x 8160, origin at L cell (1344, 36160) of face 4)
+RIVERS f4-368-4720-none-td4-schott: core 122624 channel cells; 32811 on closed basins of the start surface (26.76 % of river length); pits touching the core 107; time nodes 33 s, front 35 s, sample 537 s, route 107 s
+BASINS117 f4-368-4720-none-td4-schott: river length on basins at least 0.5 m deep and 16 cells: 0.00 % (0 of 122624); basins counted 113 of 171 in the window; by N: N4 0.00 % N8 0.00 % N16 0.00 % N32 0.00 % N64 0.00 %
+RIVERS f4-368-4720-none-td4-schott D inf m: cut p50 0.00 p95 0.73 p99 1.75 max 6.06 m, over 50 m 0.00 %; channel cells in lakes 0.00 %
+RIVERS f4-368-4720-none-td4-schott D 20 m: cut p50 0.00 p95 0.73 p99 1.75 max 6.06 m, over 50 m 0.00 %; channel cells in lakes 0.00 %
+AXIS117 f4-368-4720-none-td4-schott: channel steps along a grid axis 46.1 % (56578 of 122624); relief p50 range 2 x 2 1.14 m, 10 x 10 9.23 m
+RELIEF f4-368-4720-none-td4-schott: band 200 m-1 km std 1.99 m (|.| p95 3.23); 1 km block relief p50 9.2 p95 59.7 m (198914 blocks)
+TOTAL f4-368-4720-none-td4-schott 759 s

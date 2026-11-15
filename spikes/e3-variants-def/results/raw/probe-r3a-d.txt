@@ -1,0 +1,10 @@
+LATTICE f4-368-4720-none: 1365 x 1366 nodes (611 m); land nodes changed over 1 cm 0 of 1301106 (0.00 %); lowered p50 NaN p95 NaN max 0.00 m, over 50 m on 0.00 % of land nodes; raised p50 NaN p95 NaN max 0.00 m; mean change 0.000 m; 
+TRANSFER d8tri: the 814 m breach lowered 14805 of 727003 land cells: p50 0.12 p95 1.61 max 24.65 m; over 50 m 0 (0.00 % of land); residual damped over 400 m (floored at the sea level + 5 mm); capped multi-scale breach (8, 4, 2, 1, plain), cap 2 x local sigma (radius 8 cells): p50 0.80 p95 1.70 m: lowered 3715470 cells, p50 0.04 p95 0.35 m; the plain breach wanted more than the cap on 84957 cells (left as pits); 234 s
+START f4-368-4720-none-td8tri: wrote C:/DEV/SeriousPlanetData/tmp/e3-def/start\f4-368-4720-none-td8tri-start-8160x8160.f64 (8160 x 8160, origin at L cell (1344, 36160) of face 4)
+RIVERS f4-368-4720-none-td8tri: core 77951 channel cells; 8735 on closed basins of the start surface (11.21 % of river length); pits touching the core 1019; time nodes 25 s, front 45 s, sample 344 s, route 108 s
+BASINS117 f4-368-4720-none-td8tri: river length on basins at least 0.5 m deep and 16 cells: 3.63 % (2828 of 77951); basins counted 240 of 2300 in the window; by N: N4 3.76 % N8 3.71 % N16 3.63 % N32 3.48 % N64 3.14 %
+RIVERS f4-368-4720-none-td8tri D inf m: cut p50 0.00 p95 0.18 p99 1.04 max 3.85 m, over 50 m 0.00 %; channel cells in lakes 0.00 %
+RIVERS f4-368-4720-none-td8tri D 20 m: cut p50 0.00 p95 0.18 p99 1.04 max 3.85 m, over 50 m 0.00 %; channel cells in lakes 0.00 %
+AXIS117 f4-368-4720-none-td8tri: channel steps along a grid axis 44.9 % (34993 of 77951); relief p50 range 2 x 2 0.99 m, 10 x 10 8.34 m
+RELIEF f4-368-4720-none-td8tri: band 200 m-1 km std 1.33 m (|.| p95 2.36); 1 km block relief p50 8.3 p95 53.7 m (196459 blocks)
+TOTAL f4-368-4720-none-td8tri 563 s
