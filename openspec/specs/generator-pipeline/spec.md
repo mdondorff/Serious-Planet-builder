@@ -2168,13 +2168,13 @@ K7 SHALL start a tile from `B + C1(regional change)`, `B` read at every cell of 
 
 Verify: A
 Status: active
-Source: A3 sections 3.1 to 3.3 and 12.1 (G-SURF), briefing item 11, inbox #104
+Source: A3 sections 3.1 to 3.3 and 12.1 (G-SURF), briefing item 11, inbox #104; the runtime read in the gate: lead, 2026-11-15 (external review F3)
 
 Detail: - The pits (land cells with a fill depth of at least 0.5 m) SHALL be reported after each stage: the start, the burn-in, the breach alone, the incision, the whole pass.
 - A dam across a channel SHALL be a pit before the burn-in and SHALL NOT be one after it.
 - The result SHALL be the same bits on any thread count.
 - The stored change SHALL read back at the centres of the cells as the bake's surface (before quantisation) and within half a step of `QUANT_STEP_M` after.
-- The difference of the runtime's `B + C1(L)` and the bake's `C1(z)` at the vertices of the store lattice SHALL be reported (maximum, 50th and 99th percentile, the nodes over 0.25 m, their positions, and the two other readings: `B` plus the unclamped `C1(L)`, and the clamped read of the composed `B + L`). G-SURF is the gate at the centres of the local cells, where the bake defines its heights (owner, 2026-11-09): 0 before quantisation, at most half a step after. The vertices are the diagnostic G-SURF-I (GEN-154): 192 of 28,900 nodes (0.66 %) are over 0.25 m after quantisation on the prototype tile, maximum 2.55 m; reported, the clamp stays.
+- The difference of the runtime's `B + R(L)` (`R` the runtime's read of the stored change, GEN-188's monotone cubic) and the bake's `C1(z)` at the vertices of the store lattice SHALL be reported (maximum, 50th and 99th percentile, the nodes over 0.25 m, their positions, and the two other readings: `B` plus the retired clamped `C1(L)`, and the clamped read of the composed `B + L`). G-SURF is the gate at the centres of the local cells, where the bake defines its heights (owner, 2026-11-09): 0 before quantisation, at most half a step after. The vertices are the diagnostic G-SURF-I (GEN-154): 192 of 28,900 nodes (0.66 %) are over 0.25 m after quantisation on the prototype tile, maximum 2.55 m; reported, the clamp stays.
 - The runs of `examples/k7_region` (the pit shares and the G-SURF numbers on a tile of the prototype region) are measurements, not gates; the gates are the tier-A tests.
 
 #### Scenario: K7 on a tile
@@ -2261,11 +2261,11 @@ The surface gate SHALL read the runtime's `B + L` against the bake's surface at 
 
 Verify: A
 Status: active
-Source: A3 section 12.1 (G-SURF, G-SURF-I), owner 2026-11-09, inbox #105 step 3
+Source: A3 section 12.1 (G-SURF, G-SURF-I), owner 2026-11-09, inbox #105 step 3; the runtime read in the gate: lead, 2026-11-15 (external review F3)
 
-Detail: - G-SURF-I SHALL report the 50th, 95th and 99th percentile and the maximum of the difference at the vertices, the share over 0.25 m, the vertices and those over 0.25 m by the bake's local step height (up to 5 m, over 5 m up to 20 m, over 20 m), the largest quotient of the difference and the step height, the spatial concentration (the bins of 64 cells with vertices over 0.25 m against the bins with vertices, and the most in one bin) and the overshoot of the unclamped read of `L`.
+Detail: - G-SURF-I SHALL report the 50th, 95th and 99th percentile and the maximum of the difference at the vertices, the share over 0.25 m, the vertices and those over 0.25 m by the bake's local step height (up to 5 m, over 5 m up to 20 m, over 20 m), the largest quotient of the difference and the step height, the spatial concentration (the bins of 64 cells with vertices over 0.25 m against the bins with vertices, and the most in one bin).
 - G-SURF-I SHALL also report the error against the local base slope (the difference over the largest rise of `B` across one cell, over the vertices whose rise is at least 1 m: 99th percentile and maximum, and their number) and the overshoot of the runtime read beyond the range of the four composed cells (maximum and the vertices over 0.25 m).
-- The clamp of the C1 read SHALL stay.
+- The gate SHALL read `L` with the runtime's read (GEN-188), the read the runtime draws with; the bake's own surface keeps the clamped C1 read as the reference.
 
 #### Scenario: a smooth tile, with and without a burnt channel
 - **WHEN** K7 runs on a small tile and the gate is read

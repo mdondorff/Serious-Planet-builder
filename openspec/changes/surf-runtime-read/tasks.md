@@ -1,7 +1,0 @@
-- [x] Extract the runtime's read (`erosion_layer::monotone_read`), with its bits kept (55 layer tests).
-- [x] A tier-A test that fails on main: the gate reads as the runtime draws.
-- [x] The gate reads `L` with the runtime's read; the retired read stays as one comparison.
-- [x] Quarantine the smooth-tile vertex test (lead, 2026-11-15), with a Tracked entry.
-- [x] Option B measured (design.md).
-- [x] G-SURF and G-SURF-I re-run on the ledger tiles (65, 7), (65, 8), (64, 8); the rows are replaced in a docs PR after the merge (BUILD-041: the commit is the squash commit).
-- [ ] numerics-reviewer, verifier, prepush (tier C), PR.
