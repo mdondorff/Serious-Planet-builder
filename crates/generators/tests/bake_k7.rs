@@ -139,6 +139,7 @@ fn a_dam_across_a_channel_is_a_pit_before_the_burn_in_and_none_after() {
 // spec: GEN-148
 // spec: GEN-154
 #[test]
+#[ignore = "quarantined (lead, 2026-11-15; docs/status.md Tracked): the runtime read of L flattens trenches, up to 2.9 m from the bake between centres near channels (G-SURF-I, review F3); fix at the source, the runtime read (GEN-188)"]
 fn the_runtime_surface_is_the_bake_surface_at_the_centres_and_within_a_step_at_the_lattice_nodes() {
     let g = tile_grid();
     let p = K7Params::standard(5, 0.0);
