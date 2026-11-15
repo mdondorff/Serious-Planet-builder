@@ -805,3 +805,18 @@ fn the_surface_gate_reads_a_field_as_the_runtime_draws_it() {
         }
     }
 }
+
+// spec: GEN-154 (the gate at the centres keeps a running test while the vertex test is quarantined, lead 2026-11-15)
+#[test]
+fn the_surface_gate_holds_at_the_cell_centres_with_and_without_a_burnt_channel() {
+    let g = tile_grid();
+    let p = K7Params::standard(5, 0.0);
+    let smooth = |d: Vec3| 6.0 * libm::sin(0.5 * d.x) - 4.0 * libm::cos(0.7 * d.y);
+    for channels in [vec![], vec![channel(&g, g.halo as i64 + 20)]] {
+        let r = k7_tile(&g, id(), &base, &smooth, &channels, &p, 2);
+        let gate = surface_gate(&g, id(), &base, &r, 6);
+        assert!(gate.nodes > 20, "lattice nodes read: {gate:?}");
+        assert!(gate.max_centres_unquantised_m < 1e-9, "at the cells' centres the runtime's read returns the stored value: {gate:?}");
+        assert!(gate.max_centres_quantised_m <= 0.125 + 1e-9, "quantisation at the centres is at most half a step: {gate:?}");
+    }
+}
