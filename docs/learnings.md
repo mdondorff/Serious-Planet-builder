@@ -191,3 +191,9 @@ Scope: project (generators, process)
 ## 2026-11-14 The width law never reaches a visible size on the prototype
 Scope: project (K7 width GEN-165, river drawing)
 - Widest trench 1.9 cells; the drawn width's one-cell floor makes tributaries as wide as the main stem (gsurfi-reread-2026-11-11.md).
+
+## 2026-11-15 GLO-30 is a surface model: its basins and flat-ground relief are canopy
+Scope: project (the GLO-30 benchmark, SPIKE-108's frozen pools, P3 E1)
+- Against USGS 3DEP bare earth on 4 tiles (SPIKE-119): GLO-30 stands 0.8-9.7 m above it at p50; basins on river length 1.3-2.9x (Appalachians 64.9 % against 22.1 %); floodplain relief over 10 x 10 cells 15.2 m against 4.7 m.
+- GLO-30 basin shares are an upper bound; low-gradient windows are judged against a DTM. Steep ground agrees within 2 % relief.
+- Obsolete when: the benchmark uses a bare-earth source for every tile.
