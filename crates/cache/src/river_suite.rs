@@ -556,7 +556,7 @@ pub fn trunk_burn(grid: &Grid, z: &[f64], inside: &[bool], reaches: &[Vec<(f64, 
 /// The corridors of the trunk column (BUILD-057, lead #158): the radius of a reach's corridor in H1 cells (`k_c`; the E4 note §3.3).
 pub const CORRIDOR_K: [f64; 3] = [1.0, 2.0, 4.0];
 
-/// A key for the corridor search's heap: the label (lower first), then the cell id (lower first).
+/// A key for the corridor search's heap: the label (higher first), then the cell id (lower first).
 #[derive(PartialEq)]
 struct Key(f64, usize);
 impl Eq for Key {}
@@ -567,8 +567,8 @@ impl PartialOrd for Key {
 }
 impl Ord for Key {
     fn cmp(&self, o: &Self) -> std::cmp::Ordering {
-        // reversed: `BinaryHeap` pops the largest
-        o.0.total_cmp(&self.0).then(o.1.cmp(&self.1))
+        // `BinaryHeap` pops the largest: the higher label, then the lower cell id
+        self.0.total_cmp(&o.0).then(o.1.cmp(&self.1))
     }
 }
 
@@ -610,7 +610,9 @@ fn corridor(w: usize, h: usize, line: &[(f64, f64)], radius: f64) -> Option<(std
 }
 
 /// Whether a route inside the corridor leads from `from` to `to` with every cell at most `d` above the running minimum of the route so far; on success the route
-/// (cells, upstream first). Lower running minima dominate, so a search that keeps each cell's lowest reachable minimum (lowest first, ties by cell id) is exact.
+/// (cells, upstream first). A higher running minimum leaves every later step at least as much room (a step is allowed when the cell stands at most `d` above it,
+/// and the minimum only falls), so a search that keeps each cell's highest reachable minimum, highest first and ties by cell id, is exact (the maximin form of
+/// Dijkstra's search).
 fn corridor_route(
     w: usize,
     z: &[f64],
@@ -620,7 +622,7 @@ fn corridor_route(
     to: usize,
     d: f64,
 ) -> Option<Vec<usize>> {
-    let mut label = vec![f64::INFINITY; cells.len()];
+    let mut label = vec![f64::NEG_INFINITY; cells.len()];
     let mut parent = vec![usize::MAX; cells.len()];
     let mut done = vec![false; cells.len()];
     let mut heap = std::collections::BinaryHeap::new();
@@ -628,7 +630,7 @@ fn corridor_route(
     heap.push(Key(z[from], from));
     while let Some(Key(l, c)) = heap.pop() {
         let ci = index[&c];
-        if done[ci] || l > label[ci] {
+        if done[ci] || l < label[ci] {
             continue;
         }
         done[ci] = true;
@@ -645,7 +647,7 @@ fn corridor_route(
         let (cx, cy) = ((c % w) as i64, (c / w) as i64);
         for (dx, dy) in [(-1i64, -1i64), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
             let (nx, ny) = (cx + dx, cy + dy);
-            if nx < 0 || ny < 0 || nx >= w as i64 {
+            if nx < 0 || ny < 0 || nx >= w as i64 || ny >= (z.len() / w) as i64 {
                 continue;
             }
             let n = ny as usize * w + nx as usize;
@@ -654,7 +656,7 @@ fn corridor_route(
                 continue;
             }
             let nl = l.min(z[n]);
-            if nl < label[ni] {
+            if nl > label[ni] {
                 label[ni] = nl;
                 parent[ni] = ci;
                 heap.push(Key(nl, n));
@@ -684,8 +686,8 @@ pub fn trunk_corridor(grid: &Grid, z: &[f64], inside: &[bool], reaches: &[Vec<(f
             None => {
                 // over the bar: bisect the minimax rise in (bar, top]
                 let (mut lo, mut hi) = (bar_m, top.max(bar_m));
-                let mut best =
-                    corridor_route(w, z, &index, &cells, from, to, hi).expect("a route exists below the corridor's highest cell");
+                // At the height range every step is allowed: no route means the corridor does not join the reach's ends (8-neighbour), and the reach is skipped.
+                let Some(mut best) = corridor_route(w, z, &index, &cells, from, to, hi) else { continue };
                 while hi - lo > 0.1 {
                     let mid = 0.5 * (lo + hi);
                     match corridor_route(w, z, &index, &cells, from, to, mid) {

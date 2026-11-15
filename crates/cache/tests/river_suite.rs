@@ -362,7 +362,9 @@ fn a_corridor_routes_a_trunk_around_a_partial_dam_but_not_through_a_narrow_one()
     }
     let narrow = planet_cache::river_suite::trunk_corridor(&g, &dam, &inside, &floor, 2.0, 50.0);
     assert_eq!((narrow.reaches, narrow.reaches_over), (1, 1), "a 2-cell corridor cannot leave the dam: {narrow:?}");
-    assert!((narrow.deepest_m - 59.0).abs() <= 0.11, "the minimax route crosses at the floor, 59 m over its minimum: {narrow:?}");
+    // The minimax route comes down at x = 18 (its minimum 115 m at y = 11: 104 + y) and steps diagonally onto the dam at (19, 10), 172 m: 57 m, less than the
+    // 59 m of crossing straight down the floor (170 m over 111 m).
+    assert!((narrow.deepest_m - 57.0).abs() <= 0.11, "{narrow:?}");
     // 6 cells reach x = 14 and 26, outside the dam: the route climbs the side about 10 m and passes.
     let wide = planet_cache::river_suite::trunk_corridor(&g, &dam, &inside, &floor, 6.0, 50.0);
     assert_eq!((wide.reaches, wide.reaches_over, wide.vertices_over, wide.deepest_m), (1, 0, 0, 0.0), "{wide:?}");
@@ -396,4 +398,37 @@ fn a_corridor_routes_a_trunk_around_a_partial_dam_but_not_through_a_narrow_one()
     assert!(r.trunk_corridors.iter().all(|t| t.reaches_over == 0), "{:?}", r.trunk_corridors);
     assert!(r.corridor_line().contains("k_c 1 (814 m): 0 of 1 reaches"), "{}", r.corridor_line());
     assert!(r.fields().iter().any(|(k, v)| *k == "trunk_c4_reaches_over" && v == "0"));
+}
+
+// spec: TEST-137, BUILD-057
+#[test]
+fn a_corridor_route_bypasses_a_pit_whose_low_minimum_would_make_a_later_rise_a_burn() {
+    // A plateau at 100 m. On the trunk's line (y = 10, from x = 2 to x = 37) a pit at 40 m (x 10..=12, y 9..=11) and, further down, a ridge at 145 m across the
+    // whole grid (x = 25). Through the pit the ridge stands 105 m above the running minimum; around the pit (y 7 or 13) only 45 m above it.
+    let g = Grid::new(N, N, DX);
+    let inside = vec![true; N * N];
+    let mut z = vec![100.0; N * N];
+    for y in 9..=11 {
+        for x in 10..=12 {
+            z[y * N + x] = 40.0;
+        }
+    }
+    for y in 0..N {
+        z[y * N + 25] = 145.0;
+    }
+    let line = vec![vec![(2.0, 10.0), (37.0, 10.0)]];
+    // Along the line itself: 105 m.
+    let polyline = planet_cache::river_suite::trunk_burn(&g, &z, &inside, &line, 50.0);
+    assert_eq!(polyline.reaches_over, 1);
+    assert!((polyline.deepest_m - 105.0).abs() < 1e-9, "{polyline:?}");
+    // A corridor of 4 cells lets the route pass beside the pit: the highest running minimum (100 m) keeps the ridge within 45 m.
+    let wide = planet_cache::river_suite::trunk_corridor(&g, &z, &inside, &line, 4.0, 50.0);
+    assert_eq!((wide.reaches, wide.reaches_over, wide.deepest_m), (1, 0, 0.0), "{wide:?}");
+    // A corridor of 1 cell holds no way around (the pit spans y 9..=11): the route must cross it, 105 m.
+    let narrow = planet_cache::river_suite::trunk_corridor(&g, &z, &inside, &line, 1.0, 50.0);
+    assert_eq!(narrow.reaches_over, 1, "{narrow:?}");
+    assert!((narrow.deepest_m - 105.0).abs() <= 0.11, "{narrow:?}");
+    // The same input gives the same bits.
+    assert_eq!(planet_cache::river_suite::trunk_corridor(&g, &z, &inside, &line, 4.0, 50.0), wide);
+    assert_eq!(planet_cache::river_suite::trunk_corridor(&g, &z, &inside, &line, 1.0, 50.0), narrow);
 }

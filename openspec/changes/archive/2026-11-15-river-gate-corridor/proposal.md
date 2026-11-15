@@ -3,9 +3,9 @@
 
 ## What changes
 - BUILD-057: a "trunks in corridors" line and eight fields per k_c (1, 2, 4).
-  - Each reach takes the minimax route inside its corridor, by an exact search: each cell keeps its lowest reachable running minimum, lowest first, ties by cell id.
+  - Each reach takes the minimax route inside its corridor, by an exact search: each cell keeps its highest reachable running minimum, highest first, ties by cell id (the maximin form of Dijkstra's search; the verifier caught a first version that kept the lowest).
   - The reaches over the 50 m bar are counted. Their minimax rise is bisected to 0.1 m.
-- TEST-137: a corridor fixture (a partial dam, a full dam, two radii).
+- TEST-137: corridor fixtures (a partial dam, a full dam, two radii; a pit bypass that only the highest-minimum search finds; the same bits twice).
 
 ## Impact
 cache (`river_suite.rs` `trunk_corridor`, `river_gate.rs` `GateParams::h1_cell_m`, `GateReport::trunk_corridors`, `corridor_line`, fields); tests.
