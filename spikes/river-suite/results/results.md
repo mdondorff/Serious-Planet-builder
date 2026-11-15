@@ -169,7 +169,7 @@ GLO-30 is a surface model (canopy, buildings, bridges). Four tiles have a free b
 
 ## Visuals
 ![R1h cross-sections](images/xsec-r1h.png)
-R1h (face 1, seed 14): locator hillshade and the three transects; five start-surface variants (drain_base probe, spike/schott-fair f15b0e1d, not baked) and a GLO-30 valley at matched relief, one vertical scale (648 m a panel). CPU, no renderer.
+R1h (face 1, seed 14): locator hillshade and the three transects; five start-surface variants (drain_base probe, spike/schott-fair f15b0e1d, not baked) and a GLO-30 valley at matched relief, one vertical scale (665 m a panel). CPU, no renderer.
 
 ![R3a cross-sections](images/xsec-r3a.png)
 R3a (face 4, seed 15): the same, 35 m a panel.
