@@ -50,6 +50,7 @@ const USAGE: &str = "cargo xtask <command>
   layering             crate layering and GPU-free dependency check (CON-02)
   k7-layout [--write-baseline]  the layout report of K7 (BUILD-052): the fixture's tile layout against an alternative, compared with docs/gates/k7-layout-baseline.txt; REVIEW above twice the baseline p99 or max; exit 0; prepush runs it when K7 files change
   river-gate <store dir | face,i0,i1,j0,j1,seed | r1h | r3a | r3b | m1 | f1> [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--no-key-check]   the river gate (BUILD-055): closed basins on river length (0.5 m, 16 cells), the valley depth (1-2 cells) and the burn (K7's cut), ring 2-4 and the erosion depth, lakes at D, relief at 200 m and 1 km against the start surface, edge agreement with H1, and the measurement suite (BUILD-057: gradient, valley width, asymmetry, drainage density, catchment ratio, seam, narrowness, slope-area, relief spectrum), on a store (its commit's tiles) or a window's start surface; release, under the heavy lock; exit 0
+  river-gate --table <window | store dir@window | store dir>... [--windows W,W...] [options]   one row per run of every gate and suite number, counts beside percentages (BUILD-057); target/review/river-gate-table.md and .csv
   spec-lint            trace IDs, tiers, requirement coverage (CON-16)
   log [--since YYYY-MM-DD] [--limit N]   the project log: fragments of docs/log.d/ and the entries of docs/log.md, newest first (BUILD-010)
   accept <milestone>   run milestone acceptance, e.g. M0; M4 also judges the perf logs of a streaming window (--logs DIR, default perf/logs) and refuses without a valid one
@@ -113,6 +114,9 @@ fn main() -> ExitCode {
         Some("gate") => heavy::with_exclusive(&format!("gate {}", args[1..].join(" ")), || gate::run_gate(&root, &args[1..])),
         Some("layering") => layering::run(&root),
         Some("k7-layout") => heavy::with("k7-layout", || k7layout::run(&root, &args[1..])),
+        Some("river-gate") if args.get(1).map(String::as_str) == Some("--table") => {
+            heavy::with(&format!("river-gate {}", args[1..].join(" ")), || rivergate::run_table(&root, &args[2..]))
+        }
         Some("river-gate") => heavy::with(&format!("river-gate {}", args[1..].join(" ")), || rivergate::run_gate(&root, &args[1..])),
         Some("spec-lint") => speclint::run(&root),
         Some("log") => logcmd::run(&root, &args[1..]),

@@ -1,6 +1,9 @@
-//! TEST-137: the river gate's measurement suite (BUILD-057) on small fixtures.
-use planet_cache::river_gate::{edge_pairs, measure, Crossing, GateInput, GateParams, GateReport};
+//! TEST-137: the river gate's measurement suite (BUILD-057) on small fixtures, and its store path on a small baked store.
+use planet_cache::l_writer::read_l_tile;
+use planet_cache::pack::TileStore;
+use planet_cache::river_gate::{edge_pairs, lay_store_ground, measure, Crossing, GateInput, GateParams, GateReport, LWindow};
 use planet_cache::river_suite::spectrum;
+use planet_core::Face;
 use planet_generators::bake::Grid;
 
 const N: usize = 40;
@@ -201,4 +204,96 @@ fn the_suite_prints_one_line_per_metric_and_gives_the_same_bits_twice() {
     for key in ["gradient", "valley width", "asymmetry", "drainage density", "catchment", "seam", "narrowness", "slope-area", "spectrum"] {
         assert!(lines.contains(&format!("RIVER-GATE {key}:")), "no {key} line in\n{lines}");
     }
+}
+
+/// A B for the store fixture's window: any smooth height of the face's L cell (the laying adds it to the tile's change).
+fn store_base(x: i64, y: i64) -> f64 {
+    300.0 + 0.5 * x as f64 + 0.25 * y as f64
+}
+
+// spec: TEST-137, BUILD-057, BUILD-055
+#[test]
+fn a_baked_store_read_through_the_reader_gives_the_numbers_of_its_surface() {
+    use crate::l_writer::{bake, lakes, spec, tiles, world, Dir, Feed, RES, T};
+    let (w, d) = (world(), Dir::new("river-suite-store"));
+    let commit = bake(&d, &w, spec(7), &Feed(true), &lakes(), 2).expect("the fixture bake");
+    let store = TileStore::open(d.path(), w.params()).unwrap();
+    // The window: face 2 from L cell (24, 24), 5 tiles a side; the commit's tiles (2..=4, 2..=4) lie inside it.
+    let win = LWindow { face: Face(2), x0: T as i64, y0: T as i64, w: 5 * T, h: 5 * T };
+    let n = win.w * win.h;
+    let start: Vec<f64> = (0..n).map(|c| store_base(win.x0 + (c % win.w) as i64, win.y0 + (c / win.w) as i64)).collect();
+    let (mut surface, mut inside) = (start.clone(), vec![false; n]);
+    let (read, outside) = lay_store_ground(&store, &w, &commit, true, win, &store_base, 3, &mut surface, &mut inside).unwrap();
+    assert_eq!((read, outside), (9, 0));
+    // The same surface laid by hand from the reader's tiles: B plus each tile's change at its cells.
+    let (mut by_hand, mut hand_inside) = (start.clone(), vec![false; n]);
+    for id in tiles() {
+        let t = read_l_tile(&store, &w, RES, &spec(7), &commit, id).unwrap().unwrap();
+        for p in 0..T * T {
+            let (x, y) = (id.ti as usize * T + p % T, id.tj as usize * T + p / T);
+            let c = (y - T) * win.w + x - T;
+            by_hand[c] = store_base(x as i64, y as i64) + f64::from(t.core[p]);
+            hand_inside[c] = true;
+        }
+    }
+    assert_eq!(surface, by_hand, "the store's ground is B + the tile's change at its cells");
+    assert_eq!(inside, hand_inside);
+    assert!(surface.iter().zip(&start).any(|(a, b)| a != b), "the bake changed the ground");
+    // Without the key check, the commit's own keys read the same tiles; another thread count lays the same bits.
+    let (mut s2, mut i2) = (start.clone(), vec![false; n]);
+    lay_store_ground(&store, &w, &commit, false, win, &store_base, 1, &mut s2, &mut i2).unwrap();
+    assert_eq!((s2, i2), (surface.clone(), inside.clone()));
+    // The gate and the suite on the store read and on the hand-laid surface: the same report.
+    let g = Grid::new(win.w, win.h, 1000.0);
+    let outlet = g.outlets(&surface, 0.0);
+    let p = GateParams { channel_area_m2: 20.0 * 1000.0 * 1000.0, ..GateParams::default() };
+    let gate = |s: &[f64], ins: &[bool]| {
+        measure(
+            &GateInput {
+                grid: &g,
+                start: &start,
+                surface: s,
+                outlet: &outlet,
+                inside: ins,
+                region: ins,
+                h1: &[],
+                seed: 7,
+                sea_level_m: 0.0,
+                outside_drains: true,
+            },
+            &p,
+        )
+    };
+    let (a, b) = (gate(&surface, &inside), gate(&by_hand, &hand_inside));
+    assert_eq!(a, b);
+    assert!(a.river_cells > 0 && a.suite.steps > 0, "{:?}", a.suite);
+    // A window short of the third column of tiles (window cells 72..96) leaves those 3 outside; a window on another face reads none and is refused.
+    let short = LWindow { w: 4 * T - 1, ..win };
+    let (mut s3, mut i3) = (vec![0.0; short.w * short.h], vec![false; short.w * short.h]);
+    assert_eq!(lay_store_ground(&store, &w, &commit, true, short, &store_base, 2, &mut s3, &mut i3).unwrap(), (6, 3));
+    let other = LWindow { face: Face(3), ..win };
+    let err = lay_store_ground(&store, &w, &commit, true, other, &store_base, 2, &mut surface, &mut inside).unwrap_err();
+    assert!(err.contains("none of the commit's 9 tiles"), "{err}");
+}
+
+// spec: TEST-137, BUILD-057
+#[test]
+fn the_fields_name_every_number_once_with_a_count_before_every_percentage() {
+    let r = run(&valley(4.0, 2.0));
+    let f = r.fields();
+    let names: Vec<&str> = f.iter().map(|(k, _)| *k).collect();
+    let mut uniq = names.clone();
+    uniq.sort_unstable();
+    uniq.dedup();
+    assert_eq!(uniq.len(), names.len(), "a column name twice: {names:?}");
+    for (i, (k, _)) in f.iter().enumerate() {
+        if k.ends_with("_pct") {
+            let before = f[i - 1].0;
+            assert!(!before.ends_with("_pct") && !before.ends_with("_m"), "{k} follows {before}, not its count");
+        }
+    }
+    assert!(f.iter().all(|(_, v)| !v.is_empty() && !v.contains(' ')), "{f:?}");
+    let line = r.fields_line();
+    assert_eq!(line.strip_prefix("RIVER-GATE fields: ").unwrap().split(' ').count(), f.len());
+    assert_eq!(f.iter().find(|(k, _)| *k == "river_cells").unwrap().1, r.river_cells.to_string());
 }

@@ -165,6 +165,94 @@ impl GateReport {
         share(self.burn_breached.count_over, self.river_cells)
     }
 
+    /// Every number of the report as (column, value), counts beside their percentages: the columns of `cargo xtask river-gate --table` (BUILD-057). The names are fixed; a new number is a new column.
+    pub fn fields(&self) -> Vec<(&'static str, String)> {
+        let s = &self.suite;
+        let n = self.river_cells;
+        let pct = |k: usize, of: usize| format!("{:.2}", share(k, of));
+        let m = |v: f64| format!("{v:.2}");
+        let r = |v: f64| format!("{v:.3}");
+        let c = |k: usize| k.to_string();
+        vec![
+            ("river_cells", c(n)),
+            ("basins", c(self.basins)),
+            ("basin_cells", c(self.basin_river_cells)),
+            ("basin_pct", pct(self.basin_river_cells, n)),
+            ("reference_cells", c(self.reference_river_cells)),
+            ("reference_pct", pct(self.reference_river_cells, n)),
+            ("valley_over_cells", c(self.valley.count_over)),
+            ("valley_over_pct", pct(self.valley.count_over, n)),
+            ("valley_p50_m", m(self.valley.p50_m)),
+            ("valley_p99_m", m(self.valley.p99_m)),
+            ("burn_over_cells", c(self.burn_breached.count_over)),
+            ("burn_over_pct", pct(self.burn_breached.count_over, n)),
+            ("burn_p99_m", m(self.burn_breached.p99_m)),
+            ("burn_lakes_over_cells", c(self.burn.count_over)),
+            ("burn_lakes_over_pct", pct(self.burn.count_over, n)),
+            ("ring24_over_cells", c(self.canyon.count_over)),
+            ("ring24_over_pct", pct(self.canyon.count_over, n)),
+            ("ring24_breached_over_cells", c(self.canyon_breached.count_over)),
+            ("ring24_breached_over_pct", pct(self.canyon_breached.count_over, n)),
+            ("erosion_p50_m", m(self.erosion.p50_m)),
+            ("erosion_p99_m", m(self.erosion.p99_m)),
+            ("erosion_over_cells", c(self.erosion.count_over)),
+            ("erosion_over_pct", pct(self.erosion.count_over, n)),
+            ("lake_cells", c(self.lake_river_cells)),
+            ("lake_pct", pct(self.lake_river_cells, n)),
+            ("relief2_m", m(self.relief_2_m)),
+            ("relief2_start_m", m(self.relief_2_start_m)),
+            ("relief10_m", m(self.relief_10_m)),
+            ("relief10_start_m", m(self.relief_10_start_m)),
+            ("edge_h1", c(self.edge_h1)),
+            ("edge_matched", c(self.edge_matched)),
+            ("edge_pct", pct(self.edge_matched, self.edge_h1)),
+            ("steps", c(s.steps)),
+            ("uphill_steps", c(s.uphill_steps)),
+            ("uphill_pct", pct(s.uphill_steps, s.steps)),
+            ("uphill_max_m", m(s.uphill_max_m)),
+            ("width10_cells", c(s.width_fixed.n)),
+            ("width10_p50_m", format!("{:.0}", s.width_fixed.p50)),
+            ("width10_p90_m", format!("{:.0}", s.width_fixed.p90)),
+            ("width10_capped_sides", c(s.width_fixed_capped)),
+            ("widthhalf_cells", c(s.width_half.n)),
+            ("widthhalf_p50_m", format!("{:.0}", s.width_half.p50)),
+            ("widthhalf_p90_m", format!("{:.0}", s.width_half.p90)),
+            ("widthhalf_capped_sides", c(s.width_half_capped)),
+            ("widthhalf_flat_cells", c(s.width_half_flat)),
+            ("asym_cells", c(s.asymmetry.n)),
+            ("asym_p50", r(s.asymmetry.p50)),
+            ("asym_p90", r(s.asymmetry.p90)),
+            ("density_km_per_km2", format!("{:.4}", s.density_km_per_km2)),
+            ("river_km", format!("{:.1}", s.river_km)),
+            ("land_km2", format!("{:.1}", s.land_km2)),
+            ("catchment_pairs", c(s.conservation_pairs)),
+            ("catchment_runoff_m2_per_m3s", format!("{:.4e}", s.implied_runoff)),
+            ("catchment_p10", r(s.conservation_p10)),
+            ("catchment_p90", r(s.conservation_p90)),
+            ("seam_pairs", c(s.seam_pairs)),
+            ("seam_p50_m", m(s.seam_p50_m)),
+            ("seam_p99_m", m(s.seam_p99_m)),
+            ("seam_max_m", m(s.seam_max_m)),
+            ("interior_p50_m", m(s.interior_p50_m)),
+            ("interior_p99_m", m(s.interior_p99_m)),
+            ("narrow_cells", c(s.narrowness.n)),
+            ("narrow_p50", r(s.narrowness.p50)),
+            ("narrow_p90", r(s.narrowness.p90)),
+            ("narrow_of_p50", r(s.narrowness_of_p50)),
+            ("slope_area_bins_fitted", c(s.slope_area.iter().filter(|b| b.cells >= crate::river_suite::SA_BIN_MIN_CELLS).count())),
+            ("theta", r(s.theta)),
+            ("spectrum_n", c(s.spectrum.n)),
+            ("beta", r(s.spectrum.beta)),
+            ("beta_start", r(s.spectrum_start.beta)),
+        ]
+    }
+
+    /// The fields as one printed line: `RIVER-GATE fields: name=value ...` (values hold no space).
+    pub fn fields_line(&self) -> String {
+        let f: Vec<String> = self.fields().into_iter().map(|(k, v)| format!("{k}={v}")).collect();
+        format!("RIVER-GATE fields: {}", f.join(" "))
+    }
+
     /// The printed report: one line per measure, the same bits for the same input.
     pub fn lines(&self) -> Vec<String> {
         let p = &self.params;
@@ -399,6 +487,77 @@ pub fn commit_differences(commit: &crate::l_writer::CommitSpec, window: &WindowI
         ));
     }
     differ
+}
+
+/// The L window a store is laid on: its corner in the face's L cells and its size.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LWindow {
+    pub face: planet_core::Face,
+    pub x0: i64,
+    pub y0: i64,
+    pub w: usize,
+    pub h: usize,
+}
+
+/// Lays a commit's stored ground on the window (BUILD-055's store mode): every tile of the commit on the window's face that lies wholly inside it is read through the reader (`read_l_tile`, or
+/// under the commit's own key without `key_check`), and its cells get B (`base` at the face's L cell) plus the tile's change and count as inside. Returns (tiles read, tiles outside); no tile read
+/// is an error.
+#[allow(clippy::too_many_arguments)]
+pub fn lay_store_ground(
+    tiles: &crate::pack::TileStore,
+    world: &crate::global_store::GlobalWorld,
+    commit: &crate::l_writer::Commit,
+    key_check: bool,
+    win: LWindow,
+    base: &(dyn Fn(i64, i64) -> f64 + Sync),
+    threads: usize,
+    surface: &mut [f64],
+    inside: &mut [bool],
+) -> Result<(usize, usize), String> {
+    let LWindow { face, x0, y0, w, h } = win;
+    assert!(surface.len() == w * h && inside.len() == w * h, "one surface height and inside flag per window cell");
+    let l_spec = commit.spec.l_spec();
+    let t = l_spec.grid.tile;
+    let (mut read, mut outside) = (0usize, 0usize);
+    for (&(f, ti, tj), &key) in &commit.tiles {
+        let (tx0, ty0) = (i64::from(ti) * t as i64 - x0, i64::from(tj) * t as i64 - y0);
+        if f != face.0 || tx0 < 0 || ty0 < 0 || tx0 as usize + t > w || ty0 as usize + t > h {
+            outside += 1;
+            continue;
+        }
+        let id = planet_generators::bake::tile::TileId { face, ti, tj };
+        let tile = if key_check {
+            crate::l_writer::read_l_tile(tiles, world, commit.spec.res, &l_spec, commit, id)
+        } else {
+            crate::layer_l::load_l_tile_keyed(tiles, &l_spec, id, key)
+        }
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("the commit names tile {f}/{ti}/{tj} but the store does not hold it"))?;
+        // The stored ground: B plus the tile's change (K7's ground minus B, which holds the regional change already). Rows over scoped threads: the same values on any thread count.
+        let mut ground = vec![0f64; t * t];
+        let rows = t.div_ceil(threads.max(1)).max(1);
+        std::thread::scope(|s| {
+            for (k, chunk) in ground.chunks_mut(rows * t).enumerate() {
+                let core = &tile.core;
+                s.spawn(move || {
+                    for (q, v) in chunk.iter_mut().enumerate() {
+                        let p = k * rows * t + q;
+                        *v = base(x0 + tx0 + (p % t) as i64, y0 + ty0 + (p / t) as i64) + f64::from(core[p]);
+                    }
+                });
+            }
+        });
+        for (p, g) in ground.iter().enumerate() {
+            let c = (ty0 as usize + p / t) * w + tx0 as usize + p % t;
+            surface[c] = *g;
+            inside[c] = true;
+        }
+        read += 1;
+    }
+    if read == 0 {
+        return Err(format!("none of the commit's {} tiles lies inside the window", commit.tiles.len()));
+    }
+    Ok((read, outside))
 }
 
 /// The key note of a store run's input line.
