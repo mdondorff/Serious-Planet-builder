@@ -30,6 +30,8 @@ How they were found (`window_scan`, raw `raw/windows/window-scan.txt`):
 ## 2. Transects
 Files: `transects.csv` (the 15 transects), `tools/transects.py` (`pick` writes a window's three, `plot` draws its figure), `raw/transect-matches.txt` (the GLO-30 valley matched to each).
 
+Another lane's variant (a baked store, E3's B and C) joins a figure with `plot <window> <out.png> --extra label=file.csv`: columns window, id, k, gx, gy, z_m; samples every 0.5 face L cells along the line, k = 0..n-1 with n = floor(length / 0.5) + 1; absolute heights; positions checked against the line (agreed with explorer, 2026-11-15).
+
 ### 2.1 The rule (deterministic, the same for every window)
 - Surface: today's start surface (B + regional) from the drain_base probe's dump; R1h the whole 8,160-cell window, the others the 4,960-cell core (the variants were dumped as cores).
 - River cells and drained area: main's routing (`route_rules` on the plain flood, epsilon 1 mm, seed 7) over the dump, by `grid_gate` (raw `raw/windows/transect-route-*.txt`). A core routes without its margin, so a river entering from outside carries only its area inside the core (`area_scope` in the csv).

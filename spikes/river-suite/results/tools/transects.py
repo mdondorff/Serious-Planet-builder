@@ -1,7 +1,10 @@
 """SPIKE-119: fixed river transects and cross-section figures (P3 E1).
 
 pick  <window> : choose the window's 3 transects on today's surface (B + regional) and append them to transects.csv.
-plot  <window> <out.png> : one figure: a locator map, then one cross-section per transect with every variant and a GLO-30 valley at matched relief, at one vertical scale.
+plot  <window> <out.png> [--extra label=file.csv]... : one figure: a locator map, then one cross-section per transect with every variant and a GLO-30 valley at matched relief, at one vertical scale.
+      --extra adds a variant sampled elsewhere (a baked store, another lane's surface): a CSV with columns window, id, k, gx, gy, z_m, one row per sample, k = 0..n-1 with
+      n = floor(hypot(gx1 - gx0, gy1 - gy0) / 0.5) + 1 at t = k / (n - 1) along the transect's line (face L cells, every 0.5 cells), z_m the absolute height (m), bilinear.
+      Rows of other windows are ignored; a transect without rows is drawn without that variant; positions are checked against the line (within 0.01 cells).
 
 Rule (deterministic, written once, the same for every window):
 - River cells and drained area: main's routing (route_rules on the plain flood, epsilon 1 mm, seed 7) over the dump, from grid_gate's area file.
@@ -208,7 +211,38 @@ def dem_match(pool, tid, area_target, relief_target, half_m):
     return best
 
 
-def plot(win, out_png):
+EXTRA_COLORS = ['#9467bd', '#8c564b', '#e377c2', '#17becf', '#bcbd22']
+
+
+def read_extra(path, win):
+    """Rows of one extra-variant CSV for this window: {transect id: [(k, gx, gy, z)]}."""
+    out = {}
+    with open(path) as f:
+        for r in csv.DictReader(f):
+            if r['window'] != win:
+                continue
+            out.setdefault(r['id'], []).append((int(r['k']), float(r['gx']), float(r['gy']), float(r['z_m'])))
+    for v in out.values():
+        v.sort()
+    return out
+
+
+def extra_profile(rows, r):
+    """The extra variant's profile on transect r: (distance m, z) after checking the sample positions against the line."""
+    gx0, gy0, gx1, gy1 = (float(r[k]) for k in ('gx0', 'gy0', 'gx1', 'gy1'))
+    length = math.hypot(gx1 - gx0, gy1 - gy0)
+    n = int(length / 0.5) + 1
+    if len(rows) != n or [k for k, *_ in rows] != list(range(n)):
+        raise ValueError(f"transect {r['window']} {r['id']}: {len(rows)} samples, expected k = 0..{n - 1}")
+    for k, gx, gy, z in rows:
+        t = k / (n - 1)
+        if abs(gx - (gx0 + (gx1 - gx0) * t)) > 0.01 or abs(gy - (gy0 + (gy1 - gy0) * t)) > 0.01:
+            raise ValueError(f"transect {r['window']} {r['id']} sample {k}: ({gx}, {gy}) is off the line")
+    t = np.array([k / (n - 1) for k, *_ in rows])
+    return (t - 0.5) * length * CELL, np.array([z for *_, z in rows])
+
+
+def plot(win, out_png, extras=()):
     face, i0, i1, j0, j1, seed, d, stem, kind, label, pool = WIN[win]
     with open(CSV) as f:
         rows = [r for r in csv.DictReader(f) if r['window'] == win]
@@ -229,6 +263,10 @@ def plot(win, out_png):
             if var in surf:
                 dist, v = sample(surf[var][0], x0, y0, x1, y1)
                 lines.append((name, col, dist, v - base))
+        for (xname, xrows), col in zip(extras, EXTRA_COLORS):
+            if r['id'] in xrows:
+                dist, v = extra_profile(xrows[r['id']], r)
+                lines.append((xname, col, dist, v - base))
         half = float(r['half_km']) * 1000
         dm = dem_match(pool, r['id'], float(r['area_km2']) * 1e6, float(r['relief_m']), half)
         if dm:
@@ -288,4 +326,12 @@ if __name__ == '__main__':
     if sys.argv[1] == 'pick':
         pick(sys.argv[2])
     elif sys.argv[1] == 'plot':
-        plot(sys.argv[2], sys.argv[3])
+        extras = []
+        a = sys.argv[4:]
+        while a:
+            if a[0] != '--extra' or len(a) < 2 or '=' not in a[1]:
+                raise SystemExit('usage: transects.py plot <window> <out.png> [--extra label=file.csv]...')
+            label, path = a[1].split('=', 1)
+            extras.append((label, read_extra(path, sys.argv[2])))
+            a = a[2:]
+        plot(sys.argv[2], sys.argv[3], extras)
