@@ -194,8 +194,8 @@ pub fn overdue_phrases(holders: &str, now: u64, limit: Duration) -> String {
     holders.split(" | ").filter_map(|h| overdue_minutes(h, now, limit).map(|m| format!("; overdue: {}, held {m} min", h.trim()))).collect()
 }
 
-/// The phrase naming the holders (notes joined by " | ") that an xtask older than the slots and the ticket queue wrote: its note names no slot ("slot k of n" or
-/// "exclusive"), or there is no note. Such a binary (a `target/debug/xtask.exe` run directly instead of through `cargo xtask`) takes `heavy.lock` without
+/// The phrase naming the holders (notes joined by " | ") that an xtask older than the slots and the ticket queue wrote: a note of a process that names no slot ("slot k of n" or
+/// "exclusive"; a slot without a note is not named: today's xtask writes its note just after the lock). Such a binary (a `target/debug/xtask.exe` run directly instead of through `cargo xtask`) takes `heavy.lock` without
 /// queueing (lead #156).
 pub fn pre_queue_phrase(holders: &str) -> String {
     let old: Vec<&str> = holders
