@@ -43,3 +43,37 @@ Code location: spikes/e3-variants-bc/ (results) and crates/cache/examples/bake_e
   - At that value diffusion barely touches 1 to 2 cell features in 5 steps: the 2-cell mode decays by (1 - 8 kappa)^5 ~ 0.89.
 - What C must remove: the V that is 1 to 2 cells narrow (A's R1h store: narrowness p50 0.37, valley depth 1.26 % over 50 m).
 - Calibration on R1h only: kappa in {3e-3 (derived), 1e-2, 3e-2, 0.1}. Pick on G-INCISION and the valley width at 10 m without lowering G-DRAIN, then all five windows.
+
+## Bars (lead #155, set before the results)
+| Gate | Bar |
+|---|---|
+| G-DRAIN | basins at most 10 % of river length |
+| G-INCISION | valley depth share over 50 m: R1h 1.80 %, R3a 0.10 %, R3b 0.10 %, M1 40.80 %, F1 0.10 % |
+| Cross-sections | judged on the T1 to T3 figures |
+
+## B: calibration on R1h
+Five stores of R1h from one binary (a07b404c): A (K dt x 1) and B at 1/2, 1/4, 1/8 (derived) and 1/16. All are read by `cargo xtask river-gate --table ... --no-key-check` on main 8c503df0. Full table: `table-b-calibration-r1h.csv` and `.md`.
+
+| K dt scale | 1 (A) | 1/2 | 1/4 | 1/8 (derived) | 1/16 |
+|---|---|---|---|---|---|
+| basins % (G-DRAIN) | 0.58 | 0.59 | 0.47 | 0.37 | 0.32 |
+| valley depth over 50 m, % (cells) (G-INCISION, bar 1.80) | 1.26 (2,225) | 1.33 (2,355) | 1.57 (2,791) | **2.03** (3,593) | **2.54** (4,480) |
+| valley depth p99, m | 52.8 | 54.0 | 56.3 | 60.2 | 63.5 |
+| burn over 50 m, % | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
+| ring 2-4 over 50 m, % | 4.82 | 3.89 | 3.76 | 4.22 | 4.77 |
+| relief 10 x 10, m (start 54.9 in window mode) | 76.9 | 71.9 | 69.6 | 68.5 | 68.0 |
+| width at 10 m p50, m | 634 | 668 | 700 | 710 | 705 |
+| narrowness p50 | 0.365 | 0.391 | 0.412 | 0.433 | 0.463 |
+| asymmetry p50 | 0.489 | 0.477 | 0.471 | 0.468 | 0.471 |
+| slope-area theta | 0.347 | 0.340 | 0.340 | 0.348 | 0.357 |
+| spectrum beta | -3.62 | -3.68 | -3.71 | -3.72 | -3.73 |
+| trunk reaches over 50 m (of 5,297) | 539 | 444 | 434 | 446 | 459 |
+| trunk vertices over 50 m | 3,815 | 3,340 | 3,420 | 3,716 | 3,988 |
+| deepest trunk vertex, m | 357 | 378 | 361 | 347 | 340 |
+| edge matched, % | 77.3 | 77.3 | 86.4 | 81.8 | 77.3 |
+
+- G-DRAIN passes at every scale.
+- G-INCISION gets worse as K dt shrinks. A weaker round at L leaves more relief for K7 to cut, and K7 cuts narrow: narrowness rises from 0.365 to 0.463, and the valley depth p99 from 52.8 to 63.5 m. The derived 1/8 fails R1h's bar (2.03 % against 1.80 %).
+- The calibration picks the scale nearest the derived 1/8 that passes on R1h: **1/4** (1.57 %). It also has the lowest ring 2-4 share and the best edge agreement. B is K dt x 1/4 on every window.
+- Finding: the incision the gate counts comes from K7's channel cut on top of the round, not from the round. The round's K dt sets how much of the valley K7 has to make.
+- The trunks: about 8 % of H1's trunk reaches stand more than 50 m above their running minimum in every variant, A included, up to 378 m deep. No K dt scale carries the trunks without a burn on R1h.
