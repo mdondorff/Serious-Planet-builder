@@ -231,6 +231,10 @@ def plot(win, out_png):
                 lines.append((name, col, dist, v - base))
         half = float(r['half_km']) * 1000
         dm = dem_match(pool, r['id'], float(r['area_km2']) * 1e6, float(r['relief_m']), half)
+        if dm:
+            print(f"MATCH {win} {r['id']} GLO-30 {dm[1]} relief {dm[4]:.1f} m area {dm[5] / 1e6:.0f} km2")
+        else:
+            print(f"MATCH {win} {r['id']} none")
         profiles.append((r, lines, dm))
     span = 0.0
     for r, lines, dm in profiles:

@@ -1,0 +1,12 @@
+heavy-run lock: waiting for prepush (process 21668, in start-879e4b, since 1794733714 s after the epoch, slot 1 of 2) | target/river-suite/drain_base_pics.exe --face 4 --region 4800,5419,3300,3919 --seed 15 --variant none --out target/river-suite/dumps (process 27144, in sonnet-spikes-36fc88, since 1794734941 s after the epoch, slot 2 of 2); `target/release/examples/grid_gate.exe target/river-suite/dumps/f4-4800-3300-none-full-4960x4960.f32 4960 4960 101.8 0 10 target/river-suite/area/f1-today.area.f32` is queued
+heavy-run lock: the machine is free after 30 s: running `target/release/examples/grid_gate.exe target/river-suite/dumps/f4-4800-3300-none-full-4960x4960.f32 4960 4960 101.8 0 10 target/river-suite/area/f1-today.area.f32`
+$ target/release/examples/grid_gate.exe target/river-suite/dumps/f4-4800-3300-none-full-4960x4960.f32 4960 4960 101.8 0 10 target/river-suite/area/f1-today.area.f32
+GRID input target/river-suite/dumps/f4-4800-3300-none-full-4960x4960.f32 (4960 x 4960 cells of 101.8 m, sea level 0 m, border 10)
+GRID gate RIVER-GATE rivers: 194922 river cells inside (drainage area >= 75 km2, land)
+GRID gate RIVER-GATE basins: 72.86 % of river length in closed basins (142028 of 194922 cells; 12766 basins of >= 0.5 m depth and >= 16 cells, fill epsilon 1e-7 m; bar <= 10 %); SPIKE-114 reference (any pit of 0.05 m): 74.69 %
+GRID gate RIVER-GATE canyon: 0.00 % of river cells over 50 m below the p50 of their valley (2 to 4 cells out) at D 20 m (0 cells, p99 16.31 m, max 36.50 m; bar <= 1 %); every basin breached 0.06 % (118 cells, max 63.81 m)
+GRID gate RIVER-GATE erosion depth: the river level under the start surface at D 20 m p50 0.14 p99 11.60 max 19.97 m, 0 cells over 50 m (0.00 %)
+GRID gate RIVER-GATE lakes: 14.86 % of river cells in lakes at D 20 m (28958 cells)
+GRID gate RIVER-GATE relief: p50 over 2 x 2 cells 1.33 m against the start's 1.33 m (100 %), over 10 x 10 cells 11.60 m against 11.60 m (100 %)
+GRID gate RIVER-GATE edge: no H1 crossing of the region's edge in the input
+GRID counts: 24403600 cells inside, 24379158 land, 24442 sea or outlet; river cells (area >= 75 km2) 194922; >= 300 km2 84871; >= 1,000 km2 27613; >= 10,000 km2 88; >= 100,000 km2 0; largest drained area inside 12030 km2

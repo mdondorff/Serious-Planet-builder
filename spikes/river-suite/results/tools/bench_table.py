@@ -65,18 +65,34 @@ for tag in sorted(sizes):
         area_max_km2=num(r'largest drained area inside (\d+)', gate, f=int),
         basins_pct=num(r'basins: ([\d.]+) %', gate), basins_cells=num(r'basins: [\d.]+ % of river length in closed basins \((\d+) of', gate, f=int),
         basins_n=num(r'cells; (\d+) basins of', gate, f=int), pit5cm_pct=num(r'any pit of 0.05 m\): ([\d.]+) %', gate),
-        valley_24_pct=num(r'canyon: ([\d.]+) %', gate), valley_24_cells=num(r'canyon: [\d.]+ % of river cells .*?\((\d+) cells', gate, f=int),
+        valley_12_pct=num(r'valley depth: ([\d.]+) %', gate), valley_12_cells=num(r'valley depth: [\d.]+ % of river cells .*?; (\d+) cells', gate, f=int),
+        valley_24_pct=num(r'ring 2-4: ([\d.]+) %', gate), valley_24_cells=num(r'ring 2-4: [\d.]+ % of river cells .*?\((\d+) cells', gate, f=int),
+        burn_pct=num(r'burn: ([\d.]+) %', gate),
         lakes_pct=num(r'lakes: ([\d.]+) %', gate), lakes_cells=num(r'lakes at D 20 m \((\d+) cells', gate, f=int),
         relief_2=num(r'over 2 x 2 cells ([\d.]+) m', gate), relief_10=num(r'over 10 x 10 cells ([\d.]+) m', gate),
+        uphill_pct=num(r'gradient: \d+ of \d+ river steps rise by more than 0.25 m \(([\d.]+) %', gate),
+        width10_p50=num(r'at 10 m above the river cell p50 (\d+) m', gate), width10_p90=num(r'at 10 m above the river cell p50 \d+ m p90 (\d+) m', gate),
+        widthhalf_p50=num(r'at half the ring 2-4 depth p50 (\d+) m', gate),
+        asym_p50=num(r'asymmetry: .*? p50 ([\d.]+)', gate), density=num(r'drainage density: ([\d.]+) km/km2', gate),
+        narrow_p50=num(r'narrowness: .*? p50 ([\d.]+)', gate), theta=num(r'slope-area: theta (-?[\d.]+)', gate), beta=num(r'slope beta (-?[\d.]+)', gate),
     )
     rows.append(r)
 with open(sys.argv[2], 'w', newline='') as f:
     wr = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
     wr.writeheader()
     wr.writerows(rows)
-print('| Source | Tile | Landform | Pool | Slope p95 (frozen / here) | px a cell | Land cells | River cells (>= 1,000 km2) | Largest area km2 | Basins % (cells, basins) | Valley depth 2-4 % (cells) | Lakes % (cells) | Relief 2x2 / 10x10 m |')
+def f(v, d=2):
+    return '-' if v is None else f'{v:,.{d}f}'
+
+
+print('| Source | Tile | Landform | Pool | Slope p95 (frozen / here) | px a cell | Land cells | River cells (>= 1,000 km2) | Largest area km2 | Basins % (cells, basins) | Valley depth 1-2 / ring 2-4 % (cells) | Lakes % (cells) | Relief 2x2 / 10x10 m |')
 print('|---|---|---|---|---|---|---|---|---|---|---|---|---|')
 for r in rows:
     fr = f"{r['slope_p95_frozen']}" if r['slope_p95_frozen'] is not None else '-'
     print(f"| {r['source']} | {r['tile']} | {r['landform']} | {r['pool']} | {fr} / {r['slope_p95_here']} | {r['px_per_cell']} | {r['land']:,} | {r['river_cells']:,} ({r['river_1000']:,}) | {r['area_max_km2']:,} | "
-          f"{r['basins_pct']:.2f} ({r['basins_cells']:,}, {r['basins_n']:,}) | {r['valley_24_pct']:.2f} ({r['valley_24_cells']:,}) | {r['lakes_pct']:.2f} ({r['lakes_cells']:,}) | {r['relief_2']:.1f} / {r['relief_10']:.1f} |")
+          f"{r['basins_pct']:.2f} ({r['basins_cells']:,}, {r['basins_n']:,}) | {f(r['valley_12_pct'])} / {f(r['valley_24_pct'])} ({r['valley_12_cells']:,} / {r['valley_24_cells']:,}) | {r['lakes_pct']:.2f} ({r['lakes_cells']:,}) | {r['relief_2']:.1f} / {r['relief_10']:.1f} |")
+print()
+print('| Source | Tile | Uphill steps % | Width at 10 m p50 / p90 (m) | Width at half ring depth p50 (m) | Asymmetry p50 | Drainage density km/km2 | Narrowness p50 | Slope-area theta | Spectrum beta |')
+print('|---|---|---|---|---|---|---|---|---|---|')
+for r in rows:
+    print(f"| {r['source']} | {r['tile']} | {f(r['uphill_pct'])} | {f(r['width10_p50'], 0)} / {f(r['width10_p90'], 0)} | {f(r['widthhalf_p50'], 0)} | {f(r['asym_p50'])} | {f(r['density'], 3)} | {f(r['narrow_p50'])} | {f(r['theta'])} | {f(r['beta'])} |")

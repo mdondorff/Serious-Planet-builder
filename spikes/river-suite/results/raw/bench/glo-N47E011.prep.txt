@@ -1,0 +1,2 @@
+PREP glo-N47E011.f64 738 1093
+COUNTS src C:/DEV/SeriousPlanetData/dem/glo30-samples/Copernicus_DSM_COG_10_N47_00_E011_00_DEM.tif: 3600 x 3600 pixels (1.000" x 1.000", 20.89 x 30.92 m at lat 47.500), no-data pixels 0; cells 738 x 1093 of 101.8 m, pixels a cell 4.87 x 3.29; cells without data 0; cells at or below 0 m 0; land z p5/p50/p95 573/1084/2462 m; min 474.5 m
