@@ -196,7 +196,12 @@ pub fn spectrum(grid: &Grid, z: &[f64], inside: &[bool]) -> Spectrum {
     let (ox, oy) = (x0 + (x1 - x0 - n) / 2, y0 + (y1 - y0 - n) / 2);
     let mean = (0..n * n).map(|k| z[(oy + k / n) * w + ox + k % n]).sum::<f64>() / (n * n) as f64;
     let hann: Vec<f64> = (0..n).map(|i| 0.5 - 0.5 * libm::cos(2.0 * std::f64::consts::PI * (i as f64 + 0.5) / n as f64)).collect();
-    let win2 = (0..n * n).map(|k| (hann[k % n] * hann[k / n]).powi(2)).sum::<f64>();
+    let win2 = (0..n * n)
+        .map(|k| {
+            let v = hann[k % n] * hann[k / n];
+            v * v
+        })
+        .sum::<f64>();
     let mut re: Vec<f64> = (0..n * n).map(|k| (z[(oy + k / n) * w + ox + k % n] - mean) * hann[k % n] * hann[k / n]).collect();
     let mut im = vec![0.0; n * n];
     for row in 0..n {
@@ -224,7 +229,8 @@ pub fn spectrum(grid: &Grid, z: &[f64], inside: &[bool]) -> Spectrum {
                 continue;
             }
             let o = (libm::log2(k).floor() as usize).min(octaves - 1);
-            sum[o] += (re[ky * n + kx].powi(2) + im[ky * n + kx].powi(2)) / win2;
+            let (a, b) = (re[ky * n + kx], im[ky * n + kx]);
+            sum[o] += (a * a + b * b) / win2;
             cnt[o] += 1;
         }
     }
