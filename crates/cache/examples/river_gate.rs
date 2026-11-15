@@ -84,7 +84,7 @@ fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let no_key_check = args.iter().any(|a| a == "--no-key-check");
     let args: Vec<String> = args.into_iter().filter(|a| a != "--no-key-check").collect();
-    let known = ["--window", "--margin", "--store", "--min-cells", "--d", "--threads", "--surface"];
+    let known = ["--window", "--margin", "--store", "--min-cells", "--d", "--threads", "--surface", "--xsec", "--xsec-out"];
     let mut k = 0;
     while k < args.len() {
         if !known.contains(&args[k].as_str()) {
@@ -228,6 +228,49 @@ fn main() -> Result<(), String> {
         }
         surface = bytes.chunks_exact(8).map(|b| f64::from_le_bytes(b.try_into().expect("8 bytes"))).collect();
         label = format!("surface {f} on the window {win:?}, margin {margin}, counted over the region's box");
+    }
+    // SPIKE-121 (spike branch, never merged): `--xsec <transects.csv> --xsec-out <out.csv>` samples the measured surface along spikes' transects (SPIKE-119) that lie on this
+    // window: n = floor(hypot / 0.5) + 1 samples from (gx0, gy0) to (gx1, gy1) in face L cells, bilinear, absolute height (agreed with spikes, 2026-11-15).
+    if let (Some(src), Some(dst)) = (value(&args, "--xsec"), value(&args, "--xsec-out")) {
+        let text = std::fs::read_to_string(src).map_err(|e| format!("{src}: {e}"))?;
+        let mut out = String::from("window,id,k,gx,gy,z_m\n");
+        let at = |gx: f64, gy: f64| -> Option<f64> {
+            let (x, y) = (gx - x0 as f64, gy - y0 as f64);
+            if x < 0.0 || y < 0.0 || x > (w - 1) as f64 || y > (h - 1) as f64 {
+                return None;
+            }
+            let (xi, yi) = ((x.floor() as usize).min(w - 2), (y.floor() as usize).min(h - 2));
+            let (fx, fy) = (x - xi as f64, y - yi as f64);
+            let z = |i: usize, j: usize| surface[j * w + i];
+            Some(
+                z(xi, yi) * (1.0 - fx) * (1.0 - fy)
+                    + z(xi + 1, yi) * fx * (1.0 - fy)
+                    + z(xi, yi + 1) * (1.0 - fx) * fy
+                    + z(xi + 1, yi + 1) * fx * fy,
+            )
+        };
+        let mut lines = 0;
+        for row in text.lines().skip(1) {
+            let c: Vec<&str> = row.split(',').collect();
+            if c.len() < 8 || c[2].parse::<u8>() != Ok(face.0) || c[3].parse::<u64>() != Ok(seed) {
+                continue;
+            }
+            let p: Vec<f64> =
+                c[4..8].iter().map(|v| v.parse::<f64>().map_err(|_| format!("{src}: not a number '{v}'"))).collect::<Result<_, _>>()?;
+            let (gx0, gy0, gx1, gy1) = (p[0], p[1], p[2], p[3]);
+            if at(gx0, gy0).is_none() || at(gx1, gy1).is_none() {
+                continue;
+            }
+            let n = (libm::hypot(gx1 - gx0, gy1 - gy0) / 0.5).floor() as usize + 1;
+            for k in 0..n {
+                let t = if n > 1 { k as f64 / (n - 1) as f64 } else { 0.0 };
+                let (gx, gy) = (gx0 + t * (gx1 - gx0), gy0 + t * (gy1 - gy0));
+                out.push_str(&format!("{},{},{k},{gx:.3},{gy:.3},{:.3}\n", c[0], c[1], at(gx, gy).expect("inside the window")));
+            }
+            lines += 1;
+        }
+        std::fs::write(dst, out).map_err(|e| format!("{dst}: {e}"))?;
+        println!("RIVER-GATE xsec: {lines} transects of {src} sampled into {dst}");
     }
     // H1's crossings of the region's box, in the L window's cells (an H1 cell's centre).
     let to_local = |c: u32| {
