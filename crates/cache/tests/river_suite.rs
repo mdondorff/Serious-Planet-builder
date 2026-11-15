@@ -122,9 +122,9 @@ fn the_catchment_ratio_and_the_seam_read_the_region_edge() {
     assert_eq!(r.suite.interior_p99_m, 2.0);
     // A 50 m step at the edge shows in the seam only.
     let mut cliff = z.clone();
-    for c in 0..N * N {
+    for (c, v) in cliff.iter_mut().enumerate() {
         if c / N >= 20 {
-            cliff[c] += 50.0;
+            *v += 50.0;
         }
     }
     let r = run_in(&cliff, &cliff, &region, &[]);

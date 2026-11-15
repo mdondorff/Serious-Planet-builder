@@ -177,8 +177,8 @@ fn fft(re: &mut [f64], im: &mut [f64]) {
 pub fn spectrum(grid: &Grid, z: &[f64], inside: &[bool]) -> Spectrum {
     let (w, h) = (grid.w(), grid.h());
     let (mut x0, mut x1, mut y0, mut y1) = (w, 0, h, 0);
-    for c in 0..w * h {
-        if inside[c] {
+    for (c, &is_in) in inside.iter().enumerate().take(w * h) {
+        if is_in {
             x0 = x0.min(c % w);
             x1 = x1.max(c % w + 1);
             y0 = y0.min(c / w);
