@@ -105,7 +105,16 @@ fn main() -> ExitCode {
         }
         Some("check") => testcmd::check(&root),
         Some("prepush") => {
-            heavy::with("prepush", || disk::check(&root, "prepush").and_then(|_| scratch::begin(&root)).and_then(|_| prepush::run(&root)))
+            if prepush::needs_slot(&testcmd::changed_paths(&root)) {
+                heavy::with("prepush", || {
+                    disk::check(&root, "prepush").and_then(|_| scratch::begin(&root)).and_then(|_| prepush::run(&root))
+                })
+            } else {
+                // A docs-only diff runs spec-lint alone, in seconds: it takes no heavy slot and waits for no bake (BUILD-026; lead #156). It does not
+                // prepare the scratch folder either: that empties `target/test-tmp`, which a heavy test of this worktree may be using.
+                eprintln!("prepush: spec-lint only, so no heavy slot is taken");
+                disk::check(&root, "prepush").and_then(|_| prepush::run(&root))
+            }
         }
         // The gate times frames in a window: exclusive; `--small` runs headless on the software adapter in a slot.
         Some("gate") if args.iter().any(|a| a == "--small") => {
