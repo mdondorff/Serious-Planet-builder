@@ -9,13 +9,13 @@ use std::path::Path;
 use std::sync::Arc;
 
 use planet_cache::global_store::{class_inputs, class_inputs_key, GlobalWorld};
-use planet_cache::l_writer::{read_l_tile, Commit};
-use planet_cache::layer_l::load_l_tile_keyed;
+use planet_cache::l_writer::Commit;
 use planet_cache::pack::TileStore;
 use planet_cache::region_bake::{lattice_direction, region_front, RegionSpec, LOCAL_PER_REGIONAL};
-use planet_cache::river_gate::{commit_differences, key_note, measure, Crossing, GateInput, GateParams, WindowIdentity};
+use planet_cache::river_gate::{
+    commit_differences, key_note, lay_store_ground, measure, Crossing, GateInput, GateParams, LWindow, WindowIdentity,
+};
 use planet_core::{Face, TangentWarp, Vec3};
-use planet_generators::bake::tile::TileId as PassTile;
 use planet_generators::global::{read_elevation_c1, GlobalSample, LatticeSource, ReadError};
 use planet_generators::runoff::{discharge_weight, pet_mm, runoff_mm};
 use planet_world_def::WorldDefinition;
@@ -196,40 +196,19 @@ fn main() -> Result<(), String> {
             ));
         }
         sea_level_m = cs.sea_level_m;
-        let l_spec = commit.spec.l_spec();
-        let t = l_spec.grid.tile;
         inside = vec![false; w * h];
-        let (mut read, mut outside) = (0usize, 0usize);
-        for &(f, ti, tj) in commit.tiles.keys() {
-            let (tx0, ty0) = (i64::from(ti) * t as i64 - x0, i64::from(tj) * t as i64 - y0);
-            if f != face.0 || tx0 < 0 || ty0 < 0 || tx0 as usize + t > w || ty0 as usize + t > h {
-                outside += 1;
-                continue;
-            }
-            let id = PassTile { face, ti, tj };
-            let tile = if no_key_check {
-                load_l_tile_keyed(&tiles, &l_spec, id, commit.tiles[&(f, ti, tj)])
-            } else {
-                read_l_tile(&tiles, &world, commit.spec.res, &l_spec, &commit, id)
-            }
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("the commit names tile {f}/{ti}/{tj} but the store does not hold it"))?;
-            // The stored ground: B plus the tile's change (K7's ground minus B, which holds the regional change already).
-            let mut ground = vec![0f64; t * t];
-            par_fill(&mut ground, t, threads, &|p| {
-                let (lx, ly) = (p % t, p / t);
-                base(dir_of(x0 + tx0 + lx as i64, y0 + ty0 + ly as i64)) + f64::from(tile.core[p])
-            });
-            for (p, g) in ground.iter().enumerate() {
-                let c = (ty0 as usize + p / t) * w + tx0 as usize + p % t;
-                surface[c] = *g;
-                inside[c] = true;
-            }
-            read += 1;
-        }
-        if read == 0 {
-            return Err(format!("{}: none of the commit's {} tiles lies inside the window {win:?}", dir.display(), commit.tiles.len()));
-        }
+        let (read, outside) = lay_store_ground(
+            &tiles,
+            &world,
+            &commit,
+            !no_key_check,
+            LWindow { face, x0, y0, w, h },
+            &|x, y| base(dir_of(x, y)),
+            threads,
+            &mut surface,
+            &mut inside,
+        )
+        .map_err(|e| format!("{}: {e} {win:?}", dir.display()))?;
         label = format!(
             "store {} (commit {:016x}, {read} tiles read, {outside} outside the window; {}): the stored ground B + L over its tiles, which drain to their border, window {win:?}, sea level {sea_level_m} m; the stored change's 0.25 m steps add pits to the 5 cm reference only",
             dir.display(),
@@ -285,5 +264,6 @@ fn main() -> Result<(), String> {
     for line in report.lines() {
         println!("{line}");
     }
+    println!("{}", report.fields_line());
     Ok(())
 }
