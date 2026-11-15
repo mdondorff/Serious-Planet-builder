@@ -229,8 +229,14 @@ fn main() -> Result<(), String> {
         gx >= bi0 && gx < bi1 && gy >= bj0 && gy < bj1
     };
     let mut h1: Vec<Crossing> = Vec::new();
+    // H1's trunk reaches (BUILD-057): every segment of the channel graph whose discharge reaches the edge limit, its H1 cell centres in the L window's cells, upstream first.
+    let mut trunks: Vec<Vec<(f64, f64)>> = Vec::new();
     front.graph.for_each(|s| {
         let cells = s.cells(&front.solve.grid);
+        let q_max = s.q.iter().map(|&q| planet_generators::bake::channel_graph::q_value(q)).fold(0.0, f64::max);
+        if cells.len() >= 2 && q_max >= params.edge_q_m3s {
+            trunks.push(cells.iter().map(|&c| to_local(c)).collect());
+        }
         for k in 1..cells.len() {
             let (p0, p1) = (to_local(cells[k - 1]), to_local(cells[k]));
             if in_region(p0) != in_region(p1) {
@@ -257,6 +263,7 @@ fn main() -> Result<(), String> {
             seed: front.solve.stream,
             sea_level_m,
             outside_drains: store.is_some(),
+            trunks: &trunks,
         },
         &params,
     );

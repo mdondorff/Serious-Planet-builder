@@ -40,6 +40,7 @@ fn run_in(start: &[f64], surface: &[f64], region: &[bool], h1: &[Crossing]) -> G
             seed: 7,
             sea_level_m: 0.0,
             outside_drains: false,
+            trunks: &[],
         },
         &params(),
     )
@@ -260,6 +261,7 @@ fn a_baked_store_read_through_the_reader_gives_the_numbers_of_its_surface() {
                 seed: 7,
                 sea_level_m: 0.0,
                 outside_drains: true,
+                trunks: &[],
             },
             &p,
         )
@@ -296,4 +298,53 @@ fn the_fields_name_every_number_once_with_a_count_before_every_percentage() {
     let line = r.fields_line();
     assert_eq!(line.strip_prefix("RIVER-GATE fields: ").unwrap().split(' ').count(), f.len());
     assert_eq!(f.iter().find(|(k, _)| *k == "river_cells").unwrap().1, r.river_cells.to_string());
+}
+
+// spec: TEST-137, BUILD-057
+#[test]
+fn a_trunk_over_a_dam_needs_a_burn_and_one_down_a_draining_floor_none() {
+    let g = Grid::new(N, N, DX);
+    let inside = vec![true; N * N];
+    let z = valley(2.0, 2.0);
+    // The floor x = 20 from y = 39 (upstream) to y = 0: its surface falls 1 m a cell, so it is its own running minimum.
+    let floor = vec![vec![(20.0, 39.0), (20.0, 0.0)]];
+    let t = planet_cache::river_suite::trunk_burn(&g, &z, &inside, &floor, 50.0);
+    assert_eq!((t.reaches, t.vertices, t.reaches_over, t.vertices_over), (1, 40, 0, 0), "{t:?}");
+    // A 60 m dam across the floor at y = 10: the running minimum from upstream is 111 m (y = 11), the dam stands at 170 m: 59 m over it, more than 50.
+    let mut dam = z.clone();
+    for x in 0..N {
+        dam[10 * N + x] += 60.0;
+    }
+    let d = planet_cache::river_suite::trunk_burn(&g, &dam, &inside, &floor, 50.0);
+    assert_eq!((d.reaches_over, d.vertices_over, d.deepest_reach, d.deepest_at), (1, 1, 0, (20.0, 10.0)), "{d:?}");
+    assert!((d.deepest_m - 59.0).abs() < 1e-9, "{d:?}");
+    // At a bar of 60 m it is not counted; a reach outside the counted cells is not a reach.
+    assert_eq!(planet_cache::river_suite::trunk_burn(&g, &dam, &inside, &floor, 60.0).vertices_over, 0);
+    let none = vec![false; N * N];
+    assert_eq!(planet_cache::river_suite::trunk_burn(&g, &dam, &none, &floor, 50.0).reaches, 0);
+    // Through the gate: the trunk line and the fields; no reach in the input says so.
+    let outlet = g.outlets(&dam, 0.0);
+    let r = measure(
+        &GateInput {
+            grid: &g,
+            start: &z,
+            surface: &dam,
+            outlet: &outlet,
+            inside: &inside,
+            region: &inside,
+            h1: &[],
+            seed: 7,
+            sea_level_m: 0.0,
+            outside_drains: false,
+            trunks: &floor,
+        },
+        &params(),
+    );
+    assert!(
+        r.trunk_line().contains("1 of 1 H1 trunk reaches") && r.trunk_line().contains("deepest 59.00 m on reach 0"),
+        "{}",
+        r.trunk_line()
+    );
+    assert!(r.fields().iter().any(|(k, v)| *k == "trunk_vertices_over" && v == "1"));
+    assert_eq!(run(&z).trunk_line(), "RIVER-GATE trunks: no H1 trunk reach in the input");
 }

@@ -5,7 +5,7 @@ use planet_generators::bake::flood::priority_flood_with;
 use planet_generators::bake::route::{route_rules_filled, RoundRules, Routing, NONE};
 use planet_generators::bake::Grid;
 
-use crate::river_suite::{measure_suite, SuiteInput, SuiteReport};
+use crate::river_suite::{measure_suite, trunk_burn, SuiteInput, SuiteReport, TrunkReport};
 
 /// The routing's flood grade between cells (the spikes' 1e-3 m).
 pub const ROUTE_EPSILON_M: f64 = 1.0e-3;
@@ -82,6 +82,8 @@ pub struct GateInput<'a> {
     pub sea_level_m: f64,
     /// Every cell outside `inside` is an outlet: a store's tiles drain to their border, so the start surface around them (without the candidate's burn) dams no river leaving the tiles.
     pub outside_drains: bool,
+    /// H1's trunk reaches in the grid's cells, each upstream first (empty when the input has none; the trunk line then says so).
+    pub trunks: &'a [Vec<(f64, f64)>],
 }
 
 /// The p99 and the maximum of a set of values (0 for none).
@@ -134,6 +136,9 @@ pub struct GateReport {
     pub edge_matched: usize,
     /// The measurement suite (BUILD-057).
     pub suite: SuiteReport,
+    /// H1's trunk reaches against the surface (BUILD-057): the vertices more than `cut_m` above their reach's running minimum; `trunks_given` says whether the input had reaches.
+    pub trunk: TrunkReport,
+    pub trunks_given: bool,
 }
 
 fn share(n: usize, of: usize) -> f64 {
@@ -244,6 +249,14 @@ impl GateReport {
             ("spectrum_n", c(s.spectrum.n)),
             ("beta", r(s.spectrum.beta)),
             ("beta_start", r(s.spectrum_start.beta)),
+            ("trunk_reaches", c(self.trunk.reaches)),
+            ("trunk_reaches_over", c(self.trunk.reaches_over)),
+            ("trunk_reaches_over_pct", pct(self.trunk.reaches_over, self.trunk.reaches)),
+            ("trunk_vertices", c(self.trunk.vertices)),
+            ("trunk_vertices_over", c(self.trunk.vertices_over)),
+            ("trunk_vertices_over_pct", pct(self.trunk.vertices_over, self.trunk.vertices)),
+            ("trunk_deepest_m", m(self.trunk.deepest_m)),
+            ("trunk_deepest_reach", c(self.trunk.deepest_reach)),
         ]
     }
 
@@ -339,7 +352,30 @@ impl GateReport {
         ]
         .into_iter()
         .chain(self.suite.lines())
+        .chain(std::iter::once(self.trunk_line()))
         .collect()
+    }
+
+    /// The trunk line (BUILD-057; the E4 note's "KR does not cut").
+    pub fn trunk_line(&self) -> String {
+        let t = &self.trunk;
+        if !self.trunks_given {
+            return "RIVER-GATE trunks: no H1 trunk reach in the input".to_string();
+        }
+        format!(
+            "RIVER-GATE trunks: {} of {} H1 trunk reaches inside ({:.2} %) and {} of {} vertices ({:.2} %) stand more than {} m above their reach's running minimum (the burn KR would need); deepest {:.2} m on reach {} at cell ({:.0}, {:.0})",
+            t.reaches_over,
+            t.reaches,
+            share(t.reaches_over, t.reaches),
+            t.vertices_over,
+            t.vertices,
+            share(t.vertices_over, t.vertices),
+            self.params.cut_m,
+            t.deepest_m,
+            t.deepest_reach,
+            t.deepest_at.0,
+            t.deepest_at.1
+        )
     }
 }
 
@@ -696,5 +732,7 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         edge_h1,
         edge_matched,
         suite,
+        trunk: trunk_burn(g, input.surface, input.inside, input.trunks, params.cut_m),
+        trunks_given: !input.trunks.is_empty(),
     }
 }

@@ -493,3 +493,62 @@ impl SuiteReport {
         ]
     }
 }
+
+/// The H1 trunk reaches against the surface (BUILD-057, the E4 note's "KR does not cut"): each reach a polyline in the grid's cells, upstream first, sampled every cell.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct TrunkReport {
+    /// Reaches with at least one vertex inside, and their vertices inside.
+    pub reaches: usize,
+    pub vertices: usize,
+    /// Those whose surface stands more than the bar above the reach's running minimum (the bed a non-increasing profile needs: the burn KR would have to cut).
+    pub reaches_over: usize,
+    pub vertices_over: usize,
+    /// The deepest such vertex: its depth (m), its reach (index in the input) and its position (cells).
+    pub deepest_m: f64,
+    pub deepest_reach: usize,
+    pub deepest_at: (f64, f64),
+}
+
+/// Samples each reach every cell along its polyline (bilinear surface), takes the running minimum downstream and counts the vertices inside whose surface stands more than `bar_m` above it.
+pub fn trunk_burn(grid: &Grid, z: &[f64], inside: &[bool], reaches: &[Vec<(f64, f64)>], bar_m: f64) -> TrunkReport {
+    let (w, h) = (grid.w(), grid.h());
+    let mut r = TrunkReport::default();
+    for (k, line) in reaches.iter().enumerate() {
+        let mut pts: Vec<(f64, f64)> = Vec::new();
+        for pair in line.windows(2) {
+            let ((ax, ay), (bx, by)) = (pair[0], pair[1]);
+            let n = libm::hypot(bx - ax, by - ay).ceil().max(1.0) as usize;
+            for s in 0..n {
+                let t = s as f64 / n as f64;
+                pts.push((ax + t * (bx - ax), ay + t * (by - ay)));
+            }
+        }
+        if let Some(&last) = line.last() {
+            pts.push(last);
+        }
+        let (mut bed, mut seen, mut over) = (f64::INFINITY, 0usize, 0usize);
+        for &(x, y) in &pts {
+            let Some(v) = bilinear(z, w, h, x, y) else { continue };
+            bed = bed.min(v);
+            let c = (y.round() as usize).min(h - 1) * w + (x.round() as usize).min(w - 1);
+            if !inside[c] {
+                continue;
+            }
+            seen += 1;
+            let depth = v - bed;
+            if depth > bar_m {
+                over += 1;
+                if depth > r.deepest_m {
+                    (r.deepest_m, r.deepest_reach, r.deepest_at) = (depth, k, (x, y));
+                }
+            }
+        }
+        if seen > 0 {
+            r.reaches += 1;
+            r.vertices += seen;
+            r.reaches_over += usize::from(over > 0);
+            r.vertices_over += over;
+        }
+    }
+    r
+}

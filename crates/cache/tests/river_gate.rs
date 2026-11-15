@@ -42,6 +42,7 @@ fn run(start: &[f64], surface: &[f64], p: &GateParams) -> planet_cache::river_ga
             seed: 7,
             sea_level_m: 0.0,
             outside_drains: false,
+            trunks: &[],
         },
         p,
     )
@@ -207,6 +208,7 @@ fn a_store_s_tiles_drain_to_their_border_so_the_start_surface_around_them_dams_n
                 seed: 7,
                 sea_level_m: 0.0,
                 outside_drains: drains,
+                trunks: &[],
             },
             &GateParams { basin_cells: 4, ..params() },
         )
@@ -237,6 +239,7 @@ fn land_is_above_the_sea_level() {
                 seed: 7,
                 sea_level_m: sea,
                 outside_drains: false,
+                trunks: &[],
             },
             &params(),
         )
