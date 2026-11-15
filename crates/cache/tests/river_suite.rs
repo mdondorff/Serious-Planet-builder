@@ -468,3 +468,31 @@ fn the_corridor_bar_scales_with_relief_and_snapping_moves_ends_and_crossings_to_
     assert_eq!(snapped.reaches_over, 1, "{snapped:?}");
     assert!((snapped.deepest_m - 60.0).abs() <= 0.11, "{snapped:?}");
 }
+
+// spec: TEST-137, BUILD-057
+#[test]
+fn a_crossing_leg_carries_the_running_minimum_and_a_rise_outside_the_counted_cells_still_fails_the_reach() {
+    use planet_cache::river_suite::{trunk_corridor, Snap};
+    let g = Grid::new(N, N, DX);
+    let all = vec![true; N * N];
+    // A plateau at 100 m with a pit band at 60 m across the whole grid (x 6..=8; the plateau after it stands 40 m above its minimum, within the bar) and a ridge at 145 m across it (x = 28). The region is x <= 19, so the snapped
+    // reach crosses at an edge cell between the pit and the ridge: carried over, the pit's minimum makes the ridge an 85 m rise; restarted at the crossing it would
+    // be 45 m and pass.
+    let mut z = vec![100.0; N * N];
+    for y in 0..N {
+        for x in 6..=8 {
+            z[y * N + x] = 60.0;
+        }
+        z[y * N + 28] = 145.0;
+    }
+    let region: Vec<bool> = (0..N * N).map(|c| c % N <= 19).collect();
+    let line = vec![vec![(2.0, 10.0), (12.0, 10.0), (20.0, 10.0), (28.0, 10.0), (36.0, 10.0)]];
+    let s = trunk_corridor(&g, &z, &all, &line, 4.0, 50.0, Some(&Snap { node_radius: 3.0, region: &region }));
+    assert_eq!(s.reaches_over, 1, "{s:?}");
+    assert!((s.deepest_m - 85.0).abs() <= 0.11, "{s:?}");
+    // Only the cells x <= 15 are counted: the ridge lies outside them, yet the reach has no route within the bar and is over; no counted vertex is over.
+    let counted: Vec<bool> = (0..N * N).map(|c| c % N <= 15).collect();
+    let t = trunk_corridor(&g, &z, &counted, &line, 4.0, 50.0, None);
+    assert_eq!((t.reaches, t.reaches_over, t.vertices_over), (1, 1, 0), "{t:?}");
+    assert!((t.deepest_m - 85.0).abs() <= 0.11, "{t:?}");
+}

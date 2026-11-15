@@ -775,9 +775,13 @@ pub fn trunk_corridor(
         }
         // No route rises more than the corridor's height range above its running minimum (the bed may fall below the start first).
         let top = cells.iter().map(|&c| z[c]).fold(f64::NEG_INFINITY, f64::max) - cells.iter().map(|&c| z[c]).fold(f64::INFINITY, f64::min);
+        // A reach is over exactly when no route keeps within the bar (every cell of the route counts, inside the counted cells or not); its depth is then the
+        // minimax rise. The vertex counts are of the route's cells inside.
+        let mut failed = false;
         let route = match waypoint_route(w, z, &index, &cells, &points, bar_m) {
             Some(route) => route,
             None => {
+                failed = true;
                 // over the bar: bisect the minimax rise in (bar, top]
                 let (mut lo, mut hi) = (bar_m, top.max(bar_m));
                 // At the height range every step is allowed: no route means the corridor does not join the waypoints (8-neighbour), and the reach is skipped.
@@ -796,21 +800,18 @@ pub fn trunk_corridor(
         let mut deepest = (0.0f64, (0.0, 0.0));
         for &c in &route {
             bed = bed.min(z[c]);
-            if !inside[c] {
-                continue;
-            }
-            seen += 1;
             let depth = z[c] - bed;
-            if depth > bar_m {
-                over += 1;
-                if depth > deepest.0 {
-                    deepest = (depth, ((c % w) as f64, (c / w) as f64));
-                }
+            if failed && depth > deepest.0 {
+                deepest = (depth, ((c % w) as f64, (c / w) as f64));
+            }
+            if inside[c] {
+                seen += 1;
+                over += usize::from(depth > bar_m);
             }
         }
         r.reaches += 1;
         r.vertices += seen;
-        r.reaches_over += usize::from(over > 0);
+        r.reaches_over += usize::from(failed);
         r.vertices_over += over;
         if deepest.0 > r.deepest_m {
             (r.deepest_m, r.deepest_reach, r.deepest_at) = (deepest.0, k, deepest.1);
