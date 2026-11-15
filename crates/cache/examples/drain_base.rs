@@ -726,10 +726,19 @@ fn main() -> Result<(), String> {
         }
         transfer_line += &format!("; residual damped over {hill} m (floored at the sea level + 5 mm)");
         if d8 && std::env::var("PLANET_SCHOTT").is_err() {
-            // The multi-scale breach (Schott 2024's final stage), each cell lowered at most `cap` in all: cap = --cap-mult (default 2) x p95 |residual| over the window's land.
+            // The multi-scale breach (Schott 2024's final stage), each cell lowered at most cap(c) in all: cap(c) = --cap-mult (default 2) x the local residual amplitude, the standard
+            // deviation of B's sub-814 m residual in a box of radius --cap-r L cells (default 8, one solve cell) around c. A pit within that depth is noise of the residual and is breached;
+            // a deeper one is structure (a basin, a lake) and stays for the gate to count.
             let mult: f64 = arg(&args, "--cap-mult").map_or(2.0, |v| v.parse().unwrap());
-            let mut amp: Vec<f64> = (0..w * h).filter(|&c| zr4[c] > 0.0).map(|c| res[c].abs()).collect();
-            let cap = mult * pct(&mut amp, 0.95);
+            let cr: i64 = arg(&args, "--cap-r").map_or(8, |v| v.parse().unwrap());
+            let res2: Vec<f64> = res.iter().map(|v| v * v).collect();
+            let (m1, m2) = (box_mean(w, h, &res, cr), box_mean(w, h, &res2, cr));
+            drop(res2);
+            let capv: Vec<f64> = (0..w * h).map(|c| mult * (m2[c] - m1[c] * m1[c]).max(0.0).sqrt()).collect();
+            drop((m1, m2));
+            let mut capl: Vec<f64> = (0..w * h).filter(|&c| zr4[c] > 0.0).map(|c| capv[c]).collect();
+            let cap_line = format!("cap {mult} x local sigma (radius {cr} cells): p50 {:.2} p95 {:.2} m", pct(&mut capl, 0.5), pct(&mut capl, 0.95));
+            drop(capl);
             let start = z0.clone();
             let outlet: Vec<bool> = (0..w * h).map(|c| c % w == 0 || c / w == 0 || c % w == w - 1 || c / w == h - 1 || z0[c] <= 0.0).collect();
             let tb = std::time::Instant::now();
@@ -740,7 +749,7 @@ fn main() -> Result<(), String> {
                 let g = box_mean(w, h, &box_mean(w, h, &d, r), r);
                 for c in 0..w * h {
                     if !outlet[c] {
-                        z0[c] = (z0[c] - g[c]).max(start[c] - cap);
+                        z0[c] = (z0[c] - g[c]).max(start[c] - capv[c]);
                     }
                 }
             }
@@ -749,16 +758,16 @@ fn main() -> Result<(), String> {
             let mut over = 0usize;
             for c in 0..w * h {
                 if !outlet[c] {
-                    if b[c] < start[c] - cap {
+                    if b[c] < start[c] - capv[c] {
                         over += 1;
                     }
-                    z0[c] = b[c].max(start[c] - cap);
+                    z0[c] = b[c].max(start[c] - capv[c]);
                 }
             }
             let mut low: Vec<f64> = (0..w * h).filter(|&c| !outlet[c]).map(|c| start[c] - z0[c]).filter(|v| *v > 0.01).collect();
             let nl = low.len();
             transfer_line += &format!(
-                "; capped multi-scale breach (8, 4, 2, 1, plain), cap {cap:.2} m ({mult} x p95 |residual|): lowered {nl} cells, p50 {:.2} p95 {:.2} m; the plain breach wanted more than the cap on {over} cells (left as pits); {:.0} s",
+                "; capped multi-scale breach (8, 4, 2, 1, plain), {cap_line}: lowered {nl} cells, p50 {:.2} p95 {:.2} m; the plain breach wanted more than the cap on {over} cells (left as pits); {:.0} s",
                 pct(&mut low, 0.5),
                 pct(&mut low, 0.95),
                 tb.elapsed().as_secs_f64()
