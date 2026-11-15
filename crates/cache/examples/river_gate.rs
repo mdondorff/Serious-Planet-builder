@@ -84,7 +84,7 @@ fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let no_key_check = args.iter().any(|a| a == "--no-key-check");
     let args: Vec<String> = args.into_iter().filter(|a| a != "--no-key-check").collect();
-    let known = ["--window", "--margin", "--store", "--min-cells", "--d", "--threads"];
+    let known = ["--window", "--margin", "--store", "--min-cells", "--d", "--threads", "--surface"];
     let mut k = 0;
     while k < args.len() {
         if !known.contains(&args[k].as_str()) {
@@ -236,6 +236,19 @@ fn main() -> Result<(), String> {
             commit.id,
             key_note(!no_key_check)
         );
+    }
+    // River review (#138, spike branch, never merged): `--surface FILE` replaces the surface by a variant's (raw little-endian f64 of this w x h L window, from erosion_at_l's PLANET_DUMP_DIR),
+    // counted over the region's box like the start surface; the start, the outlets' rule, H1 and the gate's code stay main's.
+    if let Some(f) = value(&args, "--surface") {
+        if store.is_some() {
+            return Err("--surface replaces the window's surface: it does not go with --store".into());
+        }
+        let bytes = std::fs::read(f).map_err(|e| format!("{f}: {e}"))?;
+        if bytes.len() != w * h * 8 {
+            return Err(format!("{f}: {} bytes, the window needs {} ({w} x {h} f64)", bytes.len(), w * h * 8));
+        }
+        surface = bytes.chunks_exact(8).map(|b| f64::from_le_bytes(b.try_into().expect("8 bytes"))).collect();
+        label = format!("surface {f} on the window {win:?}, margin {margin}, counted over the region's box");
     }
     // H1's crossings of the region's box, in the L window's cells (an H1 cell's centre).
     let to_local = |c: u32| {
