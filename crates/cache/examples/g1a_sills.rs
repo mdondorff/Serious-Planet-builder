@@ -318,7 +318,7 @@ fn topological_order(receiver: &[u32]) -> Vec<u32> {
 }
 
 /// K6's routing on the filled levels with the sill condition: a neighbour is open when it is lower and the cell's level reaches the sill between them.
-fn route_sills(grid: &Grid, w: &[f64], sill: &dyn Fn(usize, usize, usize) -> f64, outlet: &[bool], seed: u64, weights: &[f32]) -> Routing {
+fn route_sills(grid: &Grid, w: &[f64], sill: &dyn Fn(usize, usize, usize) -> f64, outlet: &[bool], seed: u64, weights: &[f32], mfd_open: bool) -> Routing {
     let n = grid.len();
     let open = |p: usize, d: usize| -> Option<usize> {
         let q = grid.neighbour(p, d)?;
@@ -355,7 +355,8 @@ fn route_sills(grid: &Grid, w: &[f64], sill: &dyn Fn(usize, usize, usize) -> f64
         let mut wt = [0.0f64; 8];
         let mut sum = 0.0;
         for (d, x) in wt.iter_mut().enumerate() {
-            if let Some(q) = open(p, d) {
+            let q = if mfd_open { open(p, d) } else { grid.neighbour(p, d).filter(|&q| w[q] < w[p]) };
+            if let Some(q) = q {
                 if root[q] != root[p] {
                     continue;
                 }
@@ -699,6 +700,9 @@ fn near(set: &HashSet<u32>, c: u32, rw: usize, r: i64) -> bool {
 fn diff_line(name: &str, a: &Topo, b: &Topo, rw: usize) -> String {
     let changed = a.reaches.iter().filter(|r| !b.reaches.contains(*r)).count();
     let new = b.reaches.iter().filter(|r| !a.reaches.contains(*r)).count();
+    // a reach moved: one of its cells lies more than 1 cell from every trunk cell of the other graph
+    let moved1 = a.reaches.iter().filter(|r| r.iter().any(|&c| a.cells.contains(&c) && !near(&b.cells, c, rw, 1))).count();
+    let moved1b = b.reaches.iter().filter(|r| r.iter().any(|&c| b.cells.contains(&c) && !near(&a.cells, c, rw, 1))).count();
     let j_lost = a.junctions.iter().filter(|&&c| !b.junctions.contains(&c)).count();
     let j_lost1 = a.junctions.iter().filter(|&&c| !near(&b.junctions, c, rw, 1)).count();
     let o_lost = a.mouths.iter().filter(|&&c| !b.mouths.contains(&c)).count();
@@ -706,7 +710,7 @@ fn diff_line(name: &str, a: &Topo, b: &Topo, rw: usize) -> String {
     let cells_off = b.cells.iter().filter(|&&c| !a.cells.contains(&c)).count();
     let cells_off1 = b.cells.iter().filter(|&&c| !near(&a.cells, c, rw, 1)).count();
     format!(
-        "{name}: reaches {} -> {} ({changed} of the first not in the second, {:.2} %; {new} new); junctions {} -> {} ({j_lost} moved, {j_lost1} by more than 1 cell); outlets {} -> {} ({o_lost} moved, {o_lost1} by more than 1 cell); trunk cells {} -> {} ({cells_off} of the second off the first's cells, {:.2} %; {cells_off1} more than 1 cell off, {:.2} %)",
+        "{name}: reaches {} -> {} ({changed} of the first not in the second, {:.2} %; {new} new; {moved1} of the first and {moved1b} of the second with a cell more than 1 cell off the other's trunks); junctions {} -> {} ({j_lost} moved, {j_lost1} by more than 1 cell); outlets {} -> {} ({o_lost} moved, {o_lost1} by more than 1 cell); trunk cells {} -> {} ({cells_off} of the second off the first's cells, {:.2} %; {cells_off1} more than 1 cell off, {:.2} %)",
         a.reaches.len(),
         b.reaches.len(),
         100.0 * changed as f64 / a.reaches.len().max(1) as f64,
@@ -727,15 +731,20 @@ fn roots(r: &Routing) -> Vec<u32> {
 }
 
 /// Area (km2) of the land cells in the box whose outlet differs, and the count whose receiver differs.
-fn catchment_diff(grid: &Grid, a: &H1, b: &H1, land_box: &[bool]) -> (f64, usize, f64) {
+fn catchment_diff(grid: &Grid, a: &H1, b: &H1, land_box: &[bool], tol: i64) -> (f64, usize, f64) {
     let (ra, rb) = (roots(&a.routing), roots(&b.routing));
+    let rw = grid.w();
+    let far = |x: u32, y: u32| {
+        let (ax, ay, bx, by) = ((x as usize % rw) as i64, (x as usize / rw) as i64, (y as usize % rw) as i64, (y as usize / rw) as i64);
+        (ax - bx).abs().max((ay - by).abs()) > tol
+    };
     let (mut area, mut recv, mut total) = (0.0, 0usize, 0.0);
     for c in 0..grid.len() {
         if !land_box[c] {
             continue;
         }
         total += grid.cell_area(c);
-        if ra[c] != rb[c] {
+        if far(ra[c], rb[c]) {
             area += grid.cell_area(c);
         }
         recv += usize::from(a.routing.receiver[c] != b.routing.receiver[c]);
@@ -745,13 +754,13 @@ fn catchment_diff(grid: &Grid, a: &H1, b: &H1, land_box: &[bool]) -> (f64, usize
 
 /// The 10 largest rivers of `a` by mouth discharge (mouths in or out of the box, a cell in the box): per river, whether `b` keeps its mouth (within 1 cell) and the
 /// share of its main stem (largest-Q upstream chain) within 1 cell of `b`'s trunk cells.
-fn major(a: &H1, b: &H1, in_box: &dyn Fn(u32) -> bool, rw: usize) -> Vec<(u32, f64, bool, f64, f64)> {
+fn major(a: &H1, b: &H1, in_box: &dyn Fn(u32) -> bool, rw: usize) -> Vec<(u32, f64, bool, f64, f64, i64, usize)> {
     let segs = &a.hydro.segments;
     let trunk: HashSet<usize> = a.trunk_seg.iter().copied().collect();
-    let mut ups: HashMap<u32, Vec<usize>> = HashMap::new();
+    let mut ups: HashMap<usize, Vec<usize>> = HashMap::new();
     for (k, s) in segs.iter().enumerate() {
         if s.downstream != NONE && trunk.contains(&k) {
-            ups.entry(s.downstream).or_default().push(k);
+            ups.entry(s.downstream as usize).or_default().push(k);
         }
     }
     let cells_of = |h1: &H1, k: usize| -> Vec<u32> {
@@ -765,18 +774,24 @@ fn major(a: &H1, b: &H1, in_box: &dyn Fn(u32) -> bool, rw: usize) -> Vec<(u32, f
         v
     };
     let b_cells: HashSet<u32> = b.trunk_cells.iter().flatten().copied().collect();
-    let b_mouths: HashSet<u32> =
-        b.trunk_seg.iter().map(|&k| &b.hydro.segments[k]).filter(|s| s.downstream == NONE).map(|s| s.down).collect();
-    let b_q: HashMap<u32, f64> =
-        b.trunk_seg.iter().map(|&k| &b.hydro.segments[k]).filter(|s| s.downstream == NONE).map(|s| (s.down, s.q_down)).collect();
-    let mut mouths: Vec<usize> = a
-        .trunk_seg
-        .iter()
-        .copied()
-        .filter(|&k| segs[k].downstream == NONE)
-        .filter(|&k| a.trunk_cells[a.trunk_seg.iter().position(|&x| x == k).expect("a trunk")].iter().any(|&c| in_box(c)))
-        .collect();
-    mouths.sort_by(|&x, &y| segs[y].q_down.total_cmp(&segs[x].q_down).then(x.cmp(&y)));
+    // the rivers leaving the box: trunk segments whose end cell is in the box and whose downstream segment ends outside it (or none: a mouth)
+    let exits_of = |h1: &H1| -> Vec<usize> {
+        let sg = &h1.hydro.segments;
+        let mut v: Vec<usize> = h1
+            .trunk_seg
+            .iter()
+            .copied()
+            .filter(|&k| in_box(sg[k].down) && (sg[k].downstream == NONE || !in_box(sg[sg[k].downstream as usize].down)))
+            .collect();
+        v.sort_by(|&x, &y| sg[y].q_down.total_cmp(&sg[x].q_down).then(x.cmp(&y)));
+        let mut seen = HashSet::new();
+        v.retain(|&k| seen.insert(sg[k].down));
+        v
+    };
+    let mouths = exits_of(a);
+    let b_exit: Vec<(u32, f64)> = exits_of(b).iter().map(|&k| (b.hydro.segments[k].down, b.hydro.segments[k].q_down)).collect();
+    let b_mouths: HashSet<u32> = b_exit.iter().map(|e| e.0).collect();
+    let b_q: HashMap<u32, f64> = b_exit.into_iter().collect();
     let mut out = Vec::new();
     for &m in mouths.iter().take(10) {
         let mut stem = Vec::new();
@@ -784,21 +799,24 @@ fn major(a: &H1, b: &H1, in_box: &dyn Fn(u32) -> bool, rw: usize) -> Vec<(u32, f
         loop {
             stem.extend(cells_of(a, k));
             // upstream segments end at this segment's up cell
-            let Some(u) = ups.get(&segs[k].up) else { break };
+            let Some(u) = ups.get(&k) else { break };
             k = *u.iter().max_by(|&&x, &&y| segs[x].q_down.total_cmp(&segs[y].q_down).then(y.cmp(&x))).expect("non-empty");
         }
         let stem_in: Vec<u32> = stem.into_iter().filter(|&c| in_box(c)).collect();
         let kept = stem_in.iter().filter(|&&c| near(&b_cells, c, rw, 1)).count();
         let mouth = segs[m].down;
         let mouth_kept = near(&b_mouths, mouth, rw, 1);
-        let qb = (-1i64..=1)
-            .flat_map(|dy| (-1i64..=1).map(move |dx| (dx, dy)))
-            .filter_map(|(dx, dy)| {
-                let (x, y) = ((mouth as usize % rw) as i64 + dx, (mouth as usize / rw) as i64 + dy);
-                b_q.get(&((y * rw as i64 + x) as u32)).copied()
-            })
-            .fold(0.0, f64::max);
-        out.push((mouth, segs[m].q_down, mouth_kept, 100.0 * kept as f64 / stem_in.len().max(1) as f64, qb));
+        // the b mouth of the largest Q within 10 cells (Chebyshev), and its distance
+        let (mx, my) = ((mouth as usize % rw) as i64, (mouth as usize / rw) as i64);
+        let mut qb = (0.0f64, -1i64);
+        for (&c, &q) in &b_q {
+            let (x, y) = ((c as usize % rw) as i64, (c as usize / rw) as i64);
+            let dd = (x - mx).abs().max((y - my).abs());
+            if dd <= 10 && q > qb.0 {
+                qb = (q, dd);
+            }
+        }
+        out.push((mouth, segs[m].q_down, mouth_kept, 100.0 * kept as f64 / stem_in.len().max(1) as f64, qb.0, qb.1, stem_in.len()));
     }
     out
 }
@@ -926,7 +944,7 @@ fn main() -> Result<(), String> {
     let zs = &solve.zs;
     let point_sill = |p: usize, _d: usize, q: usize| zs[p].max(zs[q]);
     let fc = flood(grid, zs, &point_sill, outlet, eps);
-    let rc = route_sills(grid, &fc, &point_sill, outlet, stream, &weight);
+    let rc = route_sills(grid, &fc, &point_sill, outlet, stream, &weight, true);
     let tc = h1_from(grid, zs, &fc, rc, outlet, &runoff, &evap);
 
     // ---- sills of S0
@@ -977,12 +995,19 @@ fn main() -> Result<(), String> {
     let k6_sills = |s: &Sills| -> H1 {
         let sill = |p: usize, d: usize, q: usize| s.at(p, d, q);
         let f = flood(grid, &s.h, &sill, outlet, eps);
-        let r = route_sills(grid, &f, &sill, outlet, stream, &weight);
+        let r = route_sills(grid, &f, &sill, outlet, stream, &weight, true);
+        h1_from(grid, &s.h, &f, r, outlet, &runoff, &evap)
+    };
+    let k6_sills_mfd_all = |s: &Sills| -> H1 {
+        let sill = |p: usize, d: usize, q: usize| s.at(p, d, q);
+        let f = flood(grid, &s.h, &sill, outlet, eps);
+        let r = route_sills(grid, &f, &sill, outlet, stream, &weight, false);
         h1_from(grid, &s.h, &f, r, outlet, &runoff, &evap)
     };
     let t = Instant::now();
     let t1 = k6_sills(&sills);
     println!("G1A K6' routing: {:.1} s", t.elapsed().as_secs_f64());
+    let t1_mfd = k6_sills_mfd_all(&sills);
     // perturbed runs
     let t = Instant::now();
     let s0_noise = |c: usize| {
@@ -995,6 +1020,10 @@ fn main() -> Result<(), String> {
     let sills_ps = nodes_and_sills(&s0_read, rw, rh, threads, Some((0x6731_A5_0002, 1.0)));
     let t1_ps = k6_sills(&sills_ps);
     drop(sills_ps);
+    let zs_p: Vec<f64> = (0..cells).map(|c| solve.zs[c] + 0.5 * noise(0x6731_A5_0003, grid.global_id(c))).collect();
+    let r0p = route_rules(grid, &zs_p, outlet, eps, stream, 0.0, Some(&weight), RoundRules::ROUND);
+    let f0p = priority_flood_with(grid, &zs_p, outlet, eps, true);
+    let t0_p = h1_from(grid, &zs_p, &f0p, r0p, outlet, &runoff, &evap);
     println!("G1A perturbed runs: {:.1} s", t.elapsed().as_secs_f64());
 
     // ---- topology
@@ -1007,11 +1036,19 @@ fn main() -> Result<(), String> {
     println!("G1A topology {}", diff_line("today -> control (this code on z_s, no regrade)", &g0, &gc, rw));
     println!("G1A topology {}", diff_line("today -> K6' (sills of S0)", &g0, &g1, rw));
     println!("G1A topology {}", diff_line("control -> K6'", &gc, &g1, rw));
+    println!("G1A topology {}", diff_line("today -> K6' with the MFD over all lower neighbours", &g0, &topo(&t1_mfd, &in_box_h1), rw));
+    let g0p = topo(&t0_p, &in_box_h1);
+    println!("G1A sensitivity {}", diff_line("today -> today with z_s +-0.5 m (baseline)", &g0, &g0p, rw));
     println!("G1A sensitivity {}", diff_line("K6' -> K6' with S0 +-0.5 m", &g1, &gp0, rw));
     println!("G1A sensitivity {}", diff_line("K6' -> K6' with sills +-1 m", &g1, &gps, rw));
-    for (name, a, b) in [("today -> control", &t0, &tc), ("today -> K6'", &t0, &t1), ("K6' -> S0 +-0.5 m", &t1, &t1_p0), ("K6' -> sills +-1 m", &t1, &t1_ps)] {
-        let (area, recv, total) = catchment_diff(grid, a, b, &land_box_h1);
-        println!("G1A catchments {name}: {area:.0} of {total:.0} km2 of the box's land drain to another outlet ({:.2} %); {recv} cells change receiver", 100.0 * area / total);
+    for (name, a, b) in [("today -> control", &t0, &tc), ("today -> K6'", &t0, &t1), ("today -> z_s +-0.5 m", &t0, &t0_p), ("K6' -> S0 +-0.5 m", &t1, &t1_p0), ("K6' -> sills +-1 m", &t1, &t1_ps)] {
+        let (area, recv, total) = catchment_diff(grid, a, b, &land_box_h1, 2);
+        let (area10, _, _) = catchment_diff(grid, a, b, &land_box_h1, 10);
+        println!(
+            "G1A catchments {name}: of {total:.0} km2 of the box's land, {area:.0} km2 ({:.2} %) drain to an outlet more than 2 cells (1.6 km) from the first's, {area10:.0} km2 ({:.2} %) more than 10 cells (8 km); {recv} cells change receiver",
+            100.0 * area / total,
+            100.0 * area10 / total
+        );
     }
     // K5's channel cells: today's H1 channel cells (A_d >= 75 km2 on z_s), and K5's carve (z_b - z_s)
     let k5ch: HashSet<u32> = (0..cells as u32).filter(|&c| t0.hydro.channel[c as usize]).collect();
@@ -1032,11 +1069,12 @@ fn main() -> Result<(), String> {
             p50(&carve_off)
         );
     }
-    for (name, a, b) in [("today -> K6'", &t0, &t1), ("today -> control", &t0, &tc), ("K6' -> S0 +-0.5 m", &t1, &t1_p0), ("K6' -> sills +-1 m", &t1, &t1_ps)] {
+    for (name, a, b) in [("today -> K6'", &t0, &t1), ("today -> control", &t0, &tc), ("today -> z_s +-0.5 m", &t0, &t0_p), ("K6' -> S0 +-0.5 m", &t1, &t1_p0), ("K6' -> sills +-1 m", &t1, &t1_ps)] {
         let m = major(a, b, &in_box_h1, rw);
         let changed = m.iter().filter(|r| !r.2 || r.3 < 95.0).count();
-        let rows: Vec<String> = m.iter().map(|r| format!("{}:{:.0}->{:.0}m3/s,{},{:.1}%", r.0, r.1, r.4, if r.2 { "mouth" } else { "MOVED" }, r.3)).collect();
-        println!("G1A major {name}: {changed} of {} changed (mouth moved or under 95 % of the main stem within 1 cell): {}", m.len(), rows.join(" "));
+        let rows: Vec<String> =
+            m.iter().map(|r| format!("{}:{:.0}->{:.0}m3/s@{},{},stem{}:{:.1}%", r.0, r.1, r.4, r.5, if r.2 { "mouth" } else { "MOVED" }, r.6, r.3)).collect();
+        println!("G1A major {name}: {changed} of {} changed (the box exit moved more than 1 cell or under 95 % of the main stem in the box within 1 cell; the 10 largest rivers leaving the box): {}", m.len(), rows.join(" "));
     }
 
     // ---- corridors
