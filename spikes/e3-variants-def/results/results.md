@@ -236,8 +236,8 @@ Time box: 0.5 day (2026-11-16). Code: `ridge_split.py` (spike/e3-def, target too
 - **Cut-through:** a lowered ridge cell with a channel cell within 1 cell (its 3 x 3 neighbourhood) on the lowered surface and none there on today's surface: a channel or breach path now crosses the ridge line.
 - **Saddle:** a connected group (8 neighbours) of cut-through cells.
 - **Rounding:** every other lowered ridge cell (the crest drops with no channel through it).
-- **K7 by sub-step (A, R1h and M1):** each ridge cell K7 lowers more than 20 m is booked to the sub-step that lowered it most (burn-in of the channel lines, local carve, thermal, deposition sweep, pit spreading, final channel pass), and split the same way (channels from A's pre-K7 and post-K7 surfaces).
-- Raw: `raw/ridge-split.csv`, `raw/k7-steps.csv`.
+- **K7 by sub-step (A, R1h and M1):** each ridge cell K7 lowers more than 20 m is booked to the sub-step that lowered it most (burn-in of the channel lines, local carve, thermal, deposition sweep, pit spreading, final channel pass), and split the same way (channels from A's pre-K7 and post-K7 surfaces). The table's last column counts the ridge cells one sub-step alone lowers over 20 m (its own increment, not booked).
+- Raw: `raw/ridge-split.csv`, `raw/k7-steps.csv`, `raw/k7-carve-split.txt` (the breach alone against the carve, and the lowering percentiles on ridge cells).
 
 ### 7.2 Counts
 | Window | Variant | Before K7: lowered over 20 m | cut-through cells (saddles) | rounding cells | After K7: lowered over 20 m | cut-through cells (saddles) | rounding cells | Saddles at 75 km2 before / after |
@@ -296,7 +296,7 @@ Time box: 0.5 day (2026-11-16). Code: `ridge_split.py` (spike/e3-def, target too
 
 ### 7.3 Findings
 - **Most ridge lowering is rounding, not cutting.** Before K7, cut-throughs are 0.8-13.4 % of the lowered ridge cells for A, B, D and E, and 10.6-36.0 % for F (R3a 35.6 %, R3b 30.9 %, F1 36.0 %); after K7, 1.3-8.0 % and 4.7-32.9 %.
-- **The D-1 ranking on cut-through saddles before K7 (fewest first):** B, then A, on every window, except F1, where A (42) comes before B (46). D and E sit within 0.3-9 % of each other (F1 the widest: 334 against 365). F is last on R1h, R3a, R3b and F1; on M1 it lies between A and D at 1 km2, last at 75 km2.
+- **The D-1 ranking on cut-through saddles before K7 (fewest first):** B, then A, on every window, except F1, where A (42) comes before B (46). D and E sit within 0.15-9.3 % of each other (F1 the widest: 334 against 365). F is last on R1h, R3a, R3b and F1; on M1 it lies between A and D at 1 km2, last at 75 km2.
   - F's hand-over (the 4-neighbour breach plus the per-scale pipeline) makes the most saddles on flat ground: R3b 3,302 and F1 5,122, against 941-946 and 334-365 for D and E.
   - D and E make about 3.2x A's saddles on R1h and 1.5x on M1.
 - **After K7, B and A stay fewest;** on R1h F moves ahead of D and E (saddles B 1,915, A 2,364, F 6,580, D 6,885, E 7,048). K7 adds rounding mainly, and some saddles (+1,151 to +3,352 on R1h).
