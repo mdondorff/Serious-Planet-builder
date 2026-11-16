@@ -383,6 +383,8 @@ struct H1 {
     graph: ChannelGraph,
     trunk_seg: Vec<usize>,
     trunk_cells: Vec<Vec<u32>>,
+    /// The D8 drainage area (true area, unweighted) of each cell along the receivers, m2.
+    d8: Vec<f64>,
 }
 
 fn h1_from(grid: &Grid, z: &[f64], filled: &[f64], routing: Routing, outlet: &[bool], runoff: &[f32], evap: &[f32]) -> H1 {
@@ -397,7 +399,14 @@ fn h1_from(grid: &Grid, z: &[f64], filled: &[f64], routing: Routing, outlet: &[b
             trunk_cells.push(cells);
         }
     });
-    H1 { routing, hydro, graph, trunk_seg, trunk_cells }
+    let mut d8: Vec<f64> = (0..grid.len()).map(|p| grid.cell_area(p)).collect();
+    for &c in routing.order.iter().rev() {
+        let r = routing.receiver[c as usize];
+        if r != NONE {
+            d8[r as usize] += d8[c as usize];
+        }
+    }
+    H1 { routing, hydro, graph, trunk_seg, trunk_cells, d8 }
 }
 
 // ---------------------------------------------------------------- the corridor measure (land-only snap)
@@ -841,8 +850,9 @@ fn ups_of(h1: &H1) -> HashMap<usize, Vec<usize>> {
     ups
 }
 
-/// The main stem upstream of segment `k` (the largest-Q upstream segment at each confluence): its cells, and its major confluences in the box
-/// (a tributary of at least 10 % of the stem's Q below the confluence, and of at least 1 m3/s) as (cell, tributary Q).
+/// The main stem upstream of segment `k` (the upstream segment of the largest D8 area at each confluence): its cells, and its major confluences in the box
+/// (a tributary whose D8 area above the confluence is at least 75 km2 and 10 % of the stem's D8 area at the confluence) as (cell, tributary D8 area km2).
+/// D8 area, not the MFD Q: the MFD splits a trunk's Q over parallel D8 lines that re-join, and those are no tributaries.
 fn main_stem(h1: &H1, ups: &HashMap<usize, Vec<usize>>, k: usize, in_box: &dyn Fn(u32) -> bool) -> (Vec<u32>, Vec<(u32, f64)>) {
     let segs = &h1.hydro.segments;
     let (mut cells, mut conf) = (Vec::new(), Vec::new());
@@ -856,11 +866,21 @@ fn main_stem(h1: &H1, ups: &HashMap<usize, Vec<usize>>, k: usize, in_box: &dyn F
             cells.push(c);
         }
         let Some(u) = ups.get(&k) else { break };
-        let main = *u.iter().max_by(|&&x, &&y| segs[x].q_down.total_cmp(&segs[y].q_down).then(y.cmp(&x))).expect("non-empty");
+        // a tributary's D8 area just above the confluence: its cell whose receiver is the confluence
+        let above = |t: usize| -> f64 {
+            let st = &segs[t];
+            let mut c = st.up;
+            while h1.routing.receiver[c as usize] != st.down && c != st.down {
+                c = h1.routing.receiver[c as usize];
+            }
+            h1.d8[c as usize]
+        };
+        let main = *u.iter().max_by(|&&x, &&y| above(x).total_cmp(&above(y)).then(y.cmp(&x))).expect("non-empty");
         if in_box(s.up) {
             for &t in u {
-                if t != main && segs[t].q_down >= 0.1 * s.q_up.max(segs[main].q_down) && segs[t].q_down >= EDGE_Q {
-                    conf.push((s.up, segs[t].q_down));
+                let a = above(t);
+                if t != main && a >= 75.0e6 && a >= 0.1 * h1.d8[s.up as usize] {
+                    conf.push((s.up, a / 1e6));
                 }
             }
         }
@@ -928,7 +948,7 @@ fn stop_test(a: &H1, b: &H1, in_box: &dyn Fn(u32) -> bool, rw: usize) -> Vec<Str
         let gained: Vec<&(u32, f64)> = conf_b.iter().filter(|y| !conf_a.iter().any(|x| cheb(x.0, y.0, rw) <= 2)).collect();
         let fmt = |v: &[&(u32, f64)]| v.iter().map(|x| format!("{}({:.0})", x.0, x.1)).collect::<Vec<_>>().join("/");
         out.push(format!(
-            "exit {exit} Q {:.0}: outlet {} cells off{}; {} major confluences, lost {} [{}], gained {} [{}]{}",
+            "exit {exit} Q {:.0}: outlet {} cells off{}; {} major confluences (D8 km2), lost {} [{}], gained {} [{}]{}",
             segs[m].q_down,
             od,
             if od > 10 { " (CHANGED)" } else { "" },
@@ -944,9 +964,11 @@ fn stop_test(a: &H1, b: &H1, in_box: &dyn Fn(u32) -> bool, rw: usize) -> Vec<Str
 }
 
 /// Trunk heads (trunk segments without an upstream trunk segment, head cell in the box), trunk length in the box (km, cell to receiver) and trunk cells in the box.
-fn trunk_stats(h1: &H1, grid: &Grid, in_box: &dyn Fn(u32) -> bool) -> (usize, f64, usize) {
+fn trunk_stats(h1: &H1, grid: &Grid, in_box: &dyn Fn(u32) -> bool) -> (usize, usize, f64, usize) {
     let ups = ups_of(h1);
-    let heads = h1.trunk_seg.iter().filter(|&&k| !ups.contains_key(&k) && in_box(h1.hydro.segments[k].up)).count();
+    let head_cells: Vec<u32> = h1.trunk_seg.iter().filter(|&&k| !ups.contains_key(&k) && in_box(h1.hydro.segments[k].up)).map(|&k| h1.hydro.segments[k].up).collect();
+    let heads = head_cells.len();
+    let side = head_cells.iter().filter(|&&c| h1.d8[c as usize] < 75.0e6).count();
     let mut cells: HashSet<u32> = HashSet::new();
     for cs in &h1.trunk_cells {
         cells.extend(cs.iter().copied().filter(|&c| in_box(c)));
@@ -959,7 +981,7 @@ fn trunk_stats(h1: &H1, grid: &Grid, in_box: &dyn Fn(u32) -> bool) -> (usize, f6
             len += grid.distance_at(c as usize, d);
         }
     }
-    (heads, len / 1000.0, cells.len())
+    (heads, side, len / 1000.0, cells.len())
 }
 
 
@@ -1220,8 +1242,11 @@ fn main() -> Result<(), String> {
     }
 
     for (name, h1) in [("today", &t0), ("control", &tc), ("K6'", &t1), ("K6' MFD over all lower neighbours", &t1_mfd)] {
-        let (heads, km, n) = trunk_stats(h1, grid, &in_box_h1);
-        println!("G1A trunk stats {name}: {heads} heads in the box, {km:.0} km of trunk, {n} cells ({:.3} km a cell)", km / n.max(1) as f64);
+        let (heads, side, km, n) = trunk_stats(h1, grid, &in_box_h1);
+        println!(
+            "G1A trunk stats {name}: {heads} heads in the box ({side} with a D8 area under 75 km2: fed by the MFD split, not by their own catchment), {km:.0} km of trunk, {n} cells ({:.3} km a cell)",
+            km / n.max(1) as f64
+        );
     }
     for (name, a, b) in [("today -> K6'", &t0, &t1), ("today -> control", &t0, &tc), ("today -> z_s +-0.5 m", &t0, &t0_p), ("K6' -> S0 +-0.5 m", &t1, &t1_p0), ("K6' -> sills +-1 m", &t1, &t1_ps)] {
         let rows = stop_test(a, b, &in_box_h1, rw);
