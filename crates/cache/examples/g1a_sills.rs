@@ -943,13 +943,18 @@ fn stop_test(a: &H1, b: &H1, in_box: &dyn Fn(u32) -> bool, rw: usize) -> Vec<Str
                 }
             }
         }
-        let conf_b = best.map(|(_, c)| main_stem(b, &ub, seg_of_b[&c], in_box).1).unwrap_or_default();
+        let (stem_b, conf_b) = best.map(|(_, c)| main_stem(b, &ub, seg_of_b[&c], in_box)).unwrap_or_default();
+        let stem_b_in = stem_b.iter().filter(|&&c| in_box(c)).count();
+        let stem_a_in = stem.iter().filter(|&&c| in_box(c)).count();
+        let d8b = best.map_or(0.0, |(a, _)| a);
         let lost: Vec<&(u32, f64)> = conf_a.iter().filter(|x| !conf_b.iter().any(|y| cheb(x.0, y.0, rw) <= 2)).collect();
         let gained: Vec<&(u32, f64)> = conf_b.iter().filter(|y| !conf_a.iter().any(|x| cheb(x.0, y.0, rw) <= 2)).collect();
         let fmt = |v: &[&(u32, f64)]| v.iter().map(|x| format!("{}({:.0})", x.0, x.1)).collect::<Vec<_>>().join("/");
         out.push(format!(
-            "exit {exit} Q {:.0}: outlet {} cells off{}; {} major confluences (D8 km2), lost {} [{}], gained {} [{}]{}",
+            "exit {exit} Q {:.0} D8 {:.0} -> {:.0} km2, stem {stem_a_in} -> {stem_b_in} cells in the box: outlet {} cells off{}; {} major confluences (D8 km2), lost {} [{}], gained {} [{}]{}",
             segs[m].q_down,
+            a.d8[exit as usize] / 1e6,
+            d8b / 1e6,
             od,
             if od > 10 { " (CHANGED)" } else { "" },
             conf_a.len(),
