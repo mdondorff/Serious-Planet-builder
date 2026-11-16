@@ -793,7 +793,10 @@ fn major(a: &H1, b: &H1, in_box: &dyn Fn(u32) -> bool, rw: usize) -> Vec<(u32, f
     let b_mouths: HashSet<u32> = b_exit.iter().map(|e| e.0).collect();
     let b_q: HashMap<u32, f64> = b_exit.into_iter().collect();
     let mut out = Vec::new();
-    for &m in mouths.iter().take(10) {
+    for &m in mouths.iter() {
+        if out.len() == 10 {
+            break;
+        }
         let mut stem = Vec::new();
         let mut k = m;
         loop {
@@ -803,6 +806,10 @@ fn major(a: &H1, b: &H1, in_box: &dyn Fn(u32) -> bool, rw: usize) -> Vec<(u32, f
             k = *u.iter().max_by(|&&x, &&y| segs[x].q_down.total_cmp(&segs[y].q_down).then(y.cmp(&x))).expect("non-empty");
         }
         let stem_in: Vec<u32> = stem.into_iter().filter(|&c| in_box(c)).collect();
+        // a major river runs at least 20 cells (16 km) of its main stem in the box
+        if stem_in.len() < 20 {
+            continue;
+        }
         let kept = stem_in.iter().filter(|&&c| near(&b_cells, c, rw, 1)).count();
         let mouth = segs[m].down;
         let mouth_kept = near(&b_mouths, mouth, rw, 1);
@@ -1074,7 +1081,7 @@ fn main() -> Result<(), String> {
         let changed = m.iter().filter(|r| !r.2 || r.3 < 95.0).count();
         let rows: Vec<String> =
             m.iter().map(|r| format!("{}:{:.0}->{:.0}m3/s@{},{},stem{}:{:.1}%", r.0, r.1, r.4, r.5, if r.2 { "mouth" } else { "MOVED" }, r.6, r.3)).collect();
-        println!("G1A major {name}: {changed} of {} changed (the box exit moved more than 1 cell or under 95 % of the main stem in the box within 1 cell; the 10 largest rivers leaving the box): {}", m.len(), rows.join(" "));
+        println!("G1A major {name}: {changed} of {} changed (the box exit moved more than 1 cell or under 95 % of the main stem in the box within 1 cell; the 10 largest rivers leaving the box with 20 cells or more of main stem in it): {}", m.len(), rows.join(" "));
     }
 
     // ---- corridors
