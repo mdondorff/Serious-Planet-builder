@@ -1,0 +1,3 @@
+﻿BAKE-TIME 379 s, peak working set 5,30 GB, exit 
+BAKE-E front 34 s, one round at L 73 s, L channels 66 s: 3016 segments, 312313 channel cells
+BAKE-E commit 5d79632c245e4563, 52 tiles, into C:/DEV/SeriousPlanetData/tmp/e3-def/stores/r1h-bcheck (379 s in all)

@@ -1,0 +1,4 @@
+﻿BAKE-TIME 395 s, peak working set 5,04 GB, exit 
+BAKE-E pre-K7 surface (8160 x 8160 f64) into C:/DEV/SeriousPlanetData/tmp/e3-def/prek7/r3a-g.f64
+BAKE-E front 29 s, one round at L 82 s, L channels 94 s: 2591 segments, 222981 channel cells
+BAKE-E commit 921491e579cb7364, 51 tiles, into C:/DEV/SeriousPlanetData/tmp/e3-def/stores/r3a-g (394 s in all)
