@@ -198,8 +198,7 @@ Scope: project (the GLO-30 benchmark, SPIKE-108's frozen pools, P3 E1)
 - GLO-30 basin shares are an upper bound; low-gradient windows are judged against a DTM. Steep ground agrees within 2 % relief.
 - Obsolete when: the benchmark uses a bare-earth source for every tile.
 
-## 2026-11-17 River-graph markers need their own uniqueness class and a chain walk through them
+## 2026-11-17 River-graph markers: own uniqueness class, walked through
 Scope: project (river graph, GEN-189)
-- The G0 contract made one node per (level, anchor) and also put a `trib_junction` on a trunk source's cell; the lead's reading separates markers from plain nodes (a marker shares only with its reach's up node at vertex 0).
-- A marker has no outgoing reach: a validator that walks only outgoing reaches stops at every junction and misses cycles and outlet-less chains through it; the walk follows the marker's reach.
+- A marker shares a cell only with its reach's up node (contract reading 1); validators follow a chain through a marker's reach, or cycles and outlet-less chains through junctions go unseen.
 - Obsolete when: never.
