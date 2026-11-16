@@ -1,0 +1,17 @@
+SPIKE-122 addendum (#127): R1h stage split by ridge_trace.py (spike branch spike/e3-def, target/e3/tools), ridge cells of today's surface in the core (prominence 2 m at 2 L cells, land): 1,359,069.
+| Stage | Ridge cells lowered over 20 m | share | over 50 m | lowering p95 / max on ridge cells (m) | raised over 20 m |
+|---|---|---|---|---|---|
+| A: round + K7 (store - today) | 409,406 | 30.12 % | 123,325 | 68.3 / 336.5 | 0 |
+| D: hand-over (cap 0 - today) | 191,041 | 14.06 % | 24,086 | 33.9 / 266.9 | 6,747 |
+| D: capped breach (start - cap 0) | 891 | 0.07 % | 36 | 0.7 / 94.1 | 0 |
+| D: bake, K7 (store - start) | 281,256 | 20.69 % | 28,068 | 38.7 / 229.5 | 10 |
+| D: total (store - today) | 573,536 | 42.20 % | 128,288 | 63.1 / 268.5 | 646 |
+| E: hand-over (cap 0 - today) | 234,360 | 17.24 % | 30,516 | 37.3 / 266.9 | 5,289 |
+| E: capped breach (start - cap 0) | 111 | 0.01 % | 4 | 0.2 / 71.9 | 0 |
+| E: bake, K7 (store - start) | 289,560 | 21.31 % | 27,820 | 38.8 / 254.4 | 5 |
+| E: total (store - today) | 617,971 | 45.47 % | 146,345 | 65.9 / 266.9 | 239 |
+| F: hand-over + Schott (start - today) | 138,132 | 10.16 % | 57,872 | 42.3 / 462.2 | 96,321 |
+| F: bake, K7 (store - start) | 315,585 | 23.22 % | 32,295 | 40.1 / 242.1 | 9 |
+| F: total (store - today) | 367,390 | 27.03 % | 132,544 | 76.4 / 490.5 | 26,045 |
+
+D hand-over without residual damping (--hill 1, cap 0, start surface only), same ridge cells: 190,209 lowered over 20 m (14.00 %), over 50 m 23,550, p95 33.8 m; with damping (cap 0): 191,041 (14.06 %), over 50 m 24,086, p95 33.9 m.
