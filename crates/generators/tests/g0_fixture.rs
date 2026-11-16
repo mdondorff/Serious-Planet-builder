@@ -14,8 +14,8 @@ use planet_generators::bake::Grid;
 
 const EPS: f64 = 1e-3;
 
-// The two-region split lies within one H1 column (3.75 degrees on face 0's equator) east of the divide.
-const _: () = assert!(REGION_SPLIT_LON > DIVIDE_LON && REGION_SPLIT_LON - DIVIDE_LON < 3.75);
+// The two-region cut runs along the tile line through the divide (G0 contract section 11).
+const _: () = assert!(REGION_SPLIT_LON == DIVIDE_LON);
 
 /// The receiver path from `from` to its outlet (the outlet included).
 fn path(receiver: &[u32], from: usize) -> Vec<usize> {
@@ -56,7 +56,7 @@ fn measure(fx: &Fixture) -> Vec<(String, f64)> {
     let gh = Grid::cube(H1_N, RADIUS_M);
     let outlet_h = gh.outlets(&fx.z_s, SEA_LEVEL_M);
     let rh = route_rules(&gh, &fx.z_s, &outlet_h, EPS, 1, 0.0, None, RoundRules::ROUND);
-    let trunk = path(&rh.receiver, cell_at(H1_N, -27.0, TRUNK_LAT));
+    let trunk = path(&rh.receiver, cell_at(H1_N, TRUNK_LON.0 + 0.5, TRUNK_LAT));
     let mouth = *trunk.last().unwrap();
     put("h1.trunk.outlet_lon", lon_lat_h1(mouth).0);
     put("h1.trunk.cells", trunk.len() as f64);
@@ -80,15 +80,15 @@ trunk {}",
         };
         (p[at], p.len())
     };
-    let (c1, _) = join(cell_at(H1_N, -4.5, 29.0));
+    let (c1, _) = join(cell_at(H1_N, -21.0, 27.0));
     let (c2, _) = join(cell_at(H1_N, 39.5, -27.0));
     put("h1.T1.confluence_lon", lon_lat_h1(c1).0);
     put("h1.T2.confluence_lon", lon_lat_h1(c2).0);
-    let w = path(&rh.receiver, cell_at(H1_N, -30.5, TRUNK_LAT));
+    let w = path(&rh.receiver, cell_at(H1_N, -17.0, TRUNK_LAT));
     put("h1.W.outlet_lon", lon_lat_h1(*w.last().unwrap()).0);
     // the divide: the H1 cells either side of it on the trunk's row drain to the two coasts
-    let west = path(&rh.receiver, cell_at(H1_N, DIVIDE_LON - 1.0, TRUNK_LAT));
-    let east = path(&rh.receiver, cell_at(H1_N, DIVIDE_LON + 1.0, TRUNK_LAT));
+    let west = path(&rh.receiver, cell_at(H1_N, DIVIDE_LON - 1.3, TRUNK_LAT));
+    let east = path(&rh.receiver, cell_at(H1_N, DIVIDE_LON + 1.3, TRUNK_LAT));
     put("h1.divide.west_outlet_lon", lon_lat_h1(*west.last().unwrap()).0);
     put("h1.divide.east_outlet_lon", lon_lat_h1(*east.last().unwrap()).0);
     // the two-region layout: the H1 cells either side of the divide lie in different regions, and neither catchment's path leaves its region
@@ -106,7 +106,7 @@ trunk {}",
     let gl = Grid::cube(L_N, RADIUS_M);
     let outlet_l = gl.outlets(&fx.s0, SEA_LEVEL_M);
     let rl = route_rules(&gl, &fx.s0, &outlet_l, EPS, 1, 0.0, None, RoundRules::ROUND);
-    let tl = path(&rl.receiver, cell_at(L_N, -27.0, TRUNK_LAT));
+    let tl = path(&rl.receiver, cell_at(L_N, TRUNK_LON.0 + 0.5, TRUNK_LAT));
     put("l.trunk.outlet_lon", lon_lat_l(*tl.last().unwrap()).0);
     put("l.trunk.face_changes", tl.windows(2).filter(|w| w[0] / (L_N * L_N) != w[1] / (L_N * L_N)).count() as f64);
     put("l.trunk.tile_changes", tl.windows(2).filter(|w| tile_of_l(w[0]) != tile_of_l(w[1])).count() as f64);
@@ -114,7 +114,18 @@ trunk {}",
         "l.trunk.crosses_tile_at_15",
         f64::from(u8::from(tl.windows(2).any(|w| tile_of_l(w[0]) != tile_of_l(w[1]) && (lon_lat_l(w[1]).0 - 15.0).abs() < 0.5))),
     );
-    for (name, head) in [("l.T1.confluence_lon", (-4.5, 29.0)), ("l.T2.confluence_lon", (39.5, -27.0))] {
+    // feature 6: T1 crosses face 0's tile line at -15, the cut of the two-region layout
+    let lay2 = &layouts()[1];
+    let t1 = path(&rl.receiver, cell_at(L_N, -21.0, 27.0));
+    let cut: Vec<usize> = t1
+        .windows(2)
+        .filter(|w| tile_of_l(w[0]) != tile_of_l(w[1]) && lay2.region_of_h1[h1_of_l(w[0])] != lay2.region_of_h1[h1_of_l(w[1])])
+        .map(|w| w[1])
+        .collect();
+    put("l.T1.cut_crossings", cut.len() as f64);
+    put("l.T1.cut_crossing_lat", cut.first().map_or(f64::NAN, |&c| lon_lat_l(c).1));
+    put("l.T1.tile_changes", t1.windows(2).filter(|w| tile_of_l(w[0]) != tile_of_l(w[1])).count() as f64);
+    for (name, head) in [("l.T1.confluence_lon", (-21.0, 27.0)), ("l.T2.confluence_lon", (39.5, -27.0))] {
         let p = path(&rl.receiver, cell_at(L_N, head.0, head.1));
         let at = p.iter().position(|c| tl.contains(c)).expect("the tributary reaches the trunk at L");
         put(name, lon_lat_l(p[at]).0);
@@ -217,6 +228,7 @@ fn the_g0_fixture_holds_its_features_and_the_recorded_values() {
     assert!(m("h1.divide.east_outlet_lon") > 68.0, "east of the divide drains to the trunk's mouth");
     assert_eq!(m("h1.trunk.face_changes"), 1.0, "the trunk crosses one cube-face edge");
     assert!(m("l.trunk.crosses_tile_at_15") == 1.0, "the trunk crosses the tile boundary at 15 E");
+    assert_eq!(m("l.T1.cut_crossings"), 1.0, "T1 crosses the tile line of the two-region cut once");
     assert_eq!(m("h1.trunk.crosses_ridge"), 1.0, "the trunk crosses the ridge at H1 (antecedent)");
     assert!(m("l.ridge.s0_rise_m") > 0.0, "S0 keeps part of the ridge on the trunk's line");
     assert!(m("h1.divide.west_region") != m("h1.divide.east_region"), "the region boundary separates the two sides of the divide");
@@ -230,17 +242,21 @@ fn the_g0_fixture_holds_its_features_and_the_recorded_values() {
 
 // spec: TEST-139
 #[test]
-fn the_two_layouts_cover_every_cell_and_split_just_east_of_the_divide() {
+fn the_two_layouts_are_whole_tiles_and_cut_along_the_tile_line_by_the_divide() {
     let [one, two] = layouts();
     assert_eq!(one.region_of_h1.len(), 6 * H1_N * H1_N);
     assert!(one.region_of_h1.iter().all(|&r| r == 0));
     assert!(two.region_of_h1.iter().all(|&r| r < 2) && two.region_of_h1.contains(&0) && two.region_of_h1.contains(&1));
     let h1 = GlobalGrid::new(H1_N, RADIUS_M);
-    // on the trunk's row the split falls between the H1 columns either side of -30, within one H1 column (3.75 degrees) east of the divide
+    // regions are whole tiles: every H1 cell of a tile has the tile's region
+    let (nn, per) = (H1_N * H1_N, TILE_L / L_PER_H1);
+    for p in 0..6 * nn {
+        let first = (p / nn) * nn + ((p % nn) / H1_N / per * per) * H1_N + (p % H1_N) / per * per;
+        assert_eq!(two.region_of_h1[p], two.region_of_h1[first], "H1 cell {p} and its tile's first cell");
+    }
+    // on the trunk's row the cut falls on the tile line at -15, the divide, between the H1 columns either side of it
     let (w, e) = (cell_at(H1_N, REGION_SPLIT_LON - 1.0, TRUNK_LAT), cell_at(H1_N, REGION_SPLIT_LON + 1.0, TRUNK_LAT));
     assert_ne!(two.region_of_h1[w], two.region_of_h1[e]);
-    let d = cell_at(H1_N, DIVIDE_LON, TRUNK_LAT);
-    assert_eq!(two.region_of_h1[d], two.region_of_h1[w], "the divide lies in the western region");
     assert!(
         (lon_lat(h1.direction(e as u32)).0 - lon_lat(h1.direction(w as u32)).0 - 3.75).abs() < 0.01,
         "the split lies between two neighbouring H1 columns"
