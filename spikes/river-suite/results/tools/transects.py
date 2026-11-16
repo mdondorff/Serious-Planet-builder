@@ -212,7 +212,7 @@ def dem_match(pool, tid, area_target, relief_target, half_m):
     return best
 
 
-EXTRA_COLORS = ['#9467bd', '#8c564b', '#e377c2', '#17becf', '#bcbd22']
+EXTRA_COLORS = ['#9467bd', '#bcbd22', '#7f7f7f', '#8c564b', '#e377c2', '#17becf', '#1f77b4', '#ff7f0e']
 
 
 def read_extra(path, win):
