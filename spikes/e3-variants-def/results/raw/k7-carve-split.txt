@@ -1,0 +1,5 @@
+SPIKE-122 section 7 (#129): K7's local carve split on A's stage dumps (PLANET_K7_STAGES, spike/e3-k7-stages), ridge cells of today's surface in the core, lowering in m (positive = lowered).
+| Window | Breach alone (k_dt 0) lowers over 20 m | Carve (breach and incision) lowers over 20 m | Carve lowering on ridge cells p50 / p95 | Thermal lowering on ridge cells p50 / p95 |
+|---|---|---|---|---|
+| R1h | 0 | 299,576 | 9.0 / 41.6 | not computed |
+| M1 | 218 | 2,930,460 | 30.2 / 108.8 | 0.0 / 245.0 |
