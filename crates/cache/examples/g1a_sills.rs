@@ -889,16 +889,39 @@ fn main_stem(h1: &H1, ups: &HashMap<usize, Vec<usize>>, k: usize, in_box: &dyn F
     (cells, conf)
 }
 
+/// Every trunk confluence of a graph: its cell and the D8 areas (km2) of all segments joining there.
+fn confluences(h1: &H1, ups: &HashMap<usize, Vec<usize>>) -> Vec<(u32, Vec<f64>)> {
+    let segs = &h1.hydro.segments;
+    let above = |t: usize| -> f64 {
+        let st = &segs[t];
+        let mut c = st.up;
+        while h1.routing.receiver[c as usize] != st.down && c != st.down {
+            c = h1.routing.receiver[c as usize];
+        }
+        h1.d8[c as usize] / 1e6
+    };
+    let mut v: Vec<(u32, Vec<f64>)> = ups.iter().filter(|(_, u)| u.len() >= 2).map(|(&k, u)| (segs[k].up, u.iter().map(|&t| above(t)).collect())).collect();
+    v.sort_by(|a, b| a.0.cmp(&b.0));
+    v
+}
+
+/// Whether `set` holds a confluence within 2 cells of `c` that a segment of D8 area within a factor 2 of `a` (km2) joins.
+fn has_confluence(set: &[(u32, Vec<f64>)], c: u32, a: f64, rw: usize) -> bool {
+    set.iter().any(|(x, areas)| cheb(*x, c, rw) <= 2 && areas.iter().any(|&t| t >= 0.5 * a && t <= 2.0 * a))
+}
+
 fn cheb(a: u32, b: u32, rw: usize) -> i64 {
     let (ax, ay, bx, by) = ((a as usize % rw) as i64, (a as usize / rw) as i64, (b as usize % rw) as i64, (b as usize / rw) as i64);
     (ax - bx).abs().max((ay - by).abs())
 }
 
 /// The addendum's stop test (lead #131a): for the 10 largest rivers of `a` leaving the box (20 main-stem cells or more in it), whether the water at `a`'s exit cell
-/// reaches an outlet of `b` more than 10 cells (8 km) from `a`'s outlet, and the major confluences of the main stem lost or gained (no counterpart within 2 cells)
-/// on `b`'s main stem from its trunk cell of the largest D8 area within 2 cells of the exit.
+/// reaches an outlet of `b` more than 10 cells (8 km) from `a`'s outlet, and the major confluences of its main stem that `b` lacks (no confluence of `b` within 2
+/// cells joined by a segment of 0.5 to 2 times the tributary's D8 area), and those of `b`'s main stem (from its trunk cell of the largest D8 area within 2 cells
+/// of the exit) that `a` lacks. Matching against every confluence, not only the other main stem's, keeps a switch of the main-stem branch out of the count.
 fn stop_test(a: &H1, b: &H1, in_box: &dyn Fn(u32) -> bool, rw: usize) -> Vec<String> {
     let (ua, ub) = (ups_of(a), ups_of(b));
+    let (all_a, all_b) = (confluences(a, &ua), confluences(b, &ub));
     let segs = &a.hydro.segments;
     let mut exits: Vec<usize> = a
         .trunk_seg
@@ -947,8 +970,10 @@ fn stop_test(a: &H1, b: &H1, in_box: &dyn Fn(u32) -> bool, rw: usize) -> Vec<Str
         let stem_b_in = stem_b.iter().filter(|&&c| in_box(c)).count();
         let stem_a_in = stem.iter().filter(|&&c| in_box(c)).count();
         let d8b = best.map_or(0.0, |(a, _)| a);
-        let lost: Vec<&(u32, f64)> = conf_a.iter().filter(|x| !conf_b.iter().any(|y| cheb(x.0, y.0, rw) <= 2)).collect();
-        let gained: Vec<&(u32, f64)> = conf_b.iter().filter(|y| !conf_a.iter().any(|x| cheb(x.0, y.0, rw) <= 2)).collect();
+        // lost: a major confluence of a's main stem with no confluence of b (anywhere in b's trunk graph) within 2 cells joined by a segment of a similar D8 area;
+        // gained: the same the other way round, for b's main stem against all of a's confluences
+        let lost: Vec<&(u32, f64)> = conf_a.iter().filter(|x| !has_confluence(&all_b, x.0, x.1, rw)).collect();
+        let gained: Vec<&(u32, f64)> = conf_b.iter().filter(|y| !has_confluence(&all_a, y.0, y.1, rw)).collect();
         let fmt = |v: &[&(u32, f64)]| v.iter().map(|x| format!("{}({:.0})", x.0, x.1)).collect::<Vec<_>>().join("/");
         out.push(format!(
             "exit {exit} Q {:.0} D8 {:.0} -> {:.0} km2, stem {stem_a_in} -> {stem_b_in} cells in the box: outlet {} cells off{}; {} major confluences (D8 km2), lost {} [{}], gained {} [{}]{}",
