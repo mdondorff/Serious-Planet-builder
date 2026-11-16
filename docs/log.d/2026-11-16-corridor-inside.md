@@ -1,0 +1,1 @@
+- 2026-11-16 corridor-inside (BUILD-057, TEST-137): the corridor trunk measure routes over a store's counted tiles only; outside them a store holds the start surface (DEC explorer-4).

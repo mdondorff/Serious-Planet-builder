@@ -572,9 +572,16 @@ impl Ord for Key {
     }
 }
 
-/// The cells of a reach's corridor: those within `radius` cells of its polyline (Euclidean, to the segments), as (cell, id in the corridor) and the corridor's
-/// size; `None` when an end lies outside the grid.
-fn corridor(w: usize, h: usize, line: &[(f64, f64)], radius: f64) -> Option<(std::collections::HashMap<usize, usize>, Vec<usize>)> {
+/// The cells of a reach's corridor: the counted cells (`inside`: a store's tiles; the region's box in window mode) within `radius` cells of its polyline (Euclidean,
+/// to the segments), as (cell, id in the corridor) and the corridor's size; `None` when an end lies outside the grid. Outside the counted cells a store holds the
+/// start surface, not the variant's (lead, DEC explorer-4).
+fn corridor(
+    w: usize,
+    h: usize,
+    line: &[(f64, f64)],
+    radius: f64,
+    inside: &[bool],
+) -> Option<(std::collections::HashMap<usize, usize>, Vec<usize>)> {
     let inside_grid = |p: (f64, f64)| p.0 >= 0.0 && p.1 >= 0.0 && p.0 <= (w - 1) as f64 && p.1 <= (h - 1) as f64;
     if line.len() < 2 || !inside_grid(line[0]) || !inside_grid(line[line.len() - 1]) {
         return None;
@@ -600,7 +607,7 @@ fn corridor(w: usize, h: usize, line: &[(f64, f64)], radius: f64) -> Option<(std
     let (mut index, mut cells) = (std::collections::HashMap::new(), Vec::new());
     for y in by0..=by1 {
         for x in bx0..=bx1 {
-            if seg_dist(x as f64, y as f64) <= radius {
+            if inside[y * w + x] && seg_dist(x as f64, y as f64) <= radius {
                 index.insert(y * w + x, cells.len());
                 cells.push(y * w + x);
             }
@@ -736,7 +743,7 @@ pub fn trunk_corridor(
     let mut r = TrunkReport::default();
     let cell_of = |p: (f64, f64)| (p.1.round() as usize).min(h - 1) * w + (p.0.round() as usize).min(w - 1);
     for (k, line) in reaches.iter().enumerate() {
-        let Some((index, cells)) = corridor(w, h, line, radius) else { continue };
+        let Some((index, cells)) = corridor(w, h, line, radius, inside) else { continue };
         if !line.iter().any(|&p| inside[cell_of(p)]) {
             continue;
         }
@@ -775,7 +782,7 @@ pub fn trunk_corridor(
         }
         // No route rises more than the corridor's height range above its running minimum (the bed may fall below the start first).
         let top = cells.iter().map(|&c| z[c]).fold(f64::NEG_INFINITY, f64::max) - cells.iter().map(|&c| z[c]).fold(f64::INFINITY, f64::min);
-        // A reach is over exactly when no route keeps within the bar (every cell of the route counts, inside the counted cells or not); its depth is then the
+        // A reach is over exactly when no route keeps within the bar (every cell of the route counts; the corridor holds counted cells only); its depth is then the
         // minimax rise. The vertex counts are of the route's cells inside.
         let mut failed = false;
         let route = match waypoint_route(w, z, &index, &cells, &points, bar_m) {

@@ -471,7 +471,7 @@ fn the_corridor_bar_scales_with_relief_and_snapping_moves_ends_and_crossings_to_
 
 // spec: TEST-137, BUILD-057
 #[test]
-fn a_crossing_leg_carries_the_running_minimum_and_a_rise_outside_the_counted_cells_still_fails_the_reach() {
+fn a_crossing_leg_carries_the_running_minimum_and_a_corridor_holds_only_the_counted_cells() {
     use planet_cache::river_suite::{trunk_corridor, Snap};
     let g = Grid::new(N, N, DX);
     let all = vec![true; N * N];
@@ -490,11 +490,27 @@ fn a_crossing_leg_carries_the_running_minimum_and_a_rise_outside_the_counted_cel
     let s = trunk_corridor(&g, &z, &all, &line, 4.0, 50.0, Some(&Snap { node_radius: 3.0, region: &region }));
     assert_eq!(s.reaches_over, 1, "{s:?}");
     assert!((s.deepest_m - 85.0).abs() <= 0.11, "{s:?}");
-    // Only the cells x <= 15 are counted: the ridge lies outside them, yet the reach has no route within the bar and is over; no counted vertex is over.
+    // Only the cells x <= 15 are counted (a store's tiles: outside them it holds the start surface, DEC explorer-4): the corridor holds counted cells only, so a
+    // reach whose end lies outside them is not counted at all, and one inside them is routed over counted cells only (the pit, then the plateau 40 m above it: passes).
     let counted: Vec<bool> = (0..N * N).map(|c| c % N <= 15).collect();
     let t = trunk_corridor(&g, &z, &counted, &line, 4.0, 50.0, None);
-    assert_eq!((t.reaches, t.reaches_over, t.vertices_over), (1, 1, 0), "{t:?}");
-    assert!((t.deepest_m - 85.0).abs() <= 0.11, "{t:?}");
+    assert_eq!((t.reaches, t.reaches_over), (0, 0), "{t:?}");
+    let short = vec![vec![(2.0, 10.0), (14.0, 10.0)]];
+    let u = trunk_corridor(&g, &z, &counted, &short, 4.0, 50.0, None);
+    assert_eq!((u.reaches, u.reaches_over, u.vertices_over), (1, 0, 0), "{u:?}");
+    // A 160 m wall across the plateau (x = 20) with one gap cell at 100 m, 3 cells off the line: counted, the route takes the gap and passes; not counted, the
+    // corridor holds no way through but over the wall, 60 m.
+    let mut wall = vec![100.0; N * N];
+    for y in 0..N {
+        wall[y * N + 20] = 160.0;
+    }
+    wall[13 * N + 20] = 100.0;
+    let across = vec![vec![(12.0, 10.0), (28.0, 10.0)]];
+    assert_eq!(trunk_corridor(&g, &wall, &all, &across, 4.0, 50.0, None).reaches_over, 0);
+    let no_gap: Vec<bool> = (0..N * N).map(|c| c != 13 * N + 20).collect();
+    let v = trunk_corridor(&g, &wall, &no_gap, &across, 4.0, 50.0, None);
+    assert_eq!(v.reaches_over, 1, "{v:?}");
+    assert!((v.deepest_m - 60.0).abs() <= 0.11, "{v:?}");
 }
 
 // spec: TEST-137, BUILD-057
