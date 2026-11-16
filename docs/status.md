@@ -16,15 +16,16 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 
 Dormant items moved to `docs/parking.md` (2026-11-12).
 
-## Queue (2026-11-15, milestone P3: `docs/milestones/P3.md`, rewritten after the external review)
-Every row names an exit item (ADR 0120). Everything else is in `docs/parking.md`; the P4 draft holds what moved out of P3.
+## Queue (2026-11-16, milestone P3: `docs/milestones/P3.md`; E6 river graphs, owner 2026-11-16)
 | Exit | Step | Lane |
 |---|---|---|
-| E3 | The controlled comparison (E1 done 2026-11-15): A crusader, B and C explorer (SPIKE-121), D to F spikes (SPIKE-122); measured through `river-gate --table` | crusader, explorer, spikes |
-| E4 | The river hierarchy and boundary design note, then ADRs for D-2 and D-3 | lead |
-| E5 | Basin hierarchy, spill graph and classification built now (SPIKE-123); G-LAKE on E3's winner, then the D-4 ADR | crusader, lead |
+| E6 | Pre: BUILD-057 coastal snap (TEST-138), density and `R_b` baseline (BUILD-059) | explorer |
+| E6 | G1a: H1 on sub-cell sills of `S0` (SPIKE-127), R1h first | spikes |
+| E6 | G0: fixture terrain and expectations (TEST-139) | crusader |
+| E6 | G0: the contract note (graph, reach, basin, rasterisation, budget, determinism, partition, edit) for the owner | lead |
+| E4 | ADRs 0125, 0126 proposed (review v4); G3 decides their fate | lead |
+| E5 | ADR 0127 proposed; G1e builds the basin topology; G3 decides | lead |
 
-P2 closed 2026-11-14 into P3; P1 closed 2026-11-13.
 ## Tracked
 - **Sea not meeting the coast; a coastal fade at river mouths** (owner, 2026-11-15; seen on a flight about 2026-11-13, not reported then): the sea did not start where the terrain ended. Candidate cause: the runtime fades the erosion change toward 0 within 3 m above sea level (`COAST_FADE_M`, `erosion_layer.rs`), so the drawn coast and river mouths differ from the store (adversarial review F3). Owner re-tests on a flight with the P4 E2 flights; the fade is decided with D-2.
 - **Runtime read of L flattens trenches** (quarantine, lead 2026-11-15): up to 2.9 m from the bake between centres near channels (G-SURF-I, review F3); fix at the source, the runtime read (GEN-188); owner decides the look. Quarantined: `bake_k7::the_runtime_surface_is_the_bake_surface_at_the_centres_and_within_a_step_at_the_lattice_nodes`, assertions unchanged.
