@@ -225,3 +225,83 @@ R1h: D and E as run and fixed (REGCAP, REGCAP plus crest, the minimal-change han
 
 ![M1 fixed variants](images/addendum-fix-m1.png)
 M1: the same. Every variant, A and the minimal-change hand-over included, lowers T1's far ridge by about 250 m: K7's shared cut.
+
+## 7. Addendum (lead #129): cut-through against crest rounding, and K7 by sub-step
+Question: of the ridge cells lowered more than 20 m (section 6), how many are cut-throughs (a channel or breach path across the ridge line, the owner's fault class, 2026-11-13) and how many are crest rounding; and which K7 sub-step lowers ridges?
+Time box: 0.5 day (2026-11-16). Code: `ridge_split.py` (spike/e3-def, target tools); drained areas by `grid_gate` with `GRID_AREA_ONLY` (spike/e3-def); K7's stages dumped by `PLANET_K7_STAGES` in `k7_tile` (spike/e3-k7-stages, never merged; A re-baked on R1h and M1 to the same commit, R1h 39038c59).
+
+### 7.1 Method
+- **Ridge cells and "lowered over 20 m":** as section 6 (today's start surface, the 620-cell core, land; before K7 = the surface K7 starts from, after K7 = the baked store).
+- **Channel cell:** drained area at least A0 on the surface being judged (main's routing, `route_rules` on the plain flood, epsilon 1 mm). A0 = 1 km2, the local carve's catchment scale (96 L cells); 75 km2, the gate's river cells, as a check.
+- **Cut-through:** a lowered ridge cell with a channel cell within 1 cell (its 3 x 3 neighbourhood) on the lowered surface and none there on today's surface: a channel or breach path now crosses the ridge line.
+- **Saddle:** a connected group (8 neighbours) of cut-through cells.
+- **Rounding:** every other lowered ridge cell (the crest drops with no channel through it).
+- **K7 by sub-step (A, R1h and M1):** each ridge cell K7 lowers more than 20 m is booked to the sub-step that lowered it most (burn-in of the channel lines, local carve, thermal, deposition sweep, pit spreading, final channel pass), and split the same way (channels from A's pre-K7 and post-K7 surfaces).
+- Raw: `raw/ridge-split.csv`, `raw/k7-steps.csv`.
+
+### 7.2 Counts
+| Window | Variant | Before K7: lowered over 20 m | cut-through cells (saddles) | rounding cells | After K7: lowered over 20 m | cut-through cells (saddles) | rounding cells | Saddles at 75 km2 before / after |
+|---|---|---|---|---|---|---|---|---|
+| R1h | A | 76,869 | 3,331 (1,156) | 73,538 | 409,406 | 5,438 (2,364) | 403,968 | 686 / 1,371 |
+| R1h | B | 29,448 | 2,272 (764) | 27,176 | 329,035 | 4,635 (1,915) | 324,400 | 498 / 974 |
+| R1h | D | 195,218 | 12,654 (3,708) | 182,564 | 573,536 | 22,252 (6,885) | 551,284 | 1,715 / 2,309 |
+| R1h | E | 235,944 | 13,065 (3,696) | 222,879 | 617,971 | 23,540 (7,048) | 594,431 | 1,631 / 2,178 |
+| R1h | F | 138,132 | 26,488 (5,010) | 111,644 | 367,390 | 32,724 (6,580) | 334,666 | 3,405 / 3,699 |
+| R3a | A | 663 | 5 (4) | 658 | 3,149 | 51 (33) | 3,098 | 4 / 14 |
+| R3a | B | 253 | 5 (2) | 248 | 1,874 | 50 (29) | 1,824 | 3 / 10 |
+| R3a | D | 1,126 | 110 (44) | 1,016 | 6,671 | 461 (184) | 6,210 | 28 / 55 |
+| R3a | E | 1,140 | 109 (43) | 1,031 | 6,741 | 438 (173) | 6,303 | 27 / 56 |
+| R3a | F | 2,622 | 934 (232) | 1,688 | 4,574 | 1,168 (278) | 3,406 | 190 / 218 |
+| R3b | A | 18,381 | 575 (239) | 17,806 | 62,519 | 1,100 (624) | 61,419 | 181 / 593 |
+| R3b | B | 11,020 | 575 (228) | 10,445 | 39,748 | 872 (432) | 38,876 | 163 / 377 |
+| R3b | D | 34,987 | 2,795 (941) | 32,192 | 114,999 | 5,811 (1,948) | 109,188 | 643 / 1,048 |
+| R3b | E | 35,201 | 2,832 (946) | 32,369 | 115,268 | 5,846 (1,966) | 109,422 | 645 / 1,049 |
+| R3b | F | 56,878 | 17,587 (3,302) | 39,291 | 101,210 | 20,370 (3,740) | 80,840 | 2,771 / 2,972 |
+| M1 | A | 1,568,054 | 60,463 (16,665) | 1,507,591 | 3,571,904 | 86,649 (23,186) | 3,485,255 | 5,146 / 7,335 |
+| M1 | B | 417,890 | 43,469 (12,506) | 374,421 | 3,274,645 | 79,961 (22,386) | 3,194,684 | 4,440 / 7,068 |
+| M1 | D | 1,828,923 | 92,921 (25,670) | 1,736,002 | 3,638,150 | 132,445 (36,071) | 3,505,705 | 8,250 / 10,185 |
+| M1 | E | 2,141,640 | 97,445 (25,709) | 2,044,195 | 3,700,518 | 140,468 (36,582) | 3,560,050 | 6,870 / 8,746 |
+| M1 | F | 810,753 | 85,891 (18,778) | 724,862 | 2,506,164 | 118,431 (27,016) | 2,387,733 | 9,539 / 10,202 |
+| F1 | A | 6,846 | 64 (42) | 6,782 | 17,646 | 280 (193) | 17,366 | 56 / 192 |
+| F1 | B | 4,257 | 87 (46) | 4,170 | 9,554 | 140 (101) | 9,414 | 58 / 94 |
+| F1 | D | 7,518 | 913 (334) | 6,605 | 32,281 | 2,409 (853) | 29,872 | 227 / 480 |
+| F1 | E | 7,797 | 1,041 (365) | 6,756 | 32,799 | 2,608 (900) | 30,191 | 256 / 525 |
+| F1 | F | 71,755 | 25,800 (5,122) | 45,955 | 94,705 | 31,159 (5,726) | 63,546 | 2,911 / 3,150 |
+
+| Window | Before K7: cut-through saddles B / A / D / E / F | rank (fewest first) |
+|---|---|---|
+| R1h | 764 / 1,156 / 3,708 / 3,696 / 5,010 | B 764 < A 1,156 < E 3,696 < D 3,708 < F 5,010 |
+| R3a | 2 / 4 / 44 / 43 / 232 | B 2 < A 4 < E 43 < D 44 < F 232 |
+| R3b | 228 / 239 / 941 / 946 / 3,302 | B 228 < A 239 < D 941 < E 946 < F 3,302 |
+| M1 | 12,506 / 16,665 / 25,670 / 25,709 / 18,778 | B 12,506 < A 16,665 < F 18,778 < D 25,670 < E 25,709 |
+| F1 | 46 / 42 / 334 / 365 / 5,122 | A 42 < B 46 < D 334 < E 365 < F 5,122 |
+
+| Window | K7 sub-step | Ridge cells it lowers most (of K7 own) | cut-through cells (saddles) | rounding | Ridge cells this step alone lowers over 20 m |
+|---|---|---|---|---|---|
+| R1h | burn-in of the channel lines | 0 of 299,191 | 0 (0) | 0 | 0 |
+| R1h | local carve (breach and incision) | 293,395 of 299,191 | 2,174 (1,356) | 291,221 | 299,576 |
+| R1h | thermal | 5,796 of 299,191 | 1 (1) | 5,795 | 13,829 |
+| R1h | deposition sweep | 0 of 299,191 | 0 (0) | 0 | 0 |
+| R1h | pit spreading | 0 of 299,191 | 0 (0) | 0 | 0 |
+| R1h | final channel pass | 0 of 299,191 | 0 (0) | 0 | 0 |
+| M1 | burn-in of the channel lines | 2,779 of 3,000,453 | 64 (37) | 2,715 | 2,779 |
+| M1 | local carve (breach and incision) | 2,026,239 of 3,000,453 | 33,280 (14,613) | 1,992,959 | 2,930,460 |
+| M1 | thermal | 971,435 of 3,000,453 | 10,430 (1,704) | 961,005 | 1,315,477 |
+| M1 | deposition sweep | 0 of 3,000,453 | 0 (0) | 0 | 0 |
+| M1 | pit spreading | 0 of 3,000,453 | 0 (0) | 0 | 0 |
+| M1 | final channel pass | 0 of 3,000,453 | 0 (0) | 0 | 0 |
+
+- **The local carve's breach is not the ridge cutter; its incision rounds crests.** The breach alone (dumped separately) lowers 0 ridge cells over 20 m on R1h and 218 on M1. The carve as a whole lowers ridge cells by p50 9.0 / p95 41.6 m on R1h and p50 30.2 / p95 108.8 m on M1. Thermal adds p95 245 m on M1's steep crests.
+- Deposition, pit spreading and the final channel pass lower no ridge cell over 20 m on either window.
+
+### 7.3 Findings
+- **Most ridge lowering is rounding, not cutting.** Before K7, cut-throughs are 0.8-13.4 % of the lowered ridge cells for A, B, D and E, and 10.6-36.0 % for F (R3a 35.6 %, R3b 30.9 %, F1 36.0 %); after K7, 1.3-8.0 % and 4.7-32.9 %.
+- **The D-1 ranking on cut-through saddles before K7 (fewest first):** B, then A, on every window, except F1, where A (42) comes before B (46). D and E sit within 0.3-9 % of each other (F1 the widest: 334 against 365). F is last on R1h, R3a, R3b and F1; on M1 it lies between A and D at 1 km2, last at 75 km2.
+  - F's hand-over (the 4-neighbour breach plus the per-scale pipeline) makes the most saddles on flat ground: R3b 3,302 and F1 5,122, against 941-946 and 334-365 for D and E.
+  - D and E make about 3.2x A's saddles on R1h and 1.5x on M1.
+- **After K7, B and A stay fewest;** on R1h F moves ahead of D and E (saddles B 1,915, A 2,364, F 6,580, D 6,885, E 7,048). K7 adds rounding mainly, and some saddles (+1,151 to +3,352 on R1h).
+- **K7's ridge lowering is the local carve's incision plus thermal, and it is rounding:** R1h 98 % carve (cut-throughs 0.7 %), M1 68 % carve and 32 % thermal (cut-throughs 1.5 %). The E4 / K7 item is crest rounding by the incision of catchments up to 1 km² and by thermal at repose, not cut-throughs.
+- **Columns for explorer's D-1 table (#160):** `raw/ridge-split.csv` (window, variant, before and after K7: lowered, cut-through cells and saddles, rounding, at 1 km2 and 75 km2). The D-1 table ranks on `pre_saddles_1km2`; rounding stays a reported number.
+- **Check at 75 km2:** B and A have the fewest saddles on every window (F1: A 56, B 58), and F the most on every window, M1 included (9,539); D and E in between. Only F's place on M1 depends on the channel threshold.
+
+Visuals (section 7): none new; the T1 figures of sections 4 and 6 show the crests.
