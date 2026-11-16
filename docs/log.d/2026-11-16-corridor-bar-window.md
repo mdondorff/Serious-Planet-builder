@@ -1,0 +1,1 @@
+- 2026-11-16 corridor-bar-window (BUILD-057, TEST-137): the corridor bar reads the start relief over the region's box, the window value set before the results (R1h 27.5 m).
