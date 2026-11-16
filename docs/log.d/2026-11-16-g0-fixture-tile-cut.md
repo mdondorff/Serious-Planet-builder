@@ -1,0 +1,1 @@
+- 2026-11-16 g0-fixture-tile-cut (TEST-139): the fixture's two-region layout cuts along a tile line through the divide and a tributary's tile crossing (G0 contracts, fixture section).

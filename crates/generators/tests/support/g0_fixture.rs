@@ -5,8 +5,8 @@
 //! 2. one explicit confluence (T1 into the trunk at longitude 5; T2 joins at 35);
 //! 3. one antecedent river: the trunk crosses a narrow north-south ridge at longitude 25 that the base keeps and only the regional surface cuts;
 //! 4. one closed basin meant as a protected lake (a cone at 55 E, 14 N);
-//! 5. one divide close to a region boundary (the trunk's head against river W, the crest near longitude -30.9; the two-region layout splits at the H1 column boundary -30);
-//! 6. one reach crossing a tile boundary (tiles of 64 L cells: face 0's boundary at longitude 15);
+//! 5. one divide close to a region boundary (the trunk's head against river W, the crest on face 0's tile line at -15, along which the two-region layout cuts);
+//! 6. one reach crossing a tile boundary (tiles of 64 L cells): tributary T1 crosses face 0's tile line at -15, the cut of the two-region layout (the trunk crosses the one at 15; trunk reaches are never cut at tiles);
 //! 7. one reach crossing a cube-face edge (faces 0 and 2 meet at longitude 45).
 //!
 //! The surfaces follow the plan's terms: `B` the base at L, `z_b` the base at the H1 cell centres, `z_s` the regional surface (here `z_b` with the trunk's H1 row lowered to its bed: the cut that makes
@@ -53,10 +53,10 @@ const RIDGE_M: f64 = 300.0;
 pub const BOWL: (f64, f64) = (55.0, 14.0);
 const BOWL_RADIUS_DEG: f64 = 3.0;
 const BOWL_DEPTH_M: f64 = 200.0;
-/// The divide between river W and the trunk's head: where W's valley surface (560 m at its head, -30.25) meets the trunk's (490 m at its head, -29.75) on the trunk's row, about -30.9; the
-/// two-region layout splits at the H1 column boundary -30 just east of it.
-pub const DIVIDE_LON: f64 = -30.9;
-pub const REGION_SPLIT_LON: f64 = -30.0;
+/// The divide between river W and the trunk's head: both heads at 490 m, a quarter degree either side of face 0's tile line at -15 and falling at the same slope, so the crest lies on the
+/// tile line (an H1 and an L cell boundary); the two-region layout cuts along it (G0 contract section 11: a tile line through features 5 and 6).
+pub const DIVIDE_LON: f64 = -15.0;
+pub const REGION_SPLIT_LON: f64 = -15.0;
 
 /// A river line: name, polyline (longitude, latitude) from head to mouth or confluence, bed (m) at the head and at the end.
 pub struct Line {
@@ -67,7 +67,7 @@ pub struct Line {
 }
 
 /// The trunk's head and mouth longitudes.
-pub const TRUNK_LON: (f64, f64) = (-29.75, 68.0);
+pub const TRUNK_LON: (f64, f64) = (-14.75, 68.0);
 
 /// The trunk's bed at a longitude: 490 m at its head falling linearly to 1 m at its mouth.
 pub fn trunk_bed(lon: f64) -> f64 {
@@ -83,9 +83,9 @@ pub fn lines() -> [Line; 4] {
             to: (TRUNK_LON.1, TRUNK_LAT),
             bed: (trunk_bed(TRUNK_LON.0), trunk_bed(TRUNK_LON.1)),
         },
-        Line { name: "T1", from: (-5.0, 30.0), to: (5.0, TRUNK_LAT), bed: (800.0, trunk_bed(5.0)) },
+        Line { name: "T1", from: (-22.0, 28.0), to: (5.0, TRUNK_LAT), bed: (800.0, trunk_bed(5.0)) },
         Line { name: "T2", from: (40.0, -28.0), to: (35.0, TRUNK_LAT), bed: (800.0, trunk_bed(35.0)) },
-        Line { name: "W", from: (-30.25, TRUNK_LAT), to: (-44.0, TRUNK_LAT), bed: (560.0, 1.0) },
+        Line { name: "W", from: (-15.25, TRUNK_LAT), to: (-44.0, TRUNK_LAT), bed: (490.0, trunk_bed(13.75)) },
     ]
 }
 
@@ -198,17 +198,28 @@ pub struct Layout {
     pub region_of_h1: Vec<u8>,
 }
 
-/// The two layouts: one region; two regions split at longitude -30 (a column boundary of face 0's H1 grid, about 0.9 degrees east of the divide): region 0 west of it, 1 east.
+/// The tiles a face edge.
+pub const TILES_PER_FACE: usize = L_N / TILE_L;
+
+/// The longitude of a tile's centre (face, column, row).
+pub fn tile_centre_lon(face: usize, col: usize, row: usize) -> f64 {
+    let c = |k: usize| 2.0 * (k as f64 + 0.5) / TILES_PER_FACE as f64 - 1.0;
+    lon_lat(face_to_direction(&TangentWarp, Face(face as u8), c(col), c(row))).0
+}
+
+/// The two layouts, regions of whole tiles: one region; two regions cut along face 0's tile line at longitude -15 (G0 contract section 11): region 0 the tiles whose centre lies west of it
+/// (face 0's column 0 and the faces beyond), region 1 the rest. An H1 cell takes its tile's region (8 H1 cells a tile edge), an L cell its H1 cell's.
 pub fn layouts() -> [Layout; 2] {
-    let h1 = GlobalGrid::new(H1_N, RADIUS_M);
-    let split = (0..6 * H1_N * H1_N)
+    let nn = H1_N * H1_N;
+    let per = TILE_L / L_PER_H1;
+    let split = (0..6 * nn)
         .map(|p| {
-            let (lon, _) = lon_lat(h1.direction(p as u32));
-            u8::from(lon >= REGION_SPLIT_LON)
+            let (f, i, j) = (p / nn, p % H1_N, (p % nn) / H1_N);
+            u8::from(tile_centre_lon(f, i / per, j / per) >= REGION_SPLIT_LON)
         })
         .collect();
     [
-        Layout { name: "one-region", regions: 1, region_of_h1: vec![0; 6 * H1_N * H1_N] },
+        Layout { name: "one-region", regions: 1, region_of_h1: vec![0; 6 * nn] },
         Layout { name: "two-regions", regions: 2, region_of_h1: split },
     ]
 }
