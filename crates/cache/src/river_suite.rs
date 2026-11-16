@@ -619,7 +619,8 @@ fn corridor(
 /// A route inside the corridor from `from` to `to` with every cell at most `d` above the running minimum of the route so far, the minimum starting at
 /// `start_label` (`+inf` for a reach's first leg); on success the route (cells, upstream first) and its final running minimum. A higher running minimum leaves
 /// every later step at least as much room (a step is allowed when the cell stands at most `d` above it, and the minimum only falls), so a search that keeps each
-/// cell's highest reachable minimum, highest first and ties by cell id, is exact (the maximin form of Dijkstra's search).
+/// cell's highest reachable minimum, highest first and ties by cell id, is exact (the maximin form of Dijkstra's search). Steps route over land only (`z > sea_m`,
+/// #163): a sea cell is never stepped from, and a route that reaches one ends there (the third value is then `true`; the leg's `to` is not reached).
 #[allow(clippy::too_many_arguments)]
 fn corridor_route(
     w: usize,
@@ -630,7 +631,8 @@ fn corridor_route(
     to: usize,
     d: f64,
     start_label: f64,
-) -> Option<(Vec<usize>, f64)> {
+    sea_m: f64,
+) -> Option<(Vec<usize>, f64, bool)> {
     if z[from] - start_label > d {
         return None;
     }
@@ -647,7 +649,8 @@ fn corridor_route(
             continue;
         }
         done[ci] = true;
-        if c == to {
+        let sea = z[c] <= sea_m;
+        if c == to || sea {
             let mut route = vec![c];
             let mut k = ci;
             while parent[k] != usize::MAX {
@@ -655,7 +658,7 @@ fn corridor_route(
                 route.push(cells[k]);
             }
             route.reverse();
-            return Some((route, l));
+            return Some((route, l, c != to && sea));
         }
         let (cx, cy) = ((c % w) as i64, (c / w) as i64);
         for (dx, dy) in [(-1i64, -1i64), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
@@ -679,7 +682,9 @@ fn corridor_route(
     None
 }
 
-/// The route through the waypoints (leg after leg, the running minimum carried over), or `None` when a leg has no route within `d`.
+/// The route through the waypoints (leg after leg, the running minimum carried over), or `None` when a leg has no route within `d`. A leg that meets the sea
+/// ends the route there (the later waypoints are dropped).
+#[allow(clippy::too_many_arguments)]
 fn waypoint_route(
     w: usize,
     z: &[f64],
@@ -687,12 +692,16 @@ fn waypoint_route(
     cells: &[usize],
     points: &[usize],
     d: f64,
+    sea_m: f64,
 ) -> Option<Vec<usize>> {
     let (mut route, mut label) = (vec![points[0]], f64::INFINITY);
     for leg in points.windows(2) {
-        let (part, l) = corridor_route(w, z, index, cells, leg[0], leg[1], d, label)?;
+        let (part, l, at_sea) = corridor_route(w, z, index, cells, leg[0], leg[1], d, label, sea_m)?;
         route.extend_from_slice(&part[1..]);
         label = l;
+        if at_sea {
+            break;
+        }
     }
     Some(route)
 }
@@ -719,7 +728,9 @@ fn lowest_in_disc(grid: &Grid, z: &[f64], p: (f64, f64), radius: f64, keep: impl
 
 /// The snapped form of the corridor measure (#159): a reach's ends (H1's nodes) snap to the lowest L cell within `node_radius` cells, ties by cell id (all reaches
 /// meeting at a node share it: the snap depends on the node's position only), and a reach that crosses the region's edge passes through the lowest edge cell
-/// (a cell of the region with a 4-neighbour outside it) within `node_radius` cells of the midpoint of H1's crossing step, ties by cell id.
+/// (a cell of the region with a 4-neighbour outside it) within `node_radius` cells of the midpoint of H1's crossing step, ties by cell id. Nodes and crossings
+/// snap to land cells only (#163); only a mouth (a reach's last point where no reach starts) may snap to the sea. A node with no land cell in its disc snaps
+/// to the lowest cell (the route then ends at the sea); a crossing with no land edge cell adds no waypoint.
 pub struct Snap<'a> {
     pub node_radius: f64,
     pub region: &'a [bool],
@@ -729,7 +740,9 @@ pub struct Snap<'a> {
 /// cells, or with `snap` the snapped nodes and the crossing cells) by the route that minimises the largest rise above its running minimum. A reach counts over
 /// when no route keeps within `bar_m`; its minimax rise is found to 0.1 m by bisection, and the vertices over the bar along that route are counted (vertices
 /// inside only). `vertices` counts the cells of the routes inside. A reach whose end lies outside the grid or its corridor, whose corridor does not join its
-/// waypoints, or that has no point inside is skipped.
+/// waypoints, or that has no point inside is skipped. Routes step over land only (`z > sea_level_m`) and end at the first sea cell they meet (#163);
+/// `f64::NEG_INFINITY` makes every cell land.
+#[allow(clippy::too_many_arguments)]
 pub fn trunk_corridor(
     grid: &Grid,
     z: &[f64],
@@ -737,11 +750,15 @@ pub fn trunk_corridor(
     reaches: &[Vec<(f64, f64)>],
     radius: f64,
     bar_m: f64,
+    sea_level_m: f64,
     snap: Option<&Snap>,
 ) -> TrunkReport {
     let (w, h) = (grid.w(), grid.h());
     let mut r = TrunkReport::default();
     let cell_of = |p: (f64, f64)| (p.1.round() as usize).min(h - 1) * w + (p.0.round() as usize).min(w - 1);
+    let key = |p: (f64, f64)| (p.0.to_bits(), p.1.to_bits());
+    let starts: std::collections::HashSet<(u64, u64)> = reaches.iter().filter(|l| !l.is_empty()).map(|l| key(l[0])).collect();
+    let land = |c: usize| z[c] > sea_level_m;
     for (k, line) in reaches.iter().enumerate() {
         let Some((index, cells)) = corridor(w, h, line, radius, inside) else { continue };
         if !line.iter().any(|&p| inside[cell_of(p)]) {
@@ -752,13 +769,21 @@ pub fn trunk_corridor(
         match snap {
             None => points.extend([cell_of(first), cell_of(last)]),
             Some(s) => {
-                let at_node = |p: (f64, f64)| lowest_in_disc(grid, z, p, s.node_radius, |_| true);
-                let Some(a) = at_node(first) else { continue };
+                let at_node = |p: (f64, f64), sea_ok: bool| {
+                    let any = lowest_in_disc(grid, z, p, s.node_radius, |_| true);
+                    if sea_ok {
+                        any
+                    } else {
+                        lowest_in_disc(grid, z, p, s.node_radius, land).or(any)
+                    }
+                };
+                let Some(a) = at_node(first, false) else { continue };
                 points.push(a);
                 let region = |c: usize| s.region[c];
                 let edge = |c: usize| {
                     let (x, y) = (c % w, c / w);
                     region(c)
+                        && land(c)
                         && [(x > 0).then(|| c - 1), (x + 1 < w).then(|| c + 1), (y > 0).then(|| c - w), (y + 1 < h).then(|| c + w)]
                             .into_iter()
                             .flatten()
@@ -772,7 +797,7 @@ pub fn trunk_corridor(
                         }
                     }
                 }
-                let Some(b) = at_node(last) else { continue };
+                let Some(b) = at_node(last, !starts.contains(&key(last))) else { continue };
                 points.push(b);
                 points.dedup();
             }
@@ -785,17 +810,17 @@ pub fn trunk_corridor(
         // A reach is over exactly when no route keeps within the bar (every cell of the route counts; the corridor holds counted cells only); its depth is then the
         // minimax rise. The vertex counts are of the route's cells inside.
         let mut failed = false;
-        let route = match waypoint_route(w, z, &index, &cells, &points, bar_m) {
+        let route = match waypoint_route(w, z, &index, &cells, &points, bar_m, sea_level_m) {
             Some(route) => route,
             None => {
                 failed = true;
                 // over the bar: bisect the minimax rise in (bar, top]
                 let (mut lo, mut hi) = (bar_m, top.max(bar_m));
                 // At the height range every step is allowed: no route means the corridor does not join the waypoints (8-neighbour), and the reach is skipped.
-                let Some(mut best) = waypoint_route(w, z, &index, &cells, &points, hi) else { continue };
+                let Some(mut best) = waypoint_route(w, z, &index, &cells, &points, hi, sea_level_m) else { continue };
                 while hi - lo > 0.1 {
                     let mid = 0.5 * (lo + hi);
-                    match waypoint_route(w, z, &index, &cells, &points, mid) {
+                    match waypoint_route(w, z, &index, &cells, &points, mid, sea_level_m) {
                         Some(route) => (hi, best) = (mid, route),
                         None => lo = mid,
                     }
