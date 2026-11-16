@@ -845,10 +845,13 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         suite,
         trunk: trunk_burn(g, input.surface, input.inside, input.trunks, params.cut_m),
         trunks_given: !input.trunks.is_empty(),
-        trunk_corridors: CORRIDOR_K.iter().map(|k| trunk_corridor(g, &water, input.inside, input.trunks, k * cell_h1, bar, None)).collect(),
+        trunk_corridors: CORRIDOR_K
+            .iter()
+            .map(|k| trunk_corridor(g, &water, input.inside, input.trunks, k * cell_h1, bar, input.sea_level_m, None))
+            .collect(),
         trunk_corridors_snapped: CORRIDOR_K
             .iter()
-            .map(|k| trunk_corridor(g, &water, input.inside, input.trunks, k * cell_h1, bar, Some(&snap)))
+            .map(|k| trunk_corridor(g, &water, input.inside, input.trunks, k * cell_h1, bar, input.sea_level_m, Some(&snap)))
             .collect(),
         corridor_bar_m: bar,
     }

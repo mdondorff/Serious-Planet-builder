@@ -1,0 +1,1 @@
+- 2026-11-16 corridor-coast (BUILD-057, TEST-138): the corridor trunk measure snaps non-mouth nodes and routes over land only; a route that meets the sea ends there (lead #163, review B F2).
