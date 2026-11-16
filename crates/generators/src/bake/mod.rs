@@ -33,6 +33,7 @@ pub mod partition;
 pub mod precision;
 pub mod preview;
 pub mod probe;
+pub mod river_graph;
 pub mod round;
 pub mod route;
 pub mod sediment;

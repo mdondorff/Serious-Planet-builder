@@ -104,6 +104,8 @@ mod driver_channels;
 mod erosion;
 #[path = "g0_fixture.rs"]
 mod g0_fixture;
+#[path = "g0_graph.rs"]
+mod g0_graph;
 #[path = "generator_contract.rs"]
 mod generator_contract;
 #[path = "global.rs"]
@@ -144,6 +146,8 @@ mod relief_channels;
 mod relief_field;
 #[path = "relief_scale.rs"]
 mod relief_scale;
+#[path = "river_graph.rs"]
+mod river_graph;
 #[path = "runtime_layer.rs"]
 mod runtime_layer;
 #[path = "shelf.rs"]

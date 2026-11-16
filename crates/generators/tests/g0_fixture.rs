@@ -4,7 +4,7 @@
 #![allow(clippy::needless_range_loop)]
 
 #[path = "support/g0_fixture.rs"]
-mod fixture;
+pub(crate) mod fixture;
 
 use fixture::*;
 use planet_generators::bake::flood::priority_flood_with;
