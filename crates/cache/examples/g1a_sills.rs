@@ -828,6 +828,141 @@ fn major(a: &H1, b: &H1, in_box: &dyn Fn(u32) -> bool, rw: usize) -> Vec<(u32, f
     out
 }
 
+
+/// Upstream trunk segments of each trunk segment.
+fn ups_of(h1: &H1) -> HashMap<usize, Vec<usize>> {
+    let trunk: HashSet<usize> = h1.trunk_seg.iter().copied().collect();
+    let mut ups: HashMap<usize, Vec<usize>> = HashMap::new();
+    for (k, s) in h1.hydro.segments.iter().enumerate() {
+        if s.downstream != NONE && trunk.contains(&k) {
+            ups.entry(s.downstream as usize).or_default().push(k);
+        }
+    }
+    ups
+}
+
+/// The main stem upstream of segment `k` (the largest-Q upstream segment at each confluence): its cells, and its major confluences in the box
+/// (a tributary of at least 10 % of the stem's Q below the confluence, and of at least 1 m3/s) as (cell, tributary Q).
+fn main_stem(h1: &H1, ups: &HashMap<usize, Vec<usize>>, k: usize, in_box: &dyn Fn(u32) -> bool) -> (Vec<u32>, Vec<(u32, f64)>) {
+    let segs = &h1.hydro.segments;
+    let (mut cells, mut conf) = (Vec::new(), Vec::new());
+    let mut k = k;
+    loop {
+        let s = &segs[k];
+        let mut c = s.up;
+        cells.push(c);
+        while c != s.down {
+            c = h1.routing.receiver[c as usize];
+            cells.push(c);
+        }
+        let Some(u) = ups.get(&k) else { break };
+        let main = *u.iter().max_by(|&&x, &&y| segs[x].q_down.total_cmp(&segs[y].q_down).then(y.cmp(&x))).expect("non-empty");
+        if in_box(s.up) {
+            for &t in u {
+                if t != main && segs[t].q_down >= 0.1 * s.q_up.max(segs[main].q_down) && segs[t].q_down >= EDGE_Q {
+                    conf.push((s.up, segs[t].q_down));
+                }
+            }
+        }
+        k = main;
+    }
+    (cells, conf)
+}
+
+fn cheb(a: u32, b: u32, rw: usize) -> i64 {
+    let (ax, ay, bx, by) = ((a as usize % rw) as i64, (a as usize / rw) as i64, (b as usize % rw) as i64, (b as usize / rw) as i64);
+    (ax - bx).abs().max((ay - by).abs())
+}
+
+/// The addendum's stop test (lead #131a): for the 10 largest rivers of `a` leaving the box (20 main-stem cells or more in it), whether the water at `a`'s exit cell
+/// reaches an outlet of `b` more than 10 cells (8 km) from `a`'s outlet, and the major confluences of the main stem lost or gained (no counterpart within 2 cells)
+/// on `b`'s main stem from its trunk cell of the largest Q within 2 cells of the exit.
+fn stop_test(a: &H1, b: &H1, in_box: &dyn Fn(u32) -> bool, rw: usize) -> Vec<String> {
+    let (ua, ub) = (ups_of(a), ups_of(b));
+    let segs = &a.hydro.segments;
+    let mut exits: Vec<usize> = a
+        .trunk_seg
+        .iter()
+        .copied()
+        .filter(|&k| in_box(segs[k].down) && (segs[k].downstream == NONE || !in_box(segs[segs[k].downstream as usize].down)))
+        .collect();
+    exits.sort_by(|&x, &y| segs[y].q_down.total_cmp(&segs[x].q_down).then(x.cmp(&y)));
+    let mut seen = HashSet::new();
+    exits.retain(|&k| seen.insert(segs[k].down));
+    let (ra, rb) = (roots(&a.routing), roots(&b.routing));
+    // b's segment of every trunk cell
+    let mut seg_of_b: HashMap<u32, usize> = HashMap::new();
+    for &k in &b.trunk_seg {
+        let s = &b.hydro.segments[k];
+        let mut c = s.up;
+        seg_of_b.insert(c, k);
+        while c != s.down {
+            c = b.routing.receiver[c as usize];
+            seg_of_b.entry(c).or_insert(k);
+        }
+    }
+    let mut out = Vec::new();
+    for &m in &exits {
+        if out.len() == 10 {
+            break;
+        }
+        let (stem, conf_a) = main_stem(a, &ua, m, in_box);
+        if stem.iter().filter(|&&c| in_box(c)).count() < 20 {
+            continue;
+        }
+        let exit = segs[m].down;
+        let od = cheb(ra[exit as usize], rb[exit as usize], rw);
+        // b's counterpart: its trunk cell of the largest Q within 2 cells of the exit
+        let mut best: Option<(f64, u32)> = None;
+        let (ex, ey) = ((exit as usize % rw) as i64, (exit as usize / rw) as i64);
+        for dy in -2..=2i64 {
+            for dx in -2..=2i64 {
+                let c = ((ey + dy) * rw as i64 + ex + dx) as u32;
+                if seg_of_b.contains_key(&c) && best.is_none_or(|(q, bc)| b.hydro.qw[c as usize] > q || (b.hydro.qw[c as usize] == q && c < bc)) {
+                    best = Some((b.hydro.qw[c as usize], c));
+                }
+            }
+        }
+        let conf_b = best.map(|(_, c)| main_stem(b, &ub, seg_of_b[&c], in_box).1).unwrap_or_default();
+        let lost: Vec<&(u32, f64)> = conf_a.iter().filter(|x| !conf_b.iter().any(|y| cheb(x.0, y.0, rw) <= 2)).collect();
+        let gained: Vec<&(u32, f64)> = conf_b.iter().filter(|y| !conf_a.iter().any(|x| cheb(x.0, y.0, rw) <= 2)).collect();
+        let fmt = |v: &[&(u32, f64)]| v.iter().map(|x| format!("{}({:.0})", x.0, x.1)).collect::<Vec<_>>().join("/");
+        out.push(format!(
+            "exit {exit} Q {:.0}: outlet {} cells off{}; {} major confluences, lost {} [{}], gained {} [{}]{}",
+            segs[m].q_down,
+            od,
+            if od > 10 { " (CHANGED)" } else { "" },
+            conf_a.len(),
+            lost.len(),
+            fmt(&lost),
+            gained.len(),
+            fmt(&gained),
+            if best.is_none() { "; no trunk of the second within 2 cells of the exit" } else { "" }
+        ));
+    }
+    out
+}
+
+/// Trunk heads (trunk segments without an upstream trunk segment, head cell in the box), trunk length in the box (km, cell to receiver) and trunk cells in the box.
+fn trunk_stats(h1: &H1, grid: &Grid, in_box: &dyn Fn(u32) -> bool) -> (usize, f64, usize) {
+    let ups = ups_of(h1);
+    let heads = h1.trunk_seg.iter().filter(|&&k| !ups.contains_key(&k) && in_box(h1.hydro.segments[k].up)).count();
+    let mut cells: HashSet<u32> = HashSet::new();
+    for cs in &h1.trunk_cells {
+        cells.extend(cs.iter().copied().filter(|&c| in_box(c)));
+    }
+    let mut len = 0.0;
+    for &c in &cells {
+        let r = h1.routing.receiver[c as usize];
+        if r != NONE {
+            let d = (0..8).find(|&d| grid.neighbour(c as usize, d) == Some(r as usize)).expect("a receiver is a neighbour");
+            len += grid.distance_at(c as usize, d);
+        }
+    }
+    (heads, len / 1000.0, cells.len())
+}
+
+
 // ---------------------------------------------------------------- main
 
 #[allow(clippy::type_complexity)]
@@ -1082,6 +1217,19 @@ fn main() -> Result<(), String> {
         let rows: Vec<String> =
             m.iter().map(|r| format!("{}:{:.0}->{:.0}m3/s@{},{},stem{}:{:.1}%", r.0, r.1, r.4, r.5, if r.2 { "mouth" } else { "MOVED" }, r.6, r.3)).collect();
         println!("G1A major {name}: {changed} of {} changed (the box exit moved more than 1 cell or under 95 % of the main stem in the box within 1 cell; the 10 largest rivers leaving the box with 20 cells or more of main stem in it): {}", m.len(), rows.join(" "));
+    }
+
+    for (name, h1) in [("today", &t0), ("control", &tc), ("K6'", &t1), ("K6' MFD over all lower neighbours", &t1_mfd)] {
+        let (heads, km, n) = trunk_stats(h1, grid, &in_box_h1);
+        println!("G1A trunk stats {name}: {heads} heads in the box, {km:.0} km of trunk, {n} cells ({:.3} km a cell)", km / n.max(1) as f64);
+    }
+    for (name, a, b) in [("today -> K6'", &t0, &t1), ("today -> control", &t0, &tc), ("today -> z_s +-0.5 m", &t0, &t0_p), ("K6' -> S0 +-0.5 m", &t1, &t1_p0), ("K6' -> sills +-1 m", &t1, &t1_ps)] {
+        let rows = stop_test(a, b, &in_box_h1, rw);
+        let changed = rows.iter().filter(|r| r.contains("CHANGED") || !r.contains("lost 0 [") || !r.contains("gained 0 [")).count();
+        println!("G1A stop test {name}: {changed} of {} top rivers change outlet (> 8 km) or lose or gain a major confluence", rows.len());
+        for r in rows {
+            println!("G1A stop test {name}:   {r}");
+        }
     }
 
     // ---- corridors
