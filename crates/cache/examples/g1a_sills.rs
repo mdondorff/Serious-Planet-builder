@@ -896,7 +896,7 @@ fn cheb(a: u32, b: u32, rw: usize) -> i64 {
 
 /// The addendum's stop test (lead #131a): for the 10 largest rivers of `a` leaving the box (20 main-stem cells or more in it), whether the water at `a`'s exit cell
 /// reaches an outlet of `b` more than 10 cells (8 km) from `a`'s outlet, and the major confluences of the main stem lost or gained (no counterpart within 2 cells)
-/// on `b`'s main stem from its trunk cell of the largest Q within 2 cells of the exit.
+/// on `b`'s main stem from its trunk cell of the largest D8 area within 2 cells of the exit.
 fn stop_test(a: &H1, b: &H1, in_box: &dyn Fn(u32) -> bool, rw: usize) -> Vec<String> {
     let (ua, ub) = (ups_of(a), ups_of(b));
     let segs = &a.hydro.segments;
@@ -932,14 +932,14 @@ fn stop_test(a: &H1, b: &H1, in_box: &dyn Fn(u32) -> bool, rw: usize) -> Vec<Str
         }
         let exit = segs[m].down;
         let od = cheb(ra[exit as usize], rb[exit as usize], rw);
-        // b's counterpart: its trunk cell of the largest Q within 2 cells of the exit
+        // b's counterpart: its trunk cell of the largest D8 area within 2 cells of the exit
         let mut best: Option<(f64, u32)> = None;
         let (ex, ey) = ((exit as usize % rw) as i64, (exit as usize / rw) as i64);
         for dy in -2..=2i64 {
             for dx in -2..=2i64 {
                 let c = ((ey + dy) * rw as i64 + ex + dx) as u32;
-                if seg_of_b.contains_key(&c) && best.is_none_or(|(q, bc)| b.hydro.qw[c as usize] > q || (b.hydro.qw[c as usize] == q && c < bc)) {
-                    best = Some((b.hydro.qw[c as usize], c));
+                if seg_of_b.contains_key(&c) && best.is_none_or(|(q, bc)| b.d8[c as usize] > q || (b.d8[c as usize] == q && c < bc)) {
+                    best = Some((b.d8[c as usize], c));
                 }
             }
         }
