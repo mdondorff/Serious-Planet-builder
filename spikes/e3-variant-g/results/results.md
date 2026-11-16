@@ -14,7 +14,7 @@ Code location: spike branch `spike/e3-def` (`crates/cache/examples/drain_base.rs
 | B (explorer's stores) | today's surface: B + regional | one round at L with K dt x 1/4 (`--k-scale 0.25`), K7 |
 | G | today's surface with B's sub-814 m residual replaced by E's: attenuated toward the channels over 1,200 m and averaged along the downslope direction over +-4 L cells (channels and directions as in E: the 814 m surface breached over 8 neighbours, read at L on D8-diagonal triangles, routed at L, area at least 75 km2); no rebuild from the 814 m nodes, no capped breach | the same: `bake_eroded --window <w> --k-scale 0.25 --threads 8 --start <file>` (explorer's B invocation, confirmed 2026-11-16) |
 
-- **Bit check:** B's own start (B + regional, the probe's dump) baked through `--start` on R1h gives a gate row identical in every column to explorer's b-r1h-s0.25 (raw `raw/gate-b-g.csv` source rows, `raw/bake-r1h-bcheck.txt`).
+- **Bit check:** B's own start (B + regional, the probe's dump) baked through `--start` on R1h gives a gate row identical in every column to explorer's b-r1h-s0.25 (raw `raw/gate-bcheck-r1h.csv`: rows b-r1h-s0.25, r1h-bcheck and r1h-g of one gate run; `raw/bake-r1h-bcheck.txt`).
 - **No re-calibration:** B's k-scale and E's base settings as they were.
 - **Recorded this time:** bake time and the bake process's peak working set (polled every 0.5 s; `raw/bake-*.txt`).
 
@@ -36,7 +36,7 @@ Ridge columns by SPIKE-122's rule (sections 6 and 7: today's ridge cells lowered
 
 ## 3. Findings
 - **G passes both bars on all five windows** (basins 0.00-2.95 %, valley depth within every window's bar).
-- **On the gate columns G is B within about a point:** a little better on R1h and M1 (valley depth 1.22 against 1.57 % and 18.24 against 22.23 %; corridor raw +0.5 and +1.0 points; edge +2 crossings each), and on R3a, R3b and F1 equal within 0.1 point except edge (R3a and R3b +1 crossing, about +1.1 points).
+- **On the gate columns G is B within about a point:** a little better on R1h and M1 (valley depth 1.22 against 1.57 % and 18.24 against 22.23 %; corridor raw +0.5 and +1.0 points; edge +2 crossings each), and on R3a, R3b and F1 equal within 0.15 point except edge (R3a and R3b +1 crossing, about +1.1 points; F1's snapped corridor +0.14).
 - **On the owner's fault class G is worse than B where there is relief:** cut-through saddles before K7 R1h 1,495 against 764 (2.0x), M1 21,615 against 12,506 (1.7x), F1 90 against 46; equal within 17 on R3a and R3b. Ridge cells lowered over 20 m before K7: R1h 4.08 against 2.17 %, M1 26.09 against 9.58 %.
 - **Where G stands among the variants (saddles before K7):** R1h above A (1,156) and below D and E (about 3,700); M1 above A (16,665) and below D and E (about 25,700). E's residual damps the relief toward the channels, crests near the channels included; on B's base that adds ridge cuts that B's own base does not have.
 - **Answer to the owner's question:** "fix the base first", in E's form, does not improve B; it buys about one point on the gate columns of the steep windows with 1.7-2x B's ridge cuts. B on its own base stays ahead on the ranking measure.
