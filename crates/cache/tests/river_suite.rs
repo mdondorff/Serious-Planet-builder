@@ -558,3 +558,38 @@ fn the_ground_lowered_counts_land_cells_more_than_50_m_below_the_start() {
     assert!(r.lines().iter().any(|l| l.starts_with("RIVER-GATE lowered: 1600 of 1600 land cells inside (100.00 %)")), "{:?}", r.lines());
     assert!(r.fields().iter().any(|(k, v)| *k == "lowered_pct" && v == "100.00"));
 }
+
+// spec: TEST-137, BUILD-057
+#[test]
+fn a_corridor_measures_rises_above_the_water_surface_not_the_sea_floor() {
+    // Sea floor at -45 m for x < 5, flat land at 5 m beyond (a little tilt for the routing); a reach from the sea out across the land. On the sea floor its bed
+    // would be -45 m and the land 50 m above it, over the 10 m bar of a flat window; on the water surface (the sea level, 0 m) the land is 5 m above: it passes.
+    let g = Grid::new(N, N, DX);
+    let z: Vec<f64> = (0..N * N).map(|c| if c % N < 5 { -45.0 } else { 5.0 + 0.001 * (c % N) as f64 }).collect();
+    let all = vec![true; N * N];
+    let outlet = g.outlets(&z, 0.0);
+    let line = vec![vec![(2.0, 10.0), (30.0, 10.0)]];
+    let r = measure(
+        &GateInput {
+            grid: &g,
+            start: &z,
+            surface: &z,
+            outlet: &outlet,
+            inside: &all,
+            region: &all,
+            h1: &[],
+            seed: 7,
+            sea_level_m: 0.0,
+            outside_drains: false,
+            trunks: &line,
+        },
+        &params(),
+    );
+    assert_eq!(r.corridor_bar_m, 10.0);
+    for t in r.trunk_corridors.iter().chain(&r.trunk_corridors_snapped) {
+        assert_eq!((t.reaches, t.reaches_over), (1, 0), "{t:?}");
+    }
+    // The measure itself on the sea floor would fail it: the gate passes the water surface.
+    let floor = planet_cache::river_suite::trunk_corridor(&g, &z, &all, &line, 8.0, 10.0, None);
+    assert_eq!(floor.reaches_over, 1, "{floor:?}");
+}
