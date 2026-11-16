@@ -782,7 +782,7 @@ pub fn trunk_corridor(
         }
         // No route rises more than the corridor's height range above its running minimum (the bed may fall below the start first).
         let top = cells.iter().map(|&c| z[c]).fold(f64::NEG_INFINITY, f64::max) - cells.iter().map(|&c| z[c]).fold(f64::INFINITY, f64::min);
-        // A reach is over exactly when no route keeps within the bar (every cell of the route counts, inside the counted cells or not); its depth is then the
+        // A reach is over exactly when no route keeps within the bar (every cell of the route counts; the corridor holds counted cells only); its depth is then the
         // minimax rise. The vertex counts are of the route's cells inside.
         let mut failed = false;
         let route = match waypoint_route(w, z, &index, &cells, &points, bar_m) {
