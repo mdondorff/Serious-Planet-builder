@@ -1,0 +1,4 @@
+TRANSFER g: the 814 m breach lowered 14805 of 727003 land cells: p50 0.12 p95 1.61 max 24.65 m; over 50 m 0 (0.00 % of land); G: today's surface with E's residual (attenuated over 1200 m, oriented downslope) in place of B's; no rebuild, no capped breach
+START f4-368-4720-none-tg: wrote C:/DEV/SeriousPlanetData/tmp/e3-def/start5\f4-368-4720-none-tg-start-8160x8160.f64 (8160 x 8160, origin at L cell (1344, 36160) of face 4)
+BASINS117 f4-368-4720-none-tg: river length on basins at least 0.5 m deep and 16 cells: 48.58 % (39910 of 82152); basins counted 8473 of 28841 in the window; by N: N4 49.14 % N8 49.07 % N16 48.58 % N32 46.25 % N64 43.27 %
+RELIEF f4-368-4720-none-tg: band 200 m-1 km std 1.39 m (|.| p95 2.47); 1 km block relief p50 8.4 p95 54.1 m (199965 blocks)
