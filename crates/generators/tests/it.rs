@@ -102,6 +102,8 @@ mod descriptors;
 mod driver_channels;
 #[path = "erosion.rs"]
 mod erosion;
+#[path = "g0_fixture.rs"]
+mod g0_fixture;
 #[path = "generator_contract.rs"]
 mod generator_contract;
 #[path = "global.rs"]
