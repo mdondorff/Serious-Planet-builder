@@ -91,6 +91,39 @@ Where a NoBasin bed's water goes (steepest descent on the stored ground):
 - D-4: keep the class rule (wet share q_in / E(A_sill), thresholds 1 and 0.1) for lakes decided upstream; on trunks it gives lakes except in arid basins near the cap.
 - The ponding rule as a KR stage is not worth building on its own: about 1 % of river length and at most 0.7 points of corridor share.
 
+## 6. Addendum: the final corridor measure (lead #153, 2026-11-16)
+Sections 3 and 4 use the corridor measure from before #1551 (counted tiles) and #1555 (water surface). This addendum re-runs the classification on the final measure (cb5a504d):
+- corridors hold counted cells (the store's tiles) only;
+- routes and snaps run on the water surface, with a cell under the sea at the sea level.
+
+Setup:
+- B on all five windows; k_c 2 snapped; same rule, cap and depth limit as section 1.
+- Branch `spike/ponding-final` (local, never merged).
+- Logs in `final/`.
+- Each run took 348-416 s with a peak of 8.6 GB.
+
+| B, final measure | R1h | R3a | R3b | M1 | F1 |
+|---|---|---|---|---|---|
+| Bar, m | 27.46 | 10.00 | 10.00 | 50.00 | 10.00 |
+| Reaches failing (gate, c2s) | 111 of 5,179 | 13 of 12,502 | 29 of 8,608 | 493 of 9,999 | 145 of 10,252 |
+| Rescued: own pond + an earlier reach's pond | 13 + 1 | 0 | 0 | 56 + 10 | 0 |
+| NoBasin (of which the bed is under the sea) | 71 (31) | 11 (7) | 24 (10) | 213 (0) | 122 (49) |
+| SpillsLower | 25 | 2 | 5 | 193 | 23 |
+| OverDepth / OverCap | 0 / 0 | 0 / 0 | 0 / 0 | 4 / 0 | 0 / 0 |
+| SpillOutside | 1 | 0 | 0 | 17 | 0 |
+| Touching the store edge: route / corridor clipped / either | 3 / 3 / 3 | 0 / 0 / 0 | 1 / 1 / 1 | 6 / 21 / 21 | 1 / 1 / 1 |
+| D-2 list (NoBasin + SpillsLower + OverDepth + SpillOutside) | 97 | 13 | 29 | 427 | 145 |
+| Corridor passing, before -> after ponding | 97.86 -> 98.11 % | 99.90 -> 99.90 % | 99.66 -> 99.66 % | 95.07 -> 95.73 % | 98.59 -> 98.59 % |
+| Lakes, km2; flats | 18, 4.65; 0 | 0; 0 | 0; 0 | 94, 37.40; 0 | 1, 0.02; 0 |
+| River length in ponds | 0.37 % | 0.00 % | 0.00 % | 0.98 % | 0.01 % |
+
+- Definitions:
+  - "Bed under the sea": the route's running minimum before the rise sits on a sea cell. The trunk reaches the coast on the water surface and then rises inland.
+  - "Touching the store edge": the route holds a counted cell with an 8-neighbour outside the store, or the corridor around a vertex is cut by the store's edge.
+- The store edge no longer drives the classes. 26 of the 780 classified failing reaches touch it (the 11 rescued by an earlier pond are not classified), 21 of them on M1. Section 4's 70 beds outside the store came from the old measure, whose corridor held cells outside the tiles.
+- Ponds still rescue few reaches: 14 of 111 (R1h), 66 of 493 (M1), none on R3a, R3b and F1.
+- Sections 4 and 5 stand. The D-2 list on one measure is 711 reaches: R1h 97, R3a 13, R3b 29, M1 427, F1 145.
+
 ## Visuals
 Analysis renders: hillshade of the stored ground at 101.8 m (sun from the north-west), lakes blue, the rejected candidate purple, the trunk routes red, cells outside the store pale. CPU (numpy), no GPU path.
 

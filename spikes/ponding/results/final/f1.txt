@@ -1,0 +1,339 @@
+RIVER-GATE input: store ../start-879e4b/target/stores/b-f1 (commit 7f4a0f2eb3392a65, 49 tiles read, 0 outside the window; keys not checked: spike store): the stored ground B + L over its tiles, which drain to their border, window [4, 4800, 5419, 3300, 3919, 15], sea level 0 m; the stored change's 0.25 m steps add pits to the 5 cm reference only; 8160 x 8160 L cells of 101.8 m
+RIVER-GATE rivers: 180296 river cells inside (drainage area >= 75 km2, land)
+RIVER-GATE basins: 0.00 % of river length in closed basins (8 of 180296 cells; 1 basins of >= 0.5 m depth and >= 16 cells, fill epsilon 1e-7 m; bar <= 10 %); SPIKE-114 reference (any pit of 0.05 m): 6.98 %
+RIVER-GATE valley depth: 0.00 % of river cells over 50 m below the p50 of the surface 1 to 2 cells out (the canyon a viewer sees; 0 cells, p50 0.74 m, p99 10.11 m, max 33.04 m); bar: at most the share of a GLO-30 tile with 1 to 2 x this window's relief at 10 x 10 cells (13.26 m; the review table gives the reference)
+RIVER-GATE burn: 0.00 % of river cells with the river level over 50 m below their surface, every basin breached (0 cells, p99 0.14 m, max 0.79 m; K7's cut); with the lakes of D 20 m kept 0.00 % (0 cells)
+RIVER-GATE ring 2-4: 0.00 % of river cells with the river level over 50 m below the p50 of the surface 2 to 4 cells out at D 20 m (0 cells, p99 15.59 m, max 45.88 m; the valley depth at 2 to 4 cells plus the burn); every basin breached 0.00 % (0 cells, max 45.88 m)
+RIVER-GATE erosion depth: the river level under the start surface at D 20 m p50 2.93 p99 34.06 max 80.95 m, 263 cells over 50 m (0.15 %)
+RIVER-GATE lakes: 0.00 % of river cells in lakes at D 20 m (0 cells)
+RIVER-GATE relief: p50 over 2 x 2 cells 1.63 m against the start's 1.32 m (124 %), over 10 x 10 cells 13.26 m against 11.49 m (115 %)
+RIVER-GATE lowered: 2713 of 28821437 land cells inside (0.01 %) lie more than 50 m below the start surface
+RIVER-GATE edge: 30 of 87 H1 crossings (Q >= 1 m3/s) have an L crossing of the same direction within 2000 m (34.5 %)
+RIVER-GATE gradient: 5 of 179758 river steps rise by more than 0.25 m (0.00 %; largest 0.75 m)
+RIVER-GATE valley width: at 10 m above the river cell p50 1527 m p90 3926 m (180296 cells, 4475 sides capped at 64 cells); at half the ring 2-4 depth p50 334 m p90 602 m (88129 cells, 146 sides capped, 92167 cells with a flat ring)
+RIVER-GATE asymmetry: |L - R| / (L + R) of the rise 2 to 4 cells out: p50 0.42 p90 0.91 (174814 cells)
+RIVER-GATE drainage density: 0.074 km/km2 (22157.7 km of river over 297615.2 km2 of land)
+RIVER-GATE catchment: 30 matched H1 crossings; implied runoff (L area per H1 discharge) 1.523e8 m2 per m3/s; the ratio to it p10 0.63 p90 1.58
+RIVER-GATE seam: 19840 neighbour pairs across the region's edge, |dz| p50 0.81 m p99 22.44 m max 80.35 m; inside the region p50 0.75 m p99 9.55 m
+RIVER-GATE narrowness: valley depth (ring 1-2) over ring 2-4 depth p50 0.40 p90 0.77 (148939 cells); of the two p50s 0.38
+RIVER-GATE slope-area: theta 0.24 over bins (area in cells: slope p50 (cells)) 4:0.0128(6913565) 13:0.0113(3146350) 40:0.0086(1090009) 126:0.0057(524381) 400:0.0039(266161) 1265:0.0029(147086) 4000:0.0022(106810) 12649:0.0018(71409) 40000:0.0016(33557) 126491:0.0012(5184) 400000:0.0005(29)
+RIVER-GATE spectrum: 1024 x 1024 cells, power per octave from wavenumber 1 (m2) 2.134e7 1.262e7 1.258e6 1.662e5 2.031e4 2.041e3 1.170e2 1.828e0 1.557e-1 1.190e-1; slope beta -3.60; the start's 1024 x 1024: 2.087e7 1.212e7 1.194e6 1.613e5 1.817e4 1.630e3 7.836e1 1.205e-1 3.783e-3 3.626e-4; beta -4.55
+RIVER-GATE trunks: 6 of 10587 H1 trunk reaches inside (0.06 %) and 8 of 347989 vertices (0.00 %) stand more than 50 m above their reach's running minimum (the burn KR would need); deepest 56.92 m on reach 3539 at cell (2192, 1736)
+RIVER-GATE trunks in corridors (a reach passes when its minimax route inside its corridor keeps within 10.0 m of its running minimum, the window's bar): raw H1 ends: k_c 1 (814 m) 95.61 % of 10465 reaches pass (459 over; 5648 of 395704 route vertices over), deepest 49.55 m on reach 6096; k_c 2 (1628 m) 96.28 % of 10465 reaches pass (389 over; 5619 of 476111 route vertices over), deepest 49.58 m on reach 6096; k_c 4 (3256 m) 96.54 % of 10465 reaches pass (362 over; 6401 of 586312 route vertices over), deepest 49.53 m on reach 6096 | snapped: k_c 1 (814 m) 97.44 % of 10252 reaches pass (262 over; 5861 of 357063 route vertices over), deepest 54.73 m on reach 6096; k_c 2 (1628 m) 98.59 % of 10252 reaches pass (145 over; 4741 of 433608 route vertices over), deepest 54.73 m on reach 6096; k_c 4 (3256 m) 98.97 % of 10252 reaches pass (106 over; 5001 of 535607 route vertices over), deepest 54.73 m on reach 6096
+RIVER-GATE fields: river_cells=180296 basins=1 basin_cells=8 basin_pct=0.00 reference_cells=12586 reference_pct=6.98 valley_over_cells=0 valley_over_pct=0.00 valley_p50_m=0.74 valley_p99_m=10.11 burn_over_cells=0 burn_over_pct=0.00 burn_p99_m=0.14 burn_lakes_over_cells=0 burn_lakes_over_pct=0.00 ring24_over_cells=0 ring24_over_pct=0.00 ring24_breached_over_cells=0 ring24_breached_over_pct=0.00 erosion_p50_m=2.93 erosion_p99_m=34.06 erosion_over_cells=263 erosion_over_pct=0.15 lake_cells=0 lake_pct=0.00 relief2_m=1.63 relief2_start_m=1.32 relief10_m=13.26 relief10_start_m=11.49 land_cells=28821437 lowered_cells=2713 lowered_pct=0.01 edge_h1=87 edge_matched=30 edge_pct=34.48 steps=179758 uphill_steps=5 uphill_pct=0.00 uphill_max_m=0.75 width10_cells=180296 width10_p50_m=1527 width10_p90_m=3926 width10_capped_sides=4475 widthhalf_cells=88129 widthhalf_p50_m=334 widthhalf_p90_m=602 widthhalf_capped_sides=146 widthhalf_flat_cells=92167 asym_cells=174814 asym_p50=0.419 asym_p90=0.911 density_km_per_km2=0.0745 river_km=22157.7 land_km2=297615.2 catchment_pairs=30 catchment_runoff_m2_per_m3s=1.5230e8 catchment_p10=0.633 catchment_p90=1.578 seam_pairs=19840 seam_p50_m=0.81 seam_p99_m=22.44 seam_max_m=80.35 interior_p50_m=0.75 interior_p99_m=9.55 narrow_cells=148939 narrow_p50=0.396 narrow_p90=0.773 narrow_of_p50=0.377 slope_area_bins_fitted=10 theta=0.244 spectrum_n=1024 beta=-3.598 beta_start=-4.552 trunk_reaches=10587 trunk_reaches_over=6 trunk_reaches_over_pct=0.06 trunk_vertices=347989 trunk_vertices_over=8 trunk_vertices_over_pct=0.00 trunk_deepest_m=56.92 trunk_deepest_reach=3539 corridor_bar_m=10.00 trunk_c1_reaches=10465 trunk_c1_reaches_over=459 trunk_c1_reaches_passing_pct=95.61 trunk_c1_vertices=395704 trunk_c1_vertices_over=5648 trunk_c1_vertices_over_pct=1.43 trunk_c1_deepest_m=49.55 trunk_c1_deepest_reach=6096 trunk_c2_reaches=10465 trunk_c2_reaches_over=389 trunk_c2_reaches_passing_pct=96.28 trunk_c2_vertices=476111 trunk_c2_vertices_over=5619 trunk_c2_vertices_over_pct=1.18 trunk_c2_deepest_m=49.58 trunk_c2_deepest_reach=6096 trunk_c4_reaches=10465 trunk_c4_reaches_over=362 trunk_c4_reaches_passing_pct=96.54 trunk_c4_vertices=586312 trunk_c4_vertices_over=6401 trunk_c4_vertices_over_pct=1.09 trunk_c4_deepest_m=49.53 trunk_c4_deepest_reach=6096 trunk_c1s_reaches=10252 trunk_c1s_reaches_over=262 trunk_c1s_reaches_passing_pct=97.44 trunk_c1s_vertices=357063 trunk_c1s_vertices_over=5861 trunk_c1s_vertices_over_pct=1.64 trunk_c1s_deepest_m=54.73 trunk_c1s_deepest_reach=6096 trunk_c2s_reaches=10252 trunk_c2s_reaches_over=145 trunk_c2s_reaches_passing_pct=98.59 trunk_c2s_vertices=433608 trunk_c2s_vertices_over=4741 trunk_c2s_vertices_over_pct=1.09 trunk_c2s_deepest_m=54.73 trunk_c2s_deepest_reach=6096 trunk_c4s_reaches=10252 trunk_c4s_reaches_over=106 trunk_c4s_reaches_passing_pct=98.97 trunk_c4s_vertices=535607 trunk_c4s_vertices_over=5001 trunk_c4s_vertices_over_pct=0.93 trunk_c4s_deepest_m=54.73 trunk_c4s_deepest_reach=6096
+PONDING rule: bar 10.00 m; corridor k_c 2 (1628 m); area cap (4 k_c dx_H1)^2 = 42.41 km2 (4092 cells); depth limit 2 x bar = 20.0 m
+PONDING hierarchy: 67731 nodes, 95528 depression cells; 24.5 s
+PONDING nobasin reach 2866: bed L (39765, 26228) 2.9 m, 117 cells from outside the store; its water reaches a pit after 6 steps, leaving the corridor after never
+PONDING nobasin reach 2890: bed L (42077, 26248) 0.5 m, 137 cells from outside the store; its water reaches a pit after 2 steps, leaving the corridor after never
+PONDING nobasin reach 2978: bed L (39744, 26262) 0.5 m, 151 cells from outside the store; its water reaches the sea or the window border after 5 steps, leaving the corridor after never
+PONDING nobasin reach 3303: bed L (39843, 26412) 0.5 m, 301 cells from outside the store; its water reaches a pit after 3 steps, leaving the corridor after never
+PONDING nobasin reach 3456: bed L (42838, 26484) 0.7 m, 373 cells from outside the store; its water reaches the sea or the window border after 2 steps, leaving the corridor after never
+PONDING nobasin reach 3467: bed L (39855, 26493) 0.0 m, 382 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 3677: bed L (39966, 26582) 1.4 m, >400 cells from outside the store; its water reaches the sea or the window border after 6 steps, leaving the corridor after never
+PONDING nobasin reach 3742: bed L (40453, 26621) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 3878: bed L (41548, 26674) 1.6 m, >400 cells from outside the store; its water reaches a pit after 5 steps, leaving the corridor after never
+PONDING nobasin reach 4027: bed L (39032, 26757) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 4033: bed L (41565, 26756) 2.9 m, >400 cells from outside the store; its water reaches a pit after 3 steps, leaving the corridor after never
+PONDING nobasin reach 4266: bed L (39113, 26886) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 4355: bed L (40511, 26933) 0.6 m, >400 cells from outside the store; its water reaches a pit after 3 steps, leaving the corridor after never
+PONDING nobasin reach 4441: bed L (42247, 26975) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 4552: bed L (42348, 27004) 1.5 m, >400 cells from outside the store; its water reaches a pit after 3 steps, leaving the corridor after never
+PONDING nobasin reach 4692: bed L (41379, 27070) 4.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 5 steps, leaving the corridor after never
+PONDING nobasin reach 4913: bed L (40531, 27132) 4.3 m, >400 cells from outside the store; its water reaches the sea or the window border after 10 steps, leaving the corridor after 9 steps
+PONDING nobasin reach 5329: bed L (41573, 27296) 2.0 m, >400 cells from outside the store; its water reaches a pit after 4 steps, leaving the corridor after never
+PONDING nobasin reach 5391: bed L (40541, 27319) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 5447: bed L (40542, 27342) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 5542: bed L (40542, 27374) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 5904: bed L (38868, 27505) 1.5 m, >400 cells from outside the store; its water reaches a pit after 6 steps, leaving the corridor after never
+PONDING nobasin reach 6043: bed L (41812, 27529) 5.3 m, >400 cells from outside the store; its water reaches a pit after 18 steps, leaving the corridor after 8 steps
+PONDING nobasin reach 6058: bed L (38707, 27547) 0.7 m, 308 cells from outside the store; its water reaches a pit after 6 steps, leaving the corridor after never
+PONDING nobasin reach 6190: bed L (41739, 27566) 6.8 m, >400 cells from outside the store; its water reaches a pit after 1 steps, leaving the corridor after never
+PONDING nobasin reach 6216: bed L (39404, 27569) 0.9 m, >400 cells from outside the store; its water reaches a pit after 6 steps, leaving the corridor after never
+PONDING nobasin reach 6237: bed L (38684, 27580) 3.2 m, 285 cells from outside the store; its water reaches a pit after 3 steps, leaving the corridor after never
+PONDING nobasin reach 6273: bed L (40529, 27580) 1.2 m, >400 cells from outside the store; its water reaches a pit after 3 steps, leaving the corridor after never
+PONDING nobasin reach 6451: bed L (40474, 27631) 2.0 m, >400 cells from outside the store; its water reaches a pit after 3 steps, leaving the corridor after never
+PONDING nobasin reach 6520: bed L (39912, 27665) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 6557: bed L (42613, 27663) 15.2 m, >400 cells from outside the store; its water reaches a pit after 11 steps, leaving the corridor after 10 steps
+PONDING nobasin reach 6578: bed L (39161, 27685) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 6583: bed L (40233, 27676) 1.9 m, >400 cells from outside the store; its water reaches a pit after 2 steps, leaving the corridor after never
+PONDING nobasin reach 6905: bed L (43451, 27809) 0.0 m, 325 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 6923: bed L (39096, 27829) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 7114: bed L (42444, 27918) 0.3 m, >400 cells from outside the store; its water reaches the sea or the window border after 2 steps, leaving the corridor after never
+PONDING nobasin reach 7220: bed L (40267, 27977) 4.0 m, >400 cells from outside the store; its water reaches a pit after 12 steps, leaving the corridor after 9 steps
+PONDING nobasin reach 7260: bed L (40285, 27996) 2.7 m, >400 cells from outside the store; its water reaches a pit after 5 steps, leaving the corridor after never
+PONDING nobasin reach 7301: bed L (40306, 28015) 3.5 m, >400 cells from outside the store; its water reaches a pit after 2 steps, leaving the corridor after never
+PONDING nobasin reach 7385: bed L (40341, 28052) 1.6 m, >400 cells from outside the store; its water reaches a pit after 2 steps, leaving the corridor after never
+PONDING nobasin reach 7633: bed L (42227, 28174) 0.5 m, >400 cells from outside the store; its water reaches the sea or the window border after 2 steps, leaving the corridor after never
+PONDING nobasin reach 7634: bed L (42229, 28175) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 7658: bed L (42211, 28182) 2.7 m, >400 cells from outside the store; its water reaches the sea or the window border after 7 steps, leaving the corridor after never
+PONDING nobasin reach 7738: bed L (42431, 28234) 6.4 m, >400 cells from outside the store; its water reaches a pit after 5 steps, leaving the corridor after never
+PONDING nobasin reach 7753: bed L (42193, 28243) 0.3 m, >400 cells from outside the store; its water reaches a pit after 4 steps, leaving the corridor after never
+PONDING nobasin reach 8024: bed L (42107, 28366) 0.9 m, >400 cells from outside the store; its water reaches the sea or the window border after 1 steps, leaving the corridor after never
+PONDING nobasin reach 8058: bed L (41417, 28375) 6.6 m, >400 cells from outside the store; its water reaches the sea or the window border after 14 steps, leaving the corridor after 9 steps
+PONDING nobasin reach 8217: bed L (42051, 28451) 3.3 m, >400 cells from outside the store; its water reaches a pit after 4 steps, leaving the corridor after never
+PONDING nobasin reach 8281: bed L (42060, 28460) 2.8 m, >400 cells from outside the store; its water reaches a pit after 4 steps, leaving the corridor after never
+PONDING nobasin reach 8403: bed L (41604, 28494) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 8406: bed L (42073, 28492) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 8431: bed L (42058, 28504) 1.6 m, >400 cells from outside the store; its water reaches the sea or the window border after 5 steps, leaving the corridor after never
+PONDING nobasin reach 8488: bed L (41670, 28518) 0.6 m, >400 cells from outside the store; its water reaches the sea or the window border after 3 steps, leaving the corridor after never
+PONDING nobasin reach 8641: bed L (40119, 28608) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 8737: bed L (41718, 28659) 5.8 m, >400 cells from outside the store; its water reaches a pit after 3 steps, leaving the corridor after never
+PONDING nobasin reach 8830: bed L (40719, 28677) 1.5 m, >400 cells from outside the store; its water reaches a pit after 11 steps, leaving the corridor after 7 steps
+PONDING nobasin reach 8919: bed L (40510, 28737) 1.5 m, >400 cells from outside the store; its water reaches the sea or the window border after 1 steps, leaving the corridor after never
+PONDING nobasin reach 9115: bed L (40637, 28816) 3.1 m, >400 cells from outside the store; its water reaches a pit after 6 steps, leaving the corridor after never
+PONDING nobasin reach 9326: bed L (40604, 28886) 1.9 m, >400 cells from outside the store; its water reaches a pit after 11 steps, leaving the corridor after 8 steps
+PONDING nobasin reach 9356: bed L (40577, 28892) 0.5 m, >400 cells from outside the store; its water reaches a pit after 3 steps, leaving the corridor after never
+PONDING nobasin reach 9439: bed L (41271, 28946) 2.4 m, >400 cells from outside the store; its water reaches a pit after 3 steps, leaving the corridor after never
+PONDING nobasin reach 9456: bed L (41262, 28942) 1.1 m, >400 cells from outside the store; its water reaches a pit after 1 steps, leaving the corridor after never
+PONDING nobasin reach 9472: bed L (41246, 28948) 5.1 m, >400 cells from outside the store; its water reaches a pit after 12 steps, leaving the corridor after 10 steps
+PONDING nobasin reach 9541: bed L (41557, 28982) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 9840: bed L (40108, 29109) 0.5 m, >400 cells from outside the store; its water reaches a pit after 4 steps, leaving the corridor after never
+PONDING nobasin reach 10170: bed L (41338, 29184) 2.3 m, >400 cells from outside the store; its water reaches a pit after 3 steps, leaving the corridor after never
+PONDING nobasin reach 10220: bed L (38730, 29190) 0.0 m, 331 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 10346: bed L (41243, 29228) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 10417: bed L (38805, 29257) 1.2 m, >400 cells from outside the store; its water reaches the sea or the window border after 10 steps, leaving the corridor after 9 steps
+PONDING nobasin reach 10499: bed L (39892, 29302) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 10537: bed L (41371, 29326) 2.2 m, >400 cells from outside the store; its water reaches a pit after 6 steps, leaving the corridor after never
+PONDING nobasin reach 10670: bed L (41241, 29380) 6.7 m, >400 cells from outside the store; its water reaches a pit after 12 steps, leaving the corridor after never
+PONDING nobasin reach 10672: bed L (41406, 29393) 2.5 m, >400 cells from outside the store; its water reaches the sea or the window border after 21 steps, leaving the corridor after 9 steps
+PONDING nobasin reach 10750: bed L (39821, 29438) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 10852: bed L (40961, 29479) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 10914: bed L (39569, 29500) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 11167: bed L (39793, 29611) 1.7 m, >400 cells from outside the store; its water reaches a pit after 8 steps, leaving the corridor after never
+PONDING nobasin reach 11318: bed L (41335, 29719) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 11486: bed L (39166, 29809) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 11497: bed L (39674, 29807) 1.2 m, >400 cells from outside the store; its water reaches a pit after 4 steps, leaving the corridor after never
+PONDING nobasin reach 11543: bed L (39422, 29824) 0.6 m, >400 cells from outside the store; its water reaches a pit after 6 steps, leaving the corridor after never
+PONDING nobasin reach 11590: bed L (39125, 29847) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 11600: bed L (42677, 29839) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 11603: bed L (42854, 29839) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 12227: bed L (40710, 30119) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 12228: bed L (40743, 30122) 1.0 m, >400 cells from outside the store; its water reaches a pit after 4 steps, leaving the corridor after never
+PONDING nobasin reach 12504: bed L (40746, 30255) 6.0 m, >400 cells from outside the store; its water reaches a pit after 7 steps, leaving the corridor after never
+PONDING nobasin reach 12525: bed L (41691, 30267) 1.5 m, >400 cells from outside the store; its water reaches the sea or the window border after 6 steps, leaving the corridor after never
+PONDING nobasin reach 12526: bed L (41692, 30262) 2.6 m, >400 cells from outside the store; its water reaches the sea or the window border after 11 steps, leaving the corridor after never
+PONDING nobasin reach 12586: bed L (42298, 30284) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 12774: bed L (41735, 30378) 0.3 m, >400 cells from outside the store; its water reaches the sea or the window border after 3 steps, leaving the corridor after never
+PONDING nobasin reach 12791: bed L (40690, 30383) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 12906: bed L (39272, 30442) 6.0 m, >400 cells from outside the store; its water reaches a pit after 3 steps, leaving the corridor after never
+PONDING nobasin reach 13020: bed L (41499, 30483) 2.7 m, >400 cells from outside the store; its water reaches a pit after 2 steps, leaving the corridor after never
+PONDING nobasin reach 13150: bed L (42843, 30514) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 13228: bed L (41724, 30542) 0.5 m, >400 cells from outside the store; its water reaches a pit after 1 steps, leaving the corridor after never
+PONDING nobasin reach 13229: bed L (41734, 30545) 10.7 m, >400 cells from outside the store; its water reaches a pit after 12 steps, leaving the corridor after 12 steps
+PONDING nobasin reach 13260: bed L (39389, 30551) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 13273: bed L (41740, 30556) 4.8 m, >400 cells from outside the store; its water reaches a pit after 5 steps, leaving the corridor after never
+PONDING nobasin reach 13288: bed L (39364, 30566) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 13390: bed L (39335, 30597) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 13446: bed L (42724, 30613) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 13467: bed L (39361, 30639) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 13543: bed L (42537, 30670) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 13994: bed L (41593, 30891) 2.1 m, >400 cells from outside the store; its water reaches a pit after 4 steps, leaving the corridor after never
+PONDING nobasin reach 14048: bed L (38519, 30902) 0.0 m, 120 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 14203: bed L (40603, 30988) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 14205: bed L (42591, 30989) 0.0 m, >400 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 14302: bed L (39354, 31047) 3.8 m, >400 cells from outside the store; its water reaches a pit after 6 steps, leaving the corridor after never
+PONDING nobasin reach 14406: bed L (41478, 31092) 0.0 m, 396 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 14424: bed L (41466, 31103) 0.7 m, 385 cells from outside the store; its water reaches the sea or the window border after 2 steps, leaving the corridor after never
+PONDING nobasin reach 14425: bed L (41474, 31096) 0.0 m, 392 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 14438: bed L (41561, 31112) 1.4 m, 376 cells from outside the store; its water reaches a pit after 9 steps, leaving the corridor after never
+PONDING nobasin reach 14439: bed L (41562, 31115) 1.0 m, 373 cells from outside the store; its water reaches a pit after 6 steps, leaving the corridor after never
+PONDING nobasin reach 14440: bed L (42931, 31100) 0.0 m, 388 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 14583: bed L (40584, 31201) 0.0 m, 287 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 14863: bed L (42709, 31328) 0.0 m, 160 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 14873: bed L (39442, 31343) 0.0 m, 145 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 14974: bed L (39357, 31399) 0.0 m, 89 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 14986: bed L (39303, 31405) 0.0 m, 83 cells from outside the store; its water reaches the sea or the window border after 0 steps, leaving the corridor after never
+PONDING nobasin reach 14998: bed L (39528, 31418) 1.9 m, 70 cells from outside the store; its water reaches a pit after 4 steps, leaving the corridor after never
+PONDING nobasin reach 15140: bed L (40343, 31487) 37.3 m, 1 cells from outside the store; its water reaches a cell outside the store after 1 steps, leaving the corridor after 1 steps
+PONDING failing reaches before: 145 (inside the store, k_c 2 snapped, water surface)
+PONDING class Ponded: 0 reaches; route touches the store edge 0; corridor clipped by the edge 0; bed under the sea 0
+PONDING class NoBasin: 122 reaches; route touches the store edge 1; corridor clipped by the edge 1; bed under the sea 49
+PONDING class SpillsLower: 23 reaches; route touches the store edge 0; corridor clipped by the edge 0; bed under the sea 0
+PONDING class OverDepth: 0 reaches; route touches the store edge 0; corridor clipped by the edge 0; bed under the sea 0
+PONDING class OverCap: 0 reaches; route touches the store edge 0; corridor clipped by the edge 0; bed under the sea 0
+PONDING class SpillOutside: 0 reaches; route touches the store edge 0; corridor clipped by the edge 0; bed under the sea 0
+PONDING class NoProgress: 0 reaches; route touches the store edge 0; corridor clipped by the edge 0; bed under the sea 0
+PONDING class Pass: 0 reaches; route touches the store edge 0; corridor clipped by the edge 0; bed under the sea 0
+PONDING failing touching the store edge: route 1, corridor 1, either 1
+PONDING corridor k_c 2 snapped, inside the store: before 10107/10252 reaches pass (98.59 %), 4741 vertices over; after 10107/10252 (98.59 %), 4739 vertices over; deepest after 54.7 m
+PONDING cut-throughs (runs over the bar along the routes, inside): before 515, after 514
+PONDING reaches ending Pass: 17474
+PONDING reaches ending Ponded: 0
+PONDING reaches ending NoBasin: 122
+PONDING reaches ending SpillsLower: 23
+PONDING reaches ending OverCap: 0
+PONDING reaches ending OverDepth: 0
+PONDING reaches ending SpillOutside: 0
+PONDING reaches ending NoProgress: 0
+PONDING large reach 2866: NoBasin, rise 21.7 m, candidate 0.00 km2 deep 0.0 m, at window L (39761, 26220)
+PONDING large reach 2890: NoBasin, rise 12.5 m, candidate 0.00 km2 deep 0.0 m, at window L (42086, 26254)
+PONDING large reach 2978: NoBasin, rise 19.1 m, candidate 0.00 km2 deep 0.0 m, at window L (39743, 26260)
+PONDING large reach 3303: NoBasin, rise 17.0 m, candidate 0.00 km2 deep 0.0 m, at window L (39835, 26414)
+PONDING large reach 3456: NoBasin, rise 10.9 m, candidate 0.00 km2 deep 0.0 m, at window L (42826, 26479)
+PONDING large reach 3467: NoBasin, rise 11.3 m, candidate 0.00 km2 deep 0.0 m, at window L (39861, 26501)
+PONDING large reach 3677: NoBasin, rise 14.4 m, candidate 0.00 km2 deep 0.0 m, at window L (39975, 26590)
+PONDING large reach 3742: NoBasin, rise 10.9 m, candidate 0.00 km2 deep 0.0 m, at window L (40449, 26617)
+PONDING large reach 3784: SpillsLower, rise 10.4 m, candidate 0.01 km2 deep 0.0 m, at window L (40049, 26624)
+PONDING large reach 3878: NoBasin, rise 10.9 m, candidate 0.00 km2 deep 0.0 m, at window L (41556, 26730)
+PONDING large reach 4027: NoBasin, rise 13.9 m, candidate 0.00 km2 deep 0.0 m, at window L (39037, 26765)
+PONDING large reach 4033: NoBasin, rise 14.4 m, candidate 0.00 km2 deep 0.0 m, at window L (41546, 26759)
+PONDING large reach 4266: NoBasin, rise 10.6 m, candidate 0.00 km2 deep 0.0 m, at window L (39116, 26894)
+PONDING large reach 4355: NoBasin, rise 13.0 m, candidate 0.00 km2 deep 0.0 m, at window L (40499, 26934)
+PONDING large reach 4441: NoBasin, rise 12.2 m, candidate 0.00 km2 deep 0.0 m, at window L (42240, 26968)
+PONDING large reach 4552: NoBasin, rise 11.1 m, candidate 0.00 km2 deep 0.0 m, at window L (42339, 26999)
+PONDING large reach 4649: SpillsLower, rise 10.6 m, candidate 0.02 km2 deep 0.0 m, at window L (40567, 27042)
+PONDING large reach 4657: SpillsLower, rise 10.1 m, candidate 0.01 km2 deep 0.1 m, at window L (42376, 27047)
+PONDING large reach 4692: NoBasin, rise 10.3 m, candidate 0.00 km2 deep 0.0 m, at window L (41367, 27058)
+PONDING large reach 4913: NoBasin, rise 11.0 m, candidate 0.00 km2 deep 0.0 m, at window L (40513, 27136)
+PONDING large reach 5329: NoBasin, rise 10.1 m, candidate 0.00 km2 deep 0.0 m, at window L (41578, 27306)
+PONDING large reach 5391: NoBasin, rise 11.3 m, candidate 0.00 km2 deep 0.0 m, at window L (40536, 27317)
+PONDING large reach 5447: NoBasin, rise 10.3 m, candidate 0.00 km2 deep 0.0 m, at window L (40547, 27366)
+PONDING large reach 5542: NoBasin, rise 10.2 m, candidate 0.00 km2 deep 0.0 m, at window L (40530, 27377)
+PONDING large reach 5904: NoBasin, rise 21.1 m, candidate 0.00 km2 deep 0.0 m, at window L (38878, 27510)
+PONDING large reach 6043: NoBasin, rise 11.7 m, candidate 0.00 km2 deep 0.0 m, at window L (41815, 27528)
+PONDING large reach 6058: NoBasin, rise 16.0 m, candidate 0.00 km2 deep 0.0 m, at window L (38697, 27537)
+PONDING large reach 6096: SpillsLower, rise 14.5 m, candidate 0.35 km2 deep 0.2 m, at window L (38597, 27549)
+PONDING large reach 6190: NoBasin, rise 10.6 m, candidate 0.00 km2 deep 0.0 m, at window L (41736, 27561)
+PONDING large reach 6216: NoBasin, rise 11.2 m, candidate 0.00 km2 deep 0.0 m, at window L (39413, 27573)
+PONDING large reach 6237: NoBasin, rise 12.6 m, candidate 0.00 km2 deep 0.0 m, at window L (38681, 27577)
+PONDING large reach 6273: NoBasin, rise 10.4 m, candidate 0.00 km2 deep 0.0 m, at window L (40527, 27584)
+PONDING large reach 6418: SpillsLower, rise 11.9 m, candidate 0.38 km2 deep 0.2 m, at window L (40471, 27623)
+PONDING large reach 6451: NoBasin, rise 10.6 m, candidate 0.00 km2 deep 0.0 m, at window L (40470, 27632)
+PONDING large reach 6520: NoBasin, rise 12.7 m, candidate 0.00 km2 deep 0.0 m, at window L (39904, 27649)
+PONDING large reach 6557: NoBasin, rise 10.9 m, candidate 0.00 km2 deep 0.0 m, at window L (42598, 27639)
+PONDING large reach 6578: NoBasin, rise 11.9 m, candidate 0.00 km2 deep 0.0 m, at window L (39153, 27672)
+PONDING large reach 6583: NoBasin, rise 11.2 m, candidate 0.00 km2 deep 0.0 m, at window L (40238, 27678)
+PONDING large reach 6905: NoBasin, rise 10.2 m, candidate 0.00 km2 deep 0.0 m, at window L (43444, 27802)
+PONDING large reach 6923: NoBasin, rise 10.2 m, candidate 0.00 km2 deep 0.0 m, at window L (39094, 27827)
+PONDING large reach 7114: NoBasin, rise 10.5 m, candidate 0.00 km2 deep 0.0 m, at window L (42441, 27913)
+PONDING large reach 7220: NoBasin, rise 10.5 m, candidate 0.00 km2 deep 0.0 m, at window L (40264, 27974)
+PONDING large reach 7260: NoBasin, rise 15.5 m, candidate 0.00 km2 deep 0.0 m, at window L (40274, 27991)
+PONDING large reach 7301: NoBasin, rise 13.6 m, candidate 0.00 km2 deep 0.0 m, at window L (40289, 28008)
+PONDING large reach 7302: SpillsLower, rise 10.4 m, candidate 0.01 km2 deep 0.0 m, at window L (40306, 28022)
+PONDING large reach 7385: NoBasin, rise 15.5 m, candidate 0.00 km2 deep 0.0 m, at window L (40329, 28048)
+PONDING large reach 7633: NoBasin, rise 12.6 m, candidate 0.00 km2 deep 0.0 m, at window L (42224, 28171)
+PONDING large reach 7634: NoBasin, rise 15.4 m, candidate 0.00 km2 deep 0.0 m, at window L (42224, 28170)
+PONDING large reach 7658: NoBasin, rise 15.9 m, candidate 0.00 km2 deep 0.0 m, at window L (42207, 28178)
+PONDING large reach 7738: NoBasin, rise 11.9 m, candidate 0.00 km2 deep 0.0 m, at window L (42419, 28215)
+PONDING large reach 7753: NoBasin, rise 14.2 m, candidate 0.00 km2 deep 0.0 m, at window L (42183, 28233)
+PONDING large reach 8024: NoBasin, rise 13.6 m, candidate 0.00 km2 deep 0.0 m, at window L (42104, 28363)
+PONDING large reach 8058: NoBasin, rise 14.9 m, candidate 0.00 km2 deep 0.0 m, at window L (41425, 28371)
+PONDING large reach 8217: NoBasin, rise 10.6 m, candidate 0.00 km2 deep 0.0 m, at window L (42047, 28447)
+PONDING large reach 8281: NoBasin, rise 11.3 m, candidate 0.00 km2 deep 0.0 m, at window L (42055, 28452)
+PONDING large reach 8384: SpillsLower, rise 10.8 m, candidate 0.01 km2 deep 0.0 m, at window L (42045, 28448)
+PONDING large reach 8403: NoBasin, rise 11.0 m, candidate 0.00 km2 deep 0.0 m, at window L (41614, 28502)
+PONDING large reach 8406: NoBasin, rise 14.4 m, candidate 0.00 km2 deep 0.0 m, at window L (42069, 28488)
+PONDING large reach 8431: NoBasin, rise 11.8 m, candidate 0.00 km2 deep 0.0 m, at window L (42053, 28499)
+PONDING large reach 8488: NoBasin, rise 10.1 m, candidate 0.00 km2 deep 0.0 m, at window L (41675, 28508)
+PONDING large reach 8641: NoBasin, rise 13.0 m, candidate 0.00 km2 deep 0.0 m, at window L (40142, 28630)
+PONDING large reach 8660: SpillsLower, rise 16.8 m, candidate 0.04 km2 deep 0.1 m, at window L (40486, 28630)
+PONDING large reach 8677: SpillsLower, rise 16.8 m, candidate 0.09 km2 deep 0.2 m, at window L (40486, 28630)
+PONDING large reach 8737: NoBasin, rise 10.8 m, candidate 0.00 km2 deep 0.0 m, at window L (41705, 28640)
+PONDING large reach 8830: NoBasin, rise 16.8 m, candidate 0.00 km2 deep 0.0 m, at window L (40711, 28674)
+PONDING large reach 8919: NoBasin, rise 10.1 m, candidate 0.00 km2 deep 0.0 m, at window L (40501, 28725)
+PONDING large reach 9115: NoBasin, rise 12.0 m, candidate 0.00 km2 deep 0.0 m, at window L (40641, 28818)
+PONDING large reach 9326: NoBasin, rise 11.5 m, candidate 0.00 km2 deep 0.0 m, at window L (40599, 28874)
+PONDING large reach 9356: NoBasin, rise 13.8 m, candidate 0.00 km2 deep 0.0 m, at window L (40599, 28877)
+PONDING large reach 9439: NoBasin, rise 12.7 m, candidate 0.00 km2 deep 0.0 m, at window L (41279, 28949)
+PONDING large reach 9456: NoBasin, rise 14.1 m, candidate 0.00 km2 deep 0.0 m, at window L (41279, 28949)
+PONDING large reach 9472: NoBasin, rise 10.0 m, candidate 0.00 km2 deep 0.0 m, at window L (41279, 28949)
+PONDING large reach 9541: NoBasin, rise 10.4 m, candidate 0.00 km2 deep 0.0 m, at window L (41552, 28968)
+PONDING large reach 9840: NoBasin, rise 12.4 m, candidate 0.00 km2 deep 0.0 m, at window L (40106, 29095)
+PONDING large reach 10170: NoBasin, rise 11.2 m, candidate 0.00 km2 deep 0.0 m, at window L (41333, 29178)
+PONDING large reach 10220: NoBasin, rise 10.6 m, candidate 0.00 km2 deep 0.0 m, at window L (38733, 29197)
+PONDING large reach 10237: SpillsLower, rise 12.9 m, candidate 0.01 km2 deep 0.0 m, at window L (41328, 29184)
+PONDING large reach 10346: NoBasin, rise 12.2 m, candidate 0.00 km2 deep 0.0 m, at window L (41238, 29223)
+PONDING large reach 10417: NoBasin, rise 15.6 m, candidate 0.00 km2 deep 0.0 m, at window L (38813, 29262)
+PONDING large reach 10499: NoBasin, rise 15.1 m, candidate 0.00 km2 deep 0.0 m, at window L (39887, 29297)
+PONDING large reach 10537: NoBasin, rise 11.6 m, candidate 0.00 km2 deep 0.0 m, at window L (41368, 29322)
+PONDING large reach 10538: SpillsLower, rise 14.0 m, candidate 0.09 km2 deep 0.2 m, at window L (41369, 29321)
+PONDING large reach 10670: NoBasin, rise 12.9 m, candidate 0.00 km2 deep 0.0 m, at window L (41240, 29373)
+PONDING large reach 10672: NoBasin, rise 12.1 m, candidate 0.00 km2 deep 0.0 m, at window L (41400, 29388)
+PONDING large reach 10750: NoBasin, rise 11.9 m, candidate 0.00 km2 deep 0.0 m, at window L (39817, 29434)
+PONDING large reach 10852: NoBasin, rise 10.9 m, candidate 0.00 km2 deep 0.0 m, at window L (40955, 29472)
+PONDING large reach 10914: NoBasin, rise 11.9 m, candidate 0.00 km2 deep 0.0 m, at window L (39573, 29509)
+PONDING large reach 10956: SpillsLower, rise 12.4 m, candidate 0.01 km2 deep 0.0 m, at window L (42471, 29515)
+PONDING large reach 11125: SpillsLower, rise 15.0 m, candidate 0.03 km2 deep 0.1 m, at window L (39240, 29583)
+PONDING large reach 11167: NoBasin, rise 21.3 m, candidate 0.00 km2 deep 0.0 m, at window L (39789, 29607)
+PONDING large reach 11318: NoBasin, rise 10.6 m, candidate 0.00 km2 deep 0.0 m, at window L (41329, 29713)
+PONDING large reach 11428: SpillsLower, rise 14.3 m, candidate 0.01 km2 deep 0.1 m, at window L (39005, 29781)
+PONDING large reach 11486: NoBasin, rise 16.2 m, candidate 0.00 km2 deep 0.0 m, at window L (39161, 29792)
+PONDING large reach 11497: NoBasin, rise 15.8 m, candidate 0.00 km2 deep 0.0 m, at window L (39667, 29800)
+PONDING large reach 11543: NoBasin, rise 15.9 m, candidate 0.00 km2 deep 0.0 m, at window L (39414, 29812)
+PONDING large reach 11590: NoBasin, rise 11.7 m, candidate 0.00 km2 deep 0.0 m, at window L (39119, 29841)
+PONDING large reach 11600: NoBasin, rise 11.0 m, candidate 0.00 km2 deep 0.0 m, at window L (42674, 29831)
+PONDING large reach 11603: NoBasin, rise 11.4 m, candidate 0.00 km2 deep 0.0 m, at window L (42863, 29855)
+PONDING large reach 11785: SpillsLower, rise 12.8 m, candidate 0.01 km2 deep 0.0 m, at window L (41342, 29918)
+PONDING large reach 11911: SpillsLower, rise 11.9 m, candidate 0.01 km2 deep 0.1 m, at window L (41726, 29977)
+PONDING large reach 12227: NoBasin, rise 11.5 m, candidate 0.00 km2 deep 0.0 m, at window L (40704, 30113)
+PONDING large reach 12228: NoBasin, rise 13.9 m, candidate 0.00 km2 deep 0.0 m, at window L (40741, 30120)
+PONDING large reach 12348: SpillsLower, rise 10.9 m, candidate 0.04 km2 deep 0.1 m, at window L (40660, 30179)
+PONDING large reach 12504: NoBasin, rise 13.9 m, candidate 0.00 km2 deep 0.0 m, at window L (40739, 30248)
+PONDING large reach 12525: NoBasin, rise 14.3 m, candidate 0.00 km2 deep 0.0 m, at window L (41686, 30262)
+PONDING large reach 12526: NoBasin, rise 10.3 m, candidate 0.00 km2 deep 0.0 m, at window L (41690, 30256)
+PONDING large reach 12586: NoBasin, rise 11.0 m, candidate 0.00 km2 deep 0.0 m, at window L (42302, 30294)
+PONDING large reach 12699: SpillsLower, rise 12.2 m, candidate 0.01 km2 deep 0.0 m, at window L (39681, 30350)
+PONDING large reach 12774: NoBasin, rise 14.0 m, candidate 0.00 km2 deep 0.0 m, at window L (41728, 30371)
+PONDING large reach 12791: NoBasin, rise 10.2 m, candidate 0.00 km2 deep 0.0 m, at window L (40683, 30376)
+PONDING large reach 12906: NoBasin, rise 18.3 m, candidate 0.00 km2 deep 0.0 m, at window L (39270, 30440)
+PONDING large reach 13020: NoBasin, rise 16.1 m, candidate 0.00 km2 deep 0.0 m, at window L (41493, 30477)
+PONDING large reach 13150: NoBasin, rise 12.3 m, candidate 0.00 km2 deep 0.0 m, at window L (42836, 30507)
+PONDING large reach 13228: NoBasin, rise 11.5 m, candidate 0.00 km2 deep 0.0 m, at window L (41720, 30513)
+PONDING large reach 13229: NoBasin, rise 10.8 m, candidate 0.00 km2 deep 0.0 m, at window L (41724, 30533)
+PONDING large reach 13260: NoBasin, rise 11.8 m, candidate 0.00 km2 deep 0.0 m, at window L (39397, 30557)
+PONDING large reach 13273: NoBasin, rise 11.6 m, candidate 0.00 km2 deep 0.0 m, at window L (41728, 30537)
+PONDING large reach 13288: NoBasin, rise 10.1 m, candidate 0.00 km2 deep 0.0 m, at window L (39360, 30562)
+PONDING large reach 13340: SpillsLower, rise 10.7 m, candidate 0.01 km2 deep 0.0 m, at window L (38672, 30584)
+PONDING large reach 13370: SpillsLower, rise 10.4 m, candidate 0.02 km2 deep 0.0 m, at window L (38637, 30585)
+PONDING large reach 13390: NoBasin, rise 11.0 m, candidate 0.00 km2 deep 0.0 m, at window L (39330, 30583)
+PONDING large reach 13446: NoBasin, rise 10.1 m, candidate 0.00 km2 deep 0.0 m, at window L (42711, 30601)
+PONDING large reach 13467: NoBasin, rise 15.8 m, candidate 0.00 km2 deep 0.0 m, at window L (39355, 30633)
+PONDING large reach 13543: NoBasin, rise 13.7 m, candidate 0.00 km2 deep 0.0 m, at window L (42543, 30679)
+PONDING large reach 13782: SpillsLower, rise 15.3 m, candidate 0.01 km2 deep 0.1 m, at window L (40745, 30786)
+PONDING large reach 13994: NoBasin, rise 14.5 m, candidate 0.00 km2 deep 0.0 m, at window L (41583, 30881)
+PONDING large reach 14048: NoBasin, rise 15.8 m, candidate 0.00 km2 deep 0.0 m, at window L (38525, 30909)
+PONDING large reach 14203: NoBasin, rise 11.2 m, candidate 0.00 km2 deep 0.0 m, at window L (40598, 30983)
+PONDING large reach 14205: NoBasin, rise 10.1 m, candidate 0.00 km2 deep 0.0 m, at window L (42630, 31006)
+PONDING large reach 14302: NoBasin, rise 13.1 m, candidate 0.00 km2 deep 0.0 m, at window L (39348, 31041)
+PONDING large reach 14340: SpillsLower, rise 14.3 m, candidate 0.01 km2 deep 0.0 m, at window L (39457, 31059)
+PONDING large reach 14406: NoBasin, rise 11.7 m, candidate 0.00 km2 deep 0.0 m, at window L (41473, 31087)
+PONDING large reach 14424: NoBasin, rise 11.2 m, candidate 0.00 km2 deep 0.0 m, at window L (41463, 31100)
+PONDING large reach 14425: NoBasin, rise 10.4 m, candidate 0.00 km2 deep 0.0 m, at window L (41471, 31092)
+PONDING large reach 14438: NoBasin, rise 13.8 m, candidate 0.00 km2 deep 0.0 m, at window L (41553, 31104)
+PONDING large reach 14439: NoBasin, rise 11.7 m, candidate 0.00 km2 deep 0.0 m, at window L (41552, 31105)
+PONDING large reach 14440: NoBasin, rise 10.1 m, candidate 0.00 km2 deep 0.0 m, at window L (42928, 31095)
+PONDING large reach 14583: NoBasin, rise 15.0 m, candidate 0.00 km2 deep 0.0 m, at window L (40577, 31194)
+PONDING large reach 14863: NoBasin, rise 12.9 m, candidate 0.00 km2 deep 0.0 m, at window L (42726, 31344)
+PONDING large reach 14873: NoBasin, rise 19.9 m, candidate 0.00 km2 deep 0.0 m, at window L (39430, 31331)
+PONDING large reach 14924: SpillsLower, rise 15.7 m, candidate 0.01 km2 deep 0.0 m, at window L (40488, 31372)
+PONDING large reach 14974: NoBasin, rise 22.2 m, candidate 0.00 km2 deep 0.0 m, at window L (39352, 31393)
+PONDING large reach 14986: NoBasin, rise 13.6 m, candidate 0.00 km2 deep 0.0 m, at window L (39297, 31392)
+PONDING large reach 14998: NoBasin, rise 13.8 m, candidate 0.00 km2 deep 0.0 m, at window L (39521, 31411)
+PONDING large reach 15140: NoBasin, rise 10.3 m, candidate 0.00 km2 deep 0.0 m, at window L (40344, 31486)
+PONDING rises met: 24; candidate area p50 0.01 p90 0.09 max 0.38 km2; depth p50 0.0 p90 0.2 max 0.2 m
+PONDING pond 0: lake, reach 13370, floor L (38634, 30592) 7.1 m, sill L (38636, 30592) 7.1 m, depth 0.0 m, 0.02 km2, q_in 31.14 m3/s (own 0.00, trunk 31.14), E 0.0000 m3/s, ratio 5597394.94
+PONDING classes (floor inside the store): lakes 1 (0.02 km2), seasonal flats 0 (0.00 km2), dry flats 0 (0.00 km2)
+PONDING trunk route cells inside: 433608, in ponds 4 (0.00 %)
+PONDING G-DRAIN: before basins 0.00 % of 180296 river cells; ponds as lakes: basins 0.00 % of 180286 river cells; river cells in ponds 10 (0.01 % of the river length)
+PONDED RIVER-GATE rivers: 180286 river cells inside (drainage area >= 75 km2, land)
+PONDED RIVER-GATE basins: 0.00 % of river length in closed basins (8 of 180286 cells; 1 basins of >= 0.5 m depth and >= 16 cells, fill epsilon 1e-7 m; bar <= 10 %); SPIKE-114 reference (any pit of 0.05 m): 6.98 %
+PONDED RIVER-GATE valley depth: 0.00 % of river cells over 50 m below the p50 of the surface 1 to 2 cells out (the canyon a viewer sees; 0 cells, p50 0.74 m, p99 10.11 m, max 33.04 m); bar: at most the share of a GLO-30 tile with 1 to 2 x this window's relief at 10 x 10 cells (13.26 m; the review table gives the reference)
+PONDED RIVER-GATE burn: 0.00 % of river cells with the river level over 50 m below their surface, every basin breached (0 cells, p99 0.14 m, max 0.79 m; K7's cut); with the lakes of D 20 m kept 0.00 % (0 cells)
+PONDED RIVER-GATE ring 2-4: 0.00 % of river cells with the river level over 50 m below the p50 of the surface 2 to 4 cells out at D 20 m (0 cells, p99 15.59 m, max 45.88 m; the valley depth at 2 to 4 cells plus the burn); every basin breached 0.00 % (0 cells, max 45.88 m)
+PONDED RIVER-GATE erosion depth: the river level under the start surface at D 20 m p50 2.93 p99 34.05 max 80.95 m, 263 cells over 50 m (0.15 %)
+PONDED RIVER-GATE lakes: 0.00 % of river cells in lakes at D 20 m (0 cells)
+PONDED RIVER-GATE relief: p50 over 2 x 2 cells 1.63 m against the start's 1.32 m (124 %), over 10 x 10 cells 13.26 m against 11.49 m (115 %)
+PONDED RIVER-GATE lowered: 2713 of 28821435 land cells inside (0.01 %) lie more than 50 m below the start surface
+PONDED RIVER-GATE edge: 30 of 87 H1 crossings (Q >= 1 m3/s) have an L crossing of the same direction within 2000 m (34.5 %)
+PONDED RIVER-GATE gradient: 5 of 179747 river steps rise by more than 0.25 m (0.00 %; largest 0.75 m)
+PONDED RIVER-GATE valley width: at 10 m above the river cell p50 1527 m p90 3926 m (180286 cells, 4475 sides capped at 64 cells); at half the ring 2-4 depth p50 334 m p90 602 m (88129 cells, 146 sides capped, 92157 cells with a flat ring)
+PONDED RIVER-GATE asymmetry: |L - R| / (L + R) of the rise 2 to 4 cells out: p50 0.42 p90 0.91 (174804 cells)
+PONDED RIVER-GATE drainage density: 0.074 km/km2 (22156.3 km of river over 297615.2 km2 of land)
+PONDED RIVER-GATE catchment: 30 matched H1 crossings; implied runoff (L area per H1 discharge) 1.523e8 m2 per m3/s; the ratio to it p10 0.63 p90 1.58
+PONDED RIVER-GATE seam: 19840 neighbour pairs across the region's edge, |dz| p50 0.81 m p99 22.44 m max 80.35 m; inside the region p50 0.75 m p99 9.55 m
+PONDED RIVER-GATE narrowness: valley depth (ring 1-2) over ring 2-4 depth p50 0.40 p90 0.77 (148932 cells); of the two p50s 0.38
+PONDED RIVER-GATE slope-area: theta 0.24 over bins (area in cells: slope p50 (cells)) 4:0.0128(6913567) 13:0.0113(3146352) 40:0.0086(1090009) 126:0.0057(524381) 400:0.0039(266161) 1265:0.0029(147086) 4000:0.0022(106810) 12649:0.0018(71402) 40000:0.0016(33557) 126491:0.0012(5184) 400000:0.0005(29)
+PONDED RIVER-GATE spectrum: 1024 x 1024 cells, power per octave from wavenumber 1 (m2) 2.134e7 1.262e7 1.258e6 1.662e5 2.031e4 2.041e3 1.170e2 1.828e0 1.557e-1 1.190e-1; slope beta -3.60; the start's 1024 x 1024: 2.087e7 1.212e7 1.194e6 1.613e5 1.817e4 1.630e3 7.836e1 1.205e-1 3.783e-3 3.626e-4; beta -4.55
+PONDED RIVER-GATE trunks: 6 of 10587 H1 trunk reaches inside (0.06 %) and 8 of 347989 vertices (0.00 %) stand more than 50 m above their reach's running minimum (the burn KR would need); deepest 56.92 m on reach 3539 at cell (2192, 1736)
+PONDED RIVER-GATE trunks in corridors (a reach passes when its minimax route inside its corridor keeps within 10.0 m of its running minimum, the window's bar): raw H1 ends: k_c 1 (814 m) 95.61 % of 10465 reaches pass (459 over; 5648 of 395704 route vertices over), deepest 49.55 m on reach 6096; k_c 2 (1628 m) 96.28 % of 10465 reaches pass (389 over; 5619 of 476111 route vertices over), deepest 49.58 m on reach 6096; k_c 4 (3256 m) 96.54 % of 10465 reaches pass (362 over; 6401 of 586312 route vertices over), deepest 49.53 m on reach 6096 | snapped: k_c 1 (814 m) 97.45 % of 10248 reaches pass (261 over; 5812 of 356915 route vertices over), deepest 54.73 m on reach 6096; k_c 2 (1628 m) 98.59 % of 10248 reaches pass (144 over; 4713 of 433459 route vertices over), deepest 54.73 m on reach 6096; k_c 4 (3256 m) 98.98 % of 10248 reaches pass (105 over; 4974 of 535459 route vertices over), deepest 54.73 m on reach 6096
+PONDING done in 224.5 s
