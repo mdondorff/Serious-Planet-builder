@@ -1,0 +1,1 @@
+- 2026-11-16 river-gate-lowered (BUILD-057, TEST-137): the river gate counts the land cells lowered more than 50 m below the start surface, for #160's D-1 table.

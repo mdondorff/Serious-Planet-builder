@@ -526,3 +526,19 @@ fn the_corridor_bar_reads_the_start_relief_over_the_region_box_not_the_counted_c
     assert!(r.relief_10_start_m < 1.0, "the counted cells are flat: {}", r.relief_10_start_m);
     assert!((r.corridor_bar_m - 45.045).abs() < 1e-9, "90.09 m of relief (the 0.01 m a row tilt included): {}", r.corridor_bar_m);
 }
+
+// spec: TEST-137, BUILD-057
+#[test]
+fn the_ground_lowered_counts_land_cells_more_than_50_m_below_the_start() {
+    let start = valley(2.0, 2.0);
+    let same = run(&start);
+    assert_eq!((same.land_cells, same.lowered_cells), (N * N, 0));
+    let lower: Vec<f64> = start.iter().map(|z| z - 60.0).collect();
+    let r = run_in(&start, &lower, &vec![true; N * N], &[]);
+    assert_eq!((r.land_cells, r.lowered_cells), (N * N, N * N));
+    // 40 m is not more than 50 m.
+    let shallow: Vec<f64> = start.iter().map(|z| z - 40.0).collect();
+    assert_eq!(run_in(&start, &shallow, &vec![true; N * N], &[]).lowered_cells, 0);
+    assert!(r.lines().iter().any(|l| l.starts_with("RIVER-GATE lowered: 1600 of 1600 land cells inside (100.00 %)")), "{:?}", r.lines());
+    assert!(r.fields().iter().any(|(k, v)| *k == "lowered_pct" && v == "100.00"));
+}

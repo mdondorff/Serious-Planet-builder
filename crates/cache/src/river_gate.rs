@@ -162,6 +162,9 @@ pub struct GateReport {
     pub relief_2_m: f64,
     pub relief_10_start_m: f64,
     pub relief_10_m: f64,
+    /// Land cells inside (the start above the sea) and those whose surface lies more than `cut_m` below the start (#160: ground lowered over 50 m).
+    pub land_cells: usize,
+    pub lowered_cells: usize,
     /// H1 crossings of the edge (Q at least the limit), and those an L crossing matches.
     pub edge_h1: usize,
     pub edge_matched: usize,
@@ -244,6 +247,9 @@ impl GateReport {
             ("relief2_start_m", m(self.relief_2_start_m)),
             ("relief10_m", m(self.relief_10_m)),
             ("relief10_start_m", m(self.relief_10_start_m)),
+            ("land_cells", c(self.land_cells)),
+            ("lowered_cells", c(self.lowered_cells)),
+            ("lowered_pct", pct(self.lowered_cells, self.land_cells)),
             ("edge_h1", c(self.edge_h1)),
             ("edge_matched", c(self.edge_matched)),
             ("edge_pct", pct(self.edge_matched, self.edge_h1)),
@@ -398,6 +404,13 @@ impl GateReport {
                 self.relief_10_m,
                 self.relief_10_start_m,
                 percent(self.relief_10_m, self.relief_10_start_m)
+            ),
+            format!(
+                "RIVER-GATE lowered: {} of {} land cells inside ({:.2} %) lie more than {} m below the start surface",
+                self.lowered_cells,
+                self.land_cells,
+                share(self.lowered_cells, self.land_cells),
+                p.cut_m
             ),
             edge,
         ]
@@ -821,6 +834,10 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         relief_2_m: relief(g, input.surface, input.inside, 2, input.sea_level_m),
         relief_10_start_m,
         relief_10_m: relief(g, input.surface, input.inside, 10, input.sea_level_m),
+        land_cells: (0..n).filter(|&c| input.inside[c] && input.start[c] > input.sea_level_m).count(),
+        lowered_cells: (0..n)
+            .filter(|&c| input.inside[c] && input.start[c] > input.sea_level_m && input.start[c] - input.surface[c] > params.cut_m)
+            .count(),
         edge_h1,
         edge_matched,
         suite,
