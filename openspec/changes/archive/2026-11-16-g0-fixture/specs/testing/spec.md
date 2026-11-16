@@ -1,6 +1,6 @@
 ## ADDED Requirements
 ### Requirement: TEST-139 The G0 minimum fixture
-A tier-A fixture SHALL provide the G0 minimum landscape of the river-graph plan (G0 contract addendum section 2.7) as terrain and expectations only: `B`, `z_b`, `z_s` and `S0` on a cube sphere whose H1 cell is 814 m and whose L cell is an eighth of it, two partition layouts as data, and a plain-table expectations file; it SHALL build with the same bits on any thread count, and its measured features SHALL equal the recorded table.
+A tier-A fixture SHALL provide the G0 minimum landscape of the river-graph plan (its minimum fixture) as terrain and expectations only: `B`, `z_b`, `z_s` and `S0` on a cube sphere whose H1 cell is 814 m and whose L cell is an eighth of it, two partition layouts as data, and a plain-table expectations file; it SHALL build with the same bits on any thread count, and its measured features SHALL equal the recorded table.
 
 Verify: A
 Status: active
@@ -9,4 +9,4 @@ Detail: the features are one trunk and two tributaries, one explicit confluence,
 
 #### Scenario: Same bits, recorded features
 - **WHEN** the fixture is built on 1, 2, 4 and 7 threads and measured
-- **THEN** every surface has the same bits, each feature holds, and every measured value equals the recorded table
+- **THEN** every surface has the same bits, each feature holds, and every measured value is within 0.006 of the recorded table

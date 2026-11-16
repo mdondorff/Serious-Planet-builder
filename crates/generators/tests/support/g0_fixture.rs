@@ -35,7 +35,7 @@ pub const TILE_L: usize = 64;
 /// The sea level (m).
 pub const SEA_LEVEL_M: f64 = 0.0;
 
-/// The trunk's latitude: inside the H1 row centred at 1.875 N and on an L cell row's centre band, never on a cell boundary.
+/// The trunk's latitude: inside the H1 row of face 0 centred at 1.875 N; a line of constant latitude, so it changes L row away from longitude 0 (near +-26.4 and +-41.7 on face 0).
 pub const TRUNK_LAT: f64 = 2.1;
 /// Side slope of every valley (m a degree of distance from its line).
 const SIDE_M_PER_DEG: f64 = 40.0;

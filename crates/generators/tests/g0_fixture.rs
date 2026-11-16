@@ -124,14 +124,12 @@ trunk {}",
     put("l.divide.west_outlet_lon", lon_lat_l(*lw.last().unwrap()).0);
     put("l.divide.east_outlet_lon", lon_lat_l(*le.last().unwrap()).0);
     put("l.trunk.max_lat_dev", tl.iter().map(|&c| (lon_lat_l(c).1 - TRUNK_LAT).abs()).fold(0.0, f64::max));
-    // the antecedent crossing: S0 along the trunk's L row from 20 E to 30 E, the rise over the running minimum
+    // the antecedent crossing: S0 along the trunk's latitude from 20 E to 30 E (201 samples, 0.05 degrees apart), the rise over the running minimum
     let (mut bed, mut rise) = (f64::INFINITY, 0.0f64);
-    let mut lon = 20.0;
-    while lon <= 30.0 {
-        let c = cell_at(L_N, lon, TRUNK_LAT);
+    for k in 0..=200 {
+        let c = cell_at(L_N, 20.0 + 0.05 * f64::from(k), TRUNK_LAT);
         bed = bed.min(fx.s0[c]);
         rise = rise.max(fx.s0[c] - bed);
-        lon += 0.05;
     }
     put("l.ridge.s0_rise_m", rise);
     let ridge_c = cell_at(L_N, RIDGE_LON, TRUNK_LAT);
@@ -150,13 +148,14 @@ trunk {}",
     while let Some(c) = stack.pop() {
         cells += 1;
         for q in (0..8).filter_map(|d| gl.neighbour(c, d)) {
-            if !basin[q] && fl[q] > fx.s0[q] + 1e-3 {
+            if !basin[q] && fl[q] > fx.s0[q] + 0.01 {
                 basin[q] = true;
                 stack.push(q);
             }
         }
     }
     put("l.bowl.cells", cells as f64);
+    put("l.bowl.area_km2", (0..fl.len()).filter(|&c| basin[c]).map(|c| gl.cell_area(c)).sum::<f64>() / 1e6);
     let leave = path(&rl.receiver, bowl).into_iter().find(|&c| !basin[c]).expect("the basin spills");
     put("l.bowl.spill_m", fx.s0[leave]);
     let (slon, slat) = lon_lat_l(leave);
@@ -192,7 +191,7 @@ fn the_g0_fixture_holds_its_features_and_the_recorded_values() {
     let want = recorded();
     let mut report = String::new();
     for (k, x) in &got {
-        report.push_str(&format!("| `{k}` | {x:.2} |\n"));
+        report.push_str(&format!("| `{k}` | {x:.3} |\n"));
     }
     if std::env::var_os("G0_FIXTURE_PRINT").is_some() {
         println!("{report}");
@@ -200,8 +199,8 @@ fn the_g0_fixture_holds_its_features_and_the_recorded_values() {
     let mut bad = Vec::new();
     for (k, x) in &got {
         match want.iter().find(|(w, _)| w == k) {
-            None => bad.push(format!("{k}: measured {x:.2}, not recorded")),
-            Some((_, y)) if (x - y).abs() > 0.006 => bad.push(format!("{k}: measured {x:.2}, recorded {y:.2}")),
+            None => bad.push(format!("{k}: measured {x:.3}, not recorded")),
+            Some((_, y)) if (x - y).abs() > 0.006 => bad.push(format!("{k}: measured {x:.3}, recorded {y:.3}")),
             _ => {}
         }
     }
@@ -223,7 +222,7 @@ fn the_g0_fixture_holds_its_features_and_the_recorded_values() {
     assert!(m("h1.divide.west_region") != m("h1.divide.east_region"), "the region boundary separates the two sides of the divide");
     assert_eq!((m("h1.trunk.region_changes"), m("h1.W.region_changes")), (0.0, 0.0), "each catchment's main path stays in its region");
     assert!(
-        m("l.bowl.spill_m") - m("l.bowl.floor_m") >= 2.0 && m("l.bowl.cells") * 101.75 * 101.75 >= 0.25e6,
+        m("l.bowl.spill_m") - m("l.bowl.floor_m") >= 2.0 && m("l.bowl.area_km2") >= 0.25,
         "the closed basin is a lake (>= 2 m, >= 0.25 km2)"
     );
     assert!(m("l.bowl.outlet_lon") > 68.0, "the basin spills into the trunk's catchment");
@@ -246,7 +245,14 @@ fn the_two_layouts_cover_every_cell_and_split_just_east_of_the_divide() {
         (lon_lat(h1.direction(e as u32)).0 - lon_lat(h1.direction(w as u32)).0 - 3.75).abs() < 0.01,
         "the split lies between two neighbouring H1 columns"
     );
-    for p in [0, L_N * L_N + 5, 6 * L_N * L_N - 1] {
-        assert!(h1_of_l(p) < 6 * H1_N * H1_N);
+    // every L cell's H1 cell is the H1 cell holding its centre (L centres never lie on H1 boundaries), so an L cell takes its H1 cell's region
+    let l = GlobalGrid::new(L_N, RADIUS_M);
+    for p in 0..6 * L_N * L_N {
+        let (lon, lat) = lon_lat(l.direction(p as u32));
+        assert_eq!(h1_of_l(p), cell_at(H1_N, lon, lat), "L cell {p}");
     }
+    // the tiles of face 0 change at longitude -15 and 15 on the trunk's latitude: columns 0, 1, 2
+    let col = |lon: f64| tile_of_l(cell_at(L_N, lon, TRUNK_LAT));
+    assert_eq!([col(-15.2).1, col(-14.8).1, col(14.8).1, col(15.2).1], [0, 1, 1, 2]);
+    assert_eq!((col(-15.2).0, col(15.2).0), (0, 0));
 }
