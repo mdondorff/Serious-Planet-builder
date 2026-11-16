@@ -29,6 +29,6 @@ Per-spike register sections of M5 and M6: `docs/archive/M6/spikes.md`. Closed sp
 | SPIKE-122 | E3 variants D, E, F (P3 E3) | closed 2026-11-15: all pass both bars; ridge cut from the hand-over | `spikes/e3-variants-def/results/results.md` |
 | SPIKE-123 | Lakes as objects (E5) | closed 11-15: A keeps 2-40 lakes | `spikes/lakes-d4/results/results.md` |
 | SPIKE-124 | Protect lakes (E5) | closed 11-15: K7 leak fixed | `spikes/lakes-protect/results/results.md` |
-| SPIKE-125 | Variant G: B on E's valley-aware base (P3 E3) | closed 2026-11-16: passes both bars; 1.7-2x B's saddles on R1h, M1 | `spikes/e3-variant-g/results/results.md` |
+| SPIKE-125 | Variant G: B on E's valley-aware base (P3 E3) | closed 2026-11-16: passes bars; up to 2x B's saddles | `spikes/e3-variant-g/results/results.md` |
 
 Every exploration gets a `SPIKE-NN` entry.
