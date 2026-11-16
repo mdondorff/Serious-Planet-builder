@@ -817,6 +817,8 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
     let bar = corridor_bar_m(relief(g, input.start, input.region, 10, input.sea_level_m));
     let cell_h1 = params.h1_cell_m / g.dx();
     let snap = Snap { node_radius: cell_h1, region: input.region };
+    // The corridors route and snap on the water surface (DEC explorer-5): a cell under the sea counts at the sea level, as a riverbed at the coast sits there.
+    let water: Vec<f64> = input.surface.iter().map(|&z| z.max(input.sea_level_m)).collect();
     GateReport {
         params: *params,
         river_cells,
@@ -843,13 +845,10 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         suite,
         trunk: trunk_burn(g, input.surface, input.inside, input.trunks, params.cut_m),
         trunks_given: !input.trunks.is_empty(),
-        trunk_corridors: CORRIDOR_K
-            .iter()
-            .map(|k| trunk_corridor(g, input.surface, input.inside, input.trunks, k * cell_h1, bar, None))
-            .collect(),
+        trunk_corridors: CORRIDOR_K.iter().map(|k| trunk_corridor(g, &water, input.inside, input.trunks, k * cell_h1, bar, None)).collect(),
         trunk_corridors_snapped: CORRIDOR_K
             .iter()
-            .map(|k| trunk_corridor(g, input.surface, input.inside, input.trunks, k * cell_h1, bar, Some(&snap)))
+            .map(|k| trunk_corridor(g, &water, input.inside, input.trunks, k * cell_h1, bar, Some(&snap)))
             .collect(),
         corridor_bar_m: bar,
     }
