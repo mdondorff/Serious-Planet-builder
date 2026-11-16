@@ -685,6 +685,22 @@ pub struct K7Result {
 
 /// K7 on one tile. `base` is `B` (read at every cell of the window), `regional` the regional change (a C1 read of the regional solve, `RegionField::at`), `channels` the channel segments on the local
 /// grid (cell-index space of the face, see [`Channel`]).
+/// SPIKE-122 section 7 (spike branch spike/e3-k7-stages, never merged): with PLANET_K7_STAGES=<dir>, every stage of `k7_tile` writes the tile's core heights (f32, row-major,
+/// tile x tile cells) to `<dir>/<stage>/<face>_<ti>_<tj>.f32`; read only, the bake's bits do not change.
+fn dump_k7_stage(stage: &str, g: &TileGrid, id: TileId, z: &[f64]) {
+    let Ok(dir) = std::env::var("PLANET_K7_STAGES") else { return };
+    let (w, t, h) = (g.window(), g.tile, g.halo);
+    let mut bytes = Vec::with_capacity(t * t * 4);
+    for y in h..h + t {
+        for x in h..h + t {
+            bytes.extend_from_slice(&(z[y * w + x] as f32).to_le_bytes());
+        }
+    }
+    let d = std::path::Path::new(&dir).join(stage);
+    let _ = std::fs::create_dir_all(&d);
+    let _ = std::fs::write(d.join(format!("{}_{}_{}.f32", id.face.0, id.ti, id.tj)), bytes);
+}
+
 pub fn k7_tile(
     g: &TileGrid,
     id: TileId,
@@ -711,6 +727,7 @@ pub fn k7_tile(
     let (w, t, h) = (g.window(), g.tile as i64, g.halo as i64);
     let origin = (i64::from(id.ti) * t - h, i64::from(id.tj) * t - h);
     let z_start = z.clone();
+    dump_k7_stage("0-start", g, id, &z);
     assert!(
         channels.is_empty() || g.halo >= DISC_RADIUS_MAX as usize + PROFILE_CARRY_MIN,
         "the tile halo of {} cells is smaller than the trench radius cap of {} cells plus the smallest profile carry of {} cells ({}): the profile would carry nothing across the halo (GEN-169)",
@@ -735,6 +752,7 @@ pub fn k7_tile(
     let fixed_cells = fixed.iter().filter(|&&f| f).count();
     drop(z_start);
     pits.push(("channels burned in", stats(&z)));
+    dump_k7_stage("1-burn", g, id, &z);
     let z_burned = z.clone();
     let outlet = grid.outlets(&z, q.sea_level);
     let stream = super::face::face_stream(q.seed, id.face);
@@ -743,11 +761,14 @@ pub fn k7_tile(
     // The breach alone: the carve with no incision (`k_dt` 0) runs the breach of pass 1 and leaves the rest.
     let mut breach_only = z.clone();
     carve_fixed(&grid, &mut breach_only, &outlet, &CarveParams { k_dt: 0.0, steps: 1, reroute_every: 1, ..local }, None, stream, &fixed);
+    dump_k7_stage("2a-breach-only", g, id, &breach_only);
     pits.push(("breach", stats(&breach_only)));
     drop(breach_only);
     let _ = carve_fixed(&grid, &mut z, &outlet, &local, None, stream, &fixed);
     pits.push(("breach and incision", stats(&z)));
+    dump_k7_stage("2-carve", g, id, &z);
     let thermal_report = thermal_fixed(&grid, &mut z, &q.thermal, threads, &fixed);
+    dump_k7_stage("3-thermal", g, id, &z);
     let mut sediment = deposit_on_own_route_fixed(
         &grid,
         &mut z,
@@ -760,11 +781,14 @@ pub fn k7_tile(
     );
     // What thermal gave to the fixed cells left the tile with the sediment: reported in `thermal_exported_m3` (GEN-176).
     // (Not booked in the ledger: the deposition sweep reads the givers' loss as eroded column against `z_burned` already.)
+    dump_k7_stage("4-deposition", g, id, &z);
     spread_pits_fixed(&grid, &mut z, q.sea_level, q.pit_min_m, q.pit_passes, &fixed);
+    dump_k7_stage("5-pits", g, id, &z);
     let final_pass = final_channel_pass(&mut z, w, origin, channels, q.sea_level, g.dx() * g.dx(), g.halo);
     sediment.eroded += final_pass.removed_m3;
     sediment.exported += final_pass.removed_m3;
     pits.push(("the whole pass", stats(&z)));
+    dump_k7_stage("6-final", g, id, &z);
     // The stage probe (GEN-161) reads the finished window: off by default, read only.
     super::probe::emit(super::probe::Stage::K7 { face: id.face.0, ti: id.ti, tj: id.tj }, |s| {
         super::probe::StageView::new(s, &grid)
