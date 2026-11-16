@@ -27,7 +27,7 @@ const TRUNK_M2: f64 = 75.0e6;
 const RUNOFF: f64 = 1.0e-8;
 /// The bed code (GEN-170): 0.5 m.
 fn code(z: f64) -> i32 {
-    libm::floor(z / 0.5) as i32
+    i32::from(planet_generators::bake::channel_graph::bed_code(z))
 }
 
 fn path(r: &Routing, from: usize) -> Vec<usize> {
@@ -239,13 +239,15 @@ fn expected(fx: &Fixture) -> Built {
     };
     // the trunk's bed at L: the running minimum, cut at most the budget (KS off): where S0 rises more, the bed rises and the reach is exception(rise_over_budget)
     let mut bed: Vec<i32> = Vec::new();
-    let (mut low, mut rise, mut budget_at_rise) = (f64::INFINITY, 0.0f64, 0.0);
+    let (mut low, mut rise, mut budget_at_rise, mut over) = (f64::INFINITY, 0.0f64, 0.0, false);
     for &c in &trunk_l {
         let budget = budget_h(h1_of_l(c));
         low = low.min(fx.s0[c]);
         if fx.s0[c] - low > rise {
             (rise, budget_at_rise) = (fx.s0[c] - low, budget);
         }
+        // a vertex whose rise over the bed exceeds its budget keeps the excess: the bed rises there
+        over |= fx.s0[c] - low > budget;
         let floor = low.max(fx.s0[c] - budget);
         low = floor;
         bed.push(code(floor));
@@ -260,7 +262,7 @@ fn expected(fx: &Fixture) -> Built {
             exceptions.push(m);
         }
     }
-    let status = if rise > budget_at_rise { Status::Exception { reason: Reason::RiseOverBudget, value: rise } } else { Status::Ok };
+    let status = if over { Status::Exception { reason: Reason::RiseOverBudget, value: rise } } else { Status::Ok };
     let trunk_reach_l = Reach {
         id: trunk_l_id,
         level: Level::L,
@@ -434,6 +436,10 @@ fn expected(fx: &Fixture) -> Built {
     Built { graph: g, trunk_l, trunk_l_id, budget_at_rise, rise_m: rise }
 }
 
+fn ids_of(s: &Graph) -> Vec<u64> {
+    s.nodes.iter().map(|n| n.id).chain(s.reaches.iter().map(|r| r.id)).chain(s.basins.iter().map(|b| b.id)).collect()
+}
+
 fn adjacency() -> impl Fn(Level, u64, u64) -> bool {
     let (gh, gl) = (Grid::cube(H1_N, RADIUS_M), Grid::cube(L_N, RADIUS_M));
     move |level, a, b| {
@@ -449,7 +455,9 @@ fn the_fixture_graph_validates_round_trips_and_is_the_same_on_any_thread_count()
     let b = expected(&fx);
     let g = &b.graph;
     let adj = adjacency();
-    assert_eq!(validate(g, &adj, false), vec![], "the expected graph validates");
+    let tiles = |c: u64| tile_domain(c as usize);
+    assert_eq!(validate(g, &Checks { adjacent: &adj, tile_of: Some(&tiles), open: false }), vec![], "the expected graph validates");
+    assert_eq!(missing_owners(g), vec![], "a whole graph names no missing owner");
     let text = g.canonical();
     assert_eq!(Graph::parse(&text).expect("parses").canonical(), text, "round trip");
     assert_eq!(expected(&build(1)).graph.canonical(), text, "the same bytes on 1 and 4 threads");
@@ -467,15 +475,32 @@ fn the_fixture_graph_validates_round_trips_and_is_the_same_on_any_thread_count()
         b.rise_m,
         b.budget_at_rise
     );
+    // the status is exception exactly where the reach carries exception markers (its bed rises)
+    let marked = g.nodes.iter().any(|n| n.kind == NodeKind::Exception && n.marker.is_some_and(|m| m.on_reach == trunk.id));
+    assert!(marked, "the trunk's bed rises at the ridge, marked");
+    assert!(
+        g.reaches.iter().filter(|r| r.id != trunk.id).all(|r| r.status == Status::Ok && r.attrs.bed.windows(2).all(|w| w[1] <= w[0])),
+        "no other reach is exceptional"
+    );
     let faces: std::collections::BTreeSet<usize> = b.trunk_l.iter().map(|&c| c / (L_N * L_N)).collect();
     assert_eq!(faces.len(), 2, "the trunk crosses a cube-face edge (gated at H1, reported at L)");
     // the explicit confluence conserves: one shared value, at least the inflows
     let conf = g.nodes.iter().find(|n| n.kind == NodeKind::Confluence).unwrap();
     let inflows: Vec<&Reach> = g.reaches.iter().filter(|r| r.down == conf.id).collect();
     assert_eq!(inflows.len(), 2);
-    // the rasterisation owns each cell once
-    let claims: Vec<(u64, u64)> = rasterise(g).into_iter().map(|(c, (r, _))| (c, r)).collect();
-    assert_eq!(validate_raster(&claims), vec![]);
+    // the rasterisation owns every L vertex cell, a junction cell to the downstream reach
+    let raster = rasterise(g);
+    for r in g.reaches.iter().filter(|r| r.level == Level::L) {
+        for c in &r.vertices {
+            assert!(raster.contains_key(c), "cell {c} of reach {:x}", r.id);
+        }
+    }
+    let j0 = g
+        .nodes
+        .iter()
+        .find(|n| n.kind == NodeKind::TribJunction && n.level == Level::L && n.marker.is_some_and(|m| m.at_vertex == 0))
+        .expect("the junction at the trunk's head");
+    assert_eq!(raster[&j0.anchor].0, trunk.id, "the trunk's head cell belongs to the trunk");
     if std::env::var_os("G0_GRAPH_PRINT").is_some() {
         println!(
             "nodes {} reaches {} basins {}; tile crossings {}; trunk L {} vertices, rise {:.1} m, budget {:.1} m",
@@ -507,7 +532,17 @@ fn the_fixture_graph_runs_under_both_partition_layouts() {
         };
         let slices: Vec<Graph> = (0..layout.regions).map(|r| slice(&g, &|d| region_of(d).is_none_or(|x| x == r))).collect();
         for (r, s) in slices.iter().enumerate() {
-            assert_eq!(validate(s, &adj, true), vec![], "{} region {r} validates as an open slice", layout.name);
+            let tiles = |c: u64| tile_domain(c as usize);
+            assert_eq!(
+                validate(s, &Checks { adjacent: &adj, tile_of: Some(&tiles), open: true }),
+                vec![],
+                "{} region {r} validates as an open slice",
+                layout.name
+            );
+            // what the slice names but does not hold is owned by the other region
+            for (_, id) in missing_owners(s) {
+                assert!(ids_of(&g).contains(&id) && !ids_of(s).contains(&id), "{} region {r}: {id:x}", layout.name);
+            }
         }
         // every tile-owned item in exactly one slice, the landmass items in every slice, nothing else
         let ids = |s: &Graph| -> Vec<u64> {

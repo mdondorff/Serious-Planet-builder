@@ -1,23 +1,11 @@
 ## ADDED Requirements
 ### Requirement: TEST-140 The river graph's validators and the fixture's expected graph
-Tier-A tests SHALL check each validator of GEN-189 with an injected failure, the canonical form's round trip, the diff, the rasterisation, the budget validator, and the G0 fixture's expected graph (TEST-139). The fixture's graph is built by hand in the contract's types; it SHALL validate, round-trip, give the same bytes on any thread count, and run under both partition layouts.
+Tier-A tests SHALL check each validator of GEN-189 with an injected failure, the canonical form's round trip, the diff, the rasterisation, the budget validator and the open slice's missing owners, and the G0 fixture's expected graph (TEST-139). The fixture's graph is built by hand in the contract's types: it SHALL validate, round-trip, give the same bytes on any thread count, and run under both partition layouts.
 
 Verify: A
 Status: active
 Source: Lead 2026-11-16 (crusader #155), the river-graph plan's G0 contracts (agreed, owner 2026-11-16) sections 8 and 11
-Detail: injected, each found:
-- a cycle, a duplicate id, two nodes on one anchor, and a marker off vertex 0 on a node's anchor;
-- an unresolved endpoint, a chain without an outlet, a confluence with one inflow, a node with zero or two outgoing reaches;
-- an edge from an outlet, into a source or across levels, and a broken or misplaced chain;
-- a bed rise (allowed at an exception marker) and a bed not shared at a node;
-- a discharge falling along a reach, and a confluence below its inflows or not sharing its value;
-- a cell owned twice;
-- a lowering and a fill over the budget, a clamp without its residual, and a residual whose feature is not flagged.
-Also checked:
-- the hand graph's canonical form parses back to the same bytes in any input order;
-- an attribute change is one named field, and a kind change on an anchor retires the node and its reaches;
-- the fixture's graph holds one H1 trunk reach, its L image `exception(rise_over_budget)` across the ridge and over two faces, the explicit confluence, tributaries cut at tile lines, two sea outlets and the protected basin at both levels;
-- under each layout every tile-owned item lies in one slice, the landmass items lie in every slice with the same bytes, every slice validates open, and a tributary crosses the two-region cut at a `tile_crossing`.
+Detail: injected, each found: a cycle; a duplicate id, and a kind changed under a kept id; two nodes on one anchor, two junctions on one vertex, a marker at an inflow's end on a node's anchor (a junction at vertex 0 and an exception beside a junction pass); a marker off its reach, out of range, on another vertex, a marker kind without and a non-marker with the field; an unresolved endpoint; a chain without an outlet, followed through a junction; a confluence with one inflow, two inflows into a tile crossing; a node with zero or two outgoing reaches; an edge from an outlet, from a marker, into a source, into an exception marker, at another level at either end; a chain not 8-connected, not starting or ending at its nodes' anchors, an empty reach (reported, no panic); a tributary leaving its tile core (a trunk image passes); a bed rise (passing at an exception marker), a bed not shared at a confluence, and a tributary off the trunk's bed at its junction; `a_geo`, `a_run`, `q` and `q_w` each falling along a reach; a confluence below its inflows, `a_run` and `q_w` not shared there; a NaN; a cell owned twice; a lowering overrun reported once and never excused, a fill overrun excused only by its residual, a raise in KS, a clamp without its residual, a residual whose feature is not flagged, NaN and short inputs. Also: the canonical form parses back to the same bytes in any input order and the parser refuses an unknown outlet, representation or face; an attribute change is one named field, a kind change retires the node and its reach; every vertex cell is rasterised, a junction cell goes to the downstream reach whatever the `q_w`, otherwise the larger `q_w` and on a tie the lower id, the same for any input order; an open slice validates and names its missing owners. The fixture's graph holds one H1 trunk reach; its L image is `exception(rise_over_budget)` across the ridge, with exception markers where its bed rises, over two faces, and is the only exceptional reach; it holds the explicit confluence, tributaries cut at tile lines, two sea outlets, and the protected basin at both levels. Under each layout every tile-owned item lies in one slice, the landmass items lie in every slice with the same bytes, every slice validates open and names only items the other region holds, and a tributary crosses the two-region cut at a `tile_crossing`.
 
 #### Scenario: One injected failure, one violation
 - **WHEN** a valid graph is changed to break one rule

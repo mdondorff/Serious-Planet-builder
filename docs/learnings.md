@@ -197,3 +197,9 @@ Scope: project (the GLO-30 benchmark, SPIKE-108's frozen pools, P3 E1)
 - Against USGS 3DEP bare earth on 4 tiles (SPIKE-119): GLO-30 stands 0.8-9.7 m above it at p50; basins on river length 1.3-2.9x (Appalachians 64.9 % against 22.1 %); floodplain relief over 10 x 10 cells 15.2 m against 4.7 m.
 - GLO-30 basin shares are an upper bound; low-gradient windows are judged against a DTM. Steep ground agrees within 2 % relief.
 - Obsolete when: the benchmark uses a bare-earth source for every tile.
+
+## 2026-11-17 River-graph markers need their own uniqueness class and a chain walk through them
+Scope: project (river graph, GEN-189)
+- The G0 contract made one node per (level, anchor) and also put a `trib_junction` on a trunk source's cell; the lead's reading separates markers from plain nodes (a marker shares only with its reach's up node at vertex 0).
+- A marker has no outgoing reach: a validator that walks only outgoing reaches stops at every junction and misses cycles and outlet-less chains through it; the walk follows the marker's reach.
+- Obsolete when: never.

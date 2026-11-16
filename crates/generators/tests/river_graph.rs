@@ -90,18 +90,64 @@ fn base() -> Graph {
     g
 }
 
-fn check(g: &Graph) -> Vec<Violation> {
+/// Two tiles a face edge on the 4-cell face: columns and rows 0-1 and 2-3.
+fn tile_of(c: u64) -> Domain {
+    let (f, i, j) = (c as usize / (N * N), c as usize % N, (c as usize % (N * N)) / N);
+    Domain::Tile { face: f as u8, ti: (i / 2) as u32, tj: (j / 2) as u32 }
+}
+
+fn check_with(g: &Graph, tiles: bool, open: bool) -> Vec<Violation> {
     let adj = adjacency();
-    validate(g, &adj, false)
+    let t = tile_of;
+    validate(g, &Checks { adjacent: &adj, tile_of: if tiles { Some(&t) } else { None }, open })
+}
+
+fn check(g: &Graph) -> Vec<Violation> {
+    check_with(g, false, false)
+}
+
+fn found(g: &Graph, pred: &dyn Fn(&Violation) -> bool) -> bool {
+    check(g).iter().any(pred)
+}
+
+fn id(kind: NodeKind, i: usize, j: usize) -> u64 {
+    node_id(BODY, kind, Level::L, cell(i, j))
 }
 
 fn reach_mut(g: &mut Graph, up: u64) -> &mut Reach {
-    let id = node_id(BODY, NodeKind::Source, Level::L, up);
-    let id = if g.reaches.iter().any(|r| r.up == id) { id } else { node_id(BODY, NodeKind::Confluence, Level::L, up) };
-    g.reaches.iter_mut().find(|r| r.up == id).expect("a reach from that anchor")
+    let src = node_id(BODY, NodeKind::Source, Level::L, up);
+    let up_id = if g.reaches.iter().any(|r| r.up == src) { src } else { node_id(BODY, NodeKind::Confluence, Level::L, up) };
+    g.reaches.iter_mut().find(|r| r.up == up_id).expect("a reach from that anchor")
 }
 
-// spec: TEST-140
+/// Recomputes every id from its fields, and the references to them.
+fn rehash(g: &mut Graph) {
+    let mut map = std::collections::BTreeMap::new();
+    for n in g.nodes.iter_mut() {
+        let new = node_id(BODY, n.kind, n.level, n.anchor);
+        map.insert(n.id, new);
+        n.id = new;
+    }
+    let mut rmap = std::collections::BTreeMap::new();
+    for r in g.reaches.iter_mut() {
+        r.up = *map.get(&r.up).unwrap_or(&r.up);
+        r.down = *map.get(&r.down).unwrap_or(&r.down);
+        let new = reach_id(BODY, r.level, r.up, r.down);
+        rmap.insert(r.id, new);
+        r.id = new;
+    }
+    for n in g.nodes.iter_mut() {
+        if let Some(m) = n.marker.as_mut() {
+            m.on_reach = *rmap.get(&m.on_reach).unwrap_or(&m.on_reach);
+        }
+    }
+    for b in g.basins.iter_mut() {
+        b.spill_node = *map.get(&b.spill_node).unwrap_or(&b.spill_node);
+    }
+    g.sort();
+}
+
+// spec: TEST-140, GEN-189
 #[test]
 fn the_hand_graph_validates_and_round_trips() {
     let g = base();
@@ -110,129 +156,278 @@ fn the_hand_graph_validates_and_round_trips() {
     let back = Graph::parse(&text).expect("the canonical form parses");
     assert_eq!(back, g);
     assert_eq!(back.canonical(), text, "same graph, same bytes");
-    // the order of the input does not matter
     let mut shuffled = g.clone();
     shuffled.nodes.reverse();
     shuffled.reaches.rotate_left(2);
     assert_eq!(shuffled.canonical(), text);
+    assert_eq!(check(&shuffled), check(&g), "the validator does not read the input order");
     assert!(text.lines().nth(1).unwrap().starts_with("node "), "nodes first:\n{text}");
+    // the parser refuses what the canonical form never writes
+    for (from, to) in
+        [("outlet=active", "outlet=open"), ("represented=protected_surface", "represented=lake"), ("owner=tile:0:", "owner=tile:300:")]
+    {
+        assert!(Graph::parse(&text.replacen(from, to, 1)).is_err(), "{to}");
+    }
 }
 
 // spec: TEST-140
 #[test]
-fn each_injected_failure_is_found() {
-    let adj = adjacency();
-    let found = |g: &Graph, pred: &dyn Fn(&Violation) -> bool| validate(g, &adj, false).iter().any(pred);
-    // a cycle: the outlet becomes a confluence draining back into S1's reach start
+fn each_injected_structural_failure_is_found() {
+    let c = id(NodeKind::Confluence, 1, 1);
+    let o = id(NodeKind::OutletSea, 3, 1);
+    let s1 = id(NodeKind::Source, 0, 0);
+    let r3 = reach_mut(&mut base(), cell(1, 1)).id;
+    // a cycle: C's outflow goes to a new confluence X at (2, 0), which drains back into C
     let mut g = base();
-    let c = node_id(BODY, NodeKind::Confluence, Level::L, cell(1, 1));
-    let s1 = node_id(BODY, NodeKind::Source, Level::L, cell(0, 0));
-    let r = reach_mut(&mut g, cell(1, 1));
-    r.down = s1;
-    assert!(found(&g, &|v| matches!(v, Violation::Cycle { .. } | Violation::InvalidEdge { why: "down is a source", .. })));
-    // duplicate id
+    let x = node(NodeKind::Confluence, cell(2, 0));
+    let cx = reach_mut(&mut g, cell(1, 1)).clone();
+    g.reaches.retain(|r| r.up != c);
+    let to_x = Reach { vertices: vec![cell(1, 1), cell(2, 0)], down: x.id, attrs: attrs(&[3.0e4, 4.0e4], &[18, 18], 2), ..cx.clone() };
+    let back = Reach { up: x.id, down: c, vertices: vec![cell(2, 0), cell(1, 1)], attrs: attrs(&[4.0e4, 4.0e4], &[18, 18], 2), ..cx };
+    g.nodes.push(x);
+    g.reaches.extend([to_x, back]);
+    rehash(&mut g);
+    assert!(found(&g, &|v| matches!(v, Violation::Cycle { .. })));
+    // a duplicate id, and an id that is not the hash of its fields
     let mut g = base();
     let dup = g.nodes[0].clone();
     g.nodes.push(dup);
     assert!(found(&g, &|v| matches!(v, Violation::DuplicateId { .. })));
+    let mut g = base();
+    g.nodes.iter_mut().find(|n| n.id == o).unwrap().kind = NodeKind::LakeInlet;
+    assert!(found(&g, &|v| matches!(v, Violation::IdMismatch { id } if *id == o)), "a kind changed under a kept id");
     // two nodes on one (level, anchor)
     let mut g = base();
     g.nodes.push(node(NodeKind::LakeSpill, cell(1, 1)));
     assert!(found(&g, &|v| matches!(v, Violation::TwoNodesOneAnchor { .. })));
-    // a marker on another node's anchor; allowed only at vertex 0 of the reach that node starts (DEC crusader-6, default A)
-    let mut g = base();
-    let r3 = reach_mut(&mut g, cell(1, 1)).id;
+    // a marker on a node's anchor: allowed at vertex 0 of the reach that node starts, not at the end of an inflow
     let mut m = node(NodeKind::TribJunction, cell(1, 1));
     m.marker = Some(Marker { on_reach: r3, at_vertex: 0 });
+    let mut g = base();
     g.nodes.push(m.clone());
     assert!(!found(&g, &|v| matches!(v, Violation::TwoNodesOneAnchor { .. })), "a junction at vertex 0 shares the up node's anchor");
     let mut g = base();
-    m.marker = Some(Marker { on_reach: r3, at_vertex: 1 });
+    m.marker = Some(Marker { on_reach: reach_mut(&mut g, cell(0, 0)).id, at_vertex: 1 });
     g.nodes.push(m);
-    assert!(found(&g, &|v| matches!(v, Violation::TwoNodesOneAnchor { .. })));
+    assert!(
+        found(&g, &|v| matches!(v, Violation::TwoNodesOneAnchor { .. })),
+        "a marker at the end of an inflow on the confluence's anchor"
+    );
+    // markers of different kinds may share an anchor; two of one kind may not
+    let mut g = base();
+    let mut e = node(NodeKind::Exception, cell(2, 1));
+    e.marker = Some(Marker { on_reach: r3, at_vertex: 1 });
+    g.nodes.push(e);
+    assert!(!found(&g, &|v| matches!(v, Violation::TwoNodesOneAnchor { .. })), "an exception marker beside a junction");
+    let mut j2 = node(NodeKind::TribJunction, cell(2, 1));
+    j2.id ^= 3;
+    j2.marker = Some(Marker { on_reach: r3, at_vertex: 1 });
+    g.nodes.push(j2);
+    assert!(found(&g, &|v| matches!(v, Violation::TwoNodesOneAnchor { .. })), "two junctions on one vertex");
+    // markers off their reach: no reach, out of range, another vertex; a marker kind without, and a non-marker with, the field
+    for (mk, why) in [
+        (Marker { on_reach: 42, at_vertex: 1 }, "its reach does not exist"),
+        (Marker { on_reach: r3, at_vertex: 9 }, "at_vertex out of range"),
+        (Marker { on_reach: r3, at_vertex: 2 }, "not at its reach's vertex"),
+    ] {
+        let mut g = base();
+        g.nodes.iter_mut().find(|n| n.kind == NodeKind::TribJunction).unwrap().marker = Some(mk);
+        assert!(found(&g, &|v| matches!(v, Violation::InvalidMarker { why: w, .. } if *w == why)), "{why}");
+    }
+    let mut g = base();
+    g.nodes.iter_mut().find(|n| n.kind == NodeKind::TribJunction).unwrap().marker = None;
+    assert!(found(&g, &|v| matches!(v, Violation::InvalidMarker { why: "a marker kind without its reach", .. })));
+    let mut g = base();
+    g.nodes.iter_mut().find(|n| n.id == o).unwrap().marker = Some(Marker { on_reach: r3, at_vertex: 2 });
+    assert!(found(&g, &|v| matches!(v, Violation::InvalidMarker { why: "a marker field on a non-marker", .. })));
     // an unresolved endpoint
     let mut g = base();
-    g.nodes.retain(|n| n.kind != NodeKind::OutletSea);
-    assert!(found(&g, &|v| matches!(v, Violation::UnresolvedEndpoint { .. })));
-    // a chain without an outlet: the outlet kind becomes a lake spill (not an outlet, no outgoing reach)
+    g.nodes.retain(|n| n.id != o);
+    assert!(found(&g, &|v| matches!(v, Violation::UnresolvedEndpoint { node, .. } if *node == o)));
+    // a chain without an outlet, followed through a junction: the outlet becomes a lake spill
     let mut g = base();
-    for n in g.nodes.iter_mut().filter(|n| n.kind == NodeKind::OutletSea) {
-        n.kind = NodeKind::LakeSpill;
-    }
-    assert!(found(&g, &|v| matches!(v, Violation::ChainWithoutOutlet { .. })));
-    // a confluence with one inflow
+    g.nodes.iter_mut().find(|n| n.id == o).unwrap().kind = NodeKind::LakeSpill;
+    rehash(&mut g);
+    let t_src = id(NodeKind::Source, 2, 3);
+    assert!(
+        found(&g, &|v| matches!(v, Violation::ChainWithoutOutlet { node } if *node == t_src)),
+        "the tributary's chain runs on through its junction"
+    );
+    // a confluence with one inflow; two inflows into a non-confluence
     let mut g = base();
-    let s2 = node_id(BODY, NodeKind::Source, Level::L, cell(0, 2));
+    let s2 = id(NodeKind::Source, 0, 2);
     g.reaches.retain(|r| r.up != s2);
     g.nodes.retain(|n| n.id != s2);
     assert!(found(&g, &|v| matches!(v, Violation::ConfluenceOneInflow { node } if *node == c)));
+    let mut g = base();
+    g.nodes.iter_mut().find(|n| n.id == c).unwrap().kind = NodeKind::TileCrossing;
+    rehash(&mut g);
+    assert!(found(&g, &|v| matches!(v, Violation::InflowsToNonConfluence { .. })));
     // a non-outlet node with zero, and with two, outgoing reaches
     let mut g = base();
     g.nodes.push(node(NodeKind::Source, cell(3, 0)));
     assert!(found(&g, &|v| matches!(v, Violation::OutgoingCount { outgoing: 0, .. })));
     let mut g = base();
-    let extra = g.reaches.iter().find(|r| r.up == s1).unwrap().clone();
-    let mut extra2 = extra.clone();
-    extra2.id ^= 1;
-    g.reaches.push(extra2);
+    let mut extra = g.reaches.iter().find(|r| r.up == s1).unwrap().clone();
+    extra.id ^= 1;
+    g.reaches.push(extra);
     assert!(found(&g, &|v| matches!(v, Violation::OutgoingCount { outgoing: 2, .. })));
-    // invalid edges: from an outlet, into a source, across levels, a broken chain
-    let o = node_id(BODY, NodeKind::OutletSea, Level::L, cell(3, 1));
-    let mut g = base();
-    let mut back = g.reaches.iter().find(|r| r.down == o).unwrap().clone();
-    back.id ^= 7;
-    back.up = o;
-    back.vertices = vec![cell(3, 1), cell(2, 1)];
-    back.attrs = attrs(&[6.0e4, 6.0e4], &[0, 0], 1);
-    g.reaches.push(back);
-    assert!(found(&g, &|v| matches!(v, Violation::InvalidEdge { why: "up is an outlet", .. })));
-    let mut g = base();
-    g.nodes.iter_mut().find(|n| n.id == o).unwrap().level = Level::H1;
-    assert!(found(&g, &|v| matches!(v, Violation::InvalidEdge { why: "down at another level", .. })));
-    let mut g = base();
-    reach_mut(&mut g, cell(1, 1)).vertices = vec![cell(1, 1), cell(3, 1), cell(3, 1)];
-    assert!(found(&g, &|v| matches!(v, Violation::InvalidEdge { why: "vertices not an 8-connected chain", .. })));
-    let mut g = base();
-    reach_mut(&mut g, cell(1, 1)).vertices = vec![cell(1, 1), cell(2, 1), cell(3, 2)];
-    assert!(found(&g, &|v| matches!(v, Violation::InvalidEdge { why: "chain does not end at down's anchor", .. })));
-    // a bed rise on codes, allowed only at an exception marker
-    let mut g = base();
-    reach_mut(&mut g, cell(1, 1)).attrs.bed = vec![18, 19, 0];
-    assert!(found(&g, &|v| matches!(v, Violation::BedRise { vertex: 1, .. })));
-    let r3 = reach_mut(&mut g, cell(1, 1)).id;
-    let mut ex = node(NodeKind::Exception, cell(2, 0));
-    ex.marker = Some(Marker { on_reach: r3, at_vertex: 1 });
-    g.nodes.push(ex);
-    assert!(!found(&g, &|v| matches!(v, Violation::BedRise { .. })), "an exception marker allows the rise");
-    // a node's bed is shared by its reaches
-    let mut g = base();
-    reach_mut(&mut g, cell(0, 0)).attrs.bed = vec![20, 19];
-    assert!(found(&g, &|v| matches!(v, Violation::BedRise { vertex: 0, .. })));
-    // conservation: an area falling along a reach; a confluence below its inflows; a value not shared at the node
-    let mut g = base();
-    reach_mut(&mut g, cell(1, 1)).attrs.q[2] = 1.0e-5;
-    assert!(found(&g, &|v| matches!(v, Violation::ConservationBreak { field: "q", .. })));
-    let mut g = base();
-    for j in [0, 2] {
-        reach_mut(&mut g, cell(0, j)).attrs.a_geo = vec![2.0e4, 3.0e4];
-    }
-    assert!(found(&g, &|v| matches!(v, Violation::ConservationBreak { at, field: "a_geo" } if *at == c)), "3e4 below 2e4 + 2e4");
-    let mut g = base();
-    reach_mut(&mut g, cell(0, 0)).attrs.q_w[1] = 3.5e-4;
-    assert!(found(&g, &|v| matches!(v, Violation::ConservationBreak { at, field: "q_w" } if *at == c)));
 }
 
 // spec: TEST-140
 #[test]
-fn two_reaches_owning_one_cell_are_found_and_the_rasterisation_owns_each_cell_once() {
+fn each_injected_edge_failure_is_found() {
+    let o = id(NodeKind::OutletSea, 3, 1);
+    let s1 = id(NodeKind::Source, 0, 0);
+    let s3 = id(NodeKind::Source, 2, 3);
+    let edge = |g: &Graph, why: &'static str| found(g, &|v| matches!(v, Violation::InvalidEdge { why: w, .. } if *w == why));
+    // up is an outlet; down is a source
+    let mut g = base();
+    let mut back = g.reaches.iter().find(|r| r.down == o).unwrap().clone();
+    (back.up, back.down, back.vertices) = (o, s3, vec![cell(3, 1), cell(2, 2), cell(2, 3)]);
+    back.attrs = attrs(&[6.0e4, 6.0e4, 6.0e4], &[0, 0, 0], 1);
+    g.reaches.push(back);
+    assert!(edge(&g, "up is an outlet") && edge(&g, "down is a source"));
+    // up is a marker
+    let mut g = base();
+    let j = g.nodes.iter().find(|n| n.kind == NodeKind::TribJunction).unwrap().clone();
+    let mut from_j = g.reaches.iter().find(|r| r.down == o).unwrap().clone();
+    (from_j.up, from_j.vertices) = (j.id, vec![cell(2, 1), cell(3, 1)]);
+    from_j.attrs = attrs(&[5.0e4, 6.0e4], &[16, 0], 2);
+    g.reaches.push(from_j);
+    assert!(edge(&g, "up is a marker"));
+    // a reach ending at an exception marker
+    let mut g = base();
+    let r3 = reach_mut(&mut g, cell(1, 1)).id;
+    let mut e = node(NodeKind::Exception, cell(2, 1));
+    e.marker = Some(Marker { on_reach: r3, at_vertex: 1 });
+    g.reaches.iter_mut().find(|r| r.up == s3).unwrap().down = e.id;
+    g.nodes.push(e);
+    assert!(edge(&g, "down is an exception marker"));
+    // up and down at another level
+    let mut g = base();
+    g.nodes.iter_mut().find(|n| n.id == s1).unwrap().level = Level::H1;
+    assert!(edge(&g, "up at another level"));
+    let mut g = base();
+    g.nodes.iter_mut().find(|n| n.id == o).unwrap().level = Level::H1;
+    assert!(edge(&g, "down at another level"));
+    // chains: not 8-connected, not starting at up's anchor, not ending at down's anchor; attributes not one per vertex (an empty reach is reported, not a panic)
+    let mut g = base();
+    reach_mut(&mut g, cell(1, 1)).vertices = vec![cell(1, 1), cell(3, 1), cell(3, 1)];
+    assert!(edge(&g, "vertices not an 8-connected chain"));
+    let mut g = base();
+    reach_mut(&mut g, cell(0, 0)).vertices = vec![cell(0, 1), cell(1, 1)];
+    assert!(edge(&g, "chain does not start at up's anchor"));
+    let mut g = base();
+    reach_mut(&mut g, cell(1, 1)).vertices = vec![cell(1, 1), cell(2, 1), cell(3, 2)];
+    assert!(edge(&g, "chain does not end at down's anchor"));
+    let mut g = base();
+    let r = reach_mut(&mut g, cell(1, 1));
+    r.vertices.clear();
+    r.attrs = Attrs::default();
+    assert!(edge(&g, "attributes not one per vertex"));
+    // a tributary leaving its tile core (two tiles a face edge here): T runs from tile (1, 1) into tile (1, 0) after its first vertex; the other reaches stay in one core
+    let v = check_with(&base(), true, false);
+    let t = reach_mut(&mut base(), cell(2, 3)).id;
+    assert_eq!(v, vec![Violation::TributaryLeavesTile { reach: t }]);
+    // a trunk image (with a parent) is never cut at tiles
+    let mut g = base();
+    reach_mut(&mut g, cell(2, 3)).parent = Some(7);
+    assert_eq!(check_with(&g, true, false), vec![]);
+}
+
+// spec: TEST-140
+#[test]
+fn each_injected_bed_and_conservation_failure_is_found() {
+    let c = id(NodeKind::Confluence, 1, 1);
+    let j = id(NodeKind::TribJunction, 2, 1);
+    // a bed rise on codes, allowed only at an exception marker on that vertex
+    let mut g = base();
+    reach_mut(&mut g, cell(1, 1)).attrs.bed = vec![18, 19, 0];
+    assert!(found(&g, &|v| matches!(v, Violation::BedRise { vertex: 1, .. })));
+    let r3 = reach_mut(&mut g, cell(1, 1)).id;
+    let mut ex = node(NodeKind::Exception, cell(2, 1));
+    ex.marker = Some(Marker { on_reach: r3, at_vertex: 1 });
+    g.nodes.push(ex);
+    assert!(!found(&g, &|v| matches!(v, Violation::BedRise { .. })), "an exception marker allows the rise");
+    // the junction there now sees the trunk at 19 and T arriving at 16
+    assert!(
+        found(&g, &|v| matches!(v, Violation::BedNotShared { node } if *node == j)),
+        "a tributary carries the trunk's bed at its junction"
+    );
+    // a node's bed is shared by its reaches
+    let mut g = base();
+    reach_mut(&mut g, cell(0, 0)).attrs.bed = vec![20, 19];
+    assert!(found(&g, &|v| matches!(v, Violation::BedNotShared { node } if *node == c)));
+    // conservation along a reach: each field falling
+    for f in ["a_geo", "a_run", "q", "q_w"] {
+        let mut g = base();
+        let a = &mut reach_mut(&mut g, cell(1, 1)).attrs;
+        let x = match f {
+            "a_geo" => &mut a.a_geo,
+            "a_run" => &mut a.a_run,
+            "q" => &mut a.q,
+            _ => &mut a.q_w,
+        };
+        x[2] = x[1] * 0.5;
+        assert!(found(&g, &|v| matches!(v, Violation::ConservationBreak { field, .. } if *field == f)), "{f}");
+    }
+    // at a confluence: below its inflows, and a value not shared
+    let mut g = base();
+    for jj in [0, 2] {
+        reach_mut(&mut g, cell(0, jj)).attrs.a_geo = vec![2.0e4, 3.0e4];
+    }
+    assert!(found(&g, &|v| matches!(v, Violation::ConservationBreak { at, field: "a_geo" } if *at == c)), "3e4 below 2e4 + 2e4");
+    for f in ["a_run", "q_w"] {
+        let mut g = base();
+        let a = &mut reach_mut(&mut g, cell(0, 0)).attrs;
+        match f {
+            "a_run" => a.a_run[1] = 3.5e4,
+            _ => a.q_w[1] = 3.5e-4,
+        }
+        assert!(found(&g, &|v| matches!(v, Violation::ConservationBreak { at, field } if *at == c && *field == f)), "{f}");
+    }
+    // a value that is not finite
+    let mut g = base();
+    reach_mut(&mut g, cell(1, 1)).attrs.q_w[1] = f64::NAN;
+    assert!(found(&g, &|v| matches!(v, Violation::NotFinite { field: "q_w", .. })));
+}
+
+// spec: TEST-140
+#[test]
+fn the_rasterisation_owns_each_cell_once_by_its_rules() {
     let g = base();
     let raster = rasterise(&g);
+    for r in &g.reaches {
+        for c in &r.vertices {
+            assert!(raster.contains_key(c), "cell {c} of reach {:x}", r.id);
+        }
+    }
     let claims: Vec<(u64, u64)> = raster.iter().map(|(&c, &(r, _))| (c, r)).collect();
     assert_eq!(validate_raster(&claims), vec![]);
-    // the junction cell (1, 1) belongs to the downstream reach C -> O; the shared cell (2, 1) to the larger q_w (C -> O carries 5e-4 against T's 1.6e-4)
+    // junction cells belong to the downstream reach: the confluence (1, 1) and the trib_junction (2, 1) to C -> O, whatever the q_w
     let down = reach_mut(&mut g.clone(), cell(1, 1)).id;
     assert_eq!(raster[&cell(1, 1)].0, down);
-    assert_eq!(raster[&cell(2, 1)], (down, 1));
+    let mut big_t = g.clone();
+    for x in reach_mut(&mut big_t, cell(2, 3)).attrs.q_w.iter_mut() {
+        *x = 1.0;
+    }
+    assert_eq!(rasterise(&big_t)[&cell(2, 1)], (down, 1), "the tributary's last vertex yields to the trunk");
+    // elsewhere the larger q_w wins, ties by the lower reach id: T shares (2, 2) with a parallel reach P from S4 (3, 3) to O
+    let mut p = g.clone();
+    let s4 = node(NodeKind::Source, cell(3, 3));
+    let o = p.nodes.iter().find(|n| n.kind == NodeKind::OutletSea).unwrap().clone();
+    let r = reach(&s4, &o, vec![cell(3, 3), cell(2, 2), cell(3, 1)], attrs(&[1.0e4, 1.5e4, 1.6e4], &[30, 20, 0], 1));
+    let (t_id, p_id) = (reach_mut(&mut p, cell(2, 3)).id, r.id);
+    p.nodes.push(s4);
+    p.reaches.push(r);
+    assert_eq!(rasterise(&p)[&cell(2, 2)].0, t_id.min(p_id), "equal q_w: the lower id");
+    reach_mut(&mut p, cell(3, 3)).attrs.q_w[1] = 1.0;
+    assert_eq!(rasterise(&p)[&cell(2, 2)].0, p_id, "the larger q_w");
+    let mut shuffled = p.clone();
+    shuffled.reaches.reverse();
+    assert_eq!(rasterise(&shuffled), rasterise(&p), "the same for any input order");
+    // two claims on one cell
     let mut bad = claims.clone();
     bad.push((cell(2, 1), reach_mut(&mut g.clone(), cell(2, 3)).id));
     assert!(matches!(validate_raster(&bad)[..], [Violation::CellOwnedTwice { cell: c, .. }] if c == cell(2, 1)));
@@ -249,73 +444,79 @@ fn the_diff_separates_topology_from_attributes() {
     let d = diff(&g, &a);
     assert_eq!(d.len(), 1);
     assert!(matches!(&d[0], Change::Field { what: "reach", field, .. } if field == "q_w") && !d[0].is_topology());
-    // topology: a kind change on an anchor retires the node id and the reaches that end there
+    // topology: a kind change on an anchor retires the node id and the reach that ends there; the junction's marker follows its reach
     let mut t = g.clone();
-    let o = t.nodes.iter_mut().find(|n| n.kind == NodeKind::OutletSea).unwrap();
-    let old = o.id;
-    o.kind = NodeKind::LakeInlet;
-    o.id = node_id(BODY, NodeKind::LakeInlet, Level::L, o.anchor);
-    let new = o.id;
-    let r = t.reaches.iter_mut().find(|r| r.down == old).unwrap();
-    r.down = new;
-    r.id = reach_id(BODY, Level::L, r.up, new);
+    t.nodes.iter_mut().find(|n| n.kind == NodeKind::OutletSea).unwrap().kind = NodeKind::LakeInlet;
+    rehash(&mut t);
+    assert_eq!(check(&t), vec![]);
     let d = diff(&g, &t);
-    assert!(d.iter().all(Change::is_topology), "{d:?}");
-    assert_eq!(d.iter().filter(|c| matches!(c, Change::Removed { .. })).count(), 2);
-    assert_eq!(d.iter().filter(|c| matches!(c, Change::Added { .. })).count(), 2);
+    assert_eq!(d.iter().filter(|c| matches!(c, Change::Removed { .. })).count(), 2, "{d:?}");
+    assert_eq!(d.iter().filter(|c| matches!(c, Change::Added { .. })).count(), 2, "{d:?}");
+    assert!(d.iter().all(|c| c.is_topology() || matches!(c, Change::Field { field, .. } if field == "marker")), "{d:?}");
 }
 
 // spec: TEST-140
 #[test]
-fn the_budget_validator_finds_overruns_and_clamps_without_residuals() {
+fn the_budget_validator_finds_overruns_raises_and_clamps_without_residuals() {
     let g = base();
     let s0 = vec![100.0, 100.0, 100.0];
     let budget = vec![10.0, 10.0, 10.0];
-    // KS lowers 6 m, KV 4 m (exactly the budget), KC fills 3 m: valid
-    let ks = vec![94.0, 100.0, 100.0];
-    let kv = vec![90.0, 100.0, 100.0];
-    let kc = vec![90.0, 103.0, 100.0];
-    let stages = |ks: &[f64], kv: &[f64], kc: &[f64]| -> Vec<(&'static str, Vec<f64>, bool)> {
-        vec![("ks", ks.to_vec(), false), ("kv", kv.to_vec(), true), ("kc", kc.to_vec(), true)]
-    };
-    let run = |st: &[(&'static str, Vec<f64>, bool)], wanted: Option<&[f64]>, res: &[Residual], g: &Graph| {
-        let s: Vec<Stage> = st
-            .iter()
-            .map(|(name, out, fills)| Stage { name, out, wanted_lowering: if *name == "kv" { wanted } else { None }, fills: *fills })
-            .collect();
+    let run = |ks: &[f64], kv: &[f64], kc: &[f64], wanted: Option<&[f64]>, res: &[Residual], g: &Graph| {
+        let s = [
+            Stage { name: "ks", out: ks, wanted_lowering: None, fills: false },
+            Stage { name: "kv", out: kv, wanted_lowering: wanted, fills: true },
+            Stage { name: "kc", out: kc, wanted_lowering: None, fills: true },
+        ];
         validate_budget(&s0, &budget, &s, res, g)
     };
-    assert_eq!(run(&stages(&ks, &kv, &kc), None, &[], &g), vec![]);
-    // an injected overrun: KV lowers 0.5 m more
-    let kv2 = vec![89.5, 100.0, 100.0];
-    let v = run(&stages(&ks, &kv2, &kv2), None, &[], &g);
+    // KS lowers 6 m, KV 4 m (exactly the budget), KC fills 3 m: valid
+    let (ks, kv, kc) = ([94.0, 100.0, 100.0], [90.0, 100.0, 100.0], [90.0, 103.0, 100.0]);
+    assert_eq!(run(&ks, &kv, &kc, None, &[], &g), vec![]);
+    // an overrun: KV lowers 0.5 m more, KC 0.1 m more again: one violation, at KV
+    let (kv2, kc2) = ([89.5, 100.0, 100.0], [89.4, 100.0, 100.0]);
+    let v = run(&ks, &kv2, &kc2, None, &[], &g);
     assert!(matches!(v[..], [Violation::BudgetOverrun { cell: 0, stage: "kv", .. }]), "{v:?}");
-    // a fill over the budget
-    let kc2 = vec![90.0, 111.0, 100.0];
-    assert!(run(&stages(&ks, &kv, &kc2), None, &[], &g).iter().any(|v| matches!(v, Violation::BudgetOverrun { cell: 1, stage: "kc", .. })));
-    // an injected clamp without a residual: KV wanted 7 m at cell 0 and got 4 m
-    let wanted = vec![7.0, 0.0, 0.0];
-    let v = run(&stages(&ks, &kv, &kc), Some(&wanted), &[], &g);
-    assert!(matches!(v[..], [Violation::ClampWithoutResidual { cell: 0, stage: "kv" }]), "{v:?}");
-    // with its residual the clamp passes once the feature is flagged budget_residual
+    // a residual does not excuse a lowering overrun
     let mut flagged = g.clone();
     let t = reach_mut(&mut flagged, cell(2, 3));
     t.status = Status::Exception { reason: Reason::BudgetResidual, value: 3.0 };
     let feature = t.id;
     let res = [Residual { cell: 0, stage: "kv", needed_m: 7.0, available_m: 4.0, feature }];
-    assert_eq!(run(&stages(&ks, &kv, &kc), Some(&wanted), &res, &flagged), vec![]);
-    assert!(matches!(run(&stages(&ks, &kv, &kc), Some(&wanted), &res, &g)[..], [Violation::ResidualFeatureNotFlagged { .. }]));
+    assert!(run(&ks, &kv2, &kv2, None, &res, &flagged).iter().any(|v| matches!(v, Violation::BudgetOverrun { cell: 0, stage: "kv", .. })));
+    // a fill over the budget, excused only by its residual
+    let kc3 = [90.0, 111.0, 100.0];
+    assert!(run(&ks, &kv, &kc3, None, &[], &g).iter().any(|v| matches!(v, Violation::BudgetOverrun { cell: 1, stage: "kc", .. })));
+    let res_fill = [Residual { cell: 1, stage: "kc", needed_m: 11.0, available_m: 10.0, feature }];
+    assert_eq!(run(&ks, &kv, &kc3, None, &res_fill, &flagged), vec![]);
+    // a lowering stage that raises
+    let ks_up = [94.0, 105.0, 100.0];
+    assert!(run(&ks_up, &kv, &kc, None, &[], &g).iter().any(|v| matches!(v, Violation::RaiseInLoweringStage { cell: 1, stage: "ks" })));
+    // a clamp without a residual: KV wanted 7 m at cell 0 and got 4 m; with its residual it passes once the feature is flagged
+    let wanted = [7.0, 0.0, 0.0];
+    let v = run(&ks, &kv, &kc, Some(&wanted), &[], &g);
+    assert!(matches!(v[..], [Violation::ClampWithoutResidual { cell: 0, stage: "kv" }]), "{v:?}");
+    assert_eq!(run(&ks, &kv, &kc, Some(&wanted), &res, &flagged), vec![]);
+    assert!(matches!(run(&ks, &kv, &kc, Some(&wanted), &res, &g)[..], [Violation::ResidualFeatureNotFlagged { .. }]));
+    // inputs that are not finite or do not fit
+    let kv_nan = [f64::NAN, 100.0, 100.0];
+    assert!(run(&ks, &kv_nan, &kc, None, &[], &g).iter().any(|v| matches!(v, Violation::BudgetInput { cell: 0, stage: "kv" })));
+    let short = [90.0, 100.0];
+    assert!(matches!(run(&ks, &short, &kc, None, &[], &g)[..], [Violation::BudgetInput { stage: "kv", .. }]));
 }
 
 // spec: TEST-140
 #[test]
-fn an_open_slice_reports_no_missing_owner_as_a_violation() {
+fn an_open_slice_reports_its_missing_owners_not_violations() {
     let g = base();
-    // the slice without the outlet's owner: the outlet's reach ends at an id the slice does not hold
-    let o = g.nodes.iter().find(|n| n.kind == NodeKind::OutletSea).unwrap().id;
+    assert_eq!(missing_owners(&g), vec![]);
+    // the slice without the outlet and C -> O: the junction's reach is owned elsewhere
+    let o = id(NodeKind::OutletSea, 3, 1);
+    let r3 = reach_mut(&mut g.clone(), cell(1, 1)).id;
     let mut s = g.clone();
     s.nodes.retain(|n| n.id != o);
-    let adj = adjacency();
-    assert!(validate(&s, &adj, true).is_empty(), "{:?}", validate(&s, &adj, true));
-    assert!(validate(&s, &adj, false).iter().any(|v| matches!(v, Violation::UnresolvedEndpoint { node, .. } if *node == o)));
+    s.reaches.retain(|r| r.id != r3);
+    assert_eq!(check_with(&s, false, true), vec![], "an open slice validates");
+    let j = id(NodeKind::TribJunction, 2, 1);
+    assert_eq!(missing_owners(&s), vec![(j, r3)]);
+    assert!(!check(&s).is_empty(), "closed, the same slice is invalid");
 }

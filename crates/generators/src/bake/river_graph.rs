@@ -11,7 +11,7 @@
 //! Sums and orders are fixed (CON-14); nothing here reads a thread count.
 
 use super::hydro::id_hash;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 const NODE_TAG: u64 = 0x6E0D_E000_0000_0000;
@@ -75,7 +75,8 @@ impl Domain {
         let p: Vec<&str> = s.split(':').collect();
         if p.len() == 4 && p[0] == "tile" {
             let n = |x: &str| x.parse::<u32>().map_err(|_| format!("domain '{s}'"));
-            return Ok(Domain::Tile { face: n(p[1])? as u8, ti: n(p[2])?, tj: n(p[3])? });
+            let face = p[1].parse::<u8>().ok().filter(|f| *f < 6).ok_or_else(|| format!("domain '{s}'"))?;
+            return Ok(Domain::Tile { face, ti: n(p[2])?, tj: n(p[3])? });
         }
         Err(format!("domain '{s}'"))
     }
@@ -452,11 +453,15 @@ impl Graph {
                         spill_cell,
                         spill_m,
                         spill_node: hex(get("spill_node")?)?,
-                        outlet: if get("outlet")? == "active" { Outlet::Active } else { Outlet::Endorheic },
-                        represented: if get("represented")? == "protected_surface" {
-                            Represented::ProtectedSurface
-                        } else {
-                            Represented::None
+                        outlet: match get("outlet")? {
+                            "active" => Outlet::Active,
+                            "endorheic" => Outlet::Endorheic,
+                            o => return Err(format!("outlet '{o}'")),
+                        },
+                        represented: match get("represented")? {
+                            "protected_surface" => Represented::ProtectedSurface,
+                            "none" => Represented::None,
+                            o => return Err(format!("represented '{o}'")),
                         },
                         owner: Domain::parse(get("owner")?)?,
                     });
@@ -548,43 +553,168 @@ pub fn diff(old: &Graph, new: &Graph) -> Vec<Change> {
 /// A violation of the contract's section 8.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Violation {
-    Cycle { reach: u64 },
-    DuplicateId { id: u64 },
-    TwoNodesOneAnchor { level: Level, anchor: u64 },
-    UnresolvedEndpoint { reach: u64, node: u64 },
-    ChainWithoutOutlet { node: u64 },
-    ConfluenceOneInflow { node: u64 },
-    OutgoingCount { node: u64, outgoing: usize },
-    InvalidEdge { reach: u64, why: &'static str },
-    BedRise { reach: u64, vertex: usize },
-    ConservationBreak { at: u64, field: &'static str },
-    CellOwnedTwice { cell: u64, reaches: (u64, u64) },
-    BudgetOverrun { cell: usize, stage: &'static str, used_m: f64, budget_m: f64 },
-    ClampWithoutResidual { cell: usize, stage: &'static str },
-    ResidualFeatureNotFlagged { feature: u64 },
+    Cycle {
+        reach: u64,
+    },
+    DuplicateId {
+        id: u64,
+    },
+    /// An id that is not the hash of its defining fields (a kind or an endpoint changed under a kept id).
+    IdMismatch {
+        id: u64,
+    },
+    TwoNodesOneAnchor {
+        level: Level,
+        anchor: u64,
+    },
+    UnresolvedEndpoint {
+        reach: u64,
+        node: u64,
+    },
+    ChainWithoutOutlet {
+        node: u64,
+    },
+    ConfluenceOneInflow {
+        node: u64,
+    },
+    /// Two or more reaches enter a node that is not a confluence (or an outlet).
+    InflowsToNonConfluence {
+        node: u64,
+    },
+    OutgoingCount {
+        node: u64,
+        outgoing: usize,
+    },
+    InvalidEdge {
+        reach: u64,
+        why: &'static str,
+    },
+    /// A marker that does not sit on its reach (`on_reach` missing, `at_vertex` out of range, or the vertex not its anchor), or a marker field on a non-marker kind.
+    InvalidMarker {
+        node: u64,
+        why: &'static str,
+    },
+    /// A tributary reach whose vertices after the first leave one tile core.
+    TributaryLeavesTile {
+        reach: u64,
+    },
+    BedRise {
+        reach: u64,
+        vertex: usize,
+    },
+    /// The reaches at a node carry different beds there, or a tributary's last bed is not the trunk's at its junction.
+    BedNotShared {
+        node: u64,
+    },
+    ConservationBreak {
+        at: u64,
+        field: &'static str,
+    },
+    /// A value that is not finite.
+    NotFinite {
+        at: u64,
+        field: &'static str,
+    },
+    CellOwnedTwice {
+        cell: u64,
+        reaches: (u64, u64),
+    },
+    BudgetOverrun {
+        cell: usize,
+        stage: &'static str,
+        used_m: f64,
+        budget_m: f64,
+    },
+    /// A stage that only lowers (KS) raised a cell.
+    RaiseInLoweringStage {
+        cell: usize,
+        stage: &'static str,
+    },
+    ClampWithoutResidual {
+        cell: usize,
+        stage: &'static str,
+    },
+    ResidualFeatureNotFlagged {
+        feature: u64,
+    },
+    /// The budget's inputs do not fit (lengths) or are not finite.
+    BudgetInput {
+        cell: usize,
+        stage: &'static str,
+    },
 }
 
 /// The 8-neighbour relation of the global cells at each level: `adjacent(level, a, b)`.
 pub type Adjacency<'a> = &'a dyn Fn(Level, u64, u64) -> bool;
 
-/// Whether `v` is non-decreasing within the relative tolerance.
+/// What the validator needs besides the graph.
+pub struct Checks<'a> {
+    pub adjacent: Adjacency<'a>,
+    /// The tile core of an L cell (the tile-crossing rule); `None` skips that rule.
+    pub tile_of: Option<&'a dyn Fn(u64) -> Domain>,
+    /// An open slice: endpoints, markers' reaches and inflows owned elsewhere are not violations (see [`missing_owners`]).
+    pub open: bool,
+}
+
+/// Whether `b` lies below `a` beyond the relative tolerance.
 fn falls(a: f64, b: f64) -> bool {
     b < a - CONSERVATION_REL * a.abs().max(b.abs())
 }
 
-/// Validates a graph (contract section 8). An open slice (`open`) reports endpoints owned elsewhere as resolved (a store fact, `missing owner`), not as violations.
-pub fn validate(g: &Graph, adjacent: Adjacency, open: bool) -> Vec<Violation> {
+/// The conserved fields, checked along a reach and at a node.
+const CONSERVED: [(&str, usize); 4] = [("a_geo", 0), ("a_run", 2), ("q", 4), ("q_w", 5)];
+
+/// Validates a graph (contract section 8, with the readings of its section 12). Works on a sorted copy, so the violations come in a fixed order whatever the input order.
+pub fn validate(graph: &Graph, checks: &Checks) -> Vec<Violation> {
+    let mut g = graph.clone();
+    g.sort();
+    let (adjacent, open) = (checks.adjacent, checks.open);
     let mut v = Vec::new();
-    // duplicate ids
+    // duplicate ids, and ids that are not the hash of their fields
     let mut seen = BTreeSet::new();
     for id in g.nodes.iter().map(|n| n.id).chain(g.reaches.iter().map(|r| r.id)).chain(g.basins.iter().map(|b| b.id)) {
         if !seen.insert(id) {
             v.push(Violation::DuplicateId { id });
         }
     }
-    // two nodes on one (level, anchor): among non-marker nodes, and among markers; a marker shares its anchor only with the up node of the reach it sits on, at vertex 0 (a tributary
-    // continuing above a trunk's head ends at a trib_junction on the trunk's source; reading of DEC crusader-6, default A)
-    let up_of: HashMap<u64, u64> = g.reaches.iter().map(|r| (r.id, r.up)).collect();
+    for n in &g.nodes {
+        if n.id != node_id(g.body, n.kind, n.level, n.anchor) {
+            v.push(Violation::IdMismatch { id: n.id });
+        }
+    }
+    for r in &g.reaches {
+        if r.id != reach_id(g.body, r.level, r.up, r.down) {
+            v.push(Violation::IdMismatch { id: r.id });
+        }
+    }
+    for b in &g.basins {
+        if b.id != basin_id(g.body, b.level, b.floor_cell) {
+            v.push(Violation::IdMismatch { id: b.id });
+        }
+    }
+    let node: BTreeMap<u64, &Node> = g.nodes.iter().map(|n| (n.id, n)).collect();
+    let reach: BTreeMap<u64, &Reach> = g.reaches.iter().map(|r| (r.id, r)).collect();
+    // markers: a marker kind carries its reach and vertex, on that reach, at its anchor; a non-marker carries none
+    for n in &g.nodes {
+        match (n.kind.is_marker(), n.marker) {
+            (true, None) => v.push(Violation::InvalidMarker { node: n.id, why: "a marker kind without its reach" }),
+            (false, Some(_)) => v.push(Violation::InvalidMarker { node: n.id, why: "a marker field on a non-marker" }),
+            (true, Some(m)) => match reach.get(&m.on_reach) {
+                None if !open => v.push(Violation::InvalidMarker { node: n.id, why: "its reach does not exist" }),
+                None => {}
+                Some(r) => match r.vertices.get(m.at_vertex as usize) {
+                    None => v.push(Violation::InvalidMarker { node: n.id, why: "at_vertex out of range" }),
+                    Some(&c) if c != n.anchor || r.level != n.level => {
+                        v.push(Violation::InvalidMarker { node: n.id, why: "not at its reach's vertex" })
+                    }
+                    _ => {}
+                },
+            },
+            (false, None) => {}
+        }
+    }
+    // uniqueness (section 2.1 and reading 1): one non-marker node per (level, anchor); markers of one kind once per anchor; a marker shares an anchor with a non-marker only as the `up` node of
+    // the reach it sits on, at vertex 0
     let mut plain: BTreeMap<(Level, u64), Vec<u64>> = BTreeMap::new();
     let mut markers: BTreeMap<(Level, u64), Vec<&Node>> = BTreeMap::new();
     for n in &g.nodes {
@@ -601,25 +731,33 @@ pub fn validate(g: &Graph, adjacent: Adjacency, open: bool) -> Vec<Violation> {
         }
     }
     for (key, ms) in &markers {
+        let kinds: BTreeSet<NodeKind> = ms.iter().map(|m| m.kind).collect();
         let shared_ok = |m: &Node| {
             m.marker.is_some_and(|mk| {
-                mk.at_vertex == 0 && plain.get(key).is_some_and(|ids| ids.len() == 1 && up_of.get(&mk.on_reach) == Some(&ids[0]))
+                mk.at_vertex == 0
+                    && plain.get(key).is_some_and(|ids| ids.len() == 1 && reach.get(&mk.on_reach).map(|r| r.up) == Some(ids[0]))
             })
         };
-        if ms.len() > 1 || (plain.contains_key(key) && !ms.iter().all(|m| shared_ok(m))) {
+        if kinds.len() < ms.len() || (plain.contains_key(key) && !ms.iter().all(|m| shared_ok(m))) {
             twice.insert(*key);
         }
     }
     for (level, anchor) in twice {
         v.push(Violation::TwoNodesOneAnchor { level, anchor });
     }
-    let node: HashMap<u64, &Node> = g.nodes.iter().map(|n| (n.id, n)).collect();
+    // exception markers by reach
+    let mut excepted: BTreeMap<u64, BTreeSet<u32>> = BTreeMap::new();
+    for m in g.nodes.iter().filter(|m| m.kind == NodeKind::Exception) {
+        if let Some(mk) = m.marker {
+            excepted.entry(mk.on_reach).or_default().insert(mk.at_vertex);
+        }
+    }
     let mut outgoing: BTreeMap<u64, Vec<&Reach>> = BTreeMap::new();
     let mut incoming: BTreeMap<u64, Vec<&Reach>> = BTreeMap::new();
+    let mut whole: BTreeSet<u64> = BTreeSet::new();
     for r in &g.reaches {
         outgoing.entry(r.up).or_default().push(r);
         incoming.entry(r.down).or_default().push(r);
-        // endpoints and edges
         let (up, down) = (node.get(&r.up), node.get(&r.down));
         for (id, n) in [(r.up, up), (r.down, down)] {
             if n.is_none() && !open {
@@ -644,14 +782,14 @@ pub fn validate(g: &Graph, adjacent: Adjacency, open: bool) -> Vec<Violation> {
             if d.kind == NodeKind::Source {
                 v.push(Violation::InvalidEdge { reach: r.id, why: "down is a source" });
             }
+            if d.kind == NodeKind::Exception {
+                v.push(Violation::InvalidEdge { reach: r.id, why: "down is an exception marker" });
+            }
             if d.level != r.level {
                 v.push(Violation::InvalidEdge { reach: r.id, why: "down at another level" });
             }
             if r.vertices.last() != Some(&d.anchor) {
                 v.push(Violation::InvalidEdge { reach: r.id, why: "chain does not end at down's anchor" });
-            }
-            if d.kind == NodeKind::TribJunction && d.marker.is_none() {
-                v.push(Violation::InvalidEdge { reach: r.id, why: "trib_junction without its reach" });
             }
         }
         if r.vertices.len() < 2 || r.vertices.windows(2).any(|w| w[0] == w[1] || !adjacent(r.level, w[0], w[1])) {
@@ -659,60 +797,98 @@ pub fn validate(g: &Graph, adjacent: Adjacency, open: bool) -> Vec<Violation> {
         }
         let n = r.vertices.len();
         let a = &r.attrs;
-        if F64_FIELDS.iter().any(|(_, get)| get(a).len() != n) || a.strahler.len() != n || a.bed.len() != n {
+        if n == 0 || F64_FIELDS.iter().any(|(_, get)| get(a).len() != n) || a.strahler.len() != n || a.bed.len() != n {
             v.push(Violation::InvalidEdge { reach: r.id, why: "attributes not one per vertex" });
             continue;
         }
+        whole.insert(r.id);
+        for (name, get) in F64_FIELDS {
+            if get(a).iter().any(|x| !x.is_finite()) {
+                v.push(Violation::NotFinite { at: r.id, field: name });
+            }
+        }
+        if let Status::Exception { value, .. } = r.status {
+            if !value.is_finite() {
+                v.push(Violation::NotFinite { at: r.id, field: "status" });
+            }
+        }
+        // a tributary (an L reach that is no trunk image) lies in one tile core plus its first vertex
+        if let (Some(tile_of), Level::L, None) = (checks.tile_of, r.level, r.parent) {
+            if r.vertices[1..].iter().any(|&c| tile_of(c) != tile_of(r.vertices[1])) {
+                v.push(Violation::TributaryLeavesTile { reach: r.id });
+            }
+        }
         // bed: non-increasing on codes, except at an exception marker's vertex on this reach
-        let exceptions: BTreeSet<u32> = g
-            .nodes
-            .iter()
-            .filter(|m| m.kind == NodeKind::Exception)
-            .filter_map(|m| m.marker)
-            .filter(|m| m.on_reach == r.id)
-            .map(|m| m.at_vertex)
-            .collect();
+        let ex = excepted.get(&r.id);
         for k in 1..n {
-            if a.bed[k] > a.bed[k - 1] && !exceptions.contains(&(k as u32)) {
+            if a.bed[k] > a.bed[k - 1] && !ex.is_some_and(|e| e.contains(&(k as u32))) {
                 v.push(Violation::BedRise { reach: r.id, vertex: k });
             }
         }
-        // conservation along the reach: the areas and discharges do not fall downstream (q_w may fall only at a basin, which is a node, never inside a reach)
-        for (name, get) in [("a_geo", F64_FIELDS[0].1), ("a_run", F64_FIELDS[2].1), ("q", F64_FIELDS[4].1), ("q_w", F64_FIELDS[5].1)] {
-            if get(a).windows(2).any(|w| falls(w[0], w[1])) {
+        // conservation along the reach
+        for (name, f) in CONSERVED {
+            if F64_FIELDS[f].1(a).windows(2).any(|w| falls(w[0], w[1])) {
                 v.push(Violation::ConservationBreak { at: r.id, field: name });
             }
         }
     }
-    // node degrees and confluences
+    // nodes: degrees, the shared value and bed at a node joining reaches, conservation at a confluence (inflows by id, as the canonical order)
     for n in &g.nodes {
-        let out = outgoing.get(&n.id).map_or(0, Vec::len);
-        let inc = incoming.get(&n.id).map_or(&[][..], |x| &x[..]);
+        let outs = outgoing.get(&n.id).map_or(&[][..], |x| &x[..]);
+        let ins = incoming.get(&n.id).map_or(&[][..], |x| &x[..]);
         let wants = if n.kind.is_outlet() || n.kind.is_marker() { 0 } else { 1 };
-        if out != wants && !(open && out == 0) {
-            v.push(Violation::OutgoingCount { node: n.id, outgoing: out });
+        if outs.len() != wants && !(open && outs.is_empty()) {
+            v.push(Violation::OutgoingCount { node: n.id, outgoing: outs.len() });
         }
-        if n.kind == NodeKind::Confluence && inc.len() < 2 {
+        if n.kind == NodeKind::Confluence && ins.len() < 2 && !open {
             v.push(Violation::ConfluenceOneInflow { node: n.id });
         }
-        if n.kind == NodeKind::Confluence && inc.len() >= 2 && out == 1 {
-            let o = outgoing[&n.id][0];
-            for (name, get) in [("a_geo", F64_FIELDS[0].1), ("q", F64_FIELDS[4].1), ("q_w", F64_FIELDS[5].1)] {
-                // one value at the node, shared by every reach there, and at least the inflows one vertex upstream
-                let at = get(&o.attrs)[0];
-                let shared = inc.iter().all(|r| get(&r.attrs).last().is_some_and(|x| *x == at));
-                let donors: f64 = inc.iter().map(|r| get(&r.attrs).iter().rev().nth(1).copied().unwrap_or(0.0)).sum();
-                if !shared || falls(donors, at) {
-                    v.push(Violation::ConservationBreak { at: n.id, field: name });
-                }
-            }
-            // a node's bed is one value shared by its reaches
-            if inc.iter().any(|r| r.attrs.bed.last() != o.attrs.bed.first()) {
-                v.push(Violation::BedRise { reach: o.id, vertex: 0 });
+        if n.kind != NodeKind::Confluence && !n.kind.is_outlet() && !n.kind.is_marker() && ins.len() > 1 {
+            v.push(Violation::InflowsToNonConfluence { node: n.id });
+        }
+        let ins: Vec<&Reach> = ins.iter().copied().filter(|r| whole.contains(&r.id)).collect();
+        let Some(o) = outs.first().filter(|o| whole.contains(&o.id) && outs.len() == 1) else { continue };
+        if ins.is_empty() {
+            continue;
+        }
+        for (name, f) in CONSERVED {
+            let get = F64_FIELDS[f].1;
+            let at = get(&o.attrs)[0];
+            let shared = ins.iter().all(|r| get(&r.attrs).last().is_some_and(|x| *x == at));
+            let donors: f64 = ins
+                .iter()
+                .map(|r| {
+                    let x = get(&r.attrs);
+                    if x.len() >= 2 {
+                        x[x.len() - 2]
+                    } else {
+                        0.0
+                    }
+                })
+                .sum();
+            if !shared || (n.kind == NodeKind::Confluence && falls(donors, at)) {
+                v.push(Violation::ConservationBreak { at: n.id, field: name });
             }
         }
+        if ins.iter().any(|r| r.attrs.bed.last() != o.attrs.bed.first()) {
+            v.push(Violation::BedNotShared { node: n.id });
+        }
     }
-    // cycles and chains without an outlet: follow each node's single outgoing reach
+    // a trib_junction: every tributary ending there carries the trunk's bed at the junction's vertex
+    for n in g.nodes.iter().filter(|n| n.kind == NodeKind::TribJunction) {
+        let Some(trunk_bed) = n.marker.and_then(|m| {
+            reach.get(&m.on_reach).filter(|r| whole.contains(&r.id)).and_then(|r| r.attrs.bed.get(m.at_vertex as usize).copied())
+        }) else {
+            continue;
+        };
+        if incoming
+            .get(&n.id)
+            .is_some_and(|ins| ins.iter().filter(|r| whole.contains(&r.id)).any(|r| r.attrs.bed.last() != Some(&trunk_bed)))
+        {
+            v.push(Violation::BedNotShared { node: n.id });
+        }
+    }
+    // cycles and chains without an outlet: follow each node downstream, through a marker along the reach it sits on
     for n in &g.nodes {
         let mut at = n.id;
         let mut steps = 0usize;
@@ -720,40 +896,81 @@ pub fn validate(g: &Graph, adjacent: Adjacency, open: bool) -> Vec<Violation> {
             if k.kind.is_outlet() {
                 break;
             }
-            let Some(out) = outgoing.get(&at).and_then(|o| o.first()) else {
-                if !open && !k.kind.is_marker() {
+            let next = if k.kind.is_marker() {
+                k.marker.and_then(|m| reach.get(&m.on_reach)).map(|r| (r.id, r.down))
+            } else {
+                outgoing.get(&at).and_then(|o| o.first()).map(|r| (r.id, r.down))
+            };
+            let Some((rid, down)) = next else {
+                if !open {
                     v.push(Violation::ChainWithoutOutlet { node: n.id });
                 }
                 break;
             };
-            at = out.down;
+            at = down;
             steps += 1;
-            if steps > g.reaches.len() {
-                v.push(Violation::Cycle { reach: out.id });
+            if steps > g.reaches.len() + 1 {
+                v.push(Violation::Cycle { reach: rid });
                 break;
             }
         }
     }
+    v.sort_by(|a, b| format!("{a:?}").cmp(&format!("{b:?}")));
     v.dedup();
     v
 }
 
-/// The rasterisation of the L reaches (contract section 5): each L cell belongs to one reach, the larger `q_w` there, ties by the lower reach id; a junction cell belongs to the downstream reach
-/// (the reach whose first vertex it is). Returns `cell -> (reach id, vertex index)` in cell order.
+/// The endpoints and markers' reaches an open slice names but does not hold: `missing owner` (a store fact, contract section 1), as (the item that names it, the id it names).
+pub fn missing_owners(g: &Graph) -> Vec<(u64, u64)> {
+    let nodes: BTreeSet<u64> = g.nodes.iter().map(|n| n.id).collect();
+    let reaches: BTreeSet<u64> = g.reaches.iter().map(|r| r.id).collect();
+    let mut out: Vec<(u64, u64)> = Vec::new();
+    for r in &g.reaches {
+        for id in [r.up, r.down] {
+            if !nodes.contains(&id) {
+                out.push((r.id, id));
+            }
+        }
+    }
+    for n in &g.nodes {
+        if let Some(m) = n.marker {
+            if !reaches.contains(&m.on_reach) {
+                out.push((n.id, m.on_reach));
+            }
+        }
+    }
+    for b in &g.basins {
+        if !nodes.contains(&b.spill_node) {
+            out.push((b.id, b.spill_node));
+        }
+    }
+    out.sort_unstable();
+    out
+}
+
+/// The rasterisation of the L reaches (contract section 5): each L cell belongs to one reach. A reach's last vertex is a junction cell: it belongs to the downstream reach, so it yields to any
+/// other claim; among the other claims the larger `q_w` wins (`total_cmp`), ties by the lower reach id. Returns `cell -> (reach id, vertex index)` in cell order, the same for any input order.
 pub fn rasterise(g: &Graph) -> BTreeMap<u64, (u64, usize)> {
+    let mut sorted = g.clone();
+    sorted.sort();
+    // (reach id, vertex, q_w, arriving: the reach's last vertex)
     let mut best: BTreeMap<u64, (u64, usize, f64, bool)> = BTreeMap::new();
-    for r in g.reaches.iter().filter(|r| r.level == Level::L) {
+    for r in sorted.reaches.iter().filter(|r| r.level == Level::L) {
+        let n = r.vertices.len();
         for (k, &c) in r.vertices.iter().enumerate() {
-            let qw = r.attrs.q_w.get(k).copied().unwrap_or(0.0);
-            let first = k == 0;
+            let claim = (r.id, k, r.attrs.q_w.get(k).copied().unwrap_or(0.0), k + 1 == n);
             let better = |o: &(u64, usize, f64, bool)| {
-                if first != o.3 {
-                    return first;
+                if claim.3 != o.3 {
+                    return !claim.3;
                 }
-                qw > o.2 || (qw == o.2 && r.id < o.0)
+                match claim.2.total_cmp(&o.2) {
+                    std::cmp::Ordering::Greater => true,
+                    std::cmp::Ordering::Less => false,
+                    std::cmp::Ordering::Equal => claim.0 < o.0,
+                }
             };
             if best.get(&c).is_none_or(better) {
-                best.insert(c, (r.id, k, qw, first));
+                best.insert(c, claim);
             }
         }
     }
@@ -781,7 +998,7 @@ pub struct Stage<'a> {
     pub out: &'a [f64],
     /// The lowering the stage wanted per cell (`None`: never clamped).
     pub wanted_lowering: Option<&'a [f64]>,
-    /// Whether fills count against the budget (KV and KC; KS only lowers).
+    /// Whether the stage may fill (KV and KC); a stage that may not (KS) only lowers.
     pub fills: bool,
 }
 
@@ -795,22 +1012,47 @@ pub struct Residual {
     pub feature: u64,
 }
 
-/// The budget validator on f64 (contract section 6): per cell, the lowering of the stages in order (`max(0, in - out)`) summed against `budget`, each stage's fill against `budget`; a cell over
-/// either without a residual of that (cell, stage) is an overrun; a stage that lowered less than it wanted needs a residual; every residual's feature must be a reach flagged `budget_residual`.
+/// The budget validator on f64 (contract section 6). Per cell, in stage order:
+/// - the lowering `max(0, in - out)` adds to the cell's use; a use over `budget` is an overrun, reported once, at the stage that first passes the budget (a residual never excuses it: a clamp holds
+///   the lowering at the remainder);
+/// - a stage that only lowers must not raise; a fill `max(0, out - in)` over `budget` needs a residual of that (cell, stage);
+/// - a stage that lowered less than it wanted needs a residual of that (cell, stage);
+/// - every residual's feature is a reach flagged `budget_residual`;
+/// - every input is finite and one value per cell.
 pub fn validate_budget(s0: &[f64], budget: &[f64], stages: &[Stage], residuals: &[Residual], g: &Graph) -> Vec<Violation> {
     let mut v = Vec::new();
-    let has = |cell: usize, stage: &str| residuals.iter().any(|r| r.cell == cell && r.stage == stage);
-    let mut used = vec![0.0f64; s0.len()];
-    let mut input: Vec<f64> = s0.to_vec();
+    let n = s0.len();
+    if budget.len() != n {
+        return vec![Violation::BudgetInput { cell: budget.len().min(n), stage: "budget" }];
+    }
     for st in stages {
-        assert_eq!(st.out.len(), s0.len(), "one value per cell");
-        for c in 0..s0.len() {
+        if st.out.len() != n || st.wanted_lowering.is_some_and(|w| w.len() != n) {
+            return vec![Violation::BudgetInput { cell: st.out.len().min(n), stage: st.name }];
+        }
+    }
+    let has = |cell: usize, stage: &str| residuals.iter().any(|r| r.cell == cell && r.stage == stage);
+    let mut used = vec![0.0f64; n];
+    let mut input: Vec<f64> = s0.to_vec();
+    for c in 0..n {
+        if !s0[c].is_finite() || !budget[c].is_finite() {
+            v.push(Violation::BudgetInput { cell: c, stage: "s0" });
+        }
+    }
+    for st in stages {
+        for c in 0..n {
+            if !st.out[c].is_finite() || st.wanted_lowering.is_some_and(|w| !w[c].is_finite()) {
+                v.push(Violation::BudgetInput { cell: c, stage: st.name });
+                continue;
+            }
             let lowered = (input[c] - st.out[c]).max(0.0);
             let filled = (st.out[c] - input[c]).max(0.0);
+            let before = used[c];
             used[c] += lowered;
-            // reported at the stage that lowers past the budget
-            if lowered > 0.0 && used[c] > budget[c] + BUDGET_EPS_M && !has(c, st.name) {
+            if lowered > 0.0 && used[c] > budget[c] + BUDGET_EPS_M && before <= budget[c] + BUDGET_EPS_M {
                 v.push(Violation::BudgetOverrun { cell: c, stage: st.name, used_m: used[c], budget_m: budget[c] });
+            }
+            if !st.fills && filled > 0.0 {
+                v.push(Violation::RaiseInLoweringStage { cell: c, stage: st.name });
             }
             if st.fills && filled > budget[c] + BUDGET_EPS_M && !has(c, st.name) {
                 v.push(Violation::BudgetOverrun { cell: c, stage: st.name, used_m: filled, budget_m: budget[c] });
@@ -821,7 +1063,11 @@ pub fn validate_budget(s0: &[f64], budget: &[f64], stages: &[Stage], residuals: 
                 }
             }
         }
-        input.copy_from_slice(st.out);
+        for (i, &o) in input.iter_mut().zip(st.out) {
+            if o.is_finite() {
+                *i = o;
+            }
+        }
     }
     for r in residuals {
         let flagged =
