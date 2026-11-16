@@ -800,7 +800,8 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
     });
     // The corridor measure (#159): the bar scales with the start's relief, the corridors and the snap disc with the H1 cell.
     let relief_10_start_m = relief(g, input.start, input.inside, 10, input.sea_level_m);
-    let bar = corridor_bar_m(relief_10_start_m);
+    // The bar is the window's, set before the results (P3; lead, 2026-11-16): the start's relief over the region's box, so a store's tiles do not move it.
+    let bar = corridor_bar_m(relief(g, input.start, input.region, 10, input.sea_level_m));
     let cell_h1 = params.h1_cell_m / g.dx();
     let snap = Snap { node_radius: cell_h1, region: input.region };
     GateReport {

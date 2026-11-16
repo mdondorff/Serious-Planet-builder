@@ -496,3 +496,33 @@ fn a_crossing_leg_carries_the_running_minimum_and_a_rise_outside_the_counted_cel
     assert_eq!((t.reaches, t.reaches_over, t.vertices_over), (1, 1, 0), "{t:?}");
     assert!((t.deepest_m - 85.0).abs() <= 0.11, "{t:?}");
 }
+
+// spec: TEST-137, BUILD-057
+#[test]
+fn the_corridor_bar_reads_the_start_relief_over_the_region_box_not_the_counted_cells() {
+    // Steep (10 m a cell) for x < 20, flat for x >= 20. The counted cells are the flat half (relief ~0: bar 10 m); the region is the whole grid, whose 10 x 10
+    // blocks are half steep (90.09 m) and half flat: the upper median is 90.09 m and the bar about 45 m.
+    let g = Grid::new(N, N, DX);
+    let z: Vec<f64> = (0..N * N).map(|c| 100.0 + 10.0 * (20.0 - (c % N) as f64).max(0.0) + 0.01 * (c / N) as f64).collect();
+    let counted: Vec<bool> = (0..N * N).map(|c| c % N >= 20).collect();
+    let region = vec![true; N * N];
+    let outlet = g.outlets(&z, 0.0);
+    let r = measure(
+        &GateInput {
+            grid: &g,
+            start: &z,
+            surface: &z,
+            outlet: &outlet,
+            inside: &counted,
+            region: &region,
+            h1: &[],
+            seed: 7,
+            sea_level_m: 0.0,
+            outside_drains: false,
+            trunks: &[],
+        },
+        &params(),
+    );
+    assert!(r.relief_10_start_m < 1.0, "the counted cells are flat: {}", r.relief_10_start_m);
+    assert!((r.corridor_bar_m - 45.045).abs() < 1e-9, "90.09 m of relief (the 0.01 m a row tilt included): {}", r.corridor_bar_m);
+}
