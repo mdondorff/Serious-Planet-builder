@@ -1,0 +1,13 @@
+window,step,k7_own_dominant,dominant_cut_1km2,dominant_round_1km2,dominant_cut_saddles,step_alone_over20,ridge_cells_covered,k7_own_total
+r1h,burn-in of the channel lines,0,0,0,0,0,1359069,299191
+r1h,local carve (breach and incision),293395,2174,291221,1356,299576,1359069,299191
+r1h,thermal,5796,1,5795,1,13829,1359069,299191
+r1h,deposition sweep,0,0,0,0,0,1359069,299191
+r1h,pit spreading,0,0,0,0,0,1359069,299191
+r1h,final channel pass,0,0,0,0,0,1359069,299191
+m1,burn-in of the channel lines,2779,64,2715,37,2779,4362922,3000453
+m1,local carve (breach and incision),2026239,33280,1992959,14613,2930460,4362922,3000453
+m1,thermal,971435,10430,961005,1704,1315477,4362922,3000453
+m1,deposition sweep,0,0,0,0,0,4362922,3000453
+m1,pit spreading,0,0,0,0,0,4362922,3000453
+m1,final channel pass,0,0,0,0,0,4362922,3000453
