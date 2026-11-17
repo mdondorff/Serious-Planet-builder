@@ -177,7 +177,7 @@ fn line(cells: &[usize], down_kind: NodeKind) -> (Reach, Node, Node) {
             strahler: vec![1; n],
             bed: vec![0; n],
         },
-        status: Status::Ok,
+        exceptions: Vec::new(),
     };
     (r, up, down)
 }

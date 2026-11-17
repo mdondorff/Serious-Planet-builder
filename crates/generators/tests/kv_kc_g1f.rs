@@ -66,21 +66,23 @@ fn stage_run(k: &Case, switch: Switch) -> Report {
     let mut conflict = 0usize;
     for res in &r.residuals {
         if let Some(x) = g.reaches.iter_mut().find(|x| x.id == res.feature) {
-            match x.status {
-                Status::Ok => x.status = Status::Exception { reason: Reason::BudgetResidual, value: res.needed_m - res.available_m },
-                Status::Exception { reason: Reason::BudgetResidual, value } => {
-                    x.status = Status::Exception { reason: Reason::BudgetResidual, value: value.max(res.needed_m - res.available_m) }
-                }
-                Status::Exception { .. } => conflict += 1,
+            // reading 9: the list holds budget_residual beside any other reason; `conflict` counts reaches already exceptional for another reason
+            if x.exceptions.iter().any(|e| e.reason != Reason::BudgetResidual) && !x.has_exception(Reason::BudgetResidual) {
+                conflict += 1;
+            }
+            let need = res.needed_m - res.available_m;
+            match x.exceptions.iter_mut().find(|e| e.reason == Reason::BudgetResidual) {
+                Some(e) => e.value = e.value.max(need),
+                None => x.exceptions.push(Exception { reason: Reason::BudgetResidual, value: need }),
             }
         }
     }
     let stages: Vec<Stage> = match switch {
-        Switch::KvOnly => vec![Stage { name: "kv", out: &r.kv, wanted_lowering: Some(&r.kv_wanted), fills: false }],
-        Switch::KcOnly => vec![Stage { name: "kc", out: &r.kc, wanted_lowering: None, fills: true }],
+        Switch::KvOnly => vec![Stage { name: "kv", out: &r.kv, wanted_lowering: Some(&r.kv_wanted), wanted_fill: None, fills: false }],
+        Switch::KcOnly => vec![Stage { name: "kc", out: &r.kc, wanted_lowering: None, wanted_fill: None, fills: true }],
         Switch::Both => vec![
-            Stage { name: "kv", out: &r.kv, wanted_lowering: Some(&r.kv_wanted), fills: false },
-            Stage { name: "kc", out: &r.kc, wanted_lowering: None, fills: true },
+            Stage { name: "kv", out: &r.kv, wanted_lowering: Some(&r.kv_wanted), wanted_fill: None, fills: false },
+            Stage { name: "kc", out: &r.kc, wanted_lowering: None, wanted_fill: None, fills: true },
         ],
     };
     let v = validate_budget(&k.s0, &k.budget, &stages, &r.residuals, &g);
