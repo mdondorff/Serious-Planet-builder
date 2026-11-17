@@ -47,6 +47,29 @@ fn main() -> Result<(), String> {
     for (k, c) in &by {
         println!("{c:>6} {k}");
     }
+    // conservation breaks: by field, at a reach (its level, trunk image or tributary, its up node's kind) or at a node (its kind)
+    let kind_of: HashMap<u64, NodeKind> = g.nodes.iter().map(|n| (n.id, n.kind)).collect();
+    let mut cb: BTreeMap<String, usize> = BTreeMap::new();
+    let mut shown_cb = 0;
+    for x in &v {
+        if let Violation::ConservationBreak { at, field } = x {
+            let key = if let Some(r) = reach.get(at) {
+                if shown_cb < 6 && *field == "q_w" {
+                    let qw = &r.attrs.q_w;
+                    let i = qw.windows(2).position(|w| w[1] < w[0] * (1.0 - 1e-9)).unwrap_or(0);
+                    println!("reach {at} {:?} up {:?} down {:?} n {}: q_w falls at {i}: {:.4} -> {:.4}; q there {:.4} -> {:.4}", r.level, kind_of.get(&r.up), kind_of.get(&r.down), qw.len(), qw[i], qw[i + 1], r.attrs.q[i], r.attrs.q[i + 1]);
+                    shown_cb += 1;
+                }
+                format!("{field} along a {:?} reach ({}), up {:?}", r.level, if r.parent.is_some() { "trunk image" } else if r.level == planet_generators::bake::river_graph::Level::H1 { "H1" } else { "tributary" }, kind_of.get(&r.up))
+            } else {
+                format!("{field} at a node {:?}", kind_of.get(at))
+            };
+            *cb.entry(key).or_default() += 1;
+        }
+    }
+    for (k, c) in &cb {
+        println!("{c:>6} {k}");
+    }
     let _ = NodeKind::Exception;
     Ok(())
 }

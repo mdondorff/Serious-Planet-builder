@@ -416,6 +416,19 @@ fn h1_from(grid: &Grid, z: &[f64], filled: &[f64], routing: Routing, outlet: &[b
             assert_eq!(again.basins.len(), hydro.basins.len(), "the loss does not change the basins");
             hydro = again;
         }
+        // q_w as a running sum along the routing: q less the losses of the basins upstream (each basin's q_in - q_out, entered at its spill cell; zero for a crossed
+        // basin). The cascade's q_w inside a basin is no channel discharge (a basin's cells are taken in index order on its flat), so a trunk through a crossed basin reads this one.
+        let mut loss = vec![0f64; hydro.q.len()];
+        for b in &hydro.basins {
+            loss[b.spill_cell as usize] += b.q_in - b.q_out;
+        }
+        for &c in routing.order.iter().rev() {
+            let r = routing.receiver[c as usize];
+            if r != NONE {
+                loss[r as usize] += loss[c as usize];
+            }
+        }
+        hydro.qw = (0..hydro.q.len()).map(|c| (hydro.q[c] - loss[c]).max(0.0)).collect();
     }
     let graph = ChannelGraph::from_hydro(grid, &routing, &hydro, z);
     let (mut trunk_seg, mut trunk_cells) = (Vec::new(), Vec::new());
