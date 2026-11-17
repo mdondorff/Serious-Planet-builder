@@ -1803,6 +1803,10 @@ fn q_of(v: &mut [f64], f: f64) -> f64 {
 struct Kept {
     breach: Vec<f32>,
     ch75: Vec<bool>,
+    /// spikes #141: the fill depth (the 1e-7 m flood over the surface), whether the cell lies in a closed depression (over 1 mm), and in one over 5 m deep
+    fill: Vec<f32>,
+    pit: Vec<bool>,
+    pit5: Vec<bool>,
 }
 
 /// Routes `z` on `g` with one rule for every rung (outlets: the grid's edge and every cell at or below the sea; the canonical priority flood with a 1e-3 m grade; D8 steepest descent on
@@ -2006,7 +2010,13 @@ fn rung(
         t.elapsed().as_secs_f64()
     );
     let kept = keep
-        .then(|| Kept { breach: breach.iter().map(|&v| v as f32).collect(), ch75: (0..n).map(|p| area[p] >= 75.0e6 && land(p)).collect() });
+        .then(|| Kept {
+            breach: breach.iter().map(|&v| v as f32).collect(),
+            ch75: (0..n).map(|p| area[p] >= 75.0e6 && land(p)).collect(),
+            fill: depth.iter().map(|&v| v as f32).collect(),
+            pit: (0..n).map(|p| label[p] != u32::MAX).collect(),
+            pit5: (0..n).map(|p| label[p] != u32::MAX && comps[label[p] as usize].0 > 5.0).collect(),
+        });
     (row, kept)
 }
 
@@ -2405,6 +2415,92 @@ fn main() -> Result<(), String> {
         let (fx, fy) = fxy(c);
         kh::read_ct_clamped(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0
     });
+    // ---- spikes #141: what remains in closed basins after KH(h4c) + r' and KS1 (#140), by origin. The surface F = KH(h4c)(z_s) + r' - KS1's lowering (ks_kh's dump),
+    // r' the band floored at the sea + 0.5 m where KH lies above it (as ks_kh). A defect of a rung: breach or fill over 1 m. A defect cell of F is classed by the first rung of
+    // the chain z_b (814 m) -> z_s (814 m) -> KH(h4c)(z_s) at L -> F with a defect there (814 m rungs within one cell, KH within 4 L cells), as SPIKE-135's classifier:
+    // base (z_b and z_s), K5 (z_s only), interpolation residue (KH, not z_s), band (F only).
+    if let Some(dir) = value(&args, "--ks1") {
+        let used2 = read_f32(&format!("{dir}/ks-rg2-used-{w}x{h}.f32"), nl)?;
+        let f: Vec<f64> = (0..nl)
+            .map(|p| {
+                let rr = if h4cz[p] > 0.5 { rl[p].max(0.5 - h4cz[p]) } else { rl[p] };
+                h4cz[p] + rr - f64::from(used2[p])
+            })
+            .collect();
+        drop(used2);
+        let (row, kh_k) = rung(&tag, "KH(h4c) no band", &lg, &h4cz, &in_core_l, &sea_l, true, threads, "-,-");
+        csv += &format!("{row}\n");
+        let (row, f_k) = rung(&tag, "F = KH(h4c) + r' - KS1", &lg, &f, &in_core_l, &sea_l, true, threads, "-,-");
+        csv += &format!("{row}\n");
+        let (kh_k, f_k) = (kh_k.expect("kept"), f_k.expect("kept"));
+        let defect = |k: &Kept, i: usize| k.breach[i] > PRESENT as f32 || k.fill[i] > PRESENT as f32;
+        let d814 = |k: &Kept| dilate(&(0..cells).map(|c| defect(k, c)).collect::<Vec<_>>(), rw, rh, 1);
+        let (p0, p1) = (d814(&k0), d814(&k1));
+        let pkh = dilate(&(0..nl).map(|p| defect(&kh_k, p)).collect::<Vec<_>>(), w, h, L / 2);
+        let class_of = |p: usize| -> usize {
+            let c = to_h1(p);
+            if p1[c] && p0[c] {
+                1
+            } else if p1[c] {
+                2
+            } else if pkh[p] {
+                3
+            } else {
+                4
+            }
+        };
+        const NAMES: [&str; 5] = ["-", "base", "K5", "interpolation", "band"];
+        // river cells (75 km2) of F inside: in a closed depression (any; over 5 m deep), by the class of the cell (a river cell in a depression is a defect cell of F)
+        let (mut riv, mut riv_pit, mut riv_pit5) = (0usize, [0usize; 5], [0usize; 5]);
+        let (mut bvol, mut bcells) = ([0f64; 5], [0usize; 5]);
+        for p in (0..nl).filter(|&p| in_box[p] && start[p] > 0.0) {
+            if f_k.ch75[p] {
+                riv += 1;
+                if f_k.pit[p] {
+                    let k = class_of(p);
+                    riv_pit[k] += 1;
+                    if f_k.pit5[p] {
+                        riv_pit5[k] += 1;
+                    }
+                }
+            }
+            let b = f64::from(f_k.breach[p]);
+            if b > PRESENT {
+                let k = class_of(p);
+                bvol[k] += b * lg.cell_area(p);
+                bcells[k] += 1;
+            }
+        }
+        let tp: usize = riv_pit.iter().sum();
+        let tp5: usize = riv_pit5.iter().sum();
+        let tv: f64 = bvol.iter().sum();
+        let tc: usize = bcells.iter().sum();
+        let pc = |a: f64, b: f64| 100.0 * a / b.max(1e-12);
+        println!(
+            "HO {tag} remainder on F: river cells (75 km2) {riv}, in closed depressions {tp} ({:.2} %), over 5 m deep {tp5} ({:.2} %); breach cells over {PRESENT} m {tc}, {:.4} km3",
+            pc(tp as f64, riv as f64),
+            pc(tp5 as f64, riv as f64),
+            tv / 1.0e9
+        );
+        for k in 1..5 {
+            println!(
+                "HO {tag} remainder class {}: river in closed depressions {} cells ({:.1} % of the remainder; {:.2} % of the river), over 5 m {} ({:.1} %); breach {} cells, {:.4} km3 ({:.1} % of the volume)",
+                NAMES[k],
+                riv_pit[k],
+                pc(riv_pit[k] as f64, tp as f64),
+                pc(riv_pit[k] as f64, riv as f64),
+                riv_pit5[k],
+                pc(riv_pit5[k] as f64, tp5 as f64),
+                bcells[k],
+                bvol[k] / 1.0e9,
+                pc(bvol[k], tv)
+            );
+            csv += &format!("#remain,{tag},{},{riv},{},{},{},{},{:.6}\n", NAMES[k], riv_pit[k], riv_pit5[k], bcells[k], 0, bvol[k] / 1.0e9);
+        }
+        flush(&csv, &csv2)?;
+        println!("HO {tag} done (--ks1): {:.0} s", t_all.elapsed().as_secs_f64());
+        return Ok(());
+    }
     // the overshoot of h4 and h4c beyond the corners of the macro triangle and of the quad, over land of the box; each along every D8 step of the box's land
     for (form, clamped) in [("h4", false), ("h4c", true)] {
         let read = |fx: f64, fy: f64| -> f64 {
