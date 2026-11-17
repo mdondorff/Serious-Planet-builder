@@ -74,7 +74,7 @@ These numbers are plumbing checks, not results: no stage is tuned and the G2 run
 None: a plumbing run with no judgement; the outputs are files for `river-gate`.
 
 ## 5. Addendum (#166a, 2026-11-17)
-Runner `spike/rg-chain` at f43491e0: crusader's `spike/g1d` merged to d72ee86b, spikes' `spike/kh-stage` merged (KH `c1 | h2 | h4 | h4c`, default `h4c`); runs below with `--kh c1`, so they compare with sections 2 and 3.
+Runner `spike/rg-chain` at 000a0ea5: crusader's `spike/g1d` merged to be4a383f, spikes' `spike/kh-stage` merged (KH `c1 | h2 | h4 | h4c`, default `h4c`); runs below with `--kh c1`, so they compare with sections 2 and 3.
 
 ### 5.1 What changed in the runner
 | Item | Change |
@@ -84,7 +84,7 @@ Runner `spike/rg-chain` at f43491e0: crusader's `spike/g1d` merged to d72ee86b, 
 | The cut | on a global tile boundary (the window's origin is not on one) |
 | Junction markers | a `trib_junction` with no reach ending at it and no basin spilling to it is dropped after the stitch (one a domain made for a tributary in its halo) |
 | Gap 3 | crusader's `kv_kc::flag_residuals`: every KV/KC residual's reach flagged `budget_residual` |
-| Basins | crusader's `produce_ids` (reach vertices read and anchors written as global ids); two passes as in G1d: on the trunks for the kept set, then with every L reach as spill receivers |
+| Basins | crusader's `produce_ids` (reach vertices read and anchors written as global ids); two passes as in G1d: on the trunks for the kept set, then with every L reach as spill receivers; the graph takes the second pass's nodes only |
 | KH | `--kh h2 \| h4 \| h4c` give KS the base `KH(z_s) + r`; `S0` stays the reference of the budget, the sills, the ridges and the gate (agreed with spikes) |
 
 ### 5.2 Correction to sections 2 and 3
@@ -94,26 +94,25 @@ The basins of the first runs (crusader's producer at 82aa5939) carried window-lo
 | Measure | One region | Two regions |
 |---|---|---|
 | Final surface | - | bit-identical (`raw/surface-compare-addendum.txt`) |
-| Graph | 322,067 nodes, 209,212 reaches, 55,501 basins | the same counts; one change: the owner of one `trib_junction` (below) |
+| Canonical graph | 316,142 nodes, 209,212 reaches, 55,501 basins | byte-identical; river-gate's partition: identical |
 | Landmass items with different contents in two domains | - | 0 |
-| Junction markers dropped after the stitch | 288 | 300 |
-| Seconds: basins / KG-trib (with the second basin pass) / KV and KC / the run (the runner's total) | 139 / 228 / 164 / 725 | 140 / 224 / 429 / 996 |
-| Peak working set, MiB (the basins stage) | 13,800 | 13,431 |
-- The one change: `trib_junction` 7ba4f0f6c4d4a441 at vertex 0 of trunk reach 77d4d415106ccfb5 is owned by tile 1:87:9 in the one-region graph and by the landmass in the two-region graph: two of crusader's stages give one marker different owners (told).
+| Junction markers dropped after the stitch | 0 | 15 |
+| Seconds: basins / KG-trib (with the second basin pass) / KV and KC / the run | 136 / 222 / 164 / 722 | 138 / 229 / 419 / 988 |
+| Peak working set, MiB (the basins stage) | 13,802 | 13,429 |
+- Before crusader's be4a383f and the second-pass nodes fix the graphs differed in one marker's owner, and 99 `lake_inlet`s of the first basin pass collided with confluences, sources and tile crossings.
 - KV and KC run on the whole window per domain (the module has no active mask): 2.6 times the one-region time.
 
 ### 5.4 The gate on the final surface (one region; `raw/gate-r1h-addendum.txt`)
 | Part | R1h |
 |---|---|
-| Graph | 322,067 nodes; 421 violations, all two nodes on one anchor (99 between non-marker nodes: a `lake_inlet` with a confluence 85, a source 11, a tile crossing 3; told crusader) |
+| Graph | 316,142 nodes; 211 violations, all two nodes on one anchor: markers of one kind on one anchor (`exception` on 93 anchors, `trib_junction` on 1); no two non-marker nodes share an anchor |
 | Before crusader's d72ee86b | 452 invalid markers (`trib_junction` on its reach's last vertex) and 992 two nodes on one anchor |
 | Spill nodes not in the graph | 1,182, the producer's unresolved spills |
 | Connectivity | 121,281 of 121,699 sources reach an outlet; 0 trunk breaks; 0 conservation breaks |
 | Exceptions | 704 `rise_over_budget`, 27,980 `budget_residual` (29,495 KV/KC residuals name no reach within KV's reach) |
-| Partition | 1 change, 0 topology |
+| Partition | identical |
 
 ### 5.5 Open
-- The basins stage's peak, 13.8 GB on R1h after crusader's producer rework: above the 12 GB budget (crusader's #159 item 1).
-- 99 non-marker anchor collisions and the marker owner difference: crusader.
-- 7 `exception` markers on G1c trunks on their reach's last vertex (before d72ee86b): spikes.
+- The basins stage's peak, 13.8 GB on R1h, above the 12 GB budget; crusader's window example with one pass peaks at 7.9-8.1 GB (crusader's #159 item 1; the chain holds its other fields beside it).
+- `exception` markers sharing an anchor (93): G1c's trunk graph (spikes).
 - KV and KC per domain on the whole window: a cost, not a partition fault.
