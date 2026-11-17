@@ -1,0 +1,9 @@
+BASINS input: start surface of the window [1, 8056, 8675, 760, 1379, 14], margin 200, counted over the region's box; 8160 x 8160 L cells of 101.8 m; hierarchy 87113 nodes in 28.5 s
+BASINS kept (>= 0.25 km2, >= 2 m) with the floor in the box: 11388 (7080 nested in another, 4308 outermost); reported (>= 0.5 m, >= 16 cells, under the kept bar): 3283; closed: 0
+BASINS outermost area: 11981.29 km2 total (6.812 % of the box's land 175883 km2); p50 0.674 p90 3.886 max 633.82 km2; depth p50 15.1 p90 74.8 max 287.3 m
+BASINS on an H1 trunk line: 1740 of 4308 outermost (9262.63 km2); off the trunks 2568 (2718.65 km2)
+BASINS largest: floor L (65537, 7702) 3.2 m, spill 223.5 m, 633.82 km2, depth 220.3 m, on a trunk true
+BASINS largest: floor L (66177, 6369) 7.4 m, spill 183.6 m, 267.58 km2, depth 176.2 m, on a trunk true
+BASINS largest: floor L (69265, 8258) 106.6 m, spill 255.3 m, 199.65 km2, depth 148.7 m, on a trunk true
+BASINS largest: floor L (68334, 7287) 6.0 m, spill 183.5 m, 188.72 km2, depth 177.4 m, on a trunk true
+BASINS largest: floor L (69278, 7368) 53.1 m, spill 330.8 m, 141.44 km2, depth 277.7 m, on a trunk true
