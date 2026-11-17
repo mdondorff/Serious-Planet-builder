@@ -2092,6 +2092,8 @@ fn main() -> Result<(), String> {
     let mut res_kvkc: Vec<planet_generators::bake::river_graph::Residual> = Vec::new();
     let mut extra = Graph { body: BODY, nodes: Vec::new(), reaches: Vec::new(), basins: Vec::new() };
     let (mut t_basins, mut t_trib, mut t_ks1, mut t_kvkc) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+    let mut landmass_seen: HashMap<u64, String> = HashMap::new();
+    let mut landmass_conflicts = 0usize;
     for d in 0..regions.max(1) {
         // the domain's window: its core's H1 cells and 16 rings around them, inside the whole window
         let core_h1: Vec<bool> = (0..cells).map(|c| region_of((c % rw) * L) == d).collect();
@@ -2266,10 +2268,31 @@ fn main() -> Result<(), String> {
         }
         res_ks.extend(res_d.into_iter().filter(|r| core[r.0]));
         res_kvkc.extend(rkc.into_iter().filter(|r| r.cell < n_l && core[r.cell]));
-        let mine = |o: Domain| regions == 1 || owner_region(o) == Some(d);
-        extra.nodes.extend(gd.nodes.iter().filter(|x| x.owner != Domain::Landmass && mine(x.owner)).cloned());
-        extra.reaches.extend(gd.reaches.iter().filter(|x| x.owner != Domain::Landmass && mine(x.owner)).cloned());
-        extra.basins.extend(gd.basins.iter().filter(|x| x.owner != Domain::Landmass && mine(x.owner)).cloned());
+        // a tile item belongs to the domain whose core holds its tile; a landmass item new in this domain (not KG-trunk's) is kept from every domain, and two domains that
+        // give one id different contents are counted (a partition difference the dedupe would otherwise hide)
+        let mine = |o: Domain| regions == 1 || o == Domain::Landmass || owner_region(o) == Some(d);
+        let trunk_ids: HashSet<u64> = g.nodes.iter().map(|x| x.id).chain(l_trunks.iter().map(|x| x.id)).collect();
+        for x in gd.nodes.iter().filter(|x| mine(x.owner) && !trunk_ids.contains(&x.id)) {
+            match landmass_seen.get(&x.id) {
+                Some(prev) if x.owner == Domain::Landmass && prev != &format!("{x:?}") => landmass_conflicts += 1,
+                _ => {}
+            }
+            if x.owner == Domain::Landmass {
+                landmass_seen.insert(x.id, format!("{x:?}"));
+            }
+            extra.nodes.push(x.clone());
+        }
+        for x in gd.reaches.iter().filter(|x| mine(x.owner) && !trunk_ids.contains(&x.id)) {
+            match landmass_seen.get(&x.id) {
+                Some(prev) if x.owner == Domain::Landmass && prev != &format!("{x:?}") => landmass_conflicts += 1,
+                _ => {}
+            }
+            if x.owner == Domain::Landmass {
+                landmass_seen.insert(x.id, format!("{x:?}"));
+            }
+            extra.reaches.push(x.clone());
+        }
+        extra.basins.extend(gd.basins.iter().filter(|x| mine(x.owner)).cloned());
     }
     let have: HashSet<u64> = g.nodes.iter().map(|x| x.id).collect();
     let mut seen: HashSet<u64> = have.clone();
@@ -2280,7 +2303,7 @@ fn main() -> Result<(), String> {
     g.basins.extend(extra.basins.into_iter().filter(|x| seen_b.insert(x.id)));
     g.sort();
     drop(ks0);
-    println!("RG domains: {} nodes, {} reaches, {} basins after the stitch", g.nodes.len(), g.reaches.len(), g.basins.len());
+    println!("RG domains: {} nodes, {} reaches, {} basins after the stitch; landmass items with different contents in two domains: {landmass_conflicts}", g.nodes.len(), g.reaches.len(), g.basins.len());
     for (name, secs) in [("basins", t_basins), ("KG-trib", t_trib), ("KS1", t_ks1), ("KV and KC", t_kvkc)] {
         stamp(name, secs);
     }
