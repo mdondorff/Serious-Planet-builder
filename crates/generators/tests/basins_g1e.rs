@@ -305,6 +305,9 @@ mod fixture_case {
     use super::*;
     use crate::g0_fixture::fixture as fx;
 
+    const DIGEST_H1: u64 = 0xcea8_2aec_00dd_8987;
+    const DIGEST_L: u64 = 0x7067_a5aa_df26_46eb;
+
     fn l_tile(c: usize) -> Domain {
         let (f, ti, tj) = fx::tile_of_l(c);
         Domain::Tile { face: f as u8, ti: ti as u32, tj: tj as u32 }
@@ -335,6 +338,32 @@ mod fixture_case {
         };
         let pairs = if link { link_images(&h1, &mut l, &f.s0, &l_cells_of) } else { Vec::new() };
         (h1, l, pairs, f)
+    }
+
+    /// A digest of a producer's output: its basins and nodes (canonical) and each basin's cell set (sorted).
+    pub(crate) fn digest(p: &Produced) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let g = Graph { body: BODY, nodes: p.nodes.clone(), reaches: Vec::new(), basins: p.basins.clone() };
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        g.canonical().hash(&mut h);
+        for b in &p.basins {
+            let mut c: Vec<usize> = p.cells[&b.id].to_vec();
+            c.sort_unstable();
+            c.hash(&mut h);
+        }
+        h.finish()
+    }
+
+    // spec: SPIKE-133
+    #[test]
+    fn the_producer_s_output_is_unchanged() {
+        // order #159: the producer's memory rework gives the same basins, nodes and cell sets (digests recorded before the rework)
+        let (h1, l, _, _) = basins(4);
+        let (dh, dl) = (digest(&h1), digest(&l));
+        if std::env::var_os("G1E_DIGEST").is_some() {
+            println!("digest h1 {dh:#018x} l {dl:#018x}");
+        }
+        assert_eq!((dh, dl), (DIGEST_H1, DIGEST_L));
     }
 
     // spec: SPIKE-130

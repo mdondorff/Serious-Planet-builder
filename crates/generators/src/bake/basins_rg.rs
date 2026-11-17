@@ -176,12 +176,28 @@ impl BasinParams {
     }
 }
 
+/// The cells of the basins: one flat array in which every hierarchy node's subtree is a contiguous range (its own cells, then its children's), so a nested basin shares its
+/// cells with its parent instead of copying them (order #159). `cells[&id]` is a basin's cells, in that order (not sorted).
+#[derive(Default)]
+pub struct Cells {
+    flat: Vec<usize>,
+    range: BTreeMap<u64, (usize, usize)>,
+}
+
+impl std::ops::Index<&u64> for Cells {
+    type Output = [usize];
+    fn index(&self, id: &u64) -> &[usize] {
+        let (a, b) = self.range[id];
+        &self.flat[a..b]
+    }
+}
+
 /// What the producer made: basins and the nodes they name (`lake_inlet`s, `trib_junction`s), the hierarchy node of each basin, the basins' cells, and the spills it could not resolve.
 pub struct Produced {
     pub basins: Vec<Basin>,
     pub nodes: Vec<Node>,
     pub node_of_basin: BTreeMap<u64, u32>,
-    pub cells: BTreeMap<u64, Vec<usize>>,
+    pub cells: Cells,
     pub unresolved: Vec<u64>,
 }
 
@@ -189,18 +205,39 @@ pub struct Produced {
 pub fn produce(grid: &Grid, z: &[f64], outlet: &[bool], reaches: &[Reach], owner: &dyn Fn(usize) -> Domain, p: &BasinParams) -> Produced {
     let hy = hierarchy(grid, z, outlet);
     let nn = hy.nodes.len();
-    // subtree cells (sorted) and areas, children before parents (a node's id is larger than its children's)
-    let mut sub: Vec<Vec<usize>> = vec![Vec::new(); nn];
+    // subtrees as ranges of one flat array (order #159: no per-subtree copies): sizes children first (a node's id is larger than its children's), then the starts parents first,
+    // a node's own cells first and its children after them in id order
+    let mut size = vec![0usize; nn];
     for k in 0..nn {
-        let mut cells = hy.nodes[k].own.clone();
-        for &kid in &hy.nodes[k].kids {
-            cells.extend(sub[kid as usize].iter().copied());
-        }
-        cells.sort_unstable();
-        sub[k] = cells;
+        size[k] = hy.nodes[k].own.len() + hy.nodes[k].kids.iter().map(|&kid| size[kid as usize]).sum::<usize>();
     }
+    let mut first = vec![usize::MAX; nn];
+    let mut next = 0usize;
+    for k in (0..nn).rev() {
+        if first[k] == usize::MAX {
+            // a root of the hierarchy
+            first[k] = next;
+            next += size[k];
+        }
+        let mut at = first[k] + hy.nodes[k].own.len();
+        for &kid in &hy.nodes[k].kids {
+            first[kid as usize] = at;
+            at += size[kid as usize];
+        }
+    }
+    let mut flat = vec![0usize; next];
+    for k in 0..nn {
+        flat[first[k]..first[k] + hy.nodes[k].own.len()].copy_from_slice(&hy.nodes[k].own);
+    }
+    let span = |k: usize| &flat[first[k]..first[k] + size[k]];
+    // a subtree's cells sorted, into a reused buffer (the area sums in cell order, as before: the same bits)
+    let sorted_into = |k: usize, buf: &mut Vec<usize>| {
+        buf.clear();
+        buf.extend_from_slice(span(k));
+        buf.sort_unstable();
+    };
     let depth = |k: usize| hy.nodes[k].spill.map_or(f64::INFINITY, |s| s.1) - hy.nodes[k].floor_m;
-    let area = |k: usize| sub[k].iter().map(|&c| grid.cell_area(c)).sum::<f64>();
+    let mut buf: Vec<usize> = Vec::new();
     #[derive(Clone, Copy, PartialEq)]
     enum Keep {
         No,
@@ -209,9 +246,13 @@ pub fn produce(grid: &Grid, z: &[f64], outlet: &[bool], reaches: &[Reach], owner
     }
     let keep: Vec<Keep> = (0..nn)
         .map(|k| {
-            if depth(k) >= p.min_depth_m && area(k) >= p.min_area_m2 {
+            let deep = depth(k) >= p.min_depth_m;
+            if deep && {
+                sorted_into(k, &mut buf);
+                buf.iter().map(|&c| grid.cell_area(c)).sum::<f64>() >= p.min_area_m2
+            } {
                 Keep::Kept
-            } else if depth(k) >= p.report_depth_m && sub[k].len() >= p.report_cells {
+            } else if depth(k) >= p.report_depth_m && size[k] >= p.report_cells {
                 Keep::Reported
             } else {
                 Keep::No
@@ -219,14 +260,17 @@ pub fn produce(grid: &Grid, z: &[f64], outlet: &[bool], reaches: &[Reach], owner
         })
         .collect();
     // the basin of each cell: the deepest kept (or reported) node whose subtree holds it
-    let mut basin_of_cell: BTreeMap<usize, u32> = BTreeMap::new();
+    let mut basin_of_cell: Vec<u32> = vec![NONE; z.len()];
     for k in 0..nn {
         if keep[k] != Keep::No {
-            for &c in &sub[k] {
-                basin_of_cell.entry(c).or_insert(k as u32);
+            for &c in span(k) {
+                if basin_of_cell[c] == NONE {
+                    basin_of_cell[c] = k as u32;
+                }
             }
         }
     }
+    let basin_at = |c: usize| (basin_of_cell[c] != NONE).then_some(basin_of_cell[c]);
     let id_of = |k: usize| basin_id(p.body, p.level, hy.nodes[k].floor_cell as u64, hy.nodes[k].spill.map(|sp| sp.0 as u64));
     let mut nodes: BTreeMap<u64, Node> = BTreeMap::new();
     let inlet = |c: usize, nodes: &mut BTreeMap<u64, Node>| {
@@ -263,7 +307,7 @@ pub fn produce(grid: &Grid, z: &[f64], outlet: &[bool], reaches: &[Reach], owner
     };
     let routing = route_rules(grid, z, route_outlet, 1e-3, p.body, 0.0, None, RoundRules::ROUND);
     let mut out =
-        Produced { basins: Vec::new(), nodes: Vec::new(), node_of_basin: BTreeMap::new(), cells: BTreeMap::new(), unresolved: Vec::new() };
+        Produced { basins: Vec::new(), nodes: Vec::new(), node_of_basin: BTreeMap::new(), cells: Cells::default(), unresolved: Vec::new() };
     for k in 0..nn {
         if keep[k] == Keep::No {
             continue;
@@ -274,6 +318,8 @@ pub fn produce(grid: &Grid, z: &[f64], outlet: &[bool], reaches: &[Reach], owner
             parent = hy.nodes[parent as usize].parent;
         }
         let id = id_of(k);
+        sorted_into(k, &mut buf);
+        let sub_k = &buf;
         let (outlet_kind, spill_cell, spill_m, spill_node) = match nd.spill {
             None => (Outlet::Endorheic, nd.floor_cell, f64::INFINITY, 0),
             Some((sc, sm, _)) => {
@@ -281,13 +327,13 @@ pub fn produce(grid: &Grid, z: &[f64], outlet: &[bool], reaches: &[Reach], owner
                 // vertex
                 let outside = (0..8)
                     .filter_map(|d| grid.neighbour(sc, d))
-                    .filter(|q| sub[k].binary_search(q).is_err())
+                    .filter(|q| sub_k.binary_search(q).is_err())
                     .min_by(|&a, &b| z[a].total_cmp(&z[b]).then(a.cmp(&b)));
                 let mut c = outside.unwrap_or(sc);
                 let mut target = 0u64;
                 let mut steps = 0usize;
                 loop {
-                    if let Some(&b) = basin_of_cell.get(&c) {
+                    if let Some(b) = basin_at(c) {
                         let b = b as usize;
                         // another basin: not this one, not one nested in it, not an ancestor it merges into (the water goes on into the sibling)
                         let mut anc = hy.nodes[k].parent;
@@ -299,7 +345,7 @@ pub fn produce(grid: &Grid, z: &[f64], outlet: &[bool], reaches: &[Reach], owner
                             }
                             anc = hy.nodes[anc as usize].parent;
                         }
-                        if b != k && sub[k].binary_search(&c).is_err() && !is_ancestor {
+                        if b != k && sub_k.binary_search(&c).is_err() && !is_ancestor {
                             target = inlet(c, &mut nodes);
                             break;
                         }
@@ -346,14 +392,14 @@ pub fn produce(grid: &Grid, z: &[f64], outlet: &[bool], reaches: &[Reach], owner
             owner: owner(nd.floor_cell),
         });
         out.node_of_basin.insert(id, k as u32);
-        out.cells.insert(id, sub[k].clone());
+        out.cells.range.insert(id, (first[k], first[k] + size[k]));
     }
     // inlets: each given reach entering a kept basin gets a lake_inlet on its first vertex inside it
     // (SPIKE-133: a reach that starts inside a kept basin does not enter it there: from its second vertex, and only from outside that basin)
     for r in &sorted_reaches {
         for (k, &c) in r.vertices.iter().enumerate().skip(1) {
-            if let Some(&b) = basin_of_cell.get(&(c as usize)) {
-                if keep[b as usize] == Keep::Kept && basin_of_cell.get(&(r.vertices[k - 1] as usize)) != Some(&b) {
+            if let Some(b) = basin_at(c as usize) {
+                if keep[b as usize] == Keep::Kept && basin_at(r.vertices[k - 1] as usize) != Some(b) {
                     inlet(c as usize, &mut nodes);
                     break;
                 }
@@ -362,6 +408,7 @@ pub fn produce(grid: &Grid, z: &[f64], outlet: &[bool], reaches: &[Reach], owner
     }
     out.basins.sort_by_key(|b| b.id);
     out.nodes = nodes.into_values().collect();
+    out.cells.flat = flat;
     out
 }
 
