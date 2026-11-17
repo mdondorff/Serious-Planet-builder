@@ -1989,7 +1989,8 @@ fn main() -> Result<(), String> {
     let gl = Grid::new(w, h, dx_l);
     let parent = |p: usize| ((p / w) / L) * rw + (p % w) / L;
     // the regions: one, or the window cut at a tile column into two; a pointwise field is evaluated per region and stitched (the partition run)
-    let half = (w / 2 / TILE as usize) * TILE as usize;
+    // the cut sits on a global tile boundary (the window's origin need not), so a tile lies wholly in one region
+    let half = ((((x0 as u64) + (w / 2) as u64) / TILE) * TILE - x0 as u64) as usize;
     let region_of = |p: usize| usize::from(regions == 2 && p % w >= half);
     let per_region = |f: &(dyn Fn(usize) -> f64 + Sync)| -> Vec<f64> {
         let mut out = vec![0f64; n_l];
