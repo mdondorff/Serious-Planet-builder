@@ -1024,8 +1024,9 @@ fn trunk_stats(h1: &H1, grid: &Grid, in_box: &dyn Fn(u32) -> bool) -> (usize, us
 
 // ---------------------------------------------------------------- K5' (lead #133)
 
-/// K5's rounds (`solve_rounds_with`, no drivers) with the routing of each round replaced: on node heights `z + r_min` and sill edges `s_r + max(z_p, z_q)`
-/// (`sill_r = None`: today's `route_rules`, the bit check of this loop). Returns the heights and the seconds.
+/// K5's rounds (`solve_rounds_with`, no drivers) with the routing of each round replaced: on node heights `h = z + r_min` and sill edges `s_r + max(z_p, z_q)`
+/// (`sill_r = None`: today's `route_rules`, the bit check of this loop). The carve acts on the surface it routes on, the node heights (`r_min` static, so a change
+/// of `h` is a change of `z_s`); the result is `z_s = h - r_min`. The carve's sea floor (sea level + epsilon) applies to `h`.
 #[allow(clippy::too_many_arguments)]
 fn rounds_k5p(
     grid: &Grid,
@@ -1038,9 +1039,10 @@ fn rounds_k5p(
     sill_r: Option<&Sills>,
 ) -> Vec<f64> {
     let n = grid.len();
-    let mut z = zb.to_vec();
+    let rmin: Vec<f64> = sill_r.map_or(vec![0.0; n], |s| s.h.clone());
+    let mut z: Vec<f64> = (0..n).map(|c| zb[c] + rmin[c]).collect();
     let taper: Vec<f32> = if p.uplift_taper_m > 0.0 && p.u_over_k != 0.0 {
-        z.iter().map(|h| planet_core::smoothstep(0.0, p.uplift_taper_m, h - p.sea_level) as f32).collect()
+        zb.iter().map(|h| planet_core::smoothstep(0.0, p.uplift_taper_m, h - p.sea_level) as f32).collect()
     } else {
         Vec::new()
     };
@@ -1049,10 +1051,9 @@ fn rounds_k5p(
         let r = match sill_r {
             None => route_rules(grid, &z, outlet, p.epsilon, seed, p.max_area, None, p.round_rules),
             Some(s) => {
-                let h: Vec<f64> = (0..n).map(|c| z[c] + s.h[c]).collect();
-                let zz = &z;
-                let sill = |a: usize, d: usize, b: usize| s.at(a, d, b) + zz[a].max(zz[b]);
-                let w = flood(grid, &h, &sill, outlet, p.epsilon);
+                let zz: Vec<f64> = (0..n).map(|c| z[c] - rmin[c]).collect();
+                let sill = |a: usize, d: usize, b: usize| (s.at(a, d, b) + zz[a].max(zz[b])).max(z[a]).max(z[b]);
+                let w = flood(grid, &z, &sill, outlet, p.epsilon);
                 route_sills(grid, &w, &sill, outlet, seed, &ones, true)
             }
         };
@@ -1084,7 +1085,7 @@ fn rounds_k5p(
             narrow_f32_checked(&mut z, p.epsilon);
         }
     }
-    z
+    (0..n).map(|c| z[c] - rmin[c]).collect()
 }
 
 /// A tributary of a main stem: confluence cell, D8 area (km2), and its cell just above the confluence.
