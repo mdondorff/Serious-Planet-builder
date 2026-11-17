@@ -279,3 +279,20 @@ fn kv_and_kc_give_the_pinned_output() {
 
 // KV only: pinned before the memory cut and unchanged by it; KC only and both re-pinned for reading 22's breach (#161: the 5-cell coastal pit drains by a 45,181 m3 cut instead of a fill)
 const KVKC_DIGESTS: [u64; 3] = [0x3367_fe24_9007_dfe2, 0x4c07_3ae4_4545_fb75, 0xf327_9595_e00e_14a2];
+
+// spec: SPIKE-132
+#[test]
+fn kv_s_budget_is_what_ks_left_against_s_kh() {
+    // reading 21 (owner, #161): KS used `S_KH - s0` of the budget before KV, so KV lowers at most the rest
+    use planet_generators::bake::kv_kc::run_with;
+    let k = case();
+    let gl = Grid::cube(L_N, RADIUS_M);
+    let s_kh: Vec<f64> = k.s0.iter().map(|z| z + 5.0).collect();
+    let p = KvParams::plan(RADIUS_M * core::f64::consts::FRAC_PI_2 / L_N as f64);
+    let r = run_with(&gl, &k.s0, &k.outlet, &k.graph, &k.protected, &k.budget, Some(&s_kh), &p, Switch::KvOnly);
+    let worst = (0..k.s0.len()).map(|c| (k.s0[c] - r.kv[c]) - (k.budget[c] - 5.0).max(0.0)).fold(f64::NEG_INFINITY, f64::max);
+    assert!(worst <= 1e-9, "KV lowered {worst} m past the budget KS left");
+    let plain = run(&gl, &k.s0, &k.outlet, &k.graph, &k.protected, &k.budget, &p, Switch::KvOnly);
+    let max_low = |kv: &[f64]| (0..kv.len()).map(|c| k.s0[c] - kv[c]).fold(0.0, f64::max);
+    assert!(max_low(&r.kv) < max_low(&plain.kv), "the reference takes budget away");
+}
