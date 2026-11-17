@@ -403,7 +403,16 @@ struct H1 {
     d8: Vec<f64>,
 }
 
-fn h1_from(grid: &Grid, z: &[f64], filled: &[f64], routing: Routing, outlet: &[bool], runoff: &[f32], evap: &[f32], budget: Option<&[f64]>) -> H1 {
+fn h1_from(
+    grid: &Grid,
+    z: &[f64],
+    filled: &[f64],
+    routing: Routing,
+    outlet: &[bool],
+    runoff: &[f32],
+    evap: &[f32],
+    budget: Option<&[f64]>,
+) -> H1 {
     let mut hydro = hydrology(grid, z, filled, &routing, outlet, Some(runoff), Some(evap), &HydroParams::default());
     // spikes #142, reading 16: a kept basin deeper than the budget at its floor is crossed (reading 13), not a lake: no open-water loss there, so q_w = q through it.
     // The basins are the same (the loss enters only the balance); the rerun changes q_w and the balance only.
@@ -1436,7 +1445,8 @@ fn build_graph(
     // ---- L anchors (contract §2.1: the lowest L cell of S0 within one H1 cell, ties by global cell id; land only for a non-outlet node, reading 2 for outlets)
     let all_inside = vec![true; w * h];
     let ks_water: Vec<f64> = (0..ks0.len()).map(|c| if ocean[c] { ks0[c].max(sea) } else { ks0[c] }).collect();
-    let mks = Measure { w, h, water: &ks_water, inside: &all_inside, region: &all_inside, sea, radius: K_C * L as f64, bar, ocean: Some(ocean) };
+    let mks =
+        Measure { w, h, water: &ks_water, inside: &all_inside, region: &all_inside, sea, radius: K_C * L as f64, bar, ocean: Some(ocean) };
     let anchor_of = |c: u32, outlet: bool, taken: &HashSet<usize>| -> Option<usize> {
         let p = to_local(c);
         let disc = |keep: &dyn Fn(usize) -> bool| -> Option<usize> {
@@ -2089,7 +2099,6 @@ fn main() -> Result<(), String> {
         out
     };
 
-
     // ---- KH: the hand-over (c1: C1(z_s) + r, the start surface S0 itself)
     // ---- HAND at H1 (z_s over the channel cell the 814 m flow path reaches)
     let t = Instant::now();
@@ -2212,7 +2221,12 @@ fn main() -> Result<(), String> {
     };
     let (ks0, res0) = if ks_mode == "off" { (ks_base.clone(), Vec::new()) } else { ks(&hand_l) };
     drop(hand_l);
-    println!("RG KS0 ({}): {} cells lowered, {} residuals", if ks_mode == "off" { "off: S0" } else { "S0 - min(max(0, r - C1(HAND)), budget)" }, (0..n_l).filter(|&p| ks0[p] < start[p]).count(), res0.len());
+    println!(
+        "RG KS0 ({}): {} cells lowered, {} residuals",
+        if ks_mode == "off" { "off: S0" } else { "S0 - min(max(0, r - C1(HAND)), budget)" },
+        (0..n_l).filter(|&p| ks0[p] < start[p]).count(),
+        res0.len()
+    );
     stamp("KS0", t.elapsed().as_secs_f64());
 
     // ---- KG-trunk (spikes' code, G1c) on KS0
@@ -2230,7 +2244,11 @@ fn main() -> Result<(), String> {
     // (13 km, plan section 3.2), the window's border its exits except the entry cells, which carry the A_d of the H1 cell outside that drains into them (crusader's G1d rule).
     // Each domain keeps the graph items its core's tiles own and its core's cells; the stitched result is the regions' answer.
     let gid_l = |c: usize| gid(x0 as u64 + (c % w) as u64, y0 as u64 + (c / w) as u64);
-    let tile_l = |c: usize| Domain::Tile { face: face.0, ti: ((x0 as u64 + (c % w) as u64) / TILE) as u32, tj: ((y0 as u64 + (c / w) as u64) / TILE) as u32 };
+    let tile_l = |c: usize| Domain::Tile {
+        face: face.0,
+        ti: ((x0 as u64 + (c % w) as u64) / TILE) as u32,
+        tj: ((y0 as u64 + (c / w) as u64) / TILE) as u32,
+    };
     let sea_l: Vec<bool> = (0..n_l).map(|c| start[c] <= sea).collect();
     let land_h1: Vec<f64> = (0..cells).filter(|&c| solve.zs[c] > 0.0).map(|c| f64::from(runoff[c])).collect();
     let runoff_mean = land_h1.iter().sum::<f64>() / land_h1.len().max(1) as f64;
@@ -2266,10 +2284,12 @@ fn main() -> Result<(), String> {
                 for c in 0..cells {
                     if !prev[c] {
                         let (cx, cy) = ((c % rw) as i64, (c / rw) as i64);
-                        win_h1[c] = (-1..=1i64).any(|dy| (-1..=1i64).any(|dx| {
-                            let (x, y) = (cx + dx, cy + dy);
-                            x >= 0 && y >= 0 && (x as usize) < rw && (y as usize) < rh && prev[y as usize * rw + x as usize]
-                        }));
+                        win_h1[c] = (-1..=1i64).any(|dy| {
+                            (-1..=1i64).any(|dx| {
+                                let (x, y) = (cx + dx, cy + dy);
+                                x >= 0 && y >= 0 && (x as usize) < rw && (y as usize) < rh && prev[y as usize * rw + x as usize]
+                            })
+                        });
                     }
                 }
             }
@@ -2280,10 +2300,12 @@ fn main() -> Result<(), String> {
             .map(|p| {
                 let (x, y) = ((p % w) as i64, (p / w) as i64);
                 active[p]
-                    && (-1..=1i64).any(|dy| (-1..=1i64).any(|dx| {
-                        let (a, b) = (x + dx, y + dy);
-                        a < 0 || b < 0 || a as usize >= w || b as usize >= h || !active[b as usize * w + a as usize]
-                    }))
+                    && (-1..=1i64).any(|dy| {
+                        (-1..=1i64).any(|dx| {
+                            let (a, b) = (x + dx, y + dy);
+                            a < 0 || b < 0 || a as usize >= w || b as usize >= h || !active[b as usize * w + a as usize]
+                        })
+                    })
             })
             .collect();
         let mut seed = vec![0.0f64; n_l];
@@ -2302,10 +2324,12 @@ fn main() -> Result<(), String> {
                         if !border[p] || sea_l[p] || on_trunk.contains(&p) {
                             continue;
                         }
-                        let touches = (-1..=1i64).any(|dy| (-1..=1i64).any(|dx| {
-                            let (a, b) = (x as i64 + dx, y as i64 + dy);
-                            a >= 0 && b >= 0 && (a as usize) < w && (b as usize) < h && parent(b as usize * w + a as usize) == q
-                        }));
+                        let touches = (-1..=1i64).any(|dy| {
+                            (-1..=1i64).any(|dx| {
+                                let (a, b) = (x as i64 + dx, y as i64 + dy);
+                                a >= 0 && b >= 0 && (a as usize) < w && (b as usize) < h && parent(b as usize * w + a as usize) == q
+                            })
+                        });
                         if touches && best.is_none_or(|b| start[p] < start[b] || (start[p] == start[b] && p < b)) {
                             best = Some(p);
                         }
@@ -2333,9 +2357,16 @@ fn main() -> Result<(), String> {
             use planet_generators::bake::river_graph::Represented;
             // crusader's produce_ids (spike/g1d c75c8641): reach vertices read and every anchor and id written as global ids; Produced.cells in grid cells
             let ids = planet_generators::bake::basins_rg::CellIds { gid: &gid_l, local: &to_local };
-            { let (pk, nw) = memory_mib(); println!("RG mem before basin pass 1: peak {pk} MiB, now {nw} MiB"); }
-            let pb = planet_generators::bake::basins_rg::produce_ids(&grid_d, &ks0, &outlet_d, &l_trunks, &tile_l, &BasinParams::l(BODY), &ids);
-            { let (pk, nw) = memory_mib(); println!("RG mem after basin pass 1: peak {pk} MiB, now {nw} MiB"); }
+            {
+                let (pk, nw) = memory_mib();
+                println!("RG mem before basin pass 1: peak {pk} MiB, now {nw} MiB");
+            }
+            let pb =
+                planet_generators::bake::basins_rg::produce_ids(&grid_d, &ks0, &outlet_d, &l_trunks, &tile_l, &BasinParams::l(BODY), &ids);
+            {
+                let (pk, nw) = memory_mib();
+                println!("RG mem after basin pass 1: peak {pk} MiB, now {nw} MiB");
+            }
             for b in pb.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface) {
                 for &c in &pb.cells[&b.id] {
                     kept[c] = true;
@@ -2344,7 +2375,12 @@ fn main() -> Result<(), String> {
             // the first pass's nodes enter the graph only when no second pass follows (crusader: the final graph takes the second pass's nodes)
             first_nodes = pb.nodes.clone();
             gd.basins.extend(pb.basins.iter().cloned());
-            println!("RG domain {d} basins: {} L basins ({} kept), {} unresolved spills", pb.basins.len(), pb.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface).count(), pb.unresolved.len());
+            println!(
+                "RG domain {d} basins: {} L basins ({} kept), {} unresolved spills",
+                pb.basins.len(),
+                pb.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface).count(),
+                pb.unresolved.len()
+            );
         }
         t_basins += t.elapsed().as_secs_f64();
         // KG-trib (crusader's G1d extractor-1) on KS0, A_crit 1 km2
@@ -2360,11 +2396,28 @@ fn main() -> Result<(), String> {
                     v.map(|vertices| Trunk { id: r.id, vertices, attrs: r.attrs.clone(), down })
                 })
                 .collect();
-            let inp = Input { grid: &grid_d, z: &ks0, sea: &sea_l, exit: &exit, trunks: &trunks, kept: &kept, seed_ext: &seed, tile: &tile_l, gid: &gid_l, keep_fields: false };
+            let inp = Input {
+                grid: &grid_d,
+                z: &ks0,
+                sea: &sea_l,
+                exit: &exit,
+                trunks: &trunks,
+                kept: &kept,
+                seed_ext: &seed,
+                tile: &tile_l,
+                gid: &gid_l,
+                keep_fields: false,
+            };
             let ex = extract(&inp, &Params { mfd_init: false, ..Params::plan(BODY, runoff_mean) });
             gd.nodes.extend(ex.nodes.iter().cloned());
             gd.reaches.extend(ex.reaches.iter().cloned());
-            println!("RG domain {d} KG-trib: {} reaches, {} nodes, {} open ends, {} entry cells", ex.reaches.len(), ex.nodes.len(), ex.open_ends, entry.iter().filter(|&&e| e).count());
+            println!(
+                "RG domain {d} KG-trib: {} reaches, {} nodes, {} open ends, {} entry cells",
+                ex.reaches.len(),
+                ex.nodes.len(),
+                ex.open_ends,
+                entry.iter().filter(|&&e| e).count()
+            );
             fine = Some((ex.receiver, ex.channel));
         }
         t_trib += t.elapsed().as_secs_f64();
@@ -2385,7 +2438,11 @@ fn main() -> Result<(), String> {
                     let c = c as usize;
                     let r = receiver[c];
                     tgt[c] = if channel[c] || r == NONE {
-                        if bed[c].is_finite() { bed[c] } else { ks0[c] }
+                        if bed[c].is_finite() {
+                            bed[c]
+                        } else {
+                            ks0[c]
+                        }
                     } else {
                         tgt[r as usize]
                     };
@@ -2396,7 +2453,11 @@ fn main() -> Result<(), String> {
             ("ks1", None) => return Err("--ks ks1 needs KG-trib's routing: do not skip kg-trib".into()),
             _ => (ks0.clone(), res0.iter().filter(|r| core[r.0]).cloned().collect()),
         };
-        println!("RG domain {d} KS: {} core cells lowered, {} core residuals", (0..n_l).filter(|&p| core[p] && ks_d[p] < start[p]).count(), res_d.iter().filter(|r| core[r.0]).count());
+        println!(
+            "RG domain {d} KS: {} core cells lowered, {} core residuals",
+            (0..n_l).filter(|&p| core[p] && ks_d[p] < start[p]).count(),
+            res_d.iter().filter(|r| core[r.0]).count()
+        );
         t_ks1 += t.elapsed().as_secs_f64();
         // the basins again, on the KS output with every L reach as spill receivers and inlets (reading 5: the L kept rule reads KS1; crusader's G1d order: the first pass on KS0 gave
         // KG-trib its kept set); the graph takes this pass's basins and nodes; its kept basins and H1's lake water are KV's and KC's protected cells
@@ -2407,14 +2468,22 @@ fn main() -> Result<(), String> {
             let all: Vec<GReach> = gd.reaches.iter().filter(|r| r.level == Level::L).cloned().collect();
             let ids = CellIds { gid: &gid_l, local: &to_local };
             // spikes #142: the cells of the markers on the reaches (KG-trunk's exceptions, KG-trib's junctions); an inlet passes them (reading 1)
-            let marker_cells: BTreeSet<usize> = gd.nodes.iter().filter(|x| x.level == Level::L && x.kind.is_marker()).filter_map(|x| to_local(x.anchor)).collect();
-            { let (pk, nw) = memory_mib(); println!("RG mem before basin pass 2: peak {pk} MiB, now {nw} MiB"); }
+            let marker_cells: BTreeSet<usize> =
+                gd.nodes.iter().filter(|x| x.level == Level::L && x.kind.is_marker()).filter_map(|x| to_local(x.anchor)).collect();
+            {
+                let (pk, nw) = memory_mib();
+                println!("RG mem before basin pass 2: peak {pk} MiB, now {nw} MiB");
+            }
             // crusader #161, reading 22: a kept-size depression drains unless neither its fill nor a bounded breach fits the budget KS left against S_KH (reading 21)
             let remaining: Vec<f64> = (0..n_l).map(|p| (budget_l[p] - (ks_base[p] - ks_d[p]).max(0.0)).max(0.0)).collect();
-            let pb = produce_drain_avoiding(&grid_d, &ks_d, &outlet_d, &all, &tile_l, &BasinParams::l(BODY), &ids, &remaining, &marker_cells);
+            let pb =
+                produce_drain_avoiding(&grid_d, &ks_d, &outlet_d, &all, &tile_l, &BasinParams::l(BODY), &ids, &remaining, &marker_cells);
             drop(remaining);
             println!("RG domain {d} second pass, reading 22: {} kept-size depressions drained", pb.drained);
-            { let (pk, nw) = memory_mib(); println!("RG mem after basin pass 2: peak {pk} MiB, now {nw} MiB"); }
+            {
+                let (pk, nw) = memory_mib();
+                println!("RG mem after basin pass 2: peak {pk} MiB, now {nw} MiB");
+            }
             for p in 0..n_l {
                 kept[p] = protected_h1[parent(p)];
             }
@@ -2529,13 +2598,14 @@ fn main() -> Result<(), String> {
         stamp(name, secs);
     }
 
-
     // ---- outputs: what river-gate --graph --stages --partition reads (BUILD-060), and the final surface
     let t = Instant::now();
     let stages_dir = out_dir.join(format!("{tag}-stages"));
     std::fs::create_dir_all(&stages_dir).map_err(|e| e.to_string())?;
     std::fs::write(out_dir.join(format!("{tag}-graph.txt")), g.canonical()).map_err(|e| e.to_string())?;
-    let field = |v: &dyn Fn(usize) -> f64| -> Vec<u8> { (0..n_l).flat_map(|p| ((v(p).max(0.0) / 0.1).floor().min(65535.0) as u16).to_le_bytes()).collect() };
+    let field = |v: &dyn Fn(usize) -> f64| -> Vec<u8> {
+        (0..n_l).flat_map(|p| ((v(p).max(0.0) / 0.1).floor().min(65535.0) as u16).to_le_bytes()).collect()
+    };
     let write = |name: &str, bytes: Vec<u8>| -> Result<(), String> {
         if let Some(d) = &chain_dir {
             std::fs::write(d.join("stages").join(name), &bytes).map_err(|e| e.to_string())?;
@@ -2617,7 +2687,8 @@ fn memory_mib() -> (u64, u64) {
         fn GetCurrentProcess() -> isize;
         fn K32GetProcessMemoryInfo(process: isize, counters: *mut Counters, cb: u32) -> i32;
     }
-    let mut c = Counters { cb: core::mem::size_of::<Counters>() as u32, page_fault_count: 0, peak_working_set: 0, working_set: 0, rest: [0; 6] };
+    let mut c =
+        Counters { cb: core::mem::size_of::<Counters>() as u32, page_fault_count: 0, peak_working_set: 0, working_set: 0, rest: [0; 6] };
     // SAFETY: `c` is a writable PROCESS_MEMORY_COUNTERS of the size it declares; the pseudo handle needs no closing.
     let ok = unsafe { K32GetProcessMemoryInfo(GetCurrentProcess(), &mut c, c.cb) };
     if ok == 0 {
