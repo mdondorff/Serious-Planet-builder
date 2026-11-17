@@ -1,0 +1,26 @@
+KG sea at L: 20473775 cells of S0 at or below the sea level, 164943 of them inland (not connected to an H1 sea outlet or the window's edge; 0.248 % of the window)
+KG basin census: 236 kept H1 basins; depth spill - floor p10 0.7 p50 2.8 p90 94.0 m; cells p50 29 p90 1017 max 25368; shallower than 2 m 102 (of them under 0.5 m 0), fewer than 4 cells 5
+KG basin census: channel-segment cells in kept basins by basin depth: < 0.5 m 0, 0.5-2 m 2459, 2-5 m 4783, 5-10 m 1434, 10-50 m 27483, >= 50 m 25982 (of 84462 segment cells)
+KG basin census (K6'): without the sills (each edge at the higher node height) 2496 kept basins, 48972 basin cells; 70 of the 236 K6' basins (1907 cells) have their floor in no basin there: the sills alone close them; they hold 596 of the 62141 segment cells in kept basins
+KG centreline: lowest path (Dijkstra, step cost length x (1 + height over the corridor's minimum / 10 m))
+KG base H1: K6' on the sills of S0 (SPIKE-127) (21508 segments, 236 kept basins)
+KG segments: 21508 (84462 cells, 62141 in kept basins, 17360 segments inside one); kept-basin cells 120423 of 1040400
+KG H1 trunk reaches: 5044 (74 end on the window's edge; 1538 lake inlets, 933 lake spills)
+RG stage setup (S0, ocean, H1 base): 51.8 s; peak working set 1629 MiB, now 1335 MiB
+RG stage budget field: 27.4 s; peak working set 1859 MiB, now 1851 MiB
+RG KS0 (S0 - min(max(0, r - C1(HAND)), budget)): 991555 cells lowered, 103006 residuals
+RG stage KS0: 19.4 s; peak working set 3384 MiB, now 2368 MiB
+RG KG-trunk: 16881 nodes, 10088 reaches
+RG stage KG-trunk: 2.6 s; peak working set 3384 MiB, now 2382 MiB
+RG basins: 55502 L basins (45438 kept), 2541 unresolved spills
+RG stage basins: 180.7 s; peak working set 13186 MiB, now 2650 MiB
+RG KG-trib: 199124 reaches, 249067 nodes, 301 open ends
+RG stage KG-trib: 116.4 s; peak working set 13186 MiB, now 3305 MiB
+RG KS1 = S0 - min(max(0, r - H_f), budget): 1498950 cells lowered, 54475 residuals
+RG stage KS1: 3.8 s; peak working set 13186 MiB, now 3425 MiB
+RG KV/KC input: 204168 of 204168 L reaches inside the window
+RG KV/KC (Both): 2317780 residuals, 32344 KC patches
+RG stage KV and KC: 166.1 s; peak working set 13186 MiB, now 5146 MiB
+RG stage write: 120.1 s; peak working set 13186 MiB, now 5147 MiB
+RG done: kh c1, ks ks1, skipped [], regions 1; 310763 nodes, 209212 reaches, 55502 basins; files in C:/DEV/SeriousPlanetData/tmp/rg-chain: r1h-graph.txt, r1h-stages/, r1h-final-8160x8160.f64, r1h-timing.csv; 688.3 s
+EXIT 0

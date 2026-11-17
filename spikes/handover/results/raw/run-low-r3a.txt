@@ -1,0 +1,6 @@
+HL r3a h1 breach at L: bilinear(z_s) - h1 = bilinear(814 m lowering): of 19998573 land cells, lowered over 10 m 28984 (0.145 %), over 50 m 1365 (0.007 %); raised over 10 m 0, over 50 m 0; S0 ridge cells lowered over 10 m 3509, over 50 m 417; lowering p95 3.70 max 151.7 m
+HL r3a h2 against bilinear(z_s): bilinear - TIN: of 19998573 land cells, lowered over 10 m 15899 (0.080 %), over 50 m 212 (0.001 %); raised over 10 m 3301, over 50 m 12; S0 ridge cells lowered over 10 m 2611, over 50 m 111; lowering p95 1.85 max 100.8 m
+HL r3a C1(z_s) against bilinear(z_s): C1 - bilinear: of 19998573 land cells, lowered over 10 m 4537 (0.023 %), over 50 m 0 (0.000 %); raised over 10 m 11735, over 50 m 0; S0 ridge cells lowered over 10 m 1665, over 50 m 0; lowering p95 2.04 max 31.8 m
+HL r3a h1 against C1(z_s): C1 - h1: of 19998573 land cells, lowered over 10 m 33053 (0.165 %), over 50 m 1494 (0.007 %); raised over 10 m 7916, over 50 m 0; S0 ridge cells lowered over 10 m 5022, over 50 m 459; lowering p95 2.55 max 167.4 m
+HL r3a h2 against C1(z_s): C1 - TIN: of 19998573 land cells, lowered over 10 m 18512 (0.093 %), over 50 m 53 (0.000 %); raised over 10 m 9600, over 50 m 31; S0 ridge cells lowered over 10 m 4464, over 50 m 34; lowering p95 2.56 max 96.8 m
+HL r3a done: 51 s
