@@ -674,6 +674,19 @@ impl G2Report {
     }
 }
 
+/// A candidate's surface on the window's L grid (BUILD-060 `--surface`): `n` little-endian f64 heights, row-major; refused when the byte count differs or a height is not finite.
+pub fn read_surface(path: &str, n: usize) -> Result<Vec<f64>, String> {
+    let b = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
+    if b.len() != 8 * n {
+        return Err(format!("{path}: {} bytes, the window's {n} cells of f64 are {}", b.len(), 8 * n));
+    }
+    let z: Vec<f64> = b.as_chunks::<8>().0.iter().map(|c| f64::from_le_bytes(*c)).collect();
+    match z.iter().position(|v| !v.is_finite()) {
+        Some(c) => Err(format!("{path}: cell {c} is not finite")),
+        None => Ok(z),
+    }
+}
+
 /// A canonical river graph file (GEN-189).
 pub fn read_graph(path: &str) -> Result<Graph, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;

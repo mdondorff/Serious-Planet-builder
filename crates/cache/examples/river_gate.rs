@@ -19,7 +19,7 @@ use planet_cache::river_gate::{
     border_inside, commit_differences, key_note, lay_store_ground, measure, raw_grid_arg, raw_grid_heights, Crossing, GateInput,
     GateParams, LWindow, RawGrid, WindowIdentity, GRID_BORDER, GRID_CELL_M,
 };
-use planet_cache::river_gate_graph::{read_graph, read_stages, G2Input, Window};
+use planet_cache::river_gate_graph::{read_graph, read_stages, read_surface, G2Input, Window};
 use planet_core::{Face, TangentWarp, Vec3};
 use planet_generators::global::{read_elevation_c1, GlobalSample, LatticeSource, ReadError};
 use planet_generators::runoff::{discharge_weight, pet_mm, runoff_mm};
@@ -135,6 +135,7 @@ fn main() -> Result<(), String> {
         "--graph",
         "--stages",
         "--partition",
+        "--surface",
     ];
     let mut k = 0;
     while k < args.len() {
@@ -184,6 +185,9 @@ fn main() -> Result<(), String> {
     let store = value(&args, "--store").map(Path::new);
     if no_key_check && store.is_none() {
         return Err("--no-key-check reads a store: it goes with --store".to_string());
+    }
+    if value(&args, "--surface").is_some() && store.is_some() {
+        return Err("--surface is the candidate's surface on the window: it takes no --store".to_string());
     }
     let (face, seed) = (Face(win[0] as u8), win[5] as u64);
     let region = (win[1], win[2], win[3], win[4]);
@@ -250,6 +254,11 @@ fn main() -> Result<(), String> {
     let mut inside = in_box.clone();
     let mut label = format!("start surface of the window {win:?}, margin {margin}, counted over the region's box");
     let mut sea_level_m = 0.0;
+    // BUILD-060: a candidate's surface on the window's L grid (the RG chain's final surface), measured against the window's start surface
+    if let Some(path) = value(&args, "--surface") {
+        surface = read_surface(path, w * h)?;
+        label = format!("surface {path} on the window {win:?}, margin {margin}, against its start surface, counted over the region's box");
+    }
     if let Some(dir) = store {
         let commit = Commit::read(dir)?.ok_or_else(|| format!("{}: no commit record", dir.display()))?;
         let world = Arc::new(GlobalWorld::from_definition(&def).map_err(|e| format!("{e:?}"))?);
