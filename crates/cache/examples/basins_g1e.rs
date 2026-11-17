@@ -7,9 +7,7 @@ use planet_cache::global_store::{class_inputs, class_inputs_key, GlobalWorld};
 use planet_cache::l_writer::Commit;
 use planet_cache::pack::TileStore;
 use planet_cache::region_bake::{lattice_direction, region_front, RegionSpec, LOCAL_PER_REGIONAL};
-use planet_cache::river_gate::{
-    commit_differences, key_note, lay_store_ground, Crossing, GateParams, LWindow, WindowIdentity,
-};
+use planet_cache::river_gate::{commit_differences, key_note, lay_store_ground, Crossing, GateParams, LWindow, WindowIdentity};
 use planet_core::{Face, TangentWarp, Vec3};
 use planet_generators::global::{read_elevation_c1, GlobalSample, LatticeSource, ReadError};
 use planet_generators::runoff::{discharge_weight, pet_mm, runoff_mm};

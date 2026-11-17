@@ -2114,7 +2114,7 @@ fn main() -> Result<(), String> {
     // RG-1 with `--z <file>`: explorer's KS0 (spike/ks-g1b), little-endian f64, row-major, the window's L grid (8 x (i0 - margin), 8 x (j0 - margin))
     {
         use planet_generators::bake::basins_rg::{produce, BasinParams};
-        use planet_generators::bake::kg_trib::{extract, Input, Params, Trunk};
+        use planet_generators::bake::kg_trib::{accumulate_trunks, extract, Input, Params, Trunk};
         use planet_generators::bake::river_graph::Represented;
         let t = Instant::now();
         let n = w * h;
@@ -2199,6 +2199,33 @@ fn main() -> Result<(), String> {
         g2.nodes.extend(ex.nodes.iter().filter(|x| !have.contains(&x.id)).cloned());
         g2.reaches.extend(ex.reaches.iter().cloned());
         g2.sort();
+        // reading 18: the landmass pass accumulates the L trunks from their tributaries (order #159)
+        let junction_breaks = |g: &Graph| {
+            let nodes: HashMap<u64, &Node> = g.nodes.iter().map(|x| (x.id, x)).collect();
+            let reach: HashMap<u64, &GReach> = g.reaches.iter().map(|x| (x.id, x)).collect();
+            g.reaches
+                .iter()
+                .filter(|r| r.level == Level::L && r.parent.is_none() && r.vertices.len() >= 2)
+                .filter(|r| {
+                    let Some(m) = nodes.get(&r.down).and_then(|n| n.marker) else { return false };
+                    let Some(t) = reach.get(&m.on_reach) else { return false };
+                    t.attrs.a_geo[m.at_vertex as usize] < r.attrs.a_geo[r.vertices.len() - 2]
+                })
+                .count()
+        };
+        let breaks_before = junction_breaks(&g2);
+        let trunk_ids: BTreeSet<u64> = trunks.iter().map(|t| t.id).collect();
+        let inflow = |id: u64| to_local(id).map_or((0.0, 0.0), |c| (dx_l * dx_l + ex.d8[c], dx_l * dx_l + ex.d8_no_ext[c]));
+        let t_acc = Instant::now();
+        let acc = accumulate_trunks(&mut g2, &trunk_ids, &inflow, runoff_mean);
+        println!(
+            "G1d landmass pass (reading 18): {} trunk reaches in {:.1} s, {} unordered, {} heads over their H1 seed; junction breaks {breaks_before} before, {} after",
+            acc.reaches,
+            t_acc.elapsed().as_secs_f64(),
+            acc.unordered,
+            acc.heads_over_seed,
+            junction_breaks(&g2)
+        );
         let v2 = validate(&g2, &Checks { adjacent: &adjacent, tile_of: Some(&tile_of), open: true });
         let mut k2: BTreeMap<String, usize> = BTreeMap::new();
         for v in &v2 {
@@ -2295,6 +2322,20 @@ fn main() -> Result<(), String> {
             v2.len(),
             viol.len()
         );
+        // BUILD-059's hierarchy on the combined graph, by the river gate's G2 code (BUILD-060's `graph_report`): rasterised L channel over the counted land (the region's box), streams, R_b
+        {
+            use planet_cache::river_gate_graph::{graph_report, Window as GWindow};
+            let land: Vec<bool> = (0..n).map(|c| !sea_l[c]).collect();
+            let rep = graph_report(&g2, &GWindow { x0: x0 as u64, y0: y0 as u64, w, h }, &in_box, &land, dx_l);
+            println!(
+                "G1d graph hierarchy (river-gate --graph's code, BUILD-059 definition): {:.1} km of rasterised L channel over {:.1} km2, density {:.4} km/km2; streams {:?}; R_b {:.2} ({} orders)",
+                rep.channel_km, rep.land_km2, rep.density_km_per_km2, rep.streams, rep.rb, rep.rb_orders
+            );
+        }
+        if let Some(path) = value(&args, "--write-graph") {
+            std::fs::write(path, g2.canonical()).map_err(|e| e.to_string())?;
+            println!("G1d graph written to {path}");
+        }
         // the map: one pixel per `f` L cells; sea blue, land grey by height, kept basins green, tributaries by order, trunks red
         let f = w.max(h).div_ceil(1400).max(1);
         let (pw, ph) = (w.div_ceil(f), h.div_ceil(f));

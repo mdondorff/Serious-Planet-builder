@@ -8,7 +8,7 @@ use crate::g0_fixture::fixture::*;
 use crate::g0_graph::expected;
 use planet_generators::bake::basins_rg::{produce, BasinParams};
 use planet_generators::bake::h0::GlobalGrid;
-use planet_generators::bake::kv_kc::{run, KvParams, Switch};
+use planet_generators::bake::kv_kc::{flag_residuals, run, KvParams, Switch};
 use planet_generators::bake::river_graph::*;
 use planet_generators::bake::Grid;
 
@@ -61,22 +61,12 @@ fn stage_run(k: &Case, switch: Switch) -> Report {
         &KvParams::plan(RADIUS_M * core::f64::consts::FRAC_PI_2 / L_N as f64),
         switch,
     );
-    // the features of the residuals are flagged budget_residual where they were ok (a reach that is already an exception keeps it: reported)
+    // the features of the residuals are flagged budget_residual (lead #159: the writer flags them; reading 9: beside any other reason)
     let mut g = k.graph.clone();
-    let mut conflict = 0usize;
-    for res in &r.residuals {
-        if let Some(x) = g.reaches.iter_mut().find(|x| x.id == res.feature) {
-            // reading 9: the list holds budget_residual beside any other reason; `conflict` counts reaches already exceptional for another reason
-            if x.exceptions.iter().any(|e| e.reason != Reason::BudgetResidual) && !x.has_exception(Reason::BudgetResidual) {
-                conflict += 1;
-            }
-            let need = res.needed_m - res.available_m;
-            match x.exceptions.iter_mut().find(|e| e.reason == Reason::BudgetResidual) {
-                Some(e) => e.value = e.value.max(need),
-                None => x.exceptions.push(Exception { reason: Reason::BudgetResidual, value: need }),
-            }
-        }
-    }
+    let flagged = flag_residuals(&mut g, &r.residuals);
+    let conflict = flagged.with_other;
+    assert_eq!(flagged.no_feature, 0, "every residual names a reach");
+    assert!(r.residuals.is_empty() || flagged.reaches > 0, "a residual flags its reach");
     let stages: Vec<Stage> = match switch {
         Switch::KvOnly => vec![Stage { name: "kv", out: &r.kv, wanted_lowering: Some(&r.kv_wanted), wanted_fill: None, fills: false }],
         Switch::KcOnly => vec![Stage { name: "kc", out: &r.kc, wanted_lowering: None, wanted_fill: None, fills: true }],

@@ -109,7 +109,15 @@ pub fn extract(inp: &Input, p: &Params) -> Extracted {
         for (k, &c) in inp.trunks[t].vertices.iter().enumerate() {
             // the claim of a cell several trunks pass: a trunk's first vertex (a junction there shares the anchor with that trunk's up node, reading 1), then an interior vertex, then
             // a last vertex (the tributary ends at that trunk's down node); ties by trunk id
-            let rank = |t: usize, k: usize| if k == 0 { 0 } else if k + 1 == inp.trunks[t].vertices.len() { 2 } else { 1 };
+            let rank = |t: usize, k: usize| {
+                if k == 0 {
+                    0
+                } else if k + 1 == inp.trunks[t].vertices.len() {
+                    2
+                } else {
+                    1
+                }
+            };
             match on_trunk.get(&c) {
                 Some(&(t0, k0)) if rank(t0, k0) <= rank(t, k) => {}
                 _ => {
@@ -328,4 +336,101 @@ pub fn extract(inp: &Input, p: &Params) -> Extracted {
         trunk_area_breaks,
         open_ends,
     }
+}
+
+/// What the landmass pass changed.
+#[derive(Debug, Default)]
+pub struct Accumulated {
+    pub reaches: usize,
+    /// Heads where the L inflow exceeds the H1 seed (the head then takes the inflow).
+    pub heads_over_seed: usize,
+    /// Trunk reaches the pass could not order (a cycle through trunk nodes; left as they were).
+    pub unordered: usize,
+}
+
+/// Reading 18: the landmass pass over the combined graph. Every L trunk reach in `trunks` gets `a_geo`, `a_run`, `a_run_no_ext`, `q`, `q_w` accumulated at L: a vertex carries the vertex
+/// before it plus `inflow(cell)` (its own cell and what drains into it directly: tributaries and hillslope, with and without the halo seed); a node shares one value with every reach there, the sum
+/// of its inflowing trunk reaches' second-to-last vertices plus its own inflow; a head with no inflowing trunk takes the larger of its H1 seed (its present value) and its own inflow.
+/// `q = q_w = a_run runoff` (no basin loss on a crossed basin, reading 16).
+pub fn accumulate_trunks(
+    g: &mut Graph,
+    trunks: &std::collections::BTreeSet<u64>,
+    inflow: &dyn Fn(u64) -> (f64, f64),
+    runoff: f64,
+) -> Accumulated {
+    let mut out = Accumulated::default();
+    let idx: Vec<usize> = (0..g.reaches.len()).filter(|&i| trunks.contains(&g.reaches[i].id)).collect();
+    out.reaches = idx.len();
+    // the reaches into each node, and the order: a reach after every trunk reach ending at its up node (Kahn, ties by reach id)
+    let mut into: BTreeMap<u64, Vec<usize>> = BTreeMap::new();
+    for &i in &idx {
+        into.entry(g.reaches[i].down).or_default().push(i);
+    }
+    let mut waiting: BTreeMap<usize, usize> = idx.iter().map(|&i| (i, into.get(&g.reaches[i].up).map_or(0, |v| v.len()))).collect();
+    let mut ready: std::collections::BTreeSet<(u64, usize)> =
+        idx.iter().filter(|i| waiting[i] == 0).map(|&i| (g.reaches[i].id, i)).collect();
+    let mut order: Vec<usize> = Vec::new();
+    while let Some(&(id, i)) = ready.iter().next() {
+        ready.remove(&(id, i));
+        order.push(i);
+        let down = g.reaches[i].down;
+        for &j in &idx {
+            if g.reaches[j].up == down {
+                let w = waiting.get_mut(&j).unwrap();
+                *w -= 1;
+                if *w == 0 {
+                    ready.insert((g.reaches[j].id, j));
+                }
+            }
+        }
+    }
+    out.unordered = idx.len() - order.len();
+    for &i in &order {
+        let up = g.reaches[i].up;
+        let cells = g.reaches[i].vertices.clone();
+        // the head: the node's value from its inflowing trunk reaches, or the seed against the own inflow
+        let (own0, own0_no) = inflow(cells[0]);
+        let ins: Vec<usize> = into.get(&up).cloned().unwrap_or_default();
+        let (mut v, mut v_no) = if ins.is_empty() {
+            let a = &g.reaches[i].attrs;
+            let (seed, seed_no) = (a.a_geo[0], a.a_run_no_ext[0]);
+            if own0 > seed {
+                out.heads_over_seed += 1;
+            }
+            (seed.max(own0), seed_no.max(own0_no))
+        } else {
+            let pre = |r: &Reach, f: fn(&Attrs) -> &Vec<f64>| {
+                let x = f(&r.attrs);
+                x[x.len().saturating_sub(2)]
+            };
+            let s: f64 = ins.iter().map(|&j| pre(&g.reaches[j], |a| &a.a_geo)).sum::<f64>() + own0;
+            let s_no: f64 = ins.iter().map(|&j| pre(&g.reaches[j], |a| &a.a_run_no_ext)).sum::<f64>() + own0_no;
+            // the inflowing reaches end with the node's value
+            for &j in &ins {
+                let a = &mut g.reaches[j].attrs;
+                let m = a.a_geo.len() - 1;
+                a.a_geo[m] = s;
+                a.a_run[m] = s;
+                a.a_run_no_ext[m] = s_no;
+                a.q[m] = s * runoff;
+                a.q_w[m] = s * runoff;
+            }
+            (s, s_no)
+        };
+        let a = &mut g.reaches[i].attrs;
+        let n = cells.len();
+        for k in 0..n {
+            if k > 0 {
+                let (o, o_no) = inflow(cells[k]);
+                v += o;
+                v_no += o_no;
+            }
+            a.a_geo[k] = v;
+            a.a_run[k] = v;
+            a.a_run_no_ext[k] = v_no;
+            a.q[k] = v * runoff;
+            a.q_w[k] = v * runoff;
+        }
+    }
+    out
 }
