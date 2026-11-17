@@ -504,3 +504,103 @@ F1: h4 near `S0`, with small inland patches at or below 0 m (sand); h3's grooves
 - On `spike/kh-stage`: `cargo test -p planet-generators --lib kh`.
 - Runs: `cargo xtask heavy target/release/examples/kh_smooth.exe --window <w> --out <dir> --tag <tag> --crop-at <cx,cy,crop>`, with #137's crops from `kh_ridge`'s `<tag>-crop.txt`.
 - Tables: `python tools/smooth_tables.py raw r1h r3a r3b m1 f1`. Sheets: `python tools/kh_smooth_sheet.py <dir> <tag> <name> <out.jpg>`.
+
+## Addendum 3: h4 clamped per quad, h4c, as the chain default (lead #139, 2026-11-17)
+Question: does clamping h4 to its quad's corners remove its overshoot and keep its drainage gain? If so, h4c becomes the RG chain runner's default.
+Time box: 2-3 h (used: about 1.5 h).
+
+Code location: branch `spike/kh-stage` (never merged):
+- @ e2d792a4: `kh::read_ct_clamped` (h4c) with a unit test. The read stays within the quad's range, equals h4 where h4 does, and is monotone along a step. `kh_smooth` measures h2 + `r`, h4, h4 + `r`, h4c and h4c + `r`. `rg_chain` gains `--kh h4 | h4c`.
+- @ 3a632d48: `rg_chain`'s `--kh` defaults to `h4c` (explorer told, 2026-11-17); `--kh c1` keeps today's surface.
+
+### The form
+- h4c = h4's value, clamped to the lowest and highest of its quad's four corner heights. The quad is the one whose cell centres hold the L cell.
+- The macro triangle's three corners are a narrower range than the quad's four. h4c may still lie outside the triangle's range, but never outside the quad's.
+- Measured as addendum 2. Full tables: `raw/h4c-tables.md`, built by `tools/smooth_tables.py --set h4c raw r1h r3a r3b m1 f1` from `raw/h4c-ladder-<w>.csv` and `raw/h4c-handover-<w>.csv`. Runs: 479-711 s, peak 6.8 GB (`raw/h4c-peaks.txt`).
+
+### Overshoot
+Beyond the corners (over 1 cm), over the land of the box; D8 steps rising over 1 mm along the step:
+
+| Window | h4: above / below the triangle | h4: above / below the quad | h4c: above / below the triangle | h4c: above / below the quad | Rising steps, h4 and h4c |
+|---|---|---|---|---|---|
+| R1h | 2.17 / 1.72 % | 237,370 / 237,613 | 0.81 / 0.45 % | 0 / 0 | 318 |
+| R3a | 1.96 / 1.74 % | 226,388 / 287,335 | 0.85 / 0.45 % | 0 / 0 | 3,782 |
+| R3b | 2.24 / 1.31 % | 320,972 / 238,985 | 0.81 / 0.29 % | 0 / 0 | 399 |
+| M1 | 2.06 / 2.64 % | 296,539 / 547,380 | 0.89 / 0.77 % | 0 / 0 | 1,140 |
+| F1 | 3.00 / 2.95 % | 472,080 / 587,043 | 1.15 / 1.04 % | 0 / 0 | 8,026 |
+
+- The clamp leaves no cell beyond its quad's corners.
+- The rising steps are the same with and without the clamp: they lie inside `z_s`'s own depressions (addendum 2; not traced).
+- Without the band, h4c puts 0-106 inland land cells at or below 0 m. h4 put 0-305,076.
+
+### Drainage and ridges
+River length (75 km2 channels) on closed depressions, all / over 5 m deep, %:
+
+| Surface | R1h | R3a | R3b | M1 | F1 |
+|---|---|---|---|---|---|
+| `S0` | 76.5 / 65.0 | 74.9 / 37.2 | 68.8 / 52.4 | 89.1 / 88.5 | 80.4 / 71.1 |
+| h2 + `r` | 47.6 / 27.3 | 51.3 / 0.6 | 24.3 / 7.2 | 66.4 / 63.3 | 53.8 / 39.5 |
+| h4 + `r` | 52.7 / 31.5 | 55.7 / 1.6 | 31.9 / 9.8 | 68.8 / 65.7 | 59.3 / 43.5 |
+| h4c | 14.5 / 1.7 | 31.3 / 0.0 | 12.1 / 0.0 | 20.8 / 12.7 | 45.5 / 39.0 |
+| h4c + `r` | 51.4 / 25.0 | 55.3 / 1.0 | 29.6 / 2.5 | 68.3 / 64.2 | 58.7 / 41.4 |
+
+Breach volume, km3, and D-2 failures:
+
+| Surface | R1h | R3a | R3b | M1 | F1 |
+|---|---|---|---|---|---|
+| `S0` | 155; 352 | 17.2; 78 | 53.6; 568 | 1,645; 1,890 | 127; 525 |
+| h2 + `r` | 14.0; 46 | 4.2; 1 | 1.3; 5 | 348; 864 | 109; 87 |
+| h4 + `r` | 23.0; 87 | 5.3; 3 | 5.1; 80 | 406; 1,488 | 119; 81 |
+| h4c | 0.3; 1 | 1.7; 1 | 0.3; 3 | 149; 59 | 89.0; 75 |
+| h4c + `r` | 14.9; 35 | 4.2; 1 | 0.7; 4 | 338; 874 | 101; 78 |
+
+Against `S0`: breach volume % lower, and D-2 failures % fewer:
+
+| Surface | Breach volume: R1h, R3a, R3b, M1 | Breach volume: F1 | D-2: R1h, R3a, R3b, F1 | D-2: M1 |
+|---|---|---|---|---|
+| h2 + `r` | 76-98 | 14 | 83-99 | 54 |
+| h4 + `r` | 69-91 | 6 | 75-96 | 21 |
+| h4c + `r` | 76-99 | 20 | 85-99 | 54 |
+
+- `S0`'s ridge cells lowered over 50 m (the band cancels):
+
+| Window | h4c | h4 | h2 |
+|---|---|---|---|
+| R1h | 8,286 | 8,304 | 18,122 |
+| R3a | 21 | 21 | 34 |
+| R3b | 854 | 854 | 1,183 |
+| M1 | 101,055 | 98,906 | 594,900 |
+| F1 | 43 | 43 | 57 |
+
+- Relief kept against `S0` with the band: band std 103-106 %, 1 km p50 99-101 %, p95 99-102 %.
+
+### Findings (addendum 3)
+1. **The clamp keeps the gain and improves on it.**
+   - h4c + `r` matches h2 + `r` on breach volume and D-2 (on the river share on closed depressions it is within 5 points: F1 58.7 against 53.8 %, R1h 51.4 against 47.6 %, R3b over 5 m 2.5 against 7.2 %): breach volume 76-99 % below `S0`'s on four windows against h2's 76-98 %; D-2 85-99 % fewer on four against h2's 83-99 %; M1 54 % for both.
+   - Unclamped h4 + `r` has 69-91 % and 75-96 %, M1 21 %.
+   - With the clamp, R3b's D-2 falls from 80 to 4 and its breach volume from 5.1 to 0.7 km3. That the removed overshoot closed those basins is an inference, not traced.
+2. **h4c keeps h4's ridge record.** It cuts the fewest `S0` ridges over 50 m together with h4 (21-101,055, against h2's 34-594,900).
+3. **No new look.** The renders show h4c as h4: no facets, the faint crinkles along the steps. The clamp makes no flat tops visible at a 10-degree sun.
+4. **Left:**
+   - h4c still lies outside its triangle's three-corner range on 0.29-1.15 % of the land, within the quad's range;
+   - the rising steps inside `z_s`'s depressions;
+   - the band's pits: h4c + `r` keeps 29.6-68.3 % of the river length on closed depressions (h2 + `r` 24.3-66.4 %).
+
+### Recommendation (addendum 3)
+**h4c (h4 clamped to its quad's corners) is KH: drainage at h2's level, no facets, no cell beyond its quad's corners. It is `rg_chain`'s default on `spike/kh-stage` @ 3a632d48.** Next, before KS:
+- floor the band at the sea near the coast (SPIKE-135);
+- leave M1's debt to decision 5.
+
+### Visuals (addendum 3)
+Analysis renders (CPU), not the production path. #137's crops at a 10-degree sun from the north-west, 1 px an L cell. Panels: `C1(z_s)` + `r` (`S0`), h2 + `r`, h4 + `r`, h4c + `r`.
+
+![R1h](images/kh-h4c-r1h.jpg)
+R1h: h4c and h4 alike, both close to `S0`; h2's triangles for comparison.
+
+![M1](images/kh-h4c-m1.jpg)
+M1: h4c keeps `S0`'s mountain shapes like h4, with no flat tops from the clamp.
+
+### Reproduce (addendum 3)
+- On `spike/kh-stage`: `cargo test -p planet-generators --lib kh`.
+- Runs: `cargo xtask heavy target/release/examples/kh_smooth.exe --window <w> --out <dir> --tag <tag> --crop-at <cx,cy,crop>` (@ e2d792a4).
+- Tables: `python tools/smooth_tables.py --set h4c raw r1h r3a r3b m1 f1`. Sheets: `python tools/kh_smooth_sheet.py <dir> <tag> <name> <out.jpg> --h4c`.
