@@ -31,7 +31,7 @@ Per-spike register sections of M5 and M6: `docs/archive/M6/spikes.md`. Closed sp
 | SPIKE-124 | Protect lakes (E5) | closed 11-15: K7 leak fixed | `spikes/lakes-protect/results/results.md` |
 | SPIKE-125 | Variant G (P3 E3) | closed 11-16: passes bars; up to 2x B's saddles | `spikes/e3-variant-g/results/results.md` |
 | SPIKE-126 | Ponding rule on B's trunks (D-1) | closed 11-16: ponds rescue 0-13 %; rises are D-2 | `spikes/ponding/results/results.md` |
-| SPIKE-127 | H1 on sills of S0 (G1a) | closed 11-17: 59 % of D-2 gain a route | `spikes/g1a-sills/results/results.md` |
+| SPIKE-127 | H1 on sills of S0 (G1a) | closed 11-17: 59 % of D-2 gain a route; see SPIKE-131 | `spikes/g1a-sills/results/results.md` |
 | SPIKE-129 | KG-trunk at L (G1c) | closed 11-17: continuous; lakes, snap collisions | `spikes/g1c-trunk/results/results.md` |
 | SPIKE-131 | K5' on sills (G1a) | closed 11-17: stop test an artefact; not adopted | `spikes/k5p-sills/results/results.md` |
 | SPIKE-130 | Basin topology on the river graph (G1e) | closed 11-17: stable under layouts; S0 keeps 3-19 % of land | `spikes/basins-g1e/results/results.md` |

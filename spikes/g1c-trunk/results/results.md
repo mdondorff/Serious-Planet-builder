@@ -45,24 +45,24 @@ Code location: spike branch `spike/g1c-trunk-k6p` (fd1b32b7, `crates/cache/examp
 | 1 thread against 8 / two regions against one / a tile evaluated again | identical / 0 cells, identical / 0 differences | the same | the same | the same | the same |
 | KS0 lowering: share of land, p95 (K6') | 3.2 %, 16.2 m | 4.2 %, 0.7 m | 2.4 %, 0.7 m | 5.2 %, 43.1 m | 3.4 %, 1.3 m |
 | Budget field p50, m | 26.7 | 10.0 | 10.0 | 50.0 | 10.0 |
-| H1 basins on the trunks; L image spill - H1 spill p50 (p90), m | 125: 0.3 (114) / 41: 1.4 (16) | 162: -0.8 (3.3) / 217: -0.5 (1.5) | 87: -0.6 (7.4) / 51: -0.4 (0.9) | 107: 95 (400) / 52: 20 (74) | 108: -0.6 (10) / 165: -0.9 (1.4) |
+| H1 basins on the trunks; L image spill - H1 spill p50 (p90), m | 125: 0.3 (114) / 41: 1.4 (16) | 162: -0.8 (3.3) / 217: -0.5 (1.5) | 87: -0.6 (7.4) / 51: -0.4 (0.9) | 107: 95.5 (400) / 52: 20 (74) | 108: -0.6 (10) / 165: -0.9 (1.4) |
 
 - The violations are of four kinds only: `ConservationBreak` on L confluences, `DuplicateId` (exception markers, a few reaches), `TwoNodesOneAnchor`, `OutgoingCount`. On R1h and M1 every conservation break sits on an L node that stands for two or more H1 nodes (62 of 62, 13 of 13; rerun logs `raw/run-r1h.txt`, `raw/run-m1.txt`). No `InvalidEdge`, `BedRise`, `Cycle` or raster violation remains.
 - Centreline on R1h: BUILD-057's maximin route (it keeps the running minimum as high as possible) gives 8.6 / 11.4 % agreement and 1,434 exceptional reaches; the lowest path 25.0 / 55.9 % and 702 (`raw/run-r1h-maximin.txt`).
-- Cost per window (8 threads): KS0 1.8-4.4 s; budget field 0.9-1.6 s; graph 0.9-3.3 s; an L routing of the window for the agreement 31-79 s; run 146-285 s, peak 3.46-3.66 GB.
-- Logs `raw/run-<window>[-today].txt`; markers with their excess `raw/exceptions-<window>.csv`.
+- Cost per window (8 threads): KS0 1.7-2.5 s; budget field 0.9-1.5 s; graph 0.9-3.3 s; an L routing of the window for the agreement 33-79 s; run 146-285 s, peak 3.46-3.66 GB.
+- Logs `raw/run-<window>[-today].txt`; markers with their excess, K6' base only, `raw/exceptions-<window>.csv`.
 
 ## 3. Findings
-1. **The contracts carry a continuous trunk image where H1 has trunks.** Every L reach is an 8-connected chain between its anchors, no bed rises outside an exceptional reach, the raster has no cell owned twice, and the L stage is deterministic and partition-invariant (identical canonical form on 1 and 8 threads, over two regions, after a tile rebuild).
+1. **The contracts carry a continuous trunk image where H1 has trunks.** The validator finds no `InvalidEdge` (every L reach an 8-connected chain from its up anchor to its down anchor) and no `BedNotShared` (beds shared through every junction), no bed rises outside an exceptional reach, `q`, `q_w`, `a_geo` and `a_run` break conservation only at the merged nodes of finding 4, the raster has no cell owned twice, and the L stage is deterministic and partition-invariant (identical canonical form on 1 and 8 threads, over two regions, after a tile rebuild).
 2. **H1's kept basins remove most of the trunk network.** 49-93 % of K6''s channel-segment cells and 29-67 % of today's lie in kept H1 basins, which the contract replaces by `lake_inlet`/`lake_spill` pairs. On M1 K6' keeps 2,840 trunk reaches of 41,287 segments. The trunk graph at L is then fragments between lakes (maps).
 3. **K6' doubles the basin area of today's K6** (7-30 % of the window against 3-15 %): its sill-lifted node heights become kept basins. On this measure today's K6 gives the more complete trunk graph (more reaches, higher river coverage on every window).
-4. **Two H1 nodes within one H1 cell can snap to one L cell** (33-525 per window). On R1h and M1 (the windows checked) that gap explains every conservation break, and it yields the duplicate reach ids and most `OutgoingCount` and `TwoNodesOneAnchor` violations.
+4. **Two H1 nodes within one H1 cell can snap to one L cell** (33-525 per window). On R1h and M1 (the windows checked) that gap explains every conservation break; the duplicate reach ids, `OutgoingCount` and `TwoNodesOneAnchor` fit the same gap (not measured apart).
 5. **Exception markers of two reaches on one cell collide** (`DuplicateId` on markers, 0-1,409 per window): the marker id `hash(kind, level, anchor)` cannot hold two reaches' exceptions at one cell.
 6. **Inland cells of `S0` at or below the sea level end routes** (389-5,811 per window on the coastal windows): confluence images become `outlet_sea` there, which the contract does not define for a non-outlet node.
 7. **The centreline method decides the result.** The contract and the KR note say "routed on S1 inside the corridor"; the maximin route of the corridor measure misses the valleys (11 % agreement), a lowest path follows them (39-71 % of graph cells near a routed river on K6').
 8. **Exceptions follow relief:** 3 % of L reaches on R3a, 28-40 % on M1 (excess p50 30-40 m); on the flat windows the excess is a few metres (p50 2.6-5.2 m).
 9. **KS0 changes little:** it lowers 1.8-5.2 % of the land (p95 0.7-46 m); agreement against KS0 is within 2 points of `S0`.
-10. **L images of K6''s mountain basins spill far above H1's** (M1 p50 95 m): the L depression under the H1 floor is an L pit in `r`, not the H1 basin; on the other windows the two agree within a few metres (p50 -0.9 to 1.4 m).
+10. **L images of K6''s mountain basins spill far above H1's** (M1 p50 95 m): the L depression under the H1 floor is an L pit in `r`, not the H1 basin; on the other windows the p50s agree within a few metres (-0.9 to 1.4 m; R1h's p90 on K6' is 114 m).
 
 ## 4. Recommendation
 - G1c's exit (a continuous L trunk representation without an L erosion round) holds for the reaches H1 hands over; it fails where H1's kept basins cover the network. The basin question goes to G1e before G1d: whether the H1 kept set (>= 4 cells or >= 2 m) is the right lake set for the trunk graph.
@@ -79,13 +79,13 @@ R1h (face 1, seed 14), K6' base: trunk fragments between lakes; exceptions in th
 R1h on today's K6: more of the network survives the lake cuts.
 
 ![R3a](images/exc-r3a.png)
-R3a (face 4, seed 15), K6' base: dense network on the coastal ridges and valleys, few exceptions.
+R3a (face 4, seed 15), K6' base: trunks in the valleys between the coastal ridges, few exceptions.
 
 ![R3b](images/exc-r3b.png)
 R3b (face 2, seed 15), K6' base: exceptions along the mid-slope valleys.
 
 ![M1](images/exc-m1.png)
-M1 (face 4, seed 15), K6' base: almost the whole network lies in kept basins; what remains is mostly exceptional.
+M1 (face 4, seed 15), K6' base: almost the whole network lies in kept basins; 726 of the 2,636 L reaches left are exceptional.
 
 ![M1 today](images/exc-m1-today.png)
 M1 on today's K6: a connected trunk network, 40 % of its L reaches exceptional (dense red markers along the valleys).
