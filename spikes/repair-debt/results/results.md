@@ -302,3 +302,95 @@ F1: the base's broad lowland depressions (purple fans), which K5 keeps and the h
 - KS dumps: `cargo xtask heavy target/release/examples/ks_dump.exe --window <w> --out <dir>/<tag> --dump-only`.
 - Ladder: `cargo xtask heavy target/release/examples/repair_debt.exe --window <w> --out <dir> --tag <tag> --ks <dir>/<tag> --ks0-k6p <explorer's ks0-k6p-8160x8160.f64>`.
 - Tables: `python tools/ladder_tables.py raw r1h r3a r3b m1 f1` (reads `raw/ladder-<w>.csv`). Sheets: `python tools/repair_sheet.py <dir> <tag> <title> <out.jpg>`.
+
+## Addendum: what remains after KH + KS1, by origin (lead #141, 2026-11-17; input to decision 5)
+Question: after KH(h4c) + `r'` and KS1 (SPIKE-128 addendum, #140), 8-50 % of the river length still lies in closed basins. Which of this spike's origin classes holds that remainder, per window?
+Time box: about 2 h (used: about 1.5 h).
+
+Code location: branch `spike/kh-stage` @ 51a4cacf (never merged): `kh_smooth --ks1 <#140's KS dumps>`. It applies this spike's classifier to the final surface; no new classifier.
+
+### Method
+- The final surface: F = KH(h4c)(`z_s`) + `r'` - KS1's lowering.
+  - `r'` is the band floored at sea + 0.5 m where KH lies above that level, as `ks_kh`.
+  - KS1's lowering comes from #140's dumps (`ks-rg2-used`).
+- A rung's defect cell is a cell whose breach or fill is over 1 m (the ladder's breach along the routing, and its 1e-7 m flood).
+- The chain of rungs: `z_b` (814 m) -> `z_s` (814 m) -> KH(h4c)(`z_s`) at L, no band -> F.
+- Each counted cell of F is classed by the first rung with a defect nearby, as section 3: within one 814 m cell for the 814 m rungs, within 4 L cells for KH.
+
+| Class | Rule |
+|---|---|
+| base | defect in `z_b` and `z_s` (kept by K5) |
+| K5 | defect in `z_s` only (made by K5) |
+| interpolation | defect in KH, not in `z_s` (the residue of the hand-over) |
+| band | in F only: the band `r'`, and whatever KS1's lowering leaves |
+
+- Counted, over the box's land (`S0` > 0):
+  - the river cells (D8 area 75 km2) of F in a closed depression of F, in three depth sets:
+    - any depression (over 1 mm);
+    - the river gate's G-DRAIN basins (at least 0.5 m deep and 16 cells);
+    - over 5 m deep;
+  - the breach volume of F's cells lowered over 1 m.
+- Routing: the ladder's rule (reading 12's sea, the canonical flood, D8).
+- The G-DRAIN share differs from #140's river-gate figure because the routing and the outlets differ. #140 used the gate's own routing with every cell at or below 0 m as an outlet; here inland cells at or below 0 m are land. The shares (#140 in brackets): R1h 22.8 (21.0), R3a 33.6 (22.6), R3b 9.3 (8.1), M1 44.0 (43.5), F1 48.9 (49.7) %. R3a's inland cells below 0 m count as basins here.
+- Raw: `raw/remain-ladder-<w>.csv` (the rungs, incl. KH and F, and the `#remain` lines), `raw/remain-run-<w>.txt`, `raw/remain-peaks.txt` (266-403 s, peak 8.3 GB). Tables: `raw/remain-tables.md`, built by `tools/remain_tables.py raw r1h r3a r3b m1 f1`.
+
+### Results
+**The remainder on F = KH(h4c) + r' - KS1, river cells (75 km2) of the box: in G-DRAIN basins (at least 0.5 m deep, 16 cells), % of the river; in any closed depression; over 5 m deep**
+
+| Window | River cells | In G-DRAIN basins | In any closed depression | Over 5 m deep | Breach volume over 1 m, km3 |
+|---|---|---|---|---|---|
+| R1h | 128,362 | 29,289 (22.8 %) | 47,666 (37.1 %) | 14,289 (11.1 %) | 4.905 |
+| R3a | 135,096 | 45,439 (33.6 %) | 61,661 (45.6 %) | 0 (0.0 %) | 0.875 |
+| R3b | 173,136 | 16,113 (9.3 %) | 42,566 (24.6 %) | 9 (0.0 %) | 0.251 |
+| M1 | 176,061 | 77,475 (44.0 %) | 94,230 (53.5 %) | 82,556 (46.9 %) | 265.956 |
+| F1 | 240,952 | 117,755 (48.9 %) | 133,603 (55.4 %) | 99,065 (41.1 %) | 96.990 |
+
+**River cells in G-DRAIN basins by origin class, % of the remainder: base / K5 / interpolation / band**
+
+| Window | base | K5 | interpolation | band |
+|---|---|---|---|---|
+| R1h | 10.3 | 0.2 | 13.3 | 76.2 |
+| R3a | 19.9 | 0.0 | 9.7 | 70.4 |
+| R3b | 20.2 | 0.0 | 18.5 | 61.3 |
+| M1 | 25.3 | 0.0 | 15.6 | 59.0 |
+| F1 | 85.7 | 1.1 | 0.6 | 12.6 |
+
+**River cells over 5 m deep by origin class, % of the remainder: base / K5 / interpolation / band**
+
+| Window | base | K5 | interpolation | band |
+|---|---|---|---|---|
+| R1h | 12.3 | 0.0 | 17.4 | 70.3 |
+| R3a | 0.0 | 0.0 | 0.0 | 0.0 |
+| R3b | 0.0 | 0.0 | 66.7 | 33.3 |
+| M1 | 23.8 | 0.0 | 16.6 | 59.6 |
+| F1 | 98.5 | 1.3 | 0.0 | 0.1 |
+
+**Breach volume (cells over 1 m) by origin class, % of the volume: base / K5 / interpolation / band**
+
+| Window | base | K5 | interpolation | band |
+|---|---|---|---|---|
+| R1h | 13.9 | 0.0 | 12.9 | 73.1 |
+| R3a | 25.2 | 0.0 | 53.9 | 20.9 |
+| R3b | 52.5 | 0.0 | 30.9 | 16.6 |
+| M1 | 72.8 | 0.4 | 5.0 | 21.8 |
+| F1 | 98.5 | 1.1 | 0.1 | 0.3 |
+
+### Findings (addendum)
+1. **F1: the base dominates.** Of the remainder, base-class cells kept by K5 hold:
+   - 85.7 % of the river cells in G-DRAIN basins;
+   - 98.5 % of those over 5 m deep;
+   - 98.5 % of the breach volume.
+
+   These are F1's broad lowland depressions (section 3; SPIKE-134).
+2. **M1: base and band share it.**
+   - The band holds 59.0 % of the river cells in G-DRAIN basins, and the base 25.3 %.
+   - The base holds 72.8 % of the breach volume against 25.3 % of the river cells: its remainder needs deep breaches. The band's needs shallow ones (depression counts by class were not recorded).
+3. **R1h, R3a, R3b: the band dominates the river length.**
+   - The band holds 61.3-76.2 % of the river cells in G-DRAIN basins, and the base 10.3-20.2 %.
+   - On R3b the base holds 52.5 % of the breach volume, and on R3a the interpolation residue 53.9 %. Both volumes are small (0.25 and 0.88 km3).
+4. **K5's own share is at most 1.3 % anywhere** (F1). K5 does not make what remains.
+5. **The interpolation residue** after KH is 0.6-18.5 % of the river cells in G-DRAIN basins.
+
+### For decision 5 (addendum)
+- The base and K5 classes dominate on **F1** (base) and on **M1's volume** (base). A base or K5 fix acts there.
+- On R1h, R3a and R3b, and on M1's river length, the band's own pits are the larger part. KS2 or KV/KC work on them; a base fix does not.
