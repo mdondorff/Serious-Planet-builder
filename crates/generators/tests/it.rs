@@ -62,6 +62,8 @@ mod bake_water_mask;
 mod bake_world_precision;
 #[path = "band_rules.rs"]
 mod band_rules;
+#[path = "basins_g1e.rs"]
+mod basins_g1e;
 #[path = "block_order.rs"]
 mod block_order;
 #[path = "body_keys.rs"]
