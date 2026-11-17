@@ -1,0 +1,15 @@
+KS setup: 8160 x 8160 L cells (1020 x 1020 at 814 m), 24574435 land cells inside, 89067 H1 channel cells, 97684 H1 lake cells protected; 8 s
+KS dump rg1: f1/ks-rg1-used-8160x8160.f32; 459002 cells lowered; 153 s
+KS dump rg2: f1/ks-rg2-used-8160x8160.f32; 2458977 cells lowered; 156 s
+KS setup: 8160 x 8160 L cells (1020 x 1020 at 814 m), 24601600 land cells inside, 87512 H1 channel cells, 150706 H1 lake cells protected; 6 s
+KS dump rg1: m1/ks-rg1-used-8160x8160.f32; 811975 cells lowered; 104 s
+KS dump rg2: m1/ks-rg2-used-8160x8160.f32; 4498933 cells lowered; 105 s
+KS setup: 8160 x 8160 L cells (1020 x 1020 at 814 m), 16971124 land cells inside, 47951 H1 channel cells, 50130 H1 lake cells protected; 7 s
+KS dump rg1: r1h/ks-rg1-used-8160x8160.f32; 560258 cells lowered; 90 s
+KS dump rg2: r1h/ks-rg2-used-8160x8160.f32; 2400384 cells lowered; 93 s
+KS setup: 8160 x 8160 L cells (1020 x 1020 at 814 m), 19998573 land cells inside, 78235 H1 channel cells, 38977 H1 lake cells protected; 7 s
+KS dump rg1: r3a/ks-rg1-used-8160x8160.f32; 897417 cells lowered; 106 s
+KS dump rg2: r3a/ks-rg2-used-8160x8160.f32; 2720672 cells lowered; 108 s
+KS setup: 8160 x 8160 L cells (1020 x 1020 at 814 m), 21813736 land cells inside, 80945 H1 channel cells, 32576 H1 lake cells protected; 6 s
+KS dump rg1: r3b/ks-rg1-used-8160x8160.f32; 539739 cells lowered; 89 s
+KS dump rg2: r3b/ks-rg2-used-8160x8160.f32; 2595705 cells lowered; 92 s

@@ -1,0 +1,25 @@
+KS K6': 95452 channel cells (today's H1 80945); H from node heights
+KS setup: 8160 x 8160 L cells (1020 x 1020 at 814 m), 21813736 land cells inside, 80945 H1 channel cells, 32576 H1 lake cells protected; 9 s
+KS budget: 25 km disc of 2965 cells at 814 m (814.4 m); 13 s
+KS KS0 written: C:/DEV/SeriousPlanetData/tmp/ks-g1b2/k6p/r3b/ks0-k6p-8160x8160.f64
+KS routing S0 and divides: 95 s
+KS routings KS0, KS1: 251 s
+KS RG-0 2,9968,10587,8304,8923,15 K6p: lowering on 0 of 21813736 land cells inside (0.00 %), p50 0.00 m, p95 0.00 m, max 0.00 m, volume 0.000 km3 (requested 0.000 km3); residual 0 cells (0.000 %), 0 of them at the 10 m floor; at 95-100 % of the budget or residual 0 (0.00 %); land below the sea 0
+KS RG-0 hist (share of land cells inside by lowering / budget): none 100.00 | <=10 % 0.00 | 10-25 % 0.00 | 25-50 % 0.00 | 50-75 % 0.00 | 75-95 % 0.00 | 95-100 % 0.00 | residual 0.000
+KS RG-0 band: 0 of 9875799 cells with r > 0 clipped (0.00 %); near divides (<= 1 km, 16372258 cells): 0.00 % lowered, p95 0.00 m, 0.0 % of the volume on 75.1 % of the land; elsewhere (5441478): 0.00 % lowered, p95 0.00 m
+KS RG-0 ridges: 402501 ridge cells of S0; 0 lowered over 20 m (0.00 %), p95 lowering 0.00 m; cut-through saddles at 1 km2 0 (0 cells), at 5 km2 0 (0 cells)
+KS RG-0 gate: basins 18214 G-DRAIN 62.33 % (of 168528 river cells), lowered 0.00 %, relief10 10.71 / start 10.71 m, uphill 23.20 %
+KS RG-0 done: 366 s
+KS RG-1 2,9968,10587,8304,8923,15 K6p: lowering on 594677 of 21813736 land cells inside (2.73 %), p50 0.05 m, p95 0.53 m, max 2.57 m, volume 0.794 km3 (requested 0.794 km3); residual 0 cells (0.000 %), 0 of them at the 10 m floor; at 95-100 % of the budget or residual 0 (0.00 %); land below the sea 18533
+KS RG-1 hist (share of land cells inside by lowering / budget): none 97.27 | <=10 % 2.71 | 10-25 % 0.01 | 25-50 % 0.00 | 50-75 % 0.00 | 75-95 % 0.00 | 95-100 % 0.00 | residual 0.000
+KS RG-1 band: 594677 of 9875799 cells with r > 0 clipped (6.02 %); near divides (<= 1 km, 16372258 cells): 2.59 % lowered, p95 0.58 m, 84.6 % of the volume on 75.1 % of the land; elsewhere (5441478): 3.14 % lowered, p95 0.36 m
+KS RG-1 ridges: 402501 ridge cells of S0; 0 lowered over 20 m (0.00 %), p95 lowering 0.65 m; cut-through saddles at 1 km2 0 (0 cells), at 5 km2 0 (0 cells)
+KS RG-1 gate: basins 18026 G-DRAIN 61.15 % (of 170966 river cells), lowered 0.00 %, relief10 10.72 / start 10.71 m, uphill 23.00 %
+KS RG-1 done: 479 s
+KS RG-2 2,9968,10587,8304,8923,15 K6p: lowering on 1185625 of 21813736 land cells inside (5.44 %), p50 0.05 m, p95 0.52 m, max 2.71 m, volume 1.580 km3 (requested 1.580 km3); residual 0 cells (0.000 %), 0 of them at the 10 m floor; at 95-100 % of the budget or residual 0 (0.00 %); land below the sea 18651
+KS RG-2 hist (share of land cells inside by lowering / budget): none 94.56 | <=10 % 5.41 | 10-25 % 0.02 | 25-50 % 0.00 | 50-75 % 0.00 | 75-95 % 0.00 | 95-100 % 0.00 | residual 0.000
+KS RG-2 band: 1185625 of 9875799 cells with r > 0 clipped (12.01 %); near divides (<= 1 km, 16372258 cells): 4.52 % lowered, p95 0.55 m, 70.9 % of the volume on 75.1 % of the land; elsewhere (5441478): 8.18 % lowered, p95 0.43 m
+KS RG-2 ridges: 402501 ridge cells of S0; 0 lowered over 20 m (0.00 %), p95 lowering 0.84 m; cut-through saddles at 1 km2 0 (0 cells), at 5 km2 0 (0 cells)
+KS RG-2 gate: basins 17639 G-DRAIN 61.94 % (of 168467 river cells), lowered 0.00 %, relief10 10.73 / start 10.71 m, uphill 23.02 %
+KS RG-2 done: 590 s
+KS budget field: p5 10.0 p50 10.0 p95 21.2 m over 1040400 cells; total 590 s
