@@ -368,3 +368,139 @@ F1: diagonal stripes along the main valley and triangles on the hills.
 - Chain: `cargo xtask heavy target/release/examples/rg_chain.exe --window <w> --out <dir> --tag <tag> --kh h2 [--ks ks0 --skip kg-trunk,basins,kg-trib,kv,kc] [--regions 2]`.
 - Ridge check: `cargo xtask heavy target/release/examples/kh_ridge.exe --window <w> --out <dir> --tag <tag>`.
 - Images: `python tools/kh_sheets.py <ridge dir> <SPIKE-136 handover dir> <tag> <name> images/`.
+
+## Addendum 2: two smooth forms of KH (lead #138, 2026-11-17)
+Question: which smooth form of KH keeps h2's drainage without its facets?
+- h3, the skeleton: `C1(z_s)`, lowered only along each D8 diagonal step.
+- h4: Clough-Tocher patches on h2's split.
+
+Time box: half a day (used: about 2 h).
+
+Code location: branch `spike/kh-stage` @ 38ed92c3 (never merged):
+- `crates/generators/src/bake/kh.rs`: `read_skeleton` (h3), `read_ct` and `gradients` (h4), with unit tests. h4 reproduces a plane and is continuous across the split and the quad edges, tested without the monotone clamp; only `kh_smooth`'s step check exercises the clamp. h3 lowers to the step line, leaves other cells and never raises.
+- `crates/cache/examples/kh_smooth.rs`: SPIKE-136's `handover.rs` with h2, h3 and h4, the overshoot and step checks, and #137's render crops.
+
+### The forms
+| Form | Definition |
+|---|---|
+| h3 | `C1(z_s)` at every L cell, lowered toward each D8 diagonal step line of `z_s` (the segment between the two H1 cell centres) to the line's linear value at the cell's projection: fully within 1 L cell of the line, falling off smoothly (smoothstep) to no change at 2 L cells; never raised. Quads without a diagonal step stay `C1(z_s)`, except within 2 L cells of a step line's end, where the band reaches into the neighbouring quads |
+| h4 | Reduced Clough-Tocher on h2's split. Each triangle is three cubic Bezier patches about its centroid, the normal derivative linear along each outer edge. Gradients: central differences of `z_s`. On every edge that is a D8 step (diagonal or axis), the edge control points are clamped between the corner heights in order, so the control polygon is monotone. That breaks C1 at those edges' corners |
+
+- Both are measured as SPIKE-136, with and without the raw band `r`, against `S0` and SPIKE-135's classes. Full tables: `raw/smooth-tables.md`, built by `tools/smooth_tables.py raw r1h r3a r3b m1 f1` from `raw/smooth-ladder-<w>.csv` and `raw/smooth-handover-<w>.csv`. Runs: 441-675 s, peak 6.3 GB (`raw/smooth-peaks.txt`).
+
+### Results
+River length (75 km2 channels) on closed depressions, all / over 5 m deep, %:
+
+| Surface | R1h | R3a | R3b | M1 | F1 |
+|---|---|---|---|---|---|
+| `S0` | 76.5 / 65.0 | 74.9 / 37.2 | 68.8 / 52.4 | 89.1 / 88.5 | 80.4 / 71.1 |
+| h2 + `r` | 47.6 / 27.3 | 51.3 / 0.6 | 24.3 / 7.2 | 66.4 / 63.3 | 53.8 / 39.5 |
+| h3 | 12.1 / 1.2 | 31.9 / 0.0 | 10.6 / 0.0 | 17.1 / 12.2 | 46.5 / 40.2 |
+| h3 + `r` | 49.6 / 23.4 | 54.4 / 0.7 | 27.4 / 2.6 | 67.2 / 62.8 | 58.1 / 40.8 |
+| h4 | 33.3 / 16.1 | 39.6 / 0.1 | 25.9 / 8.7 | 44.0 / 38.6 | 50.9 / 39.2 |
+| h4 + `r` | 52.7 / 31.5 | 55.7 / 1.6 | 31.9 / 9.8 | 68.8 / 65.7 | 59.3 / 43.5 |
+
+Breach volume, km3, and D-2 failures (H1 trunk reaches, of 3,094-9,804 measured):
+
+| Surface | R1h | R3a | R3b | M1 | F1 |
+|---|---|---|---|---|---|
+| `S0` | 155; 352 | 17.2; 78 | 53.6; 568 | 1,645; 1,890 | 127; 525 |
+| h2 + `r` | 14.0; 46 | 4.2; 1 | 1.3; 5 | 348; 864 | 109; 87 |
+| h3 | 0.3; 1 | 1.6; 1 | 0.2; 1 | 143; 52 | 86.6; 52 |
+| h3 + `r` | 14.1; 38 | 4.1; 1 | 0.7; 1 | 328; 838 | 98.8; 56 |
+| h4 | 9.7; 30 | 3.1; 2 | 4.7; 79 | 231; 768 | 112; 82 |
+| h4 + `r` | 23.0; 87 | 5.3; 3 | 5.1; 80 | 406; 1,488 | 119; 81 |
+
+Breach volume against `S0`, % lower, and D-2 failures against `S0`, % fewer:
+
+| Surface | Breach volume: R1h, R3a, R3b, M1 | Breach volume: F1 | D-2: R1h, R3a, R3b, F1 | D-2: M1 |
+|---|---|---|---|---|
+| h2 + `r` | 76-98 | 14 | 83-99 | 54 |
+| h3 + `r` | 76-99 | 22 | 89-100 | 56 |
+| h4 + `r` | 69-91 | 6 | 75-96 | 21 |
+
+`S0`'s ridge cells lowered over 50 m against the reference (`C1(z_s)` without the band; the band cancels):
+
+| Surface | R1h | R3a | R3b | M1 | F1 |
+|---|---|---|---|---|---|
+| h2 | 18,122 | 34 | 1,183 | 594,900 | 57 |
+| h3 | 16,243 | 94 | 2,416 | 153,479 | 169 |
+| h4 | 8,304 | 21 | 854 | 98,906 | 43 |
+
+Relief kept against `S0` with the band, band std / 1 km p50 / 1 km p95, %:
+
+| Surface | R1h | R3a | R3b | M1 | F1 |
+|---|---|---|---|---|---|
+| h2 + `r` | 95 / 97 / 96 | 94 / 93 / 97 | 94 / 97 / 96 | 95 / 97 / 95 | 94 / 96 / 95 |
+| h3 + `r` | 107 / 102 / 101 | 108 / 99 / 100 | 111 / 102 / 102 | 105 / 101 / 100 | 108 / 102 / 101 |
+| h4 + `r` | 104 / 101 / 101 | 105 / 102 / 100 | 107 / 102 / 102 | 104 / 101 / 101 | 105 / 101 / 101 |
+
+- Over 100 %: h3's grooves and h4's overshoot add relief in the 200 m-1 km band.
+
+h4's overshoot beyond the corners of its macro triangle (over 1 cm, land of the box), and h4 sampled along every D8 step (33 samples centre to centre):
+
+| Window | Above the corners: cells (%), max | Below: cells (%), max | Steps rising over 1 mm (of the box's steps), max rise |
+|---|---|---|---|
+| R1h | 369,060 (2.17 %), 95 m | 292,235 (1.72 %), 66 m | 318 (of 267,606), 0.31 m |
+| R3a | 392,170 (1.96 %), 20 m | 348,389 (1.74 %), 18 m | 3,782 (of 321,909), 0.15 m |
+| R3b | 489,297 (2.24 %), 37 m | 285,592 (1.31 %), 34 m | 399 (of 342,995), 0.13 m |
+| M1 | 506,038 (2.06 %), 227 m | 648,470 (2.64 %), 208 m | 1,140 (of 384,400), 47 m |
+| F1 | 737,017 (3.00 %), 18 m | 724,081 (2.95 %), 24 m | 8,026 (of 384,372), 1.6 m |
+
+- The rising steps are most frequent on F1 (2.1 % of its steps) and R3a (1.2 %), and rise most on M1 (47 m) and F1 (1.6 m), where `z_s` keeps closed depressions (SPIKE-135). KH's routing runs on the 1e-3 m flood, so a step inside a depression can rise on `z_s` itself, and the monotone clamp then keeps it rising. This was not traced cell by cell.
+- h4 without the band puts 83,573 (R1h), 305,076 (R3a), 89,954 (R3b) and 23,358 (F1) inland land cells at or below 0 m (M1 none), where h3 puts at most 95 and `C1(z_s)` 0-1,340. The cubic patches dip below their corners (the table above); where the corners are near 0 m that leaves land at or below it. Not traced to single coast nodes.
+
+### The look
+Four panels per window, #137's crops, at a 10-degree sun: `C1(z_s)` + `r`, h2 + `r`, h3 + `r`, h4 + `r`.
+- **h4 + `r` comes closest to `C1(z_s)` + `r` on every window.** The facets are gone; faint diagonal crinkles remain along the steps (R3b, F1). F1 shows a few inland patches at or below 0 m (the undershoot).
+- **h3 + `r` keeps `C1`'s shapes but scratches thin diagonal grooves along every step.** They form dense parallel stripes on flat ground (R3a, F1). The grooves are 1-2 L cells wide, the width of the band.
+- h2 + `r` is as in #137.
+
+### Findings (addendum 2)
+1. **h3 drains best.** Without the band it leaves 10.6-46.5 % of the river length on closed depressions, against h2's 19.2-46.7 % (SPIKE-136). D-2: 1 on three windows, 52 on M1 and F1. With the band it matches h2 + `r`.
+   - It looks wrong: grooves 1-2 L cells wide along every diagonal step, visible on flat ground.
+2. **h4 looks right, and drains somewhat worse than h2.**
+   - With the band: breach volume 69-91 % below `S0`'s on four windows (h2 + `r` 76-98 %), and D-2 75-96 % fewer on four windows (h2 + `r` 83-99 %).
+   - M1's D-2 falls only 21 % (h2: 54 %).
+   - It cuts the fewest `S0` ridge cells by more than 50 m of the three: 21-98,906, against h2's 34-594,900.
+3. **h4's costs:**
+   - overshoot beyond the corners on 1.3-3.0 % of the land each way, up to 227 m on M1;
+   - undershoot that leaves inland land at or below 0 m (R3a the most, 305,076 cells without the band);
+   - rising steps inside `z_s`'s own depressions.
+   - All three come from the cubic patches; none is a facet.
+4. **The band stays the larger defect.** With `r` added, all three forms fall back to 24-69 % of the river length on closed depressions. KS's work on the new start is the same for each.
+
+### Recommendation (addendum 2)
+**h4 + `r` (Clough-Tocher on the flow-diagonal split, monotone step edges) becomes KS's start: it removes the facets and keeps most of h2's drainage (breach volume 69-91 % below `S0`'s on four windows).**
+Before it lands:
+- clamp h4 to its macro triangle's corner range: the overshoot, and the undershoot that leaves land at or below 0 m;
+- floor the band at the sea near the coast (SPIKE-135);
+- leave M1 to decision 5.
+
+h3 stays the reference for drainage, for comparison. Not tested:
+- the clamped h4;
+- h4 with gradients from a wider stencil;
+- a narrower h3 band.
+
+### Visuals (addendum 2)
+Analysis renders (CPU), not the production path: no bake of any KH form exists. #137's crops: the box's 52 km block with the largest p50 1 km relief, 1 px an L cell, hillshade at sun altitude 10 degrees from the north-west, no vertical exaggeration. Panels: `C1(z_s)` + `r` (`S0`), h2 + `r`, h3 + `r`, h4 + `r`.
+
+![R1h](images/kh-smooth-r1h.jpg)
+R1h: h4 close to `S0`; h3 with fine diagonal grooves; h2's triangles.
+
+![R3a](images/kh-smooth-r3a.jpg)
+R3a, flat ground: h3's grooves as dense parallel stripes; h4 smooth.
+
+![R3b](images/kh-smooth-r3b.jpg)
+R3b: h4 with faint crinkles along the diagonal valley; h3 with grooves.
+
+![M1](images/kh-smooth-m1.jpg)
+M1: h4 keeps `S0`'s mountain shapes; h3's grooves cross the slopes.
+
+![F1](images/kh-smooth-f1.jpg)
+F1: h4 near `S0`, with small inland patches at or below 0 m (sand); h3's grooves on the lowland.
+
+### Reproduce (addendum 2)
+- On `spike/kh-stage`: `cargo test -p planet-generators --lib kh`.
+- Runs: `cargo xtask heavy target/release/examples/kh_smooth.exe --window <w> --out <dir> --tag <tag> --crop-at <cx,cy,crop>`, with #137's crops from `kh_ridge`'s `<tag>-crop.txt`.
+- Tables: `python tools/smooth_tables.py raw r1h r3a r3b m1 f1`. Sheets: `python tools/kh_smooth_sheet.py <dir> <tag> <name> <out.jpg>`.
