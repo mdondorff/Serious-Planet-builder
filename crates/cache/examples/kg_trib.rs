@@ -2322,6 +2322,53 @@ fn main() -> Result<(), String> {
             v2.len(),
             viol.len()
         );
+        // order #159 item 3: BUILD-059's density on the stage input, by the gate's rule (outlets the sea and the window's edge, round rules, seed 7; a channel cell is a land cell
+        // whose area is at least 1 km2; the length of the steps from a channel cell in the box to its receiver, diagonals sqrt 2, a step into the sea not counted), once with the
+        // routing's MFD area (the gate's) and once with the D8 accumulation of the same receivers (the extractor's initiation)
+        if value(&args, "--density-check").is_some() {
+            let t_d = Instant::now();
+            let edge: Vec<bool> = (0..n).map(|c| sea_l[c] || c % w == 0 || c / w == 0 || c % w == w - 1 || c / w == h - 1).collect();
+            let rr = route_rules(&gl, &z_in, &edge, 1e-3, 7, 0.0, None, RoundRules::ROUND);
+            let mut d8 = vec![0.0f64; n];
+            for c in 0..n {
+                if !edge[c] {
+                    d8[c] = dx_l * dx_l;
+                }
+            }
+            for &c in rr.order.iter().rev() {
+                let to = rr.receiver[c as usize];
+                if to != NONE {
+                    let a = d8[c as usize];
+                    d8[to as usize] += a;
+                }
+            }
+            let land_cells = (0..n).filter(|&c| in_box[c] && !sea_l[c]).count();
+            let land_km2 = land_cells as f64 * dx_l * dx_l / 1e6;
+            let density = |area: &dyn Fn(usize) -> f64| {
+                let mut len = 0.0;
+                let mut cells = 0usize;
+                for c in 0..n {
+                    if !in_box[c] || sea_l[c] || area(c) < 1.0e6 {
+                        continue;
+                    }
+                    cells += 1;
+                    let to = rr.receiver[c];
+                    if to == NONE || sea_l[to as usize] {
+                        continue;
+                    }
+                    let to = to as usize;
+                    let diag = (to % w != c % w) && (to / w != c / w);
+                    len += if diag { core::f64::consts::SQRT_2 } else { 1.0 } * dx_l;
+                }
+                (len / 1e3 / land_km2, cells)
+            };
+            let (d_mfd, c_mfd) = density(&|c| rr.area[c]);
+            let (d_d8, c_d8) = density(&|c| d8[c]);
+            println!(
+                "G1d density check (BUILD-059's rule on the stage input, 1 km2): MFD area {d_mfd:.4} km/km2 ({c_mfd} channel cells); D8 area {d_d8:.4} km/km2 ({c_d8}); {:.1} s",
+                t_d.elapsed().as_secs_f64()
+            );
+        }
         // BUILD-059's hierarchy on the combined graph, by the river gate's G2 code (BUILD-060's `graph_report`): rasterised L channel over the counted land (the region's box), streams, R_b
         {
             use planet_cache::river_gate_graph::{graph_report, Window as GWindow};
