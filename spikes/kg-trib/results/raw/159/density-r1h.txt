@@ -1,0 +1,1 @@
+G1d density check (BUILD-059's rule on the stage input, 1 km2): MFD area 1.3139 km/km2 (1913204 channel cells); D8 area 0.6586 km/km2 (960887); D8 outside kept basins 0.4684 (682520); the extractor's channel cells 0.4521 (658770); 75.9 s

@@ -1,0 +1,5 @@
+G1d landmass pass (reading 18): 12672 trunk reaches in 0.6 s, 0 unordered, 2480 heads over their H1 seed; junction breaks 2275 before, 0 after
+G1d RG-0 (S0, KS off); D8 initiation, A_crit 1 km2: basins 206.3 s (29572 kept L basins, 5.6 % of the box's land), extractor 97.7 s; runoff 1.97e-8 m/s; cells below S0 0
+G1d box: 110944 tributary reaches, 883064 channel cells, 89878 km, land 226070 km2, density 0.398 km/km2; trunks given 12672
+G1d validators (open slice, G1c's graph plus the tributaries): 10 violations {"TwoNodesOneAnchor": 10} (G1c's alone: 10 {"TwoNodesOneAnchor": 10})
+G1d graph hierarchy (river-gate --graph's code, BUILD-059 definition): 121016.0 km of rasterised L channel over 226069.8 km2, density 0.5353 km/km2; streams [69855, 14987, 3083, 371, 31, 24]; R_b 6.78 (5 orders)
