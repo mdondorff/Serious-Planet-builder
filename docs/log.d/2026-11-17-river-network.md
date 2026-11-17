@@ -1,0 +1,1 @@
+- 2026-11-17 river-network (BUILD-059, TEST-137): river-gate measures the channel network at 1 and 75 km2 (density, Strahler streams, R_b) and takes a raw grid; the bar from the GLO-30 tiles at 1-2x each window's 1 km relief (lead #163).
