@@ -206,3 +206,34 @@ fn the_gate_prints_g2_columns_with_their_classes_only_when_given_g2_inputs() {
     assert!(cols.iter().all(|(_, _, c)| *c != GateClass::Incremental));
     assert_eq!(cols.iter().map(|c| &c.0).collect::<std::collections::BTreeSet<_>>().len(), cols.len(), "column names are unique");
 }
+
+// spec: TEST-137, BUILD-060
+#[test]
+fn the_stage_and_graph_readers_take_the_files_the_spec_names_and_refuse_a_wrong_size() {
+    use planet_cache::river_gate_graph::{read_graph, read_stages};
+    let dir = std::env::temp_dir().join(format!("river-gate-g2-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a temp dir");
+    let u16s = |v: &[u16]| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
+    // no stage file at all is refused
+    assert!(read_stages(&dir, 4).unwrap_err().contains("no ks-lower.u16"));
+    // KS lowers only, KV lowers and fills, KC did not run; three residual records under a header
+    std::fs::write(dir.join("ks-lower.u16"), u16s(&[0, 5, 300, 0])).unwrap();
+    std::fs::write(dir.join("kv-lower.u16"), u16s(&[1, 0, 0, 0])).unwrap();
+    std::fs::write(dir.join("kv-fill.u16"), u16s(&[0, 0, 0, 7])).unwrap();
+    std::fs::write(dir.join("residuals.csv"), "cell,stage,needed_m,available_m,feature\n1,ks,1,1,a\n2,ks,1,1,b\n3,kv,1,1,c\n\n").unwrap();
+    let (st, rec) = read_stages(&dir, 4).unwrap();
+    assert_eq!(st.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["ks", "kv"]);
+    assert_eq!((st[0].lower.clone(), st[0].fill.is_none(), st[1].fill.clone()), (vec![0, 5, 300, 0], true, Some(vec![0, 0, 0, 7])));
+    assert_eq!(rec, Some(3));
+    // a field of another size is refused, naming the file
+    assert!(read_stages(&dir, 5).unwrap_err().contains("ks-lower.u16"));
+    // a graph file round-trips its canonical form; another header is refused
+    let g = graph();
+    let p = dir.join("g.txt");
+    std::fs::write(&p, g.canonical()).unwrap();
+    assert_eq!(read_graph(p.to_str().unwrap()).unwrap(), g);
+    std::fs::write(&p, "river-graph 1 body=0\n").unwrap();
+    assert!(read_graph(p.to_str().unwrap()).is_err());
+    let _ = std::fs::remove_dir_all(&dir);
+}

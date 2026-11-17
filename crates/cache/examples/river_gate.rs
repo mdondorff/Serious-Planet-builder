@@ -19,9 +19,8 @@ use planet_cache::river_gate::{
     border_inside, commit_differences, key_note, lay_store_ground, measure, raw_grid_arg, raw_grid_heights, Crossing, GateInput,
     GateParams, LWindow, RawGrid, WindowIdentity, GRID_BORDER, GRID_CELL_M,
 };
-use planet_cache::river_gate_graph::{G2Input, StageField, Window};
+use planet_cache::river_gate_graph::{read_graph, read_stages, G2Input, Window};
 use planet_core::{Face, TangentWarp, Vec3};
-use planet_generators::bake::river_graph::Graph;
 use planet_generators::global::{read_elevation_c1, GlobalSample, LatticeSource, ReadError};
 use planet_generators::runoff::{discharge_weight, pet_mm, runoff_mm};
 use planet_world_def::WorldDefinition;
@@ -118,51 +117,6 @@ fn grid_gate(arg: &str, params: &GateParams) -> Result<(), String> {
     }
     println!("{}", report.fields_line());
     Ok(())
-}
-
-/// A canonical river graph file (GEN-189).
-fn read_graph(path: &str) -> Result<Graph, String> {
-    let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
-    Graph::parse(&text).map_err(|e| format!("{path}: {e}"))
-}
-
-/// The per-stage budget fields of a directory (BUILD-060): `<stage>-lower.u16` and `<stage>-fill.u16` for stage ks, kv, kc (little-endian u16 of 0.1 m, row-major on the window's L grid; a missing
-/// file is a stage that did not run, or a stage without fills), and `residuals.csv` (a header and one line per residual record), when present.
-fn read_stages(dir: &Path, n: usize) -> Result<(Vec<StageField>, Option<usize>), String> {
-    let read = |name: &str| -> Result<Option<Vec<u16>>, String> {
-        let p = dir.join(name);
-        if !p.exists() {
-            return Ok(None);
-        }
-        let b = std::fs::read(&p).map_err(|e| format!("{}: {e}", p.display()))?;
-        if b.len() != 2 * n {
-            return Err(format!("{}: {} bytes, the window's {n} cells of u16 are {}", p.display(), b.len(), 2 * n));
-        }
-        Ok(Some(b.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect()))
-    };
-    let mut out = Vec::new();
-    for st in ["ks", "kv", "kc"] {
-        if let Some(lower) = read(&format!("{st}-lower.u16"))? {
-            out.push(StageField { name: st.to_string(), lower, fill: read(&format!("{st}-fill.u16"))? });
-        }
-    }
-    if out.is_empty() {
-        return Err(format!("{}: no ks-lower.u16, kv-lower.u16 or kc-lower.u16", dir.display()));
-    }
-    let res = dir.join("residuals.csv");
-    let records = if res.exists() {
-        Some(
-            std::fs::read_to_string(&res)
-                .map_err(|e| format!("{}: {e}", res.display()))?
-                .lines()
-                .skip(1)
-                .filter(|l| !l.trim().is_empty())
-                .count(),
-        )
-    } else {
-        None
-    };
-    Ok((out, records))
 }
 
 fn main() -> Result<(), String> {
@@ -385,6 +339,11 @@ fn main() -> Result<(), String> {
             (Some(st), rec)
         }
     };
+    if stages.is_some() && (x0 % l as i64 != 0 || y0 % l as i64 != 0) {
+        return Err(format!(
+            "--stages: the budget field reads H1 blocks of {l} L cells, and the window's origin ({x0}, {y0}) is not on an H1 corner"
+        ));
+    }
     let g2_input = (graph.is_some() || partition.is_some() || stages.is_some()).then(|| G2Input {
         window: Window { x0: x0 as u64, y0: y0 as u64, w, h },
         graph: graph.as_ref(),

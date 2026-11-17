@@ -2,12 +2,14 @@
 //! (GEN-189), from the per-stage budget fields and from a second partition's graph, beside its raster numbers. Pure functions; the river gate's `measure` calls them when the input names a graph,
 //! stages or a partition pair, so a B row without them prints none of these columns. Every column carries its gate class ([`GateClass`]).
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::path::Path;
 
 use planet_generators::bake::river_graph::{diff, rasterise, validate, Change, Checks, Graph, Level, NodeKind, Reason, Violation};
 
 use crate::river_suite::fit;
 
-/// The gate class of a column (the plan addendum's section 4): a pass in one class never covers a failure in another.
+/// The gate class of a column (the plan addendum's section 4): a pass in one class never covers a failure in another. BUILD-060 emits no incremental or product column (the incremental
+/// build and the owner's flight are measured elsewhere); the classes are kept so the names match the addendum.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GateClass {
     Correctness,
@@ -49,13 +51,15 @@ impl Window {
     }
 }
 
-/// Two global cell ids of one level are 8-neighbours (plane ids; a window lies on one face).
+/// Two global cell ids of one level are 8-neighbours by their plane coordinates (a window lies on one face; a graph from another face never matches it). The level is not read: both
+/// levels use the plane form `(row << 32) | column`.
 pub fn adjacent(_: Level, a: u64, b: u64) -> bool {
     let d = |p: u64, q: u64| p.abs_diff(q);
     a != b && d(a & 0xFFFF_FFFF, b & 0xFFFF_FFFF) <= 1 && d(a >> 32, b >> 32) <= 1
 }
 
 /// The per-stage diagnostic fields of the terrain-change budget (G0 contracts section 6): u16 `floor(m / 0.1)` per window cell, the lowering and (KV, KC) the fill, in stage order.
+#[derive(Clone, Debug, PartialEq)]
 pub struct StageField {
     pub name: String,
     pub lower: Vec<u16>,
@@ -480,7 +484,8 @@ pub fn budget_report(
         u.lower_p95_m = quant(&mut low, 0.95);
         r.stages.push(u);
     }
-    // a field floors each stage's use to 0.1 m, so the sum is at most the true use: over the budget it is a true overrun
+    // a field floors each stage's use to 0.1 m, so the sum is at most the true use: over the budget it is a true overrun; an overrun under the fields' step is not seen, so these
+    // counts are diagnostic (G0 contracts section 6: the fields are never the gate; GEN-189's f64 budget validator is)
     for &c in &cells {
         r.overrun += usize::from(used[c] > budget[c] + 1e-9);
         r.at_95 += usize::from(used[c] >= 0.95 * budget[c]);
@@ -569,10 +574,10 @@ impl G2Report {
                 push(&format!("b_{n}_max_m"), format!("{:.1}", s.lower_max_m), Preservation);
                 push(&format!("b_{n}_filled"), s.filled.to_string(), Preservation);
                 push(&format!("b_{n}_fill_max_m"), format!("{:.1}", s.fill_max_m), Preservation);
-                push(&format!("b_{n}_fill_over"), s.fill_over.to_string(), Correctness);
+                push(&format!("b_{n}_fill_over"), s.fill_over.to_string(), Preservation);
             }
             push("b_land", b.land.to_string(), Preservation);
-            push("b_overrun", b.overrun.to_string(), Correctness);
+            push("b_overrun", b.overrun.to_string(), Preservation);
             push("b_at_95", b.at_95.to_string(), Preservation);
             push("b_at_95_pct", format!("{:.3}", 100.0 * b.at_95 as f64 / b.land.max(1) as f64), Preservation);
             push("b_residual_records", b.residual_records.map_or("-".into(), |v| v.to_string()), Correctness);
@@ -650,7 +655,7 @@ impl G2Report {
                 })
                 .collect();
             out.push(format!(
-                "RIVER-GATE budget [correctness, preservation]: over {} land cells inside, against S0: {}; {} cells over the budget, {} at 95 % of it or more; residual records {}, residual reaches {}",
+                "RIVER-GATE budget [preservation; diagnostic fields, the f64 validator is the correctness gate]: over {} land cells inside, against S0: {}; {} cells over the budget, {} at 95 % of it or more; residual records {}, residual reaches {}",
                 b.land,
                 st.join("; "),
                 b.overrun,
@@ -667,4 +672,49 @@ impl G2Report {
         }
         out
     }
+}
+
+/// A canonical river graph file (GEN-189).
+pub fn read_graph(path: &str) -> Result<Graph, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+    Graph::parse(&text).map_err(|e| format!("{path}: {e}"))
+}
+
+/// The per-stage budget fields of a directory (BUILD-060): `<stage>-lower.u16` and `<stage>-fill.u16` for stage ks, kv, kc (little-endian u16 of 0.1 m, row-major on the window's L grid; a missing
+/// file is a stage that did not run, or a stage without fills), and `residuals.csv` (a header and one line per residual record), when present.
+pub fn read_stages(dir: &Path, n: usize) -> Result<(Vec<StageField>, Option<usize>), String> {
+    let read = |name: &str| -> Result<Option<Vec<u16>>, String> {
+        let p = dir.join(name);
+        if !p.exists() {
+            return Ok(None);
+        }
+        let b = std::fs::read(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+        if b.len() != 2 * n {
+            return Err(format!("{}: {} bytes, the window's {n} cells of u16 are {}", p.display(), b.len(), 2 * n));
+        }
+        Ok(Some(b.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect()))
+    };
+    let mut out = Vec::new();
+    for st in ["ks", "kv", "kc"] {
+        if let Some(lower) = read(&format!("{st}-lower.u16"))? {
+            out.push(StageField { name: st.to_string(), lower, fill: read(&format!("{st}-fill.u16"))? });
+        }
+    }
+    if out.is_empty() {
+        return Err(format!("{}: no ks-lower.u16, kv-lower.u16 or kc-lower.u16", dir.display()));
+    }
+    let res = dir.join("residuals.csv");
+    let records = if res.exists() {
+        Some(
+            std::fs::read_to_string(&res)
+                .map_err(|e| format!("{}: {e}", res.display()))?
+                .lines()
+                .skip(1)
+                .filter(|l| !l.trim().is_empty())
+                .count(),
+        )
+    } else {
+        None
+    };
+    Ok((out, records))
 }
