@@ -18,10 +18,10 @@ Code location: spike branch `spike/ks-g1b` (`crates/cache/examples/ks_g1b.rs`, n
 | RG-0 | `S0` |
 | RG-1 | KS0 = `C1(z_s) + min(r, H)` = `S0 - max(0, r - H)`, `alpha` = 1 |
 | RG-2 | KS1 = `S0 - max(0, r - H_f)`; `H_f` = KS0 over the first channel cell (drained area at least 1 km2, land) on its receiver chain in a routing of KS0 at L (epsilon 1 mm, the window's seed, default round rules); stand-in lines until G1d |
-| Budget | G0 contracts §6: `relief_1km` per 814 m cell (range of `S0` over the L cells within 5 cells of its centre L cell), `relief10` its p50 over the 814 m cells within 25 km, `budget = min(50, max(10, 0.5 relief10))` m |
+| Budget | G0 contracts §6: `relief_1km` per 814 m cell (range of `S0` over the L cells within 5 cells of its centre L cell, taken as index 4 of 8), `relief10` its p50 over the 814 m cells within 25 km, `budget = min(50, max(10, 0.5 relief10))` m |
 | Clamp | lowering = `min(max(0, r - band), budget)`; a residual where `r - band` exceeds the budget |
-| Protected | the L cells of H1's lake water (today's kept basins) are never changed; L basins from 0.25 km2 (G1e) are not in this run |
-| Counted | land (`S0` > 0) inside the region's box |
+| Protected | the L cells under H1's lake water cells at 814 m (today's kept basins, `front.lakes.water`) are never changed; L basins from 0.25 km2 (G1e) and K6''s own basins are not in this run; the gate's G-DRAIN does not exclude protected basins here (no H1 input), unlike G0 contracts §9 |
+| Counted | land (`S0` > 0) inside the region's box; KS itself is applied on all land of the window, margin included |
 | Gate | BUILD-055 and BUILD-057 on each surface with `S0` as the start, no H1 input, no L round: basins, G-DRAIN, `lowered`, relief at 1 km |
 | Ridge, saddle | G0 contracts §9: a ridge cell of `S0` (land, inside, at least 2 m above both cells 2 cells away on an axis or diagonal); a cut-through saddle is a ridge cell lowered over 20 m with a channel at 1 km2 (5 km2) within one cell where `S0` has none; counted as 8-connected groups |
 | Divides | the catchments of `S0`'s 75 km2 streams (a stream runs from a head down through every confluence along its larger donor; land draining straight to an outlet is one catchment); a divide cell has a land 4-neighbour of another catchment; "near" is within 10 cells (1 km, Chebyshev) |
@@ -71,7 +71,7 @@ Code location: spike branch `spike/ks-g1b` (`crates/cache/examples/ks_g1b.rs`, n
 - A 75 km2 stream's catchment is about 9 km across, so half to three quarters of the land lies within 1 km of a divide.
 
 ### 2.3 Budget field and inputs
-| Window | Budget p5 / p50 / p95, m | Channel cells at 814 m, today / K6' | 814 m cells of H1 lake water (protected), % of the window |
+| Window | Budget p5 / p50 / p95 over the whole solve window (1,020 x 1,020 cells, margin included), m | Channel cells at 814 m, today / K6' | 814 m cells of H1 lake water (protected), % of the whole solve window |
 |---|---|---|---|
 | R1h | 10.0 / 26.6 / 50.0 | 47,951 / 63,095 | 4.8 |
 | R3a | 10.0 / 10.0 / 24.0 | 78,235 / 95,778 | 3.7 |
@@ -100,7 +100,7 @@ Code location: spike branch `spike/ks-g1b` (`crates/cache/examples/ks_g1b.rs`, n
 - **Ridges and saddles.** No ridge cell is lowered over 20 m on R3a, R3b and F1. R1h: 0.26-0.31 % of ridge cells, 159-258 saddles at 1 km2. M1: 2.1-2.8 % of ridge cells, 1,688-3,809 saddles at 1 km2; the 50 m budget is what allows a ridge cut there.
 - **New basins: none net.** Every KS surface has a lower G-DRAIN than `S0` (by 0.03 to 2.14 points) and fewer basins, except M1 RG-1 with more basins at a lower G-DRAIN: 155 more with K6' (13,422 against 13,267), 24 more with today's H. The gate counts basins, not their identity, so a basin made and another removed cancel.
 - **Relief:** 1 km relief rises by at most 0.87 m (M1): KS deepens valley floors and leaves the tops.
-- **Near divides:** on R1h, R3a, R3b and F1 a cell near a divide is lowered less often than one elsewhere (RG-2: 2.6-4.7 % against 5.9-8.6 %). On M1, RG-1 lowers near divides twice as often (5.3 % against 2.7 %); RG-2 then lowers elsewhere more.
+- **Near divides:** in RG-2 on R1h, R3a, R3b and F1 a cell near a divide is lowered less often than one elsewhere ( 2.6-4.7 % against 5.9-8.6 %). On M1, RG-1 lowers near divides twice as often (5.3 % against 2.7 %); RG-2 then lowers elsewhere more.
 - **Coasts:** KS lowers 2,653 (F1) to 60,775 (R3a) land cells below the sea (up to 0.30 % of land), low coastal plains near a channel. They become outlets in any routing; the budget does not stop it (it limits depth, not the sea line).
 
 ## 5. For G1d, G1f and the lead
@@ -120,10 +120,10 @@ R1h, H from K6': lowering along the valleys; residuals only in the high north-ea
 R1h, H from today's H1: RG-1 lowers fewer cells; RG-2 is near-identical to K6'.
 
 ![R3a, H from K6'](images/ks-r3a-k6p.jpg)
-R3a, H from K6': the 10 m floor everywhere; lowering under 3 m, no residual.
+R3a, H from K6': the budget at the 10 m floor on most of the region (up to about 20 m top left); lowering at most 3.1 m, no residual.
 
 ![R3b, H from K6'](images/ks-r3b-k6p.jpg)
-R3b, H from K6': as R3a; the lowering follows the channel network.
+R3b, H from K6': the budget at the 10 m floor except a few patches up to about 40 m (top left); lowering at most 2.7 m along the channel network, no residual.
 
 ![M1, H from K6'](images/ks-m1-k6p.jpg)
 M1, H from K6': a 50 m budget everywhere; RG-2's residuals spread over the whole window.
@@ -132,4 +132,4 @@ M1, H from K6': a 50 m budget everywhere; RG-2's residuals spread over the whole
 M1, H from today's H1: RG-1 lowers about 40 % of K6''s cells; RG-2 as K6'.
 
 ![F1, H from K6'](images/ks-f1-k6p.jpg)
-F1, H from K6': under 5.2 m everywhere; no residual.
+F1, H from K6': lowering at most 5.2 m; no residual.
