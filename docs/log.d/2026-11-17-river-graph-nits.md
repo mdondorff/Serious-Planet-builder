@@ -1,0 +1,1 @@
+- 2026-11-17 river-graph-nits (GEN-189, TEST-140): the rasterisation ties signed zeros by id; a residual must carry its stage's needed and available numbers.
