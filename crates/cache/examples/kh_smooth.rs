@@ -2459,7 +2459,6 @@ fn main() -> Result<(), String> {
         let (fx, fy) = fxy(c);
         kh::read_skeleton(&solve.zs, rw, rh, &diag, c1[c], fx, fy, lr, 1.0, 2.0)
     });
-    drop(c1);
     let mut h4z = vec![0f64; nl];
     par_fill(&mut h4z, w, threads, &|c| {
         let (fx, fy) = fxy(c);
@@ -2471,6 +2470,65 @@ fn main() -> Result<(), String> {
         let (fx, fy) = fxy(c);
         kh::read_ct_clamped(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0
     });
+    // ---- spikes #144b (SPIKE-136 addendum 4): h4m, h5, h4b
+    // h4m: h4 clamped to the range of its macro triangle's three corners
+    let mut h4mz = vec![0f64; nl];
+    par_fill(&mut h4mz, w, threads, &|c| {
+        let (fx, fy) = fxy(c);
+        let (v, lo, hi) = kh::read_ct(&solve.zs, rw, rh, &split, &grad, &step, fx, fy);
+        v.clamp(lo, hi)
+    });
+    // h5: C1 everywhere; h4c on the 814 m cells of KH's routing with a D8 area of at least 75 km2 and their 8 neighbours, blended into C1 over one 814 m cell
+    // (weight smoothstep(1 - d), d the distance in 814 m cells from the L cell's centre to the nearest zone cell's square)
+    let chan: Vec<bool> = (0..cells).map(|c| area[c] >= 75.0e6).collect();
+    let zone = dilate(&chan, rw, rh, 1);
+    let smooth = |t: f64| {
+        let t = t.clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    };
+    let mut h5z = vec![0f64; nl];
+    par_fill(&mut h5z, w, threads, &|c| {
+        let (fx, fy) = fxy(c);
+        let (ix, iy) = (fx.round() as i64, fy.round() as i64);
+        let mut d = f64::INFINITY;
+        for j in iy - 2..=iy + 2 {
+            for i in ix - 2..=ix + 2 {
+                if i < 0 || j < 0 || i >= rw as i64 || j >= rh as i64 || !zone[j as usize * rw + i as usize] {
+                    continue;
+                }
+                let (ex, ey) = (((fx - i as f64).abs() - 0.5).max(0.0), ((fy - j as f64).abs() - 0.5).max(0.0));
+                d = d.min((ex * ex + ey * ey).sqrt());
+            }
+        }
+        let wgt = smooth(1.0 - d);
+        c1[c] + wgt * (h4cz[c] - c1[c])
+    });
+    // h4b: h4c within 2 L cells of a D8 diagonal step line (the segment between the two 814 m cell centres), C1 beyond 4 L cells, smoothstep between
+    let mut h4bz = vec![0f64; nl];
+    par_fill(&mut h4bz, w, threads, &|c| {
+        let (fx, fy) = fxy(c);
+        let ix = (fx.floor().max(0.0) as i64).min(rw as i64 - 2);
+        let iy = (fy.floor().max(0.0) as i64).min(rh as i64 - 2);
+        let mut d = f64::INFINITY;
+        for qy in iy - 1..=iy + 1 {
+            for qx in ix - 1..=ix + 1 {
+                if qx < 0 || qy < 0 || qx > rw as i64 - 2 || qy > rh as i64 - 2 {
+                    continue;
+                }
+                let Some((a, b)) = diag(qy as usize * rw + qx as usize) else { continue };
+                let (ax, ay, bx, by) = ((a % rw) as f64, (a / rw) as f64, (b % rw) as f64, (b / rw) as f64);
+                let (dx, dy) = (bx - ax, by - ay);
+                let t = (((fx - ax) * dx + (fy - ay) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+                d = d.min(((fx - ax - t * dx).powi(2) + (fy - ay - t * dy).powi(2)).sqrt() * lr);
+            }
+        }
+        let wgt = 1.0 - smooth((d - 2.0) / 2.0);
+        c1[c] + wgt * (h4cz[c] - c1[c])
+    });
+    {
+        let zone_n = zone.iter().filter(|&&z| z).count();
+        println!("HO {tag} h5 zone: {} channel cells (>= 75 km2), {zone_n} with their neighbours ({:.1} % of the 814 m cells)", chan.iter().filter(|&&z| z).count(), 100.0 * zone_n as f64 / cells as f64);
+    }
     // ---- spikes #141: what remains in closed basins after KH(h4c) + r' and KS1 (#140), by origin. The surface F = KH(h4c)(z_s) + r' - KS1's lowering (ks_kh's dump),
     // r' the band floored at the sea + 0.5 m where KH lies above it (as ks_kh). A defect of a rung: breach or fill over 1 m. A defect cell of F is classed by the first rung of
     // the chain z_b (814 m) -> z_s (814 m) -> KH(h4c)(z_s) at L -> F with a defect there (814 m rungs within one cell, KH within 4 L cells), as SPIKE-135's classifier:
@@ -2695,7 +2753,7 @@ fn main() -> Result<(), String> {
         (x[0], x[1], x[2])
     });
     if let Some((cx, cy, cr)) = crop_at {
-        for (name, f) in [("s0", &start), ("h2r", &h2z), ("h4r", &h4z), ("h4cr", &h4cz)] {
+        for (name, f) in [("s0", &start), ("h2r", &h2z), ("h4r", &h4z), ("h4cr", &h4cz), ("h5r", &h5z), ("h4mr", &h4mz), ("h4br", &h4bz)] {
             let band = name != "s0";
             let mut b: Vec<u8> = Vec::with_capacity(cr * cr * 4);
             for y in cy..cy + cr {
@@ -2706,18 +2764,37 @@ fn main() -> Result<(), String> {
             }
             std::fs::write(out_dir.join(format!("{tag}-crop-{name}-{cr}.f32")), b).map_err(|e| e.to_string())?;
         }
+        // spikes #144b: the h5 zone's channel steps (814 m cell to its receiver, D8 area >= 75 km2) in crop pixels: x1 y1 x2 y2 area_km2
+        let mut txt = String::new();
+        let cpx = |c: usize| ((L * (c % rw)) as f64 + (lr - 1.0) / 2.0 - cx as f64, (L * (c / rw)) as f64 + (lr - 1.0) / 2.0 - cy as f64);
+        for c in (0..cells).filter(|&c| chan[c]) {
+            let Some(q) = rcv(c) else { continue };
+            let ((ax, ay), (bx, by)) = (cpx(c), cpx(q));
+            let inside = |x: f64, y: f64| x >= -8.0 && y >= -8.0 && x < cr as f64 + 8.0 && y < cr as f64 + 8.0;
+            if inside(ax, ay) || inside(bx, by) {
+                txt += &format!("{ax:.1} {ay:.1} {bx:.1} {by:.1} {:.1}
+", area[c] / 1e6);
+            }
+        }
+        std::fs::write(out_dir.join(format!("{tag}-crop-rivers-{cr}.txt")), txt).map_err(|e| e.to_string())?;
     }
 
     // ---- the hand-over surfaces (spikes #138)
     let near_s0 = dilate(&k4.breach.iter().map(|&v| v > PRESENT as f32).collect::<Vec<_>>(), w, h, L / 2);
     let ca = lg.dx() * lg.dx() / 1.0e9;
-    for (name, key) in [("h2 + r", "h2r"), ("h4 Clough-Tocher", "h4"), ("h4 + r", "h4r"), ("h4c clamped", "h4c"), ("h4c + r", "h4cr")] {
-        let src = if key.starts_with("h4c") {
-            &h4cz
-        } else if key.starts_with("h4") {
-            &h4z
-        } else {
-            &h2z
+    let variants: Vec<(&str, &str)> = if args.iter().any(|a| a == "--h5") {
+        vec![("h4c + r", "h4cr"), ("h5 + r", "h5r"), ("h4m + r", "h4mr"), ("h4b + r", "h4br")]
+    } else {
+        vec![("h2 + r", "h2r"), ("h4 Clough-Tocher", "h4"), ("h4 + r", "h4r"), ("h4c clamped", "h4c"), ("h4c + r", "h4cr")]
+    };
+    for (name, key) in variants {
+        let src = match key.trim_end_matches('r') {
+            "h4c" => &h4cz,
+            "h4" => &h4z,
+            "h5" => &h5z,
+            "h4m" => &h4mz,
+            "h4b" => &h4bz,
+            _ => &h2z,
         };
         let z: Vec<f64> = if key.ends_with('r') { (0..nl).map(|p| src[p] + rl[p]).collect() } else { src.clone() };
         let e = d2(&z);
