@@ -37,8 +37,8 @@ Outputs (`--out DIR --tag T`): `T-graph.txt` (GEN-189 canonical), `T-stages/` in
 | KV and KC | 166.1 / 164.5 | 13,186 | 5,146 |
 | Write (5 fields of 133 MB, a 316 MB graph, a 105 MB residual list, the surface) | 120.1 / 119.1 | 13,186 | 5,147 |
 | Total | 688 / 598 | | |
-- The peak (13.2 GB) is the basins stage, above the 12 GB world-build budget (memory note of 2026-11-09).
-- Times differ between the two runs (KG-trib 116 against 80 s, KS0 19 against 12 s): other lanes' jobs ran beside them in the heavy lock's second slot. The peaks agree within 2 MiB.
+- The peak (13,186 MiB, 12.9 GiB) is the basins stage, above the 12 GB world-build budget (memory note of 2026-11-09).
+- Times differ between the two runs (KG-trib 116 against 80 s, KS0 19 against 12 s): other lanes' jobs ran beside them in the heavy lock's second slot. The peaks agree within 2 MiB from the basins stage on (13,186 against 13,188 MiB); before it they differ (KS0 3,384 against 2,906 MiB).
 - The stage counts above are over the whole window, margin included; the gate's counts below are over the region's box.
 
 | Stage output | R1h |
@@ -63,7 +63,7 @@ Outputs (`--out DIR --tag T`): `T-graph.txt` (GEN-189 canonical), `T-stages/` in
 | Partition | one region against two: identical |
 These numbers are plumbing checks, not results: no stage is tuned and the G2 run is not started.
 
-## 4. Gaps for the G2 run
+## 4. Gaps for the G2 run (ruled by the lead, #166a: gaps 1 and 2 explorer's, gap 3 and the basins peak crusader's)
 - `river-gate` measures a window's `S0`, not the chain's final surface: the agreement and every raster column above read `S0`. G2 needs a surface input (for example `--surface FILE` on the window's L grid), a BUILD-060 follow-up.
 - The two-region run splits only the pointwise fields; KG-trunk, basins, KG-trib, KV and KC run on the stitched window, so "identical" is the expected answer here. A partition test of the graph stages needs per-region extraction (crusader's G1d halo cases) in the runner.
 - No reach is flagged `budget_residual`: KS's residuals name no feature (`-`), and the runner does not flag KV/KC's residual features in the graph. GEN-189's f64 budget validator would report each one.
