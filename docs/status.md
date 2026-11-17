@@ -16,13 +16,14 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 
 Dormant items moved to `docs/parking.md` (2026-11-12).
 
-## Queue (2026-11-16, milestone P3: `docs/milestones/P3.md`; E6 river graphs, owner 2026-11-16)
+## Queue (2026-11-17, milestone P3: `docs/milestones/P3.md`; E6 river graphs, owner 2026-11-16)
 | Exit | Step | Lane |
 |---|---|---|
-| E6 | Pre: BUILD-057 coastal snap (TEST-138), density and `R_b` baseline (BUILD-059) | explorer |
-| E6 | G1a: H1 on sub-cell sills of `S0` (SPIKE-127), R1h first | spikes |
-| E6 | G0: fixture terrain and expectations (TEST-139) | crusader |
-| E6 | G0: the contract note (graph, reach, basin, rasterisation, budget, determinism, partition, edit) for the owner | lead |
+| E6 | Done: G0 (contracts, fixture, harness, density bar: #1561-#1575), G1a sills (SPIKE-127), K5' rejected (SPIKE-131), G1e basins (SPIKE-130), KV/KC on the fixture (SPIKE-132), G1c trunk graph (SPIKE-129) | - |
+| E6 | G1b: band conditioning alone, with the budget (SPIKE-128) | explorer |
+| E6 | Deep H1 basins on trunks: census and lake-length bound for the owner's kept-lake decision (SPIKE-134) | spikes |
+| E6 | G1d: tributary extractor on the fixture, then five windows (SPIKE-133) | crusader |
+| E6 | Owner decisions 1-4 (criteria, KS, `S0` reference, K7 passes off) before G1f: `lanes/digest/river-graph/open-decisions-2026-11-17.md` | lead |
 | E4 | ADRs 0125, 0126 proposed (review v4); G3 decides their fate | lead |
 | E5 | ADR 0127 proposed; G1e builds the basin topology; G3 decides | lead |
 
