@@ -30,12 +30,13 @@ Code location: spike branch `spike/deep-basins` (f6395a8f): `crates/cache/exampl
 | In kept basins, every one kept | 61.7 / 1.5 % | 68.5 / 21.6 % | 48.7 / 1.5 % | 90.9 / 16.8 % | 86.3 / 75.0 % |
 | Lowland (`z_s` <= 300 m) in kept basins | 67.9 / 2.0 % | 69.6 / 22.0 % | 60.0 / 2.1 % | no lowland | 86.3 / 75.0 % |
 | In reading 13's lakes (within the budget) | 55.3 / 1.5 % | 68.4 / 21.6 % | 48.7 / 1.5 % | 3.6 / 0.0 % | 10.9 / 1.5 % |
-| Earth at 814 m, channel cells in kept basins: block mean / minimum / median | 20.4-73.7 / 1.9-26.0 / 17.5-74.3 % | 5.5-51.5 / 0.6-9.4 / 5.4-43.4 % | 5.5-54.8 / 0.6-9.4 / 5.4-43.4 % | 7.4-39.2 / 0.2-3.0 / 5.9-41.2 % | 5.5-54.8 / 0.6-9.4 / 5.4-43.4 % |
+| Earth at 814 m, channel cells in kept basins: block mean / minimum / median | 20.4-73.7 / 2.0-26.0 / 17.5-74.3 % | 5.5-51.5 / 0.6-9.4 / 5.4-43.4 % | 5.5-54.8 / 0.6-9.4 / 5.4-43.4 % | 7.4-39.2 / 0.2-3.0 / 5.9-41.2 % | 5.5-54.8 / 0.6-9.4 / 5.4-43.4 % |
 | Review B's aim / decision 5's trigger | 2-10 % / 10 % | | | | |
 
-- Earth at 814 m is not a lake share: bare-earth DTMs give the same as the GLO-30 DSM on the same tiles (11-71 % against 35-74 % with the mean; `raw/earth-h1.txt`). Valleys narrower than the cell vanish in the mean or median, and the river crosses false pits; the block minimum follows the valley floors (0.2-26 %).
+- Earth at 814 m is not a lake share: bare-earth DTMs give similar, lower shares than the GLO-30 DSM on the same tiles (11-71 % against 35-74 % with the mean; `raw/earth-h1.txt`). Valleys narrower than the cell vanish in the mean or median, and the river crosses false pits; the block minimum follows the valley floors (0.2-26 %).
 
 ### 2.2 Kept basins on trunks by origin (basins, river length km; share of the box's river length)
+- Earth-like has no per-basin column: the Earth reference (section 2.1) is a share per tile, not a basin attribution; the K5 test counts a basin as not converged when it keeps under half its cells in a basin with twice the rounds (shrinking and vanishing are not counted apart).
 | Window, base | K6' node | K5 not converged | real, floor in `z_b` | real, floor in `z_s` only (K5) | real, `band` only | Total in kept basins |
 |---|---|---|---|---|---|---|
 | R1h K6' | 36, 2,321 (12.4 %) | 1, 18 | 6, 8,701 (46.3 %) | 0 | 5, 546 (2.9 %) | 48, 11,586 (61.7 %) |
@@ -58,7 +59,7 @@ Code location: spike branch `spike/deep-basins` (f6395a8f): `crates/cache/exampl
 | K6' / today | R1h | R3a | R3b | M1 | F1 |
 |---|---|---|---|---|---|
 | Basins | 48 / 7 | 77 / 132 | 34 / 11 | 37 / 8 | 30 / 48 |
-| Depth p50 / max, m | 2.0 / 75 ; 2.7 / 5 | 0.8 / 18 ; 0.9 / 3 | 1.0 / 5 ; 1.4 / 4 | 16.9 / 1,245 ; 733 / 1,643 | 1.4 / 27 ; 1.1 / 37 |
+| Depth p50 (the value at index n/2) / max, m | 2.0 / 75 ; 2.7 / 5 | 0.8 / 18 ; 0.9 / 3 | 1.0 / 5 ; 1.4 / 4 | 16.9 / 1,245 ; 733 / 1,643 | 1.4 / 27 ; 1.1 / 37 |
 | Area p50 / max, km2 | 24 / 13,231 ; 23 / 50 | 32 / 13,621 ; 5 / 3,120 | 24 / 6,640 ; 12 / 71 | 49 / 26,477 ; 5,119 / 13,160 | 34 / 59,168 ; 5 / 40,462 |
 | Deeper than the budget (crossed by reading 13) | 2 / 0 | 1 / 0 | 0 / 0 | 10 / 8 | 2 / 2 |
 
@@ -73,16 +74,16 @@ Code location: spike branch `spike/deep-basins` (f6395a8f): `crates/cache/exampl
 - The crossing counts are window-wide (the margins hold most of the large basins); the census in sections 2.1-2.3 is the box's.
 
 ## 3. Findings
-1. **Today's K6: the basins on trunks come from the base.** On every window the real basins' floors lie in depressions of `z_b` at 814 m; K5 adds a few (R3a 22 basins, M1 3, which go with twice the rounds). F1's lowland trunks lie 75 % in one family of shallow, very large `z_b` depressions (the largest 40,462 km2, 37 m deep); M1's are 733 m deep at the median.
-2. **K6' adds basins from the band and the node height**, on top of the base's: `band` basins hold 0.2-37 % of the river length (R3b 37 %, R3a 20 %), K6' node basins 0.8-12 %, and its `z_b` basins are larger than today's (R1h 46 % against 1.5 %).
+1. **The basins on trunks come from the base and, on M1, from K5.** Today's K6: on R1h, R3b and F1 every real basin's floor lies in a depression of `z_b` at 814 m; on R3a 22 basins (14.5 % of the river length) go with twice K5's rounds; on M1 3 go with twice the rounds and the deepest (1,643 m) is a stable depression of K5's output `z_s` that `z_b` does not have. K6': the `z_s`-only (K5) real basins hold 56.2 % of M1's river length (its second deepest, 1,229 m, among them) and 8.6 % of R3a's. F1's lowland trunks lie 75 % in one family of shallow, very large `z_b` depressions (the largest 40,462 km2, 37 m deep); M1's eight on today's K6 are 90-1,643 m deep (median 616 m).
+2. **K6' adds basins from the band and the node height**, on top of the base's: `band` basins hold 0-37 % of the river length (R3b 37 %, R3a 20 %, R1h 2.9 %, F1 0.2 %, M1 none), K6' node basins 0.8-12 %, and its `z_b` basins are larger than today's (R1h 46 % against 1.5 %).
 3. **Earth at 814 m is no guide to the lake share:** H1's basin rule on real terrain keeps 5.5-74 % of the channel cells with the mean and 0.2-26 % with the minimum, also on bare-earth DTMs. The kept set at 814 m measures unresolved valleys, not lakes; on this measure today's K6 lies inside or under Earth's mean range except F1 (75 %), K6' above Earth's minimum range everywhere.
 4. **The water balance does not separate them:** every basin on trunks overflows.
 5. **Against review B's 2-10 % and decision 5's 10 % trigger:** today's K6 is under 10 % on R1h and R3b and over it on R3a (21.6 %), M1 (16.8 %) and F1 (75 %); reading 13 leaves 0-1.5 % as lakes on today's K6 (21.6 % on R3a, whose basins are within the 10 m budget); K6' is over 48 % everywhere before reading 13.
 6. **Reading 13 crosses the deep ones but brings back conservation breaks** (40-1,488 per run): a crossing reach carries H1's routed discharge, which falls inside a basin (its losses and the cascade to its spill). The contract needs the crossing reach's `q_w` rule (for instance the basin's `q_out` held through the crossing).
-7. **The deepest basins are not lakes one would draw:** on M1 the three deepest of each base (755-1,643 m deep, 10,500-15,600 km2) lie under ground whose `S0` along the channel runs 230-2,000 m above their H1 floor; on R1h K6''s three deepest have floors 46-75 m below the sea level (an inland L pocket under the sea level drags the node down) while today's three deepest are 5 m coastal flats (stills).
+7. **The deepest basins are not lakes one would draw:** on M1 the three deepest of each base (755-1,643 m deep, 10,500-15,600 km2) have their H1 floor about 85-550 m below the lowest `S0` along the channel and their spill about 500-1,400 m above it (stills); on R1h K6''s three deepest have floors 46-75 m below the sea level (an inland L pocket under the sea level drags the node down) while today's three deepest are 5 m coastal flats (stills).
 
 ## 4. Recommendation (input to decision 5)
-- Fix at the source stage: the deep and the large kept basins on trunks are closed 814 m depressions of the base `z_b`, not lakes and not a K5 or K6' artefact; the base generator (K0-K4) or K5's treatment of `z_b`'s closed depressions is the stage to change, not the kept-lake share.
+- Fix at the source stage: the deep and the large kept basins on trunks are closed 814 m depressions of the base `z_b` (R1h, R3b, F1, most of R3a) and, on M1, also depressions K5 makes in `z_s` (M1 K6' 56 % of the river length; today's deepest); they are not lakes. The base generator (K0-K4) and K5's treatment of closed depressions are the stages to change, not the kept-lake share; K6''s band and node basins come on top (finding 2).
 - Until then: reading 13 for the trunk graph, with the crossing reach's `q_w` rule added to the contract; lakes only from basins within the budget (today's K6: 0-1.5 % of the river length on four windows, 21.6 % on R3a).
 - The Earth share at 814 m is not a target for decision 5: it measures resolution.
 
@@ -99,4 +100,4 @@ M1, K6': the same family (1,245, 1,229 and 755 m deep).
 R1h (face 1, seed 14), today's K6: the three deepest are 5 m coastal flats at the sea level, 23-41 km2.
 
 ![R1h K6'](images/deep-r1h-k6p.png)
-R1h, K6': floors 46-75 m below the sea level under land 0-300 m high; each H1 cell takes its lowest L cell, an inland pocket below the sea level.
+R1h, K6': floors 46-75 m below the sea level under land 0-900 m high; each H1 cell takes its lowest L cell, an inland pocket below the sea level.
