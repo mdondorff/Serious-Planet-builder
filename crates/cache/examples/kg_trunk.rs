@@ -1056,6 +1056,73 @@ fn route_through(m: &Measure, line: &[(f64, f64)], points: &[usize]) -> Option<(
     Some((route, failed, rise))
 }
 
+/// The lowest-path centreline: Dijkstra inside the corridor from `points[0]` through each waypoint, the cost of a step its length times `1 + (z - z_min) / 10 m`
+/// (`z_min` the corridor's lowest cell), steps from land only, a sea cell ends the route; ties by cell id. Returns the route, whether its largest rise above its
+/// running minimum exceeds `bar`, and that rise.
+fn route_low(m: &Measure, line: &[(f64, f64)], points: &[usize]) -> Option<(Vec<usize>, bool, f64)> {
+    let (index, cells) = m.corridor(line)?;
+    if points.iter().any(|p| !index.contains_key(p)) {
+        return None;
+    }
+    let zmin = cells.iter().map(|&c| m.water[c]).fold(f64::INFINITY, f64::min);
+    let w = m.w;
+    let mut route = vec![points[0]];
+    for leg in points.windows(2) {
+        let (from, to) = (leg[0], leg[1]);
+        let mut dist = vec![f64::INFINITY; cells.len()];
+        let mut parent = vec![usize::MAX; cells.len()];
+        let mut heap = BinaryHeap::new();
+        dist[index[&from]] = 0.0;
+        heap.push(Key(0.0, from as u32));
+        let mut end = None;
+        while let Some(Key(d, c)) = heap.pop() {
+            let c = c as usize;
+            let ci = index[&c];
+            if d > dist[ci] {
+                continue;
+            }
+            if c == to || (c != from && !m.land(c)) {
+                end = Some(c);
+                break;
+            }
+            let (cx, cy) = ((c % w) as i64, (c / w) as i64);
+            for (dx, dy) in [(-1i64, -1i64), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
+                let (nx, ny) = (cx + dx, cy + dy);
+                if nx < 0 || ny < 0 || nx >= w as i64 || ny >= m.h as i64 {
+                    continue;
+                }
+                let n = ny as usize * w + nx as usize;
+                let Some(&ni) = index.get(&n) else { continue };
+                let len = if dx != 0 && dy != 0 { std::f64::consts::SQRT_2 } else { 1.0 };
+                let nd = d + len * (1.0 + (m.water[n] - zmin).max(0.0) / 10.0);
+                if nd < dist[ni] {
+                    dist[ni] = nd;
+                    parent[ni] = ci;
+                    heap.push(Key(nd, n as u32));
+                }
+            }
+        }
+        let e = end?;
+        let mut part = vec![e];
+        let mut k = index[&e];
+        while parent[k] != usize::MAX {
+            k = parent[k];
+            part.push(cells[k]);
+        }
+        part.reverse();
+        route.extend_from_slice(&part[1..]);
+        if e != to {
+            break;
+        }
+    }
+    let (mut bed, mut rise) = (f64::INFINITY, 0.0f64);
+    for &c in &route {
+        bed = bed.min(m.water[c]);
+        rise = rise.max(m.water[c] - bed);
+    }
+    Some((route, rise > m.bar, rise))
+}
+
 /// An H1 reach of the trunk graph before its L image: the H1 cells (up first), its up and down node kinds, its source segment.
 struct H1Reach {
     cells: Vec<u32>,
@@ -1224,6 +1291,7 @@ fn build_graph(
     bar: f64,
     order: &[u8],
     threads: usize,
+    low_centre: bool,
 ) -> (Graph, Vec<String>) {
     let (x0, y0, w, h, rw) = window;
     let h1_gid = |c: u32| grid.global_id(c as usize);
@@ -1324,7 +1392,13 @@ fn build_graph(
                 }
                 let (k, line, up, down) = &jobs[q];
                 let pts = if up == down { vec![*up] } else { vec![*up, *down] };
-                let r = if pts.len() < 2 { Some((pts.clone(), false, 0.0)) } else { route_through(&mks, line, &pts) };
+                let r = if pts.len() < 2 {
+                    Some((pts.clone(), false, 0.0))
+                } else if low_centre {
+                    route_low(&mks, line, &pts)
+                } else {
+                    route_through(&mks, line, &pts)
+                };
                 done.lock().expect("lock").push((*k, *up, *down, r));
             });
         }
@@ -1515,7 +1589,11 @@ fn l_rivers(z: &[f64], w: usize, h: usize, dx: f64, sea: f64, a_min: f64) -> Vec
             area[r as usize] += area[p as usize];
         }
     }
-    (0..n).map(|p| f64::from(area[p]) >= a_min && z[p] > sea).collect()
+    let riv: Vec<bool> = (0..n).map(|p| f64::from(area[p]) >= a_min && z[p] > sea).collect();
+    let broken = (0..n).filter(|&p| riv[p] && recv[p] != u32::MAX && !riv[recv[p] as usize] && !outlet[recv[p] as usize] && z[recv[p] as usize] > sea).count();
+    let fell = (0..n).filter(|&p| recv[p] != u32::MAX && area[recv[p] as usize] < area[p]).count();
+    println!("KG l_rivers check: {broken} river cells whose receiver is land, not an outlet and not a river cell; {fell} cells whose receiver holds less area");
+    riv
 }
 
 #[allow(clippy::type_complexity)]
@@ -1532,6 +1610,7 @@ fn main() -> Result<(), String> {
     let out_dir = PathBuf::from(value(&args, "--out").unwrap_or("target/kg"));
     let tag = value(&args, "--tag").unwrap_or("w").to_string();
     let base_today = value(&args, "--base") == Some("today");
+    let low = value(&args, "--centre") != Some("maximin");
     std::fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;
     let (face, seed) = (Face(win[0] as u8), win[5] as u64);
     let region = (win[1], win[2], win[3], win[4]);
@@ -1611,6 +1690,7 @@ fn main() -> Result<(), String> {
         let r = route_sills(grid, &f, &sill, outlet, stream, &weight, true);
         h1_from(grid, &s.h, &f, r, outlet, &runoff, &evap)
     };
+    println!("KG centreline: {}", if low { "lowest path (Dijkstra, step cost length x (1 + height over the corridor's minimum / 10 m))" } else { "maximin corridor route (BUILD-057's measure)" });
     println!("KG base H1: {} ({} segments, {} kept basins)", if base_today { "today's K6" } else { "K6' on the sills of S0 (SPIKE-127)" }, h1.hydro.segments.len(), h1.hydro.basins.len());
 
     // ---- HAND at H1 (z_s over the channel cell the 814 m flow path reaches), KS0 at L
@@ -1700,7 +1780,7 @@ fn main() -> Result<(), String> {
     // ---- the graph
     let window = (x0 as u64, y0 as u64, w, h, rw);
     let t = Instant::now();
-    let (g, notes) = build_graph(&h1, &reaches, grid, &start, &ks0, &budget, window, sea, bar, &order, threads);
+    let (g, notes) = build_graph(&h1, &reaches, grid, &start, &ks0, &budget, window, sea, bar, &order, threads, low);
     let build_s = t.elapsed().as_secs_f64();
     let l_reaches: Vec<&GReach> = g.reaches.iter().filter(|r| r.level == Level::L).collect();
     let l_vertices: usize = l_reaches.iter().map(|r| r.vertices.len()).sum();
@@ -1860,7 +1940,7 @@ fn main() -> Result<(), String> {
     }
 
     // ---- determinism and partition (the L stage reads the landmass H1 graph and pointwise fields)
-    let (g1t, _) = build_graph(&h1, &reaches, grid, &start, &ks0, &budget, window, sea, bar, &order, 1);
+    let (g1t, _) = build_graph(&h1, &reaches, grid, &start, &ks0, &budget, window, sea, bar, &order, 1, low);
     println!("KG determinism: 1 thread against {threads}: canonical form {}", if g1t.canonical() == canon { "identical" } else { "DIFFERS" });
     // two regions: KS0 evaluated anew over the left and the right half of the window (each its own evaluation), stitched
     let mut ks_two = vec![0f64; w * h];
@@ -1875,7 +1955,7 @@ fn main() -> Result<(), String> {
         }
     }
     let differ = (0..w * h).filter(|&p| ks_two[p].to_bits() != ks0[p].to_bits()).count();
-    let (g2r, _) = build_graph(&h1, &reaches, grid, &start, &ks_two, &budget, window, sea, bar, &order, threads);
+    let (g2r, _) = build_graph(&h1, &reaches, grid, &start, &ks_two, &budget, window, sea, bar, &order, threads, low);
     println!("KG partition: KS0 of two regions against one: {differ} cells differ; the graph's canonical form {}", if g2r.canonical() == canon { "identical" } else { "DIFFERS" });
     // a neighbouring tile rebuilt: one tile of KS0 evaluated again, the graph's ids
     {
@@ -1886,7 +1966,7 @@ fn main() -> Result<(), String> {
                 ks_t[y * w + x] = ks0_at(y * w + x);
             }
         }
-        let (gt, _) = build_graph(&h1, &reaches, grid, &start, &ks_t, &budget, window, sea, bar, &order, threads);
+        let (gt, _) = build_graph(&h1, &reaches, grid, &start, &ks_t, &budget, window, sea, bar, &order, threads, low);
         let changes = diff(&g, &gt);
         println!("KG tile rebuild: tile ({tx}, {ty}) of the window evaluated again: {} differences ({} topology)", changes.len(), changes.iter().filter(|c| c.is_topology()).count());
     }
