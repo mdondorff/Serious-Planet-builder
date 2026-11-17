@@ -306,7 +306,7 @@ pub fn produce(grid: &Grid, z: &[f64], outlet: &[bool], reaches: &[Reach], owner
                     }
                     if let Some(&(r, v)) = on_reach.get(&c) {
                         let mut j = Node {
-                            id: node_id(p.body, NodeKind::TribJunction, p.level, c as u64),
+                            id: marker_id(p.body, NodeKind::TribJunction, p.level, c as u64, r),
                             kind: NodeKind::TribJunction,
                             level: p.level,
                             anchor: c as u64,

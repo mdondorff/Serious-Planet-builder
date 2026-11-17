@@ -60,6 +60,10 @@ pub struct Input<'a> {
     /// `a_ext` at the window's entry cells (m2), zero elsewhere.
     pub seed_ext: &'a [f64],
     pub tile: &'a dyn Fn(usize) -> Domain,
+    /// The global cell id of a grid cell (the anchors and vertices of the graph).
+    pub gid: &'a dyn Fn(usize) -> u64,
+    /// Keep the per-cell fields `filled`, `root` and `init` (the fixture's halo tests); a window leaves them empty.
+    pub keep_fields: bool,
 }
 
 /// What a run made.
@@ -72,6 +76,8 @@ pub struct Extracted {
     /// The flooded surface the routing ran on, and the D8 catchment root of each cell (the clip of the MFD area).
     pub filled: Vec<f64>,
     pub root: Vec<u32>,
+    /// The D8 accumulation where the flood raised a cell (debug: the share of channel cells in filled depressions).
+    pub raised_channel: usize,
     /// Clipped-MFD area plus the propagated seed (the initiation measure), and the D8 areas with and without the seed.
     pub init: Vec<f64>,
     pub d8: Vec<f64>,
@@ -102,9 +108,13 @@ pub fn extract(inp: &Input, p: &Params) -> Extracted {
             on_trunk.entry(c).or_insert((t, k));
         }
     }
-    let outlet: Vec<bool> = (0..n).map(|c| g.is_active(c) && (inp.sea[c] || inp.exit[c] || on_trunk.contains_key(&c))).collect();
+    let mut is_trunk = vec![false; n];
+    for &c in on_trunk.keys() {
+        is_trunk[c] = true;
+    }
+    let outlet: Vec<bool> = (0..n).map(|c| g.is_active(c) && (inp.sea[c] || inp.exit[c] || is_trunk[c])).collect();
     let (r, filled) = route_rules_filled(g, inp.z, &outlet, p.eps, p.seed, 0.0, None, RoundRules::ROUND);
-    let root = catchment_roots(&r.receiver, &r.order);
+    let root = if inp.keep_fields { catchment_roots(&r.receiver, &r.order) } else { Vec::new() };
     // D8 accumulations (an outlet adds no area of its own) and the seed, donors first
     let mut d8_no_ext: Vec<f64> = (0..n).map(|c| if g.is_active(c) && !outlet[c] { g.cell_area(c) } else { 0.0 }).collect();
     let mut ext: Vec<f64> = inp.seed_ext.to_vec();
@@ -117,25 +127,36 @@ pub fn extract(inp: &Input, p: &Params) -> Extracted {
         }
     }
     let d8: Vec<f64> = (0..n).map(|c| d8_no_ext[c] + ext[c]).collect();
-    let init: Vec<f64> = (0..n).map(|c| if p.mfd_init { r.area[c] + ext[c] } else { d8[c] }).collect();
+    let init_at = |c: usize| if p.mfd_init { r.area[c] + ext[c] } else { d8[c] };
+    let init: Vec<f64> = if inp.keep_fields { (0..n).map(init_at).collect() } else { Vec::new() };
     // channel cells, donors first: the threshold, or a channel donor (closure); never an outlet or a kept basin cell
     let mut channel = vec![false; n];
-    let mut donors: Vec<Vec<usize>> = vec![Vec::new(); n];
-    for &c in r.order.iter() {
-        let to = r.receiver[c as usize];
+    // the donors of each cell as one flat list (CSR), in cell order
+    let mut start = vec![0u32; n + 1];
+    for &to in &r.receiver {
         if to != NONE {
-            donors[to as usize].push(c as usize);
+            start[to as usize + 1] += 1;
         }
     }
-    for d in donors.iter_mut() {
-        d.sort_unstable();
+    for c in 0..n {
+        start[c + 1] += start[c];
     }
+    let mut fill = start.clone();
+    let mut flat = vec![0u32; start[n] as usize];
+    for (c, &to) in r.receiver.iter().enumerate() {
+        if to != NONE {
+            flat[fill[to as usize] as usize] = c as u32;
+            fill[to as usize] += 1;
+        }
+    }
+    drop(fill);
+    let donors = |c: usize| flat[start[c] as usize..start[c + 1] as usize].iter().map(|&d| d as usize);
     for &c in r.order.iter().rev() {
         let c = c as usize;
         if !g.is_active(c) || outlet[c] || inp.kept[c] {
             continue;
         }
-        channel[c] = init[c] >= p.a_crit_m2 || donors[c].iter().any(|&d| channel[d]);
+        channel[c] = init_at(c) >= p.a_crit_m2 || donors(c).any(|d| channel[d]);
     }
     let mfd_only = (0..n).filter(|&c| channel[c] && d8[c] < p.a_crit_m2).count();
     // Strahler and the bed, donors first: the bed the running minimum (one value at a confluence: the lowest inflow)
@@ -146,7 +167,7 @@ pub fn extract(inp: &Input, p: &Params) -> Extracted {
         if !channel[c] {
             continue;
         }
-        let ins: Vec<usize> = donors[c].iter().copied().filter(|&d| channel[d]).collect();
+        let ins: Vec<usize> = donors(c).filter(|&d| channel[d]).collect();
         let top = ins.iter().map(|&d| strahler[d]).max().unwrap_or(0);
         strahler[c] = if ins.is_empty() {
             1
@@ -173,9 +194,9 @@ pub fn extract(inp: &Input, p: &Params) -> Extracted {
     // node kinds of channel cells
     let tile = inp.tile;
     let kind_at = |c: usize| -> Option<NodeKind> {
-        let ins = donors[c].iter().filter(|&&d| channel[d]).count();
+        let ins = donors(c).filter(|&d| channel[d]).count();
         if ins == 0 {
-            Some(if donors[c].iter().any(|&d| inp.kept[d]) { NodeKind::LakeSpill } else { NodeKind::Source })
+            Some(if donors(c).any(|d| inp.kept[d]) { NodeKind::LakeSpill } else { NodeKind::Source })
         } else if ins >= 2 {
             Some(NodeKind::Confluence)
         } else if tile(r.receiver[c] as usize) != tile(c) {
@@ -184,11 +205,12 @@ pub fn extract(inp: &Input, p: &Params) -> Extracted {
             None
         }
     };
+    let gid = inp.gid;
     let node = |kind: NodeKind, c: usize, owner: Domain| Node {
-        id: node_id(p.body, kind, Level::L, c as u64),
+        id: node_id(p.body, kind, Level::L, gid(c)),
         kind,
         level: Level::L,
-        anchor: c as u64,
+        anchor: gid(c),
         parent: None,
         owner,
         marker: None,
@@ -223,6 +245,7 @@ pub fn extract(inp: &Input, p: &Params) -> Extracted {
             if let Some(&(ti, k)) = on_trunk.get(&t) {
                 let mut j = node(NodeKind::TribJunction, t, Domain::Landmass);
                 j.marker = Some(Marker { on_reach: inp.trunks[ti].id, at_vertex: k as u32 });
+                j.id = node_id_of(p.body, &j);
                 break Some(j);
             }
             if inp.sea[t] {
@@ -271,7 +294,7 @@ pub fn extract(inp: &Input, p: &Params) -> Extracted {
             up: up.id,
             down: down.id,
             owner: tile(cells[1]),
-            vertices: cells.iter().map(|&c| c as u64).collect(),
+            vertices: cells.iter().map(|&c| gid(c)).collect(),
             parent: None,
             attrs: a,
             exceptions: Vec::new(),
@@ -280,6 +303,8 @@ pub fn extract(inp: &Input, p: &Params) -> Extracted {
         nodes.entry(down.id).or_insert(down);
     }
     reaches.sort_by_key(|x| x.id);
+    let raised_channel = (0..n).filter(|&c| channel[c] && filled[c] > inp.z[c]).count();
+    let filled = if inp.keep_fields { filled } else { Vec::new() };
     Extracted {
         nodes: nodes.into_values().collect(),
         reaches,
@@ -287,6 +312,7 @@ pub fn extract(inp: &Input, p: &Params) -> Extracted {
         receiver: r.receiver.clone(),
         filled,
         root,
+        raised_channel,
         init,
         d8,
         d8_no_ext,

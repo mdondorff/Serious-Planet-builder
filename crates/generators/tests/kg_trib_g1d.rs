@@ -82,7 +82,18 @@ pub(crate) fn run_domain_with(c: &Case, grid: &Grid, exit: &[bool], seed_ext: &[
     let p = BasinParams::l(c.graph.body);
     let first = produce(grid, &c.fx.s0, &outlet, &trunks_r, &tile, &p);
     let kept = kept_of(&first, n);
-    let inp = Input { grid, z: &c.fx.s0, sea: &c.sea, exit, trunks: &c.trunks, kept: &kept, seed_ext, tile: &tile };
+    let inp = Input {
+        grid,
+        z: &c.fx.s0,
+        sea: &c.sea,
+        exit,
+        trunks: &c.trunks,
+        kept: &kept,
+        seed_ext,
+        tile: &tile,
+        gid: &|x| x as u64,
+        keep_fields: true,
+    };
     let ex = extract(&inp, &Params { mfd_init, ..Params::plan(c.graph.body, RUNOFF) });
     let mut all = trunks_r;
     all.extend(ex.reaches.iter().cloned());
