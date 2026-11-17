@@ -21,6 +21,7 @@ use planet_generators::bake::flood::priority_flood_with;
 use planet_generators::bake::hydro::{hydrology, Hydro, HydroParams};
 use planet_generators::bake::river_graph::{
     diff, node_id, rasterise, reach_id, validate, validate_raster, Attrs, Checks, Domain, Graph, Level, Marker, Node, NodeKind, Reach as GReach, Reason, Status,
+    Violation,
 };
 use planet_generators::bake::route::{catchment_roots, jitter, route_rules, RoundRules, Routing, MFD_EXPONENT, NONE};
 use planet_generators::bake::{Grid, NEIGHBOURS};
@@ -1407,6 +1408,8 @@ fn build_graph(
     routed.sort_by_key(|x| x.0);
     // ---- L nodes and reaches, beds in topological order of the H1 reaches (upstream first: by the segments' order along the routing)
     let mut l_node: HashMap<(usize, NodeKind), u64> = HashMap::new();
+    let mut l_parent: HashMap<u64, u32> = HashMap::new();
+    let mut merged: BTreeSet<u64> = BTreeSet::new();
     let mut anchor_owner: HashMap<usize, u64> = HashMap::new();
     let mut collisions = 0usize;
     let mut skipped = 0usize;
@@ -1447,6 +1450,14 @@ fn build_graph(
             continue;
         }
         let mut mk = |c: usize, kind: NodeKind, parent_c: u32| -> u64 {
+            let id = node_id(BODY, kind, Level::L, l_gid(c));
+            if let Some(&pc) = l_parent.get(&id) {
+                if pc != parent_c {
+                    merged.insert(id);
+                }
+            } else {
+                l_parent.insert(id, parent_c);
+            }
             *l_node.entry((c, kind)).or_insert_with(|| {
                 let id = node_id(BODY, kind, Level::L, l_gid(c));
                 if let Some(&o) = anchor_owner.get(&c) {
@@ -1554,6 +1565,7 @@ fn build_graph(
     notes.push(format!(
         "L reaches skipped (no route or a one-cell chain) {skipped}; routes meeting the sea before their down node (ended at an outlet_sea there) {sea_ends}; anchor collisions (two kinds on one L cell) {collisions}; rise_over_budget reaches {exceptions}"
     ));
+    notes.push(format!("MERGED {}", merged.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")));
     g.sort();
     (g, notes)
 }
@@ -1784,7 +1796,15 @@ fn main() -> Result<(), String> {
     let build_s = t.elapsed().as_secs_f64();
     let l_reaches: Vec<&GReach> = g.reaches.iter().filter(|r| r.level == Level::L).collect();
     let l_vertices: usize = l_reaches.iter().map(|r| r.vertices.len()).sum();
-    println!("KG graph: {} nodes, {} reaches ({} at L, {l_vertices} L vertices) in {build_s:.1} s; {}", g.nodes.len(), g.reaches.len(), l_reaches.len(), notes.join("; "));
+    let merged: HashSet<u64> = notes.iter().find_map(|n| n.strip_prefix("MERGED ")).map(|x| x.split(',').filter_map(|v| v.parse().ok()).collect()).unwrap_or_default();
+    println!(
+        "KG graph: {} nodes, {} reaches ({} at L, {l_vertices} L vertices) in {build_s:.1} s; {}; L nodes standing for two or more H1 nodes {}",
+        g.nodes.len(),
+        g.reaches.len(),
+        l_reaches.len(),
+        notes.iter().filter(|n| !n.starts_with("MERGED")).cloned().collect::<Vec<_>>().join("; "),
+        merged.len()
+    );
     let canon = g.canonical();
     std::fs::write(out_dir.join(format!("{tag}-graph.txt")), &canon).map_err(|e| e.to_string())?;
     let adjacent = |_l: Level, a: u64, b: u64| {
@@ -1796,6 +1816,11 @@ fn main() -> Result<(), String> {
         Domain::Tile { face: face.0, ti: (x / TILE) as u32, tj: (y / TILE) as u32 }
     };
     let viol = validate(&g, &Checks { adjacent: &adjacent, tile_of: Some(&tile_of), open: true });
+    {
+        let cons: BTreeSet<u64> = viol.iter().filter_map(|v| if let Violation::ConservationBreak { at, .. } = v { Some(*at) } else { None }).collect();
+        let on_merged = cons.iter().filter(|c| merged.contains(c)).count();
+        println!("KG conservation breaks: {} nodes or reaches, {on_merged} of them at L nodes standing for two or more H1 nodes", cons.len());
+    }
     let mut kinds: BTreeMap<String, usize> = BTreeMap::new();
     for v in &viol {
         let k = format!("{v:?}");
