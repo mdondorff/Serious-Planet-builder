@@ -1,7 +1,7 @@
 //! Tier A, BUILD-060's chain sheet: a 32 x 32 chain directory at global L cell (100, 200), H1 cells of 8 L cells, read at one L cell per pixel.
 use std::path::{Path, PathBuf};
 
-use planet_cache::stage_sheet::{compose, panels, render, shade, Manifest, View, CHANGE_M, COLUMNS, LOWER, TRIB, TRUNK};
+use planet_cache::stage_sheet::{compose, panels, render, shade, trib_min_m2, Manifest, View, CHANGE_M, COLUMNS, LOWER, TRIB, TRUNK};
 use planet_generators::bake::river_graph::*;
 
 const N: usize = 32;
@@ -29,7 +29,7 @@ fn graph() -> Graph {
         let anchor = gid(x, y);
         Node { id: node_id(1, kind, Level::L, anchor), kind, level: Level::L, anchor, parent: None, owner: Domain::Landmass, marker: None }
     };
-    let reach = |up: &Node, down: &Node, cells: &[(u64, u64)], parent: Option<u64>| Reach {
+    let reach = |up: &Node, down: &Node, cells: &[(u64, u64)], parent: Option<u64>, area: f64| Reach {
         id: reach_id(1, Level::L, up.id, down.id),
         level: Level::L,
         up: up.id,
@@ -38,7 +38,7 @@ fn graph() -> Graph {
         parent,
         owner: Domain::Landmass,
         attrs: Attrs {
-            a_geo: vec![1.0; cells.len()],
+            a_geo: vec![area; cells.len()],
             a_ext: vec![0.0; cells.len()],
             a_run: vec![1.0; cells.len()],
             a_run_no_ext: vec![1.0; cells.len()],
@@ -50,9 +50,12 @@ fn graph() -> Graph {
         exceptions: Vec::new(),
     };
     let (a, b, c) = (node(NodeKind::Source, 110, 210), node(NodeKind::OutletSea, 120, 210), node(NodeKind::Source, 105, 225));
-    let trunk = reach(&a, &b, &[(110, 210), (115, 210), (120, 210)], Some(7));
-    let trib = reach(&c, &a, &[(105, 225), (110, 210)], None);
-    let mut g = Graph { body: 1, nodes: vec![a, b, c], reaches: vec![trunk, trib], basins: Vec::new() };
+    // the drawn tributary drains 1 km2; the small one 0.1 km2, under the 25 pixels (0.25 km2) of a 100 m pixel
+    let d = node(NodeKind::Source, 125, 225);
+    let trunk = reach(&a, &b, &[(110, 210), (115, 210), (120, 210)], Some(7), 1.0e7);
+    let trib = reach(&c, &a, &[(105, 225), (110, 210)], None, 1.0e6);
+    let small = reach(&d, &b, &[(125, 225), (120, 210)], None, 1.0e5);
+    let mut g = Graph { body: 1, nodes: vec![a, b, c, d], reaches: vec![trunk, trib, small], basins: Vec::new() };
     g.sort();
     g
 }
@@ -109,6 +112,8 @@ fn the_sheet_has_twelve_labelled_panels_draws_the_graph_and_colours_the_change_o
     assert_eq!(at(6, 15, 10), TRUNK, "panel 7 draws the trunk (a reach with a parent)");
     assert_ne!(at(6, 5, 25), TRIB, "panel 7 draws no tributary");
     assert_eq!(at(7, 5, 25), TRIB, "panel 8 draws the tributary");
+    assert_eq!(trib_min_m2(&m, &v), 250_000.0);
+    assert_ne!(at(7, 25, 25), TRIB, "a tributary draining less than 25 pixels is not drawn");
     assert_eq!(at(10, 15, 10), TRUNK, "panel 11 draws every reach");
     let near = |a: [f64; 3], b: [f64; 3]| a.iter().zip(&b).all(|(x, y)| (x - y).abs() < 1e-12);
     assert!(near(at(11, 4, 4), LOWER), "a lowering of CHANGE_M ({CHANGE_M} m) is full red: {:?}", at(11, 4, 4));
