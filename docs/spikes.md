@@ -33,6 +33,7 @@ Per-spike register sections of M5 and M6: `docs/archive/M6/spikes.md`. Closed sp
 | SPIKE-126 | Ponding rule on B's trunks (D-1) | closed 11-16: ponds rescue 0-13 %; rises are D-2 | `spikes/ponding/results/results.md` |
 | SPIKE-127 | H1 on sub-cell sills of S0 (G1a) | closed 2026-11-17: 59 % of D-2 gain a route; stop test see SPIKE-131 | `spikes/g1a-sills/results/results.md` |
 | SPIKE-131 | K5' on sill edges (G1a) | closed 2026-11-17: stop test an artefact; K5' not adopted | `spikes/k5p-sills/results/results.md` |
-| SPIKE-130 | Basin topology on the river graph (G1e) | closed 11-17: stable under layouts; S0 keeps 3-19 % of land | `spikes/basins-g1e/results/results.md` |
+| SPIKE-130 | Basin topology (G1e) | closed 11-17: stable under layouts; S0 3-19 % in basins | `spikes/basins-g1e/results/results.md` |
+| SPIKE-132 | KV and KC on the fixture (G1f) | closed 11-17: budget kept; fill clamp, 2 exceptions gaps | `spikes/kv-kc/results/results.md` |
 
 Every exploration gets a `SPIKE-NN` entry.
