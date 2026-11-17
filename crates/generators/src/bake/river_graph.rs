@@ -1050,7 +1050,6 @@ pub fn validate_budget(s0: &[f64], budget: &[f64], stages: &[Stage], residuals: 
             return vec![Violation::BudgetInput { cell: st.out.len().min(n), stage: st.name }];
         }
     }
-    let has = |cell: usize, stage: &str| residuals.iter().any(|r| r.cell == cell && r.stage == stage);
     let mut used = vec![0.0f64; n];
     let mut input: Vec<f64> = s0.to_vec();
     for c in 0..n {
@@ -1062,6 +1061,10 @@ pub fn validate_budget(s0: &[f64], budget: &[f64], stages: &[Stage], residuals: 
         for c in 0..n {
             if !st.out[c].is_finite() || st.wanted_lowering.is_some_and(|w| !w[c].is_finite()) {
                 v.push(Violation::BudgetInput { cell: c, stage: st.name });
+                // a residual here records nothing that can be checked
+                for _ in residuals.iter().filter(|r| r.cell == c && r.stage == st.name) {
+                    v.push(Violation::ResidualMismatch { cell: c, stage: st.name, why: "its stage's output is not finite there" });
+                }
                 continue;
             }
             let lowered = (input[c] - st.out[c]).max(0.0);
@@ -1074,35 +1077,44 @@ pub fn validate_budget(s0: &[f64], budget: &[f64], stages: &[Stage], residuals: 
             if !st.fills && filled > 0.0 {
                 v.push(Violation::RaiseInLoweringStage { cell: c, stage: st.name });
             }
-            if st.fills && filled > budget[c] + BUDGET_EPS_M && !has(c, st.name) {
-                v.push(Violation::BudgetOverrun { cell: c, stage: st.name, used_m: filled, budget_m: budget[c] });
-            }
+            // the events of this cell and stage, and the residuals that record them one to one: a clamp (it lowered less than it wanted) needs a residual with the wanted lowering and the
+            // budget left before the stage; a fill over the budget needs another with the fill and the budget
             let clamped = st.wanted_lowering.is_some_and(|w| w[c] > lowered + BUDGET_EPS_M);
-            if clamped && !has(c, st.name) {
-                v.push(Violation::ClampWithoutResidual { cell: c, stage: st.name });
-            }
-            // a residual's numbers are the stage's: a clamp needed the wanted lowering and had the budget left before the stage; a fill needed the fill and had the budget
             let fill_over = st.fills && filled > budget[c] + BUDGET_EPS_M;
-            // a cell may both clamp and over-fill in one stage: each residual records one of the two, and there are no more residuals than events
             let near = |a: f64, b: f64| (a - b).abs() <= BUDGET_EPS_M;
             let w = st.wanted_lowering.map_or(0.0, |w| w[c]);
             let is_clamp = |r: &Residual| clamped && near(r.needed_m, w) && near(r.available_m, (budget[c] - before).max(0.0));
             let is_fill = |r: &Residual| fill_over && near(r.needed_m, filled) && near(r.available_m, budget[c]);
             let here: Vec<&Residual> = residuals.iter().filter(|r| r.cell == c && r.stage == st.name).collect();
-            for r in &here {
-                let why = if !clamped && !fill_over {
-                    Some("no clamp or fill overrun at its cell and stage")
-                } else if !is_clamp(r) && !is_fill(r) {
-                    Some(if clamped { "not the clamp's needed and available" } else { "not the fill's needed and available" })
-                } else {
-                    None
-                };
-                if let Some(why) = why {
-                    v.push(Violation::ResidualMismatch { cell: c, stage: st.name, why });
-                }
+            let clamp_at = here.iter().position(|r| is_clamp(r));
+            let fill_at = (0..here.len()).find(|&i| is_fill(here[i]) && Some(i) != clamp_at).or_else(|| {
+                // a residual matching both events serves the fill only when no other residual records the clamp
+                (0..here.len()).find(|&i| is_fill(here[i]))
+            });
+            let (clamp_at, fill_at) = match (clamp_at, fill_at) {
+                (Some(a), Some(b)) if a == b => (here.iter().enumerate().position(|(i, r)| i != b && is_clamp(r)), Some(b)),
+                pair => pair,
+            };
+            if clamped && clamp_at.is_none() {
+                v.push(Violation::ClampWithoutResidual { cell: c, stage: st.name });
             }
-            if (clamped || fill_over) && here.len() > usize::from(clamped) + usize::from(fill_over) {
-                v.push(Violation::ResidualMismatch { cell: c, stage: st.name, why: "more residuals than clamps and fill overruns" });
+            if fill_over && fill_at.is_none() {
+                v.push(Violation::BudgetOverrun { cell: c, stage: st.name, used_m: filled, budget_m: budget[c] });
+            }
+            for (i, r) in here.iter().enumerate() {
+                if Some(i) == clamp_at || Some(i) == fill_at {
+                    continue;
+                }
+                let why = if !clamped && !fill_over {
+                    "no clamp or fill overrun at its cell and stage"
+                } else if is_clamp(r) || is_fill(r) {
+                    "more residuals than clamps and fill overruns"
+                } else if clamped {
+                    "not the clamp's needed and available"
+                } else {
+                    "not the fill's needed and available"
+                };
+                v.push(Violation::ResidualMismatch { cell: c, stage: st.name, why });
             }
         }
         for (i, &o) in input.iter_mut().zip(st.out) {

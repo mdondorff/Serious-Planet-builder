@@ -10,8 +10,8 @@
 ## What changes
 - GEN-189: the Basin row takes readings 5 and 6. Each residual names a cell and a stage that ran and records one clamp or fill overrun, with at most one residual for each.
 - `validate_budget`:
-  - a residual matches either of its cell's two events;
-  - more residuals than events, or a residual naming no cell or stage, is a `ResidualMismatch`.
+  - residuals are assigned to events one to one, and an event without its own residual is a `ClampWithoutResidual` or a fill `BudgetOverrun` (numerics review of this change);
+  - a residual left over, naming no cell or stage, or at a cell whose output is not finite is a `ResidualMismatch`.
 - TEST-140: a stray stage and cell, a duplicate, and a cell that both clamps and over-fills.
 
 ## Impact

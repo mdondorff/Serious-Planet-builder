@@ -570,6 +570,21 @@ fn the_budget_validator_finds_overruns_raises_and_clamps_without_residuals() {
     assert_eq!(run(&ks, &kv_up, &kc_up, Some(&wanted), &both, &flagged), vec![]);
     let wrong = [both[0].clone(), Residual { cell: 0, stage: "kv", needed_m: 11.0, available_m: 10.0, feature }];
     assert!(mismatch(&run(&ks, &kv_up, &kc_up, Some(&wanted), &wrong, &flagged)));
+    // one to one: the clamp's record alone leaves the fill overrun unrecorded; the clamp's record twice records the clamp once; the fill's record alone leaves the clamp
+    let v = run(&ks, &kv_up, &kc_up, Some(&wanted), &[both[0].clone()], &flagged);
+    assert!(v.iter().any(|x| matches!(x, Violation::BudgetOverrun { cell: 0, stage: "kv", .. })), "{v:?}");
+    let v = run(&ks, &kv_up, &kc_up, Some(&wanted), &[both[0].clone(), both[0].clone()], &flagged);
+    assert!(v.iter().any(|x| matches!(x, Violation::BudgetOverrun { cell: 0, stage: "kv", .. })), "{v:?}");
+    assert!(
+        v.iter().any(|x| matches!(x, Violation::ResidualMismatch { why: "more residuals than clamps and fill overruns", .. })),
+        "{v:?}"
+    );
+    let v = run(&ks, &kv_up, &kc_up, Some(&wanted), &[both[1].clone()], &flagged);
+    assert!(v.iter().any(|x| matches!(x, Violation::ClampWithoutResidual { cell: 0, stage: "kv" })), "{v:?}");
+    // a residual where the stage's output is not finite
+    let kv_nan0 = [f64::NAN, 100.0, 100.0];
+    let v = run(&ks, &kv_nan0, &kc, None, &[both[0].clone()], &flagged);
+    assert!(v.iter().any(|x| matches!(x, Violation::ResidualMismatch { why: "its stage's output is not finite there", .. })), "{v:?}");
     // inputs that are not finite or do not fit
     let kv_nan = [f64::NAN, 100.0, 100.0];
     assert!(run(&ks, &kv_nan, &kc, None, &[], &g).iter().any(|v| matches!(v, Violation::BudgetInput { cell: 0, stage: "kv" })));
