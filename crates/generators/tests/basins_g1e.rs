@@ -503,3 +503,27 @@ fn a_spill_reaching_the_sea_is_received_by_an_outlet_sea() {
     assert!(z[node.anchor as usize] <= 0.0, "on a sea cell");
     assert!(p.unresolved.is_empty(), "no spill missing: {:?}", p.unresolved);
 }
+
+// spec: SPIKE-130
+#[test]
+fn a_depression_is_protected_only_when_neither_fill_nor_breach_fits() {
+    // reading 22 (owner, #161): a kept-size depression drains (reported) when its fill or a bounded least-cost breach fits the budget left; only the rest are protected
+    use planet_generators::bake::basins_rg::{produce_drain, CellIds};
+    let mut z = base(false);
+    cone(&mut z, 12.0, 12.0, 5.0, 10.0);
+    let g = Grid::cube(N, R);
+    let outlet = g.outlets(&z, 0.0);
+    let ids = CellIds { gid: &|c| c as u64, local: &|id| Some(id as usize) };
+    let at = |p: &Produced| basin_at(p, cell(12, 12)).represented;
+    let (_, plain) = run(&z, &[]);
+    assert_eq!(at(&plain), Represented::ProtectedSurface, "without a budget the size rule protects it");
+    let roomy = produce_drain(&g, &z, &outlet, &[], &tile_of, &params(), &ids, &vec![20.0; z.len()]);
+    assert!(roomy.drained >= 1);
+    assert!(
+        roomy.basins.iter().filter(|b| roomy.cells[&b.id].contains(&cell(12, 12))).all(|b| b.represented != Represented::ProtectedSurface),
+        "a 10 m depression with 20 m left drains"
+    );
+    let tight = produce_drain(&g, &z, &outlet, &[], &tile_of, &params(), &ids, &vec![1.0; z.len()]);
+    assert_eq!(at(&tight), Represented::ProtectedSurface, "neither a fill nor a breach fits 1 m: protected");
+    assert_eq!(tight.drained, 0);
+}
