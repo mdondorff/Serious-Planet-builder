@@ -403,8 +403,38 @@ struct H1 {
     d8: Vec<f64>,
 }
 
-fn h1_from(grid: &Grid, z: &[f64], filled: &[f64], routing: Routing, outlet: &[bool], runoff: &[f32], evap: &[f32]) -> H1 {
-    let hydro = hydrology(grid, z, filled, &routing, outlet, Some(runoff), Some(evap), &HydroParams::default());
+fn h1_from(grid: &Grid, z: &[f64], filled: &[f64], routing: Routing, outlet: &[bool], runoff: &[f32], evap: &[f32], budget: Option<&[f64]>) -> H1 {
+    let mut hydro = hydrology(grid, z, filled, &routing, outlet, Some(runoff), Some(evap), &HydroParams::default());
+    // spikes #142, reading 16: a kept basin deeper than the budget at its floor is crossed (reading 13), not a lake: no open-water loss there, so q_w = q through it.
+    // The basins are the same (the loss enters only the balance); the rerun changes q_w and the balance only.
+    if let Some(budget) = budget {
+        let crossed: Vec<bool> = hydro.basins.iter().map(|b| b.spill_m - b.floor_m > budget[b.floor_cell as usize]).collect();
+        if crossed.iter().any(|&x| x) {
+            let ev2: Vec<f32> =
+                (0..evap.len()).map(|c| if hydro.label[c] != NONE && crossed[hydro.label[c] as usize] { 0.0 } else { evap[c] }).collect();
+            let again = hydrology(grid, z, filled, &routing, outlet, Some(runoff), Some(&ev2), &HydroParams::default());
+            assert_eq!(again.basins.len(), hydro.basins.len(), "the loss does not change the basins");
+            hydro = again;
+        }
+        // q_w as a running sum along the routing: q less the losses of the basins upstream (each basin's q_in - q_out, entered at its spill cell; zero for a crossed
+        // basin). The cascade's q_w inside a basin is no channel discharge (a basin's cells are taken in index order on its flat), so a trunk through a crossed basin reads this one.
+        let mut loss = vec![0f64; hydro.q.len()];
+        // entered where the routing leaves the basin (the first cell outside it on the floor's receiver chain), which need not be its spill cell
+        for (k, b) in hydro.basins.iter().enumerate() {
+            let mut c = b.floor_cell;
+            while hydro.label[c as usize] == k as u32 && routing.receiver[c as usize] != NONE {
+                c = routing.receiver[c as usize];
+            }
+            loss[c as usize] += b.q_in - b.q_out;
+        }
+        for &c in routing.order.iter().rev() {
+            let r = routing.receiver[c as usize];
+            if r != NONE {
+                loss[r as usize] += loss[c as usize];
+            }
+        }
+        hydro.qw = (0..hydro.q.len()).map(|c| (hydro.q[c] - loss[c]).max(0.0)).collect();
+    }
     let graph = ChannelGraph::from_hydro(grid, &routing, &hydro, z);
     let (mut trunk_seg, mut trunk_cells) = (Vec::new(), Vec::new());
     graph.for_each(|s| {
@@ -446,11 +476,16 @@ struct Measure<'a> {
     sea: f64,
     radius: f64,
     bar: f64,
+    /// reading 12: the sea is the ocean (cells at or below the sea level connected to an H1 sea outlet or the window's edge); `None`: every cell at or below it
+    ocean: Option<&'a [bool]>,
 }
 
 impl Measure<'_> {
     fn land(&self, c: usize) -> bool {
-        self.water[c] > self.sea
+        match self.ocean {
+            Some(o) => !o[c],
+            None => self.water[c] > self.sea,
+        }
     }
 
     fn lowest_in_disc(&self, p: (f64, f64), keep: &dyn Fn(usize) -> bool) -> Option<usize> {
@@ -1067,8 +1102,9 @@ fn gxy(id: u64) -> (u64, u64) {
 
 /// The maximin corridor route through fixed waypoints on `z` (land-only steps, a sea cell ends it), as river_suite's corridor measure; the minimax rise found to
 /// 0.1 m by bisection when no route keeps within `bar`. Returns the route (window cells), whether it failed the bar, its largest rise.
-fn route_through(m: &Measure, line: &[(f64, f64)], points: &[usize]) -> Option<(Vec<usize>, bool, f64)> {
-    let (index, cells) = m.corridor(line)?;
+fn route_through(m: &Measure, line: &[(f64, f64)], points: &[usize], avoid: &HashSet<usize>) -> Option<(Vec<usize>, bool, f64)> {
+    let (mut index, cells) = m.corridor(line)?;
+    index.retain(|c, _| !avoid.contains(c) || points.contains(c));
     if points.iter().any(|p| !index.contains_key(p)) {
         return None;
     }
@@ -1100,8 +1136,9 @@ fn route_through(m: &Measure, line: &[(f64, f64)], points: &[usize]) -> Option<(
 /// The lowest-path centreline: Dijkstra inside the corridor from `points[0]` through each waypoint, the cost of a step its length times `1 + (z - z_min) / 10 m`
 /// (`z_min` the corridor's lowest cell), steps from land only, a sea cell ends the route; ties by cell id. Returns the route, whether its largest rise above its
 /// running minimum exceeds `bar`, and that rise.
-fn route_low(m: &Measure, line: &[(f64, f64)], points: &[usize]) -> Option<(Vec<usize>, bool, f64)> {
-    let (index, cells) = m.corridor(line)?;
+fn route_low(m: &Measure, line: &[(f64, f64)], points: &[usize], avoid: &HashSet<usize>) -> Option<(Vec<usize>, bool, f64)> {
+    let (mut index, cells) = m.corridor(line)?;
+    index.retain(|c, _| !avoid.contains(c) || points.contains(c));
     if points.iter().any(|p| !index.contains_key(p)) {
         return None;
     }
@@ -1178,7 +1215,7 @@ struct H1Reach {
 /// The H1 trunk reaches: every channel segment (>= 75 km2), cut where it enters a kept basin (a `lake_inlet`) and restarted at the basin's spill cell (a `lake_spill`);
 /// a segment ending at a sea outlet ends at an `outlet_sea`; one ending on the window's edge also at an `outlet_sea` node on the edge cell (a window is not a domain:
 /// the landmass graph continues there; counted apart).
-fn h1_reaches(h1: &H1, grid: &Grid, sea_outlet: &dyn Fn(u32) -> bool) -> (Vec<H1Reach>, usize) {
+fn h1_reaches(h1: &H1, grid: &Grid, sea_outlet: &dyn Fn(u32) -> bool, budget: &[f64]) -> (Vec<H1Reach>, usize) {
     let segs = &h1.hydro.segments;
     let mut inflows = vec![0usize; segs.len()];
     for s in segs {
@@ -1186,9 +1223,14 @@ fn h1_reaches(h1: &H1, grid: &Grid, sea_outlet: &dyn Fn(u32) -> bool) -> (Vec<H1
             inflows[s.downstream as usize] += 1;
         }
     }
+    // reading 13: a basin cuts the trunk only when its depth (spill - floor) is within the budget at its floor; a deeper one is crossed
     let kept = |c: u32| -> Option<usize> {
         let b = h1.hydro.label[c as usize];
-        (b != NONE).then_some(b as usize)
+        if b == NONE {
+            return None;
+        }
+        let bs = &h1.hydro.basins[b as usize];
+        (bs.spill_m - bs.floor_m <= budget[bs.floor_cell as usize]).then_some(b as usize)
     };
     let mut out = Vec::new();
     let mut edge_ends = 0usize;
@@ -1393,8 +1435,8 @@ fn build_graph(
     }
     // ---- L anchors (contract §2.1: the lowest L cell of S0 within one H1 cell, ties by global cell id; land only for a non-outlet node, reading 2 for outlets)
     let all_inside = vec![true; w * h];
-    let ks_water: Vec<f64> = ks0.iter().map(|&z| z.max(sea)).collect();
-    let mks = Measure { w, h, water: &ks_water, inside: &all_inside, region: &all_inside, sea, radius: K_C * L as f64, bar };
+    let ks_water: Vec<f64> = (0..ks0.len()).map(|c| if ocean[c] { ks0[c].max(sea) } else { ks0[c] }).collect();
+    let mks = Measure { w, h, water: &ks_water, inside: &all_inside, region: &all_inside, sea, radius: K_C * L as f64, bar, ocean: Some(ocean) };
     let anchor_of = |c: u32, outlet: bool, taken: &HashSet<usize>| -> Option<usize> {
         let p = to_local(c);
         let disc = |keep: &dyn Fn(usize) -> bool| -> Option<usize> {
@@ -1418,7 +1460,7 @@ fn build_graph(
         if outlet {
             disc(&|cc| !taken.contains(&cc))
         } else {
-            disc(&|cc| s0[cc] > sea && !taken.contains(&cc)).or_else(|| disc(&|cc| !taken.contains(&cc)))
+            disc(&|cc| !ocean[cc] && !taken.contains(&cc)).or_else(|| disc(&|cc| !taken.contains(&cc)))
         }
     };
     // reading 7: the H1 nodes snap in order of descending q_w, ties by H1 node id; a cell already taken is excluded
@@ -1466,9 +1508,9 @@ fn build_graph(
                 let r = if pts.len() < 2 {
                     Some((pts.clone(), false, 0.0))
                 } else if low_centre {
-                    route_low(&mks, line, &pts)
+                    route_low(&mks, line, &pts, &taken)
                 } else {
-                    route_through(&mks, line, &pts)
+                    route_through(&mks, line, &pts, &taken)
                 };
                 done.lock().expect("lock").push((*k, *up, *down, r));
             });
@@ -1514,7 +1556,7 @@ fn build_graph(
         }
         if down_kind == NodeKind::OutletSea {
             // reading 2: the outlet image is the first sea cell of the chain
-            if let Some(p) = route.iter().position(|&c| s0[c] <= sea) {
+            if let Some(p) = route.iter().position(|&c| ocean[c]) {
                 route.truncate(p + 1);
                 down_c = route[p];
             }
@@ -1576,6 +1618,17 @@ fn build_graph(
                 run = run.min(z);
             }
             bed[v] = run;
+        }
+        // spikes #142: a rise at the last vertex is taken one vertex earlier (bed[n-2] raised to bed[n-1]: less cut, never more); its marker would share the
+        // down node's anchor (reading 1). A two-vertex reach drops it (its bed then starts at its end's level).
+        if rise_at.last() == Some(&(n - 1)) {
+            rise_at.pop();
+            if n >= 2 {
+                bed[n - 2] = bed[n - 2].max(bed[n - 1]);
+                if n >= 3 && rise_at.last() != Some(&(n - 2)) && bed[n - 2] > bed[n - 3] {
+                    rise_at.push(n - 2);
+                }
+            }
         }
         // the confluence's bed is shared: the lowest inflow's
         let end_bed = bed[n - 1];
@@ -1810,6 +1863,13 @@ fn main() -> Result<(), String> {
         println!("KG sea at L: {at_sea} cells of S0 at or below the sea level, {inland} of them inland (not connected to an H1 sea outlet or the window's edge; {:.3} % of the window)", 100.0 * inland as f64 / (w * h) as f64);
     }
 
+    // ---- the budget (G0 contracts section 6; BUILD-060's field, the one river-gate reads), per L cell and per H1 cell; before H1, which reads it (readings 13, 16)
+    let t_budget = Instant::now();
+    // H1's budget (spikes #142, readings 13 and 16) is read before KH exists, so it is S0's; the L stages' budget below is S_KH's (reading 21, lead #168)
+    let budget_l = planet_cache::river_gate_graph::budget_field(&start, w, h, L, grid.dx() / L as f64, 25_000.0);
+    let budget: Vec<f64> = (0..cells).map(|c| budget_l[((c / rw) * L) * w + (c % rw) * L]).collect();
+    println!("RG budget field: {:.1} s", t_budget.elapsed().as_secs_f64());
+
     // ---- H1: today's K6 and K6' (sills of S0)
     let dir_h1 = |c: usize| solve.face_spec.halo_direction((sri0 + c % rw) as i64, (srj0 + c / rw) as i64);
     let (mut weight, mut runoff, mut evap) = (vec![1.0f32; cells], vec![0.0f32; cells], vec![0.0f32; cells]);
@@ -1825,18 +1885,18 @@ fn main() -> Result<(), String> {
     let (h1, h1_nosill) = if base_today {
         let r0 = route_rules(grid, &solve.zs, outlet, eps, stream, 0.0, Some(&weight), RoundRules::ROUND);
         let f0 = priority_flood_with(grid, &solve.zs, outlet, eps, true);
-        (h1_from(grid, &solve.zs, &f0, r0, outlet, &runoff, &evap), None)
+        (h1_from(grid, &solve.zs, &f0, r0, outlet, &runoff, &evap, Some(&budget)), None)
     } else {
         let s = nodes_and_sills(&|c: usize| start[c], rw, rh, threads, None);
         let sill = |p: usize, d: usize, q: usize| s.at(p, d, q);
         let f = flood(grid, &s.h, &sill, outlet, eps);
         let r = route_sills(grid, &f, &sill, outlet, stream, &weight, true);
-        let with = h1_from(grid, &s.h, &f, r, outlet, &runoff, &evap);
+        let with = h1_from(grid, &s.h, &f, r, outlet, &runoff, &evap, Some(&budget));
         let hh = &s.h;
         let plain = |p: usize, _d: usize, q: usize| hh[p].max(hh[q]);
         let f2 = flood(grid, hh, &plain, outlet, eps);
         let r2 = route_sills(grid, &f2, &plain, outlet, stream, &weight, true);
-        (with, Some(h1_from(grid, hh, &f2, r2, outlet, &runoff, &evap)))
+        (with, Some(h1_from(grid, hh, &f2, r2, outlet, &runoff, &evap, Some(&budget))))
     };
     if let Some(d) = &chain_dir {
         // H1 rivers: the cells of the H1 channel segments the chain hands over (q at least EDGE_Q)
@@ -1952,7 +2012,7 @@ fn main() -> Result<(), String> {
     };
     let bar = corridor_bar_m(relief10);
     let sea_outlet = |c: u32| solve.zb[c as usize] <= sea && !grid.is_edge(c as usize);
-    let (reaches, edge_ends) = h1_reaches(&h1, grid, &sea_outlet);
+    let (reaches, edge_ends) = h1_reaches(&h1, grid, &sea_outlet, &budget);
     let order = strahler(&h1);
     {
         let segs = &h1.hydro.segments;
@@ -2341,13 +2401,15 @@ fn main() -> Result<(), String> {
         // the basins again, on the KS output with every L reach as spill receivers and inlets (reading 5: the L kept rule reads KS1; crusader's G1d order: the first pass on KS0 gave
         // KG-trib its kept set); the graph takes this pass's basins and nodes; its kept basins and H1's lake water are KV's and KC's protected cells
         if on("basins") && on("kg-trib") {
-            use planet_generators::bake::basins_rg::{produce_ids, BasinParams, CellIds};
+            use planet_generators::bake::basins_rg::{produce_ids_avoiding, BasinParams, CellIds};
             use planet_generators::bake::river_graph::Represented;
             let t2 = Instant::now();
             let all: Vec<GReach> = gd.reaches.iter().filter(|r| r.level == Level::L).cloned().collect();
             let ids = CellIds { gid: &gid_l, local: &to_local };
+            // spikes #142: the cells of the markers on the reaches (KG-trunk's exceptions, KG-trib's junctions); an inlet passes them (reading 1)
+            let marker_cells: BTreeSet<usize> = gd.nodes.iter().filter(|x| x.level == Level::L && x.kind.is_marker()).filter_map(|x| to_local(x.anchor)).collect();
             { let (pk, nw) = memory_mib(); println!("RG mem before basin pass 2: peak {pk} MiB, now {nw} MiB"); }
-            let pb = produce_ids(&grid_d, &ks_d, &outlet_d, &all, &tile_l, &BasinParams::l(BODY), &ids);
+            let pb = produce_ids_avoiding(&grid_d, &ks_d, &outlet_d, &all, &tile_l, &BasinParams::l(BODY), &ids, &marker_cells);
             { let (pk, nw) = memory_mib(); println!("RG mem after basin pass 2: peak {pk} MiB, now {nw} MiB"); }
             for p in 0..n_l {
                 kept[p] = protected_h1[parent(p)];
