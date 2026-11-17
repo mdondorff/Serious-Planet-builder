@@ -1,23 +1,25 @@
+KG sea at L: 21084251 cells of S0 at or below the sea level, 804618 of them inland (not connected to an H1 sea outlet or the window's edge; 1.208 % of the window)
+KG basin census: 227 kept H1 basins; depth spill - floor p10 0.6 p50 1.0 p90 6.0 m; cells p50 11 p90 107 max 6041; shallower than 2 m 187 (of them under 0.5 m 0), fewer than 4 cells 0
+KG basin census: channel-segment cells in kept basins by basin depth: < 0.5 m 0, 0.5-2 m 12713, 2-5 m 905, 5-10 m 1333, 10-50 m 11724, >= 50 m 3820 (of 105134 segment cells)
 KG centreline: lowest path (Dijkstra, step cost length x (1 + height over the corridor's minimum / 10 m))
 KG base H1: today's K6 (27392 segments, 227 kept basins)
 KG KS0 = S0 - max(0, r - C1(HAND)): 1.9 s; lowered on 2.9 % of land cells, p50 0.0 p95 0.7 max 24.4 m
-KG budget field (contract §6, relief10 on every 4th H1 cell): 1.5 s; p10 10.0 p50 10.0 p90 17.4 m
+KG budget field (contract §6, relief10 on every 4th H1 cell): 1.0 s; p10 10.0 p50 10.0 p90 17.4 m
 KG segments: 27392 (105134 cells, 30495 in kept basins, 9240 segments inside one); kept-basin cells 34221 of 1040400
 KG H1 trunk reaches: 18829 (119 end on the window's edge; 1391 lake inlets, 232 lake spills)
-KG graph: 46193 nodes, 36186 reaches (17357 at L, 305032 L vertices) in 3.0 s; L reaches skipped (no route or a one-cell chain) 1472; routes meeting the sea before their down node (ended at an outlet_sea there) 5811; anchor collisions (two kinds on one L cell) 525; rise_over_budget reaches 487
-KG validators (open slice): 1592 violations {"ConservationBreak": 676, "DuplicateId": 189, "OutgoingCount": 194, "TwoNodesOneAnchor": 533}
-KG violations by kind and item: {"ConservationBreak on L node Confluence": 676, "DuplicateId on L node Exception": 12, "DuplicateId on L reach": 177, "OutgoingCount on L node Confluence": 53, "OutgoingCount on L node LakeSpill": 3, "OutgoingCount on L node Source": 138, "TwoNodesOneAnchor on ?": 533}
-KG violation example: ConservationBreak { at: 10202928391215483851, field: "a_geo" }
-KG violation example: DuplicateId { id: 10033727134202257018 }
-KG violation example: OutgoingCount { node: 10274682957601884122, outgoing: 2 }
-KG violation example: TwoNodesOneAnchor { level: L, anchor: 155396211744880 }
-KG exceptions rise_over_budget: 487 of 17357 L reaches (146 of 8428 with a vertex in the box); excess over the remainder p50 3.2 p90 21.7 max 52.6 m
-KG profiles: 0 bed rises (0.5 m codes) outside exceptional reaches, 1893 inside them
-KG raster: 270616 L cells claimed; raster validator 0 violations
+KG graph: 49018 nodes, 37658 reaches (18829 at L, 308058 L vertices) in 2.4 s; L reaches skipped (no route or a one-cell chain) 0; routes meeting the sea before their down node (ended at an outlet_sea there) 6501, of them on an inland cell 6460; anchor collisions (two kinds on one L cell) 30; rise_over_budget reaches 487; L nodes standing for two or more H1 nodes 149
+KG conservation breaks: 0 nodes or reaches, 0 of them at L nodes standing for two or more H1 nodes
+KG validators (open slice): 2078 violations {"IdMismatch": 2036, "TwoNodesOneAnchor": 42}
+KG violations by kind and item: {"IdMismatch on L node Exception": 2036, "TwoNodesOneAnchor on ?": 42}
+KG violation example: IdMismatch { id: 10006416673731355744 }
+KG violation example: TwoNodesOneAnchor { level: L, anchor: 155739809127480 }
+KG exceptions rise_over_budget: 487 of 18829 L reaches (146 of 9264 with a vertex in the box); excess over the remainder p50 3.2 p90 21.7 max 52.6 m
+KG profiles: 0 bed rises (0.5 m codes) outside exceptional reaches, 1892 inside them
+KG raster: 273755 L cells claimed; raster validator 0 violations
 KG l_rivers check: 0 river cells whose receiver is land, not an outlet and not a river cell; 0 cells whose receiver holds less area
-KG agreement with the routed S0 (D8 area >= 75 km2, land; in the box): 61.83 % of 73002 river cells have a graph cell within 1; 39.20 % of 118473 graph cells have a river cell within 1 (43.0 s)
+KG agreement with the routed S0 (D8 area >= 75 km2, land; in the box): 61.91 % of 73002 river cells have a graph cell within 1; 38.64 % of 120543 graph cells have a river cell within 1 (38.4 s)
 KG l_rivers check: 0 river cells whose receiver is land, not an outlet and not a river cell; 0 cells whose receiver holds less area
-KG agreement with the routed KS0 (D8 area >= 75 km2, land; in the box): 62.77 % of 72679 river cells have a graph cell within 1; 39.79 % of 118473 graph cells have a river cell within 1 (48.4 s)
+KG agreement with the routed KS0 (D8 area >= 75 km2, land; in the box): 62.85 % of 72679 river cells have a graph cell within 1; 39.21 % of 120543 graph cells have a river cell within 1 (39.4 s)
 KG determinism: 1 thread against 8: canonical form identical
 KG partition: KS0 of two regions against one: 0 cells differ; the graph's canonical form identical
 KG tile rebuild: tile (5, 5) of the window evaluated again: 0 differences (0 topology)
@@ -30,5 +32,5 @@ KG basin 4: H1 spill 8.8 m, L image spill 8.7 m (depth 1.7 m)
 KG basin 5: H1 spill 673.0 m, L image spill 674.0 m (depth 25.1 m)
 KG basin 6: H1 spill 678.1 m, L image spill 678.5 m (depth 6.4 m)
 KG basin 7: H1 spill 678.1 m, L image spill 678.6 m (depth 5.4 m)
-KG done in 184.0 s
-BAKE-TIME 184 s, peak working set 3,65 GB, exit 
+KG done in 164.8 s
+BAKE-TIME 165 s, peak working set 3,71 GB, exit 
