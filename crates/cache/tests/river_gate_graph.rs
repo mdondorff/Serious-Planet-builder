@@ -237,3 +237,20 @@ fn the_stage_and_graph_readers_take_the_files_the_spec_names_and_refuse_a_wrong_
     assert!(read_graph(p.to_str().unwrap()).is_err());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// spec: TEST-137, BUILD-060
+#[test]
+fn the_surface_reader_takes_the_windows_f64_cells_and_refuses_a_wrong_size_or_a_non_finite_height() {
+    use planet_cache::river_gate_graph::read_surface;
+    let dir = std::env::temp_dir().join(format!("river-gate-surface-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a temp dir");
+    let p = dir.join("s.f64");
+    let path = p.to_str().unwrap();
+    let z = [1.5f64, -2.0, 1.0e4, 0.0];
+    std::fs::write(&p, z.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>()).unwrap();
+    assert_eq!(read_surface(path, 4).unwrap(), z.to_vec());
+    assert!(read_surface(path, 5).unwrap_err().contains("32 bytes"));
+    std::fs::write(&p, [1.0f64, f64::NAN, 2.0, 3.0].iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>()).unwrap();
+    assert!(read_surface(path, 4).unwrap_err().contains("cell 1 is not finite"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
