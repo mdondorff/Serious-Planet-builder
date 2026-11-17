@@ -73,7 +73,7 @@ fn base() -> Graph {
     j.marker = Some(Marker { on_reach: r3.id, at_vertex: 1 });
     let t = reach(&s3, &j, vec![cell(2, 3), cell(2, 2), cell(2, 1)], attrs(&[1.0e4, 1.5e4, 1.6e4], &[30, 20, 16], 1));
     let basin = Basin {
-        id: basin_id(BODY, Level::L, cell(3, 3)),
+        id: basin_id(BODY, Level::L, cell(3, 3), Some(cell(3, 2))),
         level: Level::L,
         parent: None,
         floor_cell: cell(3, 3),
@@ -196,6 +196,37 @@ fn each_injected_structural_failure_is_found() {
     let mut g = base();
     g.nodes.iter_mut().find(|n| n.id == o).unwrap().kind = NodeKind::LakeInlet;
     assert!(found(&g, &|v| matches!(v, Violation::IdMismatch { id } if *id == o)), "a kind changed under a kept id");
+    // a basin's id holds its floor and its spill (reading 4): a parent sharing its floor with its deepest child has another id; a spill moved under a kept id is a mismatch
+    let (floor, spill) = (cell(3, 3), cell(3, 2));
+    assert_ne!(basin_id(BODY, Level::L, floor, Some(spill)), basin_id(BODY, Level::L, floor, Some(cell(2, 2))));
+    assert_ne!(basin_id(BODY, Level::L, floor, None), basin_id(BODY, Level::L, floor, Some(0)), "no spill cell is not cell 0");
+    let mut g = base();
+    g.basins[0].spill_cell = cell(2, 2);
+    let b = g.basins[0].id;
+    assert!(found(&g, &|v| matches!(v, Violation::IdMismatch { id } if *id == b)), "a spill moved under a kept id");
+    let mut g = base();
+    let mut parent = g.basins[0].clone();
+    parent.spill_cell = cell(1, 3);
+    parent.spill_m = 12.0;
+    parent.id = basin_id(BODY, Level::L, floor, Some(cell(1, 3)));
+    g.basins[0].parent = Some(parent.id);
+    g.basins.push(parent);
+    assert!(
+        !found(&g, &|v| matches!(v, Violation::DuplicateId { .. } | Violation::IdMismatch { .. })),
+        "a parent on its child's floor validates"
+    );
+    // a basin with no spill cell (+inf) validates with the id of no spill; a NaN or -inf spill, or a non-finite floor, is not finite
+    let mut g = base();
+    g.basins[0].spill_m = f64::INFINITY;
+    g.basins[0].id = basin_id(BODY, Level::L, floor, None);
+    assert_eq!(check(&g), vec![], "no spill cell");
+    for (spill, floor_m, field) in [(f64::NAN, 4.0, "spill_m"), (f64::NEG_INFINITY, 4.0, "spill_m"), (9.5, f64::NAN, "floor_m")] {
+        let mut g = base();
+        (g.basins[0].spill_m, g.basins[0].floor_m) = (spill, floor_m);
+        g.basins[0].id = basin_id(BODY, Level::L, floor, spill_anchor(&g.basins[0]));
+        let b = g.basins[0].id;
+        assert!(found(&g, &|v| matches!(v, Violation::NotFinite { at, field: f } if *at == b && *f == field)), "{field} {spill} {floor_m}");
+    }
     // two nodes on one (level, anchor)
     let mut g = base();
     g.nodes.push(node(NodeKind::LakeSpill, cell(1, 1)));

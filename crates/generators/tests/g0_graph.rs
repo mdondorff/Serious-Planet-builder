@@ -148,7 +148,7 @@ fn expected(fx: &Fixture) -> Built {
     let mut junction_h = node_h(NodeKind::TribJunction, trunk_h[at_h]);
     junction_h.marker = Some(Marker { on_reach: reach_h.id, at_vertex: at_h as u32 });
     let basin_h = Basin {
-        id: basin_id(BODY, Level::H1, floor_h as u64),
+        id: basin_id(BODY, Level::H1, floor_h as u64, Some(spill_h as u64)),
         level: Level::H1,
         parent: None,
         floor_cell: floor_h as u64,
@@ -407,7 +407,7 @@ fn expected(fx: &Fixture) -> Built {
     let atb = trunk_l.iter().position(|&c| c == spill_path_l[kj]).unwrap();
     let jb = junction_at(atb);
     let basin_l = Basin {
-        id: basin_id(BODY, Level::L, floor_l as u64),
+        id: basin_id(BODY, Level::L, floor_l as u64, Some(spill_l as u64)),
         level: Level::L,
         parent: Some(basin_h.id),
         floor_cell: floor_l as u64,
