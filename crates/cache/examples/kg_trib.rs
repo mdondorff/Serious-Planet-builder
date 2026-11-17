@@ -2113,7 +2113,7 @@ fn main() -> Result<(), String> {
     // ---- G1d (SPIKE-133): KG-trib extractor-1 on the window, initiation on the D8 area (reading 14), A_crit 1 km2. The stage input: RG-0 (the control rung) S0, KS off;
     // RG-1 with `--z <file>`: explorer's KS0 (spike/ks-g1b), little-endian f64, row-major, the window's L grid (8 x (i0 - margin), 8 x (j0 - margin))
     {
-        use planet_generators::bake::basins_rg::{produce, BasinParams};
+        use planet_generators::bake::basins_rg::{produce_ids, BasinParams, CellIds};
         use planet_generators::bake::kg_trib::{accumulate_trunks, extract, Input, Params, Trunk};
         use planet_generators::bake::river_graph::Represented;
         let t = Instant::now();
@@ -2165,7 +2165,7 @@ fn main() -> Result<(), String> {
             .collect();
         let outlet_l: Vec<bool> = (0..n).map(|c| sea_l[c] || exit[c]).collect();
         let t_b = Instant::now();
-        let pb = produce(&gl, &z_in, &outlet_l, &[], &tile_l, &BasinParams::l(BODY));
+        let pb = produce_ids(&gl, &z_in, &outlet_l, &[], &tile_l, &BasinParams::l(BODY), &CellIds { gid: &gid_l, local: &to_local });
         let mut kept = vec![false; n];
         for b in pb.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface) {
             for &c in &pb.cells[&b.id] {
@@ -2322,6 +2322,56 @@ fn main() -> Result<(), String> {
             v2.len(),
             viol.len()
         );
+        // order #159 item 3: BUILD-059's density on the stage input, by the gate's rule (outlets the sea and the window's edge, round rules, seed 7; a channel cell is a land cell
+        // whose area is at least 1 km2; the length of the steps from a channel cell in the box to its receiver, diagonals sqrt 2, a step into the sea not counted), once with the
+        // routing's MFD area (the gate's) and once with the D8 accumulation of the same receivers (the extractor's initiation)
+        if value(&args, "--density-check").is_some() {
+            let t_d = Instant::now();
+            let edge: Vec<bool> = (0..n).map(|c| sea_l[c] || c % w == 0 || c / w == 0 || c % w == w - 1 || c / w == h - 1).collect();
+            let rr = route_rules(&gl, &z_in, &edge, 1e-3, 7, 0.0, None, RoundRules::ROUND);
+            let mut d8 = vec![0.0f64; n];
+            for c in 0..n {
+                if !edge[c] {
+                    d8[c] = dx_l * dx_l;
+                }
+            }
+            for &c in rr.order.iter().rev() {
+                let to = rr.receiver[c as usize];
+                if to != NONE {
+                    let a = d8[c as usize];
+                    d8[to as usize] += a;
+                }
+            }
+            let land_cells = (0..n).filter(|&c| in_box[c] && !sea_l[c]).count();
+            let land_km2 = land_cells as f64 * dx_l * dx_l / 1e6;
+            let density = |area: &dyn Fn(usize) -> f64| {
+                let mut len = 0.0;
+                let mut cells = 0usize;
+                for c in 0..n {
+                    if !in_box[c] || sea_l[c] || area(c) < 1.0e6 {
+                        continue;
+                    }
+                    cells += 1;
+                    let to = rr.receiver[c];
+                    if to == NONE || sea_l[to as usize] {
+                        continue;
+                    }
+                    let to = to as usize;
+                    let diag = (to % w != c % w) && (to / w != c / w);
+                    len += if diag { core::f64::consts::SQRT_2 } else { 1.0 } * dx_l;
+                }
+                (len / 1e3 / land_km2, cells)
+            };
+            let (d_mfd, c_mfd) = density(&|c| rr.area[c]);
+            let (d_d8, c_d8) = density(&|c| d8[c]);
+            // the D8 network without the kept basins' cells (the extractor's channels stop at a lake inlet), and the extractor's own channel cells by the same step rule
+            let (d_d8_out, c_d8_out) = density(&|c| if kept[c] { 0.0 } else { d8[c] });
+            let (d_ex, c_ex) = density(&|c| if ex.channel[c] { f64::INFINITY } else { 0.0 });
+            println!(
+                "G1d density check (BUILD-059's rule on the stage input, 1 km2): MFD area {d_mfd:.4} km/km2 ({c_mfd} channel cells); D8 area {d_d8:.4} km/km2 ({c_d8}); D8 outside kept basins {d_d8_out:.4} ({c_d8_out}); the extractor's channel cells {d_ex:.4} ({c_ex}); {:.1} s",
+                t_d.elapsed().as_secs_f64()
+            );
+        }
         // BUILD-059's hierarchy on the combined graph, by the river gate's G2 code (BUILD-060's `graph_report`): rasterised L channel over the counted land (the region's box), streams, R_b
         {
             use planet_cache::river_gate_graph::{graph_report, Window as GWindow};

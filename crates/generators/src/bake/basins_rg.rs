@@ -201,8 +201,39 @@ pub struct Produced {
     pub unresolved: Vec<u64>,
 }
 
-/// Produces the basins of `z` on `grid` (`outlet` the outlet set), with the given reaches at the same level as spill receivers and inlets. `owner` names a cell's domain.
+/// A grid's cells against global cell ids: `gid` the global id of a grid cell, `local` the grid cell of a global id (`None` outside the grid).
+pub struct CellIds<'a> {
+    pub gid: &'a dyn Fn(usize) -> u64,
+    pub local: &'a dyn Fn(u64) -> Option<usize>,
+}
+
+/// Produces the basins of `z` on `grid` (`outlet` the outlet set), with the given reaches at the same level as spill receivers and inlets. `owner` names a cell's domain. On a grid whose cell
+/// index is its global id (a cube grid, the G0 fixture); a window uses [`produce_ids`].
 pub fn produce(grid: &Grid, z: &[f64], outlet: &[bool], reaches: &[Reach], owner: &dyn Fn(usize) -> Domain, p: &BasinParams) -> Produced {
+    let n = z.len();
+    produce_ids(
+        grid,
+        z,
+        outlet,
+        reaches,
+        owner,
+        p,
+        &CellIds { gid: &|c| c as u64, local: &|id| ((id as usize) < n).then_some(id as usize) },
+    )
+}
+
+/// [`produce`] on a window (explorer, 2026-11-17): the reaches' vertices are global ids (read through `ids.local`; a vertex outside the grid is skipped), and every anchor, basin cell and id
+/// the producer writes is global (`ids.gid`). `Produced::cells` stays in grid cells.
+pub fn produce_ids(
+    grid: &Grid,
+    z: &[f64],
+    outlet: &[bool],
+    reaches: &[Reach],
+    owner: &dyn Fn(usize) -> Domain,
+    p: &BasinParams,
+    ids: &CellIds,
+) -> Produced {
+    let gid = ids.gid;
     let hy = hierarchy(grid, z, outlet);
     let nn = hy.nodes.len();
     // subtrees as ranges of one flat array (order #159: no per-subtree copies): sizes children first (a node's id is larger than its children's), then the starts parents first,
@@ -271,14 +302,14 @@ pub fn produce(grid: &Grid, z: &[f64], outlet: &[bool], reaches: &[Reach], owner
         }
     }
     let basin_at = |c: usize| (basin_of_cell[c] != NONE).then_some(basin_of_cell[c]);
-    let id_of = |k: usize| basin_id(p.body, p.level, hy.nodes[k].floor_cell as u64, hy.nodes[k].spill.map(|sp| sp.0 as u64));
+    let id_of = |k: usize| basin_id(p.body, p.level, gid(hy.nodes[k].floor_cell), hy.nodes[k].spill.map(|sp| gid(sp.0)));
     let mut nodes: BTreeMap<u64, Node> = BTreeMap::new();
     let inlet = |c: usize, nodes: &mut BTreeMap<u64, Node>| {
         let n = Node {
-            id: node_id(p.body, NodeKind::LakeInlet, p.level, c as u64),
+            id: node_id(p.body, NodeKind::LakeInlet, p.level, gid(c)),
             kind: NodeKind::LakeInlet,
             level: p.level,
-            anchor: c as u64,
+            anchor: gid(c),
             parent: None,
             owner: owner(c),
             marker: None,
@@ -293,7 +324,9 @@ pub fn produce(grid: &Grid, z: &[f64], outlet: &[bool], reaches: &[Reach], owner
     let mut on_reach: BTreeMap<usize, (u64, u32)> = BTreeMap::new();
     for r in &sorted_reaches {
         for (k, &c) in r.vertices.iter().enumerate() {
-            on_reach.entry(c as usize).or_insert((r.id, k as u32));
+            if let Some(c) = (ids.local)(c) {
+                on_reach.entry(c).or_insert((r.id, k as u32));
+            }
         }
     }
     // the spill paths: routed on the outlets, or in a world without one (every tree closed) on its lowest cell
@@ -352,10 +385,10 @@ pub fn produce(grid: &Grid, z: &[f64], outlet: &[bool], reaches: &[Reach], owner
                     }
                     if let Some(&(r, v)) = on_reach.get(&c) {
                         let mut j = Node {
-                            id: marker_id(p.body, NodeKind::TribJunction, p.level, c as u64, r),
+                            id: marker_id(p.body, NodeKind::TribJunction, p.level, gid(c), r),
                             kind: NodeKind::TribJunction,
                             level: p.level,
-                            anchor: c as u64,
+                            anchor: gid(c),
                             parent: None,
                             owner: owner(c),
                             marker: Some(Marker { on_reach: r, at_vertex: v }),
@@ -382,9 +415,9 @@ pub fn produce(grid: &Grid, z: &[f64], outlet: &[bool], reaches: &[Reach], owner
             id,
             level: p.level,
             parent: (parent != DRAINED).then(|| id_of(parent as usize)),
-            floor_cell: nd.floor_cell as u64,
+            floor_cell: gid(nd.floor_cell),
             floor_m: nd.floor_m,
-            spill_cell: spill_cell as u64,
+            spill_cell: gid(spill_cell),
             spill_m,
             spill_node,
             outlet: outlet_kind,
@@ -397,10 +430,11 @@ pub fn produce(grid: &Grid, z: &[f64], outlet: &[bool], reaches: &[Reach], owner
     // inlets: each given reach entering a kept basin gets a lake_inlet on its first vertex inside it
     // (SPIKE-133: a reach that starts inside a kept basin does not enter it there: from its second vertex, and only from outside that basin)
     for r in &sorted_reaches {
-        for (k, &c) in r.vertices.iter().enumerate().skip(1) {
-            if let Some(b) = basin_at(c as usize) {
-                if keep[b as usize] == Keep::Kept && basin_at(r.vertices[k - 1] as usize) != Some(b) {
-                    inlet(c as usize, &mut nodes);
+        for k in 1..r.vertices.len() {
+            let (Some(c), prev) = ((ids.local)(r.vertices[k]), (ids.local)(r.vertices[k - 1])) else { continue };
+            if let Some(b) = basin_at(c) {
+                if keep[b as usize] == Keep::Kept && prev.and_then(|q| basin_at(q)) != Some(b) {
+                    inlet(c, &mut nodes);
                     break;
                 }
             }
