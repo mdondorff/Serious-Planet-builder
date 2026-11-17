@@ -1960,10 +1960,10 @@ fn main() -> Result<(), String> {
         reaches.iter().filter(|r| r.up_kind == NodeKind::LakeSpill).count()
     );
     // ================================================================ the RG chain (explorer #166, G1f plumbing; no tuning, no judgement)
-    // switches: --kh c1 | h2 | h4 | h4c (KS starts from KH(z_s) + r: h2 the triangulation, reading 19, spikes #137; h4 Clough-Tocher on its split and h4c, h4 clamped to
+    // switches: --kh c1 | h2 | h4 | h4c, default h4c (spikes #139; KS starts from KH(z_s) + r: h2 the triangulation, reading 19, spikes #137; h4 Clough-Tocher on its split and h4c, h4 clamped to
     // its quad's corners, reading 20, spikes #138 and #139); --ks off | ks0 | ks1 (default ks1); --skip a,b,... of kg-trunk, basins, kg-trib, kv, kc;
     // --regions 1 | 2
-    let kh = value(&args, "--kh").unwrap_or("c1");
+    let kh = value(&args, "--kh").unwrap_or("h4c");
     if !["c1", "h2", "h4", "h4c"].contains(&kh) {
         return Err(format!("--kh c1 | h2 | h4 | h4c, not '{kh}'"));
     }
