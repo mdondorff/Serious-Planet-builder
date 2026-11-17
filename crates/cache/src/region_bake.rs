@@ -197,6 +197,72 @@ pub struct RegionSolve {
 /// `zs - zb` (the original base), so the band `B - C1(zb)` is unchanged.
 pub type BaseHook = Box<dyn Fn(&Grid, &[bool], &[f64], &(dyn Fn(usize) -> Vec3 + Sync)) -> Vec<f64> + Send + Sync>;
 pub static BASE_HOOK: std::sync::OnceLock<BaseHook> = std::sync::OnceLock::new();
+/// SPIKE-138 (spikes #145, spike only): a change of the solved surface after the rounds (a bounded post-K5 drain).
+pub type PostHook = Box<dyn Fn(&Grid, &[bool], &mut Vec<f64>) + Send + Sync>;
+pub static POST_HOOK: std::sync::OnceLock<PostHook> = std::sync::OnceLock::new();
+
+/// SPIKE-138 (spike only): installs the base form. `uncapped` / `cap`: every depression of `z_b` breached or filled before K5 (a breach deeper than `cap` m filled);
+/// `sel-post`: before K5 only depressions with a breach cut or a fill depth within 50 m, after K5 the same on `z_s`; `sel-clamp`: the same before K5, and K5's breach floor at
+/// the fill level inside the basins left.
+pub fn install_s138(form: &str, cap: f64, tag: &str) -> Result<(), String> {
+    use planet_generators::bake::drain;
+    if !["uncapped", "cap", "sel-post", "sel-clamp"].contains(&form) {
+        return Err(format!("--base-form uncapped | cap | sel-post | sel-clamp, not '{form}'"));
+    }
+    let (form, tag) = (form.to_string(), tag.to_string());
+    let selective = form.starts_with("sel");
+    let t2 = tag.clone();
+    let f2 = form.clone();
+    let _ = BASE_HOOK.set(Box::new(move |grid: &Grid, outlet: &[bool], zb: &[f64], _dir: &(dyn Fn(usize) -> Vec3 + Sync)| {
+        let t = std::time::Instant::now();
+        let (w, h) = (grid.w(), grid.len() / grid.w());
+        let area = |p: usize| grid.cell_area(p);
+        let (d, st) = if selective {
+            drain::drain_selective(zb, w, h, outlet, &|_| false, &area, 12, 1 << 20, &|_| 50.0, &|_| 50.0)
+        } else {
+            drain::drain_capped(zb, w, h, outlet, &|_| false, &area, 12, 1 << 20, cap)
+        };
+        println!(
+            "HO {t2} A drain of z_b ({f2}, cap {cap}): {} rounds, {} depressions met ({} filled, {} breached), {} left of them {} deep (both over 50 m); {:.1} s",
+            st.rounds,
+            st.depressions,
+            st.filled,
+            st.breached,
+            st.left,
+            st.deep,
+            t.elapsed().as_secs_f64()
+        );
+        if f2 == "sel-clamp" {
+            let lf = drain::level_floor(&d, w, h, outlet);
+            let n = lf.iter().filter(|v| v.is_finite()).count();
+            println!("HO {t2} K5 clamp: the breach floor at the fill level on {n} cells of the basins left");
+            let _ = planet_generators::bake::round::LEVEL_FLOOR.set(lf);
+        }
+        d
+    }));
+    if form == "sel-post" {
+        let _ = POST_HOOK.set(Box::new(move |grid: &Grid, outlet: &[bool], zs: &mut Vec<f64>| {
+            let (w, h) = (grid.w(), grid.len() / grid.w());
+            let (d, st) =
+                drain::drain_selective(zs, w, h, outlet, &|_| false, &|p| grid.cell_area(p), 12, 1 << 20, &|_| 50.0, &|_| 50.0);
+            let (mut lo, mut hi) = (0.0f64, 0.0f64);
+            for p in 0..zs.len() {
+                let dz = (d[p] - zs[p]) * grid.cell_area(p) / 1e9;
+                if dz < 0.0 {
+                    lo -= dz;
+                } else {
+                    hi += dz;
+                }
+            }
+            println!(
+                "HO {tag} post-K5 drain of z_s: {} rounds, {} depressions met ({} filled, {} breached), {} left of them {} deep; lowered {lo:.3} km3, raised {hi:.3} km3",
+                st.rounds, st.depressions, st.filled, st.breached, st.left, st.deep
+            );
+            *zs = d;
+        }));
+    }
+    Ok(())
+}
 
 /// Solves the regional surface of the region: the first stage of [`bake_region`], public so that a test (or a tool) can run it without the rest.
 pub fn solve_region(spec: &RegionSpec, base: &(dyn Fn(Vec3) -> f64 + Sync)) -> Result<RegionSolve, String> {
@@ -243,6 +309,9 @@ pub fn solve_region(spec: &RegionSpec, base: &(dyn Fn(Vec3) -> f64 + Sync)) -> R
         let why =
             panic.downcast_ref::<String>().cloned().or_else(|| panic.downcast_ref::<&str>().map(|s| (*s).to_string())).unwrap_or_default();
         return Err(format!("after the rounds of the region: the rounds refused the surface (GEN-175): {why}"));
+    }
+    if let Some(hook) = POST_HOOK.get() {
+        hook(&grid, &outlet, &mut zs);
     }
     precision.check_within_radius(&grid, &zs, |c| grid.global_id(c)).map_err(|e| format!("after the rounds of the region: {e}"))?;
     Ok(RegionSolve { face_spec, grid, outlet, zb, zb_in, zs, stream, ri0, rj0, rw, rh, precision })

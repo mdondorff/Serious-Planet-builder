@@ -2203,7 +2203,10 @@ fn main() -> Result<(), String> {
         return Err(format!("--drain none | a | aplus, not '{drain_mode}'"));
     }
     let drain_cap: f64 = value(&args, "--drain-cap").map_or(Ok(f64::INFINITY), str::parse).map_err(|_| "--drain-cap metres")?;
-    install_base_hook(&drain_mode, &tag, drain_cap);
+    if drain_mode != "none" {
+        let form = value(&args, "--base-form").unwrap_or(if drain_cap.is_finite() { "cap" } else { "uncapped" });
+        planet_cache::region_bake::install_s138(form, drain_cap, &tag)?;
+    }
     let front = region_front(&spec, &base, &climate)?;
     let solve = &front.solve;
     let (sri0, srj0, rw, rh) = (solve.ri0, solve.rj0, solve.rw, solve.rh);
@@ -2468,12 +2471,14 @@ fn main() -> Result<(), String> {
     // the chain z_b (814 m) -> z_s (814 m) -> KH(h4c)(z_s) at L -> F with a defect there (814 m rungs within one cell, KH within 4 L cells), as SPIKE-135's classifier:
     // base (z_b and z_s), K5 (z_s only), interpolation residue (KH, not z_s), band (F only).
     // SPIKE-138 (2): A+, the band drained on KH(h4c)(z_s) (its pits connected or filled); r'' replaces r
+    let mut raised: Option<Vec<bool>> = None;
     let rl = if drain_mode == "aplus" {
         let t = Instant::now();
         let seed = |p: usize| sea_h1(to_h1(p));
         let area = |_p: usize| lg.dx() * lg.dx();
         let (r2, st) = planet_generators::bake::drain::drain_band(&h4cz, &rl, w, h, &seed, &|_| false, &area, 8);
         csv += &band_report(&tag, &h4cz, &rl, &r2, &start, w, h, &in_box, &seed, lg.dx(), &st);
+        raised = Some((0..nl).map(|p| r2[p] > rl[p] + 1e-9).collect());
         println!("HO {tag} A+ band drain: {:.0} s", t.elapsed().as_secs_f64());
         r2
     } else {
@@ -2488,90 +2493,139 @@ fn main() -> Result<(), String> {
                 h4cz[p] + rr - f64::from(used2[p])
             })
             .collect();
+        // SPIKE-138 (spikes #145, reading 23): KS never lowers below drain_band's fill. `--r23 clamp`: no KS lowering on the cells drain_band raised (filled);
+        // `--r23 post`: drain_band's rule (breach cut and fill depth within the budget at the floor) on F after KS. Each form is classified as F is.
+        let r23 = value(&args, "--r23").unwrap_or("").to_string();
+        let mut variants: Vec<(String, Vec<f64>)> = Vec::new();
+        if r23.contains("clamp") {
+            let raised = raised.as_ref().ok_or("--r23 clamp needs --drain aplus")?;
+            variants.push(("-r23c".into(), (0..nl).map(|p| if raised[p] { f[p] + f64::from(used2[p]) } else { f[p] }).collect()));
+        }
         drop(used2);
+        if r23.contains("post") {
+            let t = Instant::now();
+            let budget_l = planet_cache::river_gate_graph::budget_field(&start, w, h, L, lg.dx(), 25_000.0);
+            let seed = |p: usize| sea_h1(to_h1(p));
+            let outl = planet_generators::bake::drain::sea_outlets(&f, w, h, &seed, 0.0);
+            let (fp, st) = planet_generators::bake::drain::drain_selective(
+                &f,
+                w,
+                h,
+                &outl,
+                &|_| false,
+                &|_| lg.dx() * lg.dx(),
+                8,
+                4096,
+                &|p| budget_l[p],
+                &|p| budget_l[p],
+            );
+            let (mut lo, mut hi) = (0.0f64, 0.0f64);
+            for p in (0..nl).filter(|&p| in_box[p]) {
+                let d = (fp[p] - f[p]) * lg.dx() * lg.dx() / 1e9;
+                if d < 0.0 {
+                    lo -= d;
+                } else {
+                    hi += d;
+                }
+            }
+            println!(
+                "HO {tag} reading 23 post: drain of F (caps: the budget at the floor): {} rounds, {} depressions met ({} filled, {} breached), {} left of them {} deep; box lowered {lo:.4} km3, raised {hi:.4} km3; {:.0} s",
+                st.rounds, st.depressions, st.filled, st.breached, st.left, st.deep, t.elapsed().as_secs_f64()
+            );
+            variants.push(("-r23p".into(), fp));
+        }
+        variants.insert(0, (String::new(), f));
+        let (row, kh_k) = rung(&tag, "KH(h4c) no band", &lg, &h4cz, &in_core_l, &sea_l, true, threads, "-,-");
+        csv += &format!("{row}
+");
+        let kh_k = kh_k.expect("kept");
         if args.iter().any(|a| a == "--dump-f") {
-            let b: Vec<u8> = f.iter().flat_map(|&v| (v as f32).to_le_bytes()).collect();
-            std::fs::write(out_dir.join(format!("{tag}-F-{w}x{h}.f32")), b).map_err(|e| e.to_string())?;
             let b: Vec<u8> = start.iter().flat_map(|&v| (v as f32).to_le_bytes()).collect();
             std::fs::write(out_dir.join(format!("{tag}-S0-{w}x{h}.f32")), b).map_err(|e| e.to_string())?;
         }
-        let (row, kh_k) = rung(&tag, "KH(h4c) no band", &lg, &h4cz, &in_core_l, &sea_l, true, threads, "-,-");
-        csv += &format!("{row}\n");
-        let (row, f_k) = rung(&tag, "F = KH(h4c) + r' - KS1", &lg, &f, &in_core_l, &sea_l, true, threads, "-,-");
-        csv += &format!("{row}\n");
-        let (kh_k, f_k) = (kh_k.expect("kept"), f_k.expect("kept"));
-        let defect = |k: &Kept, i: usize| k.breach[i] > PRESENT as f32 || k.fill[i] > PRESENT as f32;
-        let d814 = |k: &Kept| dilate(&(0..cells).map(|c| defect(k, c)).collect::<Vec<_>>(), rw, rh, 1);
-        let (p0, p1) = (d814(&k0), d814(&k1));
-        let pkh = dilate(&(0..nl).map(|p| defect(&kh_k, p)).collect::<Vec<_>>(), w, h, L / 2);
-        let class_of = |p: usize| -> usize {
-            let c = to_h1(p);
-            if p1[c] && p0[c] {
-                1
-            } else if p1[c] {
-                2
-            } else if pkh[p] {
-                3
-            } else {
-                4
+        for (sfx, f) in variants {
+            let vtag = format!("{tag}{sfx}");
+            if args.iter().any(|a| a == "--dump-f") {
+                let b: Vec<u8> = f.iter().flat_map(|&v| (v as f32).to_le_bytes()).collect();
+                std::fs::write(out_dir.join(format!("{vtag}-F-{w}x{h}.f32")), b).map_err(|e| e.to_string())?;
             }
-        };
-        const NAMES: [&str; 5] = ["-", "base", "K5", "interpolation", "band"];
-        // river cells (75 km2) of F inside: in a closed depression (any; over 5 m deep), by the class of the cell (a river cell in a depression is a defect cell of F)
-        let (mut riv, mut riv_pit, mut riv_pit5, mut riv_pitg) = (0usize, [0usize; 5], [0usize; 5], [0usize; 5]);
-        let (mut bvol, mut bcells) = ([0f64; 5], [0usize; 5]);
-        for p in (0..nl).filter(|&p| in_box[p] && start[p] > 0.0) {
-            if f_k.ch75[p] {
-                riv += 1;
-                if f_k.pit[p] {
-                    let k = class_of(p);
-                    riv_pit[k] += 1;
-                    if f_k.pit5[p] {
-                        riv_pit5[k] += 1;
-                    }
-                    if f_k.pitg[p] {
-                        riv_pitg[k] += 1;
+            let (row, f_k) = rung(&vtag, "F = KH(h4c) + r' - KS1", &lg, &f, &in_core_l, &sea_l, true, threads, "-,-");
+            csv += &format!("{row}
+");
+            let f_k = f_k.expect("kept");
+            let defect = |k: &Kept, i: usize| k.breach[i] > PRESENT as f32 || k.fill[i] > PRESENT as f32;
+            let d814 = |k: &Kept| dilate(&(0..cells).map(|c| defect(k, c)).collect::<Vec<_>>(), rw, rh, 1);
+            let (p0, p1) = (d814(&k0), d814(&k1));
+            let pkh = dilate(&(0..nl).map(|p| defect(&kh_k, p)).collect::<Vec<_>>(), w, h, L / 2);
+            let class_of = |p: usize| -> usize {
+                let c = to_h1(p);
+                if p1[c] && p0[c] {
+                    1
+                } else if p1[c] {
+                    2
+                } else if pkh[p] {
+                    3
+                } else {
+                    4
+                }
+            };
+            const NAMES: [&str; 5] = ["-", "base", "K5", "interpolation", "band"];
+            // river cells (75 km2) of F inside: in a closed depression (any; over 5 m deep), by the class of the cell (a river cell in a depression is a defect cell of F)
+            let (mut riv, mut riv_pit, mut riv_pit5, mut riv_pitg) = (0usize, [0usize; 5], [0usize; 5], [0usize; 5]);
+            let (mut bvol, mut bcells) = ([0f64; 5], [0usize; 5]);
+            for p in (0..nl).filter(|&p| in_box[p] && start[p] > 0.0) {
+                if f_k.ch75[p] {
+                    riv += 1;
+                    if f_k.pit[p] {
+                        let k = class_of(p);
+                        riv_pit[k] += 1;
+                        if f_k.pit5[p] {
+                            riv_pit5[k] += 1;
+                        }
+                        if f_k.pitg[p] {
+                            riv_pitg[k] += 1;
+                        }
                     }
                 }
+                let b = f64::from(f_k.breach[p]);
+                if b > PRESENT {
+                    let k = class_of(p);
+                    bvol[k] += b * lg.cell_area(p);
+                    bcells[k] += 1;
+                }
             }
-            let b = f64::from(f_k.breach[p]);
-            if b > PRESENT {
-                let k = class_of(p);
-                bvol[k] += b * lg.cell_area(p);
-                bcells[k] += 1;
-            }
-        }
-        let tp: usize = riv_pit.iter().sum();
-        let tp5: usize = riv_pit5.iter().sum();
-        let tpg: usize = riv_pitg.iter().sum();
-        let tv: f64 = bvol.iter().sum();
-        let tc: usize = bcells.iter().sum();
-        let pc = |a: f64, b: f64| 100.0 * a / b.max(1e-12);
-        println!(
-            "HO {tag} remainder on F: river cells (75 km2) {riv}, in closed depressions {tp} ({:.2} %), in G-DRAIN basins (at least 0.5 m and 16 cells) {tpg} ({:.2} %), over 5 m deep {tp5} ({:.2} %); breach cells over {PRESENT} m {tc}, {:.4} km3",
-            pc(tp as f64, riv as f64),
-            pc(tpg as f64, riv as f64),
-            pc(tp5 as f64, riv as f64),
-            tv / 1.0e9
-        );
-        for k in 1..5 {
+            let tp: usize = riv_pit.iter().sum();
+            let tp5: usize = riv_pit5.iter().sum();
+            let tpg: usize = riv_pitg.iter().sum();
+            let tv: f64 = bvol.iter().sum();
+            let tc: usize = bcells.iter().sum();
+            let pc = |a: f64, b: f64| 100.0 * a / b.max(1e-12);
             println!(
-                "HO {tag} remainder class {}: river in closed depressions {} cells ({:.1} % of the remainder; {:.2} % of the river), in G-DRAIN basins {} ({:.1} %), over 5 m {} ({:.1} %); breach {} cells, {:.4} km3 ({:.1} % of the volume)",
-                NAMES[k],
-                riv_pit[k],
-                pc(riv_pit[k] as f64, tp as f64),
-                pc(riv_pit[k] as f64, riv as f64),
-                riv_pitg[k],
-                pc(riv_pitg[k] as f64, tpg as f64),
-                riv_pit5[k],
-                pc(riv_pit5[k] as f64, tp5 as f64),
-                bcells[k],
-                bvol[k] / 1.0e9,
-                pc(bvol[k], tv)
+                "HO {vtag} remainder on F: river cells (75 km2) {riv}, in closed depressions {tp} ({:.2} %), in G-DRAIN basins (at least 0.5 m and 16 cells) {tpg} ({:.2} %), over 5 m deep {tp5} ({:.2} %); breach cells over {PRESENT} m {tc}, {:.4} km3",
+                pc(tp as f64, riv as f64),
+                pc(tpg as f64, riv as f64),
+                pc(tp5 as f64, riv as f64),
+                tv / 1.0e9
             );
-            csv += &format!("#remain,{tag},{},{riv},{},{},{},{},{:.6}\n", NAMES[k], riv_pit[k], riv_pitg[k], riv_pit5[k], bcells[k], bvol[k] / 1.0e9);
+            for k in 1..5 {
+                println!(
+                    "HO {vtag} remainder class {}: river in closed depressions {} cells ({:.1} % of the remainder; {:.2} % of the river), in G-DRAIN basins {} ({:.1} %), over 5 m {} ({:.1} %); breach {} cells, {:.4} km3 ({:.1} % of the volume)",
+                    NAMES[k],
+                    riv_pit[k],
+                    pc(riv_pit[k] as f64, tp as f64),
+                    pc(riv_pit[k] as f64, riv as f64),
+                    riv_pitg[k],
+                    pc(riv_pitg[k] as f64, tpg as f64),
+                    riv_pit5[k],
+                    pc(riv_pit5[k] as f64, tp5 as f64),
+                    bcells[k],
+                    bvol[k] / 1.0e9,
+                    pc(bvol[k], tv)
+                );
+                csv += &format!("#remain,{vtag},{},{riv},{},{},{},{},{:.6}\n", NAMES[k], riv_pit[k], riv_pitg[k], riv_pit5[k], bcells[k], bvol[k] / 1.0e9);
+            }
+            flush(&csv, &csv2)?;
         }
-        flush(&csv, &csv2)?;
         println!("HO {tag} done (--ks1): {:.0} s", t_all.elapsed().as_secs_f64());
         return Ok(());
     }

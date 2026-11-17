@@ -432,7 +432,7 @@ fn main() -> Result<(), String> {
         }
     }
     let args: Vec<String> = args.into_iter().filter(|a| a != "--no-key-check").collect();
-    let known = ["--window", "--margin", "--store", "--min-cells", "--d", "--threads", "--network-km2", "--grid", "--out", "--k6p", "--kh", "--drain", "--drain-cap"];
+    let known = ["--window", "--margin", "--store", "--min-cells", "--d", "--threads", "--network-km2", "--grid", "--out", "--k6p", "--kh", "--drain", "--drain-cap", "--base-form"];
     let mut k = 0;
     while k < args.len() {
         if !known.contains(&args[k].as_str()) {
@@ -523,14 +523,8 @@ fn main() -> Result<(), String> {
     }
     let drain_cap: f64 = value(&args, "--drain-cap").map_or(Ok(f64::INFINITY), str::parse).map_err(|_| "--drain-cap metres".to_string())?;
     if drain_mode != "none" {
-        let _ = planet_cache::region_bake::BASE_HOOK.set(Box::new(
-            move |grid: &planet_generators::bake::Grid, outlet: &[bool], zb: &[f64], _dir: &(dyn Fn(usize) -> planet_core::Vec3 + Sync)| {
-                let (w, h) = (grid.w(), grid.len() / grid.w());
-                let (d, st) = planet_generators::bake::drain::drain_capped(zb, w, h, outlet, &|_| false, &|p| grid.cell_area(p), 12, 1 << 20, drain_cap);
-                println!("KS A drain of z_b: {} rounds, {} depressions ({} filled, {} breached), {} left", st.rounds, st.depressions, st.filled, st.breached, st.left);
-                d
-            },
-        ));
+        let form = value(&args, "--base-form").unwrap_or(if drain_cap.is_finite() { "cap" } else { "uncapped" });
+        planet_cache::region_bake::install_s138(form, drain_cap, "ks")?;
     }
     let front = region_front(&spec, &base, &climate)?;
     // The L window: the regional solve's window, 8 L cells a regional cell.

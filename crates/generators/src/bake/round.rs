@@ -31,7 +31,13 @@ pub struct CatchmentInputs {
     pub up_unit: Vec<f64>,
     /// The catchment's outlet is a window cut (the caller set `CarveParams::window_cut` and the outlet is on the border of the grid): its height is no base for the breach (GEN-172).
     pub exit_window_cut: bool,
+    /// SPIKE-138 (spike only): the breach's floor per member (a donor's level floor bounds its receiver's target), empty for none; from [`LEVEL_FLOOR`].
+    pub level_floor: Vec<f64>,
 }
+
+/// SPIKE-138 (spikes #145, spike only): per region cell, the level K5's breach may not lower a receiver below when the donor lies in a basin the selective drain left (its fill
+/// level), -inf elsewhere. Read by [`gather_with`] when its length is the grid's.
+pub static LEVEL_FLOOR: std::sync::OnceLock<Vec<f64>> = std::sync::OnceLock::new();
 
 /// What a carve reads besides the heights (the drivers of `carve_rock` without a layered rock): the class factor, the uplift per cell (the ratio `U / K` at K 1) and the runoff weights.
 #[derive(Clone, Copy, Debug, Default)]
@@ -61,6 +67,9 @@ pub fn catchment_round(inp: &mut CatchmentInputs, p: &CarveParams, steps: usize)
         let mut want = (z[c] - p.breach_slope * inp.dist[c]).max(floor);
         if let Some(b) = &base {
             want = want.max(b[rec]);
+        }
+        if let Some(&lf) = inp.level_floor.get(c) {
+            want = want.max(lf);
         }
         if z[rec] > want {
             let start = *round_start.entry(rec).or_insert(z[rec]);
@@ -159,12 +168,17 @@ pub fn gather_with(
         scale: Vec::with_capacity(cells.len()),
         up_unit: Vec::with_capacity(cells.len()),
         exit_window_cut: false,
+        level_floor: Vec::new(),
     };
+    let lf = LEVEL_FLOOR.get().filter(|f| f.len() == z.len());
     for &c in cells {
         let c = c as usize;
         let rec = r.receiver[c];
         let class = drivers.k_scale.map_or(1.0, |f| f[c]);
         inp.z.push(z[c]);
+        if let Some(f) = lf {
+            inp.level_floor.push(f[c]);
+        }
         inp.area.push(r.area[c]);
         inp.taper.push(taper.get(c).copied().unwrap_or(1.0));
         inp.scale.push(class);
