@@ -97,7 +97,7 @@ The basins of the first runs (crusader's producer at 82aa5939) carried window-lo
 | Graph | 322,067 nodes, 209,212 reaches, 55,501 basins | the same counts; one change: the owner of one `trib_junction` (below) |
 | Landmass items with different contents in two domains | - | 0 |
 | Junction markers dropped after the stitch | 288 | 300 |
-| Seconds: basins / KG-trib (with the second basin pass) / KV and KC / total | 139 / 228 / 164 / 712 | 140 / 224 / 429 / 978 |
+| Seconds: basins / KG-trib (with the second basin pass) / KV and KC / total | 139 / 228 / 164 / 712 | 140 / 224 / 429 / 981 |
 | Peak working set, MiB (the basins stage) | 13,800 | 13,431 |
 - The one change: `trib_junction` 7ba4f0f6c4d4a441 at vertex 0 of trunk reach 77d4d415106ccfb5 is owned by tile 1:87:9 in the one-region graph and by the landmass in the two-region graph: two of crusader's stages give one marker different owners (told).
 - KV and KC run on the whole window per domain (the module has no active mask): 2.6 times the one-region time.
