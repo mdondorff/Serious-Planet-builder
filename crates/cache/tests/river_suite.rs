@@ -644,3 +644,90 @@ fn a_corridor_measures_rises_above_the_water_surface_not_the_sea_floor() {
     let floor = planet_cache::river_suite::trunk_corridor(&g, &z, &all, &line, 8.0, 10.0, f64::NEG_INFINITY, None);
     assert_eq!(floor.reaches_over, 1, "{floor:?}");
 }
+
+// spec: TEST-137, BUILD-059
+#[test]
+fn the_network_counts_strahler_streams_and_fits_the_bifurcation_ratio_below_the_highest_order() {
+    use planet_cache::river_suite::network;
+    use planet_generators::bake::route::NONE;
+    // A 9 x 6 grid of land at 10 m, cells of 100 m, flowing down the rows: four heads pair into two order-2 streams that meet in an order-3 trunk at (4, 3), and a
+    // fifth head joins the trunk at (4, 5) without raising its order. Strahler counts 5 / 2 / 1; the fit over orders 1 and 2 gives R_b = 5 / 2.
+    let (w, h) = (9usize, 6usize);
+    let g = Grid::new(w, h, DX);
+    let at = |x: usize, y: usize| y * w + x;
+    let mut receiver = vec![NONE; w * h];
+    let mut area = vec![0.0; w * h];
+    let steps = [
+        ((1, 0), (2, 1)),
+        ((3, 0), (2, 1)),
+        ((5, 0), (6, 1)),
+        ((7, 0), (6, 1)),
+        ((2, 1), (3, 2)),
+        ((3, 2), (4, 3)),
+        ((6, 1), (5, 2)),
+        ((5, 2), (4, 3)),
+        ((4, 3), (4, 4)),
+        ((4, 4), (4, 5)),
+        ((7, 3), (6, 3)),
+        ((6, 3), (5, 4)),
+        ((5, 4), (4, 5)),
+    ];
+    for ((x0, y0), (x1, y1)) in steps {
+        receiver[at(x0, y0)] = at(x1, y1) as u32;
+        area[at(x0, y0)] = 2.0e6;
+        area[at(x1, y1)] = 2.0e6;
+    }
+    for y in 3..6 {
+        area[at(4, y)] = 100.0e6;
+    }
+    let z = vec![10.0; w * h];
+    let inside = vec![true; w * h];
+    let fine = network(&g, &z, &receiver, &area, &inside, 0.0, 1.0e6);
+    assert_eq!(fine.streams, vec![5, 2, 1], "{fine:?}");
+    assert_eq!(fine.rb_orders, 2, "{fine:?}");
+    assert!((fine.rb - 2.5).abs() < 1e-12, "{fine:?}");
+    // 10 diagonal and 3 straight steps of 100 m over 54 cells of 0.01 km2.
+    let km = (10.0 * std::f64::consts::SQRT_2 + 3.0) * 0.1;
+    assert!((fine.river_km - km).abs() < 1e-9 && (fine.land_km2 - 0.54).abs() < 1e-12, "{fine:?}");
+    assert!((fine.density_km_per_km2 - km / 0.54).abs() < 1e-9, "{fine:?}");
+    assert_eq!(fine.threshold_km2, 1.0);
+    // At 75 km2 only the trunk below the confluence is a channel: one order-1 stream of two steps, too few orders for R_b.
+    let coarse = network(&g, &z, &receiver, &area, &inside, 0.0, 75.0e6);
+    assert_eq!((coarse.streams.clone(), coarse.rb_orders, coarse.rb), (vec![1], 0, 0.0), "{coarse:?}");
+    assert!((coarse.river_km - 0.2).abs() < 1e-9, "{coarse:?}");
+    // The sea ends the network: with the outlet cell (4, 5) under the sea, its two inflowing steps leave the length, and the counts stay.
+    let mut wet = z.clone();
+    wet[at(4, 5)] = 0.0;
+    let sea = network(&g, &wet, &receiver, &area, &inside, 0.0, 1.0e6);
+    assert_eq!(sea.streams, vec![5, 2, 1], "{sea:?}");
+    assert!((sea.river_km - (km - 0.1 - 0.1 * std::f64::consts::SQRT_2)).abs() < 1e-9 && (sea.land_km2 - 0.53).abs() < 1e-12, "{sea:?}");
+    // Counted cells: a stream counts where it starts, the length where its step starts.
+    let top_only: Vec<bool> = (0..w * h).map(|c| c / w <= 1).collect();
+    let part = network(&g, &z, &receiver, &area, &top_only, 0.0, 1.0e6);
+    assert_eq!(part.streams, vec![4, 2], "{part:?}");
+    assert!((part.river_km - 0.6 * std::f64::consts::SQRT_2).abs() < 1e-9, "{part:?}");
+}
+
+// spec: TEST-137, BUILD-059
+#[test]
+fn a_raw_grid_parses_its_argument_reads_little_endian_heights_and_counts_inside_its_border() {
+    use planet_cache::river_gate::{border_inside, raw_grid_arg, raw_grid_heights, RawGrid, GRID_BORDER};
+    // The argument splits from the right, so a path may hold commas; a grid within twice the border, a missing number or a missing file part is refused.
+    assert_eq!(
+        raw_grid_arg("C:/d,x/glo-N47E011.f64,738,1093,-200").unwrap(),
+        RawGrid { file: "C:/d,x/glo-N47E011.f64".to_string(), w: 738, h: 1093, sea_level_m: -200.0 }
+    );
+    assert!(raw_grid_arg("a.f64,20,100,0").unwrap_err().contains("twice the 10-cell border"));
+    assert!(raw_grid_arg("a.f64,100,1093").is_err() && raw_grid_arg("a.f64,x,100,0").is_err() && raw_grid_arg(",100,100,0").is_err());
+    // Heights are w x h little-endian f64, row-major; a short or long file is refused.
+    let v = [1.5f64, -2.25, 1.0e4, 0.0, 7.0, 8.0];
+    let bytes: Vec<u8> = v.iter().flat_map(|x| x.to_le_bytes()).collect();
+    assert_eq!(raw_grid_heights(&bytes, 3, 2).unwrap(), v.to_vec());
+    assert!(raw_grid_heights(&bytes[..40], 3, 2).unwrap_err().contains("40 bytes"));
+    assert!(raw_grid_heights(&bytes, 2, 2).is_err());
+    // The counted cells: at least the border from each edge, so a 25 x 23 grid counts 5 x 3 cells, the first at (10, 10).
+    assert_eq!(GRID_BORDER, 10);
+    let inside = border_inside(25, 23, GRID_BORDER);
+    assert_eq!(inside.iter().filter(|&&b| b).count(), 15);
+    assert!(inside[10 * 25 + 10] && inside[12 * 25 + 14] && !inside[10 * 25 + 9] && !inside[13 * 25 + 10] && !inside[10 * 25 + 15]);
+}
