@@ -1807,6 +1807,8 @@ struct Kept {
     fill: Vec<f32>,
     pit: Vec<bool>,
     pit5: Vec<bool>,
+    /// in a basin of the river gate's G-DRAIN (a depression at least 0.5 m deep and 16 cells)
+    pitg: Vec<bool>,
 }
 
 /// Routes `z` on `g` with one rule for every rung (outlets: the grid's edge and every cell at or below the sea; the canonical priority flood with a 1e-3 m grade; D8 steepest descent on
@@ -2016,6 +2018,7 @@ fn rung(
             fill: depth.iter().map(|&v| v as f32).collect(),
             pit: (0..n).map(|p| label[p] != u32::MAX).collect(),
             pit5: (0..n).map(|p| label[p] != u32::MAX && comps[label[p] as usize].0 > 5.0).collect(),
+            pitg: (0..n).map(|p| label[p] != u32::MAX && comps[label[p] as usize].0 >= 0.5 && comps[label[p] as usize].1 >= 16).collect(),
         });
     (row, kept)
 }
@@ -2451,7 +2454,7 @@ fn main() -> Result<(), String> {
         };
         const NAMES: [&str; 5] = ["-", "base", "K5", "interpolation", "band"];
         // river cells (75 km2) of F inside: in a closed depression (any; over 5 m deep), by the class of the cell (a river cell in a depression is a defect cell of F)
-        let (mut riv, mut riv_pit, mut riv_pit5) = (0usize, [0usize; 5], [0usize; 5]);
+        let (mut riv, mut riv_pit, mut riv_pit5, mut riv_pitg) = (0usize, [0usize; 5], [0usize; 5], [0usize; 5]);
         let (mut bvol, mut bcells) = ([0f64; 5], [0usize; 5]);
         for p in (0..nl).filter(|&p| in_box[p] && start[p] > 0.0) {
             if f_k.ch75[p] {
@@ -2461,6 +2464,9 @@ fn main() -> Result<(), String> {
                     riv_pit[k] += 1;
                     if f_k.pit5[p] {
                         riv_pit5[k] += 1;
+                    }
+                    if f_k.pitg[p] {
+                        riv_pitg[k] += 1;
                     }
                 }
             }
@@ -2473,29 +2479,33 @@ fn main() -> Result<(), String> {
         }
         let tp: usize = riv_pit.iter().sum();
         let tp5: usize = riv_pit5.iter().sum();
+        let tpg: usize = riv_pitg.iter().sum();
         let tv: f64 = bvol.iter().sum();
         let tc: usize = bcells.iter().sum();
         let pc = |a: f64, b: f64| 100.0 * a / b.max(1e-12);
         println!(
-            "HO {tag} remainder on F: river cells (75 km2) {riv}, in closed depressions {tp} ({:.2} %), over 5 m deep {tp5} ({:.2} %); breach cells over {PRESENT} m {tc}, {:.4} km3",
+            "HO {tag} remainder on F: river cells (75 km2) {riv}, in closed depressions {tp} ({:.2} %), in G-DRAIN basins (at least 0.5 m and 16 cells) {tpg} ({:.2} %), over 5 m deep {tp5} ({:.2} %); breach cells over {PRESENT} m {tc}, {:.4} km3",
             pc(tp as f64, riv as f64),
+            pc(tpg as f64, riv as f64),
             pc(tp5 as f64, riv as f64),
             tv / 1.0e9
         );
         for k in 1..5 {
             println!(
-                "HO {tag} remainder class {}: river in closed depressions {} cells ({:.1} % of the remainder; {:.2} % of the river), over 5 m {} ({:.1} %); breach {} cells, {:.4} km3 ({:.1} % of the volume)",
+                "HO {tag} remainder class {}: river in closed depressions {} cells ({:.1} % of the remainder; {:.2} % of the river), in G-DRAIN basins {} ({:.1} %), over 5 m {} ({:.1} %); breach {} cells, {:.4} km3 ({:.1} % of the volume)",
                 NAMES[k],
                 riv_pit[k],
                 pc(riv_pit[k] as f64, tp as f64),
                 pc(riv_pit[k] as f64, riv as f64),
+                riv_pitg[k],
+                pc(riv_pitg[k] as f64, tpg as f64),
                 riv_pit5[k],
                 pc(riv_pit5[k] as f64, tp5 as f64),
                 bcells[k],
                 bvol[k] / 1.0e9,
                 pc(bvol[k], tv)
             );
-            csv += &format!("#remain,{tag},{},{riv},{},{},{},{},{:.6}\n", NAMES[k], riv_pit[k], riv_pit5[k], bcells[k], 0, bvol[k] / 1.0e9);
+            csv += &format!("#remain,{tag},{},{riv},{},{},{},{},{:.6}\n", NAMES[k], riv_pit[k], riv_pitg[k], riv_pit5[k], bcells[k], bvol[k] / 1.0e9);
         }
         flush(&csv, &csv2)?;
         println!("HO {tag} done (--ks1): {:.0} s", t_all.elapsed().as_secs_f64());
