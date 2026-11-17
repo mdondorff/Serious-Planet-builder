@@ -298,3 +298,115 @@ fn every_case_validates_and_is_deterministic() {
     let (_, again) = run(&z, &[r]);
     assert_eq!(graph_of(&again, &[], &[]).canonical(), graph_of(&p, &[], &[]).canonical(), "the same bytes twice");
 }
+
+/// The G0 fixture (TEST-139): H1 basins on `z_s` (GEN-145's kept rule: 2 m at any size), L basins on `S0` (the contract's 0.25 km2, 2 m), the L image of the H1 basin, the same bytes on
+/// 1 and 4 threads, and the same L basins under both layouts (regions of whole tiles, a one-tile halo).
+mod fixture_case {
+    use super::*;
+    use crate::g0_fixture::fixture as fx;
+
+    fn l_tile(c: usize) -> Domain {
+        let (f, ti, tj) = fx::tile_of_l(c);
+        Domain::Tile { face: f as u8, ti: ti as u32, tj: tj as u32 }
+    }
+
+    fn basins(threads: usize) -> (Produced, Produced, Vec<(u64, u64)>, fx::Fixture) {
+        basins_linked(threads, true)
+    }
+
+    fn basins_linked(threads: usize, link: bool) -> (Produced, Produced, Vec<(u64, u64)>, fx::Fixture) {
+        let f = fx::build(threads);
+        let gh = Grid::cube(fx::H1_N, fx::RADIUS_M);
+        let gl = Grid::cube(fx::L_N, fx::RADIUS_M);
+        // GEN-145: an artefact is under 4 cells and under 2 m; a basin of 2 m is kept at any size
+        let h1p = BasinParams { level: Level::H1, body: BODY, min_area_m2: 0.0, min_depth_m: 2.0, report_depth_m: 0.5, report_cells: 4 };
+        let h1 = produce(&gh, &f.z_s, &gh.outlets(&f.z_s, 0.0), &[], &|_| Domain::Landmass, &h1p);
+        let mut l = produce(&gl, &f.s0, &gl.outlets(&f.s0, 0.0), &[], &l_tile, &BasinParams::l(BODY));
+        let l_cells_of = |hc: usize| {
+            let nn = fx::H1_N * fx::H1_N;
+            let (face, i, j) = (hc / nn, hc % fx::H1_N, (hc % nn) / fx::H1_N);
+            let mut out = Vec::new();
+            for dj in 0..fx::L_PER_H1 {
+                for di in 0..fx::L_PER_H1 {
+                    out.push(face * fx::L_N * fx::L_N + (j * fx::L_PER_H1 + dj) * fx::L_N + i * fx::L_PER_H1 + di);
+                }
+            }
+            out
+        };
+        let pairs = if link { link_images(&h1, &mut l, &f.s0, &l_cells_of) } else { Vec::new() };
+        (h1, l, pairs, f)
+    }
+
+    // spec: SPIKE-130
+    #[test]
+    fn the_fixture_basin_has_its_l_image_and_is_the_same_on_any_thread_count() {
+        let (h1, l, pairs, f) = basins(4);
+        let bowl_h = fx::cell_at(fx::H1_N, fx::BOWL.0, fx::BOWL.1);
+        let hb = h1.basins.iter().find(|b| h1.cells[&b.id].contains(&bowl_h)).expect("the bowl is an H1 basin");
+        let (_, lid) = *pairs.iter().find(|(h, _)| *h == hb.id).expect("the H1 bowl has an L image");
+        let lb = l.basins.iter().find(|b| b.id == lid).unwrap();
+        assert_eq!((lb.parent, lb.owner, lb.represented), (Some(hb.id), Domain::Landmass, Represented::ProtectedSurface));
+        // TEST-139's recorded L bowl: spill 431.845 m; its floor key is S0 at the bowl's centre cell (372.143 m), the basin's floor the lowest cell, lower
+        assert!((lb.spill_m - 431.845).abs() < 0.01 && lb.floor_m <= 372.143, "floor {:.3} spill {:.3}", lb.floor_m, lb.spill_m);
+        let kept = l.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface).count();
+        if std::env::var_os("G1E_PRINT").is_some() {
+            println!(
+                "H1 basins {}, L basins {} ({} kept), images {}, unresolved {}",
+                h1.basins.len(),
+                l.basins.len(),
+                kept,
+                pairs.len(),
+                l.unresolved.len()
+            );
+        }
+        let (h1b, lb1, _, f1) = basins(1);
+        assert_eq!(f1.s0.iter().map(|x| x.to_bits()).collect::<Vec<_>>(), f.s0.iter().map(|x| x.to_bits()).collect::<Vec<_>>());
+        let canon = |p: &Produced| Graph { body: BODY, nodes: p.nodes.clone(), reaches: vec![], basins: p.basins.clone() }.canonical();
+        assert_eq!((canon(&h1b), canon(&lb1)), (canon(&h1), canon(&l)), "the same bytes on 1 and 4 threads");
+    }
+
+    // spec: SPIKE-130
+    #[test]
+    fn the_fixture_l_basins_are_the_same_under_both_layouts() {
+        // the whole run unlinked: an L image's parent and owner come from the landmass pass, not from a region
+        let (_, whole, _, f) = basins_linked(4, false);
+        let gl = Grid::cube(fx::L_N, fx::RADIUS_M);
+        let n = 6 * fx::L_N * fx::L_N;
+        let region_of = |lay: &fx::Layout, c: usize| lay.region_of_h1[fx::h1_of_l(c)] as usize;
+        for lay in fx::layouts() {
+            let mut got: Vec<Basin> = Vec::new();
+            for r in 0..lay.regions {
+                // the region's tiles plus a one-tile halo on the same face
+                let tiles_in: std::collections::BTreeSet<(usize, usize, usize)> =
+                    (0..n).filter(|&c| region_of(&lay, c) == r).map(fx::tile_of_l).collect();
+                let near = |c: usize| {
+                    let (face, ti, tj) = fx::tile_of_l(c);
+                    tiles_in.iter().any(|&(f2, a, b)| f2 == face && a.abs_diff(ti) <= 1 && b.abs_diff(tj) <= 1)
+                };
+                let active: Vec<bool> = (0..n).map(near).collect();
+                let g = Grid::cube(fx::L_N, fx::RADIUS_M).with_active(active.clone());
+                let edge: Vec<bool> = (0..n).map(|c| active[c] && (0..8).any(|d| gl.neighbour(c, d).is_some_and(|q| !active[q]))).collect();
+                let outlet: Vec<bool> = (0..n).map(|c| active[c] && (f.s0[c] <= 0.0 || edge[c])).collect();
+                let p = produce(&g, &f.s0, &outlet, &[], &l_tile, &BasinParams::l(BODY));
+                got.extend(
+                    p.basins
+                        .iter()
+                        .filter(|b| region_of(&lay, b.floor_cell as usize) == r && p.cells[&b.id].iter().all(|&c| !edge[c]))
+                        .cloned(),
+                );
+            }
+            got.sort_by_key(|b| b.id);
+            let want: Vec<&Basin> = whole.basins.iter().filter(|b| got.iter().any(|g| g.floor_cell == b.floor_cell)).collect();
+            let missing = whole.basins.len() - want.len();
+            assert_eq!(got.iter().collect::<Vec<_>>(), want, "{}: every basin a region resolves equals the whole run's", lay.name);
+            if std::env::var_os("G1E_PRINT").is_some() {
+                println!(
+                    "{}: {} of {} L basins resolved inside a region, {missing} need a wider halo",
+                    lay.name,
+                    got.len(),
+                    whole.basins.len()
+                );
+            }
+        }
+    }
+}
