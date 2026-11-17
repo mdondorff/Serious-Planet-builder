@@ -1,0 +1,107 @@
+G1A front (K5 + today's K6): 8.7 s
+G1A B, r and S0 at L: 8.7 s
+G1A K5: 6.9 s; K5': sills of r 3.4 s, rounds 5.3 s; |z_s' - z_s| p50 2.77 p90 28.88 p99 143.03 max 399.59 m
+G1A erosion z_b - z_s on the box's land: K5 p10 -15.5 p50 -3.3 p90 66.3 mean 15.0; K5' p10 -17.2 p50 -8.5 p90 46.5 mean 8.7; z_s' - z_s p10 -9.5 p50 1.8 p90 28.6 mean 6.2; r_min (lowest L cell of r) p10 -0.7 p50 -0.3 p90 -0.1 mean -0.3
+G1A K6' on S0': 4.5 s
+G1A basins (kept, H1): today 61, K5+K6' 115, K5'+K6' 178
+G1A topology today -> control (this code on z_s, no regrade): reaches 6387 -> 6353 (162 of the first not in the second, 2.54 %; 128 new; 11 of the first and 6 of the second with a cell more than 1 cell off the other's trunks); junctions 3031 -> 3015 (41 moved, 13 by more than 1 cell); outlets 35 -> 35 (4 moved, 4 by more than 1 cell); trunk cells 24141 -> 24089 (60 of the second off the first's cells, 0.25 %; 20 more than 1 cell off, 0.08 %)
+G1A topology today -> K6' (G1a): reaches 6387 -> 8893 (5823 of the first not in the second, 91.17 %; 8329 new; 398 of the first and 913 of the second with a cell more than 1 cell off the other's trunks); junctions 3031 -> 4030 (2024 moved, 979 by more than 1 cell); outlets 35 -> 37 (30 moved, 20 by more than 1 cell); trunk cells 24141 -> 30522 (10482 of the second off the first's cells, 34.34 %; 1330 more than 1 cell off, 4.36 %)
+G1A topology today -> K5'+K6': reaches 6387 -> 8045 (6235 of the first not in the second, 97.62 %; 7893 new; 1915 of the first and 2719 of the second with a cell more than 1 cell off the other's trunks); junctions 3031 -> 3647 (2672 moved, 1802 by more than 1 cell); outlets 35 -> 34 (33 moved, 27 by more than 1 cell); trunk cells 24141 -> 32080 (20534 of the second off the first's cells, 64.01 %; 8023 more than 1 cell off, 25.01 %)
+G1A topology K6' (G1a) -> K5'+K6': reaches 8893 -> 8045 (7852 of the first not in the second, 88.29 %; 7004 new; 2316 of the first and 2182 of the second with a cell more than 1 cell off the other's trunks); junctions 4030 -> 3647 (3044 moved, 1928 by more than 1 cell); outlets 37 -> 34 (31 moved, 27 by more than 1 cell); trunk cells 30522 -> 32080 (17147 of the second off the first's cells, 53.45 %; 7212 more than 1 cell off, 22.48 %)
+G1A sensitivity today -> today with z_s +-0.5 m (baseline): reaches 6387 -> 6551 (1946 of the first not in the second, 30.47 %; 2110 new; 110 of the first and 112 of the second with a cell more than 1 cell off the other's trunks); junctions 3031 -> 3093 (464 moved, 174 by more than 1 cell); outlets 35 -> 38 (30 moved, 17 by more than 1 cell); trunk cells 24141 -> 24329 (1061 of the second off the first's cells, 4.36 %; 277 more than 1 cell off, 1.14 %)
+G1A sensitivity K5'+K6' -> with S0' +-0.5 m: reaches 8045 -> 7681 (2179 of the first not in the second, 27.09 %; 1815 new; 219 of the first and 168 of the second with a cell more than 1 cell off the other's trunks); junctions 3647 -> 3491 (493 moved, 353 by more than 1 cell); outlets 34 -> 24 (31 moved, 25 by more than 1 cell); trunk cells 32080 -> 32031 (1805 of the second off the first's cells, 5.64 %; 465 more than 1 cell off, 1.45 %)
+G1A sensitivity K5'+K6' -> with sills +-1 m: reaches 8045 -> 7495 (3389 of the first not in the second, 42.13 %; 2839 new; 370 of the first and 341 of the second with a cell more than 1 cell off the other's trunks); junctions 3647 -> 3425 (889 moved, 564 by more than 1 cell); outlets 34 -> 31 (30 moved, 27 by more than 1 cell); trunk cells 32080 -> 31442 (3373 of the second off the first's cells, 10.73 %; 979 more than 1 cell off, 3.11 %)
+G1A catchments today -> K6': of 194068 km2 of the box's land, 42482 km2 (21.89 %) drain to an outlet more than 2 cells from the first's, 707 km2 (0.36 %) more than 10 cells; 106267 cells change receiver
+G1A catchments today -> K5'+K6': of 194068 km2 of the box's land, 19159 km2 (9.87 %) drain to an outlet more than 2 cells from the first's, 6978 km2 (3.60 %) more than 10 cells; 201167 cells change receiver
+G1A catchments today -> control: of 194068 km2 of the box's land, 779 km2 (0.40 %) drain to an outlet more than 2 cells from the first's, 17 km2 (0.01 %) more than 10 cells; 485 cells change receiver
+G1A catchments today -> z_s +-0.5 m: of 194068 km2 of the box's land, 117494 km2 (60.54 %) drain to an outlet more than 2 cells from the first's, 34611 km2 (17.83 %) more than 10 cells; 19955 cells change receiver
+G1A K5 channels today on K5: 0 of 24141 trunk cells in the box off the channel cells (0.00 %), 0 more than 1 cell off (0.00 %)
+G1A K5 channels K6' (G1a) on K5: 10368 of 30522 trunk cells in the box off the channel cells (33.97 %), 1231 more than 1 cell off (4.03 %)
+G1A K5 channels K5'+K6' on K5': 8333 of 32080 trunk cells in the box off the channel cells (25.98 %), 629 more than 1 cell off (1.96 %)
+G1A K5 channels K5'+K6' on K5: 20476 of 32080 trunk cells in the box off the channel cells (63.83 %), 7909 more than 1 cell off (24.65 %)
+G1A trunk stats today: 3288 heads in the box (3127 with a D8 area under 75 km2), 22251 km of trunk, 24141 cells
+G1A trunk stats K6' (G1a): 4756 heads in the box (4524 with a D8 area under 75 km2), 26016 km of trunk, 30522 cells
+G1A trunk stats K5'+K6': 4255 heads in the box (4015 with a D8 area under 75 km2), 27133 km of trunk, 32080 cells
+G1A stop test today -> K5'+K6': 6 of 10 top rivers change (outlet > 8 km or a confluence lost or gained), 2 by a real change (outlet > 8 km, or a tributary to another river); confluences lost 7 real + 8 moved along the same river (1 of them via an MFD-split line), gained 0 real + 10 moved
+G1A stop test today -> K5'+K6':   exit 701227 Q 2102: outlet 0 cells off; 5 major confluences; none lost or gained
+G1A stop test today -> K5'+K6':   exit 599551 Q 872: outlet 0 cells off; 9 major confluences; lost-real 506448(2896) lost-real 348302(705) lost-real 342174(586) lost-real 336046(636) lost-real 336044(406) lost-real 327863(1525)
+G1A stop test today -> K5'+K6':   exit 290482 Q 784: outlet 1 cells off; 10 major confluences; lost-moved 295489(3938,6 steps) lost-moved 236070(1619,0 steps) lost-moved 263485(602,0 steps) lost-moved 277677(696,4 steps,side) gained-moved 289424(7991) gained-moved 270951(4835) gained-moved 241165(1604) gained-moved 262477(633) gained-moved 278691(284) gained-moved 278681(180) gained-moved 277646(141)
+G1A stop test today -> K5'+K6':   exit 756240 Q 474: outlet 0 cells off; 2 major confluences; lost-moved 736818(7752,0 steps) gained-moved 736803(7512) gained-moved 719409(14488)
+G1A stop test today -> K5'+K6':   exit 665736 Q 165: outlet 0 cells off; 7 major confluences; lost-moved 613709(569,57 steps) lost-moved 611669(562,61 steps) lost-moved 583108(335,93 steps)
+G1A stop test today -> K5'+K6':   exit 690154 Q 53: outlet 0 cells off; 4 major confluences; none lost or gained; no trunk of the second within 2 cells of the exit
+G1A stop test today -> K5'+K6':   exit 222563 Q 38: outlet 1 cells off; 0 major confluences; none lost or gained
+G1A stop test today -> K5'+K6':   exit 771558 Q 36: outlet 0 cells off; 0 major confluences; none lost or gained; no trunk of the second within 2 cells of the exit
+G1A stop test today -> K5'+K6':   exit 204339 Q 35: outlet 0 cells off; 1 major confluences; lost-real 209442(89)
+G1A stop test today -> K5'+K6':   exit 566305 Q 30: outlet 2 cells off; 2 major confluences; gained-moved 566305(323)
+G1A stop test today -> K6' (G1a): 3 of 10 top rivers change (outlet > 8 km or a confluence lost or gained), 0 by a real change (outlet > 8 km, or a tributary to another river); confluences lost 0 real + 5 moved along the same river (0 of them via an MFD-split line), gained 0 real + 3 moved
+G1A stop test today -> K6' (G1a):   exit 701227 Q 2102: outlet 0 cells off; 5 major confluences; none lost or gained
+G1A stop test today -> K6' (G1a):   exit 599551 Q 872: outlet 0 cells off; 9 major confluences; lost-moved 342174(586,617 steps) lost-moved 336046(636,624 steps) lost-moved 336044(406,627 steps) lost-moved 327863(1525,654 steps)
+G1A stop test today -> K6' (G1a):   exit 290482 Q 784: outlet 3 cells off; 10 major confluences; lost-moved 290441(7934,0 steps) gained-moved 288404(8136) gained-moved 295495(3944)
+G1A stop test today -> K6' (G1a):   exit 756240 Q 474: outlet 0 cells off; 2 major confluences; none lost or gained
+G1A stop test today -> K6' (G1a):   exit 665736 Q 165: outlet 0 cells off; 7 major confluences; none lost or gained
+G1A stop test today -> K6' (G1a):   exit 690154 Q 53: outlet 0 cells off; 4 major confluences; gained-moved 690153(232)
+G1A stop test today -> K6' (G1a):   exit 222563 Q 38: outlet 1 cells off; 0 major confluences; none lost or gained
+G1A stop test today -> K6' (G1a):   exit 771558 Q 36: outlet 0 cells off; 0 major confluences; none lost or gained
+G1A stop test today -> K6' (G1a):   exit 204339 Q 35: outlet 1 cells off; 1 major confluences; none lost or gained
+G1A stop test today -> K6' (G1a):   exit 566305 Q 30: outlet 1 cells off; 2 major confluences; none lost or gained
+G1A stop test today -> control: 0 of 10 top rivers change (outlet > 8 km or a confluence lost or gained), 0 by a real change (outlet > 8 km, or a tributary to another river); confluences lost 0 real + 0 moved along the same river (0 of them via an MFD-split line), gained 0 real + 0 moved
+G1A stop test today -> control:   exit 701227 Q 2102: outlet 0 cells off; 5 major confluences; none lost or gained
+G1A stop test today -> control:   exit 599551 Q 872: outlet 0 cells off; 9 major confluences; none lost or gained
+G1A stop test today -> control:   exit 290482 Q 784: outlet 0 cells off; 10 major confluences; none lost or gained
+G1A stop test today -> control:   exit 756240 Q 474: outlet 0 cells off; 2 major confluences; none lost or gained
+G1A stop test today -> control:   exit 665736 Q 165: outlet 0 cells off; 7 major confluences; none lost or gained
+G1A stop test today -> control:   exit 690154 Q 53: outlet 0 cells off; 4 major confluences; none lost or gained
+G1A stop test today -> control:   exit 222563 Q 38: outlet 0 cells off; 0 major confluences; none lost or gained
+G1A stop test today -> control:   exit 771558 Q 36: outlet 0 cells off; 0 major confluences; none lost or gained
+G1A stop test today -> control:   exit 204339 Q 35: outlet 0 cells off; 1 major confluences; none lost or gained
+G1A stop test today -> control:   exit 566305 Q 30: outlet 0 cells off; 2 major confluences; none lost or gained
+G1A stop test today -> z_s +-0.5 m: 1 of 10 top rivers change (outlet > 8 km or a confluence lost or gained), 1 by a real change (outlet > 8 km, or a tributary to another river); confluences lost 0 real + 0 moved along the same river (0 of them via an MFD-split line), gained 0 real + 0 moved
+G1A stop test today -> z_s +-0.5 m:   exit 701227 Q 2102: outlet 0 cells off; 5 major confluences; none lost or gained
+G1A stop test today -> z_s +-0.5 m:   exit 599551 Q 872: outlet 0 cells off; 9 major confluences; none lost or gained; no trunk of the second within 2 cells of the exit
+G1A stop test today -> z_s +-0.5 m:   exit 290482 Q 784: outlet 23 cells off (CHANGED); 10 major confluences; none lost or gained
+G1A stop test today -> z_s +-0.5 m:   exit 756240 Q 474: outlet 0 cells off; 2 major confluences; none lost or gained; no trunk of the second within 2 cells of the exit
+G1A stop test today -> z_s +-0.5 m:   exit 665736 Q 165: outlet 0 cells off; 7 major confluences; none lost or gained
+G1A stop test today -> z_s +-0.5 m:   exit 690154 Q 53: outlet 0 cells off; 4 major confluences; none lost or gained
+G1A stop test today -> z_s +-0.5 m:   exit 222563 Q 38: outlet 0 cells off; 0 major confluences; none lost or gained
+G1A stop test today -> z_s +-0.5 m:   exit 771558 Q 36: outlet 0 cells off; 0 major confluences; none lost or gained
+G1A stop test today -> z_s +-0.5 m:   exit 204339 Q 35: outlet 0 cells off; 1 major confluences; none lost or gained
+G1A stop test today -> z_s +-0.5 m:   exit 566305 Q 30: outlet 0 cells off; 2 major confluences; none lost or gained
+G1A stop test K5'+K6' -> S0' +-0.5 m: 2 of 10 top rivers change (outlet > 8 km or a confluence lost or gained), 2 by a real change (outlet > 8 km, or a tributary to another river); confluences lost 1 real + 0 moved along the same river (0 of them via an MFD-split line), gained 0 real + 0 moved
+G1A stop test K5'+K6' -> S0' +-0.5 m:   exit 702245 Q 2097: outlet 0 cells off; 0 major confluences; none lost or gained; no trunk of the second within 2 cells of the exit
+G1A stop test K5'+K6' -> S0' +-0.5 m:   exit 599549 Q 897: outlet 0 cells off; 0 major confluences; none lost or gained
+G1A stop test K5'+K6' -> S0' +-0.5 m:   exit 754202 Q 471: outlet 0 cells off; 2 major confluences; none lost or gained; no trunk of the second within 2 cells of the exit
+G1A stop test K5'+K6' -> S0' +-0.5 m:   exit 664718 Q 174: outlet 0 cells off; 0 major confluences; none lost or gained
+G1A stop test K5'+K6' -> S0' +-0.5 m:   exit 693202 Q 58: outlet 0 cells off; 4 major confluences; none lost or gained; no trunk of the second within 2 cells of the exit
+G1A stop test K5'+K6' -> S0' +-0.5 m:   exit 205527 Q 52: outlet 61 cells off (CHANGED); 9 major confluences; none lost or gained
+G1A stop test K5'+K6' -> S0' +-0.5 m:   exit 240922 Q 43: outlet 0 cells off; 0 major confluences; none lost or gained
+G1A stop test K5'+K6' -> S0' +-0.5 m:   exit 828914 Q 42: outlet 0 cells off; 0 major confluences; none lost or gained
+G1A stop test K5'+K6' -> S0' +-0.5 m:   exit 770535 Q 37: outlet 0 cells off; 1 major confluences; lost-real 773591(938); no trunk of the second within 2 cells of the exit
+G1A stop test K5'+K6' -> S0' +-0.5 m:   exit 205422 Q 21: outlet 0 cells off; 1 major confluences; none lost or gained
+G1A stop test K5'+K6' -> sills +-1 m: 1 of 10 top rivers change (outlet > 8 km or a confluence lost or gained), 0 by a real change (outlet > 8 km, or a tributary to another river); confluences lost 0 real + 1 moved along the same river (0 of them via an MFD-split line), gained 0 real + 0 moved
+G1A stop test K5'+K6' -> sills +-1 m:   exit 702245 Q 2097: outlet 0 cells off; 0 major confluences; none lost or gained
+G1A stop test K5'+K6' -> sills +-1 m:   exit 599549 Q 897: outlet 0 cells off; 0 major confluences; none lost or gained
+G1A stop test K5'+K6' -> sills +-1 m:   exit 754202 Q 471: outlet 0 cells off; 2 major confluences; none lost or gained; no trunk of the second within 2 cells of the exit
+G1A stop test K5'+K6' -> sills +-1 m:   exit 664718 Q 174: outlet 0 cells off; 0 major confluences; none lost or gained
+G1A stop test K5'+K6' -> sills +-1 m:   exit 693202 Q 58: outlet 0 cells off; 4 major confluences; none lost or gained; no trunk of the second within 2 cells of the exit
+G1A stop test K5'+K6' -> sills +-1 m:   exit 205527 Q 52: outlet 1 cells off; 9 major confluences; none lost or gained
+G1A stop test K5'+K6' -> sills +-1 m:   exit 240922 Q 43: outlet 0 cells off; 0 major confluences; none lost or gained
+G1A stop test K5'+K6' -> sills +-1 m:   exit 828914 Q 42: outlet 0 cells off; 0 major confluences; none lost or gained; no trunk of the second within 2 cells of the exit
+G1A stop test K5'+K6' -> sills +-1 m:   exit 770535 Q 37: outlet 0 cells off; 1 major confluences; lost-moved 773591(938,4 steps)
+G1A stop test K5'+K6' -> sills +-1 m:   exit 205422 Q 21: outlet 0 cells off; 1 major confluences; none lost or gained
+G1A bar 10.00 m (the start's relief10 10.71 m); corridor k_c 2 snapped, land-only snap
+G1A corridor today on S0: 5211 of 5779 reaches pass (90.17 %), 568 fail
+G1A corridor today on S0': 4784 of 6025 reaches pass (79.40 %), 1241 fail
+G1A corridor today on B: 8557 of 8570 reaches pass (99.85 %), 13 fail
+G1A corridor K6' on S0: 7168 of 8114 reaches pass (88.34 %), 946 fail
+G1A corridor K6' on B: 11264 of 11309 reaches pass (99.60 %), 45 fail
+G1A corridor K5'+K6' on S0': 6064 of 7261 reaches pass (83.51 %), 1197 fail
+G1A corridor K5'+K6' on S0: 6341 of 7536 reaches pass (84.14 %), 1195 fail
+G1A corridor K5'+K6' on B: 9930 of 10693 reaches pass (92.86 %), 763 fail
+G1A exceptions today on S0: [("coast", 3), ("hilly", 428), ("low", 59), ("rugged", 78)]
+G1A exceptions K5'+K6' on S0': [("coast", 9), ("hilly", 775), ("low", 241), ("rugged", 172)]
+G1A exceptions today on B: [("hilly", 9), ("low", 4)]
+G1A exceptions K5'+K6' on B: [("coast", 2), ("hilly", 425), ("low", 278), ("rugged", 58)]
+G1A D-2 on K5'+K6': 29 listed, 13 fail on B under the land-only snap; re-traced [("diverted", 15), ("rejoins", 14)]; gain a route under the bar: on B 2, on S0 1, on S0' 4
+G1A D-2 on K6': 29 listed, 13 fail on B under the land-only snap; re-traced [("diverted", 9), ("rejoins", 20)]; gain a route under the bar: on B 7, on S0 1, on S0' 3
+G1A done in 214.6 s
+BAKE-TIME 215 s, peak working set 3,69 GB, exit 

@@ -31,6 +31,7 @@ Per-spike register sections of M5 and M6: `docs/archive/M6/spikes.md`. Closed sp
 | SPIKE-124 | Protect lakes (E5) | closed 11-15: K7 leak fixed | `spikes/lakes-protect/results/results.md` |
 | SPIKE-125 | Variant G: B on E's valley-aware base (P3 E3) | closed 2026-11-16: passes bars; up to 2x B's saddles | `spikes/e3-variant-g/results/results.md` |
 | SPIKE-126 | The ponding rule on B's trunks (P3 D-1) | closed 2026-11-16: ponds rescue 0-13 % of over-bar reaches; most rises have no basin (D-2) | `spikes/ponding/results/results.md` |
-| SPIKE-127 | H1 on sub-cell sills of S0 (G1a) | closed 2026-11-17: stop test yes on 5 windows, K5' next; 59 % of D-2 gain a route | `spikes/g1a-sills/results/results.md` |
+| SPIKE-127 | H1 on sub-cell sills of S0 (G1a) | closed 2026-11-17: 59 % of D-2 gain a route; stop test see SPIKE-131 | `spikes/g1a-sills/results/results.md` |
+| SPIKE-131 | K5' on sill edges (G1a) | closed 2026-11-17: stop test an artefact; K5' not adopted | `spikes/k5p-sills/results/results.md` |
 
 Every exploration gets a `SPIKE-NN` entry.
