@@ -2401,7 +2401,7 @@ fn main() -> Result<(), String> {
         // the basins again, on the KS output with every L reach as spill receivers and inlets (reading 5: the L kept rule reads KS1; crusader's G1d order: the first pass on KS0 gave
         // KG-trib its kept set); the graph takes this pass's basins and nodes; its kept basins and H1's lake water are KV's and KC's protected cells
         if on("basins") && on("kg-trib") {
-            use planet_generators::bake::basins_rg::{produce_ids_avoiding, BasinParams, CellIds};
+            use planet_generators::bake::basins_rg::{produce_drain_avoiding, BasinParams, CellIds};
             use planet_generators::bake::river_graph::Represented;
             let t2 = Instant::now();
             let all: Vec<GReach> = gd.reaches.iter().filter(|r| r.level == Level::L).cloned().collect();
@@ -2409,7 +2409,11 @@ fn main() -> Result<(), String> {
             // spikes #142: the cells of the markers on the reaches (KG-trunk's exceptions, KG-trib's junctions); an inlet passes them (reading 1)
             let marker_cells: BTreeSet<usize> = gd.nodes.iter().filter(|x| x.level == Level::L && x.kind.is_marker()).filter_map(|x| to_local(x.anchor)).collect();
             { let (pk, nw) = memory_mib(); println!("RG mem before basin pass 2: peak {pk} MiB, now {nw} MiB"); }
-            let pb = produce_ids_avoiding(&grid_d, &ks_d, &outlet_d, &all, &tile_l, &BasinParams::l(BODY), &ids, &marker_cells);
+            // crusader #161, reading 22: a kept-size depression drains unless neither its fill nor a bounded breach fits the budget KS left against S_KH (reading 21)
+            let remaining: Vec<f64> = (0..n_l).map(|p| (budget_l[p] - (ks_base[p] - ks_d[p]).max(0.0)).max(0.0)).collect();
+            let pb = produce_drain_avoiding(&grid_d, &ks_d, &outlet_d, &all, &tile_l, &BasinParams::l(BODY), &ids, &remaining, &marker_cells);
+            drop(remaining);
+            println!("RG domain {d} second pass, reading 22: {} kept-size depressions drained", pb.drained);
             { let (pk, nw) = memory_mib(); println!("RG mem after basin pass 2: peak {pk} MiB, now {nw} MiB"); }
             for p in 0..n_l {
                 kept[p] = protected_h1[parent(p)];
@@ -2433,13 +2437,12 @@ fn main() -> Result<(), String> {
         // KV and KC (crusader's G1f) on the domain's KS output, within the budget KS left; the domain's L reaches in window cells (the module reads vertices as grid cells)
         let t = Instant::now();
         let (kv_d, kc_d, rkc) = if on("kv") || on("kc") {
-            use planet_generators::bake::kv_kc::{run, KvParams, Switch};
+            use planet_generators::bake::kv_kc::{run_with, KvParams, Switch};
             let sw = match (on("kv"), on("kc")) {
                 (true, true) => Switch::Both,
                 (true, false) => Switch::KvOnly,
                 _ => Switch::KcOnly,
             };
-            let remain: Vec<f64> = (0..n_l).map(|p| (budget_l[p] - (ks_base[p] - ks_d[p]).max(0.0)).max(0.0)).collect();
             let mut g_local = gd.clone();
             g_local.reaches = gd
                 .reaches
@@ -2450,8 +2453,9 @@ fn main() -> Result<(), String> {
                     v.map(|vertices| GReach { vertices, ..r.clone() })
                 })
                 .collect();
-            let r = run(&gl, &ks_d, &sea_l, &g_local, &kept, &remain, &KvParams::plan(dx_l), sw);
-            drop(remain);
+            // crusader #161: the budget left is budget - max(0, S_KH - KS's output) inside run_with (reading 21); KC breaches before it fills (reading 22)
+            let r = run_with(&gl, &ks_d, &sea_l, &g_local, &kept, &budget_l, Some(&ks_base), &KvParams::plan(dx_l), sw);
+            println!("RG domain {d} KC breaches: {} ({:.4} km3)", r.breaches, r.breach_volume / 1.0e9);
             drop(g_local);
             let kv = if on("kv") { r.kv } else { ks_d.clone() };
             let kc = if on("kc") { r.kc } else { kv.clone() };

@@ -69,10 +69,10 @@ fn stage_run(k: &Case, switch: Switch) -> Report {
     assert!(r.residuals.is_empty() || flagged.reaches > 0, "a residual flags its reach");
     let stages: Vec<Stage> = match switch {
         Switch::KvOnly => vec![Stage { name: "kv", out: &r.kv, wanted_lowering: Some(&r.kv_wanted), wanted_fill: None, fills: false }],
-        Switch::KcOnly => vec![Stage { name: "kc", out: &r.kc, wanted_lowering: None, wanted_fill: None, fills: true }],
+        Switch::KcOnly => vec![Stage { name: "kc", out: &r.kc, wanted_lowering: None, wanted_fill: Some(&r.kc_wanted), fills: true }],
         Switch::Both => vec![
             Stage { name: "kv", out: &r.kv, wanted_lowering: Some(&r.kv_wanted), wanted_fill: None, fills: false },
-            Stage { name: "kc", out: &r.kc, wanted_lowering: None, wanted_fill: None, fills: true },
+            Stage { name: "kc", out: &r.kc, wanted_lowering: None, wanted_fill: Some(&r.kc_wanted), fills: true },
         ],
     };
     let v = validate_budget(&k.s0, &k.budget, &stages, &r.residuals, &g);
@@ -100,7 +100,11 @@ fn stage_run(k: &Case, switch: Switch) -> Report {
             filled.iter().copied().fold(0.0, f64::max)
         ),
         format!("{switch:?}: residual features already exceptional (kept): {conflict}; budget violations {}", v.len()),
+        format!("{switch:?}: KC breaches (reading 22) {}, cut volume {:.0} m3", r.breaches, r.breach_volume),
     ];
+    if switch != Switch::KvOnly {
+        assert!(r.breaches >= 1, "{switch:?}: the coastal pit drains by a breach (reading 22)");
+    }
     // divides: KV touches nothing within d_buf of a divide; protected basins: nothing at all
     let div_touched = (0..n).filter(|&c| r.near_divide[c] && r.kv[c] != k.s0[c]).count();
     let prot_touched = (0..n).filter(|&c| k.protected[c] && (r.kv[c] != k.s0[c] || r.kc[c] != k.s0[c])).count();
@@ -230,4 +234,65 @@ fn kv_and_kc_are_deterministic() {
     let a = stage_run(&k, Switch::Both).out;
     let b = stage_run(&k, Switch::Both).out;
     assert_eq!(a.iter().map(|x| x.to_bits()).collect::<Vec<_>>(), b.iter().map(|x| x.to_bits()).collect::<Vec<_>>());
+}
+
+/// A digest of a KV/KC run: both surfaces' bits, the residuals and the patches.
+fn kvkc_digest(r: &planet_generators::bake::kv_kc::KvKc) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    r.kv.iter().chain(&r.kc).for_each(|x| x.to_bits().hash(&mut h));
+    for x in &r.residuals {
+        (x.cell, x.stage, x.needed_m.to_bits(), x.available_m.to_bits(), x.feature).hash(&mut h);
+    }
+    for (c, v) in &r.patches {
+        (c, v.to_bits()).hash(&mut h);
+    }
+    h.finish()
+}
+
+// spec: SPIKE-132
+#[test]
+fn kv_and_kc_give_the_pinned_output() {
+    // order #161: the memory cut keeps KV and KC's output bit-identical (digests pinned before it); the breach (reading 22) and the S_KH budget change it on purpose (re-pinned with
+    // their reason)
+    let k = case();
+    let gl = Grid::cube(L_N, RADIUS_M);
+    let mut got = Vec::new();
+    for switch in [Switch::KvOnly, Switch::KcOnly, Switch::Both] {
+        let r = run(
+            &gl,
+            &k.s0,
+            &k.outlet,
+            &k.graph,
+            &k.protected,
+            &k.budget,
+            &KvParams::plan(RADIUS_M * core::f64::consts::FRAC_PI_2 / L_N as f64),
+            switch,
+        );
+        got.push(kvkc_digest(&r));
+    }
+    if std::env::var_os("G1F_DIGEST").is_some() {
+        println!("kvkc digests {:#018x} {:#018x} {:#018x}", got[0], got[1], got[2]);
+    }
+    assert_eq!(got, KVKC_DIGESTS.to_vec());
+}
+
+// KV only: pinned before the memory cut and unchanged by it; KC only and both re-pinned for reading 22's breach (#161: the 5-cell coastal pit drains by a 45,181 m3 cut instead of a fill)
+const KVKC_DIGESTS: [u64; 3] = [0x3367_fe24_9007_dfe2, 0x4c07_3ae4_4545_fb75, 0xf327_9595_e00e_14a2];
+
+// spec: SPIKE-132
+#[test]
+fn kv_s_budget_is_what_ks_left_against_s_kh() {
+    // reading 21 (owner, #161): KS used `S_KH - s0` of the budget before KV, so KV lowers at most the rest
+    use planet_generators::bake::kv_kc::run_with;
+    let k = case();
+    let gl = Grid::cube(L_N, RADIUS_M);
+    let s_kh: Vec<f64> = k.s0.iter().map(|z| z + 5.0).collect();
+    let p = KvParams::plan(RADIUS_M * core::f64::consts::FRAC_PI_2 / L_N as f64);
+    let r = run_with(&gl, &k.s0, &k.outlet, &k.graph, &k.protected, &k.budget, Some(&s_kh), &p, Switch::KvOnly);
+    let worst = (0..k.s0.len()).map(|c| (k.s0[c] - r.kv[c]) - (k.budget[c] - 5.0).max(0.0)).fold(f64::NEG_INFINITY, f64::max);
+    assert!(worst <= 1e-9, "KV lowered {worst} m past the budget KS left");
+    let plain = run(&gl, &k.s0, &k.outlet, &k.graph, &k.protected, &k.budget, &p, Switch::KvOnly);
+    let max_low = |kv: &[f64]| (0..kv.len()).map(|c| k.s0[c] - kv[c]).fold(0.0, f64::max);
+    assert!(max_low(&r.kv) < max_low(&plain.kv), "the reference takes budget away");
 }

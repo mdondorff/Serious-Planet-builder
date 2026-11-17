@@ -57,6 +57,7 @@ fn params() -> BasinParams {
         min_depth_m: 2.0,
         report_depth_m: 0.5,
         report_cells: 2,
+        sea_level_m: 0.0,
     }
 }
 
@@ -231,7 +232,10 @@ fn regional(z: &[f64], reaches: &[Reach], region: &dyn Fn(Domain) -> bool, halo:
             f2 == face && region(tile_of(o)) && (a as i64 - ti as i64).abs() <= halo as i64 && (b as i64 - tj as i64).abs() <= halo as i64
         })
     };
-    let active: Vec<bool> = (0..6 * N * N).map(|c| region(tile_of(c)) || (c < N * N && near(c))).collect();
+    let inner: Vec<bool> = (0..6 * N * N).map(|c| region(tile_of(c)) || (c < N * N && near(c))).collect();
+    // and a one-cell ring on every face (the halo crosses the cube edge by a cell), so a spill's first sea cell beyond face 0's edge is inside, as in the whole run (reading 6)
+    let full = Grid::cube(N, R);
+    let active: Vec<bool> = (0..6 * N * N).map(|c| inner[c] || (0..8).any(|d| full.neighbour(c, d).is_some_and(|q| inner[q]))).collect();
     let g = Grid::cube(N, R).with_active(active.clone());
     let edge: Vec<bool> =
         (0..6 * N * N).map(|c| active[c] && (0..8).any(|d| Grid::cube(N, R).neighbour(c, d).is_some_and(|q| !active[q]))).collect();
@@ -305,8 +309,9 @@ mod fixture_case {
     use super::*;
     use crate::g0_fixture::fixture as fx;
 
-    const DIGEST_H1: u64 = 0xcea8_2aec_00dd_8987;
-    const DIGEST_L: u64 = 0x7067_a5aa_df26_46eb;
+    // re-pinned for reading 6 (#161): spills reaching the sea now name an `outlet_sea` (were unresolved); nothing else changed
+    const DIGEST_H1: u64 = 0x06d5_a7e5_5cbd_1a68;
+    const DIGEST_L: u64 = 0xffc8_1b12_2021_31cc;
 
     fn l_tile(c: usize) -> Domain {
         let (f, ti, tj) = fx::tile_of_l(c);
@@ -322,7 +327,15 @@ mod fixture_case {
         let gh = Grid::cube(fx::H1_N, fx::RADIUS_M);
         let gl = Grid::cube(fx::L_N, fx::RADIUS_M);
         // GEN-145: an artefact is under 4 cells and under 2 m; a basin of 2 m is kept at any size
-        let h1p = BasinParams { level: Level::H1, body: BODY, min_area_m2: 0.0, min_depth_m: 2.0, report_depth_m: 0.5, report_cells: 4 };
+        let h1p = BasinParams {
+            level: Level::H1,
+            body: BODY,
+            min_area_m2: 0.0,
+            min_depth_m: 2.0,
+            report_depth_m: 0.5,
+            report_cells: 4,
+            sea_level_m: 0.0,
+        };
         let h1 = produce(&gh, &f.z_s, &gh.outlets(&f.z_s, 0.0), &[], &|_| Domain::Landmass, &h1p);
         let mut l = produce(&gl, &f.s0, &gl.outlets(&f.s0, 0.0), &[], &l_tile, &BasinParams::l(BODY));
         let l_cells_of = |hc: usize| {
@@ -438,4 +451,79 @@ mod fixture_case {
             }
         }
     }
+}
+
+// spec: SPIKE-130
+#[test]
+fn a_basin_pass_without_the_tributaries_puts_inlets_on_their_node_cells() {
+    // lead #160: a pass that does not see a tributary may put a lake_inlet on the cell where that tributary ends (the chain runner merged its first pass's nodes, 99 on R1h); the
+    // validator finds it, and the pass that sees every reach puts none there
+    let mut z = base(false);
+    cone(&mut z, 12.0, 12.0, 5.0, 10.0);
+    let r = line(&(0..8).map(|j| cell(12, 3 + j)).collect::<Vec<_>>(), NodeKind::OutletSea).0;
+    let (_, first) = run(&z, std::slice::from_ref(&r));
+    let x = first
+        .nodes
+        .iter()
+        .find(|n| n.kind == NodeKind::LakeInlet && r.vertices.contains(&n.anchor))
+        .expect("the reach enters the lake")
+        .anchor as usize;
+    // a tributary ending at that cell (a confluence there)
+    let (i, j) = (x % N, x / N);
+    let (t, t_up, t_down) = line(&(0..4).map(|k| cell(i - 3 + k, j)).collect::<Vec<_>>(), NodeKind::Confluence);
+    let adj = |_: Level, a: u64, b: u64| {
+        let g = Grid::cube(N, R);
+        (0..8).any(|d| g.neighbour(a as usize, d) == Some(b as usize))
+    };
+    let at_x = |v: &[Violation]| v.iter().any(|v| matches!(v, Violation::TwoNodesOneAnchor { anchor, .. } if *anchor == x as u64));
+    let merged = graph_of(&first, &[r.clone(), t.clone()], &[t_up.clone(), t_down.clone()]);
+    assert!(
+        at_x(&validate(&merged, &Checks { adjacent: &adj, tile_of: None, open: true })),
+        "the first pass's inlet beside the confluence"
+    );
+    let (_, second) = run(&z, &[r.clone(), t.clone()]);
+    assert!(
+        !second.nodes.iter().any(|n| n.kind == NodeKind::LakeInlet && n.anchor == x as u64),
+        "the pass that sees the tributary puts no inlet on its node cell"
+    );
+    let g = graph_of(&second, &[r, t], &[t_up, t_down]);
+    assert!(!at_x(&validate(&g, &Checks { adjacent: &adj, tile_of: None, open: true })));
+}
+
+// spec: SPIKE-130
+#[test]
+fn a_spill_reaching_the_sea_is_received_by_an_outlet_sea() {
+    // reading 6 (owner, #161): a basin with no reach on its spill path spills to an `outlet_sea` on the first sea cell, so no spill is missing
+    let mut z = base(false);
+    cone(&mut z, 16.0, 12.0, 4.0, 10.0);
+    let (_, p) = run(&z, &[]);
+    let lake = basin_at(&p, cell(16, 12));
+    let node = p.nodes.iter().find(|n| n.id == lake.spill_node).expect("the spill names a node the producer holds");
+    assert_eq!(node.kind, NodeKind::OutletSea);
+    assert!(z[node.anchor as usize] <= 0.0, "on a sea cell");
+    assert!(p.unresolved.is_empty(), "no spill missing: {:?}", p.unresolved);
+}
+
+// spec: SPIKE-130
+#[test]
+fn a_depression_is_protected_only_when_neither_fill_nor_breach_fits() {
+    // reading 22 (owner, #161): a kept-size depression drains (reported) when its fill or a bounded least-cost breach fits the budget left; only the rest are protected
+    use planet_generators::bake::basins_rg::{produce_drain, CellIds};
+    let mut z = base(false);
+    cone(&mut z, 12.0, 12.0, 5.0, 10.0);
+    let g = Grid::cube(N, R);
+    let outlet = g.outlets(&z, 0.0);
+    let ids = CellIds { gid: &|c| c as u64, local: &|id| Some(id as usize) };
+    let at = |p: &Produced| basin_at(p, cell(12, 12)).represented;
+    let (_, plain) = run(&z, &[]);
+    assert_eq!(at(&plain), Represented::ProtectedSurface, "without a budget the size rule protects it");
+    let roomy = produce_drain(&g, &z, &outlet, &[], &tile_of, &params(), &ids, &vec![20.0; z.len()]);
+    assert!(roomy.drained >= 1);
+    assert!(
+        roomy.basins.iter().filter(|b| roomy.cells[&b.id].contains(&cell(12, 12))).all(|b| b.represented != Represented::ProtectedSurface),
+        "a 10 m depression with 20 m left drains"
+    );
+    let tight = produce_drain(&g, &z, &outlet, &[], &tile_of, &params(), &ids, &vec![1.0; z.len()]);
+    assert_eq!(at(&tight), Represented::ProtectedSurface, "neither a fill nor a breach fits 1 m: protected");
+    assert_eq!(tight.drained, 0);
 }

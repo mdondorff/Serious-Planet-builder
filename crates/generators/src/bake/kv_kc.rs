@@ -45,6 +45,9 @@ pub enum Switch {
     Both,
 }
 
+/// The bound of KC's breach search (reading 22): settled cells per depression.
+const BREACH_CAP: usize = 20_000;
+
 /// What a run made.
 pub struct KvKc {
     pub kv: Vec<f64>,
@@ -55,8 +58,13 @@ pub struct KvKc {
     pub near_divide: Vec<bool>,
     /// KC's patches: (cells, volume m3).
     pub patches: Vec<(usize, f64)>,
-    /// The nearest L reach of each cell KV reached (`u64::MAX`: none).
-    pub nearest: Vec<u64>,
+    /// KC's breaches (reading 22): the depressions drained by a bounded least-cost breach instead of a fill, and their cut volume (m3).
+    pub breaches: usize,
+    pub breach_volume: f64,
+    /// KC's wanted fill per cell (reading 9: a fill held at the budget is a fill clamp the validator reads).
+    pub kc_wanted: Vec<f64>,
+    /// The nearest L reach of each cell KV reached, as an index into the graph's L reaches sorted by id (`u32::MAX`: none; order #161's memory cut).
+    pub nearest: Vec<u32>,
 }
 
 /// The bed level (m) of a code (GEN-170: 0.5 m codes).
@@ -65,22 +73,22 @@ fn bed_m(code: i32) -> f64 {
 }
 
 /// The chamfer distance (m) from the given sources, with each cell's nearest source; ties by the source's cell id.
-fn chamfer(grid: &Grid, sources: &[(usize, usize)], cell_m: f64, limit_m: f64) -> (Vec<f64>, Vec<usize>) {
+fn chamfer(grid: &Grid, sources: &[(usize, usize)], cell_m: f64, limit_m: f64) -> (Vec<f64>, Vec<u32>) {
     let n = grid.len();
     let mut dist = vec![f64::INFINITY; n];
-    let mut src = vec![usize::MAX; n];
+    let mut src = vec![u32::MAX; n];
     let mut heap: BinaryHeap<Reverse<(u64, usize, usize)>> = BinaryHeap::new();
     for &(c, tag) in sources {
-        if dist[c] > 0.0 || tag < src[c] {
+        if dist[c] > 0.0 || (tag as u32) < src[c] {
             dist[c] = 0.0;
-            src[c] = tag;
+            src[c] = tag as u32;
             heap.push(Reverse((0, tag, c)));
         }
     }
     // distances as integer millimetres in the heap key: fixed order
     while let Some(Reverse((dmm, tag, c))) = heap.pop() {
         let d = dmm as f64 / 1000.0;
-        if d > dist[c] || (d == dist[c] && tag != src[c]) {
+        if d > dist[c] || (d == dist[c] && tag as u32 != src[c]) {
             continue;
         }
         for k in 0..8 {
@@ -90,9 +98,9 @@ fn chamfer(grid: &Grid, sources: &[(usize, usize)], cell_m: f64, limit_m: f64) -
             if nd > limit_m {
                 continue;
             }
-            if nd < dist[q] || (nd == dist[q] && tag < src[q]) {
+            if nd < dist[q] || (nd == dist[q] && (tag as u32) < src[q]) {
                 dist[q] = nd;
-                src[q] = tag;
+                src[q] = tag as u32;
                 heap.push(Reverse(((nd * 1000.0) as u64, tag, q)));
             }
         }
@@ -102,7 +110,26 @@ fn chamfer(grid: &Grid, sources: &[(usize, usize)], cell_m: f64, limit_m: f64) -
 
 /// Runs KV and KC on `s0` (the stage input; KS off in the prototype) around the L reaches of `g`, within `budget` per cell. `protected` marks the protected basins' cells; `outlet` the sea.
 pub fn run(grid: &Grid, s0: &[f64], outlet: &[bool], g: &Graph, protected: &[bool], budget: &[f64], p: &KvParams, switch: Switch) -> KvKc {
+    run_with(grid, s0, outlet, g, protected, budget, None, p, switch)
+}
+
+/// [`run`] with the budget's reference (reading 21, owner #161): `reference` is `S_KH`, and the lowering budget left at a cell is `budget - max(0, S_KH - s0)` (what KS used before
+/// KV and KC). `None`: the budget is the budget left already.
+#[allow(clippy::too_many_arguments)]
+pub fn run_with(
+    grid: &Grid,
+    s0: &[f64],
+    outlet: &[bool],
+    g: &Graph,
+    protected: &[bool],
+    budget: &[f64],
+    reference: Option<&[f64]>,
+    p: &KvParams,
+    switch: Switch,
+) -> KvKc {
     let n = s0.len();
+    // the lowering budget left before KV (reading 21)
+    let left_at = |c: usize| (budget[c] - reference.map_or(0.0, |r| (r[c] - s0[c]).max(0.0))).max(0.0);
     let law = WidthLaw::STANDARD;
     let mut reaches: Vec<&Reach> = g.reaches.iter().filter(|r| r.level == Level::L).collect();
     reaches.sort_by_key(|r| r.id);
@@ -131,16 +158,23 @@ pub fn run(grid: &Grid, s0: &[f64], outlet: &[bool], g: &Graph, protected: &[boo
         }
         reaches[x].id
     };
-    let chain: Vec<u64> = (0..reaches.len()).map(chain_of).collect();
+    // chains as dense u32 indices (order #161's memory cut: catch holds 4 bytes a cell)
+    let chain_ids: Vec<u64> = (0..reaches.len()).map(chain_of).collect();
+    let mut dense: BTreeMap<u64, u32> = BTreeMap::new();
+    for &id in &chain_ids {
+        let next = dense.len() as u32;
+        dense.entry(id).or_insert(next);
+    }
+    let chain: Vec<u32> = chain_ids.iter().map(|id| dense[id]).collect();
     let routing = route_rules(grid, s0, outlet, 1e-3, p.seed, 0.0, None, RoundRules::ROUND);
     let reached = 1.5 * p.cell_m;
-    let mut catch = vec![u64::MAX - 1; n];
+    let mut catch = vec![u32::MAX - 1; n];
     for c in 0..n {
         let mut x = c;
         let mut steps = 0;
         loop {
-            if dist[x] <= reached && src[x] != usize::MAX {
-                catch[c] = chain[vtx[&src[x]].0];
+            if dist[x] <= reached && src[x] != u32::MAX {
+                catch[c] = chain[vtx[&(src[x] as usize)].0];
                 break;
             }
             let to = routing.receiver[x];
@@ -151,24 +185,28 @@ pub fn run(grid: &Grid, s0: &[f64], outlet: &[bool], g: &Graph, protected: &[boo
             steps += 1;
         }
     }
+    drop(routing);
     let divide: Vec<bool> =
         (0..n).map(|c| !outlet[c] && (0..8).filter_map(|k| grid.neighbour(c, k)).any(|q| !outlet[q] && catch[q] != catch[c])).collect();
-    let div_src: Vec<(usize, usize)> = (0..n).filter(|&c| divide[c]).map(|c| (c, c)).collect();
-    let (ddiv, _) = chamfer(grid, &div_src, p.cell_m, p.d_buf_m + p.cell_m);
-    let near_divide: Vec<bool> = (0..n).map(|c| ddiv[c] < p.d_buf_m).collect();
+    drop(catch);
+    let near_divide: Vec<bool> = {
+        let div_src: Vec<(usize, usize)> = (0..n).filter(|&c| divide[c]).map(|c| (c, c)).collect();
+        let (ddiv, _) = chamfer(grid, &div_src, p.cell_m, p.d_buf_m + p.cell_m);
+        (0..n).map(|c| ddiv[c] < p.d_buf_m).collect()
+    };
     // KV
     let mut kv = s0.to_vec();
     let mut kv_wanted = vec![0.0; n];
     let mut residuals = Vec::new();
-    let mut nearest = vec![u64::MAX; n];
+    let mut nearest = vec![u32::MAX; n];
     let kv_on = switch != Switch::KcOnly;
     for c in 0..n {
-        if src[c] == usize::MAX {
+        if src[c] == u32::MAX {
             continue;
         }
-        let (ri, k) = vtx[&src[c]];
+        let (ri, k) = vtx[&(src[c] as usize)];
         let r = reaches[ri];
-        nearest[c] = r.id;
+        nearest[c] = ri as u32;
         if !kv_on || outlet[c] || protected[c] || near_divide[c] {
             continue;
         }
@@ -179,63 +217,117 @@ pub fn run(grid: &Grid, s0: &[f64], outlet: &[bool], g: &Graph, protected: &[boo
             continue;
         }
         kv_wanted[c] = want;
-        let left = budget[c].max(0.0);
+        let left = left_at(c);
         let low = want.min(left);
         kv[c] = s0[c] - low;
         if want > low + BUDGET_EPS_M {
             residuals.push(Residual { cell: c, stage: "kv", needed_m: want, available_m: left, feature: r.id });
         }
     }
+    drop(dist);
+    drop(src);
+    let feature_of = |c: usize| if nearest[c] == u32::MAX { u64::MAX } else { reaches[nearest[c] as usize].id };
     // KC: the pits of KV's output outside protected basins, filled within the budget
     let mut kc = kv.clone();
     let mut patches = Vec::new();
+    let (mut breaches, mut breach_volume) = (0usize, 0.0f64);
+    let mut kc_wanted = vec![0.0; n];
     if switch != Switch::KvOnly {
-        // the pits from the depression hierarchy (flats are no depressions): a cell flooded in a depression, not protected, fills to its tree's spill height
-        let hy = super::basins_rg::hierarchy(grid, &kv, outlet);
-        let level: Vec<f64> = (0..n)
-            .map(|c| {
-                let mut k = hy.node_of[c];
-                if k == super::basins_rg::DRAINED || protected[c] {
-                    return f64::NEG_INFINITY;
+        // reading 22 (owner, #161): first a bounded least-cost breach for each depression of KV's output where it fits the lowering budget left (after KS and KV) and cuts less
+        // than its fill would raise; then the remaining pits filled within the budget, as before
+        let patches_of = |z: &[f64]| -> (Vec<f64>, Vec<u32>, Vec<Vec<usize>>) {
+            // each cell's fill level (its tree's spill; -inf for a drained or protected cell) and the connected patches the fill raises
+            let hy = super::basins_rg::hierarchy(grid, z, outlet);
+            let level: Vec<f64> = (0..n)
+                .map(|c| {
+                    let mut k = hy.node_of[c];
+                    if k == super::basins_rg::DRAINED || protected[c] {
+                        return f64::NEG_INFINITY;
+                    }
+                    while hy.nodes[k as usize].parent != super::basins_rg::DRAINED {
+                        k = hy.nodes[k as usize].parent;
+                    }
+                    hy.nodes[k as usize].spill.map_or(f64::NEG_INFINITY, |sp| sp.1)
+                })
+                .collect();
+            drop(hy);
+            let mut patch_of = vec![u32::MAX; n];
+            let mut patches: Vec<Vec<usize>> = Vec::new();
+            for c0 in 0..n {
+                if patch_of[c0] != u32::MAX || protected[c0] || level[c0] <= z[c0] {
+                    continue;
                 }
-                while hy.nodes[k as usize].parent != super::basins_rg::DRAINED {
-                    k = hy.nodes[k as usize].parent;
+                let id = patches.len() as u32;
+                let mut cells = Vec::new();
+                let mut stack = vec![c0];
+                patch_of[c0] = id;
+                while let Some(c) = stack.pop() {
+                    cells.push(c);
+                    for q in (0..8).filter_map(|k| grid.neighbour(c, k)) {
+                        if patch_of[q] == u32::MAX && !protected[q] && level[q] > z[q] {
+                            patch_of[q] = id;
+                            stack.push(q);
+                        }
+                    }
                 }
-                hy.nodes[k as usize].spill.map_or(f64::NEG_INFINITY, |sp| sp.1)
-            })
-            .collect();
-        let filled = &level;
-        let pit = |c: usize| filled[c] > kv[c];
-        let mut seen = vec![false; n];
-        for c0 in 0..n {
-            if seen[c0] || protected[c0] || !pit(c0) {
-                continue;
+                patches.push(cells);
             }
-            // one patch: the connected cells the flood raises, outside protected basins
-            let (mut cells, mut vol) = (0usize, 0.0f64);
-            let mut stack = vec![c0];
-            seen[c0] = true;
-            while let Some(c) = stack.pop() {
-                cells += 1;
-                let need = filled[c] - kv[c];
-                let fill = need.min(budget[c].max(0.0));
-                kc[c] = kv[c] + fill;
-                vol += fill * grid.cell_area(c);
-                if need > fill + BUDGET_EPS_M {
-                    let feature = nearest[c];
-                    residuals.push(Residual { cell: c, stage: "kc", needed_m: need, available_m: budget[c].max(0.0), feature });
-                }
-                for q in (0..8).filter_map(|k| grid.neighbour(c, k)) {
-                    if !seen[q] && !protected[q] && pit(q) {
-                        seen[q] = true;
-                        stack.push(q);
+            (level, patch_of, patches)
+        };
+        let remaining: Vec<f64> = (0..n).map(|c| (left_at(c) - (s0[c] - kv[c]).max(0.0)).max(0.0)).collect();
+        {
+            let (level, patch_of, ps) = patches_of(&kv);
+            for (id, cells) in ps.iter().enumerate() {
+                let fill_ok = cells.iter().all(|&c| level[c] - kv[c] <= budget[c].max(0.0) + BUDGET_EPS_M);
+                let fill_vol: f64 = cells.iter().map(|&c| (level[c] - kv[c]) * grid.cell_area(c)).sum();
+                let pit = *cells.iter().min_by(|&&a, &&b| kv[a].total_cmp(&kv[b]).then(a.cmp(&b))).unwrap();
+                let floor = kv[pit];
+                let found = super::basins_rg::breach_path(
+                    grid,
+                    &kv,
+                    outlet,
+                    pit,
+                    floor,
+                    &remaining,
+                    &|c| patch_of[c] == id as u32,
+                    &|c| protected[c],
+                    BREACH_CAP,
+                );
+                if let Some((vol, path)) = found {
+                    if vol < fill_vol || !fill_ok {
+                        for &c in &path {
+                            if kc[c] > floor && !outlet[c] {
+                                kc[c] = floor;
+                            }
+                        }
+                        breaches += 1;
+                        breach_volume += vol;
                     }
                 }
             }
-            patches.push((cells, vol));
+        }
+        let (level, patch_of, ps) = patches_of(&kc);
+        drop(patch_of);
+        let base = kc.clone();
+        for cells in ps {
+            for &c in &cells {
+                kc_wanted[c] = level[c] - base[c];
+            }
+            let mut vol = 0.0f64;
+            for &c in &cells {
+                let need = level[c] - base[c];
+                let fill = need.min(budget[c].max(0.0));
+                kc[c] = base[c] + fill;
+                vol += fill * grid.cell_area(c);
+                if need > fill + BUDGET_EPS_M {
+                    let feature = feature_of(c);
+                    residuals.push(Residual { cell: c, stage: "kc", needed_m: need, available_m: budget[c].max(0.0), feature });
+                }
+            }
+            patches.push((cells.len(), vol));
         }
     }
-    KvKc { kv, kc, kv_wanted, residuals, divide, near_divide, patches, nearest }
+    KvKc { kv, kc, kv_wanted, residuals, divide, near_divide, patches, breaches, breach_volume, kc_wanted, nearest }
 }
 
 /// What [`flag_residuals`] did.

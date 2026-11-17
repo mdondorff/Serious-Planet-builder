@@ -167,12 +167,22 @@ pub struct BasinParams {
     /// Reported (`represented: none`): from this depth and cell count (BUILD-055's basin rule).
     pub report_depth_m: f64,
     pub report_cells: usize,
+    /// The sea level (m): a spill path ending on an outlet at or below it receives an `outlet_sea` there (reading 6).
+    pub sea_level_m: f64,
 }
 
 impl BasinParams {
     /// The contract's L basins: from 0.25 km2 and 2 m; reported from 0.5 m and 16 cells.
     pub fn l(body: u64) -> BasinParams {
-        BasinParams { level: Level::L, body, min_area_m2: 0.25e6, min_depth_m: 2.0, report_depth_m: 0.5, report_cells: 16 }
+        BasinParams {
+            level: Level::L,
+            body,
+            min_area_m2: 0.25e6,
+            min_depth_m: 2.0,
+            report_depth_m: 0.5,
+            report_cells: 16,
+            sea_level_m: 0.0,
+        }
     }
 }
 
@@ -199,6 +209,8 @@ pub struct Produced {
     pub node_of_basin: BTreeMap<u64, u32>,
     pub cells: Cells,
     pub unresolved: Vec<u64>,
+    /// Kept-size depressions that drain under reading 22 (reported, not protected); 0 without a budget.
+    pub drained: usize,
 }
 
 /// A grid's cells against global cell ids: `gid` the global id of a grid cell, `local` the grid cell of a global id (`None` outside the grid).
@@ -233,7 +245,7 @@ pub fn produce_ids(
     p: &BasinParams,
     ids: &CellIds,
 ) -> Produced {
-    produce_ids_avoiding(grid, z, outlet, reaches, owner, p, ids, &std::collections::BTreeSet::new())
+    produce_core(grid, z, outlet, reaches, owner, p, ids, None, &std::collections::BTreeSet::new())
 }
 
 /// [`produce_ids`] with the grid cells of markers already on the reaches (spikes #142, spike only): a reach's `lake_inlet` goes on its first vertex inside the kept basin that holds no
@@ -247,6 +259,56 @@ pub fn produce_ids_avoiding(
     owner: &dyn Fn(usize) -> Domain,
     p: &BasinParams,
     ids: &CellIds,
+    markers: &std::collections::BTreeSet<usize>,
+) -> Produced {
+    produce_core(grid, z, outlet, reaches, owner, p, ids, None, markers)
+}
+
+/// [`produce_drain`] with the markers of [`produce_ids_avoiding`] (explorer, the rg-chain merge of spikes #142 and crusader #161; spike only).
+#[allow(clippy::too_many_arguments)]
+pub fn produce_drain_avoiding(
+    grid: &Grid,
+    z: &[f64],
+    outlet: &[bool],
+    reaches: &[Reach],
+    owner: &dyn Fn(usize) -> Domain,
+    p: &BasinParams,
+    ids: &CellIds,
+    remaining: &[f64],
+    markers: &std::collections::BTreeSet<usize>,
+) -> Produced {
+    produce_core(grid, z, outlet, reaches, owner, p, ids, Some(remaining), markers)
+}
+
+/// The bound of reading 22's breach test: settled cells per depression.
+const BREACH_CAP: usize = 20_000;
+
+/// [`produce_ids`] under reading 22 (owner, #161): a depression the kept rule names (area and depth) is protected only when neither its fill (every cell raised to the spill) nor
+/// a bounded least-cost breach ([`breach_path`]) fits `remaining` (the lowering budget left per cell); every other one drains and is reported (`represented: none`).
+#[allow(clippy::too_many_arguments)]
+pub fn produce_drain(
+    grid: &Grid,
+    z: &[f64],
+    outlet: &[bool],
+    reaches: &[Reach],
+    owner: &dyn Fn(usize) -> Domain,
+    p: &BasinParams,
+    ids: &CellIds,
+    remaining: &[f64],
+) -> Produced {
+    produce_core(grid, z, outlet, reaches, owner, p, ids, Some(remaining), &std::collections::BTreeSet::new())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn produce_core(
+    grid: &Grid,
+    z: &[f64],
+    outlet: &[bool],
+    reaches: &[Reach],
+    owner: &dyn Fn(usize) -> Domain,
+    p: &BasinParams,
+    ids: &CellIds,
+    remaining: Option<&[f64]>,
     markers: &std::collections::BTreeSet<usize>,
 ) -> Produced {
     let gid = ids.gid;
@@ -291,21 +353,45 @@ pub fn produce_ids_avoiding(
         Kept,
         Reported,
     }
-    let keep: Vec<Keep> = (0..nn)
-        .map(|k| {
-            let deep = depth(k) >= p.min_depth_m;
-            if deep && {
-                sorted_into(k, &mut buf);
-                buf.iter().map(|&c| grid.cell_area(c)).sum::<f64>() >= p.min_area_m2
-            } {
-                Keep::Kept
-            } else if depth(k) >= p.report_depth_m && size[k] >= p.report_cells {
-                Keep::Reported
-            } else {
-                Keep::No
-            }
-        })
-        .collect();
+    let mut keep: Vec<Keep> = Vec::with_capacity(nn);
+    let mut drained = 0usize;
+    for k in 0..nn {
+        let deep = depth(k) >= p.min_depth_m;
+        let kept = deep && {
+            sorted_into(k, &mut buf);
+            buf.iter().map(|&c| grid.cell_area(c)).sum::<f64>() >= p.min_area_m2
+        };
+        // reading 22: a kept-size depression drains (reported) when its fill or a bounded breach fits the budget left; only the rest are protected
+        let drains = kept
+            && remaining.is_some_and(|rem| {
+                let nd = &hy.nodes[k];
+                let fill = nd.spill.is_some_and(|sp| span(k).iter().all(|&c| sp.1 - z[c] <= rem[c].max(0.0) + 1e-9));
+                fill || {
+                    // `buf` holds this subtree's cells sorted
+                    let sub_k = &buf;
+                    breach_path(
+                        grid,
+                        z,
+                        outlet,
+                        nd.floor_cell,
+                        nd.floor_m,
+                        rem,
+                        &|c| sub_k.binary_search(&c).is_ok(),
+                        &|_| false,
+                        BREACH_CAP,
+                    )
+                    .is_some()
+                }
+            });
+        drained += usize::from(drains);
+        keep.push(if kept && !drains {
+            Keep::Kept
+        } else if depth(k) >= p.report_depth_m && size[k] >= p.report_cells {
+            Keep::Reported
+        } else {
+            Keep::No
+        });
+    }
     // the basin of each cell: the deepest kept (or reported) node whose subtree holds it
     let mut basin_of_cell: Vec<u32> = vec![NONE; z.len()];
     for k in 0..nn {
@@ -370,8 +456,14 @@ pub fn produce_ids_avoiding(
         &lowest
     };
     let routing = route_rules(grid, z, route_outlet, 1e-3, p.body, 0.0, None, RoundRules::ROUND);
-    let mut out =
-        Produced { basins: Vec::new(), nodes: Vec::new(), node_of_basin: BTreeMap::new(), cells: Cells::default(), unresolved: Vec::new() };
+    let mut out = Produced {
+        basins: Vec::new(),
+        nodes: Vec::new(),
+        node_of_basin: BTreeMap::new(),
+        cells: Cells::default(),
+        unresolved: Vec::new(),
+        drained,
+    };
     for k in 0..nn {
         if keep[k] == Keep::No {
             continue;
@@ -434,6 +526,22 @@ pub fn produce_ids_avoiding(
                     }
                     let next = routing.receiver[c];
                     steps += 1;
+                    // reading 6 (owner, #161): a spill path that reaches the sea before any reach or basin is received by an `outlet_sea` on its first sea cell; a window's exit
+                    // stays unresolved (a window is no domain)
+                    if next == NONE && route_outlet[c] && z[c] <= p.sea_level_m {
+                        let o = Node {
+                            id: node_id(p.body, NodeKind::OutletSea, p.level, gid(c)),
+                            kind: NodeKind::OutletSea,
+                            level: p.level,
+                            anchor: gid(c),
+                            parent: None,
+                            owner: owner(c),
+                            marker: None,
+                        };
+                        target = o.id;
+                        nodes.entry(o.id).or_insert(o);
+                        break;
+                    }
                     if next == NONE || steps > z.len() {
                         break;
                     }
@@ -536,4 +644,64 @@ pub fn link_images(h1: &Produced, l: &mut Produced, z_l: &[f64], l_cells_of: &dy
         }
     }
     pairs
+}
+
+/// A bounded least-cost breach (reading 22, owner #161): from `start` (a depression's lowest cell), the path whose cells, cut to the floor level `floor`, give the least cut volume
+/// (`max(0, z - floor)` times the cell area, summed), stepping only onto cells whose cut fits `remaining` and that `blocked` does not hold, to the first cell outside `inside` lying at or
+/// below the floor, or an outlet. `None` when no such path exists within `cap` settled cells. Dijkstra, ties by the cell id: the same path on any machine.
+#[allow(clippy::too_many_arguments)]
+pub fn breach_path(
+    grid: &Grid,
+    z: &[f64],
+    outlet: &[bool],
+    start: usize,
+    floor: f64,
+    remaining: &[f64],
+    inside: &dyn Fn(usize) -> bool,
+    blocked: &dyn Fn(usize) -> bool,
+    cap: usize,
+) -> Option<(f64, Vec<usize>)> {
+    use std::cmp::Reverse;
+    use std::collections::{BinaryHeap, HashMap};
+    let cut = |c: usize| (z[c] - floor).max(0.0);
+    let mut best: HashMap<usize, (f64, usize)> = HashMap::new();
+    let mut heap: BinaryHeap<Reverse<(u64, usize)>> = BinaryHeap::new();
+    best.insert(start, (0.0, usize::MAX));
+    heap.push(Reverse((0, start)));
+    let mut settled = 0usize;
+    while let Some(Reverse((key, c))) = heap.pop() {
+        let (cost, _) = best[&c];
+        if key != cost.to_bits() {
+            continue;
+        }
+        settled += 1;
+        if settled > cap {
+            return None;
+        }
+        if c != start && (outlet[c] || (!inside(c) && z[c] <= floor)) {
+            let mut path = vec![c];
+            let mut x = c;
+            while let Some(&(_, from)) = best.get(&x) {
+                if from == usize::MAX {
+                    break;
+                }
+                path.push(from);
+                x = from;
+            }
+            path.reverse();
+            return Some((cost, path));
+        }
+        for d in 0..8 {
+            let Some(q) = grid.neighbour(c, d) else { continue };
+            if blocked(q) || cut(q) > remaining[q].max(0.0) {
+                continue;
+            }
+            let nc = cost + cut(q) * grid.cell_area(q);
+            if best.get(&q).is_none_or(|&(b, _)| nc < b) {
+                best.insert(q, (nc, c));
+                heap.push(Reverse((nc.to_bits(), q)));
+            }
+        }
+    }
+    None
 }
