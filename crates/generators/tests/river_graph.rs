@@ -53,7 +53,7 @@ fn reach(up: &Node, down: &Node, vertices: Vec<u64>, at: Attrs) -> Reach {
         parent: None,
         owner: Domain::Tile { face: 0, ti: 0, tj: 0 },
         attrs: at,
-        status: Status::Ok,
+        exceptions: Vec::new(),
     }
 }
 
@@ -501,9 +501,9 @@ fn the_budget_validator_finds_overruns_raises_and_clamps_without_residuals() {
     let budget = vec![10.0, 10.0, 10.0];
     let run = |ks: &[f64], kv: &[f64], kc: &[f64], wanted: Option<&[f64]>, res: &[Residual], g: &Graph| {
         let s = [
-            Stage { name: "ks", out: ks, wanted_lowering: None, fills: false },
-            Stage { name: "kv", out: kv, wanted_lowering: wanted, fills: true },
-            Stage { name: "kc", out: kc, wanted_lowering: None, fills: true },
+            Stage { name: "ks", out: ks, wanted_lowering: None, wanted_fill: None, fills: false },
+            Stage { name: "kv", out: kv, wanted_lowering: wanted, wanted_fill: None, fills: true },
+            Stage { name: "kc", out: kc, wanted_lowering: None, wanted_fill: None, fills: true },
         ];
         validate_budget(&s0, &budget, &s, res, g)
     };
@@ -517,7 +517,7 @@ fn the_budget_validator_finds_overruns_raises_and_clamps_without_residuals() {
     // a residual does not excuse a lowering overrun
     let mut flagged = g.clone();
     let t = reach_mut(&mut flagged, cell(2, 3));
-    t.status = Status::Exception { reason: Reason::BudgetResidual, value: 3.0 };
+    t.exceptions = vec![Exception { reason: Reason::BudgetResidual, value: 3.0 }];
     let feature = t.id;
     let res = [Residual { cell: 0, stage: "kv", needed_m: 7.0, available_m: 4.0, feature }];
     assert!(run(&ks, &kv2, &kv2, None, &res, &flagged).iter().any(|v| matches!(v, Violation::BudgetOverrun { cell: 0, stage: "kv", .. })));
@@ -545,11 +545,171 @@ fn the_budget_validator_finds_overruns_raises_and_clamps_without_residuals() {
     assert!(mismatch(&run(&ks, &kv, &kc3, None, &wrong_fill, &flagged)));
     let idle = [Residual { cell: 2, stage: "kc", needed_m: 1.0, available_m: 10.0, feature }];
     assert!(matches!(run(&ks, &kv, &kc, None, &idle, &flagged)[..], [Violation::ResidualMismatch { cell: 2, stage: "kc", .. }]));
+    // a residual naming no stage that ran, or a cell outside the surface
+    for (cell, stage) in [(0, "kx"), (99, "kv")] {
+        let stray = [Residual { cell, stage, needed_m: 1.0, available_m: 1.0, feature }];
+        assert!(
+            run(&ks, &kv, &kc, None, &stray, &flagged)
+                .iter()
+                .any(|v| matches!(v, Violation::ResidualMismatch { why: "no such cell or stage", .. })),
+            "{cell} {stage}"
+        );
+    }
+    // a duplicate residual is one more than the events
+    let twice = [res[0].clone(), res[0].clone()];
+    assert!(run(&ks, &kv, &kc, Some(&wanted), &twice, &flagged)
+        .iter()
+        .any(|v| matches!(v, Violation::ResidualMismatch { why: "more residuals than clamps and fill overruns", .. })));
+    // one cell that clamps and over-fills in one stage (KV wanted 7 m at cell 0 and raised it 12 m): one residual for each event passes, a wrong one fails
+    let kv_up = [106.0, 100.0, 100.0];
+    let kc_up = [106.0, 103.0, 100.0];
+    let both = [
+        Residual { cell: 0, stage: "kv", needed_m: 7.0, available_m: 4.0, feature },
+        Residual { cell: 0, stage: "kv", needed_m: 12.0, available_m: 10.0, feature },
+    ];
+    assert_eq!(run(&ks, &kv_up, &kc_up, Some(&wanted), &both, &flagged), vec![]);
+    let wrong = [both[0].clone(), Residual { cell: 0, stage: "kv", needed_m: 11.0, available_m: 10.0, feature }];
+    assert!(mismatch(&run(&ks, &kv_up, &kc_up, Some(&wanted), &wrong, &flagged)));
+    // one to one: the clamp's record alone leaves the fill overrun unrecorded; the clamp's record twice records the clamp once; the fill's record alone leaves the clamp
+    let v = run(&ks, &kv_up, &kc_up, Some(&wanted), &[both[0].clone()], &flagged);
+    assert!(v.iter().any(|x| matches!(x, Violation::BudgetOverrun { cell: 0, stage: "kv", .. })), "{v:?}");
+    let v = run(&ks, &kv_up, &kc_up, Some(&wanted), &[both[0].clone(), both[0].clone()], &flagged);
+    assert!(v.iter().any(|x| matches!(x, Violation::BudgetOverrun { cell: 0, stage: "kv", .. })), "{v:?}");
+    assert!(
+        v.iter().any(|x| matches!(x, Violation::ResidualMismatch { why: "more residuals than clamps and fill overruns", .. })),
+        "{v:?}"
+    );
+    let v = run(&ks, &kv_up, &kc_up, Some(&wanted), &[both[1].clone()], &flagged);
+    assert!(v.iter().any(|x| matches!(x, Violation::ClampWithoutResidual { cell: 0, stage: "kv" })), "{v:?}");
+    // a residual where the stage's output is not finite
+    let kv_nan0 = [f64::NAN, 100.0, 100.0];
+    let v = run(&ks, &kv_nan0, &kc, None, &[both[0].clone()], &flagged);
+    assert!(v.iter().any(|x| matches!(x, Violation::ResidualMismatch { why: "its stage's output is not finite there", .. })), "{v:?}");
     // inputs that are not finite or do not fit
     let kv_nan = [f64::NAN, 100.0, 100.0];
     assert!(run(&ks, &kv_nan, &kc, None, &[], &g).iter().any(|v| matches!(v, Violation::BudgetInput { cell: 0, stage: "kv" })));
     let short = [90.0, 100.0];
     assert!(matches!(run(&ks, &short, &kc, None, &[], &g)[..], [Violation::BudgetInput { stage: "kv", .. }]));
+}
+
+// spec: TEST-140
+#[test]
+fn a_fill_held_under_its_wanted_fill_needs_a_residual() {
+    // reading 9: KC wanted to fill 15 m at cell 1 and filled 10 m (its budget): a fill clamp, recorded like a lowering clamp
+    let g = base();
+    let s0 = vec![100.0, 100.0, 100.0];
+    let budget = vec![10.0, 10.0, 10.0];
+    let (ks, kv, kc) = ([94.0, 100.0, 100.0], [90.0, 100.0, 100.0], [90.0, 110.0, 100.0]);
+    let run = |kc: &[f64], wanted: &[f64], res: &[Residual], g: &Graph| {
+        let s = [
+            Stage { name: "ks", out: &ks, wanted_lowering: None, wanted_fill: None, fills: false },
+            Stage { name: "kv", out: &kv, wanted_lowering: None, wanted_fill: None, fills: true },
+            Stage { name: "kc", out: kc, wanted_lowering: None, wanted_fill: Some(wanted), fills: true },
+        ];
+        validate_budget(&s0, &budget, &s, res, g)
+    };
+    let wanted = [0.0, 15.0, 0.0];
+    assert_eq!(run(&kc, &wanted, &[], &g), vec![Violation::FillClampWithoutResidual { cell: 1, stage: "kc" }]);
+    // a fill that reached what it wanted is no event
+    assert_eq!(run(&kc, &[0.0, 10.0, 0.0], &[], &g), vec![]);
+    // the residual's feature is already exceptional for another reason: the list holds both (finding 3 of SPIKE-132)
+    let mut flagged = g.clone();
+    let t = reach_mut(&mut flagged, cell(2, 3));
+    t.exceptions =
+        vec![Exception { reason: Reason::RiseOverBudget, value: 12.5 }, Exception { reason: Reason::BudgetResidual, value: 5.0 }];
+    let feature = t.id;
+    let res = [Residual { cell: 1, stage: "kc", needed_m: 15.0, available_m: 10.0, feature }];
+    assert_eq!(run(&kc, &wanted, &res, &flagged), vec![]);
+    // a feature with only the other reason is not flagged for the residual
+    let mut other = g.clone();
+    reach_mut(&mut other, cell(2, 3)).exceptions = vec![Exception { reason: Reason::RiseOverBudget, value: 12.5 }];
+    assert!(matches!(run(&kc, &wanted, &res, &other)[..], [Violation::ResidualFeatureNotFlagged { .. }]));
+    // the residual carries the wanted fill and the budget
+    for (needed, available) in [(10.0, 10.0), (15.0, 4.0)] {
+        let wrong = [Residual { cell: 1, stage: "kc", needed_m: needed, available_m: available, feature }];
+        let v = run(&kc, &wanted, &wrong, &flagged);
+        assert!(v.iter().any(|x| matches!(x, Violation::ResidualMismatch { cell: 1, stage: "kc", .. })), "{needed} {available}: {v:?}");
+        assert!(v.iter().any(|x| matches!(x, Violation::FillClampWithoutResidual { cell: 1, stage: "kc" })), "{needed} {available}: {v:?}");
+    }
+    // one event, one residual: a second record of the fill clamp is left over
+    let twice = [res[0].clone(), res[0].clone()];
+    assert!(run(&kc, &wanted, &twice, &flagged)
+        .iter()
+        .any(|v| matches!(v, Violation::ResidualMismatch { why: "more residuals than clamps and fill overruns", .. })));
+    // a fill over the budget is one event, not also a clamp: its own residual alone passes
+    let kc_over = [90.0, 111.0, 100.0];
+    let over = [Residual { cell: 1, stage: "kc", needed_m: 11.0, available_m: 10.0, feature }];
+    assert_eq!(run(&kc_over, &wanted, &over, &flagged), vec![]);
+    // a wanted fill that is not finite or does not fit
+    assert!(run(&kc, &[0.0, f64::NAN, 0.0], &[], &g).iter().any(|v| matches!(v, Violation::BudgetInput { cell: 1, stage: "kc" })));
+    assert!(matches!(run(&kc, &[0.0, 15.0], &[], &g)[..], [Violation::BudgetInput { stage: "kc", .. }]));
+    // a negative wanted fill is an input error, not a silent pass
+    assert!(run(&kc, &[0.0, -15.0, 0.0], &[], &g).iter().any(|v| matches!(v, Violation::BudgetInput { cell: 1, stage: "kc" })));
+    // a stage that may not fill wants no fill
+    let ks_wants_fill = [
+        Stage { name: "ks", out: &ks, wanted_lowering: None, wanted_fill: Some(&[0.0, 5.0, 0.0]), fills: false },
+        Stage { name: "kv", out: &kv, wanted_lowering: None, wanted_fill: None, fills: true },
+    ];
+    assert!(validate_budget(&s0, &budget, &ks_wants_fill, &[], &g)
+        .iter()
+        .any(|v| matches!(v, Violation::BudgetInput { cell: 1, stage: "ks" })));
+    // a stage with a bad wanted value still uses the budget: KS 6 m, KV 4 m (its wanted fill NaN), KC 2 m is a KC overrun
+    let kv_bad = [
+        Stage { name: "ks", out: &[94.0], wanted_lowering: None, wanted_fill: None, fills: false },
+        Stage { name: "kv", out: &[90.0], wanted_lowering: None, wanted_fill: Some(&[f64::NAN]), fills: true },
+        Stage { name: "kc", out: &[88.0], wanted_lowering: Some(&[-1.0]), wanted_fill: None, fills: true },
+    ];
+    let v = validate_budget(&[100.0], &[10.0], &kv_bad, &[], &g);
+    assert!(v.iter().any(|x| matches!(x, Violation::BudgetInput { cell: 0, stage: "kv" })), "{v:?}");
+    assert!(v.iter().any(|x| matches!(x, Violation::BudgetOverrun { cell: 0, stage: "kc", .. })), "{v:?}");
+}
+
+// spec: TEST-140
+#[test]
+fn a_reach_carries_a_list_of_exceptions() {
+    // reading 9: several reasons on one reach, written in a fixed order, one per reason
+    let mut g = base();
+    let t = reach_mut(&mut g, cell(2, 3));
+    t.exceptions =
+        vec![Exception { reason: Reason::BudgetResidual, value: 5.0 }, Exception { reason: Reason::RiseOverBudget, value: 12.5 }];
+    assert_eq!(check(&g), vec![]);
+    let text = g.canonical();
+    assert!(text.contains("exceptions=budget_residual:"), "sorted by the reason's name:\n{text}");
+    assert!(text.contains(";rise_over_budget:"), "both listed:\n{text}");
+    let back = Graph::parse(&text).expect("the canonical form parses");
+    assert_eq!(back.canonical(), text, "same graph, same bytes");
+    let mut reordered = g.clone();
+    reach_mut(&mut reordered, cell(2, 3)).exceptions.reverse();
+    assert_eq!(reordered.canonical(), text, "the list's order is not part of the graph");
+    assert!(back.reaches.iter().any(|r| r.has_exception(Reason::RiseOverBudget) && r.has_exception(Reason::BudgetResidual)));
+    // a reason twice, a value that is not finite, a reason the contract does not name
+    let mut dup = g.clone();
+    let id = reach_mut(&mut dup, cell(2, 3)).id;
+    reach_mut(&mut dup, cell(2, 3)).exceptions.push(Exception { reason: Reason::BudgetResidual, value: 6.0 });
+    assert!(check(&dup).contains(&Violation::DuplicateException { at: id, reason: Reason::BudgetResidual }));
+    let mut nan = g.clone();
+    reach_mut(&mut nan, cell(2, 3)).exceptions[0].value = f64::NAN;
+    assert!(check(&nan).contains(&Violation::NotFinite { at: id, field: "exceptions" }));
+    assert!(Graph::parse(&text.replacen("exceptions=budget_residual:", "exceptions=too_steep:", 1)).is_err());
+    assert!(Graph::parse(&text.replacen(";rise_over_budget:", ";rise_over_budget", 1)).is_err());
+    // the parser takes the canonical order only, and full hex
+    let at = text.find("exceptions=budget_residual:").unwrap();
+    let (lo, hi) = (at + 11, at + text[at..].find(' ').unwrap());
+    let parts: Vec<&str> = text[lo..hi].split(';').collect();
+    let swapped = format!("{}{};{}{}", &text[..lo], parts[1], parts[0], &text[hi..]);
+    assert!(Graph::parse(&swapped).is_err(), "out of order");
+    let short = format!("{}budget_residual:0;{}{}", &text[..lo], parts[1], &text[hi..]);
+    assert!(Graph::parse(&short).is_err(), "short hex");
+    assert!(Graph::parse(&text.replacen("body=0000000000005eed", "body=0000000000005EED", 1)).is_err(), "upper-case hex");
+    // the graph parsed back equals the sorted graph, also with a signed zero
+    let mut sorted = reordered.clone();
+    sorted.sort();
+    assert_eq!(Graph::parse(&reordered.canonical()).unwrap(), sorted);
+    let mut zero = g.clone();
+    reach_mut(&mut zero, cell(2, 3)).exceptions[0].value = -0.0;
+    let mut pos = g.clone();
+    reach_mut(&mut pos, cell(2, 3)).exceptions[0].value = 0.0;
+    assert_eq!(zero.canonical(), pos.canonical(), "a signed zero is written as +0.0");
 }
 
 // spec: TEST-140

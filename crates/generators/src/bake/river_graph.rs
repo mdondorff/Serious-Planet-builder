@@ -173,11 +173,18 @@ impl Reason {
     }
 }
 
-/// A reach's status.
+/// One exception of a reach: its reason and value (reading 9: a reach carries a list of them).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Status {
-    Ok,
-    Exception { reason: Reason, value: f64 },
+pub struct Exception {
+    pub reason: Reason,
+    pub value: f64,
+}
+
+impl Reach {
+    /// Whether the reach carries an exception for `reason`.
+    pub fn has_exception(&self, reason: Reason) -> bool {
+        self.exceptions.iter().any(|e| e.reason == reason)
+    }
 }
 
 /// The per-vertex attributes of a reach (contract section 3); every array has one entry per vertex.
@@ -224,7 +231,8 @@ pub struct Reach {
     pub parent: Option<u64>,
     pub owner: Domain,
     pub attrs: Attrs,
-    pub status: Status,
+    /// The reach's exceptions (reading 9): empty for an ordinary reach; each reported, never repaired.
+    pub exceptions: Vec<Exception>,
 }
 
 /// A basin's outlet.
@@ -307,13 +315,16 @@ impl Graph {
         self.nodes.sort_by_key(|n| n.id);
         self.reaches.sort_by_key(|r| r.id);
         self.basins.sort_by_key(|b| b.id);
+        for r in &mut self.reaches {
+            r.exceptions.sort_unstable_by_key(|e| (e.reason.name(), (e.value + 0.0).to_bits()));
+        }
     }
 
     /// The canonical serialisation: one line per item in id order, fixed field order, f64 as bit patterns.
     pub fn canonical(&self) -> String {
         let mut g = self.clone();
         g.sort();
-        let mut s = format!("river-graph 1 body={:016x}\n", g.body);
+        let mut s = format!("river-graph 2 body={:016x}\n", g.body);
         for n in &g.nodes {
             let m = n.marker.map_or("-".into(), |m| format!("{:016x}@{}", m.on_reach, m.at_vertex));
             let _ = writeln!(
@@ -329,20 +340,22 @@ impl Graph {
             );
         }
         for r in &g.reaches {
-            let status = match r.status {
-                Status::Ok => "ok".to_string(),
-                Status::Exception { reason, value } => format!("{}:{}", reason.name(), hex_f64(value)),
-            };
+            // the exceptions in a fixed order: by the reason's name, then by the value's bits
+            // (a signed zero written as +0.0)
+            let mut ex: Vec<(&str, u64)> = r.exceptions.iter().map(|e| (e.reason.name(), (e.value + 0.0).to_bits())).collect();
+            ex.sort_unstable();
+            let exceptions =
+                if ex.is_empty() { "-".to_string() } else { ex.iter().map(|(n, b)| format!("{n}:{b:016x}")).collect::<Vec<_>>().join(";") };
             let _ = write!(
                 s,
-                "reach {:016x} level={} up={:016x} down={:016x} parent={} owner={} status={} vertices={}",
+                "reach {:016x} level={} up={:016x} down={:016x} parent={} owner={} exceptions={} vertices={}",
                 r.id,
                 r.level.name(),
                 r.up,
                 r.down,
                 opt(r.parent),
                 r.owner.text(),
-                status,
+                exceptions,
                 r.vertices.iter().map(u64::to_string).collect::<Vec<_>>().join(",")
             );
             for (name, get) in F64_FIELDS {
@@ -375,8 +388,14 @@ impl Graph {
     pub fn parse(text: &str) -> Result<Graph, String> {
         let mut lines = text.lines();
         let head = lines.next().ok_or("empty")?;
-        let body = head.strip_prefix("river-graph 1 body=").ok_or_else(|| format!("header '{head}'"))?;
-        let hex = |s: &str| u64::from_str_radix(s, 16).map_err(|_| format!("hex '{s}'"));
+        let body = head.strip_prefix("river-graph 2 body=").ok_or_else(|| format!("header '{head}'"))?;
+        // exactly the 16 lowercase digits the canonical form writes
+        let hex = |s: &str| {
+            if s.len() != 16 || !s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+                return Err(format!("hex '{s}'"));
+            }
+            u64::from_str_radix(s, 16).map_err(|_| format!("hex '{s}'"))
+        };
         let f = |s: &str| hex(s).map(f64::from_bits);
         let optid = |s: &str| if s == "-" { Ok(None) } else { hex(s).map(Some) };
         let mut g = Graph { body: hex(body)?, ..Graph::default() };
@@ -407,13 +426,23 @@ impl Graph {
                     });
                 }
                 "reach" => {
-                    let status = match get("status")? {
-                        "ok" => Status::Ok,
-                        s => {
-                            let (r, v) = s.split_once(':').ok_or_else(|| format!("status '{s}'"))?;
-                            Status::Exception { reason: Reason::parse(r)?, value: f(v)? }
-                        }
+                    let exceptions = match get("exceptions")? {
+                        "-" => Vec::new(),
+                        s => s
+                            .split(';')
+                            .map(|e| {
+                                let (r, v) = e.split_once(':').ok_or_else(|| format!("exception '{e}'"))?;
+                                Ok(Exception { reason: Reason::parse(r)?, value: f(v)? })
+                            })
+                            .collect::<Result<Vec<Exception>, String>>()?,
                     };
+                    // the canonical order only: by the reason's name, then the value's bits
+                    if exceptions
+                        .windows(2)
+                        .any(|w| (w[0].reason.name(), w[0].value.to_bits()) > (w[1].reason.name(), w[1].value.to_bits()))
+                    {
+                        return Err(format!("exceptions out of order '{}'", get("exceptions")?));
+                    }
                     let fl = |k: &str| -> Result<Vec<f64>, String> { list(k)?.into_iter().map(f).collect() };
                     let attrs = Attrs {
                         a_geo: fl("a_geo")?,
@@ -440,7 +469,7 @@ impl Graph {
                         parent: optid(get("parent")?)?,
                         owner: Domain::parse(get("owner")?)?,
                         attrs,
-                        status,
+                        exceptions,
                     });
                 }
                 "basin" => {
@@ -621,6 +650,11 @@ pub enum Violation {
         at: u64,
         field: &'static str,
     },
+    /// A reach lists one reason twice (reading 9: one exception per reason).
+    DuplicateException {
+        at: u64,
+        reason: Reason,
+    },
     CellOwnedTwice {
         cell: u64,
         reaches: (u64, u64),
@@ -637,6 +671,11 @@ pub enum Violation {
         stage: &'static str,
     },
     ClampWithoutResidual {
+        cell: usize,
+        stage: &'static str,
+    },
+    /// A stage filled less than it wanted (reading 9) without a residual.
+    FillClampWithoutResidual {
         cell: usize,
         stage: &'static str,
     },
@@ -826,9 +865,12 @@ pub fn validate(graph: &Graph, checks: &Checks) -> Vec<Violation> {
                 v.push(Violation::NotFinite { at: r.id, field: name });
             }
         }
-        if let Status::Exception { value, .. } = r.status {
-            if !value.is_finite() {
-                v.push(Violation::NotFinite { at: r.id, field: "status" });
+        if r.exceptions.iter().any(|e| !e.value.is_finite()) {
+            v.push(Violation::NotFinite { at: r.id, field: "exceptions" });
+        }
+        for (k, e) in r.exceptions.iter().enumerate() {
+            if r.exceptions[..k].iter().any(|x| x.reason == e.reason) {
+                v.push(Violation::DuplicateException { at: r.id, reason: e.reason });
             }
         }
         // a tributary (an L reach that is no trunk image) lies in one tile core plus its first vertex
@@ -1017,6 +1059,8 @@ pub struct Stage<'a> {
     pub out: &'a [f64],
     /// The lowering the stage wanted per cell (`None`: never clamped).
     pub wanted_lowering: Option<&'a [f64]>,
+    /// The fill the stage wanted per cell (reading 9; `None`: never clamped); a fill held at the budget is a clamp with its residual.
+    pub wanted_fill: Option<&'a [f64]>,
     /// Whether the stage may fill (KV and KC); a stage that may not (KS) only lowers.
     pub fills: bool,
 }
@@ -1046,11 +1090,10 @@ pub fn validate_budget(s0: &[f64], budget: &[f64], stages: &[Stage], residuals: 
         return vec![Violation::BudgetInput { cell: budget.len().min(n), stage: "budget" }];
     }
     for st in stages {
-        if st.out.len() != n || st.wanted_lowering.is_some_and(|w| w.len() != n) {
+        if st.out.len() != n || st.wanted_lowering.is_some_and(|w| w.len() != n) || st.wanted_fill.is_some_and(|w| w.len() != n) {
             return vec![Violation::BudgetInput { cell: st.out.len().min(n), stage: st.name }];
         }
     }
-    let has = |cell: usize, stage: &str| residuals.iter().any(|r| r.cell == cell && r.stage == stage);
     let mut used = vec![0.0f64; n];
     let mut input: Vec<f64> = s0.to_vec();
     for c in 0..n {
@@ -1060,8 +1103,24 @@ pub fn validate_budget(s0: &[f64], budget: &[f64], stages: &[Stage], residuals: 
     }
     for st in stages {
         for c in 0..n {
-            if !st.out[c].is_finite() || st.wanted_lowering.is_some_and(|w| !w[c].is_finite()) {
+            // a wanted value is finite and not negative; a stage that may not fill wants no fill
+            let bad_wanted = |w: Option<&[f64]>| w.is_some_and(|w| !w[c].is_finite() || w[c] < 0.0);
+            let fill_on_lowering = !st.fills && st.wanted_fill.is_some_and(|w| w[c] > 0.0);
+            if !st.out[c].is_finite() || bad_wanted(st.wanted_lowering) || bad_wanted(st.wanted_fill) || fill_on_lowering {
                 v.push(Violation::BudgetInput { cell: c, stage: st.name });
+                // a finite output still uses the budget: a later overrun stays reported
+                if st.out[c].is_finite() {
+                    let lowered = (input[c] - st.out[c]).max(0.0);
+                    let before = used[c];
+                    used[c] += lowered;
+                    if lowered > 0.0 && used[c] > budget[c] + BUDGET_EPS_M && before <= budget[c] + BUDGET_EPS_M {
+                        v.push(Violation::BudgetOverrun { cell: c, stage: st.name, used_m: used[c], budget_m: budget[c] });
+                    }
+                }
+                // a residual here records nothing that can be checked
+                for _ in residuals.iter().filter(|r| r.cell == c && r.stage == st.name) {
+                    v.push(Violation::ResidualMismatch { cell: c, stage: st.name, why: "its stage's output is not finite there" });
+                }
                 continue;
             }
             let lowered = (input[c] - st.out[c]).max(0.0);
@@ -1074,29 +1133,53 @@ pub fn validate_budget(s0: &[f64], budget: &[f64], stages: &[Stage], residuals: 
             if !st.fills && filled > 0.0 {
                 v.push(Violation::RaiseInLoweringStage { cell: c, stage: st.name });
             }
-            if st.fills && filled > budget[c] + BUDGET_EPS_M && !has(c, st.name) {
-                v.push(Violation::BudgetOverrun { cell: c, stage: st.name, used_m: filled, budget_m: budget[c] });
-            }
+            // the events of this cell and stage, and the residuals that record them one to one: a clamp (it lowered less than it wanted) needs a residual with the wanted lowering and the
+            // budget left before the stage; a fill over the budget needs another with the fill and the budget; a fill held under what the stage wanted (reading 9) needs one with the
+            // wanted fill and the budget
             let clamped = st.wanted_lowering.is_some_and(|w| w[c] > lowered + BUDGET_EPS_M);
-            if clamped && !has(c, st.name) {
+            let fill_over = st.fills && filled > budget[c] + BUDGET_EPS_M;
+            let fill_clamp = !fill_over && st.fills && st.wanted_fill.is_some_and(|f| f[c] > filled + BUDGET_EPS_M);
+            let wf = st.wanted_fill.map_or(0.0, |f| f[c]);
+            let near = |a: f64, b: f64| (a - b).abs() <= BUDGET_EPS_M;
+            let w = st.wanted_lowering.map_or(0.0, |w| w[c]);
+            let is_clamp = |r: &Residual| clamped && near(r.needed_m, w) && near(r.available_m, (budget[c] - before).max(0.0));
+            let is_fill = |r: &Residual| {
+                (fill_over && near(r.needed_m, filled) && near(r.available_m, budget[c]))
+                    || (fill_clamp && near(r.needed_m, wf) && near(r.available_m, budget[c]))
+            };
+            let here: Vec<&Residual> = residuals.iter().filter(|r| r.cell == c && r.stage == st.name).collect();
+            let clamp_at = here.iter().position(|r| is_clamp(r));
+            let fill_at = (0..here.len()).find(|&i| is_fill(here[i]) && Some(i) != clamp_at).or_else(|| {
+                // a residual matching both events serves the fill only when no other residual records the clamp
+                (0..here.len()).find(|&i| is_fill(here[i]))
+            });
+            let (clamp_at, fill_at) = match (clamp_at, fill_at) {
+                (Some(a), Some(b)) if a == b => (here.iter().enumerate().position(|(i, r)| i != b && is_clamp(r)), Some(b)),
+                pair => pair,
+            };
+            if clamped && clamp_at.is_none() {
                 v.push(Violation::ClampWithoutResidual { cell: c, stage: st.name });
             }
-            // a residual's numbers are the stage's: a clamp needed the wanted lowering and had the budget left before the stage; a fill needed the fill and had the budget
-            let fill_over = st.fills && filled > budget[c] + BUDGET_EPS_M;
-            for r in residuals.iter().filter(|r| r.cell == c && r.stage == st.name) {
-                let near = |a: f64, b: f64| (a - b).abs() <= BUDGET_EPS_M;
-                let why = if clamped {
-                    let w = st.wanted_lowering.map_or(0.0, |w| w[c]);
-                    (!(near(r.needed_m, w) && near(r.available_m, (budget[c] - before).max(0.0))))
-                        .then_some("not the clamp's needed and available")
-                } else if fill_over {
-                    (!(near(r.needed_m, filled) && near(r.available_m, budget[c]))).then_some("not the fill's needed and available")
-                } else {
-                    Some("no clamp or fill overrun at its cell and stage")
-                };
-                if let Some(why) = why {
-                    v.push(Violation::ResidualMismatch { cell: c, stage: st.name, why });
+            if fill_over && fill_at.is_none() {
+                v.push(Violation::BudgetOverrun { cell: c, stage: st.name, used_m: filled, budget_m: budget[c] });
+            }
+            if fill_clamp && fill_at.is_none() {
+                v.push(Violation::FillClampWithoutResidual { cell: c, stage: st.name });
+            }
+            for (i, r) in here.iter().enumerate() {
+                if Some(i) == clamp_at || Some(i) == fill_at {
+                    continue;
                 }
+                let why = if !clamped && !fill_over && !fill_clamp {
+                    "no clamp or fill overrun at its cell and stage"
+                } else if is_clamp(r) || is_fill(r) {
+                    "more residuals than clamps and fill overruns"
+                } else if clamped {
+                    "not the clamp's needed and available"
+                } else {
+                    "not the fill's needed and available"
+                };
+                v.push(Violation::ResidualMismatch { cell: c, stage: st.name, why });
             }
         }
         for (i, &o) in input.iter_mut().zip(st.out) {
@@ -1106,8 +1189,11 @@ pub fn validate_budget(s0: &[f64], budget: &[f64], stages: &[Stage], residuals: 
         }
     }
     for r in residuals {
-        let flagged =
-            g.reaches.iter().any(|x| x.id == r.feature && matches!(x.status, Status::Exception { reason: Reason::BudgetResidual, .. }));
+        // a residual naming a cell outside the surface or a stage that did not run is visited nowhere above
+        if r.cell >= n || !stages.iter().any(|st| st.name == r.stage) {
+            v.push(Violation::ResidualMismatch { cell: r.cell, stage: r.stage, why: "no such cell or stage" });
+        }
+        let flagged = g.reaches.iter().any(|x| x.id == r.feature && x.has_exception(Reason::BudgetResidual));
         if !flagged {
             v.push(Violation::ResidualFeatureNotFlagged { feature: r.feature });
         }

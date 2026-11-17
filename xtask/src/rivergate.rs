@@ -6,7 +6,7 @@ use crate::util::{run, Res};
 use std::path::Path;
 
 /// The options the example takes after the target, each with a value.
-const OPTIONS: [&str; 5] = ["--window", "--margin", "--min-cells", "--d", "--threads"];
+const OPTIONS: [&str; 6] = ["--window", "--margin", "--min-cells", "--d", "--threads", "--network-km2"];
 
 /// The canonical region windows (lead, 2026-11-14): `face,i0,i1,j0,j1,seed`, 620-cell cores (with the gate's 200-cell margin SPIKE-111's 1,020-cell windows). R1h is the E1 region stores'
 /// window (r3a-e1, r3a-p2, r3a-p2e). M1 (mountain belt) and F1 (low-gradient river landscape) are SPIKE-119's (spikes, 2026-11-15).
@@ -25,12 +25,16 @@ pub fn window_of(arg: &str) -> String {
 
 /// The example's arguments for the xtask's: the target becomes `--window` or `--store`; an unknown option, a missing value or a second window is refused.
 pub fn example_args(args: &[String]) -> Result<Vec<String>, String> {
-    let usage = "usage: cargo xtask river-gate <store dir | face,i0,i1,j0,j1,seed | r1h | r3a | r3b | m1 | f1> [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--no-key-check]";
+    let usage = "usage: cargo xtask river-gate <store dir | face,i0,i1,j0,j1,seed | r1h | r3a | r3b | m1 | f1 | grid=file,w,h,sea_level_m> [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--network-km2 A,B] [--no-key-check]";
     let Some(target) = args.first().filter(|a| !a.starts_with("--")) else { return Err(usage.to_string()) };
     let mut out = Vec::new();
     let window = window_of(target);
-    let window_target = window.split(',').count() == 6 && window.split(',').all(|x| x.parse::<usize>().is_ok());
-    if window_target {
+    let grid = target.strip_prefix("grid=");
+    // A raw grid (BUILD-059's GLO-30 input) is a window of its own: like a window target it takes no --window and no --no-key-check.
+    let window_target = grid.is_some() || (window.split(',').count() == 6 && window.split(',').all(|x| x.parse::<usize>().is_ok()));
+    if let Some(g) = grid {
+        out.extend(["--grid".to_string(), g.to_string()]);
+    } else if window_target {
         out.extend(["--window".to_string(), window]);
     } else {
         out.extend(["--store".to_string(), target.clone()]);
@@ -76,7 +80,7 @@ pub struct TableRow {
 /// The rows of `river-gate --table <row>... [--windows W,W...] [options]` (BUILD-057): a row is a window (its start surface), `<store dir>@<window>` (the store on that window) or a store dir (on
 /// `--window`, default R1h); `--windows` adds one start-surface row per window. The other options go to every row. A row's label is the store's directory name or "start", then the window.
 pub fn table_rows(args: &[String]) -> Result<Vec<TableRow>, String> {
-    let usage = "usage: cargo xtask river-gate --table <window | store dir@window | store dir>... [--windows W,W...] [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--no-key-check]";
+    let usage = "usage: cargo xtask river-gate --table <window | store dir@window | store dir | grid=file,w,h,sea_level_m>... [--windows W,W...] [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--network-km2 A,B] [--no-key-check]";
     let (mut targets, mut common, mut windows) = (Vec::new(), Vec::new(), Vec::new());
     let mut k = 0;
     while k < args.len() {
@@ -127,6 +131,7 @@ pub fn table_rows(args: &[String]) -> Result<Vec<TableRow>, String> {
         .iter()
         .map(|t| {
             let (target, window) = match t.rsplit_once('@') {
+                _ if t.starts_with("grid=") => (t.clone(), None),
                 Some((dir, w)) if !dir.is_empty() && is_window(w) => (dir.to_string(), Some(w.to_string())),
                 _ if is_window(t) => (t.clone(), None),
                 _ => (t.clone(), Some(default_window.clone())),
@@ -138,7 +143,17 @@ pub fn table_rows(args: &[String]) -> Result<Vec<TableRow>, String> {
                     let name = Path::new(&target).file_name().map_or_else(|| target.clone(), |n| n.to_string_lossy().into_owned());
                     format!("{name} @ {w}")
                 }
-                None => format!("start @ {t}"),
+                None => match t.strip_prefix("grid=") {
+                    // A grid row's label is its file's stem (a GLO-30 tile: glo-N47E011).
+                    Some(g) => {
+                        let file = g.split(',').next().unwrap_or(g);
+                        format!(
+                            "grid @ {}",
+                            Path::new(file).file_stem().map_or_else(|| file.to_string(), |n| n.to_string_lossy().into_owned())
+                        )
+                    }
+                    None => format!("start @ {t}"),
+                },
             };
             let mut args = a;
             args.extend(base.iter().filter(|x| window.is_some() || x.as_str() != "--no-key-check").cloned());
@@ -261,6 +276,21 @@ mod tests {
             s(&["--store", "C:/DEV/SeriousPlanetData/worlds/r3a-e1", "--min-cells", "30"])
         );
         assert_eq!(example_args(&s(&["store", "--window", "2,1,2,3,4,5"])).unwrap(), s(&["--store", "store", "--window", "2,1,2,3,4,5"]));
+    }
+
+    // spec: TEST-137, BUILD-059
+    #[test]
+    fn a_grid_target_becomes_the_grid_input_with_its_file_stem_as_the_row_label() {
+        assert_eq!(
+            example_args(&s(&["grid=C:/d/glo-N47E011.f64,1000,1093,0", "--network-km2", "1,75"])).unwrap(),
+            s(&["--grid", "C:/d/glo-N47E011.f64,1000,1093,0", "--network-km2", "1,75"])
+        );
+        assert!(example_args(&s(&["grid=a.f64,1,2,0", "--window", "r1h"])).unwrap_err().contains("--window goes with a store"));
+        assert!(example_args(&s(&["grid=a.f64,1,2,0", "--no-key-check"])).unwrap_err().contains("reads a store"));
+        let rows = table_rows(&s(&["grid=C:/d/glo-N47E011.f64,1000,1093,0", "r1h", "--no-key-check", "--network-km2", "2,50"])).unwrap();
+        assert_eq!(rows[0].label, "grid @ glo-N47E011");
+        assert_eq!(rows[0].args, s(&["--grid", "C:/d/glo-N47E011.f64,1000,1093,0", "--network-km2", "2,50"]));
+        assert_eq!(rows[1].label, "start @ r1h");
     }
 
     // spec: BUILD-055
