@@ -2262,6 +2262,18 @@ fn main() -> Result<(), String> {
             gd.reaches.extend(ex.reaches.iter().cloned());
             println!("RG domain {d} KG-trib: {} reaches, {} nodes, {} open ends, {} entry cells", ex.reaches.len(), ex.nodes.len(), ex.open_ends, entry.iter().filter(|&&e| e).count());
             fine = Some((ex.receiver, ex.channel));
+            // the basins again with the tributaries as spill receivers and inlets (crusader's G1d order: trunks only for the kept set, then every L reach)
+            if on("basins") {
+                use planet_generators::bake::basins_rg::{produce_ids, BasinParams, CellIds};
+                let t2 = Instant::now();
+                let mut all = l_trunks.clone();
+                all.extend(ex.reaches.iter().cloned());
+                let ids = CellIds { gid: &gid_l, local: &to_local };
+                let pb = produce_ids(&grid_d, &ks0, &outlet_d, &all, &tile_l, &BasinParams::l(BODY), &ids);
+                gd.basins = pb.basins.clone();
+                gd.nodes.extend(pb.nodes.iter().cloned());
+                println!("RG domain {d} basins (second pass, tributaries as receivers): {} L basins, {} unresolved spills; {:.1} s", pb.basins.len(), pb.unresolved.len(), t2.elapsed().as_secs_f64());
+            }
         }
         let mut seen: HashSet<u64> = HashSet::new();
         gd.nodes.retain(|x| seen.insert(x.id));
