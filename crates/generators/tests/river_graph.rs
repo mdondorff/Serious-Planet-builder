@@ -732,6 +732,8 @@ fn a_marker_id_holds_its_reach() {
     let j = g.nodes.iter().find(|n| n.kind == NodeKind::TribJunction).unwrap();
     let on = j.marker.unwrap().on_reach;
     assert_eq!(j.id, marker_id(BODY, j.kind, Level::L, j.anchor, on));
+    // reading 15: the salt of the spikes lane's G1c, so both lanes give one id
+    assert_eq!(j.id, planet_generators::bake::hydro::id_hash(node_id(BODY, j.kind, Level::L, j.anchor), on, 0x8A2E_0008));
     assert_ne!(j.id, node_id(BODY, j.kind, Level::L, j.anchor), "a marker's id is not its plain node hash");
     assert_ne!(
         marker_id(BODY, j.kind, Level::L, j.anchor, on),

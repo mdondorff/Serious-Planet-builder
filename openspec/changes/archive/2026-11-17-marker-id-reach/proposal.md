@@ -7,11 +7,11 @@
   - Ids row: a marker's id is `hash(node hash, on_reach)`;
   - Uniqueness row: markers of one kind once per (level, anchor, reach).
 - `bake::river_graph`:
-  - `marker_id(body, kind, level, anchor, on_reach)` = `id_hash(node_id(...), on_reach, 0)`;
+  - `marker_id(body, kind, level, anchor, on_reach)` = `id_hash(node_id(...), on_reach, 0x8A2E_0008)` (reading 15: the salt of the spikes lane's G1c);
   - `node_id_of(body, node)` picks the rule by the node's marker field;
   - the id validator reads `node_id_of`;
   - uniqueness counts a marker kind per reach.
-- TEST-140: the marker id, its mismatch, and two junctions on one anchor on two reaches. A kind change on a trunk's end retires the junction on that reach and the tributary ending there.
+- TEST-140: the marker id with its salt, its mismatch, and two junctions on one anchor on two reaches. A kind change on a trunk's end retires the junction on that reach and the tributary ending there.
 
 ## Impact
 generators (`bake/river_graph.rs`); tests `river_graph.rs`, `g0_graph.rs`. No stored graph exists. A topology change of a reach now also changes the ids of its markers.

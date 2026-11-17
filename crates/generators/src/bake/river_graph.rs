@@ -281,9 +281,12 @@ pub fn node_id(body: u64, kind: NodeKind, level: Level, anchor: u64) -> u64 {
     id_hash(body ^ NODE_TAG, (kind.code() << 8) | level.code(), anchor)
 }
 
+/// The salt of a marker id (reading 15: the spikes lane's G1c value).
+pub const MARKER_SALT: u64 = 0x8A2E_0008;
+
 /// The id of a marker node (reading 8): its node hash with the reach it sits on, so markers are unique per (reach, anchor).
 pub fn marker_id(body: u64, kind: NodeKind, level: Level, anchor: u64, on_reach: u64) -> u64 {
-    id_hash(node_id(body, kind, level, anchor), on_reach, 0)
+    id_hash(node_id(body, kind, level, anchor), on_reach, MARKER_SALT)
 }
 
 /// The id a node must have: [`marker_id`] for a node with a marker field, else [`node_id`].
