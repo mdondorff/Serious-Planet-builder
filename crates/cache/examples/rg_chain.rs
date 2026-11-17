@@ -2237,6 +2237,7 @@ fn main() -> Result<(), String> {
             kept[p] = protected_h1[parent(p)];
         }
         let mut gd = Graph { body: BODY, nodes: g.nodes.clone(), reaches: l_trunks.clone(), basins: Vec::new() };
+        let mut first_nodes: Vec<Node> = Vec::new();
         // basins (crusader's G1e) on KS0, the L trunk reaches as spill receivers
         let t = Instant::now();
         if on("basins") {
@@ -2250,7 +2251,8 @@ fn main() -> Result<(), String> {
                     kept[c] = true;
                 }
             }
-            gd.nodes.extend(pb.nodes.iter().cloned());
+            // the first pass's nodes enter the graph only when no second pass follows (crusader: the final graph takes the second pass's nodes)
+            first_nodes = pb.nodes.clone();
             gd.basins.extend(pb.basins.iter().cloned());
             println!("RG domain {d} basins: {} L basins ({} kept), {} unresolved spills", pb.basins.len(), pb.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface).count(), pb.unresolved.len());
         }
@@ -2284,9 +2286,11 @@ fn main() -> Result<(), String> {
                 let pb = produce_ids(&grid_d, &ks0, &outlet_d, &all, &tile_l, &BasinParams::l(BODY), &ids);
                 gd.basins = pb.basins.clone();
                 gd.nodes.extend(pb.nodes.iter().cloned());
+                first_nodes.clear();
                 println!("RG domain {d} basins (second pass, tributaries as receivers): {} L basins, {} unresolved spills; {:.1} s", pb.basins.len(), pb.unresolved.len(), t2.elapsed().as_secs_f64());
             }
         }
+        gd.nodes.append(&mut first_nodes);
         let mut seen: HashSet<u64> = HashSet::new();
         gd.nodes.retain(|x| seen.insert(x.id));
         gd.sort();
