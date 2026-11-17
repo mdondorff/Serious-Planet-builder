@@ -2386,6 +2386,15 @@ fn main() -> Result<(), String> {
     drop((p0, p1, p2, p5));
     flush(&csv)?;
 
+    // explorer #167: the defect class of each L cell (0 none, 1 base, 2 K5, 3 interpolation, 4 band; the L4 breach over the present threshold, in the box) and the L4 breach (m), for
+    // KV's and KC's split on the integrated run; u8 and f32, the window's L grid
+    if args.iter().any(|a| a == "--dump-class") {
+        let b: Vec<u8> = class.iter().map(|&c| c & 0x0f).collect();
+        std::fs::write(out_dir.join(format!("{tag}-class-{w}x{h}.u8")), b).map_err(|e| e.to_string())?;
+        let br: Vec<u8> = k4.breach.iter().flat_map(|v| v.to_le_bytes()).collect();
+        std::fs::write(out_dir.join(format!("{tag}-breach-{w}x{h}.f32")), br).map_err(|e| e.to_string())?;
+        println!("RD {tag}: class and breach written ({w} x {h})");
+    }
     // ---- where KS lowers S0 (SPIKE-128's RG-1 and RG-2 with today's H; RG-1 with K6''s H)
     let mut ks: Vec<(String, Vec<f32>)> = Vec::new();
     if let Some(d) = &ks_dir {

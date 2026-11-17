@@ -2276,24 +2276,7 @@ fn main() -> Result<(), String> {
             gd.reaches.extend(ex.reaches.iter().cloned());
             println!("RG domain {d} KG-trib: {} reaches, {} nodes, {} open ends, {} entry cells", ex.reaches.len(), ex.nodes.len(), ex.open_ends, entry.iter().filter(|&&e| e).count());
             fine = Some((ex.receiver, ex.channel));
-            // the basins again with the tributaries as spill receivers and inlets (crusader's G1d order: trunks only for the kept set, then every L reach)
-            if on("basins") {
-                use planet_generators::bake::basins_rg::{produce_ids, BasinParams, CellIds};
-                let t2 = Instant::now();
-                let mut all = l_trunks.clone();
-                all.extend(ex.reaches.iter().cloned());
-                let ids = CellIds { gid: &gid_l, local: &to_local };
-                let pb = produce_ids(&grid_d, &ks0, &outlet_d, &all, &tile_l, &BasinParams::l(BODY), &ids);
-                gd.basins = pb.basins.clone();
-                gd.nodes.extend(pb.nodes.iter().cloned());
-                first_nodes.clear();
-                println!("RG domain {d} basins (second pass, tributaries as receivers): {} L basins, {} unresolved spills; {:.1} s", pb.basins.len(), pb.unresolved.len(), t2.elapsed().as_secs_f64());
-            }
         }
-        gd.nodes.append(&mut first_nodes);
-        let mut seen: HashSet<u64> = HashSet::new();
-        gd.nodes.retain(|x| seen.insert(x.id));
-        gd.sort();
         t_trib += t.elapsed().as_secs_f64();
         // KS1: H_f by flow path on the domain's KG-trib routing of KS0 (the rasterised reach's bed code; the cell's KS0 where no reach owns it)
         let t = Instant::now();
@@ -2325,6 +2308,34 @@ fn main() -> Result<(), String> {
         };
         println!("RG domain {d} KS: {} core cells lowered, {} core residuals", (0..n_l).filter(|&p| core[p] && ks_d[p] < start[p]).count(), res_d.iter().filter(|r| core[r.0]).count());
         t_ks1 += t.elapsed().as_secs_f64();
+        // the basins again, on the KS output with every L reach as spill receivers and inlets (reading 5: the L kept rule reads KS1; crusader's G1d order: the first pass on KS0 gave
+        // KG-trib its kept set); the graph takes this pass's basins and nodes; its kept basins and H1's lake water are KV's and KC's protected cells
+        if on("basins") && on("kg-trib") {
+            use planet_generators::bake::basins_rg::{produce_ids, BasinParams, CellIds};
+            use planet_generators::bake::river_graph::Represented;
+            let t2 = Instant::now();
+            let all: Vec<GReach> = gd.reaches.iter().filter(|r| r.level == Level::L).cloned().collect();
+            let ids = CellIds { gid: &gid_l, local: &to_local };
+            let pb = produce_ids(&grid_d, &ks_d, &outlet_d, &all, &tile_l, &BasinParams::l(BODY), &ids);
+            for p in 0..n_l {
+                kept[p] = protected_h1[parent(p)];
+            }
+            for b in pb.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface) {
+                for &c in &pb.cells[&b.id] {
+                    kept[c] = true;
+                }
+            }
+            gd.basins = pb.basins.clone();
+            gd.nodes.extend(pb.nodes.iter().cloned());
+            first_nodes.clear();
+            let kept_land = (0..n_l).filter(|&p| core[p] && kept[p] && start[p] > sea).count();
+            println!("RG domain {d} basins on the KS output (second pass): {} L basins ({} kept, {kept_land} protected core land cells), {} unresolved spills; {:.1} s", pb.basins.len(), pb.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface).count(), pb.unresolved.len(), t2.elapsed().as_secs_f64());
+            t_basins += t2.elapsed().as_secs_f64();
+        }
+        gd.nodes.append(&mut first_nodes);
+        let mut seen: HashSet<u64> = HashSet::new();
+        gd.nodes.retain(|x| seen.insert(x.id));
+        gd.sort();
         // KV and KC (crusader's G1f) on the domain's KS output, within the budget KS left; the domain's L reaches in window cells (the module reads vertices as grid cells)
         let t = Instant::now();
         let (kv_d, kc_d, rkc) = if on("kv") || on("kc") {
@@ -2436,6 +2447,10 @@ fn main() -> Result<(), String> {
         for r in &res_kvkc {
             writeln!(f, "{},{},{:.4},{:.4},{:016x}", r.cell, r.stage, r.needed_m, r.available_m, r.feature).map_err(|e| e.to_string())?;
         }
+    }
+    if args.iter().any(|a| a == "--dump-s0") {
+        let b: Vec<u8> = start.iter().flat_map(|v| v.to_le_bytes()).collect();
+        std::fs::write(out_dir.join(format!("{tag}-s0-{w}x{h}.f64")), b).map_err(|e| e.to_string())?;
     }
     let bytes: Vec<u8> = kc_out.iter().flat_map(|v| v.to_le_bytes()).collect();
     std::fs::write(out_dir.join(format!("{tag}-final-{w}x{h}.f64")), bytes).map_err(|e| e.to_string())?;

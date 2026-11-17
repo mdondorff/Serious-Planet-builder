@@ -136,6 +136,7 @@ fn main() -> Result<(), String> {
         "--stages",
         "--partition",
         "--surface",
+        "--dump-surface",
     ];
     let mut k = 0;
     while k < args.len() {
@@ -296,6 +297,12 @@ fn main() -> Result<(), String> {
             commit.id,
             key_note(!no_key_check)
         );
+    }
+    // spike/rg-chain (explorer #167, never merged): the measured surface as little-endian f64 on the window's L grid, for the stills
+    if let Some(f) = value(&args, "--dump-surface") {
+        let b: Vec<u8> = surface.iter().flat_map(|v| v.to_le_bytes()).collect();
+        std::fs::write(f, b).map_err(|e| format!("{f}: {e}"))?;
+        println!("RIVER-GATE surface written: {f} ({w} x {h} f64)");
     }
     // H1's crossings of the region's box, in the L window's cells (an H1 cell's centre).
     let to_local = |c: u32| {
