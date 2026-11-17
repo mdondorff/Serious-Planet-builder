@@ -349,10 +349,11 @@ pub fn produce(grid: &Grid, z: &[f64], outlet: &[bool], reaches: &[Reach], owner
         out.cells.insert(id, sub[k].clone());
     }
     // inlets: each given reach entering a kept basin gets a lake_inlet on its first vertex inside it
+    // (SPIKE-133: a reach that starts inside a kept basin does not enter it there: from its second vertex, and only from outside that basin)
     for r in &sorted_reaches {
-        for &c in &r.vertices {
+        for (k, &c) in r.vertices.iter().enumerate().skip(1) {
             if let Some(&b) = basin_of_cell.get(&(c as usize)) {
-                if keep[b as usize] == Keep::Kept {
+                if keep[b as usize] == Keep::Kept && basin_of_cell.get(&(r.vertices[k - 1] as usize)) != Some(&b) {
                     inlet(c as usize, &mut nodes);
                     break;
                 }
