@@ -1,18 +1,23 @@
 """SPIKE-136 addendum 2 (spikes #138): the tables of h2, h3 and h4 from kh_smooth's per-window files (`<w>-ladder.csv`, `<w>-handover.csv`), or their committed copies
 (`smooth-ladder-<w>.csv`, `smooth-handover-<w>.csv`). Usage: smooth_tables.py <dir> r1h r3a r3b m1 f1 > smooth-tables.md
-Addendum 3 (spikes #139): `--set h4c` reads `h4c-ladder-<w>.csv` and `h4c-handover-<w>.csv` (h2 + r, h4, h4 + r, h4c, h4c + r) and adds the quad-range columns."""
+Addendum 3 (spikes #139): `--set h4c` reads `h4c-ladder-<w>.csv` and `h4c-handover-<w>.csv` (h2 + r, h4, h4 + r, h4c, h4c + r) and adds the quad-range columns.
+Addendum 4 (spikes #144b): `--set h5` reads `h5-ladder-<w>.csv` and `h5-handover-<w>.csv` (h4c + r, h5 + r, h4m + r, h4b + r)."""
 import os
 import sys
 
-H4C = '--set' in sys.argv and sys.argv[sys.argv.index('--set') + 1] == 'h4c'
+SET = sys.argv[sys.argv.index('--set') + 1] if '--set' in sys.argv else ''
+H4C = SET == 'h4c'
+H5 = SET == 'h5'
 argv = [a for i, a in enumerate(sys.argv) if a != '--set' and (i == 0 or sys.argv[i - 1] != '--set')]
 d, wins = argv[1], argv[2:]
-PREFIX = 'h4c' if H4C else 'smooth'
+PREFIX = SET if SET else 'smooth'
 NAMES = {'r1h': 'R1h', 'r3a': 'R3a', 'r3b': 'R3b', 'm1': 'M1', 'f1': 'F1'}
 LADDER = {'S0': 'L4 S0 = C1(z_s) + r', 'C1': 'L2s C1(z_s) at L', 'h2r': 'h2 + r', 'h3': 'h3 skeleton', 'h3r': 'h3 + r', 'h4': 'h4 Clough-Tocher', 'h4r': 'h4 + r'}
 LABEL = {'S0': '`S0` = `C1(z_s)` + `r`', 'C1': '`C1(z_s)` (no band)', 'h2r': 'h2 + `r`', 'h3': 'h3 (no band)', 'h3r': 'h3 + `r`', 'h4': 'h4 (no band)', 'h4r': 'h4 + `r`'}
 LADDER.update({'h4c': 'h4c clamped', 'h4cr': 'h4c + r'})
 LABEL.update({'h4c': 'h4c (no band)', 'h4cr': 'h4c + `r`'})
+LADDER.update({'h5r': 'h5 + r', 'h4mr': 'h4m + r', 'h4br': 'h4b + r'})
+LABEL.update({'h5r': 'h5 + `r`', 'h4mr': 'h4m + `r`', 'h4br': 'h4b + `r`'})
 
 
 def path(a, b):
@@ -57,6 +62,9 @@ def share(r, k):
 
 ALL = ['S0', 'C1', 'h2r', 'h4', 'h4r', 'h4c', 'h4cr'] if H4C else ['S0', 'C1', 'h2r', 'h3', 'h3r', 'h4', 'h4r']
 HO = ['h2r', 'h4', 'h4r', 'h4c', 'h4cr'] if H4C else ['h2r', 'h3', 'h3r', 'h4', 'h4r']
+if H5:
+    ALL = ['S0', 'h4cr', 'h5r', 'h4mr', 'h4br']
+    HO = ['h4cr', 'h5r', 'h4mr', 'h4br']
 table('River length (75 km2 channels) on closed depressions: all / over 5 m deep, %', ALL, lambda r: f"{float(r['riv75_pit_pct']):.1f} / {float(r['riv75_pit5_pct']):.1f}")
 table('River length (1 km2 channels) on closed depressions: all / over 5 m deep, %', ALL, lambda r: f"{float(r['riv1_pit_pct']):.1f} / {float(r['riv1_pit5_pct']):.1f}")
 table('Breach: land cells lowered, % / over 10 m, % / over 50 m, % of the land', ALL, lambda r: f"{share(r, 'breach_cells'):.2f} / {share(r, 'breach_over10'):.3f} / {share(r, 'breach_over50'):.3f}")
