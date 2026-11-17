@@ -167,12 +167,22 @@ pub struct BasinParams {
     /// Reported (`represented: none`): from this depth and cell count (BUILD-055's basin rule).
     pub report_depth_m: f64,
     pub report_cells: usize,
+    /// The sea level (m): a spill path ending on an outlet at or below it receives an `outlet_sea` there (reading 6).
+    pub sea_level_m: f64,
 }
 
 impl BasinParams {
     /// The contract's L basins: from 0.25 km2 and 2 m; reported from 0.5 m and 16 cells.
     pub fn l(body: u64) -> BasinParams {
-        BasinParams { level: Level::L, body, min_area_m2: 0.25e6, min_depth_m: 2.0, report_depth_m: 0.5, report_cells: 16 }
+        BasinParams {
+            level: Level::L,
+            body,
+            min_area_m2: 0.25e6,
+            min_depth_m: 2.0,
+            report_depth_m: 0.5,
+            report_cells: 16,
+            sea_level_m: 0.0,
+        }
     }
 }
 
@@ -418,6 +428,22 @@ pub fn produce_ids(
                     }
                     let next = routing.receiver[c];
                     steps += 1;
+                    // reading 6 (owner, #161): a spill path that reaches the sea before any reach or basin is received by an `outlet_sea` on its first sea cell; a window's exit
+                    // stays unresolved (a window is no domain)
+                    if next == NONE && route_outlet[c] && z[c] <= p.sea_level_m {
+                        let o = Node {
+                            id: node_id(p.body, NodeKind::OutletSea, p.level, gid(c)),
+                            kind: NodeKind::OutletSea,
+                            level: p.level,
+                            anchor: gid(c),
+                            parent: None,
+                            owner: owner(c),
+                            marker: None,
+                        };
+                        target = o.id;
+                        nodes.entry(o.id).or_insert(o);
+                        break;
+                    }
                     if next == NONE || steps > z.len() {
                         break;
                     }
