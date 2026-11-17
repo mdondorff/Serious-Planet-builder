@@ -322,7 +322,8 @@ pub fn produce_ids(
     let mut sorted_reaches: Vec<&Reach> = reaches.iter().filter(|r| r.level == p.level).collect();
     sorted_reaches.sort_by_key(|r| r.id);
     // (explorer, R1h: a spill onto a reach's last vertex names that reach's down node, a junction never sits there; a claim on a last vertex yields to one inside another reach)
-    let mut on_reach: BTreeMap<usize, (u64, u32, Option<u64>)> = BTreeMap::new();
+    // (explorer, R1h partition diff: a marker is owned by the reach it sits on, so every stage gives it one owner)
+    let mut on_reach: BTreeMap<usize, (u64, u32, Option<u64>, Domain)> = BTreeMap::new();
     let mut node_cells: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
     for r in &sorted_reaches {
         let last = r.vertices.len().saturating_sub(1);
@@ -331,12 +332,12 @@ pub fn produce_ids(
             if k == 0 || k == last {
                 node_cells.insert(c);
             }
-            let claim = (r.id, k as u32, (k == last).then_some(r.down));
+            let claim = (r.id, k as u32, (k == last).then_some(r.down), r.owner);
             match on_reach.get(&c) {
                 None => {
                     on_reach.insert(c, claim);
                 }
-                Some(&(_, _, Some(_))) if k != last => {
+                Some(&(_, _, Some(_), _)) if k != last => {
                     on_reach.insert(c, claim);
                 }
                 Some(_) => {}
@@ -380,21 +381,20 @@ pub fn produce_ids(
                 let mut target = 0u64;
                 let mut steps = 0usize;
                 loop {
-                    if let Some(&(r, v, end)) = on_reach.get(&c) {
+                    if let Some(&(r, v, end, reach_owner)) = on_reach.get(&c) {
                         if let Some(down) = end {
                             target = down;
                             break;
                         }
-                        let mut j = Node {
+                        let j = Node {
                             id: marker_id(p.body, NodeKind::TribJunction, p.level, gid(c), r),
                             kind: NodeKind::TribJunction,
                             level: p.level,
                             anchor: gid(c),
                             parent: None,
-                            owner: owner(c),
+                            owner: reach_owner,
                             marker: Some(Marker { on_reach: r, at_vertex: v }),
                         };
-                        j.owner = owner(c);
                         target = j.id;
                         nodes.entry(j.id).or_insert(j);
                         break;
