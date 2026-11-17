@@ -2110,13 +2110,33 @@ fn main() -> Result<(), String> {
     }
     println!("KG profiles: {rises} bed rises (0.5 m codes) outside exceptional reaches, {rises_exc} inside them");
 
-    // ---- G1d (SPIKE-133): KG-trib extractor-1 on the window, RG-0 (the control rung: S0, KS off), initiation on the D8 area (reading 14), A_crit 1 km2
+    // ---- G1d (SPIKE-133): KG-trib extractor-1 on the window, initiation on the D8 area (reading 14), A_crit 1 km2. The stage input: RG-0 (the control rung) S0, KS off;
+    // RG-1 with `--z <file>`: explorer's KS0 (spike/ks-g1b), little-endian f64, row-major, the window's L grid (8 x (i0 - margin), 8 x (j0 - margin))
     {
         use planet_generators::bake::basins_rg::{produce, BasinParams};
         use planet_generators::bake::kg_trib::{extract, Input, Params, Trunk};
         use planet_generators::bake::river_graph::Represented;
         let t = Instant::now();
         let n = w * h;
+        let (rung, z_in): (&str, Vec<f64>) = match value(&args, "--z") {
+            None => ("RG-0 (S0, KS off)", start.clone()),
+            Some(path) => {
+                let want = (8 * (region.0 - margin), 8 * (region.2 - margin));
+                if (x0, y0) != (want.0 as i64, want.1 as i64) {
+                    return Err(format!("--z: the window's L origin is ({x0}, {y0}), the file's grid starts at {want:?}"));
+                }
+                let bytes = std::fs::read(path).map_err(|e| format!("--z {path}: {e}"))?;
+                if bytes.len() != n * 8 {
+                    return Err(format!("--z {path}: {} bytes, the window has {w} x {h} cells", bytes.len()));
+                }
+                let z: Vec<f64> = bytes.chunks_exact(8).map(|b| f64::from_le_bytes(b.try_into().unwrap())).collect();
+                if z.iter().any(|v| !v.is_finite()) {
+                    return Err(format!("--z {path}: a value is not finite"));
+                }
+                ("RG-1 (explorer's KS0)", z)
+            }
+        };
+        let lowered = (0..n).filter(|&c| z_in[c] < start[c]).count();
         let dx_l = grid.dx() / L as f64;
         let gl = Grid::new(w, h, dx_l);
         let gid_l = |c: usize| gid(x0 as u64 + (c % w) as u64, y0 as u64 + (c / w) as u64);
@@ -2145,7 +2165,7 @@ fn main() -> Result<(), String> {
             .collect();
         let outlet_l: Vec<bool> = (0..n).map(|c| sea_l[c] || exit[c]).collect();
         let t_b = Instant::now();
-        let pb = produce(&gl, &start, &outlet_l, &[], &tile_l, &BasinParams::l(BODY));
+        let pb = produce(&gl, &z_in, &outlet_l, &[], &tile_l, &BasinParams::l(BODY));
         let mut kept = vec![false; n];
         for b in pb.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface) {
             for &c in &pb.cells[&b.id] {
@@ -2160,7 +2180,7 @@ fn main() -> Result<(), String> {
         let zero = vec![0.0; n];
         let inp = Input {
             grid: &gl,
-            z: &start,
+            z: &z_in,
             sea: &sea_l,
             exit: &exit,
             trunks: &trunks,
@@ -2244,7 +2264,7 @@ fn main() -> Result<(), String> {
         let kept_box = (0..n).filter(|&c| kept[c] && in_box[c] && !sea_l[c]).count();
         let land_box = (0..n).filter(|&c| in_box[c] && !sea_l[c]).count();
         println!(
-            "G1d RG-0 (S0, KS off; D8 initiation, A_crit 1 km2): basins {basins_s:.1} s ({kept_basins} kept L basins, {:.1} % of the box's land), extractor {extract_s:.1} s; runoff {:.2e} m/s",
+            "G1d {rung}; D8 initiation, A_crit 1 km2: basins {basins_s:.1} s ({kept_basins} kept L basins, {:.1} % of the box's land), extractor {extract_s:.1} s; runoff {:.2e} m/s; cells below S0 {lowered}",
             100.0 * kept_box as f64 / land_box.max(1) as f64,
             runoff_mean
         );
