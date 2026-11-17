@@ -432,7 +432,7 @@ fn main() -> Result<(), String> {
         }
     }
     let args: Vec<String> = args.into_iter().filter(|a| a != "--no-key-check").collect();
-    let known = ["--window", "--margin", "--store", "--min-cells", "--d", "--threads", "--network-km2", "--grid", "--out", "--k6p", "--kh"];
+    let known = ["--window", "--margin", "--store", "--min-cells", "--d", "--threads", "--network-km2", "--grid", "--out", "--k6p", "--kh", "--dump-ks1"];
     let mut k = 0;
     while k < args.len() {
         if !known.contains(&args[k].as_str()) {
@@ -881,6 +881,13 @@ S0 = the river gate's start surface of the window (B + C1(z_s - z_b)); spike cod
     let hand_f: Vec<f64> = (0..n_l).map(|p| (ks0[p] - ks0[tgt[p]].max(sea)).max(0.0)).collect();
     drop(tgt);
     let (ks1, used1, want1) = apply(&hand_f);
+    if value(&args, "--dump-ks1").is_some() {
+        // crusader (lead #160): KS1 at L for the G1e producer's kept basins on the new start, little-endian f64, row-major, w x h, the same grid as the KS0 dump
+        let bytes: Vec<u8> = ks1.iter().flat_map(|v| v.to_le_bytes()).collect();
+        let f = format!("{out_dir}/ks1-{w}x{h}.f64");
+        std::fs::write(&f, bytes).map_err(|e| format!("{f}: {e}"))?;
+        println!("KS KS1 written: {f}");
+    }
     for (name, v) in [("rg1", &used0), ("rg2", &used1)] {
         let f = format!("{out_dir}/ks-{name}-used-{w}x{h}.f32");
         let bytes: Vec<u8> = v.iter().flat_map(|x| x.to_le_bytes()).collect();
