@@ -1,0 +1,45 @@
+KG sea at L: 10272899 cells of S0 at or below the sea level, 181081 of them inland (not connected to an H1 sea outlet or the window's edge; 0.272 % of the window)
+KG basin census: 115 kept H1 basins; depth spill - floor p10 0.6 p50 0.9 p90 8.3 m; cells p50 48 p90 1114 max 11594; shallower than 2 m 83 (of them under 0.5 m 0), fewer than 4 cells 0
+KG basin census: channel-segment cells in kept basins by basin depth: < 0.5 m 0, 0.5-2 m 32867, 2-5 m 10194, 5-10 m 664, 10-50 m 2198, >= 50 m 14585 (of 123915 segment cells)
+KG basin census (K6'): without the sills (each edge at the higher node height) 364 kept basins, 19227 basin cells; 59 of the 115 K6' basins (7942 cells) have their floor in no basin there: the sills alone close them; they hold 5896 of the 60508 segment cells in kept basins
+KG centreline: lowest path (Dijkstra, step cost length x (1 + height over the corridor's minimum / 10 m))
+KG base H1: K6' on the sills of S0 (SPIKE-127) (28664 segments, 115 kept basins)
+KG KS0 = S0 - max(0, r - C1(HAND)): 2.0 s; lowered on 2.4 % of land cells, p50 0.1 p95 0.7 max 4.3 m
+KG budget field (contract §6, relief10 on every 4th H1 cell): 1.0 s; p10 10.0 p50 10.0 p90 13.3 m
+KG segments: 28664 (123915 cells, 60508 in kept basins, 17605 segments inside one); kept-basin cells 73175 of 1040400
+KG H1 trunk reaches: 17349 (110 end on the window's edge; 2229 lake inlets, 1177 lake spills)
+KG134 river length in the box 30325 km (lowland, z_s <= 300 m: 23178 km); in kept H1 basins, every one kept (upper bound): 14755 km = 48.66 % (lowland 13896 km = 59.95 %); in the basins within the budget (reading 13's lakes): 14755 km = 48.66 % (lowland 13896 km = 59.95 %)
+KG134 kept H1 basins holding channel cells in the box: 34; deeper than the budget at the floor (crossed by reading 13): 0
+KG134 deepest 1: basin 53 depth 4.7 m (floor 4.6, spill 9.3), 7 cells, Lake, q_in 41.87 m3/s, origin band, chain 27 cells
+KG134 deepest 2: basin 55 depth 3.4 m (floor 5.5, spill 8.9), 4 cells, Lake, q_in 42.73 m3/s, origin band, chain 20 cells
+KG134 deepest 3: basin 12 depth 3.1 m (floor -3.0, spill 0.1), 10589 cells, Lake, q_in 1062.73 m3/s, origin z_b, chain 34 cells
+KG134b origins of the kept H1 basins on trunks in the box (river length of 30325 km): k5 2 basins 4 km (0.01 %), k6p-node 21 basins 306 km (1.01 %), real-lake 11 basins 14445 km (47.63 %); K5 x2 kept basins 106 (base 115), median node 394 kept basins; 23.7 s
+KG graph: 46000 nodes, 34698 reaches (17349 at L, 437373 L vertices) in 3.3 s; L reaches skipped (no route or a one-cell chain) 0; routes meeting the sea before their down node (ended at an outlet_sea there) 59, of them on an inland cell 0; anchor collisions (two kinds on one L cell) 0; rise_over_budget reaches 1531; L nodes standing for two or more H1 nodes 2
+KG conservation breaks: 390 nodes or reaches, 0 of them at L nodes standing for two or more H1 nodes
+KG validators (open slice): 7216 violations {"ConservationBreak": 390, "IdMismatch": 6631, "TwoNodesOneAnchor": 195}
+KG violations by kind and item: {"ConservationBreak on H1 node Confluence": 12, "ConservationBreak on H1 reach": 183, "ConservationBreak on L node Confluence": 12, "ConservationBreak on L reach": 183, "IdMismatch on L node Exception": 6631, "TwoNodesOneAnchor on ?": 195}
+KG violation example: ConservationBreak { at: 10004612484816206283, field: "q_w" }
+KG violation example: IdMismatch { id: 10003038038686795416 }
+KG violation example: TwoNodesOneAnchor { level: L, anchor: 278554399031613 }
+KG134 reading 13: 5371 H1 trunk reaches cross a deep kept basin; their 5371 L reaches, 438 of them rise_over_budget
+KG exceptions rise_over_budget: 1531 of 17349 L reaches (442 of 4552 with a vertex in the box); excess over the remainder p50 3.7 p90 11.6 max 29.6 m
+KG profiles: 0 bed rises (0.5 m codes) outside exceptional reaches, 6184 inside them
+KG raster: 388183 L cells claimed; raster validator 0 violations
+KG l_rivers check: 0 river cells whose receiver is land, not an outlet and not a river cell; 0 cells whose receiver holds less area
+KG agreement with the routed S0 (D8 area >= 75 km2, land; in the box): 32.95 % of 166281 river cells have a graph cell within 1; 48.85 % of 110397 graph cells have a river cell within 1 (41.5 s)
+KG l_rivers check: 0 river cells whose receiver is land, not an outlet and not a river cell; 0 cells whose receiver holds less area
+KG agreement with the routed KS0 (D8 area >= 75 km2, land; in the box): 32.92 % of 166309 river cells have a graph cell within 1; 48.84 % of 110397 graph cells have a river cell within 1 (39.9 s)
+KG determinism: 1 thread against 8: canonical form identical
+KG partition: KS0 of two regions against one: 0 cells differ; the graph's canonical form identical
+KG tile rebuild: tile (5, 5) of the window evaluated again: 0 differences (0 topology)
+KG basins on the trunks: 76 H1 basins; L image spill - H1 spill p10 -2.2 p50 -0.7 p90 2.3 m
+KG basin 5: H1 spill 197.9 m, L image spill 200.2 m (depth 4.8 m)
+KG basin 7: H1 spill 0.4 m, L image spill -1.0 m (depth 0.0 m)
+KG basin 8: H1 spill 348.4 m, L image spill 350.1 m (depth 2.4 m)
+KG basin 9: H1 spill 5.1 m, L image spill -0.5 m (depth 0.0 m)
+KG basin 10: H1 spill 307.9 m, L image spill 308.9 m (depth 2.2 m)
+KG basin 11: H1 spill 21.7 m, L image spill 25.6 m (depth 10.7 m)
+KG basin 12: H1 spill 0.1 m, L image spill -3.0 m (depth 0.0 m)
+KG basin 13: H1 spill 329.5 m, L image spill 331.2 m (depth 3.2 m)
+KG done in 220.3 s
+BAKE-TIME 221 s, peak working set 3,82 GB, exit 

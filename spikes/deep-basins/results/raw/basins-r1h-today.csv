@@ -1,0 +1,8 @@
+window,basin,floor_gx,floor_gy,floor_m,spill_m,depth_m,budget_m,deep,cells,area_km2,class,overflows,q_in_m3s,origin,channel_cells,channel_km,lowland_floor
+r1h-today,46,8513,927,0.00,5.06,5.06,50.0,false,79,41.41,Lake,true,10.593,z_b,66,59.32,true
+r1h-today,47,8579,935,0.00,5.07,5.07,50.0,false,54,28.31,Lake,true,3.368,z_b,24,21.27,true
+r1h-today,50,8596,966,0.00,5.06,5.06,50.0,false,44,23.13,Lake,true,2.514,z_b,15,13.61,true
+r1h-today,54,8270,1092,1.89,4.60,2.70,21.8,false,94,49.92,Lake,true,484.094,z_b,94,73.91,true
+r1h-today,55,8317,1092,1.05,1.77,0.72,10.0,false,5,2.65,Lake,true,5.621,z_b,5,4.33,true
+r1h-today,59,8221,1232,1.08,2.14,1.06,10.0,false,15,8.06,Lake,true,40.025,z_b,15,14.98,true
+r1h-today,61,8155,1247,1.80,2.98,1.18,10.8,false,10,5.38,Lake,true,46.323,z_b,10,9.19,true
