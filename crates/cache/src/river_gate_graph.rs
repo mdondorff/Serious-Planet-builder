@@ -78,6 +78,8 @@ pub struct G2Input<'a> {
     pub residual_records: Option<usize>,
     /// The canonical graphs of one region and of two regions (the partition diff).
     pub partition: Option<(&'a Graph, &'a Graph)>,
+    /// The budget's reference surface `S_KH` on the window's L grid (reading 21, lead #168): the budget field is computed from it instead of the gate's start surface.
+    pub reference: Option<&'a [f64]>,
 }
 
 /// The graph report (BUILD-060 item 1).
@@ -156,6 +158,11 @@ pub struct BudgetReport {
     /// Cells whose summed lowering exceeds the budget by more than the fields' rounding (a field's step per stage); cells at 95 % of the budget or more.
     pub overrun: usize,
     pub at_95: usize,
+    /// The same with stage `kh`'s lowering added (reading 21: the use against `S0`; equal to the above without a `kh` field).
+    pub overrun_s0: usize,
+    pub at_95_s0: usize,
+    /// The surface the budget field was computed from: `S_KH` (a reference given) or `start`.
+    pub reference: String,
     pub residual_records: Option<usize>,
     /// Reaches flagged `budget_residual` in the graph, when a graph is given.
     pub residual_reaches: Option<usize>,
@@ -446,6 +453,7 @@ pub fn budget_field(s0: &[f64], w: usize, h: usize, block: usize, dx: f64, r_rel
 pub fn budget_report(
     stages: &[StageField],
     budget: &[f64],
+    reference: &str,
     land: &[bool],
     inside: &[bool],
     residual_records: Option<usize>,
@@ -453,13 +461,16 @@ pub fn budget_report(
 ) -> BudgetReport {
     let n = budget.len();
     let mut r = BudgetReport {
+        reference: reference.to_string(),
         residual_records,
         residual_reaches: g.map(|g| g.reaches.iter().filter(|x| x.has_exception(Reason::BudgetResidual)).count()),
         ..BudgetReport::default()
     };
     let cells: Vec<usize> = (0..n).filter(|&c| inside[c] && land[c]).collect();
     r.land = cells.len();
+    // reading 21: ks, kv and kc are against S_KH; kh (S0 against KH) only enters the use against S0
     let mut used = vec![0.0f64; n];
+    let mut used_kh = vec![0.0f64; n];
     for st in stages {
         let mut u = StageUse { name: st.name.clone(), ..StageUse::default() };
         let mut low: Vec<f64> = Vec::new();
@@ -467,7 +478,11 @@ pub fn budget_report(
             let l = f64::from(st.lower[c]) * STAGE_STEP_M;
             if l > 0.0 {
                 low.push(l);
-                used[c] += l;
+                if st.name == "kh" {
+                    used_kh[c] += l;
+                } else {
+                    used[c] += l;
+                }
             }
             if let Some(f) = &st.fill {
                 let fm = f64::from(f[c]) * STAGE_STEP_M;
@@ -489,6 +504,9 @@ pub fn budget_report(
     for &c in &cells {
         r.overrun += usize::from(used[c] > budget[c] + 1e-9);
         r.at_95 += usize::from(used[c] >= 0.95 * budget[c]);
+        let s0 = used[c] + used_kh[c];
+        r.overrun_s0 += usize::from(s0 > budget[c] + 1e-9);
+        r.at_95_s0 += usize::from(s0 >= 0.95 * budget[c]);
     }
     r
 }
@@ -580,6 +598,9 @@ impl G2Report {
             push("b_overrun", b.overrun.to_string(), Preservation);
             push("b_at_95", b.at_95.to_string(), Preservation);
             push("b_at_95_pct", format!("{:.3}", 100.0 * b.at_95 as f64 / b.land.max(1) as f64), Preservation);
+            push("b_overrun_s0", b.overrun_s0.to_string(), Preservation);
+            push("b_at_95_s0", b.at_95_s0.to_string(), Preservation);
+            push("b_reference", b.reference.clone(), Preservation);
             push("b_residual_records", b.residual_records.map_or("-".into(), |v| v.to_string()), Correctness);
             push("b_residual_reaches", b.residual_reaches.map_or("-".into(), |v| v.to_string()), Correctness);
         }
@@ -655,11 +676,14 @@ impl G2Report {
                 })
                 .collect();
             out.push(format!(
-                "RIVER-GATE budget [preservation; diagnostic fields, the f64 validator is the correctness gate]: over {} land cells inside, against S0: {}; {} cells over the budget, {} at 95 % of it or more; residual records {}, residual reaches {}",
+                "RIVER-GATE budget [preservation; diagnostic fields, the f64 validator is the correctness gate]: over {} land cells inside, the budget from {}: {}; vs S_KH (ks, kv, kc) {} cells over the budget, {} at 95 % of it or more; vs S0 (kh added) {} over, {} at 95 % or more; residual records {}, residual reaches {}",
                 b.land,
+                b.reference,
                 st.join("; "),
                 b.overrun,
                 b.at_95,
+                b.overrun_s0,
+                b.at_95_s0,
                 b.residual_records.map_or("not given".into(), |v| v.to_string()),
                 b.residual_reaches.map_or("no graph".into(), |v| v.to_string())
             ));
@@ -708,13 +732,13 @@ pub fn read_stages(dir: &Path, n: usize) -> Result<(Vec<StageField>, Option<usiz
         Ok(Some(b.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect()))
     };
     let mut out = Vec::new();
-    for st in ["ks", "kv", "kc"] {
+    for st in ["kh", "ks", "kv", "kc"] {
         if let Some(lower) = read(&format!("{st}-lower.u16"))? {
             out.push(StageField { name: st.to_string(), lower, fill: read(&format!("{st}-fill.u16"))? });
         }
     }
     if out.is_empty() {
-        return Err(format!("{}: no ks-lower.u16, kv-lower.u16 or kc-lower.u16", dir.display()));
+        return Err(format!("{}: no kh-lower.u16, ks-lower.u16, kv-lower.u16 or kc-lower.u16", dir.display()));
     }
     let res = dir.join("residuals.csv");
     let records = if res.exists() {
@@ -730,4 +754,81 @@ pub fn read_stages(dir: &Path, n: usize) -> Result<(Vec<StageField>, Option<usiz
         None
     };
     Ok((out, records))
+}
+
+/// The G2 bars (owner decision 1, 2026-11-17; lead #168): the trunk corridor share (k_c 2, snapped), uphill river steps, graph/raster agreement at each threshold, graph violations and
+/// missing basin spill nodes, each pass or fail.
+pub const UPHILL_MAX_PCT: f64 = 1.0;
+pub const AGREE_MIN_PCT: f64 = 90.0;
+/// The corridor bar outside mountain windows, and on a mountain window (M1).
+pub const CORRIDOR_MIN_PCT: f64 = 97.5;
+pub const CORRIDOR_MIN_PCT_MOUNTAIN: f64 = 95.0;
+
+/// One bar: a value against its limit, `at_most` or at least.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Bar {
+    pub name: String,
+    pub value: f64,
+    pub limit: f64,
+    pub at_most: bool,
+    pub class: GateClass,
+}
+
+impl Bar {
+    pub fn pass(&self) -> bool {
+        if self.at_most {
+            self.value <= self.limit
+        } else {
+            self.value >= self.limit
+        }
+    }
+
+    /// The table cell: `PASS:<value>` or `FAIL:<value>` (two decimals; no space).
+    pub fn cell(&self) -> String {
+        format!("{}:{:.2}", if self.pass() { "PASS" } else { "FAIL" }, self.value)
+    }
+}
+
+/// The bars of a row with a graph (none without): `uphill_pct` and `corridor_pct` from the raster columns, the corridor bar `corridor_min_pct`.
+pub fn g2_bars(g2: &G2Report, uphill_pct: f64, corridor_pct: f64, corridor_min_pct: f64) -> Vec<Bar> {
+    use GateClass::*;
+    let Some(g) = &g2.graph else { return Vec::new() };
+    let bar = |name: String, value: f64, limit: f64, at_most: bool, class: GateClass| Bar { name, value, limit, at_most, class };
+    let mut out = vec![
+        bar("bar_corridor".into(), corridor_pct, corridor_min_pct, false, Preservation),
+        bar("bar_uphill".into(), uphill_pct, UPHILL_MAX_PCT, true, Correctness),
+    ];
+    for a in &g2.agreement {
+        let pct = 100.0 * a.routed_agree as f64 / a.routed.max(1) as f64;
+        out.push(bar(format!("bar_agree_{}km2", a.threshold_km2), pct, AGREE_MIN_PCT, false, Correctness));
+    }
+    out.push(bar("bar_violations".into(), g.violations.values().sum::<usize>() as f64, 0.0, true, Correctness));
+    out.push(bar("bar_spill_missing".into(), g.basin_spill_missing as f64, 0.0, true, Correctness));
+    out
+}
+
+/// The bars' line: `RIVER-GATE bars [lead #168]: name PASS value (<= or >= limit); ...; n of m pass`.
+pub fn bars_line(bars: &[Bar]) -> Option<String> {
+    if bars.is_empty() {
+        return None;
+    }
+    let parts: Vec<String> = bars
+        .iter()
+        .map(|b| {
+            format!(
+                "{} {} {:.2} ({} {})",
+                b.name,
+                if b.pass() { "PASS" } else { "FAIL" },
+                b.value,
+                if b.at_most { "<=" } else { ">=" },
+                b.limit
+            )
+        })
+        .collect();
+    Some(format!(
+        "RIVER-GATE bars [owner decision 1]: {}; {} of {} pass",
+        parts.join("; "),
+        bars.iter().filter(|b| b.pass()).count(),
+        bars.len()
+    ))
 }
