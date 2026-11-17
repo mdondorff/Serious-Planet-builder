@@ -269,12 +269,13 @@ Code location: branch `spike/kh-stage` @ 482f2eb0 (never merged; cut from explor
 - KS starts from `ks_base`. Its lowered surface is `ks_base - u`, and the reading-17 clamp reads `ks_base`. `want = max(0, r - band)` is unchanged.
 - `S0` stays the reference of the ocean, the K6' sills, the budget field, the ridge and residual measures, and river-gate's `--surface`. Reading 19 moves only KS's start.
 - KH's split is an H1 field: KH's own routing of `z_s`, with reading 12's outlets, the canonical 1e-3 m flood, D8 steepest, ties to the lower id.
-- The L read uses one quad's four heights and one flag.
+- The L read uses one quad's four heights and one flag: it is per-quad local. The split is a window-global H1 field, like H1's routing; its locality is H1's (landmass-owned), not a tile's.
+- What the bit checks below show: the read gives the same bits in any evaluation order (one region or two cut at a tile column) and on any thread count. They evaluate one function of the cell against a split computed once, so they do not test a split recomputed per region. A split built from a region's own block and halo was not run.
 
 | Check | Result |
 |---|---|
-| G0 fixture (`raw/kh-fixture.txt`) | 114 quads split along a step, 3,060 along the higher pair, none with both diagonals stepped. The two layouts (one region; two regions cut at -15 degrees) give the same bits; so do 1 and 4 threads. The largest difference between KH + `r` and `S0` is 409 m (the fixture's antecedent ridge) |
-| Five windows, `--kh h2 --ks ks0`, later stages skipped (`raw/kh-chain-<w>.txt`) | Two regions against one: 0 cells differ on every window; one thread against eight: 0. The KH stage takes 4.9-5.4 s; the run 81-94 s, peak 6.3-6.4 GB |
+| G0 fixture (`raw/kh-fixture.txt`) | 114 quads split along a step, 3,060 along the higher pair, none with both diagonals stepped. The read in the two layouts' orders (one region; two regions cut at -15 degrees) gives the same bits; the fixture built on 1 and 4 threads gives the same bits. The largest difference between KH + `r` and `S0` is 409 m (the fixture's antecedent ridge) |
+| Five windows, `--kh h2 --ks ks0`, later stages skipped (`raw/kh-chain-<w>.txt`) | The read in two regions' order against one: 0 cells differ on every window; one thread against eight: 0 (evaluation order only, see above). The KH stage takes 4.9-5.4 s; the run 81-94 s, peak 6.3-6.4 GB |
 | R1h, the full chain, `--kh h2 --regions 2` (`raw/kh-chain-r1h-full.txt`) | Every stage runs: KS0, KG-trunk, basins, KG-trib, KS1, KV and KC. 282,283 nodes, 235,482 reaches, 28,827 basins after the stitch; 874 s, peak 13.2 GB |
 
 - The runner's "KS0: cells lowered" line counts `ks0 < start`. With `--kh h2` that count also holds KH's own difference from `S0`; it is not KS's lowering.
@@ -294,7 +295,7 @@ These include the change of interpolant (C1 to linear; SPIKE-136's lowering tabl
 ### Ridge check
 - Over the quads KH splits along a D8 step, the check takes `S0`'s ridge cells (contract §9) within 1 L cell of the split diagonal. At each such cell it compares KH(`z_s`) + `r` with `S0` (`raw/kh-ridge-<w>.csv`).
 
-| Window | Quads split along a step (in the box) | Ridge cells on a split diagonal (quads) | Under `S0`: p50 / p95 / max, m | Over 10 m: cells (quads) | Over 50 m: cells (quads) |
+| Window | Quads split along a step (in the box) | Ridge cells on a split diagonal (quads) | Under `S0`, over the cells lying under it: p50 / p95 / max, m | Over 10 m: cells (quads) | Over 50 m: cells (quads) |
 |---|---|---|---|---|---|
 | R1h | 103,077 | 98,756 (24,386) | 11.5 / 66.9 / 250 | 47,008 (11,830) | 7,703 (2,113) |
 | R3a | 124,177 | 4,150 (1,782) | 5.7 / 26.6 / 97 | 976 (328) | 30 (12) |
@@ -304,7 +305,7 @@ These include the change of interpolant (C1 to linear; SPIKE-136's lowering tabl
 
 - Of the stepped quads, 23.7 % (R1h), 1.4 % (R3a), 6.3 % (R3b), 47.4 % (M1), 7.3 % (F1) hold an `S0` ridge cell on their split diagonal; the cut is over 50 m in 0.01-2.0 % of them outside M1, 13.8 % on M1.
 - The cut against `S0` includes the C1 read's overshoot above the nodes, which a linear read cannot reproduce. Against a bilinear read, h2 lowers 111-16,589 of `S0`'s ridge cells by more than 50 m on four windows, and 174,886 on M1 (SPIKE-136, `raw/lowering-<w>.csv`).
-- The maps put the cuts on the valley sides: where a D8 step runs diagonally between two higher corners, the higher corners are the valley's shoulders. M1's are everywhere.
+- The maps put the cuts on the valley sides: where a D8 step runs diagonally between two higher corners, the higher corners read on the maps as the valley's shoulders (not measured). M1's are everywhere.
 
 ### The facet look
 - The low-sun renders show the triangulation on every window: flat facets and diagonal stripes at the 814 m quad scale. This holds in M1's and R1h's relief and on flat R3a too.
@@ -313,7 +314,7 @@ These include the change of interpolant (C1 to linear; SPIKE-136's lowering tabl
 - KH as built is the drainage the contract asks for (SPIKE-136), not a terrain surface to show. That look is the owner's call (tier D) before the flight.
 
 ### Recommendation (addendum)
-- KH (`--kh h2`) is ready as a chain stage: deterministic, tile-local and cheap (5 s a window). It runs through the full chain on R1h.
+- KH (`--kh h2`) is ready as a chain stage: deterministic, its read per-quad local, its split an H1 field, and cheap (5 s a window). It runs through the full chain on R1h.
 - **Before the flight: the facet look is a visual fault.** Options, none tested:
   1. A smooth read on the same split, a C1 patch per triangle along the D8 edges (a Clough-Tocher or Powell-Sabin split). It keeps the drainage edges, without facets.
   2. KH only as the drainage skeleton: KS reads its flow paths, while the shown surface stays `C1(z_s)` + `r` away from the cells KH changes.
@@ -354,7 +355,7 @@ R3b: KH's triangles along the valleys, where `S0` shows soft ridges.
 M1: ridge cuts in every valley (20,415 quads over 50 m).
 
 ![M1 facets](images/kh-facets-m1.jpg)
-M1: KH's triangles of hundreds of metres across the whole crop.
+M1: KH's triangles across the whole crop (814 m quads; p50 1 km relief 499 m).
 
 ![F1 ridge map](images/kh-ridge-f1.jpg)
 F1: cuts on the valley sides; 30 quads over 50 m.
