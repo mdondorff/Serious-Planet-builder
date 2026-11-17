@@ -8,7 +8,7 @@
 //! 3. The receiving node of a spill: the routed path (round rules on the raw surface's receivers) from the spill cell, to the first cell of another basin (its `lake_inlet`, anchored there) or
 //!    of a given reach (a `trib_junction` on it); a path reaching an outlet first is `unresolved` (the contract has no external outlet).
 //! 4. Inlets: a given reach entering a kept basin gets a `lake_inlet` on its first vertex inside it (several inlets, one spill).
-//! 5. Ids: [`nested_basin_id`] (floor and spill anchors; the floor the lowest cell of the subtree, ties by the global cell id): the floor alone collides between a parent and its deepest child.
+//! 5. Ids: GEN-189's `basin_id` (floor and spill anchors, reading 4; the floor the lowest cell of the subtree, ties by the global cell id).
 //!
 //! Single-threaded, fixed orders (CON-14). No water balance.
 
@@ -156,12 +156,6 @@ pub fn hierarchy(grid: &Grid, z: &[f64], outlet: &[bool]) -> Hierarchy {
     Hierarchy { nodes, node_of }
 }
 
-/// A basin's id with its spill anchor (DEC crusader-7, default A): a parent shares its floor with its deepest child, so the floor alone does not tell them apart. `spill` is the spill
-/// cell plus one, 0 for a closed basin.
-pub fn nested_basin_id(body: u64, level: Level, floor: u64, spill: u64) -> u64 {
-    super::hydro::id_hash(basin_id(body, level, floor), spill, 0x5B11)
-}
-
 /// The producer's parameters.
 #[derive(Clone, Copy, Debug)]
 pub struct BasinParams {
@@ -233,8 +227,7 @@ pub fn produce(grid: &Grid, z: &[f64], outlet: &[bool], reaches: &[Reach], owner
             }
         }
     }
-    let id_of =
-        |k: usize| nested_basin_id(p.body, p.level, hy.nodes[k].floor_cell as u64, hy.nodes[k].spill.map_or(0, |sp| sp.0 as u64 + 1));
+    let id_of = |k: usize| basin_id(p.body, p.level, hy.nodes[k].floor_cell as u64, hy.nodes[k].spill.map(|sp| sp.0 as u64));
     let mut nodes: BTreeMap<u64, Node> = BTreeMap::new();
     let inlet = |c: usize, nodes: &mut BTreeMap<u64, Node>| {
         let n = Node {
