@@ -1332,6 +1332,7 @@ fn build_graph(
     reaches: &[H1Reach],
     grid: &Grid,
     s0: &[f64],
+    skh: &[f64],
     ks0: &[f64],
     budget_h1: &[f64],
     window: (u64, u64, usize, usize, usize),
@@ -1563,7 +1564,7 @@ fn build_graph(
         let mut rise_at: Vec<usize> = Vec::new();
         for (v, &c) in route.iter().enumerate() {
             let z = ks_water[c];
-            let ks_used = (s0[c] - ks0[c]).max(0.0);
+            let ks_used = (skh[c] - ks0[c]).max(0.0);
             let room = (budget_h1[parent_h1(c)] - ks_used).max(0.0);
             if z - run > room {
                 over = over.max(z - run - room);
@@ -2028,11 +2029,6 @@ fn main() -> Result<(), String> {
         out
     };
 
-    // ---- the budget (G0 contracts section 6; BUILD-060's field, the one river-gate reads), per L cell and per H1 cell
-    let t = Instant::now();
-    let budget_l = planet_cache::river_gate_graph::budget_field(&start, w, h, L, dx_l, 25_000.0);
-    let budget: Vec<f64> = (0..cells).map(|c| budget_l[((c / rw) * L) * w + (c % rw) * L]).collect();
-    stamp("budget field", t.elapsed().as_secs_f64());
 
     // ---- KH: the hand-over (c1: C1(z_s) + r, the start surface S0 itself)
     // ---- HAND at H1 (z_s over the channel cell the 814 m flow path reaches)
@@ -2127,6 +2123,16 @@ fn main() -> Result<(), String> {
     };
     chain_f32("kh.f32", &ks_base)?;
     stamp(&format!("KH ({kh})"), t.elapsed().as_secs_f64());
+    // ---- the budget (G0 contracts section 6; BUILD-060's field, the one river-gate reads), per L cell and per H1 cell. Reading 21 (owner decision 3, 2026-11-17, lead #168):
+    // budgets and the L stages' deltas are against S_KH = KH(z_s) + r' (ks_base), not S0; S0 stays the reference of the ocean and the sea tests; KH against S0 is its own field.
+    let t = Instant::now();
+    let budget_l = planet_cache::river_gate_graph::budget_field(&ks_base, w, h, L, dx_l, 25_000.0);
+    let budget: Vec<f64> = (0..cells).map(|c| budget_l[((c / rw) * L) * w + (c % rw) * L]).collect();
+    if args.iter().any(|a| a == "--dump-s0") {
+        let b: Vec<u8> = ks_base.iter().flat_map(|v| v.to_le_bytes()).collect();
+        std::fs::write(out_dir.join(format!("{tag}-skh-{w}x{h}.f64")), b).map_err(|e| e.to_string())?;
+    }
+    stamp("budget field", t.elapsed().as_secs_f64());
     let ks = |band: &[f64]| -> (Vec<f64>, Vec<(usize, f64, f64)>) {
         let mut z = ks_base.clone();
         let mut res = Vec::new();
@@ -2153,7 +2159,7 @@ fn main() -> Result<(), String> {
     let t = Instant::now();
     let window = (x0 as u64, y0 as u64, w, h, rw);
     let mut g = if on("kg-trunk") {
-        build_graph(&h1, &reaches, grid, &start, &ks0, &budget, window, sea, bar, &order, threads, low, &ocean).0
+        build_graph(&h1, &reaches, grid, &start, &ks_base, &ks0, &budget, window, sea, bar, &order, threads, low, &ocean).0
     } else {
         Graph { body: BODY, nodes: Vec::new(), reaches: Vec::new(), basins: Vec::new() }
     };
@@ -2182,9 +2188,8 @@ fn main() -> Result<(), String> {
     };
     let l_trunks: Vec<GReach> = g.reaches.iter().filter(|r| r.level == Level::L).cloned().collect();
     let on_trunk: HashSet<usize> = l_trunks.iter().flat_map(|r| r.vertices.iter().filter_map(|&c| to_local(c))).collect();
-    let mut ks_out = ks0.clone();
-    let mut kv_out = ks0.clone();
-    let mut kc_out = ks0.clone();
+    // the stitched KS, KV and KC outputs (lead #168 item 2, memory): made after the first domain's KV/KC, not before; with one region the domain's own fields are moved in
+    let mut outs: Option<(Vec<f64>, Vec<f64>, Vec<f64>)> = None;
     let mut res_ks: Vec<(usize, f64, f64)> = Vec::new();
     let mut res_kvkc: Vec<planet_generators::bake::river_graph::Residual> = Vec::new();
     let mut extra = Graph { body: BODY, nodes: Vec::new(), reaches: Vec::new(), basins: Vec::new() };
@@ -2372,7 +2377,7 @@ fn main() -> Result<(), String> {
                 (true, false) => Switch::KvOnly,
                 _ => Switch::KcOnly,
             };
-            let remain: Vec<f64> = (0..n_l).map(|p| (budget_l[p] - (start[p] - ks_d[p]).max(0.0)).max(0.0)).collect();
+            let remain: Vec<f64> = (0..n_l).map(|p| (budget_l[p] - (ks_base[p] - ks_d[p]).max(0.0)).max(0.0)).collect();
             let mut g_local = gd.clone();
             g_local.reaches = gd
                 .reaches
@@ -2384,8 +2389,10 @@ fn main() -> Result<(), String> {
                 })
                 .collect();
             let r = run(&gl, &ks_d, &sea_l, &g_local, &kept, &remain, &KvParams::plan(dx_l), sw);
-            let kv = if on("kv") { r.kv.clone() } else { ks_d.clone() };
-            let kc = if on("kc") { r.kc.clone() } else { kv.clone() };
+            drop(remain);
+            drop(g_local);
+            let kv = if on("kv") { r.kv } else { ks_d.clone() };
+            let kc = if on("kc") { r.kc } else { kv.clone() };
             println!("RG domain {d} KV/KC ({sw:?}): {} residuals, {} KC patches", r.residuals.len(), r.patches.len());
             (kv, kc, r.residuals)
         } else {
@@ -2393,8 +2400,17 @@ fn main() -> Result<(), String> {
         };
         t_kvkc += t.elapsed().as_secs_f64();
         // the domain's share: its core's cells and residuals, the items its core's tiles own
-        for p in (0..n_l).filter(|&p| core[p]) {
-            (ks_out[p], kv_out[p], kc_out[p]) = (ks_d[p], kv_d[p], kc_d[p]);
+        if regions <= 1 && outs.is_none() {
+            let (mut a, mut b, mut c) = (ks_d, kv_d, kc_d);
+            for p in (0..n_l).filter(|&p| !core[p]) {
+                (a[p], b[p], c[p]) = (ks0[p], ks0[p], ks0[p]);
+            }
+            outs = Some((a, b, c));
+        } else {
+            let (ks_out, kv_out, kc_out) = outs.get_or_insert_with(|| (ks0.clone(), ks0.clone(), ks0.clone()));
+            for p in (0..n_l).filter(|&p| core[p]) {
+                (ks_out[p], kv_out[p], kc_out[p]) = (ks_d[p], kv_d[p], kc_d[p]);
+            }
         }
         res_ks.extend(res_d.into_iter().filter(|r| core[r.0]));
         res_kvkc.extend(rkc.into_iter().filter(|r| r.cell < n_l && core[r.cell]));
@@ -2441,6 +2457,7 @@ fn main() -> Result<(), String> {
     let flagged = planet_generators::bake::kv_kc::flag_residuals(&mut g, &res_kvkc);
     println!("RG residual flags: {flagged:?}");
     drop(ks0);
+    let (ks_out, kv_out, kc_out) = outs.expect("at least one domain");
     println!("RG domains: {} nodes, {} reaches, {} basins after the stitch; landmass items with different contents in two domains: {landmass_conflicts}", g.nodes.len(), g.reaches.len(), g.basins.len());
     for (name, secs) in [("basins", t_basins), ("KG-trib", t_trib), ("KS1", t_ks1), ("KV and KC", t_kvkc)] {
         stamp(name, secs);
@@ -2469,8 +2486,11 @@ fn main() -> Result<(), String> {
     chain_f32("ks.f32", &ks_out)?;
     chain_f32("kv.f32", &kv_out)?;
     chain_f32("final.f32", &kc_out)?;
+    // reading 21: KH against S0 in its own field (BUILD-060 stage `kh`); ks, kv and kc against S_KH
+    write("kh-lower.u16", field(&|p| start[p] - ks_base[p]))?;
+    write("kh-fill.u16", field(&|p| ks_base[p] - start[p]))?;
     if ks_mode != "off" {
-        write("ks-lower.u16", field(&|p| start[p] - ks_out[p]))?;
+        write("ks-lower.u16", field(&|p| ks_base[p] - ks_out[p]))?;
     }
     if on("kv") {
         write("kv-lower.u16", field(&|p| ks_out[p] - kv_out[p]))?;
