@@ -100,7 +100,7 @@ fn grid_gate(arg: &str, params: &GateParams) -> Result<(), String> {
     if bytes.len() != w * h * 8 {
         return Err(format!("{file}: {} bytes, {w} x {h} f64 heights are {}", bytes.len(), w * h * 8));
     }
-    let surface: Vec<f64> = bytes.chunks_exact(8).map(|c| f64::from_le_bytes(c.try_into().expect("8 bytes"))).collect();
+    let surface: Vec<f64> = bytes.as_chunks::<8>().0.iter().map(|c| f64::from_le_bytes(*c)).collect();
     let grid = planet_generators::bake::Grid::new(w, h, GRID_CELL_M);
     let outlet = grid.outlets(&surface, sea);
     let inside: Vec<bool> = (0..w * h)

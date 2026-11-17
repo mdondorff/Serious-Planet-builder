@@ -889,11 +889,9 @@ pub fn network(grid: &Grid, z: &[f64], receiver: &[u32], area: &[f64], inside: &
     };
     // Kahn's order over the channel donors: a cell is settled once every channel donor is.
     let mut waiting = vec![0u32; n];
-    for c in 0..n {
-        if channel[c] {
-            if let Some(r) = down(c) {
-                waiting[r] += 1;
-            }
+    for c in (0..n).filter(|&c| channel[c]) {
+        if let Some(r) = down(c) {
+            waiting[r] += 1;
         }
     }
     let (mut top, mut count) = (vec![0u32; n], vec![0u32; n]);
