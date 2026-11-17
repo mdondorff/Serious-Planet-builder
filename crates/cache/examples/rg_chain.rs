@@ -416,8 +416,9 @@ fn h1_from(
     let mut hydro = hydrology(grid, z, filled, &routing, outlet, Some(runoff), Some(evap), &HydroParams::default());
     // spikes #142, reading 16: a kept basin deeper than the budget at its floor is crossed (reading 13), not a lake: no open-water loss there, so q_w = q through it.
     // The basins are the same (the loss enters only the balance); the rerun changes q_w and the balance only.
-    if let Some(budget) = budget {
-        let crossed: Vec<bool> = hydro.basins.iter().map(|b| b.spill_m - b.floor_m > budget[b.floor_cell as usize]).collect();
+    // reading 24 (lead, 2026-11-17; owner decision 6 c): no H1 basin is a lake in the prototype, every one is crossed (q_w = q); `budget` only switches the rule on
+    if budget.is_some() {
+        let crossed: Vec<bool> = vec![true; hydro.basins.len()];
         if crossed.iter().any(|&x| x) {
             let ev2: Vec<f32> =
                 (0..evap.len()).map(|c| if hydro.label[c] != NONE && crossed[hydro.label[c] as usize] { 0.0 } else { evap[c] }).collect();
@@ -1232,15 +1233,9 @@ fn h1_reaches(h1: &H1, grid: &Grid, sea_outlet: &dyn Fn(u32) -> bool, budget: &[
             inflows[s.downstream as usize] += 1;
         }
     }
-    // reading 13: a basin cuts the trunk only when its depth (spill - floor) is within the budget at its floor; a deeper one is crossed
-    let kept = |c: u32| -> Option<usize> {
-        let b = h1.hydro.label[c as usize];
-        if b == NONE {
-            return None;
-        }
-        let bs = &h1.hydro.basins[b as usize];
-        (bs.spill_m - bs.floor_m <= budget[bs.floor_cell as usize]).then_some(b as usize)
-    };
+    // reading 24 (replaces reading 13 for the prototype): no H1 basin cuts a trunk; every trunk crosses, and a crossing over the budget is KG-trunk's rise_over_budget on S_KH
+    let _ = budget;
+    let kept = |_c: u32| -> Option<usize> { None };
     let mut out = Vec::new();
     let mut edge_ends = 0usize;
     for (k, s) in segs.iter().enumerate() {
@@ -1873,12 +1868,8 @@ fn main() -> Result<(), String> {
         println!("KG sea at L: {at_sea} cells of S0 at or below the sea level, {inland} of them inland (not connected to an H1 sea outlet or the window's edge; {:.3} % of the window)", 100.0 * inland as f64 / (w * h) as f64);
     }
 
-    // ---- the budget (G0 contracts section 6; BUILD-060's field, the one river-gate reads), per L cell and per H1 cell; before H1, which reads it (readings 13, 16)
-    let t_budget = Instant::now();
-    // H1's budget (spikes #142, readings 13 and 16) is read before KH exists, so it is S0's; the L stages' budget below is S_KH's (reading 21, lead #168)
-    let budget_l = planet_cache::river_gate_graph::budget_field(&start, w, h, L, grid.dx() / L as f64, 25_000.0);
-    let budget: Vec<f64> = (0..cells).map(|c| budget_l[((c / rw) * L) * w + (c % rw) * L]).collect();
-    println!("RG budget field: {:.1} s", t_budget.elapsed().as_secs_f64());
+    // reading 24: H1 reads no budget (every H1 basin is crossed); the budget is S_KH's, after KH (reading 21, lead #168)
+    let budget: Vec<f64> = Vec::new();
 
     // ---- H1: today's K6 and K6' (sills of S0)
     let dir_h1 = |c: usize| solve.face_spec.halo_direction((sri0 + c % rw) as i64, (srj0 + c / rw) as i64);
