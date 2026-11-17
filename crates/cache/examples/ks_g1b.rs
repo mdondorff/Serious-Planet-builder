@@ -307,7 +307,7 @@ fn main() -> Result<(), String> {
     };
     let ro = route_l(&start);
     let (ch_s0_1, ch_s0_5) = chans(&start, &ro);
-    // Divides: catchments of the 75 km2 river network's segments (a segment starts at a head or a confluence); a land cell with a 4-neighbour of another catchment.
+    // Divides: catchments of the 75 km2 river network's segments (a segment starts at a head or a confluence; direct drainage to an outlet is one catchment); a land cell with a land 4-neighbour of another catchment.
     let river: Vec<bool> = (0..n_l).map(|p| ro.area[p] >= 75.0e6 && land(p)).collect();
     let mut donors = vec![0u8; n_l];
     for p in 0..n_l {
@@ -331,7 +331,8 @@ fn main() -> Result<(), String> {
     for &p in &ro.order {
         let p = p as usize;
         let rc = ro.receiver[p];
-        label[p] = if river[p] { seg[p] } else if rc == NONE { p as u32 } else { label[rc as usize] };
+        // A chain that reaches an outlet without a river cell drains to the coast or the window's edge directly: one shared label, so the coast's own strips are not divides.
+        label[p] = if river[p] { seg[p] } else if rc == NONE { u32::MAX - 1 } else { label[rc as usize] };
     }
     drop((river, donors, seg, ro));
     let mut dist = vec![u16::MAX; n_l];
