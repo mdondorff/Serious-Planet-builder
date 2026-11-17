@@ -127,6 +127,22 @@ pub fn drain(
     max_rounds: usize,
     search: usize,
 ) -> (Vec<f64>, DrainStats) {
+    drain_capped(z0, w, h, outlet, keep, area, max_rounds, search, f64::INFINITY)
+}
+
+/// [`drain`] where a breach whose deepest cut exceeds `max_cut` m is not taken (the depression is filled).
+#[allow(clippy::too_many_arguments)]
+pub fn drain_capped(
+    z0: &[f64],
+    w: usize,
+    h: usize,
+    outlet: &[bool],
+    keep: &dyn Fn(usize) -> bool,
+    area: &dyn Fn(usize) -> f64,
+    max_rounds: usize,
+    search: usize,
+    max_cut: f64,
+) -> (Vec<f64>, DrainStats) {
     let n = w * h;
     let mut z = z0.to_vec();
     let mut st = DrainStats::default();
@@ -205,7 +221,8 @@ pub fn drain(
                 continue;
             }
             let breach_v: f64 = path.iter().enumerate().map(|(i, &c)| (z[c] - z[c].min(zf - DELTA * i as f64)).max(0.0) * area(c)).sum();
-            if breach_v <= fill_v {
+            let cut: f64 = path.iter().enumerate().map(|(i, &c)| z[c] - z[c].min(zf - DELTA * i as f64)).fold(0.0, f64::max);
+            if breach_v <= fill_v && cut <= max_cut {
                 for (i, &c) in path.iter().enumerate() {
                     cuts.push((c, zf - DELTA * i as f64));
                 }

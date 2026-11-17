@@ -2202,7 +2202,8 @@ fn main() -> Result<(), String> {
     if !["none", "a", "aplus"].contains(&drain_mode.as_str()) {
         return Err(format!("--drain none | a | aplus, not '{drain_mode}'"));
     }
-    install_base_hook(&drain_mode, &tag);
+    let drain_cap: f64 = value(&args, "--drain-cap").map_or(Ok(f64::INFINITY), str::parse).map_err(|_| "--drain-cap metres")?;
+    install_base_hook(&drain_mode, &tag, drain_cap);
     let front = region_front(&spec, &base, &climate)?;
     let solve = &front.solve;
     let (sri0, srj0, rw, rh) = (solve.ri0, solve.rj0, solve.rw, solve.rh);
@@ -2794,7 +2795,7 @@ fn main() -> Result<(), String> {
 // ---------------------------------------------------------------- SPIKE-138 (spikes #143; spike only)
 
 /// Installs the base hook of `--drain a | aplus`: the 814 m base `z_b` drained before K5 (least-cost breach or fill, [`planet_generators::bake::drain`]); intended basins: none.
-fn install_base_hook(mode: &str, tag: &str) {
+fn install_base_hook(mode: &str, tag: &str, cap: f64) {
     if mode == "none" {
         return;
     }
@@ -2802,9 +2803,9 @@ fn install_base_hook(mode: &str, tag: &str) {
     let _ = planet_cache::region_bake::BASE_HOOK.set(Box::new(move |grid: &Grid, outlet: &[bool], zb: &[f64], _dir: &(dyn Fn(usize) -> Vec3 + Sync)| {
         let t = Instant::now();
         let (w, h) = (grid.w(), grid.len() / grid.w());
-        let (d, st) = planet_generators::bake::drain::drain(zb, w, h, outlet, &|_| false, &|p| grid.cell_area(p), 12, 1 << 20);
+        let (d, st) = planet_generators::bake::drain::drain_capped(zb, w, h, outlet, &|_| false, &|p| grid.cell_area(p), 12, 1 << 20, cap);
         println!(
-            "HO {tag} A drain of z_b: {} rounds, {} depressions met ({} filled, {} breached), {} left; {:.1} s",
+            "HO {tag} A drain of z_b (breach cut cap {cap} m): {} rounds, {} depressions met ({} filled, {} breached), {} left; {:.1} s",
             st.rounds,
             st.depressions,
             st.filled,
