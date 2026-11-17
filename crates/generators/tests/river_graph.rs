@@ -422,6 +422,13 @@ fn the_rasterisation_owns_each_cell_once_by_its_rules() {
     p.nodes.push(s4);
     p.reaches.push(r);
     assert_eq!(rasterise(&p)[&cell(2, 2)].0, t_id.min(p_id), "equal q_w: the lower id");
+    // a signed zero is no larger: -0.0 and +0.0 tie, and the lower id wins whichever sign it carries
+    for (t_q, p_q) in [(-0.0, 0.0), (0.0, -0.0)] {
+        let mut z = p.clone();
+        reach_mut(&mut z, cell(2, 3)).attrs.q_w[1] = t_q;
+        reach_mut(&mut z, cell(3, 3)).attrs.q_w[1] = p_q;
+        assert_eq!(rasterise(&z)[&cell(2, 2)].0, t_id.min(p_id), "q_w {t_q:?} against {p_q:?}");
+    }
     reach_mut(&mut p, cell(3, 3)).attrs.q_w[1] = 1.0;
     assert_eq!(rasterise(&p)[&cell(2, 2)].0, p_id, "the larger q_w");
     let mut shuffled = p.clone();
@@ -497,6 +504,16 @@ fn the_budget_validator_finds_overruns_raises_and_clamps_without_residuals() {
     assert!(matches!(v[..], [Violation::ClampWithoutResidual { cell: 0, stage: "kv" }]), "{v:?}");
     assert_eq!(run(&ks, &kv, &kc, Some(&wanted), &res, &flagged), vec![]);
     assert!(matches!(run(&ks, &kv, &kc, Some(&wanted), &res, &g)[..], [Violation::ResidualFeatureNotFlagged { .. }]));
+    // a residual carries its stage's numbers: the clamp needed 7 m with 4 m left (KS used 6); the fill needed 11 m against 10 m; a residual where nothing clamped or overran fails
+    let mismatch = |v: &[Violation]| v.iter().any(|x| matches!(x, Violation::ResidualMismatch { .. }));
+    for (needed, available) in [(6.0, 4.0), (7.0, 10.0)] {
+        let wrong = [Residual { cell: 0, stage: "kv", needed_m: needed, available_m: available, feature }];
+        assert!(mismatch(&run(&ks, &kv, &kc, Some(&wanted), &wrong, &flagged)), "clamp needed {needed}, available {available}");
+    }
+    let wrong_fill = [Residual { cell: 1, stage: "kc", needed_m: 11.0, available_m: 4.0, feature }];
+    assert!(mismatch(&run(&ks, &kv, &kc3, None, &wrong_fill, &flagged)));
+    let idle = [Residual { cell: 2, stage: "kc", needed_m: 1.0, available_m: 10.0, feature }];
+    assert!(matches!(run(&ks, &kv, &kc, None, &idle, &flagged)[..], [Violation::ResidualMismatch { cell: 2, stage: "kc", .. }]));
     // inputs that are not finite or do not fit
     let kv_nan = [f64::NAN, 100.0, 100.0];
     assert!(run(&ks, &kv_nan, &kc, None, &[], &g).iter().any(|v| matches!(v, Violation::BudgetInput { cell: 0, stage: "kv" })));

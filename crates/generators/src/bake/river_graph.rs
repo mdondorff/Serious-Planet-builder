@@ -634,6 +634,12 @@ pub enum Violation {
         cell: usize,
         stage: &'static str,
     },
+    /// A residual whose `needed_m` or `available_m` is not the stage's (the wanted lowering and the budget left, or the fill and the budget), or that records no clamp or fill overrun.
+    ResidualMismatch {
+        cell: usize,
+        stage: &'static str,
+        why: &'static str,
+    },
     ResidualFeatureNotFlagged {
         feature: u64,
     },
@@ -958,7 +964,7 @@ pub fn rasterise(g: &Graph) -> BTreeMap<u64, (u64, usize)> {
     for r in sorted.reaches.iter().filter(|r| r.level == Level::L) {
         let n = r.vertices.len();
         for (k, &c) in r.vertices.iter().enumerate() {
-            let claim = (r.id, k, r.attrs.q_w.get(k).copied().unwrap_or(0.0), k + 1 == n);
+            let claim = (r.id, k, r.attrs.q_w.get(k).copied().unwrap_or(0.0) + 0.0, k + 1 == n); // + 0.0: -0.0 becomes +0.0, so a signed zero never decides against the id tie
             let better = |o: &(u64, usize, f64, bool)| {
                 if claim.3 != o.3 {
                     return !claim.3;
@@ -1017,6 +1023,7 @@ pub struct Residual {
 ///   the lowering at the remainder);
 /// - a stage that only lowers must not raise; a fill `max(0, out - in)` over `budget` needs a residual of that (cell, stage);
 /// - a stage that lowered less than it wanted needs a residual of that (cell, stage);
+/// - a residual carries its stage's numbers (`needed_m`, `available_m` within 1e-9 m) and records a clamp or a fill overrun;
 /// - every residual's feature is a reach flagged `budget_residual`;
 /// - every input is finite and one value per cell.
 pub fn validate_budget(s0: &[f64], budget: &[f64], stages: &[Stage], residuals: &[Residual], g: &Graph) -> Vec<Violation> {
@@ -1057,9 +1064,25 @@ pub fn validate_budget(s0: &[f64], budget: &[f64], stages: &[Stage], residuals: 
             if st.fills && filled > budget[c] + BUDGET_EPS_M && !has(c, st.name) {
                 v.push(Violation::BudgetOverrun { cell: c, stage: st.name, used_m: filled, budget_m: budget[c] });
             }
-            if let Some(w) = st.wanted_lowering {
-                if w[c] > lowered + BUDGET_EPS_M && !has(c, st.name) {
-                    v.push(Violation::ClampWithoutResidual { cell: c, stage: st.name });
+            let clamped = st.wanted_lowering.is_some_and(|w| w[c] > lowered + BUDGET_EPS_M);
+            if clamped && !has(c, st.name) {
+                v.push(Violation::ClampWithoutResidual { cell: c, stage: st.name });
+            }
+            // a residual's numbers are the stage's: a clamp needed the wanted lowering and had the budget left before the stage; a fill needed the fill and had the budget
+            let fill_over = st.fills && filled > budget[c] + BUDGET_EPS_M;
+            for r in residuals.iter().filter(|r| r.cell == c && r.stage == st.name) {
+                let near = |a: f64, b: f64| (a - b).abs() <= BUDGET_EPS_M;
+                let why = if clamped {
+                    let w = st.wanted_lowering.map_or(0.0, |w| w[c]);
+                    (!(near(r.needed_m, w) && near(r.available_m, (budget[c] - before).max(0.0))))
+                        .then_some("not the clamp's needed and available")
+                } else if fill_over {
+                    (!(near(r.needed_m, filled) && near(r.available_m, budget[c]))).then_some("not the fill's needed and available")
+                } else {
+                    Some("no clamp or fill overrun at its cell and stage")
+                };
+                if let Some(why) = why {
+                    v.push(Violation::ResidualMismatch { cell: c, stage: st.name, why });
                 }
             }
         }
