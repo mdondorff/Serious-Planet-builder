@@ -98,7 +98,7 @@ One table over five windows for the D-1 choice among the E3 variants.
   - On M1 every variant leaves 2.1 (E) to 4.9 % (B) of reaches over 50 m. Per #159 that is a **D-2 input** (H1 or KR must adjust on mountains), not a D-1 blocker.
 - **The coastal snap (#1562) against cb5a504d, failing reaches at k_c 2 snapped:**
   - Coastal rows fall most: R1h A 95 to 53, B 111 to 71, G 93 to 59; F1 A 146 to 63, B 145 to 65, G 133 to 72; R3a A, B and G 11, 13 and 6 to 3, 4 and 3; R3b 30, 29 and 29 to 15, 13 and 14.
-  - D, E and F change by 0 to 3 reaches, except on F1 (D 21 to 14, E 20 to 17, F 68 to 51). Of the fixed forms on R1h, D delta falls from 175 to 133; the others by 1.
+  - D, E and F change by 0 to 2 reaches, except on F1 (D 21 to 14, E 20 to 17, F 68 to 51). Of the fixed forms on R1h, D delta falls from 175 to 133; the others by 1.
   - B's worst rise on R1h falls from 238 to 133 m; A's from 230 to 163 m.
   - Every M1 row is unchanged in every corridor column: the coastal rule changes nothing there.
 - **The D-2 list (SPIKE-126, B's failing reaches not rescued by ponds, 711):** 565 still fail on this build.
