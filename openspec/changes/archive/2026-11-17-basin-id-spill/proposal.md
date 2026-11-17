@@ -3,7 +3,7 @@
 - The lead accepted the default with one change (G0 contracts reading 4, 2026-11-17): the id holds the spill anchor; an endorheic basin hashes its spill cell too; 0 only for a basin with no spill cell at all.
 
 ## What changes
-- GEN-189: `basin_id(body, level, floor, spill)` with the spill cell plus one (`None` -> 0); a stored basin has no spill cell when its spill height is infinite (`spill_anchor`); the id validator checks the new id.
+- GEN-189: `basin_id(body, level, floor, spill)` with the spill cell plus one (`None` -> 0); a stored basin has no spill cell when its spill height is infinite (`spill_anchor`); the id validator checks the new id; a basin's floor and a spill other than +inf must be finite (`NotFinite`); `basin_id` refuses a cell id of `u64::MAX` (numerics review).
 - TEST-140: a parent on its child's floor has its own id; no spill cell is not cell 0; a spill moved under a kept id is an `IdMismatch`.
 
 ## Impact

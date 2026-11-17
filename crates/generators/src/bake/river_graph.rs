@@ -281,12 +281,12 @@ pub fn reach_id(body: u64, level: Level, up: u64, down: u64) -> u64 {
 /// The id of a basin: its floor and spill anchors (the contract's reading 4: a parent shares its floor with its deepest child, so the floor alone collides). `spill` is the spill cell,
 /// `None` only for a basin with no spill cell at all; it enters as the cell plus one, so 0 means none.
 pub fn basin_id(body: u64, level: Level, floor: u64, spill: Option<u64>) -> u64 {
-    id_hash(body ^ BASIN_TAG ^ level.code(), floor, spill.map_or(0, |s| s + 1))
+    id_hash(body ^ BASIN_TAG ^ level.code(), floor, spill.map_or(0, |s| s.checked_add(1).expect("a spill cell id below u64::MAX")))
 }
 
-/// The spill anchor of a stored basin: its spill cell, or `None` when it has none (an infinite spill height).
+/// The spill anchor of a stored basin: its spill cell, or `None` when it has none (a spill height of +inf; a NaN or -inf height is not finite, which the validator reports).
 pub fn spill_anchor(b: &Basin) -> Option<u64> {
-    b.spill_m.is_finite().then_some(b.spill_cell)
+    (b.spill_m != f64::INFINITY).then_some(b.spill_cell)
 }
 
 fn opt(v: Option<u64>) -> String {
@@ -702,6 +702,13 @@ pub fn validate(graph: &Graph, checks: &Checks) -> Vec<Violation> {
     for b in &g.basins {
         if b.id != basin_id(g.body, b.level, b.floor_cell, spill_anchor(b)) {
             v.push(Violation::IdMismatch { id: b.id });
+        }
+        // a basin's heights: a finite floor; a finite spill, or +inf for a basin with no spill cell
+        if !b.floor_m.is_finite() {
+            v.push(Violation::NotFinite { at: b.id, field: "floor_m" });
+        }
+        if !b.spill_m.is_finite() && b.spill_m != f64::INFINITY {
+            v.push(Violation::NotFinite { at: b.id, field: "spill_m" });
         }
     }
     let node: BTreeMap<u64, &Node> = g.nodes.iter().map(|n| (n.id, n)).collect();

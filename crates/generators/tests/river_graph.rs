@@ -215,6 +215,18 @@ fn each_injected_structural_failure_is_found() {
         !found(&g, &|v| matches!(v, Violation::DuplicateId { .. } | Violation::IdMismatch { .. })),
         "a parent on its child's floor validates"
     );
+    // a basin with no spill cell (+inf) validates with the id of no spill; a NaN or -inf spill, or a non-finite floor, is not finite
+    let mut g = base();
+    g.basins[0].spill_m = f64::INFINITY;
+    g.basins[0].id = basin_id(BODY, Level::L, floor, None);
+    assert_eq!(check(&g), vec![], "no spill cell");
+    for (spill, floor_m, field) in [(f64::NAN, 4.0, "spill_m"), (f64::NEG_INFINITY, 4.0, "spill_m"), (9.5, f64::NAN, "floor_m")] {
+        let mut g = base();
+        (g.basins[0].spill_m, g.basins[0].floor_m) = (spill, floor_m);
+        g.basins[0].id = basin_id(BODY, Level::L, floor, spill_anchor(&g.basins[0]));
+        let b = g.basins[0].id;
+        assert!(found(&g, &|v| matches!(v, Violation::NotFinite { at, field: f } if *at == b && *f == field)), "{field} {spill} {floor_m}");
+    }
     // two nodes on one (level, anchor)
     let mut g = base();
     g.nodes.push(node(NodeKind::LakeSpill, cell(1, 1)));
