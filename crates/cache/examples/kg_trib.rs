@@ -2364,8 +2364,11 @@ fn main() -> Result<(), String> {
             };
             let (d_mfd, c_mfd) = density(&|c| rr.area[c]);
             let (d_d8, c_d8) = density(&|c| d8[c]);
+            // the D8 network without the kept basins' cells (the extractor's channels stop at a lake inlet), and the extractor's own channel cells by the same step rule
+            let (d_d8_out, c_d8_out) = density(&|c| if kept[c] { 0.0 } else { d8[c] });
+            let (d_ex, c_ex) = density(&|c| if ex.channel[c] { f64::INFINITY } else { 0.0 });
             println!(
-                "G1d density check (BUILD-059's rule on the stage input, 1 km2): MFD area {d_mfd:.4} km/km2 ({c_mfd} channel cells); D8 area {d_d8:.4} km/km2 ({c_d8}); {:.1} s",
+                "G1d density check (BUILD-059's rule on the stage input, 1 km2): MFD area {d_mfd:.4} km/km2 ({c_mfd} channel cells); D8 area {d_d8:.4} km/km2 ({c_d8}); D8 outside kept basins {d_d8_out:.4} ({c_d8_out}); the extractor's channel cells {d_ex:.4} ({c_ex}); {:.1} s",
                 t_d.elapsed().as_secs_f64()
             );
         }
