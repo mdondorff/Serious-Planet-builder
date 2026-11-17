@@ -143,7 +143,7 @@ pub fn shade(z: &[f32], m: &Manifest, v: &View) -> (Vec<f64>, Vec<f64>) {
     let (pw, ph) = v.px();
     let (az, alt) = (SUN_AZ_DEG.to_radians(), SUN_ALT_DEG.to_radians());
     // the light's direction: x east (the window's +x), y north (the window's -y), z up
-    let (lx, ly, lz) = (alt.cos() * az.sin(), alt.cos() * az.cos(), alt.sin());
+    let (lx, ly, lz) = (libm::cos(alt) * libm::sin(az), libm::cos(alt) * libm::cos(az), libm::sin(alt));
     let at = |x: usize, y: usize| f64::from(z[y.min(m.h - 1) * m.w + x.min(m.w - 1)]);
     let mut grey = vec![0.0; pw * ph];
     let mut mean = vec![0.0; pw * ph];
@@ -162,7 +162,7 @@ pub fn shade(z: &[f32], m: &Manifest, v: &View) -> (Vec<f64>, Vec<f64>) {
                 }
             }
             let k = (v.step * v.step) as f64;
-            grey[py * pw + px] = (0.5 + GAIN * (s / k - alt.sin())).clamp(0.0, 1.0);
+            grey[py * pw + px] = (0.5 + GAIN * (s / k - lz)).clamp(0.0, 1.0);
             mean[py * pw + px] = hsum / k;
         }
     }
@@ -267,7 +267,8 @@ pub const TRIB_PIXELS: f64 = 25.0;
 
 /// The smallest drained area of a drawn tributary at view `v` (m2).
 pub fn trib_min_m2(m: &Manifest, v: &View) -> f64 {
-    TRIB_PIXELS * (v.step as f64 * m.cell_m).powi(2)
+    let side = v.step as f64 * m.cell_m;
+    TRIB_PIXELS * side * side
 }
 
 /// Which reaches an overlay draws.
@@ -476,8 +477,8 @@ pub fn compose(m: &Manifest, v: &View, panels: &[Panel]) -> Rgba {
             for x in 0..pw {
                 let c = p.rgb.as_ref().map_or([0.35; 3], |rgb| rgb[y * pw + x]);
                 let i = ((oy + band + y) * w + ox + x) * 4;
-                for ch in 0..3 {
-                    img.data[i + ch] = (c[ch].clamp(0.0, 1.0) * 255.0).round() as u8;
+                for (ch, v) in c.iter().enumerate() {
+                    img.data[i + ch] = (v.clamp(0.0, 1.0) * 255.0).round() as u8;
                 }
             }
         }
