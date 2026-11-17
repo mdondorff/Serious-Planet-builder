@@ -69,10 +69,10 @@ fn stage_run(k: &Case, switch: Switch) -> Report {
     assert!(r.residuals.is_empty() || flagged.reaches > 0, "a residual flags its reach");
     let stages: Vec<Stage> = match switch {
         Switch::KvOnly => vec![Stage { name: "kv", out: &r.kv, wanted_lowering: Some(&r.kv_wanted), wanted_fill: None, fills: false }],
-        Switch::KcOnly => vec![Stage { name: "kc", out: &r.kc, wanted_lowering: None, wanted_fill: None, fills: true }],
+        Switch::KcOnly => vec![Stage { name: "kc", out: &r.kc, wanted_lowering: None, wanted_fill: Some(&r.kc_wanted), fills: true }],
         Switch::Both => vec![
             Stage { name: "kv", out: &r.kv, wanted_lowering: Some(&r.kv_wanted), wanted_fill: None, fills: false },
-            Stage { name: "kc", out: &r.kc, wanted_lowering: None, wanted_fill: None, fills: true },
+            Stage { name: "kc", out: &r.kc, wanted_lowering: None, wanted_fill: Some(&r.kc_wanted), fills: true },
         ],
     };
     let v = validate_budget(&k.s0, &k.budget, &stages, &r.residuals, &g);
@@ -100,7 +100,11 @@ fn stage_run(k: &Case, switch: Switch) -> Report {
             filled.iter().copied().fold(0.0, f64::max)
         ),
         format!("{switch:?}: residual features already exceptional (kept): {conflict}; budget violations {}", v.len()),
+        format!("{switch:?}: KC breaches (reading 22) {}, cut volume {:.0} m3", r.breaches, r.breach_volume),
     ];
+    if switch != Switch::KvOnly {
+        assert!(r.breaches >= 1, "{switch:?}: the coastal pit drains by a breach (reading 22)");
+    }
     // divides: KV touches nothing within d_buf of a divide; protected basins: nothing at all
     let div_touched = (0..n).filter(|&c| r.near_divide[c] && r.kv[c] != k.s0[c]).count();
     let prot_touched = (0..n).filter(|&c| k.protected[c] && (r.kv[c] != k.s0[c] || r.kc[c] != k.s0[c])).count();
@@ -273,4 +277,5 @@ fn kv_and_kc_give_the_pinned_output() {
     assert_eq!(got, KVKC_DIGESTS.to_vec());
 }
 
-const KVKC_DIGESTS: [u64; 3] = [0x3367_fe24_9007_dfe2, 0x40b2_ad10_9fc4_974b, 0x65c5_34c1_102c_1e4e];
+// KV only: pinned before the memory cut and unchanged by it; KC only and both re-pinned for reading 22's breach (#161: the 5-cell coastal pit drains by a 45,181 m3 cut instead of a fill)
+const KVKC_DIGESTS: [u64; 3] = [0x3367_fe24_9007_dfe2, 0x4c07_3ae4_4545_fb75, 0xf327_9595_e00e_14a2];
