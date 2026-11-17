@@ -4,7 +4,7 @@ Order: lead #163 item 2 (river-graph plan, pre-work): drainage density with a ch
 
 ## Method
 - Code: BUILD-059 (`river-gate`'s network lines and `net1_*`, `net2_*` fields; `grid=file,w,h,sea` input). Definitions in `openspec/specs/build-tooling/spec.md` BUILD-059.
-- One `cargo xtask river-gate --table` build (branch `change/river-network`, 3fbdc0f7), 30 rows, 32 min. Raw: `raw/network/network-163.csv`, `raw/network/network-163-lines.txt`.
+- One `cargo xtask river-gate --table` build of the BUILD-059 change (branch `change/river-network`, before the squash merge), 30 rows, 32 min. The merged code gives the same fields (N47 E011 re-run, byte-identical). Raw: `raw/network/network-163.csv`, `raw/network/network-163-lines.txt`.
 - Tiles: SPIKE-119's prepared grids (section 3.1: L cells of 101.8 m, box mean, no pit filling), 21 GLO-30 and 4 3DEP DTM; sea level 0 m, Death Valley (N36 W117) -200 m; counted inside a 10-cell border.
 - Windows: the start surface `S0` of R1h, R3a, R3b, M1 and F1, counted over the region's box.
 - Thresholds: 1 km2 (the fine graph's `A_crit`) and 75 km2 (the gate's river cells).

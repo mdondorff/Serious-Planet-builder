@@ -856,6 +856,7 @@ pub fn trunk_corridor(
 pub fn corridor_bar_m(relief_10_start_m: f64) -> f64 {
     (0.5 * relief_10_start_m).clamp(10.0, 50.0)
 }
+
 /// The channel thresholds the gate measures the network at by default (BUILD-059, lead #163), km2: the fine graph's 1 km2 and the river cells' 75 km2.
 pub const NETWORK_KM2: [f64; 2] = [1.0, 75.0];
 

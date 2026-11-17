@@ -11,7 +11,7 @@ Detail:
 - Strahler order on the whole grid from the channel donors: a cell without a channel donor is order 1; otherwise the donors' highest order `m`, raised to `m + 1` where two or more donors carry `m`; the result depends on the receivers only;
 - a stream of order `k` starts at a cell of order `k` that no donor of order `k` enters (a head, or a meeting of streams of order `k - 1`); `N_k` counts the streams starting inside;
 - `R_b = 10^-b`, `b` the least-squares slope of `log10 N_k` on `k` over the orders 1 to the highest less one with `N_k > 0` (the highest order is cut by the window); none (0) with fewer than 2 such orders;
-- the raw grid: little-endian f64, row-major, L cells of 101.8 m (SPIKE-119's preparation); outlets are the grid's edge and every cell at or below the sea level; counted inside a 10-cell border; routing seed 7; no H1 (the edge, trunk and corridor lines say so);
+- the raw grid: little-endian f64, row-major, cells of 101.8 m (SPIKE-119's preparation); the byte count must be `8 w h`; outlets are the grid's edge and every cell at or below the sea level; counted inside a 10-cell border; routing seed 7; no H1 (the input line says so, and the edge, trunk and corridor lines report none);
 - fields per threshold `net1_*` and `net2_*`: the threshold, the channel length, the land area, the density, the stream counts by order (`N_1/N_2/...`), the orders fitted and `R_b`;
 - the bar rule (#163): for each window, the range over the GLO-30 tiles whose 1 km relief (10 x 10 cells, p50) lies within 1 to 2 times the window's start relief; the numbers are in the river-graph pre-work results, not in this requirement.
 

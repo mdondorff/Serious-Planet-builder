@@ -707,3 +707,27 @@ fn the_network_counts_strahler_streams_and_fits_the_bifurcation_ratio_below_the_
     assert_eq!(part.streams, vec![4, 2], "{part:?}");
     assert!((part.river_km - 0.6 * std::f64::consts::SQRT_2).abs() < 1e-9, "{part:?}");
 }
+
+// spec: TEST-137, BUILD-059
+#[test]
+fn a_raw_grid_parses_its_argument_reads_little_endian_heights_and_counts_inside_its_border() {
+    use planet_cache::river_gate::{border_inside, raw_grid_arg, raw_grid_heights, RawGrid, GRID_BORDER};
+    // The argument splits from the right, so a path may hold commas; a grid within twice the border, a missing number or a missing file part is refused.
+    assert_eq!(
+        raw_grid_arg("C:/d,x/glo-N47E011.f64,738,1093,-200").unwrap(),
+        RawGrid { file: "C:/d,x/glo-N47E011.f64".to_string(), w: 738, h: 1093, sea_level_m: -200.0 }
+    );
+    assert!(raw_grid_arg("a.f64,20,100,0").unwrap_err().contains("twice the 10-cell border"));
+    assert!(raw_grid_arg("a.f64,100,1093").is_err() && raw_grid_arg("a.f64,x,100,0").is_err() && raw_grid_arg(",100,100,0").is_err());
+    // Heights are w x h little-endian f64, row-major; a short or long file is refused.
+    let v = [1.5f64, -2.25, 1.0e4, 0.0, 7.0, 8.0];
+    let bytes: Vec<u8> = v.iter().flat_map(|x| x.to_le_bytes()).collect();
+    assert_eq!(raw_grid_heights(&bytes, 3, 2).unwrap(), v.to_vec());
+    assert!(raw_grid_heights(&bytes[..40], 3, 2).unwrap_err().contains("40 bytes"));
+    assert!(raw_grid_heights(&bytes, 2, 2).is_err());
+    // The counted cells: at least the border from each edge, so a 25 x 23 grid counts 5 x 3 cells, the first at (10, 10).
+    assert_eq!(GRID_BORDER, 10);
+    let inside = border_inside(25, 23, GRID_BORDER);
+    assert_eq!(inside.iter().filter(|&&b| b).count(), 15);
+    assert!(inside[10 * 25 + 10] && inside[12 * 25 + 14] && !inside[10 * 25 + 9] && !inside[13 * 25 + 10] && !inside[10 * 25 + 15]);
+}

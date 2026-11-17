@@ -136,6 +136,54 @@ const CORRIDOR_FIELDS: [[&str; 8]; 6] = [
     corridor_names!("c4s"),
 ];
 
+/// A raw grid's cell size (SPIKE-119's prepared GLO-30 tiles, metres) and its counted border (cells; BUILD-059).
+pub const GRID_CELL_M: f64 = 101.8;
+pub const GRID_BORDER: usize = 10;
+
+/// A raw height grid input (BUILD-059): `file,w,h,sea_level_m`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RawGrid {
+    pub file: String,
+    pub w: usize,
+    pub h: usize,
+    pub sea_level_m: f64,
+}
+
+/// Parses `file,w,h,sea_level_m` (the file may hold commas); refuses a grid not wider and higher than twice [`GRID_BORDER`].
+pub fn raw_grid_arg(arg: &str) -> Result<RawGrid, String> {
+    let usage = || format!("--grid file,w,h,sea_level_m, not '{arg}'");
+    let p: Vec<&str> = arg.rsplitn(4, ',').collect();
+    let [sea, h, w, file] = p[..] else { return Err(usage()) };
+    let g = RawGrid {
+        file: file.to_string(),
+        w: w.parse().map_err(|_| usage())?,
+        h: h.parse().map_err(|_| usage())?,
+        sea_level_m: sea.parse().map_err(|_| usage())?,
+    };
+    if g.file.is_empty() || g.w <= 2 * GRID_BORDER || g.h <= 2 * GRID_BORDER {
+        return Err(format!(
+            "--grid {} x {}: a file and a grid wider and higher than twice the {GRID_BORDER}-cell border, not '{arg}'",
+            g.w, g.h
+        ));
+    }
+    Ok(g)
+}
+
+/// The heights of a raw grid: `w x h` little-endian f64, row-major; refused when the byte count differs.
+pub fn raw_grid_heights(bytes: &[u8], w: usize, h: usize) -> Result<Vec<f64>, String> {
+    if bytes.len() != w * h * 8 {
+        return Err(format!("{} bytes, {w} x {h} f64 heights are {}", bytes.len(), w * h * 8));
+    }
+    Ok(bytes.as_chunks::<8>().0.iter().map(|c| f64::from_le_bytes(*c)).collect())
+}
+
+/// The counted cells of a raw grid: every cell at least `border` cells from each edge.
+pub fn border_inside(w: usize, h: usize, border: usize) -> Vec<bool> {
+    (0..w * h)
+        .map(|c| (border..w.saturating_sub(border)).contains(&(c % w)) && (border..h.saturating_sub(border)).contains(&(c / w)))
+        .collect()
+}
+
 /// The column names of the network measure (BUILD-059): one row per channel threshold of `GateParams::network_km2`.
 const NETWORK_FIELDS: [[&str; 7]; 2] = [
     ["net1_km2", "net1_channel_km", "net1_land_km2", "net1_density_km_per_km2", "net1_streams_by_order", "net1_rb_orders", "net1_rb"],
