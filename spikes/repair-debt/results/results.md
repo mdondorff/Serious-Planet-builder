@@ -384,7 +384,7 @@ Code location: branch `spike/kh-stage` @ 51a4cacf (never merged): `kh_smooth --k
    These are F1's broad lowland depressions (section 3; SPIKE-134).
 2. **M1: base and band share it.**
    - The band holds 59.0 % of the river cells in G-DRAIN basins, and the base 25.3 %.
-   - The base holds 72.8 % of the breach volume: its basins are few and deep. The band's are many.
+   - The base holds 72.8 % of the breach volume against 25.3 % of the river cells: its remainder needs deep breaches. The band's needs shallow ones (depression counts by class were not recorded).
 3. **R1h, R3a, R3b: the band dominates the river length.**
    - The band holds 61.3-76.2 % of the river cells in G-DRAIN basins, and the base 10.3-20.2 %.
    - On R3b the base holds 52.5 % of the breach volume, and on R3a the interpolation residue 53.9 %. Both volumes are small (0.25 and 0.88 km3).
