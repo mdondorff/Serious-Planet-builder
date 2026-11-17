@@ -71,6 +71,7 @@ fn base() -> Graph {
     let r3 = reach(&c, &o, vec![cell(1, 1), cell(2, 1), cell(3, 1)], attrs(&[3.0e4, 5.0e4, 6.0e4], &[18, 16, 0], 2));
     let mut j = node(NodeKind::TribJunction, cell(2, 1));
     j.marker = Some(Marker { on_reach: r3.id, at_vertex: 1 });
+    j.id = marker_id(BODY, j.kind, Level::L, j.anchor, r3.id);
     let t = reach(&s3, &j, vec![cell(2, 3), cell(2, 2), cell(2, 1)], attrs(&[1.0e4, 1.5e4, 1.6e4], &[30, 20, 16], 1));
     let basin = Basin {
         id: basin_id(BODY, Level::L, cell(3, 3), Some(cell(3, 2))),
@@ -122,27 +123,30 @@ fn reach_mut(g: &mut Graph, up: u64) -> &mut Reach {
 
 /// Recomputes every id from its fields, and the references to them.
 fn rehash(g: &mut Graph) {
-    let mut map = std::collections::BTreeMap::new();
-    for n in g.nodes.iter_mut() {
-        let new = node_id(BODY, n.kind, n.level, n.anchor);
-        map.insert(n.id, new);
-        n.id = new;
-    }
-    let mut rmap = std::collections::BTreeMap::new();
-    for r in g.reaches.iter_mut() {
-        r.up = *map.get(&r.up).unwrap_or(&r.up);
-        r.down = *map.get(&r.down).unwrap_or(&r.down);
-        let new = reach_id(BODY, r.level, r.up, r.down);
-        rmap.insert(r.id, new);
-        r.id = new;
-    }
-    for n in g.nodes.iter_mut() {
-        if let Some(m) = n.marker.as_mut() {
-            m.on_reach = *rmap.get(&m.on_reach).unwrap_or(&m.on_reach);
+    // to a fixed point: a marker's id reads its reach's id, a reach's id its ends' ids
+    for _ in 0..4 {
+        let mut map = std::collections::BTreeMap::new();
+        for n in g.nodes.iter_mut() {
+            let new = node_id_of(BODY, n);
+            map.insert(n.id, new);
+            n.id = new;
         }
-    }
-    for b in g.basins.iter_mut() {
-        b.spill_node = *map.get(&b.spill_node).unwrap_or(&b.spill_node);
+        let mut rmap = std::collections::BTreeMap::new();
+        for r in g.reaches.iter_mut() {
+            r.up = *map.get(&r.up).unwrap_or(&r.up);
+            r.down = *map.get(&r.down).unwrap_or(&r.down);
+            let new = reach_id(BODY, r.level, r.up, r.down);
+            rmap.insert(r.id, new);
+            r.id = new;
+        }
+        for n in g.nodes.iter_mut() {
+            if let Some(m) = n.marker.as_mut() {
+                m.on_reach = *rmap.get(&m.on_reach).unwrap_or(&m.on_reach);
+            }
+        }
+        for b in g.basins.iter_mut() {
+            b.spill_node = *map.get(&b.spill_node).unwrap_or(&b.spill_node);
+        }
     }
     g.sort();
 }
@@ -244,7 +248,7 @@ fn each_injected_structural_failure_is_found() {
         found(&g, &|v| matches!(v, Violation::TwoNodesOneAnchor { .. })),
         "a marker at the end of an inflow on the confluence's anchor"
     );
-    // markers of different kinds may share an anchor; two of one kind may not
+    // markers of different kinds may share an anchor; two of one kind on one reach may not; two of one kind on different reaches may (reading 8)
     let mut g = base();
     let mut e = node(NodeKind::Exception, cell(2, 1));
     e.marker = Some(Marker { on_reach: r3, at_vertex: 1 });
@@ -255,6 +259,13 @@ fn each_injected_structural_failure_is_found() {
     j2.marker = Some(Marker { on_reach: r3, at_vertex: 1 });
     g.nodes.push(j2);
     assert!(found(&g, &|v| matches!(v, Violation::TwoNodesOneAnchor { .. })), "two junctions on one vertex");
+    let mut g = base();
+    let t_id = g.reaches.iter().find(|r| r.up == id(NodeKind::Source, 2, 3)).unwrap().id;
+    let mut j3 = node(NodeKind::TribJunction, cell(2, 1));
+    j3.marker = Some(Marker { on_reach: t_id, at_vertex: 2 });
+    j3.id = marker_id(BODY, j3.kind, Level::L, j3.anchor, t_id);
+    g.nodes.push(j3);
+    assert!(!found(&g, &|v| matches!(v, Violation::TwoNodesOneAnchor { .. })), "junctions on one anchor, on two reaches");
     // markers off their reach: no reach, out of range, another vertex; a marker kind without, and a non-marker with, the field
     for (mk, why) in [
         (Marker { on_reach: 42, at_vertex: 1 }, "its reach does not exist"),
@@ -371,7 +382,7 @@ fn each_injected_edge_failure_is_found() {
 #[test]
 fn each_injected_bed_and_conservation_failure_is_found() {
     let c = id(NodeKind::Confluence, 1, 1);
-    let j = id(NodeKind::TribJunction, 2, 1);
+    let j = base().nodes.iter().find(|n| n.kind == NodeKind::TribJunction).unwrap().id;
     // a bed rise on codes, allowed only at an exception marker on that vertex
     let mut g = base();
     reach_mut(&mut g, cell(1, 1)).attrs.bed = vec![18, 19, 0];
@@ -482,15 +493,16 @@ fn the_diff_separates_topology_from_attributes() {
     let d = diff(&g, &a);
     assert_eq!(d.len(), 1);
     assert!(matches!(&d[0], Change::Field { what: "reach", field, .. } if field == "q_w") && !d[0].is_topology());
-    // topology: a kind change on an anchor retires the node id and the reach that ends there; the junction's marker follows its reach
+    // topology: a kind change on an anchor retires the node id and the reach that ends there; the junction on that reach takes the reach's new id (reading 8), so the tributary ending at it
+    // is retired too
     let mut t = g.clone();
     t.nodes.iter_mut().find(|n| n.kind == NodeKind::OutletSea).unwrap().kind = NodeKind::LakeInlet;
     rehash(&mut t);
     assert_eq!(check(&t), vec![]);
     let d = diff(&g, &t);
-    assert_eq!(d.iter().filter(|c| matches!(c, Change::Removed { .. })).count(), 2, "{d:?}");
-    assert_eq!(d.iter().filter(|c| matches!(c, Change::Added { .. })).count(), 2, "{d:?}");
-    assert!(d.iter().all(|c| c.is_topology() || matches!(c, Change::Field { field, .. } if field == "marker")), "{d:?}");
+    assert_eq!(d.iter().filter(|c| matches!(c, Change::Removed { .. })).count(), 4, "{d:?}");
+    assert_eq!(d.iter().filter(|c| matches!(c, Change::Added { .. })).count(), 4, "{d:?}");
+    assert!(d.iter().all(|c| c.is_topology() || matches!(c, Change::Field { field, .. } if field == "spill_node")), "{d:?}");
 }
 
 // spec: TEST-140
@@ -714,6 +726,32 @@ fn a_reach_carries_a_list_of_exceptions() {
 
 // spec: TEST-140
 #[test]
+fn a_marker_id_holds_its_reach() {
+    // reading 8: marker = hash(body, kind, level, anchor, on_reach)
+    let g = base();
+    let j = g.nodes.iter().find(|n| n.kind == NodeKind::TribJunction).unwrap();
+    let on = j.marker.unwrap().on_reach;
+    assert_eq!(j.id, marker_id(BODY, j.kind, Level::L, j.anchor, on));
+    assert_ne!(j.id, node_id(BODY, j.kind, Level::L, j.anchor), "a marker's id is not its plain node hash");
+    assert_ne!(
+        marker_id(BODY, j.kind, Level::L, j.anchor, on),
+        marker_id(BODY, j.kind, Level::L, j.anchor, on ^ 1),
+        "another reach, another id"
+    );
+    // the plain node hash on a marker is an id mismatch; so is the hash of another reach
+    for wrong in [node_id(BODY, j.kind, Level::L, j.anchor), marker_id(BODY, j.kind, Level::L, j.anchor, on ^ 1)] {
+        let mut b = g.clone();
+        let jid = j.id;
+        b.nodes.iter_mut().find(|n| n.id == jid).unwrap().id = wrong;
+        b.reaches.iter_mut().filter(|r| r.down == jid).for_each(|r| r.down = wrong);
+        assert!(found(&b, &|v| matches!(v, Violation::IdMismatch { id } if *id == wrong)));
+    }
+    // a non-marker's id is still its plain node hash
+    assert!(g.nodes.iter().filter(|n| n.marker.is_none()).all(|n| n.id == node_id(BODY, n.kind, n.level, n.anchor)));
+}
+
+// spec: TEST-140
+#[test]
 fn an_open_slice_reports_its_missing_owners_not_violations() {
     let g = base();
     assert_eq!(missing_owners(&g), vec![]);
@@ -724,7 +762,7 @@ fn an_open_slice_reports_its_missing_owners_not_violations() {
     s.nodes.retain(|n| n.id != o);
     s.reaches.retain(|r| r.id != r3);
     assert_eq!(check_with(&s, false, true), vec![], "an open slice validates");
-    let j = id(NodeKind::TribJunction, 2, 1);
+    let j = g.nodes.iter().find(|n| n.kind == NodeKind::TribJunction).unwrap().id;
     assert_eq!(missing_owners(&s), vec![(j, r3)]);
     assert!(!check(&s).is_empty(), "closed, the same slice is invalid");
 }
