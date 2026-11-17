@@ -5,6 +5,7 @@ use planet_generators::bake::flood::priority_flood_with;
 use planet_generators::bake::route::{route_rules_filled, RoundRules, Routing, NONE};
 use planet_generators::bake::Grid;
 
+use crate::river_gate_graph::{agreement, budget_field, budget_report, graph_report, partition_report, G2Input, G2Report};
 use crate::river_suite::{
     corridor_bar_m, measure_suite, network, trunk_burn, trunk_corridor, Network, Snap, SuiteInput, SuiteReport, TrunkReport, CORRIDOR_K,
     NETWORK_KM2,
@@ -93,6 +94,8 @@ pub struct GateInput<'a> {
     pub outside_drains: bool,
     /// H1's trunk reaches in the grid's cells, each upstream first (empty when the input has none; the trunk line then says so).
     pub trunks: &'a [Vec<(f64, f64)>],
+    /// The G2 inputs (BUILD-060): a canonical river graph, the per-stage budget fields, a partition pair; `None` for a row without them (B).
+    pub g2: Option<&'a G2Input<'a>>,
 }
 
 /// The p99 and the maximum of a set of values (0 for none).
@@ -238,6 +241,8 @@ pub struct GateReport {
     pub corridor_bar_m: f64,
     /// The channel network at each of `params.network_km2` (BUILD-059): drainage density and the Strahler bifurcation ratio.
     pub networks: Vec<Network>,
+    /// The G2 columns (BUILD-060), when the input names a graph, stages or a partition pair.
+    pub g2: Option<G2Report>,
 }
 
 fn share(n: usize, of: usize) -> f64 {
@@ -411,8 +416,15 @@ impl GateReport {
 
     /// The fields as one printed line: `RIVER-GATE fields: name=value ...` (values hold no space).
     pub fn fields_line(&self) -> String {
-        let f: Vec<String> = self.fields().into_iter().map(|(k, v)| format!("{k}={v}")).collect();
+        let mut f: Vec<String> = self.fields().into_iter().map(|(k, v)| format!("{k}={v}")).collect();
+        f.extend(self.g2.iter().flat_map(|g| g.columns()).map(|(k, v, _)| format!("{k}={v}")));
         format!("RIVER-GATE fields: {}", f.join(" "))
+    }
+
+    /// The gate class of every G2 column (BUILD-060): `RIVER-GATE classes: name=class ...`, or `None` without G2 columns.
+    pub fn classes_line(&self) -> Option<String> {
+        let c: Vec<String> = self.g2.iter().flat_map(|g| g.columns()).map(|(k, _, c)| format!("{k}={}", c.name())).collect();
+        (!c.is_empty()).then(|| format!("RIVER-GATE classes: {}", c.join(" ")))
     }
 
     /// The printed report: one line per measure, the same bits for the same input.
@@ -511,6 +523,7 @@ impl GateReport {
         .chain(std::iter::once(self.trunk_line()))
         .chain(std::iter::once(self.corridor_line()))
         .chain(self.network_lines())
+        .chain(self.g2.iter().flat_map(|g| g.lines()))
         .collect()
     }
 
@@ -952,5 +965,22 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
             .iter()
             .map(|&a| network(g, z, &routing.receiver, &area, input.inside, input.sea_level_m, a * 1.0e6))
             .collect(),
+        g2: input.g2.map(|x| {
+            let land: Vec<bool> = z.iter().map(|&v| v > input.sea_level_m).collect();
+            let budget =
+                x.stages.map(|_| budget_field(input.start, g.w(), g.h(), (params.h1_cell_m / g.dx()).round() as usize, g.dx(), R_RELIEF_M));
+            G2Report {
+                graph: x.graph.map(|gr| graph_report(gr, &x.window, input.inside, &land, g.dx())),
+                agreement: x
+                    .graph
+                    .map(|gr| params.network_km2.iter().map(|&a| agreement(gr, &x.window, &area, &land, input.inside, a * 1.0e6)).collect())
+                    .unwrap_or_default(),
+                budget: x.stages.zip(budget.as_ref()).map(|(st, b)| budget_report(st, b, &land, input.inside, x.residual_records, x.graph)),
+                partition: x.partition.map(|(a, b)| partition_report(a, b)),
+            }
+        }),
     }
 }
+
+/// `R_relief` of the budget field (G0 contracts section 6), metres.
+pub const R_RELIEF_M: f64 = 25_000.0;

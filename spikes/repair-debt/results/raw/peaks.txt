@@ -1,0 +1,11 @@
+# peak.ps1 lines (wall time incl. setup, peak working set) of the ladder runs and the KS dumps
+ladder r1h: BAKE-TIME 496 s, peak working set 4,57 GB, exit 
+ladder r3a: BAKE-TIME 283 s, peak working set 4,60 GB, exit 
+ladder r3b: BAKE-TIME 312 s, peak working set 4,50 GB, exit 
+ladder m1: BAKE-TIME 409 s, peak working set 4,45 GB, exit 
+ladder f1: BAKE-TIME 357 s, peak working set 4,50 GB, exit 
+ks_dump r1h: BAKE-TIME 127 s, peak working set 3,87 GB, exit 
+ks_dump r3a: BAKE-TIME 143 s, peak working set 3,92 GB, exit 
+ks_dump r3b: BAKE-TIME 125 s, peak working set 3,95 GB, exit 
+ks_dump m1: BAKE-TIME 138 s, peak working set 3,99 GB, exit 
+ks_dump f1: BAKE-TIME 190 s, peak working set 3,99 GB, exit 

@@ -1,0 +1,12 @@
+window,basin,depth_m,cells,channel_km,overlap_median,overlap_k5x2,origin,overflows,class
+r3b-today,24,4.25,91,66.03,-,0.923,real-lake,true,Lake
+r3b-today,25,4.08,128,99.85,-,0.984,real-lake,true,Lake
+r3b-today,26,2.98,32,25.31,-,1.000,real-lake,true,Lake
+r3b-today,28,3.14,23,11.84,-,0.957,real-lake,true,Lake
+r3b-today,31,1.37,22,18.83,-,1.000,real-lake,true,Lake
+r3b-today,32,0.87,5,4.35,-,1.000,real-lake,true,Lake
+r3b-today,33,2.43,81,71.83,-,1.000,real-lake,true,Lake
+r3b-today,34,0.63,5,3.87,-,1.000,real-lake,true,Lake
+r3b-today,35,1.10,14,12.90,-,1.000,real-lake,true,Lake
+r3b-today,37,1.10,21,17.82,-,1.000,real-lake,true,Lake
+r3b-today,38,0.84,4,2.92,-,1.000,real-lake,true,Lake

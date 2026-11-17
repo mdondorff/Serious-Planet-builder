@@ -19,6 +19,7 @@ use planet_cache::river_gate::{
     border_inside, commit_differences, key_note, lay_store_ground, measure, raw_grid_arg, raw_grid_heights, Crossing, GateInput,
     GateParams, LWindow, RawGrid, WindowIdentity, GRID_BORDER, GRID_CELL_M,
 };
+use planet_cache::river_gate_graph::{read_graph, read_stages, G2Input, Window};
 use planet_core::{Face, TangentWarp, Vec3};
 use planet_generators::global::{read_elevation_c1, GlobalSample, LatticeSource, ReadError};
 use planet_generators::runoff::{discharge_weight, pet_mm, runoff_mm};
@@ -106,6 +107,7 @@ fn grid_gate(arg: &str, params: &GateParams) -> Result<(), String> {
             sea_level_m: sea,
             outside_drains: false,
             trunks: &[],
+            g2: None,
         },
         params,
     );
@@ -121,7 +123,19 @@ fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let no_key_check = args.iter().any(|a| a == "--no-key-check");
     let args: Vec<String> = args.into_iter().filter(|a| a != "--no-key-check").collect();
-    let known = ["--window", "--margin", "--store", "--min-cells", "--d", "--threads", "--network-km2", "--grid"];
+    let known = [
+        "--window",
+        "--margin",
+        "--store",
+        "--min-cells",
+        "--d",
+        "--threads",
+        "--network-km2",
+        "--grid",
+        "--graph",
+        "--stages",
+        "--partition",
+    ];
     let mut k = 0;
     while k < args.len() {
         if !known.contains(&args[k].as_str()) {
@@ -309,6 +323,34 @@ fn main() -> Result<(), String> {
     });
     let grid = planet_generators::bake::Grid::new(w, h, front.solve.grid.dx() / l as f64);
     let outlet = grid.outlets(&surface, sea_level_m);
+    // The G2 inputs (BUILD-060): a canonical graph, the per-stage budget fields, a partition pair; global L ids against this window's origin.
+    let graph = value(&args, "--graph").map(read_graph).transpose()?;
+    let partition = match value(&args, "--partition") {
+        None => None,
+        Some(v) => {
+            let (a, b) = v.split_once(',').ok_or_else(|| format!("--partition one,two: two canonical graph files, not '{v}'"))?;
+            Some((read_graph(a)?, read_graph(b)?))
+        }
+    };
+    let (stages, residual_records) = match value(&args, "--stages") {
+        None => (None, None),
+        Some(dir) => {
+            let (st, rec) = read_stages(Path::new(dir), w * h)?;
+            (Some(st), rec)
+        }
+    };
+    if stages.is_some() && (x0 % l as i64 != 0 || y0 % l as i64 != 0) {
+        return Err(format!(
+            "--stages: the budget field reads H1 blocks of {l} L cells, and the window's origin ({x0}, {y0}) is not on an H1 corner"
+        ));
+    }
+    let g2_input = (graph.is_some() || partition.is_some() || stages.is_some()).then(|| G2Input {
+        window: Window { x0: x0 as u64, y0: y0 as u64, w, h },
+        graph: graph.as_ref(),
+        stages: stages.as_deref(),
+        residual_records,
+        partition: partition.as_ref().map(|(a, b)| (a, b)),
+    });
     let report = measure(
         &GateInput {
             grid: &grid,
@@ -322,6 +364,7 @@ fn main() -> Result<(), String> {
             sea_level_m,
             outside_drains: store.is_some(),
             trunks: &trunks,
+            g2: g2_input.as_ref(),
         },
         &params,
     );
@@ -330,5 +373,8 @@ fn main() -> Result<(), String> {
         println!("{line}");
     }
     println!("{}", report.fields_line());
+    if let Some(c) = report.classes_line() {
+        println!("{c}");
+    }
     Ok(())
 }
