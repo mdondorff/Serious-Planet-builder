@@ -2348,12 +2348,14 @@ fn main() -> Result<(), String> {
         // the basins again, on the KS output with every L reach as spill receivers and inlets (reading 5: the L kept rule reads KS1; crusader's G1d order: the first pass on KS0 gave
         // KG-trib its kept set); the graph takes this pass's basins and nodes; its kept basins and H1's lake water are KV's and KC's protected cells
         if on("basins") && on("kg-trib") {
-            use planet_generators::bake::basins_rg::{produce_ids, BasinParams, CellIds};
+            use planet_generators::bake::basins_rg::{produce_ids_avoiding, BasinParams, CellIds};
             use planet_generators::bake::river_graph::Represented;
             let t2 = Instant::now();
             let all: Vec<GReach> = gd.reaches.iter().filter(|r| r.level == Level::L).cloned().collect();
             let ids = CellIds { gid: &gid_l, local: &to_local };
-            let pb = produce_ids(&grid_d, &ks_d, &outlet_d, &all, &tile_l, &BasinParams::l(BODY), &ids);
+            // spikes #142: the cells of the markers on the reaches (KG-trunk's exceptions, KG-trib's junctions); an inlet passes them (reading 1)
+            let marker_cells: BTreeSet<usize> = gd.nodes.iter().filter(|x| x.level == Level::L && x.kind.is_marker()).filter_map(|x| to_local(x.anchor)).collect();
+            let pb = produce_ids_avoiding(&grid_d, &ks_d, &outlet_d, &all, &tile_l, &BasinParams::l(BODY), &ids, &marker_cells);
             for p in 0..n_l {
                 kept[p] = protected_h1[parent(p)];
             }

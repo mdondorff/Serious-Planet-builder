@@ -233,6 +233,22 @@ pub fn produce_ids(
     p: &BasinParams,
     ids: &CellIds,
 ) -> Produced {
+    produce_ids_avoiding(grid, z, outlet, reaches, owner, p, ids, &std::collections::BTreeSet::new())
+}
+
+/// [`produce_ids`] with the grid cells of markers already on the reaches (spikes #142, spike only): a reach's `lake_inlet` goes on its first vertex inside the kept basin that holds no
+/// marker (a marker shares an anchor with a non-marker only as its reach's up node at vertex 0, reading 1); none when the reach leaves the basin first.
+#[allow(clippy::too_many_arguments)]
+pub fn produce_ids_avoiding(
+    grid: &Grid,
+    z: &[f64],
+    outlet: &[bool],
+    reaches: &[Reach],
+    owner: &dyn Fn(usize) -> Domain,
+    p: &BasinParams,
+    ids: &CellIds,
+    markers: &std::collections::BTreeSet<usize>,
+) -> Produced {
     let gid = ids.gid;
     let hy = hierarchy(grid, z, outlet);
     let nn = hy.nodes.len();
@@ -458,7 +474,23 @@ pub fn produce_ids(
             }
             if let Some(b) = basin_at(c) {
                 if keep[b as usize] == Keep::Kept && prev.and_then(|q| basin_at(q)) != Some(b) {
-                    inlet(c, &mut nodes);
+                    // spikes #142: past the marker cells, while inside the basin; never onto another node's cell or the last vertex (unless its own inlet)
+                    let mut j = k;
+                    while j < r.vertices.len() {
+                        let Some(cj) = (ids.local)(r.vertices[j]) else { break };
+                        if basin_at(cj) != Some(b) {
+                            break;
+                        }
+                        let own = node_id(p.body, NodeKind::LakeInlet, p.level, gid(cj)) == r.down;
+                        if (j + 1 == r.vertices.len() && !own) || (node_cells.contains(&cj) && !(j + 1 == r.vertices.len() && own)) {
+                            break;
+                        }
+                        if !markers.contains(&cj) {
+                            inlet(cj, &mut nodes);
+                            break;
+                        }
+                        j += 1;
+                    }
                     break;
                 }
             }
