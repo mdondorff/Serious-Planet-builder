@@ -2302,6 +2302,11 @@ fn main() -> Result<(), String> {
     g.reaches.extend(extra.reaches.into_iter().filter(|x| seen_r.insert(x.id)));
     let mut seen_b: HashSet<u64> = g.basins.iter().map(|x| x.id).collect();
     g.basins.extend(extra.basins.into_iter().filter(|x| seen_b.insert(x.id)));
+    // a junction marker a domain made for a tributary its core does not own (one it extracted in its halo) has no reach ending at it in the stitched graph: dropped
+    let ends: HashSet<u64> = g.reaches.iter().map(|r| r.down).collect();
+    let before = g.nodes.len();
+    g.nodes.retain(|x| x.kind != NodeKind::TribJunction || ends.contains(&x.id));
+    println!("RG stitch: {} junction markers without a reach ending at them dropped", before - g.nodes.len());
     g.sort();
     drop(ks0);
     println!("RG domains: {} nodes, {} reaches, {} basins after the stitch; landmass items with different contents in two domains: {landmass_conflicts}", g.nodes.len(), g.reaches.len(), g.basins.len());
