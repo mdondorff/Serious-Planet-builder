@@ -11,7 +11,7 @@ use std::time::Instant;
 use planet_cache::global_store::{class_inputs, class_inputs_key, GlobalWorld};
 use planet_cache::l_writer::Commit;
 use planet_cache::pack::TileStore;
-use planet_cache::region_bake::{lattice_direction, region_front, RegionSpec, LOCAL_PER_REGIONAL};
+use planet_cache::region_bake::{lattice_direction, region_front, solve_region, RegionSpec, LOCAL_PER_REGIONAL};
 use planet_cache::river_gate::{commit_differences, lay_store_ground, LWindow, WindowIdentity};
 use planet_cache::river_suite::corridor_bar_m;
 use planet_core::{Face, TangentWarp, Vec3};
@@ -191,6 +191,12 @@ fn sill_of(a: &[(f64, u32)], b: &[(f64, u32)], lw: usize, ax: usize, ay: usize, 
 /// Node heights and forward sills over the H1 grid `rw` x `rh` (L window `rw L` x `rh L`), S0 read by `s0(L index)`; `sill_noise` adds a uniform +-amplitude
 /// per edge (then lifts the sill to its nodes).
 fn nodes_and_sills(s0: &(dyn Fn(usize) -> f64 + Sync), rw: usize, rh: usize, threads: usize, sill_noise: Option<(u64, f64)>) -> Sills {
+    nodes_and_sills_rank(s0, rw, rh, threads, sill_noise, 0)
+}
+
+/// [`nodes_and_sills`] with the node height the `rank`-th lowest L cell of its block (0: the lowest; 32: the median of 64); the sills stay the minimax between
+/// the blocks' lowest cells, lifted to the higher of the two node heights.
+fn nodes_and_sills_rank(s0: &(dyn Fn(usize) -> f64 + Sync), rw: usize, rh: usize, threads: usize, sill_noise: Option<(u64, f64)>, rank: usize) -> Sills {
     let lw = rw * L;
     let n = rw * rh;
     let mut h = vec![0f64; n];
@@ -208,15 +214,15 @@ fn nodes_and_sills(s0: &(dyn Fn(usize) -> f64 + Sync), rw: usize, rh: usize, thr
                     let next = if j + 1 < rh { row(j + 1) } else { Vec::new() };
                     for i in 0..rw {
                         let c = (j - j0) * rw + i;
-                        hc[c] = cur[i][0].0;
-                        lc[c] = cur[i][0].1;
+                        hc[c] = cur[i][rank].0;
+                        lc[c] = cur[i][rank].1;
                         for (k, &(ox, oy)) in FWD.iter().enumerate() {
                             let (ni, nj) = (i as i64 + ox, j as i64 + oy);
                             if ni < 0 || ni >= rw as i64 || nj >= rh as i64 {
                                 continue;
                             }
                             let other = if oy == 0 { &cur[ni as usize] } else { &next[ni as usize] };
-                            let mut v = sill_of(&cur[i], other, lw, i, j, (ox, oy));
+                            let mut v = sill_of(&cur[i], other, lw, i, j, (ox, oy)).max(cur[i][rank].0).max(other[rank].0);
                             if let Some((seed, amp)) = sill_noise {
                                 let id = ((j * rw + i) as u64) * 4 + k as u64;
                                 v = (v + amp * noise(seed, id)).max(cur[i][0].0).max(other[0].0);
@@ -1657,6 +1663,7 @@ fn main() -> Result<(), String> {
     let tag = value(&args, "--tag").unwrap_or("w").to_string();
     let base_today = value(&args, "--base") == Some("today");
     let low = value(&args, "--centre") != Some("maximin");
+    let attrib = args.iter().any(|a| a == "--attrib");
     std::fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;
     let (face, seed) = (Face(win[0] as u8), win[5] as u64);
     let region = (win[1], win[2], win[3], win[4]);
@@ -2082,6 +2089,121 @@ fn main() -> Result<(), String> {
                 chain.len()
             );
         }
+    }
+
+    // ---- SPIKE-134 #134b: the origin of each kept H1 basin on trunks in the box
+    if attrib {
+        let t = Instant::now();
+        let hy = &h1.hydro;
+        // K5 with twice the rounds
+        let spec2 = RegionSpec { rounds: spec.rounds * 2, ..spec };
+        let solve2 = solve_region(&spec2, &base)?;
+        let (mut weight2, mut runoff2, mut evap2) = (vec![1.0f32; cells], vec![0.0f32; cells], vec![0.0f32; cells]);
+        for c in (0..cells).filter(|&c| solve2.zs[c] > 0.0) {
+            let (ro, ev, wt) = climate(dir_h1(c));
+            runoff2[c] = ro as f32;
+            evap2[c] = ev as f32;
+            weight2[c] = wt as f32;
+        }
+        let k6p_of = |sl: &Sills, wt: &[f32], ro: &[f32], ev: &[f32]| -> H1 {
+            let sill = |p: usize, d: usize, q: usize| sl.at(p, d, q);
+            let f = flood(grid, &sl.h, &sill, outlet, eps);
+            let r = route_sills(grid, &f, &sill, outlet, stream, wt, true);
+            h1_from(grid, &sl.h, &f, r, outlet, ro, ev)
+        };
+        let (x2, median): (H1, Option<H1>) = if base_today {
+            let r = route_rules(grid, &solve2.zs, outlet, eps, stream, 0.0, Some(&weight2), RoundRules::ROUND);
+            let f = priority_flood_with(grid, &solve2.zs, outlet, eps, true);
+            (h1_from(grid, &solve2.zs, &f, r, outlet, &runoff2, &evap2), None)
+        } else {
+            let field2 = RegionField::new(face, REGIONAL, (sri0 as i64, srj0 as i64), rw, rh, (0..cells).map(|c| (solve2.zs[c] - solve.zb[c]) as f32).collect());
+            let s0_2 = |p: usize| {
+                let d = dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64);
+                start[p] - front.regional_field.at(d) + field2.at(d)
+            };
+            let sl2 = nodes_and_sills(&s0_2, rw, rh, threads, None);
+            let x2 = k6p_of(&sl2, &weight2, &runoff2, &evap2);
+            drop(sl2);
+            let slm = nodes_and_sills_rank(&|c: usize| start[c], rw, rh, threads, None, (L * L) / 2);
+            (x2, Some(k6p_of(&slm, &weight, &runoff, &evap)))
+        };
+        let in_box_h1 = |c: usize| {
+            let (i, j) = (sri0 + c % rw, srj0 + c / rw);
+            i >= region.0 && i <= region.1 && j >= region.2 && j <= region.3
+        };
+        let mut on_seg = vec![false; cells];
+        let mut step = vec![0f64; cells];
+        for sg in &hy.segments {
+            let mut c = sg.up;
+            loop {
+                on_seg[c as usize] = true;
+                if c == sg.down {
+                    break;
+                }
+                let r = h1.routing.receiver[c as usize];
+                let d = (0..8).find(|&d| grid.neighbour(c as usize, d) == Some(r as usize)).expect("a receiver is a neighbour");
+                step[c as usize] = grid.distance_at(c as usize, d) / 1000.0;
+                c = r;
+            }
+        }
+        let mut members: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        for c in 0..cells {
+            if hy.label[c] != NONE {
+                members.entry(hy.label[c] as usize).or_default().push(c);
+            }
+        }
+        let frac = |cs: &[usize], other: &H1| cs.iter().filter(|&&c| other.hydro.label[c] != NONE).count() as f64 / cs.len().max(1) as f64;
+        let mut f = std::fs::File::create(out_dir.join(format!("{tag}-origin.csv"))).map_err(|e| e.to_string())?;
+        writeln!(f, "window,basin,depth_m,cells,channel_km,overlap_median,overlap_k5x2,origin,overflows,class").map_err(|e| e.to_string())?;
+        let mut tally: BTreeMap<String, (usize, f64)> = BTreeMap::new();
+        let mut total_km = 0.0;
+        for c in 0..cells {
+            if on_seg[c] && in_box_h1(c) && !outlet[c] {
+                total_km += step[c];
+            }
+        }
+        for (&b, cs) in &members {
+            let km: f64 = cs.iter().filter(|&&c| on_seg[c] && in_box_h1(c) && !outlet[c]).map(|&c| step[c]).sum();
+            if km <= 0.0 {
+                continue;
+            }
+            let bs = &hy.basins[b];
+            let fm = median.as_ref().map(|m| frac(cs, m));
+            let fx = frac(cs, &x2);
+            // origin, in order: K6''s node height (the basin goes with the median node height), K5 not converged (it shrinks under half or vanishes with twice
+            // the rounds), else real: a lake when the water balance overflows, otherwise endorheic (a dry or seasonal flat)
+            let origin = if fm.is_some_and(|v| v < 0.5) {
+                "k6p-node"
+            } else if fx < 0.5 {
+                "k5"
+            } else if bs.overflows {
+                "real-lake"
+            } else {
+                "real-endorheic"
+            };
+            let e = tally.entry(origin.to_string()).or_insert((0, 0.0));
+            e.0 += 1;
+            e.1 += km;
+            writeln!(
+                f,
+                "{tag},{b},{:.2},{},{km:.2},{},{fx:.3},{origin},{},{:?}",
+                bs.spill_m - bs.floor_m,
+                cs.len(),
+                fm.map_or("-".to_string(), |v| format!("{v:.3}")),
+                bs.overflows,
+                bs.class
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        let rows: Vec<String> = tally.iter().map(|(k, (n, km))| format!("{k} {n} basins {km:.0} km ({:.2} %)", 100.0 * km / total_km.max(1e-9))).collect();
+        println!(
+            "KG134b origins of the kept H1 basins on trunks in the box (river length of {total_km:.0} km): {}; K5 x2 kept basins {} (base {}){}; {:.1} s",
+            rows.join(", "),
+            x2.hydro.basins.len(),
+            hy.basins.len(),
+            median.as_ref().map_or(String::new(), |m| format!(", median node {} kept basins", m.hydro.basins.len())),
+            t.elapsed().as_secs_f64()
+        );
     }
 
     // ---- the graph
