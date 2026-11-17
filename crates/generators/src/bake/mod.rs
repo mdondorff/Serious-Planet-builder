@@ -26,6 +26,7 @@ pub mod h0;
 pub mod hydro;
 pub mod inputs;
 pub mod k7;
+pub mod kv_kc;
 pub mod lakes;
 pub mod map;
 pub mod memo;

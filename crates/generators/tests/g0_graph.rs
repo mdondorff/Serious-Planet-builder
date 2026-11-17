@@ -59,16 +59,18 @@ fn tile_domain(c: usize) -> Domain {
 }
 
 /// What the build keeps besides the graph.
-struct Built {
-    graph: Graph,
-    trunk_l: Vec<usize>,
-    trunk_l_id: u64,
-    budget_at_rise: f64,
-    rise_m: f64,
+pub(crate) struct Built {
+    pub(crate) graph: Graph,
+    pub(crate) trunk_l: Vec<usize>,
+    pub(crate) trunk_l_id: u64,
+    pub(crate) budget_at_rise: f64,
+    pub(crate) rise_m: f64,
+    /// The budget (contract section 6) of every H1 cell; an L cell reads its H1 cell's (SPIKE-132).
+    pub(crate) budget_h1: Vec<f64>,
 }
 
 /// The fixture's expected graph.
-fn expected(fx: &Fixture) -> Built {
+pub(crate) fn expected(fx: &Fixture) -> Built {
     let h1 = GlobalGrid::new(H1_N, RADIUS_M);
     let l = GlobalGrid::new(L_N, RADIUS_M);
     let (gh, gl) = (Grid::cube(H1_N, RADIUS_M), Grid::cube(L_N, RADIUS_M));
@@ -433,7 +435,8 @@ fn expected(fx: &Fixture) -> Built {
     g.reaches.extend(reaches_l);
     g.basins = vec![basin_h, basin_l];
     g.sort();
-    Built { graph: g, trunk_l, trunk_l_id, budget_at_rise, rise_m: rise }
+    let budget_h1: Vec<f64> = (0..6 * H1_N * H1_N).map(budget_h).collect();
+    Built { graph: g, trunk_l, trunk_l_id, budget_at_rise, rise_m: rise, budget_h1 }
 }
 
 fn ids_of(s: &Graph) -> Vec<u64> {

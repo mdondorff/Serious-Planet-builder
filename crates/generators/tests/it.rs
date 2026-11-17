@@ -122,6 +122,8 @@ mod global_reader;
 mod height_fields;
 #[path = "ice.rs"]
 mod ice;
+#[path = "kv_kc_g1f.rs"]
+mod kv_kc_g1f;
 #[path = "lattice_normals.rs"]
 mod lattice_normals;
 #[path = "line_stage.rs"]
