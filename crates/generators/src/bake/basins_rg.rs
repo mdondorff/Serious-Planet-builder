@@ -463,6 +463,9 @@ pub fn produce_ids_avoiding(
     }
     // inlets: each given reach entering a kept basin gets a lake_inlet on its first vertex inside it
     // (SPIKE-133: a reach that starts inside a kept basin does not enter it there: from its second vertex, and only from outside that basin)
+    // spikes #142: the markers this producer made (spill trib_junctions) are passed like the given ones
+    let own_markers: std::collections::BTreeSet<usize> =
+        nodes.values().filter(|x| x.kind.is_marker()).filter_map(|x| (ids.local)(x.anchor)).collect();
     for r in &sorted_reaches {
         for k in 1..r.vertices.len() {
             let (Some(c), prev) = ((ids.local)(r.vertices[k]), (ids.local)(r.vertices[k - 1])) else { continue };
@@ -485,7 +488,7 @@ pub fn produce_ids_avoiding(
                         if (j + 1 == r.vertices.len() && !own) || (node_cells.contains(&cj) && !(j + 1 == r.vertices.len() && own)) {
                             break;
                         }
-                        if !markers.contains(&cj) {
+                        if !markers.contains(&cj) && !own_markers.contains(&cj) {
                             inlet(cj, &mut nodes);
                             break;
                         }
