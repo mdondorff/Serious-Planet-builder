@@ -1,0 +1,5 @@
+KG sea at L: 0 cells of S0 at or below the sea level, 0 of them inland (not connected to an H1 sea outlet or the window's edge; 0.000 % of the window)
+KG graph: 13801 nodes, 5680 reaches (2840 at L, 68598 L vertices) in 0.5 s; L reaches skipped (no route or a one-cell chain) 0; routes meeting the sea before their down node (ended at an outlet_sea there) 0, of them on an inland cell 0; anchor collisions (two kinds on one L cell) 0; rise_over_budget reaches 727; L nodes standing for two or more H1 nodes 0
+KG validators (open slice): 15 violations {"TwoNodesOneAnchor": 15}
+memory allocation of 10904624 bytes failed
+xtask: `C:/DEV/Serious-Planet-Builder/.claude/worktrees/sonnet-crusader-c1a4f2/target/release/examples/kg_trib.exe --window 4,6600,7219,10200,10819,15 --threads 8 --out C:/DEV/Serious-Planet-Builder/.claude/worktrees/sonnet-crusader-c1a4f2/target/g1d-windows --tag m1-rg1 --z C:/DEV/SeriousPlanetData/tmp/ks-g1b2/k6p/m1/ks0-k6p-8160x8160.f64` failed with exit code: 0xc0000409

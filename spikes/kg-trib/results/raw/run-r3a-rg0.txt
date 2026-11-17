@@ -1,0 +1,13 @@
+KG sea at L: 21084251 cells of S0 at or below the sea level, 804618 of them inland (not connected to an H1 sea outlet or the window's edge; 1.208 % of the window)
+KG graph: 34181 nodes, 23418 reaches (11709 at L, 207324 L vertices) in 1.4 s; L reaches skipped (no route or a one-cell chain) 0; routes meeting the sea before their down node (ended at an outlet_sea there) 2865, of them on an inland cell 2764; anchor collisions (two kinds on one L cell) 20; rise_over_budget reaches 320; L nodes standing for two or more H1 nodes 25
+KG validators (open slice): 20 violations {"TwoNodesOneAnchor": 20}
+G1d violation       5 TwoNodesOneAnchor Confluence+OutletSea
+G1d violation       4 TwoNodesOneAnchor LakeInlet+TribJunction
+G1d violation      14 TwoNodesOneAnchor OutletSea+Source
+G1d violation       1 TwoNodesOneAnchor OutletSea+Source+TribJunction
+G1d RG-0 (S0, KS off); D8 initiation, A_crit 1 km2: basins 101.9 s (9461 kept L basins, 3.0 % of the box's land), extractor 78.0 s; runoff 2.71e-8 m/s; cells below S0 0
+G1d box: 102054 tributary reaches, 905360 channel cells, 92202 km, land 207258 km2, density 0.445 km/km2; trunks given 11709
+G1d box: reach length p50 611 m, p90 2036 m, max 9977 m; Strahler 1: 61743 (end area p50 1.65 km2); 2: 28036 (end area p50 6.35 km2); 3: 11278 (end area p50 22.84 km2); 4: 990 (end area p50 49.80 km2); 5: 7 (end area p50 141.03 km2); ends {"Confluence": 80448, "LakeInlet": 7388, "OutletSea": 6947, "TileCrossing": 1496, "TribJunction": 5775}
+G1d window: 235972 reaches, 280102 nodes; open ends 384; trunk area breaks 2909; channel cells in flooded depressions 128592
+G1d validators (open slice, G1c's graph plus the tributaries): 24 violations {"TwoNodesOneAnchor": 24} (G1c's alone: 20 {"TwoNodesOneAnchor": 20})
+G1d done in 183.8 s; map r3a-rg0-g1d.ppm (1360 x 1360, 6 L cells a pixel)

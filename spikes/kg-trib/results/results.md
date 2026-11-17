@@ -3,7 +3,7 @@
 Opened: 2026-11-17 (lead #158)
 Question: does extractor-1 extract the L tributaries behind the reach contract, with ids, tile crossings and the halo seed, on the fixture? The method is the canonical flood plus clipped MFD (GEN-141), with trunk cells as forced receivers and `A_crit` 1 km2.
 Why it matters: G1d of the river-graph plan; KV and KC (G1f) read its beds and `q_w`.
-Time box: about 2 days (used: about 0.5 day).
+Time box: about 2 days (used: about 1 day).
 Success criteria:
 - every reach valid, none dangling or duplicate;
 - conservation and Strahler at confluences;
@@ -19,7 +19,7 @@ Inputs:
 - The trunks are the fixture's expected L trunk image (TEST-140) with its beds and attributes.
 - KS is off (labelled): the stage input is `S0`.
 - The L basins come from SPIKE-130's producer on `S0`.
-- The five windows wait for spikes' G1c trunks (#132) and explorer's KS0 (#164).
+- The five windows (section 5) run on spikes' G1c trunks (#132), on `S0` (RG-0) and explorer's KS0 (RG-1, #164).
 
 ## 1. Method
 | Step | Rule |
@@ -96,6 +96,54 @@ Halo cases, reduced halo of 2 H1 cells (1.6 km; labelled: the fixture's body is 
 - Keep the 13 km halo; keep `a_ext` as the large-river correction only (finding 4); measure the halo on the five windows with KS0.
 - G1d next: the five windows on KS0 once spikes' G1c trunks and explorer's KS0 are readable; then the density, length and junction-angle distributions there (junction angles not measured here).
 
+## 5. Five windows (lead, 2026-11-17)
+Setup:
+- Spike branch `spike/g1d`, `crates/cache/examples/kg_trib.rs`: SPIKE-129's G1c example (`spike/g1c-trunk-k6p-2` at e29c0bd6, on main's types). It runs the extractor on G1c's L trunks (K6' base) after the trunk graph.
+- Initiation on the D8 area (reading 14), `A_crit` 1 km2.
+- RG-0, the control rung: the stage input is `S0`.
+- RG-1: explorer's KS0 (`spike/ks-g1b`, H from SPIKE-127's K6').
+- The kept L basins are SPIKE-130's producer on the stage input.
+- Runoff: the window's mean (H1 land cells).
+- Validation: GEN-189 on G1c's graph plus the tributaries (an open slice).
+- Counts are in the region's box (a reach counts when its second vertex lies there).
+
+| Measure (RG-0 / RG-1) | R1h | R3a | R3b | M1 | F1 |
+|---|---|---|---|---|---|
+| Tributary reaches | 81,720 / 82,157 | 102,054 / 102,388 | 110,944 / 110,988 | 98,412 / not run | 109,389 / 109,607 |
+| Density, km/km2 | 0.381 / 0.383 | 0.445 / 0.446 | 0.398 / 0.398 | 0.326 / - | 0.325 / 0.326 |
+| Reach length p50 / p90, m (RG-0) | 611 / 1,832 | 611 / 2,036 | 611 / 1,731 | 611 / 1,832 | 509 / 1,629 |
+| Max order; order-1 end area p50 (RG-0) | 4; 1.69 km2 | 5; 1.65 km2 | 5; 1.64 km2 | 4; 1.70 km2 | 4; 1.76 km2 |
+| Ends (RG-0): confluence / lake inlet / junction / sea | 60,190 / 14,916 / 2,765 / 2,689 | 80,448 / 7,388 / 5,775 / 6,947 | 84,607 / 15,715 / 7,590 / 1,602 | 70,999 / 24,602 / 1,455 / 0 | 77,097 / 28,021 / 1,901 / 1,194 |
+| Kept L basins; share of the box's land (RG-0) | 46,130; 6.8 % | 9,461; 3.0 % | 29,572; 5.6 % | 103,066; 22.3 % | 44,299; 8.7 % |
+| Violations added to G1c's (RG-0 / RG-1) | 1 / 2 | 4 / 6 | 0 / 0 | 0 / - | 0 / 0 |
+| Run after the lock; peak commit (RG-0) | 302 s; 14.0 GB | 225 s; 7.9 GB | 340 s; 20.3 GB | 944 s; 55.5 GB | 351 s; 8.1 GB |
+
+- Validators:
+  - The added violations are `TwoNodesOneAnchor` at cells where G1c's nodes already meet: a confluence and an outlet, a lake inlet beside a junction, a source on a sea cell.
+  - No conservation break, no invalid marker, no dangling reach.
+  - Before two fixes in this run, R1h had 7,123 violations. The fixes: the junction vertex keeps the tributary's own areas, sharing only the trunk's bed; a tributary reaching a trunk's last vertex ends at that trunk's down node.
+- RG-1 against RG-0: within 0.6 % on every measure. KS0 lowers 1.0-1.8 M L cells (1.6-2.7 % of the window).
+- Lakes: lake inlets end 7-25 % of the reaches, 25 % on M1. These are `S0`'s and KS0's kept basins (reading 5 names KS1, not built).
+- Trunk area breaks (a junction where G1c's trunk carries less `a_geo` than the tributary arriving): 334-2,909 a window. G1c's trunk attributes are H1 values sampled along the reach; the landmass pass must give the L trunk its tributaries' areas.
+
+## 6. Findings from the windows
+7. The extractor holds the reach contract on the five windows. On G1c's trunks it adds at most 6 violations to G1c's own, all at cells where G1c's nodes already meet.
+8. **The G1e basin producer does not fit the memory budget.**
+   - Peak commit is 8-20 GB on four windows and 55 GB on M1 (paged); M1's RG-1 run failed on an allocation.
+   - The producer keeps the sorted cell list of every depression's subtree, so nesting multiplies the cells. M1 has 103,066 kept basins on 22 % of its land.
+   - The world-build budget is 12 GB.
+   - G1e's producer needs basin cells by reference (a node's own cells and its children), not copied subtree lists, before it runs on real windows.
+9. **G1c's trunk attributes break at junctions.** The trunk's `a_geo` and `q` are H1 values sampled along the reach, below the inflow of 334-2,909 tributaries a window. The graph validator does not compare values at a junction, so this does not show as a violation.
+10. Density 0.33-0.45 km/km2 and order-1 reaches ending near 1.7 km2 are what `A_crit` 1 km2 and D8 initiation give. The order reaches 4-5 in a window's box.
+
+## 7. Recommendation (windows)
+- G1d meets its exit on the fixture and the five windows, M1's RG-1 apart. Close SPIKE-133 when the lead accepts.
+- Before KV and KC run on windows (G1f): the producer's memory (finding 8) and the trunk's L attributes from its tributaries (finding 9).
+- The density, length and order distributions are in the table. Junction angles are not measured.
+
 ## Visuals
 ![Network](images/network.png)
 The whole-body extraction on the G0 fixture (CPU, no GPU path; KS off, input `S0`; L cells of 101.8 m). Left: MFD initiation (extractor-1); right: D8 initiation. Red: the expected graph's trunk. Blue: tributaries by Strahler order. Black: confluences. Purple: tile crossings. Green: `S0`'s kept basins and their inlets. Dotted lines: the tile lines at -15 and 15 and the cube edge at 45. The run's numbers are in `report.txt`.
+
+![Windows](images/windows.jpg)
+The extracted networks of the five windows, each cropped to its region's box (CPU, no GPU path; one pixel per 6 L cells). RG-1 on explorer's KS0, with R1h on `S0` (RG-0) for comparison and M1 on `S0` (its RG-1 run failed, section 6). Red: G1c's trunks. Blue: tributaries, darker by Strahler order. Green: kept L basins. Grey: land, lighter higher. Pale blue: sea. Run logs are in `raw/`.
