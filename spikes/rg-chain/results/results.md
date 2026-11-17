@@ -105,7 +105,7 @@ The basins of the first runs (crusader's producer at 82aa5939) carried window-lo
 ### 5.4 The gate on the final surface (one region; `raw/gate-r1h-addendum.txt`)
 | Part | R1h |
 |---|---|
-| Graph | 316,142 nodes; 211 violations, all two nodes on one anchor: markers of one kind on one anchor (`exception` on 93 anchors, `trib_junction` on 1); no two non-marker nodes share an anchor |
+| Graph | 316,142 nodes; 211 violations, all two nodes on one anchor; no two non-marker nodes share an anchor; 93 anchors hold two or more `exception` markers and 1 two `trib_junction` markers |
 | Before crusader's d72ee86b | 452 invalid markers (`trib_junction` on its reach's last vertex) and 992 two nodes on one anchor |
 | Spill nodes not in the graph | 1,182, the producer's unresolved spills |
 | Connectivity | 121,281 of 121,699 sources reach an outlet; 0 trunk breaks; 0 conservation breaks |
