@@ -41,14 +41,14 @@ Code location: spike branch `spike/g1c-trunk-k6p-2` (e29c0bd6, rebased on main, 
 | Conservation breaks | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
 | Validator: `IdMismatch` (exception markers, reading 8) + `TwoNodesOneAnchor` | 3,133 + 98 / 8,483 + 49 | 1,447 + 28 / 2,036 + 42 | 4,877 + 62 / 10,590 + 17 | 4,339 + 255 / 29,797 + 1,391 | 3,095 + 15 / 8,612 + 11 |
 | Agreement with routed `S0`: river cells near the graph / graph cells near a river | 25.1 / 55.7 % ; 40.5 / 50.0 % | 33.6 / 38.8 % ; 61.9 / 38.6 % | 32.9 / 51.1 % ; 46.5 / 47.9 % | 10.5 / 68.9 % ; 26.9 / 30.4 % | 16.4 / 70.8 % ; 23.7 / 59.9 % |
-| The same against routed KS0 | within 1 point of `S0` on every window and base | | | | |
+| The same against routed KS0 | within 2 points of `S0` on every window and base | | | | |
 | 1 thread against 8 / two regions against one / a tile evaluated again | identical / 0 cells, identical / 0 differences | the same | the same | the same | the same |
 | KS0 lowering: share of land, p95 (K6') | 3.2 %, 16.2 m | 4.2 %, 0.7 m | 2.4 %, 0.7 m | 5.2 %, 43.1 m | 3.4 %, 1.3 m |
 | Budget field p50, m | 26.7 | 10.0 | 10.0 | 50.0 | 10.0 |
 | H1 basins on the trunks; L image spill - H1 spill p50 (p90), m | 125: 0.3 (114) / 41: 1.4 (16) | 162: -0.8 (3.3) / 217: -0.5 (1.5) | 87: -0.6 (7.4) / 51: -0.4 (0.9) | 107: 95.5 (400) / 52: 20 (74) | 108: -0.6 (10) / 165: -0.9 (1.4) |
 
 - Readings 7 and 8 removed every conservation break, every reach without a route and every duplicate id of the first run (before them: 62 conservation breaks on R1h, all at L nodes standing for two H1 nodes; 204-1,472 reaches without a route; 0-1,409 duplicate marker ids).
-- What the validator still reports: `IdMismatch` on every exception marker (main's `node_id` does not yet hash `on_reach`; reading 8 is in the contract, GEN-189 follows); `TwoNodesOneAnchor` at cells holding markers of two reaches (R1h 90 of 98, M1 240 of 255; reading 8 allows it, the validator does not know it yet), `outlet_sea` images on another node's cell (reading 2's first sea cell taken) and markers at a reach's down node (reading 1 allows the up node only).
+- What the validator still reports: `IdMismatch` on every exception marker (main's `node_id` does not yet hash `on_reach`; reading 8 is in the contract, GEN-189 follows); `TwoNodesOneAnchor` mostly at cells holding markers of two or more reaches (such cells: R1h 92, M1 246 in `raw/exceptions-<window>.csv`, against 98 and 255 reports; reading 8 allows them, the validator does not know it yet), `outlet_sea` images on another node's cell (reading 2's first sea cell taken) and markers at a reach's down node (reading 1 allows the up node only).
 - Centreline on R1h: BUILD-057's maximin route gives 8.6 / 11.4 % agreement and 1,434 exceptional reaches against the lowest path's 25 / 56 % and 702 (`raw/run-r1h-maximin.txt`, a run before readings 7 and 8).
 - Cost per window (8 threads, a machine shared with other lanes' runs): KS0 1.6-2.8 s (M1 K6' 7.7 s); budget field 0.9-1.5 s (M1 K6' 4.6 s); graph 1.1-3.5 s; an L routing of the window for the agreement 32-184 s; run 156-595 s, peak 3.51-3.71 GB.
 - Logs `raw/run-<window>[-today].txt`; markers with their excess, K6' base only, `raw/exceptions-<window>.csv`.
@@ -87,7 +87,7 @@ Code location: spike branch `spike/g1c-trunk-k6p-2` (e29c0bd6, rebased on main, 
 5. **Early sea ends are inland cells** (94-99 %): `S0` below the sea level inside the coastal lowlands.
 6. **The centreline method decides the result.** The contract and the KR note say "routed on S1 inside the corridor"; the maximin route of the corridor measure misses the valleys (11 % agreement), the lowest path follows them (39-71 % of graph cells near a routed river on K6').
 7. **Exceptions follow relief:** 3 % of L reaches on R3a, 26-36 % on M1 (excess p50 30-40 m); on the flat windows the excess is a few metres (p50 2.6-5.2 m).
-8. **KS0 changes little:** it lowers 1.8-5.2 % of the land (p95 0.7-46 m); agreement against KS0 is within 1 point of `S0`.
+8. **KS0 changes little:** it lowers 1.8-5.2 % of the land (p95 0.7-46 m); agreement against KS0 is within 2 points of `S0`.
 9. **L images of K6''s mountain basins spill far above H1's** (M1 p50 95.5 m): the L depression under the H1 floor is an L pit in `r`, not the H1 basin; on the other windows the p50s agree within a few metres (-0.9 to 1.4 m; R1h's p90 on K6' is 114 m).
 
 ## 4. Recommendation
