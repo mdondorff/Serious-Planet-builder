@@ -1,0 +1,24 @@
+KG sea at L: 20473775 cells of S0 at or below the sea level, 164943 of them inland (not connected to an H1 sea outlet or the window's edge; 0.248 % of the window)
+RG stage setup (S0, ocean, H1 base): 41.1 s; peak working set 1629 MiB, now 1336 MiB
+RG stage budget field: 17.5 s; peak working set 1860 MiB, now 1852 MiB
+RG KH h2: quads split along a D8 diagonal step 260013 (both diagonals 0), along the higher pair 778348; two regions against one: 0 cells differ, one thread against the run: 0; against S0 on 46111825 land cells: lower over 10 m 4318962, higher over 10 m 3273657
+RG stage KH (h2): 5.0 s; peak working set 3907 MiB, now 2874 MiB
+RG KS0 (S0 - min(max(0, r - C1(HAND)), budget)): 31341613 cells lowered, 91786 residuals
+RG stage KS0: 5.5 s; peak working set 3907 MiB, now 2877 MiB
+RG KG-trunk: 15371 nodes, 10088 reaches
+RG stage KG-trunk: 1.0 s; peak working set 3907 MiB, now 2889 MiB
+RG domain 0 basins: 14236 L basins (10498 kept), 1327 unresolved spills
+RG domain 0 KG-trib: 135728 reaches, 153777 nodes, 288 open ends, 160 entry cells
+RG domain 0 KS: 16795038 core cells lowered, 19385 core residuals
+RG domain 0 KV/KC (Both): 2440355 residuals, 38569 KC patches
+RG domain 1 basins: 14930 L basins (11746 kept), 1705 unresolved spills
+RG domain 1 KG-trib: 96014 reaches, 111933 nodes, 216 open ends, 251 entry cells
+RG domain 1 KS: 14510770 core cells lowered, 24248 core residuals
+RG domain 1 KV/KC (Both): 2443660 residuals, 39528 KC patches
+RG domains: 282283 nodes, 235482 reaches, 28827 basins after the stitch
+RG stage basins: 165.4 s; peak working set 13494 MiB, now 4581 MiB
+RG stage KG-trib: 84.4 s; peak working set 13494 MiB, now 4581 MiB
+RG stage KS1: 5.1 s; peak working set 13494 MiB, now 4581 MiB
+RG stage KV and KC: 407.3 s; peak working set 13494 MiB, now 4581 MiB
+RG stage write: 129.9 s; peak working set 13494 MiB, now 4581 MiB
+RG done: kh h2, ks ks1, skipped [], regions 2; 282283 nodes, 235482 reaches, 28827 basins; files in C:/DEV/SeriousPlanetData/tmp/kh/r1h-full: r1h-graph.txt, r1h-stages/, r1h-final-8160x8160.f64, r1h-timing.csv; 873.3 s

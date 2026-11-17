@@ -253,3 +253,118 @@ F1: both keep the base's lowland depressions (purple). Neither read removes them
 - `cargo build --release -p planet-cache --example handover --example handover_low` on `spike/handover`.
 - Runs: `cargo xtask heavy target/release/examples/handover.exe --window <w> --out <dir> --tag <tag>`, the same with `handover_low.exe`.
 - Tables: `python tools/handover_tables.py raw r1h r3a r3b m1 f1`. Sheets: `python tools/handover_sheet.py <dir> <tag> <title> <out.jpg>` (reads the probe's outputs).
+
+## Addendum: KH as a chain stage, its ridge check and its facet look (lead #137, 2026-11-17)
+Question: does KH (h2, G0 contracts §12 reading 19) run as a stage of the RG chain, deterministic and tile-local? How many of its D8-step splits cut across a ridge of `S0`, and by how much? What does KH(`z_s`) + `r` look like at low sun?
+Time box: half a day (used: about 2.5 h).
+
+Code location: branch `spike/kh-stage` @ 482f2eb0 (never merged; cut from explorer's `spike/rg-chain` @ d3f3d9cc):
+- `crates/generators/src/bake/kh.rs`: `split`, `read` and `routing` (spike code), with a unit test.
+- `crates/generators/tests/kh_g0.rs`: KH on the G0 fixture.
+- `crates/cache/examples/rg_chain.rs`: `--kh h2`.
+- `crates/cache/examples/kh_ridge.rs`: the ridge check and the render crops.
+
+### The stage (interface agreed with explorer, 2026-11-17)
+- `--kh h2` builds `ks_base` = KH(`z_s`) + `r`; `--kh c1` keeps `ks_base` = `S0`.
+- KS starts from `ks_base`. Its lowered surface is `ks_base - u`, and the reading-17 clamp reads `ks_base`. `want = max(0, r - band)` is unchanged.
+- `S0` stays the reference of the ocean, the K6' sills, the budget field, the ridge and residual measures, and river-gate's `--surface`. Reading 19 moves only KS's start.
+- KH's split is an H1 field: KH's own routing of `z_s`, with reading 12's outlets, the canonical 1e-3 m flood, D8 steepest, ties to the lower id.
+- The L read uses one quad's four heights and one flag: it is per-quad local. The split is a window-global H1 field, like H1's routing; its locality is H1's (landmass-owned), not a tile's.
+- What the bit checks below show: the read gives the same bits in any evaluation order (one region or two cut at a tile column) and on any thread count. They evaluate one function of the cell against a split computed once, so they do not test a split recomputed per region. A split built from a region's own block and halo was not run.
+
+| Check | Result |
+|---|---|
+| G0 fixture (`raw/kh-fixture.txt`) | 114 quads split along a step, 3,060 along the higher pair, none with both diagonals stepped. The read in the two layouts' orders (one region; two regions cut at -15 degrees) gives the same bits; the fixture built on 1 and 4 threads gives the same bits. The largest difference between KH + `r` and `S0` is 409 m (the fixture's antecedent ridge) |
+| Five windows, `--kh h2 --ks ks0`, later stages skipped (`raw/kh-chain-<w>.txt`) | The read in two regions' order against one: 0 cells differ on every window; one thread against eight: 0 (evaluation order only, see above). The KH stage takes 4.9-5.4 s; the run 81-94 s, peak 6.3-6.4 GB |
+| R1h, the full chain, `--kh h2 --regions 2` (`raw/kh-chain-r1h-full.txt`) | Every stage runs: KS0, KG-trunk, basins, KG-trib, KS1, KV and KC. 282,283 nodes, 235,482 reaches, 28,827 basins after the stitch; 874 s, peak 13.2 GB |
+
+- The runner's "KS0: cells lowered" line counts `ks0 < start`. With `--kh h2` that count also holds KH's own difference from `S0`; it is not KS's lowering.
+
+KH(`z_s`) + `r` against `S0`, over the window's land, from `raw/kh-chain-<w>.txt`:
+
+| Window | Lower over 10 m | Higher over 10 m |
+|---|---|---|
+| R1h | 4.32 M | 3.27 M |
+| R3a | 0.15 M | 0.08 M |
+| R3b | 0.50 M | 0.33 M |
+| M1 | 18.5 M | 17.8 M |
+| F1 | 0.20 M | 0.14 M |
+
+These include the change of interpolant (C1 to linear; SPIKE-136's lowering table).
+
+### Ridge check
+- Over the quads KH splits along a D8 step, the check takes `S0`'s ridge cells (contract §9) within 1 L cell of the split diagonal. At each such cell it compares KH(`z_s`) + `r` with `S0` (`raw/kh-ridge-<w>.csv`).
+
+| Window | Quads split along a step (in the box) | Ridge cells on a split diagonal (quads) | Under `S0`, over the cells lying under it: p50 / p95 / max, m | Over 10 m: cells (quads) | Over 50 m: cells (quads) |
+|---|---|---|---|---|---|
+| R1h | 103,077 | 98,756 (24,386) | 11.5 / 66.9 / 250 | 47,008 (11,830) | 7,703 (2,113) |
+| R3a | 124,177 | 4,150 (1,782) | 5.7 / 26.6 / 97 | 976 (328) | 30 (12) |
+| R3b | 160,705 | 35,495 (10,113) | 10.2 / 42.7 / 105 | 17,421 (4,824) | 1,043 (359) |
+| M1 | 148,014 | 345,836 (70,180) | 29.9 / 158.5 / 661 | 203,576 (44,933) | 83,387 (20,415) |
+| F1 | 139,545 | 29,297 (10,196) | 8.3 / 26.7 / 64 | 11,412 (3,646) | 57 (30) |
+
+- Of the stepped quads, 23.7 % (R1h), 1.4 % (R3a), 6.3 % (R3b), 47.4 % (M1), 7.3 % (F1) hold an `S0` ridge cell on their split diagonal; the cut is over 50 m in 0.01-2.0 % of them outside M1, 13.8 % on M1.
+- The cut against `S0` includes the C1 read's overshoot above the nodes, which a linear read cannot reproduce. Against a bilinear read, h2 lowers 111-16,589 of `S0`'s ridge cells by more than 50 m on four windows, and 174,886 on M1 (SPIKE-136, `raw/lowering-<w>.csv`).
+- The maps put the cuts on the valley sides: where a D8 step runs diagonally between two higher corners, the higher corners read on the maps as the valley's shoulders (not measured). M1's are everywhere.
+
+### The facet look
+- The low-sun renders show the triangulation on every window: flat facets and diagonal stripes at the 814 m quad scale. This holds in M1's and R1h's relief and on flat R3a too.
+- `C1(z_s)` + `r` shows faint 814 m squares in the same crops. KH's facets are far stronger.
+- The band `r` adds the sub-814 m detail on top, but does not hide the facet edges at a 10-degree sun.
+- KH as built is the drainage the contract asks for (SPIKE-136), not a terrain surface to show. That look is the owner's call (tier D) before the flight.
+
+### Recommendation (addendum)
+- KH (`--kh h2`) is ready as a chain stage: deterministic, its read per-quad local, its split an H1 field, and cheap (5 s a window). It runs through the full chain on R1h.
+- **Before the flight: the facet look is a visual fault.** Options, none tested:
+  1. A smooth read on the same split, a C1 patch per triangle along the D8 edges (a Clough-Tocher or Powell-Sabin split). It keeps the drainage edges, without facets.
+  2. KH only as the drainage skeleton: KS reads its flow paths, while the shown surface stays `C1(z_s)` + `r` away from the cells KH changes.
+  3. Leave the facets to KV's valleys and the erosion round at L. Not measured.
+- The ridge cuts are the cost of the drainage. Over 50 m they are rare outside M1 (0.01-2.0 % of the stepped quads); on M1, 13.8 %. M1's `z_s` is too rough at 814 m for any linear read (SPIKE-136); that is decision 5's.
+
+### Visuals (addendum)
+Analysis renders (CPU), not the production path: no bake of KH exists.
+- Ridge maps:
+  - KH's D8-step splits over a low-sun hillshade of `S0` (the region box, 2 px an 814 m quad).
+  - Blue tint: a quad split along a D8 step. Orange: an `S0` ridge cell on the split diagonal cut over 10 m. Red: over 50 m.
+  - Dashed frame: the facet crop.
+  - The legend's quad counts are over the box's 620 x 620 quads, so they differ slightly from the table, which counts the quads of the box's ridge cells.
+- Facet renders:
+  - The 52 km crop of the box with the largest p50 1 km relief, 1 px an L cell.
+  - Hillshade at sun altitude 10 degrees from the north-west, no vertical exaggeration.
+  - Left: `C1(z_s)` + `r` (`S0`). Right: KH(`z_s`) + `r`.
+
+![R1h ridge map](images/kh-ridge-r1h.jpg)
+R1h: the cuts lie along the valley sides of the hill country in the north; the plain to the south has no ridge cells on a split. The crop frame sits in the top-right corner, under the legend.
+
+![R1h facets](images/kh-facets-r1h.jpg)
+R1h: KH's flat triangles and NE-SW stripes, where `S0` is smooth.
+
+![R3a ridge map](images/kh-ridge-r3a.jpg)
+R3a: few ridge cuts (12 quads over 50 m).
+
+![R3a facets](images/kh-facets-r3a.jpg)
+R3a: the facets show even in 42 m of relief.
+
+![R3b ridge map](images/kh-ridge-r3b.jpg)
+R3b: cuts on the valley sides of the dissected plateau.
+
+![R3b facets](images/kh-facets-r3b.jpg)
+R3b: KH's triangles along the valleys, where `S0` shows soft ridges.
+
+![M1 ridge map](images/kh-ridge-m1.jpg)
+M1: ridge cuts in every valley (20,415 quads over 50 m).
+
+![M1 facets](images/kh-facets-m1.jpg)
+M1: KH's triangles across the whole crop (814 m quads; p50 1 km relief 499 m).
+
+![F1 ridge map](images/kh-ridge-f1.jpg)
+F1: cuts on the valley sides; 30 quads over 50 m.
+
+![F1 facets](images/kh-facets-f1.jpg)
+F1: diagonal stripes along the main valley and triangles on the hills.
+
+### Reproduce (addendum)
+- On `spike/kh-stage`: `cargo test -p planet-generators --test it kh_g0 -- --nocapture`.
+- Chain: `cargo xtask heavy target/release/examples/rg_chain.exe --window <w> --out <dir> --tag <tag> --kh h2 [--ks ks0 --skip kg-trunk,basins,kg-trib,kv,kc] [--regions 2]`.
+- Ridge check: `cargo xtask heavy target/release/examples/kh_ridge.exe --window <w> --out <dir> --tag <tag>`.
+- Images: `python tools/kh_sheets.py <ridge dir> <SPIKE-136 handover dir> <tag> <name> images/`.
