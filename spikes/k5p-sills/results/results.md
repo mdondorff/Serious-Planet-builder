@@ -15,7 +15,7 @@ Code location: spike branch `spike/k5p-sills` (a5a4ecc0, `crates/cache/examples/
 | K5' node height | `h = z_s + r_min`, `r_min` the lowest L cell of `r` in the 814 m cell (static) |
 | K5' sill | `s_r + max(z_s(p), z_s(q))`, `s_r` the minimax of `r` over 8-connected L paths between the two cells' lowest `r` cells, inside the two cells (static) |
 | K5' round | K5's round (`solve_rounds_with`, 4 rounds of 5 steps, the same carve parameters) with its routing replaced by SPIKE-127's sill routing on `h` and the sills; the carve acts on `h` (the surface it routes on); `z_s' = h - r_min` |
-| Bit check | the same round loop with today's `route_rules`: 0 of 1,040,400 cells differ from `solve_region` on M1 |
+| Bit check | the same round loop with today's `route_rules`: 0 of 1,040,400 cells differ from `solve_region` on M1 (`raw/bitcheck-m1.txt`, a separate M1 run with `--bitcheck`; its K5' result equals `raw/run-m1.txt`'s) |
 | `S0'` | `B + C1(z_s' - z_b)`: K5''s start surface |
 | K5' + K6' | SPIKE-127's K6' on the node heights and sills of `S0'` |
 | K5''s channels | its routing rule on its final `z_s'` with K6's weights, cells over 75 km2 |
@@ -65,7 +65,7 @@ Code location: spike branch `spike/k5p-sills` (a5a4ecc0, `crates/cache/examples/
 1. **The stop test was driven by artefacts.** With real changes only (an outlet moved over 8 km, or a tributary reaching another river), K6' alone changes no top river on R1h, R3b, M1 and F1; on R3a it changes 2, the same as R3a's own `z_s` +-0.5 m baseline (2). All 37 lost confluences of SPIKE-127's K6' on those four windows are the same tributaries joining the same river further on (7 of them through an MFD-split line first).
 2. **K5' cannot fix the stop test: there is nothing to fix, and K5' itself re-routes.** K5' + K6' changes 2-4 top rivers really on R1h, R3a, R3b and M1 (29 tributaries to another river), against 0 for K6' alone on all but R3a.
 3. **K5' changes K5's surface, not only its routing.** It erodes 16-49 % less (mean `z_b - z_s`), moves `z_s` by p50 0.7-58 m (M1 p90 365 m), and moves 21-32 % of the trunk cells more than one cell from today's.
-4. **K5''s start surface dams more.** Corridor pass on `S0'` is 1.2-6.7 points below today's on `S0` and 0.9-5.4 below K6' on `S0`.
+4. **K5''s start surface dams more.** Corridor pass on `S0'` is 1.2-6.8 points below today's on `S0` and 0.9-5.4 below K6' on `S0`.
 5. **K5' agrees with its own channels** (3.3, 4.1, 2.0, 8.9, 0.9 % more than one cell off, all under 10 %), but that agreement is K5' with itself; K6' alone already passes the rule against today's K5 on four windows (M1 14.5 %).
 6. **D-2:** on `S0'` K5' + K6' gains 160 routes (K6' on `S0` 117); on B fewer (228 against 334), since B was carved along today's trunks.
 7. **Stability:** K5' + K6' under `S0'` +-0.5 m and sills +-1 m is as stable as today's K6 under `z_s` +-0.5 m (0-2 rivers changed really).
