@@ -118,7 +118,7 @@ fn expected(fx: &Fixture) -> Built {
         parent: None,
         owner: Domain::Landmass,
         attrs: attrs_of(&acc_h, &trunk_h, &fx.z_s, 1),
-        status: Status::Ok,
+        exceptions: Vec::new(),
     };
     // the H1 basin: the flood's raised cells around the bowl, its spill the first cell of the floor's receiver path outside it, received by a trib_junction on the trunk
     let basin_of = |grid: &Grid, z: &[f64], outlet: &[bool], r: &Routing, centre: usize| {
@@ -262,7 +262,7 @@ fn expected(fx: &Fixture) -> Built {
             exceptions.push(m);
         }
     }
-    let status = if over { Status::Exception { reason: Reason::RiseOverBudget, value: rise } } else { Status::Ok };
+    let trunk_exceptions = if over { vec![Exception { reason: Reason::RiseOverBudget, value: rise }] } else { Vec::new() };
     let trunk_reach_l = Reach {
         id: trunk_l_id,
         level: Level::L,
@@ -272,7 +272,7 @@ fn expected(fx: &Fixture) -> Built {
         parent: Some(reach_h.id),
         owner: Domain::Landmass,
         attrs: trunk_attrs,
-        status,
+        exceptions: trunk_exceptions,
     };
     // tributaries: L receiver chains cut at tile lines (a tile_crossing on the last vertex inside the core a chain leaves), ending at `end` (a node id) on `end_cell`
     let mut nodes_l: Vec<Node> = vec![src_l.clone(), out_l.clone()];
@@ -340,7 +340,7 @@ fn expected(fx: &Fixture) -> Built {
                 parent: None,
                 owner: tile_domain(part[1]),
                 attrs: a,
-                status: Status::Ok,
+                exceptions: Vec::new(),
             });
             if let Some(n) = down {
                 nodes.push(n.clone());
@@ -470,16 +470,16 @@ fn the_fixture_graph_validates_round_trips_and_is_the_same_on_any_thread_count()
     assert_eq!(g.basins.len(), 2, "the basin at H1 and its L image");
     let trunk = g.reaches.iter().find(|r| r.id == b.trunk_l_id).unwrap();
     assert!(
-        matches!(trunk.status, Status::Exception { reason: Reason::RiseOverBudget, value } if value > b.budget_at_rise),
+        matches!(trunk.exceptions[..], [Exception { reason: Reason::RiseOverBudget, value }] if value > b.budget_at_rise),
         "the antecedent ridge: a rise of {:.1} m over a budget of {:.1} m",
         b.rise_m,
         b.budget_at_rise
     );
-    // the status is exception exactly where the reach carries exception markers (its bed rises)
+    // the reach is exceptional exactly where the reach carries exception markers (its bed rises)
     let marked = g.nodes.iter().any(|n| n.kind == NodeKind::Exception && n.marker.is_some_and(|m| m.on_reach == trunk.id));
     assert!(marked, "the trunk's bed rises at the ridge, marked");
     assert!(
-        g.reaches.iter().filter(|r| r.id != trunk.id).all(|r| r.status == Status::Ok && r.attrs.bed.windows(2).all(|w| w[1] <= w[0])),
+        g.reaches.iter().filter(|r| r.id != trunk.id).all(|r| r.exceptions.is_empty() && r.attrs.bed.windows(2).all(|w| w[1] <= w[0])),
         "no other reach is exceptional"
     );
     let faces: std::collections::BTreeSet<usize> = b.trunk_l.iter().map(|&c| c / (L_N * L_N)).collect();
