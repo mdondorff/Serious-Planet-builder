@@ -20,7 +20,7 @@ use planet_generators::bake::k7::RegionField;
 use planet_generators::bake::flood::priority_flood_with;
 use planet_generators::bake::hydro::{hydrology, id_hash, Hydro, HydroParams};
 use planet_generators::bake::river_graph::{
-    diff, node_id, rasterise, reach_id, validate, validate_raster, Attrs, Checks, Domain, Graph, Level, Marker, Node, NodeKind, Reach as GReach, Reason, Status,
+    diff, node_id, rasterise, reach_id, validate, validate_raster, Attrs, Checks, Domain, Graph, Level, Marker, Node, NodeKind, Reach as GReach, Reason, Exception as GException,
     Violation,
 };
 use planet_generators::bake::route::{catchment_roots, jitter, route_rules, RoundRules, Routing, MFD_EXPONENT, NONE};
@@ -426,11 +426,16 @@ struct Measure<'a> {
     sea: f64,
     radius: f64,
     bar: f64,
+    /// Reading 12: the connected sea; when given, a cell is land unless it is in it.
+    ocean: Option<&'a [bool]>,
 }
 
 impl Measure<'_> {
     fn land(&self, c: usize) -> bool {
-        self.water[c] > self.sea
+        match self.ocean {
+            Some(o) => !o[c],
+            None => self.water[c] > self.sea,
+        }
     }
 
     fn lowest_in_disc(&self, p: (f64, f64), keep: &dyn Fn(usize) -> bool) -> Option<usize> {
@@ -1138,7 +1143,7 @@ struct H1Reach {
 /// The H1 trunk reaches: every channel segment (>= 75 km2), cut where it enters a kept basin (a `lake_inlet`) and restarted at the basin's spill cell (a `lake_spill`);
 /// a segment ending at a sea outlet ends at an `outlet_sea`; one ending on the window's edge also at an `outlet_sea` node on the edge cell (a window is not a domain:
 /// the landmass graph continues there; counted apart).
-fn h1_reaches(h1: &H1, grid: &Grid, sea_outlet: &dyn Fn(u32) -> bool) -> (Vec<H1Reach>, usize) {
+fn h1_reaches(h1: &H1, grid: &Grid, sea_outlet: &dyn Fn(u32) -> bool, budget: &[f64]) -> (Vec<H1Reach>, usize) {
     let segs = &h1.hydro.segments;
     let mut inflows = vec![0usize; segs.len()];
     for s in segs {
@@ -1146,9 +1151,14 @@ fn h1_reaches(h1: &H1, grid: &Grid, sea_outlet: &dyn Fn(u32) -> bool) -> (Vec<H1
             inflows[s.downstream as usize] += 1;
         }
     }
+    // reading 13: a basin cuts the trunk only when its depth (spill - floor) is within the budget at its floor; a deeper one is crossed
     let kept = |c: u32| -> Option<usize> {
         let b = h1.hydro.label[c as usize];
-        (b != NONE).then_some(b as usize)
+        if b == NONE {
+            return None;
+        }
+        let bs = &h1.hydro.basins[b as usize];
+        (bs.spill_m - bs.floor_m <= budget[bs.floor_cell as usize]).then_some(b as usize)
     };
     let mut out = Vec::new();
     let mut edge_ends = 0usize;
@@ -1340,13 +1350,14 @@ fn build_graph(
             parent: None,
             owner: Domain::Landmass,
             attrs,
-            status: Status::Ok,
+            exceptions: Vec::new(),
         });
     }
     // ---- L anchors (contract §2.1: the lowest L cell of S0 within one H1 cell, ties by global cell id; land only for a non-outlet node, reading 2 for outlets)
     let all_inside = vec![true; w * h];
-    let ks_water: Vec<f64> = ks0.iter().map(|&z| z.max(sea)).collect();
-    let mks = Measure { w, h, water: &ks_water, inside: &all_inside, region: &all_inside, sea, radius: K_C * L as f64, bar };
+    // reading 12: a cell of the connected sea counts at the sea level; any other cell keeps its height (an inland cell below the sea level is land)
+    let ks_water: Vec<f64> = (0..ks0.len()).map(|c| if ocean[c] { ks0[c].max(sea) } else { ks0[c] }).collect();
+    let mks = Measure { w, h, water: &ks_water, inside: &all_inside, region: &all_inside, sea, radius: K_C * L as f64, bar, ocean: Some(ocean) };
     let anchor_of = |c: u32, outlet: bool, taken: &HashSet<usize>| -> Option<usize> {
         let p = to_local(c);
         let disc = |keep: &dyn Fn(usize) -> bool| -> Option<usize> {
@@ -1370,7 +1381,7 @@ fn build_graph(
         if outlet {
             disc(&|cc| !taken.contains(&cc))
         } else {
-            disc(&|cc| s0[cc] > sea && !taken.contains(&cc)).or_else(|| disc(&|cc| !taken.contains(&cc)))
+            disc(&|cc| !ocean[cc] && !taken.contains(&cc)).or_else(|| disc(&|cc| !taken.contains(&cc)))
         }
     };
     // reading 7: the H1 nodes snap in order of descending q_w, ties by H1 node id; a cell already taken is excluded
@@ -1462,7 +1473,7 @@ fn build_graph(
         }
         if down_kind == NodeKind::OutletSea {
             // reading 2: the outlet image is the first sea cell of the chain
-            if let Some(p) = route.iter().position(|&c| s0[c] <= sea) {
+            if let Some(p) = route.iter().position(|&c| ocean[c]) {
                 route.truncate(p + 1);
                 down_c = route[p];
             }
@@ -1545,9 +1556,9 @@ fn build_graph(
                     marker: Some(Marker { on_reach: id, at_vertex: v as u32 }),
                 });
             }
-            Status::Exception { reason: Reason::RiseOverBudget, value: over }
+            vec![GException { reason: Reason::RiseOverBudget, value: over }]
         } else {
-            Status::Ok
+            Vec::new()
         };
         let _ = (failed, rise);
         // attributes: the H1 reach's vertex at the same share of the length
@@ -1572,7 +1583,7 @@ fn build_graph(
             parent: Some(h1_reach_ids[k]),
             owner: Domain::Landmass,
             attrs,
-            status,
+            exceptions: status,
         });
     }
     // shared node beds: each reach's last vertex carries its down node's bed
@@ -1892,7 +1903,7 @@ fn main() -> Result<(), String> {
     };
     let bar = corridor_bar_m(relief10);
     let sea_outlet = |c: u32| solve.zb[c as usize] <= sea && !grid.is_edge(c as usize);
-    let (reaches, edge_ends) = h1_reaches(&h1, grid, &sea_outlet);
+    let (reaches, edge_ends) = h1_reaches(&h1, grid, &sea_outlet, &budget);
     let order = strahler(&h1);
     {
         let segs = &h1.hydro.segments;
@@ -1914,6 +1925,164 @@ fn main() -> Result<(), String> {
     }
     println!("KG H1 trunk reaches: {} ({} end on the window's edge; {} lake inlets, {} lake spills)", reaches.len(), edge_ends,
         reaches.iter().filter(|r| r.down_kind == NodeKind::LakeInlet).count(), reaches.iter().filter(|r| r.up_kind == NodeKind::LakeSpill).count());
+
+    // ---- SPIKE-134 (lead #134): the kept H1 basins holding trunk cells, one row each; the river length they would hold as lakes; the deep ones crossed
+    {
+        let hy = &h1.hydro;
+        let in_box_h1 = |c: usize| {
+            let (i, j) = (sri0 + c % rw, srj0 + c / rw);
+            i >= region.0 && i <= region.1 && j >= region.2 && j <= region.3
+        };
+        // depressions of z_b and of z_s (filled more than the 0.5 m pit limit): where a floor's depression comes from
+        let dep = |z: &[f64]| -> Vec<bool> {
+            let f = priority_flood_with(grid, z, outlet, eps, true);
+            (0..cells).map(|c| f[c] - z[c] > 0.5).collect()
+        };
+        let (dep_b, dep_s) = (dep(&solve.zb), dep(&solve.zs));
+        // channel-segment cells and their step length (km) to the receiver
+        let mut step = vec![0f64; cells];
+        let mut on_seg = vec![false; cells];
+        for sg in &hy.segments {
+            let mut c = sg.up;
+            loop {
+                on_seg[c as usize] = true;
+                if c == sg.down {
+                    break;
+                }
+                let r = h1.routing.receiver[c as usize];
+                let d = (0..8).find(|&d| grid.neighbour(c as usize, d) == Some(r as usize)).expect("a receiver is a neighbour");
+                step[c as usize] = grid.distance_at(c as usize, d) / 1000.0;
+                c = r;
+            }
+        }
+        let lowland = |c: usize| solve.zs[c] <= 300.0;
+        let depth = |b: usize| hy.basins[b].spill_m - hy.basins[b].floor_m;
+        let deep = |b: usize| depth(b) > budget[hy.basins[b].floor_cell as usize];
+        let (mut len_all, mut len_low, mut in_all, mut in_low, mut in_kept, mut in_kept_low) = (0.0f64, 0.0f64, 0.0f64, 0.0f64, 0.0f64, 0.0f64);
+        let mut holds: BTreeMap<usize, (usize, f64)> = BTreeMap::new();
+        for c in 0..cells {
+            if !on_seg[c] || !in_box_h1(c) || outlet[c] {
+                continue;
+            }
+            let l = step[c];
+            len_all += l;
+            if lowland(c) {
+                len_low += l;
+            }
+            let b = hy.label[c];
+            if b != NONE {
+                let b = b as usize;
+                in_all += l;
+                if lowland(c) {
+                    in_low += l;
+                }
+                if !deep(b) {
+                    in_kept += l;
+                    if lowland(c) {
+                        in_kept_low += l;
+                    }
+                }
+                let e = holds.entry(b).or_insert((0, 0.0));
+                e.0 += 1;
+                e.1 += l;
+            }
+        }
+        let pct = |a: f64, b: f64| 100.0 * a / b.max(1e-9);
+        println!(
+            "KG134 river length in the box {len_all:.0} km (lowland, z_s <= 300 m: {len_low:.0} km); in kept H1 basins, every one kept (upper bound): {in_all:.0} km = {:.2} % (lowland {in_low:.0} km = {:.2} %); in the basins within the budget (reading 13's lakes): {in_kept:.0} km = {:.2} % (lowland {in_kept_low:.0} km = {:.2} %)",
+            pct(in_all, len_all),
+            pct(in_low, len_low),
+            pct(in_kept, len_all),
+            pct(in_kept_low, len_low)
+        );
+        let n_deep = holds.keys().filter(|&&b| deep(b)).count();
+        println!("KG134 kept H1 basins holding channel cells in the box: {}; deeper than the budget at the floor (crossed by reading 13): {n_deep}", holds.len());
+        let mut f = std::fs::File::create(out_dir.join(format!("{tag}-basins.csv"))).map_err(|e| e.to_string())?;
+        writeln!(f, "window,basin,floor_gx,floor_gy,floor_m,spill_m,depth_m,budget_m,deep,cells,area_km2,class,overflows,q_in_m3s,origin,channel_cells,channel_km,lowland_floor")
+            .map_err(|e| e.to_string())?;
+        let mut rows: Vec<(f64, usize)> = Vec::new();
+        for (&b, &(nc, km)) in &holds {
+            let bs = &hy.basins[b];
+            let fc = bs.floor_cell as usize;
+            let area: f64 = (0..cells).filter(|&c| hy.label[c] as usize == b && hy.label[c] != NONE).map(|c| grid.cell_area(c)).sum::<f64>() / 1e6;
+            let origin = if dep_b[fc] { "z_b" } else if dep_s[fc] { "k5" } else { "band" };
+            let gid_f = grid.global_id(fc);
+            writeln!(
+                f,
+                "{tag},{b},{},{},{:.2},{:.2},{:.2},{:.1},{},{},{area:.2},{:?},{},{:.3},{origin},{nc},{km:.2},{}",
+                gid_f & 0xFFFF_FFFF,
+                gid_f >> 32,
+                bs.floor_m,
+                bs.spill_m,
+                depth(b),
+                budget[fc],
+                deep(b),
+                bs.cells,
+                bs.class,
+                bs.overflows,
+                bs.q_in,
+                lowland(fc)
+            )
+            .map_err(|e| e.to_string())?;
+            rows.push((depth(b), b));
+        }
+        rows.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+        // the three deepest in the box: their cells and the longest channel chain through each (window H1 cells), for the stills
+        let mut g = std::fs::File::create(out_dir.join(format!("{tag}-deep.csv"))).map_err(|e| e.to_string())?;
+        writeln!(g, "rank,basin,kind,i,j,k").map_err(|e| e.to_string())?;
+        for (rank, &(_, b)) in rows.iter().take(3).enumerate() {
+            for c in (0..cells).filter(|&c| hy.label[c] != NONE && hy.label[c] as usize == b) {
+                writeln!(g, "{rank},{b},cell,{},{},0", c % rw, c / rw).map_err(|e| e.to_string())?;
+            }
+            // the segment with the most cells in the basin, extended one segment up and down
+            let best = hy
+                .segments
+                .iter()
+                .enumerate()
+                .max_by_key(|(k, sg)| {
+                    let mut n = 0usize;
+                    let mut c = sg.up;
+                    loop {
+                        n += usize::from(hy.label[c as usize] != NONE && hy.label[c as usize] as usize == b);
+                        if c == sg.down {
+                            break;
+                        }
+                        c = h1.routing.receiver[c as usize];
+                    }
+                    (n, std::cmp::Reverse(*k))
+                })
+                .map(|(k, _)| k)
+                .expect("segments");
+            let mut chain: Vec<u32> = Vec::new();
+            let up_seg = hy.segments.iter().filter(|s2| s2.downstream as usize == best).max_by(|a2, b2| a2.q_down.total_cmp(&b2.q_down));
+            let start = up_seg.map_or(hy.segments[best].up, |u| u.up);
+            let end_seg = if hy.segments[best].downstream != NONE { hy.segments[hy.segments[best].downstream as usize].down } else { hy.segments[best].down };
+            let mut c = start;
+            loop {
+                chain.push(c);
+                if c == end_seg || h1.routing.receiver[c as usize] == NONE || chain.len() > 4000 {
+                    break;
+                }
+                c = h1.routing.receiver[c as usize];
+            }
+            for (k, &c) in chain.iter().enumerate() {
+                writeln!(g, "{rank},{b},chain,{},{},{k}", c as usize % rw, c as usize / rw).map_err(|e| e.to_string())?;
+            }
+            let bs = &hy.basins[b];
+            println!(
+                "KG134 deepest {}: basin {b} depth {:.1} m (floor {:.1}, spill {:.1}), {} cells, {:?}, q_in {:.2} m3/s, origin {}, chain {} cells",
+                rank + 1,
+                depth(b),
+                bs.floor_m,
+                bs.spill_m,
+                bs.cells,
+                bs.class,
+                bs.q_in,
+                if dep_b[bs.floor_cell as usize] { "z_b" } else if dep_s[bs.floor_cell as usize] { "k5" } else { "band" },
+                chain.len()
+            );
+        }
+    }
 
     // ---- the graph
     let window = (x0 as u64, y0 as u64, w, h, rw);
@@ -1974,15 +2143,42 @@ fn main() -> Result<(), String> {
         }
     }
     // the exceptions: count, values and where
-    let exc: Vec<&GReach> = l_reaches.iter().copied().filter(|r| matches!(r.status, Status::Exception { .. })).collect();
+    let exc: Vec<&GReach> = l_reaches.iter().copied().filter(|r| r.has_exception(Reason::RiseOverBudget)).collect();
     let in_box_l = |id: u64| {
         let (x, y) = gxy(id);
         (x as i64) >= bi0 && (x as i64) < bi1 && (y as i64) >= bj0 && (y as i64) < bj1
     };
     let exc_box = exc.iter().filter(|r| r.vertices.iter().any(|&v| in_box_l(v))).count();
     let l_box = l_reaches.iter().filter(|r| r.vertices.iter().any(|&v| in_box_l(v))).count();
-    let mut vals: Vec<f64> = exc.iter().map(|r| if let Status::Exception { value, .. } = r.status { value } else { 0.0 }).collect();
+    let mut vals: Vec<f64> = exc.iter().map(|r| r.exceptions.iter().map(|e| e.value).fold(0.0, f64::max)).collect();
     vals.sort_by(f64::total_cmp);
+    {
+        // reading 13: reaches crossing a deep kept basin, and how many of them are rise_over_budget
+        let hy = &h1.hydro;
+        let deep_cell = |c: u32| {
+            let lb = hy.label[c as usize];
+            lb != NONE && {
+                let bs = &hy.basins[lb as usize];
+                bs.spill_m - bs.floor_m > budget[bs.floor_cell as usize]
+            }
+        };
+        let crossing: HashSet<u64> = reaches
+            .iter()
+            .filter(|r| r.cells.iter().any(|&c| deep_cell(c)))
+            .map(|r| {
+                let up = node_id(BODY, r.up_kind, Level::H1, grid.global_id(r.cells[0] as usize));
+                let down = node_id(BODY, r.down_kind, Level::H1, grid.global_id(*r.cells.last().expect("cells") as usize));
+                reach_id(BODY, Level::H1, up, down)
+            })
+            .collect();
+        let l_cross: Vec<&GReach> = l_reaches.iter().copied().filter(|r| r.parent.is_some_and(|p| crossing.contains(&p))).collect();
+        let l_cross_exc = l_cross.iter().filter(|r| r.has_exception(Reason::RiseOverBudget)).count();
+        println!(
+            "KG134 reading 13: {} H1 trunk reaches cross a deep kept basin; their {} L reaches, {l_cross_exc} of them rise_over_budget",
+            crossing.len(),
+            l_cross.len()
+        );
+    }
     println!(
         "KG exceptions rise_over_budget: {} of {} L reaches ({} of {l_box} with a vertex in the box); excess over the remainder p50 {:.1} p90 {:.1} max {:.1} m",
         exc.len(),
@@ -1999,7 +2195,7 @@ fn main() -> Result<(), String> {
             let Some(m) = nd.marker else { continue };
             let Some(r) = g.reaches.iter().find(|r| r.id == m.on_reach) else { continue };
             let (x, y) = gxy(nd.anchor);
-            let v = if let Status::Exception { value, .. } = r.status { value } else { 0.0 };
+            let v = r.exceptions.iter().map(|e| e.value).fold(0.0, f64::max);
             writeln!(f, "{tag},{:016x},{x},{y},{v:.2},{:.3},{}", r.id, r.attrs.q_w[m.at_vertex as usize], r.attrs.strahler[0]).map_err(|e| e.to_string())?;
         }
     }
@@ -2009,7 +2205,7 @@ fn main() -> Result<(), String> {
     for r in &l_reaches {
         for v in 1..r.attrs.bed.len() {
             if r.attrs.bed[v] > r.attrs.bed[v - 1] {
-                if marker_at.contains(&(r.id, v as u32)) || matches!(r.status, Status::Exception { .. }) {
+                if marker_at.contains(&(r.id, v as u32)) || r.has_exception(Reason::RiseOverBudget) {
                     rises_exc += 1;
                 } else {
                     rises += 1;
@@ -2178,7 +2374,7 @@ fn main() -> Result<(), String> {
         let mut f = std::fs::File::create(out_dir.join(format!("{tag}-lines.csv"))).map_err(|e| e.to_string())?;
         writeln!(f, "reach,k,x,y,q_w,exception").map_err(|e| e.to_string())?;
         for (i, r) in l_reaches.iter().enumerate() {
-            let e = matches!(r.status, Status::Exception { .. });
+            let e = r.has_exception(Reason::RiseOverBudget);
             for (k, &v) in r.vertices.iter().enumerate().step_by(2) {
                 let (x, y) = gxy(v);
                 writeln!(f, "{i},{k},{x},{y},{:.2},{}", r.attrs.q_w[k], u8::from(e)).map_err(|e| e.to_string())?;
