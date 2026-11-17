@@ -262,6 +262,14 @@ fn put(rgb: &mut [[f64; 3]], v: &View, cell: (usize, usize), r: usize, colour: [
     }
 }
 
+/// A tributary is drawn when its drained area (its last vertex's `a_geo`) is at least this many pixels' area, so the overlay keeps the terrain readable at every scale.
+pub const TRIB_PIXELS: f64 = 25.0;
+
+/// The smallest drained area of a drawn tributary at view `v` (m2).
+pub fn trib_min_m2(m: &Manifest, v: &View) -> f64 {
+    TRIB_PIXELS * (v.step as f64 * m.cell_m).powi(2)
+}
+
 /// Which reaches an overlay draws.
 #[derive(Clone, Copy, PartialEq)]
 enum Reaches {
@@ -273,10 +281,11 @@ enum Reaches {
 fn draw_reaches(rgb: &mut [[f64; 3]], m: &Manifest, v: &View, g: &Graph, which: Reaches) {
     for r in &g.reaches {
         let trunk = r.level == Level::H1 || r.parent.is_some();
+        let big = r.attrs.a_geo.last().is_some_and(|&a| a >= trib_min_m2(m, v));
         let draw = match which {
             Reaches::Trunks => trunk,
-            Reaches::Tributaries => !trunk,
-            Reaches::All => true,
+            Reaches::Tributaries => !trunk && big,
+            Reaches::All => trunk || big,
         };
         if draw {
             for &id in &r.vertices {
@@ -291,7 +300,7 @@ fn draw_reaches(rgb: &mut [[f64; 3]], m: &Manifest, v: &View, g: &Graph, which: 
 fn draw_basins(rgb: &mut [[f64; 3]], m: &Manifest, v: &View, g: &Graph) {
     for b in &g.basins {
         if let Some(c) = vertex_cell(m, b.level, b.floor_cell) {
-            put(rgb, v, c, 1, if b.represented == Represented::None { BASIN_OTHER } else { BASIN_KEPT });
+            put(rgb, v, c, usize::from(v.step < 4), if b.represented == Represented::None { BASIN_OTHER } else { BASIN_KEPT });
         }
     }
 }
@@ -377,7 +386,7 @@ pub fn panels(dir: &Path, m: &Manifest, v: &View) -> Result<Vec<Panel>, String> 
         rgb: with_graph(&ks_rgb, &|rgb, g| draw_reaches(rgb, m, v, g, Reaches::Trunks)),
     });
     out.push(Panel {
-        label: "8 TRIBUTARIES, BASINS (MAGENTA KEPT) ON KS".into(),
+        label: format!("8 TRIBUTARIES (A >= {:.1} KM2), BASINS (MAGENTA KEPT)", trib_min_m2(m, v) / 1.0e6),
         rgb: with_graph(&ks_rgb, &|rgb, g| {
             draw_reaches(rgb, m, v, g, Reaches::Tributaries);
             draw_basins(rgb, m, v, g);
@@ -403,14 +412,16 @@ pub fn panels(dir: &Path, m: &Manifest, v: &View) -> Result<Vec<Panel>, String> 
     out.push(stage_panel(format!("10 KC (RED LOWER, BLUE FILL, {LOWER_M:.0} M FULL)"), &fin, "kc")?);
     let fin_rgb = plain(&fin);
     out.push(Panel {
-        label: "11 FINAL, GRAPH ON TOP".into(),
+        label: format!("11 FINAL, TRUNKS AND TRIBUTARIES (A >= {:.1} KM2)", trib_min_m2(m, v) / 1.0e6),
         rgb: with_graph(&fin_rgb, &|rgb, g| draw_reaches(rgb, m, v, g, Reaches::All)).or(fin_rgb),
     });
     out.push(Panel {
         label: format!("12 FINAL - S0 (RED LOWER, BLUE RAISE, {CHANGE_M:.0} M FULL)"),
         rgb: match (&fin, &s0) {
             (Some(f), Some(s)) => {
-                let mut rgb: Vec<[f64; 3]> = shade(f, m, v).0.iter().map(|&g| [0.3 + 0.5 * g; 3]).collect();
+                let (g, h) = shade(f, m, v);
+                let mut rgb: Vec<[f64; 3]> =
+                    g.iter().zip(&h).map(|(&g, &h)| if h <= m.sea_m { base_colour(g, h, m.sea_m) } else { [0.3 + 0.5 * g; 3] }).collect();
                 tint_change(&mut rgb, &pixel_mean(m, v, &|p| f64::from(f[p]) - f64::from(s[p])), CHANGE_M);
                 Some(rgb)
             }
