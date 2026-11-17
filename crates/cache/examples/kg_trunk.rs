@@ -18,7 +18,7 @@ use planet_core::{Face, TangentWarp, Vec3};
 use planet_generators::bake::channel_graph::{q_value, ChannelGraph};
 use planet_generators::bake::k7::RegionField;
 use planet_generators::bake::flood::priority_flood_with;
-use planet_generators::bake::hydro::{hydrology, Hydro, HydroParams};
+use planet_generators::bake::hydro::{hydrology, id_hash, Hydro, HydroParams};
 use planet_generators::bake::river_graph::{
     diff, node_id, rasterise, reach_id, validate, validate_raster, Attrs, Checks, Domain, Graph, Level, Marker, Node, NodeKind, Reach as GReach, Reason, Status,
     Violation,
@@ -1293,6 +1293,7 @@ fn build_graph(
     order: &[u8],
     threads: usize,
     low_centre: bool,
+    ocean: &[bool],
 ) -> (Graph, Vec<String>) {
     let (x0, y0, w, h, rw) = window;
     let h1_gid = |c: u32| grid.global_id(c as usize);
@@ -1346,7 +1347,7 @@ fn build_graph(
     let all_inside = vec![true; w * h];
     let ks_water: Vec<f64> = ks0.iter().map(|&z| z.max(sea)).collect();
     let mks = Measure { w, h, water: &ks_water, inside: &all_inside, region: &all_inside, sea, radius: K_C * L as f64, bar };
-    let anchor_of = |c: u32, outlet: bool| -> Option<usize> {
+    let anchor_of = |c: u32, outlet: bool, taken: &HashSet<usize>| -> Option<usize> {
         let p = to_local(c);
         let disc = |keep: &dyn Fn(usize) -> bool| -> Option<usize> {
             let r = L as f64;
@@ -1367,18 +1368,35 @@ fn build_graph(
             best
         };
         if outlet {
-            disc(&|_| true)
+            disc(&|cc| !taken.contains(&cc))
         } else {
-            disc(&|cc| s0[cc] > sea).or_else(|| disc(&|_| true))
+            disc(&|cc| s0[cc] > sea && !taken.contains(&cc)).or_else(|| disc(&|cc| !taken.contains(&cc)))
         }
     };
+    // reading 7: the H1 nodes snap in order of descending q_w, ties by H1 node id; a cell already taken is excluded
+    let mut h1_nodes: Vec<(u32, NodeKind)> = reaches.iter().flat_map(|r| [(r.cells[0], r.up_kind), (*r.cells.last().expect("cells"), r.down_kind)]).collect();
+    h1_nodes.sort_by_key(|&(c, k)| (c, k));
+    h1_nodes.dedup();
+    h1_nodes.sort_by(|a, b| {
+        h1.hydro.qw[b.0 as usize]
+            .total_cmp(&h1.hydro.qw[a.0 as usize])
+            .then(node_id(BODY, a.1, Level::H1, h1_gid(a.0)).cmp(&node_id(BODY, b.1, Level::H1, h1_gid(b.0))))
+    });
+    let mut taken: HashSet<usize> = HashSet::new();
+    let mut anchor: HashMap<(u32, NodeKind), usize> = HashMap::new();
+    for &(c, kind) in &h1_nodes {
+        if let Some(a) = anchor_of(c, kind == NodeKind::OutletSea, &taken) {
+            taken.insert(a);
+            anchor.insert((c, kind), a);
+        }
+    }
     // routes in parallel
     let jobs: Vec<(usize, Vec<(f64, f64)>, usize, usize)> = reaches
         .iter()
         .enumerate()
         .filter_map(|(k, r)| {
-            let up = anchor_of(r.cells[0], false)?;
-            let down = anchor_of(*r.cells.last().expect("cells"), r.down_kind == NodeKind::OutletSea)?;
+            let up = *anchor.get(&(r.cells[0], r.up_kind))?;
+            let down = *anchor.get(&(*r.cells.last().expect("cells"), r.down_kind))?;
             Some((k, r.cells.iter().map(|&c| to_local(c)).collect(), up, down))
         })
         .collect();
@@ -1420,6 +1438,7 @@ fn build_graph(
     idx.sort_by_key(|&i| std::cmp::Reverse(pos[&reaches[routed[i].0].cells[0]]));
     let mut exceptions = 0usize;
     let mut sea_ends = 0usize;
+    let mut sea_inland = 0usize;
     let mut l_reaches: Vec<GReach> = Vec::new();
     let mut markers: Vec<Node> = Vec::new();
     for &i in &idx {
@@ -1436,7 +1455,10 @@ fn build_graph(
             // the route met the sea before the down node: the image ends at an outlet there
             down_c = *route.last().expect("route");
             down_kind = NodeKind::OutletSea;
-            sea_ends += usize::from(hr.down_kind != NodeKind::OutletSea);
+            if hr.down_kind != NodeKind::OutletSea {
+                sea_ends += 1;
+                sea_inland += usize::from(!ocean[down_c]);
+            }
         }
         if down_kind == NodeKind::OutletSea {
             // reading 2: the outlet image is the first sea cell of the chain
@@ -1511,7 +1533,8 @@ fn build_graph(
         let status = if over > 0.0 {
             exceptions += 1;
             for &v in &rise_at {
-                let mid = node_id(BODY, NodeKind::Exception, Level::L, l_gid(route[v]));
+                // reading 8: hash(body, kind, level, anchor, on_reach) (GEN-189 follows in a main PR: main's validator still reports these ids as IdMismatch)
+                let mid = id_hash(node_id(BODY, NodeKind::Exception, Level::L, l_gid(route[v])), id, 0x8A2E_0008);
                 markers.push(Node {
                     id: mid,
                     kind: NodeKind::Exception,
@@ -1563,7 +1586,7 @@ fn build_graph(
     g.reaches.extend(l_reaches);
     g.nodes.extend(markers);
     notes.push(format!(
-        "L reaches skipped (no route or a one-cell chain) {skipped}; routes meeting the sea before their down node (ended at an outlet_sea there) {sea_ends}; anchor collisions (two kinds on one L cell) {collisions}; rise_over_budget reaches {exceptions}"
+        "L reaches skipped (no route or a one-cell chain) {skipped}; routes meeting the sea before their down node (ended at an outlet_sea there) {sea_ends}, of them on an inland cell {sea_inland}; anchor collisions (two kinds on one L cell) {collisions}; rise_over_budget reaches {exceptions}"
     ));
     notes.push(format!("MERGED {}", merged.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")));
     g.sort();
@@ -1680,6 +1703,43 @@ fn main() -> Result<(), String> {
     par_fill(&mut start, w, threads, &|p| bl[p] + front.regional_field.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
     drop(bl);
 
+    // ---- the ocean at L: cells at or below the sea level connected (8 neighbours) to an L cell of an H1 sea outlet or to the window's edge
+    let ocean: Vec<bool> = {
+        let mut o = vec![false; w * h];
+        let mut stack: Vec<usize> = Vec::new();
+        for c in 0..w * h {
+            let (x, y) = (c % w, c / w);
+            let hc = (y / L) * rw + x / L;
+            let seed_cell = (solve.zb[hc] <= sea && !grid.is_edge(hc)) || x == 0 || y == 0 || x == w - 1 || y == h - 1;
+            if start[c] <= sea && seed_cell {
+                o[c] = true;
+                stack.push(c);
+            }
+        }
+        while let Some(c) = stack.pop() {
+            let (x, y) = ((c % w) as i64, (c / w) as i64);
+            for dy in -1..=1i64 {
+                for dx in -1..=1i64 {
+                    let (nx, ny) = (x + dx, y + dy);
+                    if nx < 0 || ny < 0 || nx >= w as i64 || ny >= h as i64 {
+                        continue;
+                    }
+                    let n = ny as usize * w + nx as usize;
+                    if !o[n] && start[n] <= sea {
+                        o[n] = true;
+                        stack.push(n);
+                    }
+                }
+            }
+        }
+        o
+    };
+    {
+        let at_sea = (0..w * h).filter(|&c| start[c] <= sea).count();
+        let inland = (0..w * h).filter(|&c| start[c] <= sea && !ocean[c]).count();
+        println!("KG sea at L: {at_sea} cells of S0 at or below the sea level, {inland} of them inland (not connected to an H1 sea outlet or the window's edge; {:.3} % of the window)", 100.0 * inland as f64 / (w * h) as f64);
+    }
+
     // ---- H1: today's K6 and K6' (sills of S0)
     let dir_h1 = |c: usize| solve.face_spec.halo_direction((sri0 + c % rw) as i64, (srj0 + c / rw) as i64);
     let (mut weight, mut runoff, mut evap) = (vec![1.0f32; cells], vec![0.0f32; cells], vec![0.0f32; cells]);
@@ -1691,17 +1751,83 @@ fn main() -> Result<(), String> {
     }
     let eps = solve.precision.epsilon_w;
     let stream = solve.stream;
-    let h1 = if base_today {
+    // K6' on the sills, and on the same node heights without the sills (each edge at the higher node): the basins the sills alone close
+    let (h1, h1_nosill) = if base_today {
         let r0 = route_rules(grid, &solve.zs, outlet, eps, stream, 0.0, Some(&weight), RoundRules::ROUND);
         let f0 = priority_flood_with(grid, &solve.zs, outlet, eps, true);
-        h1_from(grid, &solve.zs, &f0, r0, outlet, &runoff, &evap)
+        (h1_from(grid, &solve.zs, &f0, r0, outlet, &runoff, &evap), None)
     } else {
         let s = nodes_and_sills(&|c: usize| start[c], rw, rh, threads, None);
         let sill = |p: usize, d: usize, q: usize| s.at(p, d, q);
         let f = flood(grid, &s.h, &sill, outlet, eps);
         let r = route_sills(grid, &f, &sill, outlet, stream, &weight, true);
-        h1_from(grid, &s.h, &f, r, outlet, &runoff, &evap)
+        let with = h1_from(grid, &s.h, &f, r, outlet, &runoff, &evap);
+        let hh = &s.h;
+        let plain = |p: usize, _d: usize, q: usize| hh[p].max(hh[q]);
+        let f2 = flood(grid, hh, &plain, outlet, eps);
+        let r2 = route_sills(grid, &f2, &plain, outlet, stream, &weight, true);
+        (with, Some(h1_from(grid, hh, &f2, r2, outlet, &runoff, &evap)))
     };
+    // the basin census (lead #132a): kept H1 basins, their depth and size against GEN-145's artefact floor (fewer than 4 cells and shallower than 2 m) and the
+    // 0.5 m pit limit, the channel-segment cells they hold by depth class, and (K6') those that the sills alone close
+    {
+        let hy = &h1.hydro;
+        let mut seg_cells: Vec<u32> = Vec::new();
+        for sg in &hy.segments {
+            let mut c = sg.up;
+            seg_cells.push(c);
+            while c != sg.down {
+                c = h1.routing.receiver[c as usize];
+                seg_cells.push(c);
+            }
+        }
+        let depth = |b: usize| hy.basins[b].spill_m - hy.basins[b].floor_m;
+        let nb = hy.basins.len();
+        let mut d: Vec<f64> = (0..nb).map(depth).collect();
+        d.sort_by(f64::total_cmp);
+        let mut sz: Vec<u32> = hy.basins.iter().map(|b| b.cells).collect();
+        sz.sort();
+        let q = |v: &[f64], f: f64| v.get(((v.len().max(1) - 1) as f64 * f) as usize).copied().unwrap_or(0.0);
+        let shallow2 = (0..nb).filter(|&b| depth(b) < 2.0).count();
+        let small4 = hy.basins.iter().filter(|b| b.cells < 4).count();
+        let shallow05 = (0..nb).filter(|&b| depth(b) < 0.5).count();
+        let classes = [0.5, 2.0, 5.0, 10.0, 50.0, f64::INFINITY];
+        let mut held = vec![0usize; classes.len()];
+        for &c in &seg_cells {
+            let b = hy.label[c as usize];
+            if b != NONE {
+                let dd = depth(b as usize);
+                held[classes.iter().position(|&t| dd < t).expect("a class")] += 1;
+            }
+        }
+        println!(
+            "KG basin census: {nb} kept H1 basins; depth spill - floor p10 {:.1} p50 {:.1} p90 {:.1} m; cells p50 {} p90 {} max {}; shallower than 2 m {shallow2} (of them under 0.5 m {shallow05}), fewer than 4 cells {small4}",
+            q(&d, 0.1),
+            q(&d, 0.5),
+            q(&d, 0.9),
+            sz.get(sz.len() / 2).copied().unwrap_or(0),
+            sz.get(sz.len() * 9 / 10).copied().unwrap_or(0),
+            sz.last().copied().unwrap_or(0)
+        );
+        println!(
+            "KG basin census: channel-segment cells in kept basins by basin depth: < 0.5 m {}, 0.5-2 m {}, 2-5 m {}, 5-10 m {}, 10-50 m {}, >= 50 m {} (of {} segment cells)",
+            held[0], held[1], held[2], held[3], held[4], held[5], seg_cells.len()
+        );
+        if let Some(ns) = &h1_nosill {
+            let nh = &ns.hydro;
+            let nbc = nh.label.iter().filter(|&&b| b != NONE).count();
+            let sill_only: Vec<usize> = (0..nb).filter(|&b| nh.label[hy.basins[b].floor_cell as usize] == NONE).collect();
+            let so: HashSet<usize> = sill_only.iter().copied().collect();
+            let so_cells = hy.label.iter().filter(|&&b| b != NONE && so.contains(&(b as usize))).count();
+            let so_seg = seg_cells.iter().filter(|&&c| hy.label[c as usize] != NONE && so.contains(&(hy.label[c as usize] as usize))).count();
+            let in_seg = seg_cells.iter().filter(|&&c| hy.label[c as usize] != NONE).count();
+            println!(
+                "KG basin census (K6'): without the sills (each edge at the higher node height) {} kept basins, {nbc} basin cells; {} of the {nb} K6' basins ({so_cells} cells) have their floor in no basin there: the sills alone close them; they hold {so_seg} of the {in_seg} segment cells in kept basins",
+                nh.basins.len(),
+                sill_only.len()
+            );
+        }
+    }
     println!("KG centreline: {}", if low { "lowest path (Dijkstra, step cost length x (1 + height over the corridor's minimum / 10 m))" } else { "maximin corridor route (BUILD-057's measure)" });
     println!("KG base H1: {} ({} segments, {} kept basins)", if base_today { "today's K6" } else { "K6' on the sills of S0 (SPIKE-127)" }, h1.hydro.segments.len(), h1.hydro.basins.len());
 
@@ -1792,7 +1918,7 @@ fn main() -> Result<(), String> {
     // ---- the graph
     let window = (x0 as u64, y0 as u64, w, h, rw);
     let t = Instant::now();
-    let (g, notes) = build_graph(&h1, &reaches, grid, &start, &ks0, &budget, window, sea, bar, &order, threads, low);
+    let (g, notes) = build_graph(&h1, &reaches, grid, &start, &ks0, &budget, window, sea, bar, &order, threads, low, &ocean);
     let build_s = t.elapsed().as_secs_f64();
     let l_reaches: Vec<&GReach> = g.reaches.iter().filter(|r| r.level == Level::L).collect();
     let l_vertices: usize = l_reaches.iter().map(|r| r.vertices.len()).sum();
@@ -1965,7 +2091,7 @@ fn main() -> Result<(), String> {
     }
 
     // ---- determinism and partition (the L stage reads the landmass H1 graph and pointwise fields)
-    let (g1t, _) = build_graph(&h1, &reaches, grid, &start, &ks0, &budget, window, sea, bar, &order, 1, low);
+    let (g1t, _) = build_graph(&h1, &reaches, grid, &start, &ks0, &budget, window, sea, bar, &order, 1, low, &ocean);
     println!("KG determinism: 1 thread against {threads}: canonical form {}", if g1t.canonical() == canon { "identical" } else { "DIFFERS" });
     // two regions: KS0 evaluated anew over the left and the right half of the window (each its own evaluation), stitched
     let mut ks_two = vec![0f64; w * h];
@@ -1980,7 +2106,7 @@ fn main() -> Result<(), String> {
         }
     }
     let differ = (0..w * h).filter(|&p| ks_two[p].to_bits() != ks0[p].to_bits()).count();
-    let (g2r, _) = build_graph(&h1, &reaches, grid, &start, &ks_two, &budget, window, sea, bar, &order, threads, low);
+    let (g2r, _) = build_graph(&h1, &reaches, grid, &start, &ks_two, &budget, window, sea, bar, &order, threads, low, &ocean);
     println!("KG partition: KS0 of two regions against one: {differ} cells differ; the graph's canonical form {}", if g2r.canonical() == canon { "identical" } else { "DIFFERS" });
     // a neighbouring tile rebuilt: one tile of KS0 evaluated again, the graph's ids
     {
@@ -1991,7 +2117,7 @@ fn main() -> Result<(), String> {
                 ks_t[y * w + x] = ks0_at(y * w + x);
             }
         }
-        let (gt, _) = build_graph(&h1, &reaches, grid, &start, &ks_t, &budget, window, sea, bar, &order, threads, low);
+        let (gt, _) = build_graph(&h1, &reaches, grid, &start, &ks_t, &budget, window, sea, bar, &order, threads, low, &ocean);
         let changes = diff(&g, &gt);
         println!("KG tile rebuild: tile ({tx}, {ty}) of the window evaluated again: {} differences ({} topology)", changes.len(), changes.iter().filter(|c| c.is_topology()).count());
     }
