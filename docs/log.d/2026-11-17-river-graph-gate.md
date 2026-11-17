@@ -1,0 +1,1 @@
+- 2026-11-17 river-graph-gate (BUILD-060, TEST-137): river-gate reads a canonical river graph, stage budget fields and a partition pair, and prints the G2 columns with their gate classes (lead #165).
