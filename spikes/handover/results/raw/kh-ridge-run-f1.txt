@@ -1,0 +1,3 @@
+KR f1: quads split along a D8 step 368273 (in the box 139545), by the higher pair 670088; S0 ridge cells within 1 L cell of a stepped quad's diagonal 29297 in 10196 quads; KH + r under S0 there on 28978 cells: p50 8.31 p95 26.7 max 64.1 m, over 10 m 11412 cells (3646 quads), over 50 m 57 cells (30 quads)
+KR f1 crop: L cells (1600, 5696) of the window, 512 x 512 (52.1 km), p50 1 km relief 31.1 m; H1 cells (200, 712) of the window
+KR f1 done: 37 s

@@ -1,0 +1,12 @@
+# peak.ps1 lines (wall time incl. setup, peak working set)
+rg_chain --kh h2 --ks ks0 (later stages skipped) r1h: BAKE-TIME 81 s, peak working set 6,33 GB, exit 
+kh_ridge r1h: BAKE-TIME 35 s, peak working set 1,58 GB, exit 
+rg_chain --kh h2 --ks ks0 (later stages skipped) r3a: BAKE-TIME 94 s, peak working set 6,38 GB, exit 
+kh_ridge r3a: BAKE-TIME 43 s, peak working set 1,67 GB, exit 
+rg_chain --kh h2 --ks ks0 (later stages skipped) r3b: BAKE-TIME 87 s, peak working set 6,32 GB, exit 
+kh_ridge r3b: BAKE-TIME 35 s, peak working set 1,67 GB, exit 
+rg_chain --kh h2 --ks ks0 (later stages skipped) m1: BAKE-TIME 88 s, peak working set 6,29 GB, exit 
+kh_ridge m1: BAKE-TIME 39 s, peak working set 1,66 GB, exit 
+rg_chain --kh h2 --ks ks0 (later stages skipped) f1: BAKE-TIME 89 s, peak working set 6,34 GB, exit 
+kh_ridge f1: BAKE-TIME 37 s, peak working set 1,67 GB, exit 
+rg_chain --kh h2 --regions 2, full chain, r1h: BAKE-TIME 874 s, peak working set 13,18 GB, exit 

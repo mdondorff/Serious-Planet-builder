@@ -1,0 +1,17 @@
+KG sea at L: 0 cells of S0 at or below the sea level, 0 of them inland (not connected to an H1 sea outlet or the window's edge; 0.000 % of the window)
+RG stage setup (S0, ocean, H1 base): 43.8 s; peak working set 1633 MiB, now 1303 MiB
+RG stage budget field: 17.6 s; peak working set 1827 MiB, now 1819 MiB
+RG KH h2: quads split along a D8 diagonal step 359781 (both diagonals 0), along the higher pair 678580; two regions against one: 0 cells differ, one thread against the run: 0; against S0 on 66585600 land cells: lower over 10 m 18487251, higher over 10 m 17842625
+RG stage KH (h2): 5.4 s; peak working set 3870 MiB, now 2841 MiB
+RG KS0 (S0 - min(max(0, r - C1(HAND)), budget)): 31670491 cells lowered, 77097 residuals
+RG stage KS0: 5.9 s; peak working set 3870 MiB, now 2843 MiB
+RG KG-trunk: 0 nodes, 0 reaches
+RG stage KG-trunk: 0.0 s; peak working set 3870 MiB, now 2843 MiB
+RG domain 0 KS: 31670491 core cells lowered, 77097 core residuals
+RG domains: 0 nodes, 0 reaches, 0 basins after the stitch
+RG stage basins: 0.0 s; peak working set 6444 MiB, now 3933 MiB
+RG stage KG-trib: 0.0 s; peak working set 6444 MiB, now 3933 MiB
+RG stage KS1: 0.3 s; peak working set 6444 MiB, now 3933 MiB
+RG stage KV and KC: 0.3 s; peak working set 6444 MiB, now 3933 MiB
+RG stage write: 6.2 s; peak working set 6444 MiB, now 3933 MiB
+RG done: kh h2, ks ks0, skipped ["kg-trunk", "basins", "kg-trib", "kv", "kc"], regions 1; 0 nodes, 0 reaches, 0 basins; files in C:/DEV/SeriousPlanetData/tmp/kh/m1: m1-graph.txt, m1-stages/, m1-final-8160x8160.f64, m1-timing.csv; 87.3 s
