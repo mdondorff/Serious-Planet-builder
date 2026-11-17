@@ -6,7 +6,8 @@ use planet_generators::bake::route::{route_rules_filled, RoundRules, Routing, NO
 use planet_generators::bake::Grid;
 
 use crate::river_suite::{
-    corridor_bar_m, measure_suite, trunk_burn, trunk_corridor, Snap, SuiteInput, SuiteReport, TrunkReport, CORRIDOR_K,
+    corridor_bar_m, measure_suite, network, trunk_burn, trunk_corridor, Network, Snap, SuiteInput, SuiteReport, TrunkReport, CORRIDOR_K,
+    NETWORK_KM2,
 };
 
 /// The routing's flood grade between cells (the spikes' 1e-3 m).
@@ -41,6 +42,8 @@ pub struct GateParams {
     pub edge_q_m3s: f64,
     /// The H1 cell size (metres): a trunk corridor's radius is `k_c` of it.
     pub h1_cell_m: f64,
+    /// The channel thresholds of the network measure (BUILD-059), km2.
+    pub network_km2: [f64; 2],
 }
 
 impl Default for GateParams {
@@ -54,6 +57,7 @@ impl Default for GateParams {
             edge_m: 2000.0,
             edge_q_m3s: 1.0,
             h1_cell_m: 814.0,
+            network_km2: NETWORK_KM2,
         }
     }
 }
@@ -132,6 +136,12 @@ const CORRIDOR_FIELDS: [[&str; 8]; 6] = [
     corridor_names!("c4s"),
 ];
 
+/// The column names of the network measure (BUILD-059): one row per channel threshold of `GateParams::network_km2`.
+const NETWORK_FIELDS: [[&str; 7]; 2] = [
+    ["net1_km2", "net1_channel_km", "net1_land_km2", "net1_density_km_per_km2", "net1_streams_by_order", "net1_rb_orders", "net1_rb"],
+    ["net2_km2", "net2_channel_km", "net2_land_km2", "net2_density_km_per_km2", "net2_streams_by_order", "net2_rb_orders", "net2_rb"],
+];
+
 /// The gate's numbers.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GateReport {
@@ -178,6 +188,8 @@ pub struct GateReport {
     pub trunk_corridors: Vec<TrunkReport>,
     pub trunk_corridors_snapped: Vec<TrunkReport>,
     pub corridor_bar_m: f64,
+    /// The channel network at each of `params.network_km2` (BUILD-059): drainage density and the Strahler bifurcation ratio.
+    pub networks: Vec<Network>,
 }
 
 fn share(n: usize, of: usize) -> f64 {
@@ -314,7 +326,39 @@ impl GateReport {
             ];
             f.extend(names.iter().copied().zip(values));
         }
+        for (names, t) in NETWORK_FIELDS.iter().zip(&self.networks) {
+            let orders: Vec<String> = t.streams.iter().map(|k| k.to_string()).collect();
+            let values = [
+                format!("{}", t.threshold_km2),
+                format!("{:.1}", t.river_km),
+                format!("{:.1}", t.land_km2),
+                format!("{:.4}", t.density_km_per_km2),
+                if orders.is_empty() { "-".to_string() } else { orders.join("/") },
+                c(t.rb_orders),
+                r(t.rb),
+            ];
+            f.extend(names.iter().copied().zip(values));
+        }
         f
+    }
+
+    /// The network lines (BUILD-059): one per channel threshold.
+    pub fn network_lines(&self) -> Vec<String> {
+        self.networks
+            .iter()
+            .map(|t| {
+                let orders: Vec<String> = t.streams.iter().map(|k| k.to_string()).collect();
+                let rb = if t.rb_orders >= 2 { format!("{:.3} over orders 1 to {}", t.rb, t.rb_orders) } else { "none (fewer than 2 orders below the highest)".to_string() };
+                format!(
+                    "RIVER-GATE network at {} km2: drainage density {:.4} km/km2 ({:.1} km of channel over {:.1} km2 of land); Strahler streams starting inside by order {}; bifurcation ratio R_b {rb}",
+                    t.threshold_km2,
+                    t.density_km_per_km2,
+                    t.river_km,
+                    t.land_km2,
+                    if orders.is_empty() { "none".to_string() } else { orders.join(" / ") }
+                )
+            })
+            .collect()
     }
 
     /// The fields as one printed line: `RIVER-GATE fields: name=value ...` (values hold no space).
@@ -418,6 +462,7 @@ impl GateReport {
         .chain(self.suite.lines())
         .chain(std::iter::once(self.trunk_line()))
         .chain(std::iter::once(self.corridor_line()))
+        .chain(self.network_lines())
         .collect()
     }
 
@@ -854,5 +899,10 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
             .map(|k| trunk_corridor(g, &water, input.inside, input.trunks, k * cell_h1, bar, input.sea_level_m, Some(&snap)))
             .collect(),
         corridor_bar_m: bar,
+        networks: params
+            .network_km2
+            .iter()
+            .map(|&a| network(g, z, &routing.receiver, &area, input.inside, input.sea_level_m, a * 1.0e6))
+            .collect(),
     }
 }

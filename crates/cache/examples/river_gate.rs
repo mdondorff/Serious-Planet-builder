@@ -4,6 +4,9 @@
 //! - with `--store`, on the stored ground B + L (an L tile is K7's ground minus B, so the regional change is in it) over the commit's tiles, the start surface around them, counted over the tiles;
 //!   `--no-key-check` reads each tile under the key its commit names (a spike branch's store) and the report says so.
 //!
+//! - with `--grid file,w,h,sea_level_m`, on a raw height grid (little-endian f64, row-major, L cells of 101.8 m; a GLO-30 benchmark tile prepared by SPIKE-119's
+//!   `dem_prep.py`): the grid's edge and every cell at or below the sea level are outlets, counted inside a 10-cell border, routing seed 7, no H1 (BUILD-059).
+//!
 //! The window is in regional cells (12,288 a face edge) as the spikes write it; the default is R1h (face 1, seed 14; the E1 region stores' window, lead 2026-11-14).
 use std::path::Path;
 use std::sync::Arc;
@@ -26,6 +29,9 @@ const REGIONAL: usize = 12_288;
 const SECONDS_PER_YEAR: f64 = 31_557_600.0;
 /// R1h: face 1, regional cells i 8,056 to 8,675, j 760 to 1,379, seed 14 (the E1 region stores' window: r3a-e1, r3a-p2, r3a-p2e).
 const R1H: [usize; 6] = [1, 8056, 8675, 760, 1379, 14];
+/// A raw grid's cell size (SPIKE-119's L cells) and counted border (cells).
+const GRID_CELL_M: f64 = 101.8;
+const GRID_BORDER: usize = 10;
 
 /// The base lattice's nodes over the region (the C1 read's footprint).
 struct Lattice {
@@ -80,11 +86,56 @@ fn par_fill(out: &mut [f64], w: usize, threads: usize, f: &(dyn Fn(usize) -> f64
     });
 }
 
+/// The gate on a raw height grid (`--grid file,w,h,sea_level_m`; BUILD-059's GLO-30 benchmark input).
+fn grid_gate(arg: &str, params: &GateParams) -> Result<(), String> {
+    let usage = format!("--grid file,w,h,sea_level_m, not '{arg}'");
+    let p: Vec<&str> = arg.rsplitn(4, ',').collect();
+    let [sea, h, w, file] = p[..] else { return Err(usage) };
+    let (w, h, sea): (usize, usize, f64) =
+        (w.parse().map_err(|_| usage.clone())?, h.parse().map_err(|_| usage.clone())?, sea.parse().map_err(|_| usage.clone())?);
+    if w <= 2 * GRID_BORDER || h <= 2 * GRID_BORDER {
+        return Err(format!("--grid {w} x {h}: wider and higher than twice the {GRID_BORDER}-cell border"));
+    }
+    let bytes = std::fs::read(file).map_err(|e| format!("{file}: {e}"))?;
+    if bytes.len() != w * h * 8 {
+        return Err(format!("{file}: {} bytes, {w} x {h} f64 heights are {}", bytes.len(), w * h * 8));
+    }
+    let surface: Vec<f64> = bytes.chunks_exact(8).map(|c| f64::from_le_bytes(c.try_into().expect("8 bytes"))).collect();
+    let grid = planet_generators::bake::Grid::new(w, h, GRID_CELL_M);
+    let outlet = grid.outlets(&surface, sea);
+    let inside: Vec<bool> = (0..w * h)
+        .map(|c| (GRID_BORDER..w - GRID_BORDER).contains(&(c % w)) && (GRID_BORDER..h - GRID_BORDER).contains(&(c / w)))
+        .collect();
+    let region = vec![true; w * h];
+    let report = measure(
+        &GateInput {
+            grid: &grid,
+            start: &surface,
+            surface: &surface,
+            outlet: &outlet,
+            inside: &inside,
+            region: &region,
+            h1: &[],
+            seed: 7,
+            sea_level_m: sea,
+            outside_drains: false,
+            trunks: &[],
+        },
+        params,
+    );
+    println!("RIVER-GATE input: grid {file}, sea level {sea} m, counted inside a {GRID_BORDER}-cell border, no H1; {w} x {h} cells of {GRID_CELL_M} m");
+    for line in report.lines() {
+        println!("{line}");
+    }
+    println!("{}", report.fields_line());
+    Ok(())
+}
+
 fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let no_key_check = args.iter().any(|a| a == "--no-key-check");
     let args: Vec<String> = args.into_iter().filter(|a| a != "--no-key-check").collect();
-    let known = ["--window", "--margin", "--store", "--min-cells", "--d", "--threads"];
+    let known = ["--window", "--margin", "--store", "--min-cells", "--d", "--threads", "--network-km2", "--grid"];
     let mut k = 0;
     while k < args.len() {
         if !known.contains(&args[k].as_str()) {
@@ -104,11 +155,32 @@ fn main() -> Result<(), String> {
     }
     let margin: usize = parsed(&args, "--margin", 200)?;
     let threads: usize = parsed(&args, "--threads", 8)?;
+    let network_km2 = match value(&args, "--network-km2") {
+        None => GateParams::default().network_km2,
+        Some(v) => {
+            let a: Vec<f64> = v
+                .split(',')
+                .map(|x| x.parse::<f64>())
+                .collect::<Result<_, _>>()
+                .map_err(|_| format!("--network-km2 a,b in km2, not '{v}'"))?;
+            match a[..] {
+                [x, y] if x > 0.0 && y > 0.0 => [x, y],
+                _ => return Err(format!("--network-km2 takes two positive areas a,b in km2, not '{v}'")),
+            }
+        }
+    };
     let params = GateParams {
         basin_cells: parsed(&args, "--min-cells", GateParams::default().basin_cells)?,
         lake_depth_m: parsed(&args, "--d", 20.0)?,
+        network_km2,
         ..GateParams::default()
     };
+    if let Some(g) = value(&args, "--grid") {
+        if value(&args, "--store").is_some() || value(&args, "--window").is_some() {
+            return Err("--grid is its own input: it takes no --store or --window".to_string());
+        }
+        return grid_gate(g, &params);
+    }
     let store = value(&args, "--store").map(Path::new);
     if no_key_check && store.is_none() {
         return Err("--no-key-check reads a store: it goes with --store".to_string());

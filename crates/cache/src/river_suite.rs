@@ -856,3 +856,103 @@ pub fn trunk_corridor(
 pub fn corridor_bar_m(relief_10_start_m: f64) -> f64 {
     (0.5 * relief_10_start_m).clamp(10.0, 50.0)
 }
+/// The channel thresholds the gate measures the network at by default (BUILD-059, lead #163), km2: the fine graph's 1 km2 and the river cells' 75 km2.
+pub const NETWORK_KM2: [f64; 2] = [1.0, 75.0];
+
+/// The channel network at one threshold (BUILD-059): the drainage density and the Strahler stream counts with the bifurcation ratio.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Network {
+    /// The channel threshold: a land cell (above the sea) draining at least this area is a channel cell (km2).
+    pub threshold_km2: f64,
+    /// The channel length inside (steps from a channel cell inside to a channel receiver, diagonals sqrt 2) over the land area inside.
+    pub river_km: f64,
+    pub land_km2: f64,
+    pub density_km_per_km2: f64,
+    /// `streams[k - 1]`: the Strahler streams of order `k` that start inside (a channel head for order 1; for order `k > 1` the cell where two streams of order `k - 1` meet).
+    pub streams: Vec<usize>,
+    /// The orders the fit reads (1 to the highest order less one: the highest is cut by the window), and `R_b = 10^-b`, `b` the least-squares slope of `log10 N_k` on `k`
+    /// over those orders with `N_k > 0`; 0 when fewer than 2 orders remain.
+    pub rb_orders: usize,
+    pub rb: f64,
+}
+
+/// The network of `z` at `threshold_m2` (BUILD-059) on the routing's receivers and drainage areas (m2), counted over `inside`. Orders are found on the whole grid (a
+/// cell's order follows from its channel donors: their highest order `m`, raised to `m + 1` where two or more donors carry `m`), so a stream entering from outside
+/// keeps its order; the result depends on the receivers only, not on any visiting order.
+pub fn network(grid: &Grid, z: &[f64], receiver: &[u32], area: &[f64], inside: &[bool], sea_level_m: f64, threshold_m2: f64) -> Network {
+    let n = grid.len();
+    let w = grid.w();
+    let channel: Vec<bool> = (0..n).map(|c| area[c] >= threshold_m2 && z[c] > sea_level_m).collect();
+    let down = |c: usize| {
+        let r = receiver[c];
+        (r != NONE && channel[r as usize]).then_some(r as usize)
+    };
+    // Kahn's order over the channel donors: a cell is settled once every channel donor is.
+    let mut waiting = vec![0u32; n];
+    for c in 0..n {
+        if channel[c] {
+            if let Some(r) = down(c) {
+                waiting[r] += 1;
+            }
+        }
+    }
+    let (mut top, mut count) = (vec![0u32; n], vec![0u32; n]);
+    let mut order = vec![0u32; n];
+    let mut ready: Vec<usize> = (0..n).filter(|&c| channel[c] && waiting[c] == 0).collect();
+    while let Some(c) = ready.pop() {
+        order[c] = if top[c] == 0 {
+            1
+        } else if count[c] >= 2 {
+            top[c] + 1
+        } else {
+            top[c]
+        };
+        if let Some(r) = down(c) {
+            if order[c] > top[r] {
+                (top[r], count[r]) = (order[c], 1);
+            } else if order[c] == top[r] {
+                count[r] += 1;
+            }
+            waiting[r] -= 1;
+            if waiting[r] == 0 {
+                ready.push(r);
+            }
+        }
+    }
+    let (mut len_m, mut streams) = (0.0, Vec::<usize>::new());
+    for c in 0..n {
+        if !channel[c] || !inside[c] {
+            continue;
+        }
+        if let Some(r) = down(c) {
+            let (dx, dy) = ((r % w) as f64 - (c % w) as f64, (r / w) as f64 - (c / w) as f64);
+            len_m += libm::hypot(dx, dy) * grid.dx();
+        }
+        // A stream starts where no donor carries the cell's order (a head, or a meeting of two or more streams of the order below).
+        if top[c] != order[c] {
+            let k = order[c] as usize;
+            if streams.len() < k {
+                streams.resize(k, 0);
+            }
+            streams[k - 1] += 1;
+        }
+    }
+    let land_km2 = (0..n).filter(|&c| inside[c] && z[c] > sea_level_m).count() as f64 * grid.dx() * grid.dx() / 1.0e6;
+    let pts: Vec<(f64, f64)> = streams
+        .iter()
+        .enumerate()
+        .take(streams.len().saturating_sub(1))
+        .filter(|(_, &s)| s > 0)
+        .map(|(k, &s)| ((k + 1) as f64, libm::log10(s as f64)))
+        .collect();
+    let rb = if pts.len() >= 2 { libm::pow(10.0, -fit(&pts)) } else { 0.0 };
+    Network {
+        threshold_km2: threshold_m2 / 1.0e6,
+        river_km: len_m / 1000.0,
+        land_km2,
+        density_km_per_km2: if land_km2 > 0.0 { len_m / 1000.0 / land_km2 } else { 0.0 },
+        streams,
+        rb_orders: pts.len(),
+        rb,
+    }
+}
