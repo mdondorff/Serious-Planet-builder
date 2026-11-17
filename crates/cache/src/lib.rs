@@ -28,4 +28,5 @@ pub mod river_gate_graph;
 pub mod river_read;
 pub mod river_suite;
 pub mod stage_key;
+pub mod stage_sheet;
 pub mod tiles;

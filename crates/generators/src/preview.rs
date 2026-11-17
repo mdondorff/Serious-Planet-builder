@@ -167,8 +167,11 @@ fn glyph(c: char) -> [u8; 7] {
 const SCALE: usize = 2;
 const CELL_W: usize = 6 * SCALE;
 const ROW_H: usize = 10 * SCALE;
+/// The height of a text row of [`put_text`] in pixels (glyphs 5 x 7 at scale 2, with spacing).
+pub const TEXT_ROW_H: usize = ROW_H;
 
-fn put_text(img: &mut Rgba, x: usize, y: usize, text: &str, color: [u8; 3]) {
+/// Writes `text` (upper-cased; 5 x 7 glyphs at scale 2) at `(x, y)` in `color`, clipped to the image.
+pub fn put_text(img: &mut Rgba, x: usize, y: usize, text: &str, color: [u8; 3]) {
     for (n, c) in text.chars().enumerate() {
         let g = glyph(c);
         for (row, bits) in g.iter().enumerate() {

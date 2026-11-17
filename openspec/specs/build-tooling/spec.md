@@ -964,7 +964,7 @@ Detail:
 
 Verify: A
 Status: active
-Source: Lead 2026-11-17 (explorer #165; explorer #166a: the surface input; the river-graph plan's G2, its addendum's section 4 graph reports, the G0 contracts' sections 5, 6, 9 and reading 17), BUILD-055, BUILD-057, BUILD-059, GEN-189, TEST-137
+Source: Lead 2026-11-17 (explorer #165; explorer #166a: the surface input; explorer #167a, owner 2026-11-17: the chain sheet as a kept tool; the river-graph plan's G2, its addendum's section 4 graph reports, the G0 contracts' sections 5, 6, 9 and reading 17), BUILD-046, BUILD-055, BUILD-057, BUILD-059, GEN-189, TEST-137
 Detail:
 - inputs (read by `river_gate_graph::read_graph`, `read_stages` and `read_surface`): `--surface FILE` (a candidate's surface on the window's L grid, little-endian f64, row-major, every height finite: the window's raster columns measure it against the window's start surface; not with `--store` or `--grid`), `--graph FILE` (canonical form), `--stages DIR` (`<stage>-lower.u16` and `<stage>-fill.u16` for ks, kv and kc: little-endian u16 of 0.1 m on the window's L grid, row-major; a missing file is a stage that did not run or does not fill; `residuals.csv` a header and one line per residual record), `--partition ONE,TWO` (the canonical graphs of one and of two regions); in `--table` a row takes them as suffixes `#graph=`, `#stages=`, `#partition=`, `#surface=`;
 - ids: an L cell of the window `(x, y)` is the global cell `(x0 + x, y0 + y)`, id `(gy << 32) | gx`; 8-neighbours by those coordinates;
@@ -985,6 +985,8 @@ Detail:
 | Partition | the changes between the two canonical graphs (GEN-189's diff), the topology changes among them, and the first change (`identical` for none) | partition |
 
 - budget field: GEN-189's, from the gate's start surface, on the window's H1 blocks (`--stages` refuses an origin off an H1 corner); the centre L cell of a block is its index `block / 2`; the p50 follows BUILD-057's quantile convention; the 25 km neighbourhood is cut at the window's edge (a gate approximation of the landmass field);
+- chain sheet: `cargo xtask stages --chain DIR [--step S] [--view X,Y,SX,SY] [--out FILE]` renders a chain directory (`planet_cache::stage_sheet`, the `stage_sheet` example; no spike code) as one PNG, by default the whole window at 12 L cells per pixel to `target/review/stages/chain/<label>.png`; the layout: `chain.txt` (`stage-chain 1`; `window X0 Y0 W H` in global L cells; `coarse C`, L cells per H1 cell; `cell_m`; `sea_m`; `label`), little-endian f32 row-major on the L grid `base`, `s0`, `kh`, `ks`, `kv`, `final` (`.f32`), on the H1 grid `zs.f32` and `h1-rivers.u8` (1 on a river cell), `graph.txt` (GEN-189 canonical form) and `stages/` (the stage fields above); every file but `chain.txt` optional (its panel is grey and says `not dumped`), a wrong size refused naming the file and both sizes;
+- the sheet's twelve panels, in rows of four under a title band (label, sun, km per pixel, a 50 km bar): base, `z_s`, H1 rivers on `z_s`, `S0`, KH, KS (its lowering against KH tinted), the trunk graph (H1 reaches and L reaches with a parent) on KS, tributaries and basins (kept magenta) on KS, KV and KC (each with its stage fields tinted: lowering red, fill blue), the final surface with the whole graph, and final minus `S0`; one fixed scale for all panels and runs: the sun at azimuth 315 and altitude 10 degrees, grey = 0.5 + 2 (shade - sin 10 degrees) per L cell averaged over the pixel, tints full at 20 m (stages) and 50 m (change);
 - not here: incremental correctness (fresh against incremental) and the owner's flight; the bar for each geomorphology column is BUILD-059's or the plan's.
 
 #### Scenario: A hand graph
@@ -994,3 +996,7 @@ Detail:
 #### Scenario: B's row
 - **WHEN** the gate runs without a graph, stages or partition pair
 - **THEN** it prints no G2 column and no classes line
+
+#### Scenario: The chain sheet
+- **WHEN** a 32 x 32 chain directory holds every file, its final surface 50 m below `S0` on one half, a trunk, a tributary and an H1 river cell
+- **THEN** the sheet has twelve panels; panel 3 marks the H1 river cell, panel 7 the trunk and not the tributary, panel 8 the tributary, panel 12 the 50 m lowering full red and the unchanged half as shade only; a missing file leaves only its panel empty and a file of the wrong size is refused naming it
