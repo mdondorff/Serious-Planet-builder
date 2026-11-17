@@ -15,7 +15,7 @@
 //! Single-threaded, fixed orders (CON-14).
 
 use super::river_graph::*;
-use super::route::{route_rules, RoundRules, NONE};
+use super::route::{catchment_roots, route_rules_filled, RoundRules, NONE};
 use super::Grid;
 use std::collections::BTreeMap;
 
@@ -29,11 +29,13 @@ pub struct Params {
     pub runoff: f64,
     pub seed: u64,
     pub eps: f64,
+    /// Initiation on the clipped-MFD area (the plan's extractor-1); false: on the D8 area (the comparison of the results note).
+    pub mfd_init: bool,
 }
 
 impl Params {
     pub fn plan(body: u64, runoff: f64) -> Params {
-        Params { body, a_crit_m2: 1.0e6, runoff, seed: 1, eps: 1e-3 }
+        Params { body, a_crit_m2: 1.0e6, runoff, seed: 1, eps: 1e-3, mfd_init: true }
     }
 }
 
@@ -65,6 +67,11 @@ pub struct Extracted {
     pub nodes: Vec<Node>,
     pub reaches: Vec<Reach>,
     pub channel: Vec<bool>,
+    /// The D8 receivers of the routing (`NONE`: an outlet).
+    pub receiver: Vec<u32>,
+    /// The flooded surface the routing ran on, and the D8 catchment root of each cell (the clip of the MFD area).
+    pub filled: Vec<f64>,
+    pub root: Vec<u32>,
     /// Clipped-MFD area plus the propagated seed (the initiation measure), and the D8 areas with and without the seed.
     pub init: Vec<f64>,
     pub d8: Vec<f64>,
@@ -96,7 +103,8 @@ pub fn extract(inp: &Input, p: &Params) -> Extracted {
         }
     }
     let outlet: Vec<bool> = (0..n).map(|c| g.is_active(c) && (inp.sea[c] || inp.exit[c] || on_trunk.contains_key(&c))).collect();
-    let r = route_rules(g, inp.z, &outlet, p.eps, p.seed, 0.0, None, RoundRules::ROUND);
+    let (r, filled) = route_rules_filled(g, inp.z, &outlet, p.eps, p.seed, 0.0, None, RoundRules::ROUND);
+    let root = catchment_roots(&r.receiver, &r.order);
     // D8 accumulations (an outlet adds no area of its own) and the seed, donors first
     let mut d8_no_ext: Vec<f64> = (0..n).map(|c| if g.is_active(c) && !outlet[c] { g.cell_area(c) } else { 0.0 }).collect();
     let mut ext: Vec<f64> = inp.seed_ext.to_vec();
@@ -109,7 +117,7 @@ pub fn extract(inp: &Input, p: &Params) -> Extracted {
         }
     }
     let d8: Vec<f64> = (0..n).map(|c| d8_no_ext[c] + ext[c]).collect();
-    let init: Vec<f64> = (0..n).map(|c| r.area[c] + ext[c]).collect();
+    let init: Vec<f64> = (0..n).map(|c| if p.mfd_init { r.area[c] + ext[c] } else { d8[c] }).collect();
     // channel cells, donors first: the threshold, or a channel donor (closure); never an outlet or a kept basin cell
     let mut channel = vec![false; n];
     let mut donors: Vec<Vec<usize>> = vec![Vec::new(); n];
@@ -272,5 +280,18 @@ pub fn extract(inp: &Input, p: &Params) -> Extracted {
         nodes.entry(down.id).or_insert(down);
     }
     reaches.sort_by_key(|x| x.id);
-    Extracted { nodes: nodes.into_values().collect(), reaches, channel, init, d8, d8_no_ext, mfd_only, trunk_area_breaks, open_ends }
+    Extracted {
+        nodes: nodes.into_values().collect(),
+        reaches,
+        channel,
+        receiver: r.receiver.clone(),
+        filled,
+        root,
+        init,
+        d8,
+        d8_no_ext,
+        mfd_only,
+        trunk_area_breaks,
+        open_ends,
+    }
 }
