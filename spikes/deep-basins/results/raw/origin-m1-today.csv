@@ -1,0 +1,9 @@
+window,basin,depth_m,cells,channel_km,overlap_median,overlap_k5x2,origin,overflows,class
+m1-today,6,499.50,8699,101.08,-,1.000,real-lake,true,Lake
+m1-today,30,733.36,8962,566.99,-,1.000,real-lake,true,Lake
+m1-today,39,119.03,271,82.20,-,0.000,k5,true,Lake
+m1-today,42,890.00,22413,1276.80,-,1.000,real-lake,true,Lake
+m1-today,43,1497.70,23359,1295.63,-,0.152,k5,true,Lake
+m1-today,52,90.27,38,6.68,-,0.000,k5,true,Lake
+m1-today,59,331.78,3317,83.41,-,1.000,real-lake,true,Lake
+m1-today,69,1643.30,21918,382.57,-,0.565,real-lake,true,Lake
