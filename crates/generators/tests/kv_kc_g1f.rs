@@ -231,3 +231,46 @@ fn kv_and_kc_are_deterministic() {
     let b = stage_run(&k, Switch::Both).out;
     assert_eq!(a.iter().map(|x| x.to_bits()).collect::<Vec<_>>(), b.iter().map(|x| x.to_bits()).collect::<Vec<_>>());
 }
+
+/// A digest of a KV/KC run: both surfaces' bits, the residuals and the patches.
+fn kvkc_digest(r: &planet_generators::bake::kv_kc::KvKc) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    r.kv.iter().chain(&r.kc).for_each(|x| x.to_bits().hash(&mut h));
+    for x in &r.residuals {
+        (x.cell, x.stage, x.needed_m.to_bits(), x.available_m.to_bits(), x.feature).hash(&mut h);
+    }
+    for (c, v) in &r.patches {
+        (c, v.to_bits()).hash(&mut h);
+    }
+    h.finish()
+}
+
+// spec: SPIKE-132
+#[test]
+fn kv_and_kc_give_the_pinned_output() {
+    // order #161: the memory cut keeps KV and KC's output bit-identical (digests pinned before it); the breach (reading 22) and the S_KH budget change it on purpose (re-pinned with
+    // their reason)
+    let k = case();
+    let gl = Grid::cube(L_N, RADIUS_M);
+    let mut got = Vec::new();
+    for switch in [Switch::KvOnly, Switch::KcOnly, Switch::Both] {
+        let r = run(
+            &gl,
+            &k.s0,
+            &k.outlet,
+            &k.graph,
+            &k.protected,
+            &k.budget,
+            &KvParams::plan(RADIUS_M * core::f64::consts::FRAC_PI_2 / L_N as f64),
+            switch,
+        );
+        got.push(kvkc_digest(&r));
+    }
+    if std::env::var_os("G1F_DIGEST").is_some() {
+        println!("kvkc digests {:#018x} {:#018x} {:#018x}", got[0], got[1], got[2]);
+    }
+    assert_eq!(got, KVKC_DIGESTS.to_vec());
+}
+
+const KVKC_DIGESTS: [u64; 3] = [0x3367_fe24_9007_dfe2, 0x40b2_ad10_9fc4_974b, 0x65c5_34c1_102c_1e4e];
