@@ -1,0 +1,14 @@
+window,reach,land_snap_fails_b,u_trunk_k6p,path,cells_old,cells_new,b_failed,b_rise_m,s0_failed,s0_rise_m,today_s0_failed,today_s0_rise_m,x,y,relief_m,class
+r3a,6322,false,true,rejoins,4,3,false,4.11,,,,,8016,37869,29.7,low
+r3a,6346,false,true,rejoins,4,3,false,2.74,true,13.11,true,13.11,3644,37895,20.1,low
+r3a,7509,true,true,rejoins,5,6,true,11.29,,,,,2944,38227,113.7,hilly
+r3a,9106,false,true,rejoins,4,3,false,9.11,true,10.77,true,10.77,4610,38699,23.1,low
+r3a,9872,true,true,rejoins,5,5,true,11.57,true,11.59,true,11.59,7191,38935,25.6,low
+r3a,14445,true,true,rejoins,3,2,true,15.73,,,,,7903,40316,329.4,rugged
+r3a,18001,false,true,rejoins,6,4,false,9.08,true,11.07,true,11.07,6240,41465,28.0,low
+r3a,18218,false,true,rejoins,13,10,false,0.39,false,0.76,false,0.76,6722,41581,19.0,coast
+r3a,18708,true,true,diverted,8,35,false,9.96,false,9.98,true,12.34,6382,41816,33.1,low
+r3a,19035,false,true,rejoins,16,14,false,5.00,false,7.46,false,7.46,7771,41932,16.5,coast
+r3a,19302,false,true,rejoins,6,6,false,9.00,,,,,8345,42049,32.8,coast
+r3a,19487,false,true,rejoins,6,5,false,9.95,,,,,8388,42117,33.9,low
+r3a,19729,false,true,rejoins,6,5,false,0.10,false,0.00,false,0.00,6652,42207,34.4,coast
