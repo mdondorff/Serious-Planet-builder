@@ -695,3 +695,59 @@ fn d8_initiation_at_the_halo_s_reach() {
     }
     assert!(stats[0][0] > 0, "{line}");
 }
+
+/// The tributaries ending at a trunk junction whose trunk carries less `a_geo` there than they bring (the vertex before the junction).
+fn junction_breaks(g: &Graph) -> usize {
+    let nodes: BTreeMap<u64, &Node> = g.nodes.iter().map(|x| (x.id, x)).collect();
+    g.reaches
+        .iter()
+        .filter(|r| r.parent.is_none() && r.level == Level::L)
+        .filter(|r| {
+            let Some(m) = nodes.get(&r.down).and_then(|n| n.marker) else { return false };
+            let Some(t) = g.reaches.iter().find(|x| x.id == m.on_reach) else { return false };
+            t.attrs.a_geo[m.at_vertex as usize] < r.attrs.a_geo[r.vertices.len() - 2]
+        })
+        .count()
+}
+
+// spec: SPIKE-133
+#[test]
+fn the_landmass_pass_accumulates_the_trunk_from_its_tributaries() {
+    // reading 18: the L trunk's areas and discharge from the combined graph; H1's values only seed its head
+    use planet_generators::bake::kg_trib::accumulate_trunks;
+    let c = case(4);
+    let n = c.fx.s0.len();
+    let gl = Grid::cube(L_N, RADIUS_M);
+    let run = run_domain(&c, &gl, &vec![false; n], &vec![0.0; n]);
+    let mut g = assemble(&c, &run);
+    let before = junction_breaks(&g);
+    let trunks: BTreeSet<u64> = c.trunks.iter().map(|t| t.id).collect();
+    let inflow = |x: u64| {
+        let x = x as usize;
+        (gl.cell_area(x) + run.ex.d8[x], gl.cell_area(x) + run.ex.d8_no_ext[x])
+    };
+    let acc = accumulate_trunks(&mut g, &trunks, &inflow, RUNOFF);
+    assert_eq!(acc.unordered, 0);
+    assert_eq!(junction_breaks(&g), 0, "no tributary brings more than its trunk carries (before the pass: {before})");
+    let adj = adjacency();
+    let tiles = |x: u64| tile(x as usize);
+    assert_eq!(validate(&g, &Checks { adjacent: &adj, tile_of: Some(&tiles), open: false }), vec![], "the graph still validates");
+    // the trunk at its mouth carries at least its tributaries' areas
+    let t = g.reaches.iter().find(|r| trunks.contains(&r.id)).unwrap();
+    let into: f64 = g
+        .reaches
+        .iter()
+        .filter(|r| g.nodes.iter().any(|x| x.id == r.down && x.marker.is_some_and(|m| m.on_reach == t.id)))
+        .map(|r| r.attrs.a_geo[r.vertices.len() - 2])
+        .sum();
+    assert!(*t.attrs.a_geo.last().unwrap() >= into, "{} against {into}", t.attrs.a_geo.last().unwrap());
+    if std::env::var_os("G1D_PRINT").is_some() {
+        println!(
+            "landmass pass: {} trunk reaches; junction breaks {before} before, 0 after; heads over their seed {}; mouth a_geo {:.1} km2 (expected graph's {:.1} km2)",
+            acc.reaches,
+            acc.heads_over_seed,
+            t.attrs.a_geo.last().unwrap() / 1e6,
+            c.trunks.iter().find(|x| x.id == t.id).unwrap().attrs.a_geo.last().unwrap() / 1e6
+        );
+    }
+}
