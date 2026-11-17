@@ -182,6 +182,8 @@ pub struct RegionSolve {
     pub grid: Grid,
     pub outlet: Vec<bool>,
     pub zb: Vec<f64>,
+    /// SPIKE-138 (spike branch only): the base the rounds started from; `zb` unless [`BASE_HOOK`] changed it.
+    pub zb_in: Vec<f64>,
     pub zs: Vec<f64>,
     pub stream: u64,
     pub ri0: usize,
@@ -190,6 +192,11 @@ pub struct RegionSolve {
     pub rh: usize,
     pub precision: WorldPrecision,
 }
+
+/// SPIKE-138 (spike branch only): a change of the base before the rounds, `(grid, outlet, zb, direction of a cell) -> the base the rounds start from`. The regional field stays
+/// `zs - zb` (the original base), so the band `B - C1(zb)` is unchanged.
+pub type BaseHook = Box<dyn Fn(&Grid, &[bool], &[f64], &(dyn Fn(usize) -> Vec3 + Sync)) -> Vec<f64> + Send + Sync>;
+pub static BASE_HOOK: std::sync::OnceLock<BaseHook> = std::sync::OnceLock::new();
 
 /// Solves the regional surface of the region: the first stage of [`bake_region`], public so that a test (or a tool) can run it without the rest.
 pub fn solve_region(spec: &RegionSpec, base: &(dyn Fn(Vec3) -> f64 + Sync)) -> Result<RegionSolve, String> {
@@ -223,7 +230,11 @@ pub fn solve_region(spec: &RegionSpec, base: &(dyn Fn(Vec3) -> f64 + Sync)) -> R
     };
     precision.apply(&mut carve);
     let stream = face_spec.stream();
-    let mut zs = zb.clone();
+    let zb_in = match BASE_HOOK.get() {
+        Some(hook) => hook(&grid, &outlet, &zb, &dir_of),
+        None => zb.clone(),
+    };
+    let mut zs = zb_in.clone();
     // The rounds' own narrowing guard asserts when a round lifts a summit past the binade the epsilon was chosen for: that is the same refusal as the check after them, returned as an error naming the cell.
     let solved = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         solve_rounds(&grid, &mut zs, &outlet, &carve, spec.rounds, &spec.threads, stream)
@@ -234,7 +245,7 @@ pub fn solve_region(spec: &RegionSpec, base: &(dyn Fn(Vec3) -> f64 + Sync)) -> R
         return Err(format!("after the rounds of the region: the rounds refused the surface (GEN-175): {why}"));
     }
     precision.check_within_radius(&grid, &zs, |c| grid.global_id(c)).map_err(|e| format!("after the rounds of the region: {e}"))?;
-    Ok(RegionSolve { face_spec, grid, outlet, zb, zs, stream, ri0, rj0, rw, rh, precision })
+    Ok(RegionSolve { face_spec, grid, outlet, zb, zb_in, zs, stream, ri0, rj0, rw, rh, precision })
 }
 
 /// The front half of the bake, which the tile layout does not enter: the regional solve, H1 on the solved surface, the lakes, the channel graph and its channels.
@@ -251,7 +262,7 @@ pub struct RegionFront {
 /// Runs the stages of [`bake_region`] before the writer: the same code for the bake and for the layout report (BUILD-052).
 pub fn region_front(spec: &RegionSpec, base: &(dyn Fn(Vec3) -> f64 + Sync), climate: Climate<'_>) -> Result<RegionFront, String> {
     let solve = solve_region(spec, base)?;
-    let RegionSolve { face_spec, grid, outlet, zb, zs, stream, ri0, rj0, rw, rh, precision } = &solve;
+    let RegionSolve { face_spec, grid, outlet, zb, zs, stream, ri0, rj0, rw, rh, precision, .. } = &solve;
     let (ri0, rj0, rw, rh, stream) = (*ri0, *rj0, *rw, *rh, *stream);
     let n = rw * rh;
     let dir_of = |c: usize| face_spec.halo_direction((ri0 + c % rw) as i64, (rj0 + c / rw) as i64);

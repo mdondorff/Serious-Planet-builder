@@ -432,7 +432,7 @@ fn main() -> Result<(), String> {
         }
     }
     let args: Vec<String> = args.into_iter().filter(|a| a != "--no-key-check").collect();
-    let known = ["--window", "--margin", "--store", "--min-cells", "--d", "--threads", "--network-km2", "--grid", "--out", "--k6p", "--kh"];
+    let known = ["--window", "--margin", "--store", "--min-cells", "--d", "--threads", "--network-km2", "--grid", "--out", "--k6p", "--kh", "--drain"];
     let mut k = 0;
     while k < args.len() {
         if !known.contains(&args[k].as_str()) {
@@ -516,6 +516,21 @@ fn main() -> Result<(), String> {
         height_bounds: (-11_000.0, 9_000.0),
         keep_channels: false,
     };
+    // SPIKE-138: --drain a | aplus (A: z_b drained before K5; A+ also the band on KH(h4c)), as kh_smooth
+    let drain_mode = value(&args, "--drain").unwrap_or("none").to_string();
+    if !["none", "a", "aplus"].contains(&drain_mode.as_str()) {
+        return Err(format!("--drain none | a | aplus, not '{drain_mode}'"));
+    }
+    if drain_mode != "none" {
+        let _ = planet_cache::region_bake::BASE_HOOK.set(Box::new(
+            move |grid: &planet_generators::bake::Grid, outlet: &[bool], zb: &[f64], _dir: &(dyn Fn(usize) -> planet_core::Vec3 + Sync)| {
+                let (w, h) = (grid.w(), grid.len() / grid.w());
+                let (d, st) = planet_generators::bake::drain::drain(zb, w, h, outlet, &|_| false, &|p| grid.cell_area(p), 12, 1 << 20);
+                println!("KS A drain of z_b: {} rounds, {} depressions ({} filled, {} breached), {} left", st.rounds, st.depressions, st.filled, st.breached, st.left);
+                d
+            },
+        ));
+    }
     let front = region_front(&spec, &base, &climate)?;
     // The L window: the regional solve's window, 8 L cells a regional cell.
     let l = LOCAL_PER_REGIONAL;
@@ -593,6 +608,19 @@ fn main() -> Result<(), String> {
         par_fill(&mut khz, w, threads, &|p| {
             kh::read_ct_clamped(&solve.zs, rw, rh, &split, &grad, &step, ((p % w) as f64 - (lr - 1.0) / 2.0) / lr, ((p / w) as f64 - (lr - 1.0) / 2.0) / lr).0
         });
+        // SPIKE-138 (2): A+, the band drained on KH(h4c)(z_s) before the floor and KS
+        let r = if drain_mode == "aplus" {
+            let seed = |p: usize| {
+                let c = reg(p);
+                solve.outlet[c] && !grid.is_edge(c) && solve.zs[c] <= sea
+            };
+            let dxl = grid.dx() / l as f64;
+            let (r2, st) = planet_generators::bake::drain::drain_band(&khz, &r, w, h, &seed, &|_| false, &|_| dxl * dxl, 8);
+            println!("KS A+ band drain: {} rounds, {} depressions ({} filled, {} breached), {} left", st.rounds, st.depressions, st.filled, st.breached, st.left);
+            r2
+        } else {
+            r
+        };
         let floor = sea + 0.5;
         let r2: Vec<f64> = (0..n_l).map(|p| if khz[p] > floor { r[p].max(floor - khz[p]) } else { r[p] }).collect();
         // the floored cells over land of the box, and those within 2 km (20 L cells, Chebyshev) of a cell where KH(z_s) lies at or below the sea level

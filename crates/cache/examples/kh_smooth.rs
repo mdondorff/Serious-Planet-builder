@@ -2198,6 +2198,11 @@ fn main() -> Result<(), String> {
         height_bounds: (-11_000.0, 9_000.0),
         keep_channels: false,
     };
+    let drain_mode = value(&args, "--drain").unwrap_or("none").to_string();
+    if !["none", "a", "aplus"].contains(&drain_mode.as_str()) {
+        return Err(format!("--drain none | a | aplus, not '{drain_mode}'"));
+    }
+    install_base_hook(&drain_mode, &tag);
     let front = region_front(&spec, &base, &climate)?;
     let solve = &front.solve;
     let (sri0, srj0, rw, rh) = (solve.ri0, solve.rj0, solve.rw, solve.rh);
@@ -2230,7 +2235,9 @@ fn main() -> Result<(), String> {
     let sea_l = |p: usize| sea_h1(to_h1(p));
 
     // ---- L0, L1 at 814 m (for S0's classes)
-    let (row, k0) = rung(&tag, "L0 z_b 814 m", grid, &solve.zb, &in_core_h1, &sea_h1, true, threads, "-,-");
+    let (row, k0) = rung(&tag, "L0 z_b 814 m", grid, &solve.zb_in, &in_core_h1, &sea_h1, true, threads, "-,-");
+    // SPIKE-138 (1): the base's change, K5's work, relief, ridge cells crossed; the 814 m fields dumped for the renders
+    csv += &base_report(&tag, solve, &in_core_h1, &out_dir)?;
     csv += &format!("{row}\n");
     let (row, k1) = rung(&tag, "L1 z_s 814 m", grid, &solve.zs, &in_core_h1, &sea_h1, true, threads, "-,-");
     csv += &format!("{row}\n");
@@ -2257,6 +2264,29 @@ fn main() -> Result<(), String> {
     };
     let lines: Vec<Vec<(f64, f64)>> = h1.trunk_cells.iter().map(|cs| cs.iter().map(|&c| to_local(c)).collect()).collect();
     let mouth: Vec<bool> = h1.trunk_seg.iter().map(|&k| h1.hydro.segments[k].downstream == NONE).collect();
+    // SPIKE-138 (1): kept H1 basins of z_s holding trunk (75 km2 segment) cells in the box (SPIKE-134's census): (floor cell, depth m, trunk cells in the box, rift, basin province)
+    let census: Vec<(usize, f64, usize, f64, f64)> = {
+        let hy = &h1.hydro;
+        let mut on: Vec<usize> = vec![0; hy.basins.len()];
+        let mut seen = HashSet::new();
+        for cs in &h1.trunk_cells {
+            for &c in cs {
+                let b = hy.label[c as usize];
+                if b != NONE && in_core_h1(c as usize) && seen.insert(c) {
+                    on[b as usize] += 1;
+                }
+            }
+        }
+        let prov = inputs.lithology().provinces();
+        (0..hy.basins.len())
+            .filter(|&b| on[b] > 0)
+            .map(|b| {
+                let bs = &hy.basins[b];
+                let p = prov.at(dir_h1(bs.floor_cell as usize));
+                (bs.floor_cell as usize, bs.spill_m - bs.floor_m, on[b], p.rift, p.basin)
+            })
+            .collect()
+    };
     drop(h1);
     let in_box: Vec<bool> = (0..nl).map(in_core_l).collect();
 
@@ -2292,6 +2322,20 @@ fn main() -> Result<(), String> {
         corridor_bar_m(r[r.len() / 2])
     };
     let lg = Grid::new(w, h, grid.dx() / L as f64);
+    {
+        let budget_l = planet_cache::river_gate_graph::budget_field(&start, w, h, L, grid.dx() / L as f64, 25_000.0);
+        let bud = |c: usize| budget_l[((c / rw) * L) * w + (c % rw) * L];
+        let n = census.len();
+        let deep = census.iter().filter(|x| x.1 > bud(x.0)).count();
+        let cells_on: usize = census.iter().map(|x| x.2).sum();
+        let tect = census.iter().filter(|x| x.3 >= 0.5 || x.4 >= 0.5).count();
+        let (rift, bas) = (census.iter().filter(|x| x.3 >= 0.5).count(), census.iter().filter(|x| x.4 >= 0.5).count());
+        println!(
+            "HO {tag} census (SPIKE-134) after K5: {n} kept H1 basins hold trunk cells in the box ({cells_on} trunk cells, {:.0} km), {deep} deeper than the budget at the floor; a tectonic mask (rift or basin province >= 0.5 at the floor) keeps {tect} (rift {rift}, basin {bas})",
+            cells_on as f64 * grid.dx() / 1000.0
+        );
+        csv += &format!("#census,{tag},{n},{cells_on},{:.1},{deep},{tect},{rift},{bas}\n", cells_on as f64 * grid.dx() / 1000.0);
+    }
     let d2 = |z: &[f64]| -> String {
         let t = Instant::now();
         let water: Vec<f64> = z.iter().map(|&v| v.max(sea)).collect();
@@ -2422,6 +2466,19 @@ fn main() -> Result<(), String> {
     // r' the band floored at the sea + 0.5 m where KH lies above it (as ks_kh). A defect of a rung: breach or fill over 1 m. A defect cell of F is classed by the first rung of
     // the chain z_b (814 m) -> z_s (814 m) -> KH(h4c)(z_s) at L -> F with a defect there (814 m rungs within one cell, KH within 4 L cells), as SPIKE-135's classifier:
     // base (z_b and z_s), K5 (z_s only), interpolation residue (KH, not z_s), band (F only).
+    // SPIKE-138 (2): A+, the band drained on KH(h4c)(z_s) (its pits connected or filled); r'' replaces r
+    let rl = if drain_mode == "aplus" {
+        let t = Instant::now();
+        let seed = |p: usize| sea_h1(to_h1(p));
+        let area = |_p: usize| lg.dx() * lg.dx();
+        let (r2, st) = planet_generators::bake::drain::drain_band(&h4cz, &rl, w, h, &seed, &|_| false, &area, 8);
+        csv += &band_report(&tag, &h4cz, &rl, &r2, &start, w, h, &in_box, &seed, lg.dx(), &st);
+        println!("HO {tag} A+ band drain: {:.0} s", t.elapsed().as_secs_f64());
+        r2
+    } else {
+        rl
+    };
+    flush(&csv, &csv2)?;
     if let Some(dir) = value(&args, "--ks1") {
         let used2 = read_f32(&format!("{dir}/ks-rg2-used-{w}x{h}.f32"), nl)?;
         let f: Vec<f64> = (0..nl)
@@ -2431,6 +2488,12 @@ fn main() -> Result<(), String> {
             })
             .collect();
         drop(used2);
+        if args.iter().any(|a| a == "--dump-f") {
+            let b: Vec<u8> = f.iter().flat_map(|&v| (v as f32).to_le_bytes()).collect();
+            std::fs::write(out_dir.join(format!("{tag}-F-{w}x{h}.f32")), b).map_err(|e| e.to_string())?;
+            let b: Vec<u8> = start.iter().flat_map(|&v| (v as f32).to_le_bytes()).collect();
+            std::fs::write(out_dir.join(format!("{tag}-S0-{w}x{h}.f32")), b).map_err(|e| e.to_string())?;
+        }
         let (row, kh_k) = rung(&tag, "KH(h4c) no band", &lg, &h4cz, &in_core_l, &sea_l, true, threads, "-,-");
         csv += &format!("{row}\n");
         let (row, f_k) = rung(&tag, "F = KH(h4c) + r' - KS1", &lg, &f, &in_core_l, &sea_l, true, threads, "-,-");
@@ -2725,4 +2788,190 @@ fn main() -> Result<(), String> {
     flush(&csv, &csv2)?;
     println!("HO {tag} done: {:.0} s", t_all.elapsed().as_secs_f64());
     Ok(())
+}
+
+
+// ---------------------------------------------------------------- SPIKE-138 (spikes #143; spike only)
+
+/// Installs the base hook of `--drain a | aplus`: the 814 m base `z_b` drained before K5 (least-cost breach or fill, [`planet_generators::bake::drain`]); intended basins: none.
+fn install_base_hook(mode: &str, tag: &str) {
+    if mode == "none" {
+        return;
+    }
+    let tag = tag.to_string();
+    let _ = planet_cache::region_bake::BASE_HOOK.set(Box::new(move |grid: &Grid, outlet: &[bool], zb: &[f64], _dir: &(dyn Fn(usize) -> Vec3 + Sync)| {
+        let t = Instant::now();
+        let (w, h) = (grid.w(), grid.len() / grid.w());
+        let (d, st) = planet_generators::bake::drain::drain(zb, w, h, outlet, &|_| false, &|p| grid.cell_area(p), 12, 1 << 20);
+        println!(
+            "HO {tag} A drain of z_b: {} rounds, {} depressions met ({} filled, {} breached), {} left; {:.1} s",
+            st.rounds,
+            st.depressions,
+            st.filled,
+            st.breached,
+            st.left,
+            t.elapsed().as_secs_f64()
+        );
+        d
+    }));
+}
+
+/// The ridge cells of a grid surface (G0 contracts section 9): higher by `min_m` than both cells 2 steps away along one of four axes.
+fn ridge_cells(z: &[f64], w: usize, h: usize, inside: &dyn Fn(usize) -> bool, min_m: f64) -> Vec<bool> {
+    (0..w * h)
+        .map(|p| {
+            if !inside(p) {
+                return false;
+            }
+            let (x, y) = ((p % w) as i64, (p / w) as i64);
+            [(1i64, 0i64), (0, 1), (1, 1), (1, -1)].iter().any(|&(dx, dy)| {
+                let (a, b) = ((x - 2 * dx, y - 2 * dy), (x + 2 * dx, y + 2 * dy));
+                let ok = |q: (i64, i64)| q.0 >= 0 && q.1 >= 0 && q.0 < w as i64 && q.1 < h as i64;
+                ok(a) && ok(b) && z[p] >= z[a.1 as usize * w + a.0 as usize] + min_m && z[p] >= z[b.1 as usize * w + b.0 as usize] + min_m
+            })
+        })
+        .collect()
+}
+
+/// The p50 of the range within `k x k` blocks wholly inside and on land (the local relief), and the std over land inside.
+fn relief(z: &[f64], w: usize, h: usize, inside: &dyn Fn(usize) -> bool, land: &dyn Fn(usize) -> bool, k: usize) -> (f64, f64) {
+    let mut r = Vec::new();
+    for by in (0..h.saturating_sub(k - 1)).step_by(k) {
+        for bx in (0..w.saturating_sub(k - 1)).step_by(k) {
+            let (mut lo, mut hi, mut all) = (f64::INFINITY, f64::NEG_INFINITY, true);
+            for y in by..by + k {
+                for x in bx..bx + k {
+                    let c = y * w + x;
+                    all &= inside(c) && land(c);
+                    lo = lo.min(z[c]);
+                    hi = hi.max(z[c]);
+                }
+            }
+            if all {
+                r.push(hi - lo);
+            }
+        }
+    }
+    r.sort_by(f64::total_cmp);
+    let p50 = if r.is_empty() { 0.0 } else { r[r.len() / 2] };
+    let v: Vec<f64> = (0..w * h).filter(|&p| inside(p) && land(p)).map(|p| z[p]).collect();
+    let m = v.iter().sum::<f64>() / v.len().max(1) as f64;
+    let sd = (v.iter().map(|x| (x - m) * (x - m)).sum::<f64>() / v.len().max(1) as f64).sqrt();
+    (p50, sd)
+}
+
+/// SPIKE-138 (1): z_b against z_b_in (A's change), K5's work (z_s against z_b_in), relief at 814 m, ridge cells of z_b crossed; dumps z_b, z_b_in, z_s (f32) for the renders.
+fn base_report(tag: &str, solve: &planet_cache::region_bake::RegionSolve, inside: &dyn Fn(usize) -> bool, out: &Path) -> Result<String, String> {
+    let (rw, rh) = (solve.rw, solve.rh);
+    let n = rw * rh;
+    let g = &solve.grid;
+    let land = |c: usize| solve.zb[c] > 0.0;
+    let stat = |a: &[f64], b: &[f64]| {
+        // (cells lowered over 1 m, raised over 1 m, lowered over 50 m, raised over 50 m, km3 lowered, km3 raised) over land inside
+        let mut o = (0usize, 0usize, 0usize, 0usize, 0.0f64, 0.0f64);
+        for c in (0..n).filter(|&c| inside(c) && land(c)) {
+            let d = b[c] - a[c];
+            if d < -1.0 {
+                o.0 += 1;
+            }
+            if d > 1.0 {
+                o.1 += 1;
+            }
+            if d < -50.0 {
+                o.2 += 1;
+            }
+            if d > 50.0 {
+                o.3 += 1;
+            }
+            if d < 0.0 {
+                o.4 += -d * g.cell_area(c) / 1e9;
+            } else {
+                o.5 += d * g.cell_area(c) / 1e9;
+            }
+        }
+        o
+    };
+    let a = stat(&solve.zb, &solve.zb_in);
+    let k5 = stat(&solve.zb_in, &solve.zs);
+    let ridge = ridge_cells(&solve.zb, rw, rh, &|c| inside(c) && land(c), 2.0);
+    let ridge_n = ridge.iter().filter(|&&r| r).count();
+    let crossed1 = (0..n).filter(|&c| ridge[c] && solve.zb_in[c] < solve.zb[c] - 1.0).count();
+    let crossed20 = (0..n).filter(|&c| ridge[c] && solve.zb_in[c] < solve.zb[c] - 20.0).count();
+    let (r0, s0) = relief(&solve.zb, rw, rh, inside, &land, 5);
+    let (r1, s1) = relief(&solve.zb_in, rw, rh, inside, &land, 5);
+    let (r2, s2) = relief(&solve.zs, rw, rh, inside, &land, 5);
+    let land_n = (0..n).filter(|&c| inside(c) && land(c)).count();
+    println!(
+        "HO {tag} base (814 m, land of the box, {land_n} cells): A changed z_b: lowered over 1 m {} / raised over 1 m {} cells, over 50 m {} / {}, {:.3} / {:.3} km3; ridge cells of z_b {ridge_n}, crossed (lowered over 1 m) {crossed1}, over 20 m {crossed20}; K5's work (z_s - z_b_in): lowered over 1 m {} / raised {} cells, over 50 m {} / {}, {:.3} / {:.3} km3; relief (p50 of the 5-cell block range) z_b {r0:.1}, z_b_in {r1:.1}, z_s {r2:.1} m; std {s0:.1}, {s1:.1}, {s2:.1} m",
+        a.0, a.1, a.2, a.3, a.4, a.5, k5.0, k5.1, k5.2, k5.3, k5.4, k5.5
+    );
+    for (name, v) in [("zb", &solve.zb), ("zbin", &solve.zb_in), ("zs", &solve.zs)] {
+        let b: Vec<u8> = v.iter().flat_map(|&x| (x as f32).to_le_bytes()).collect();
+        std::fs::write(out.join(format!("{tag}-h1-{name}-{rw}x{rh}.f32")), b).map_err(|e| e.to_string())?;
+    }
+    Ok(format!(
+        "#base,{tag},{land_n},{},{},{},{},{:.4},{:.4},{ridge_n},{crossed1},{crossed20},{},{},{},{},{:.4},{:.4},{r0:.2},{r1:.2},{r2:.2},{s0:.2},{s1:.2},{s2:.2}\n",
+        a.0, a.1, a.2, a.3, a.4, a.5, k5.0, k5.1, k5.2, k5.3, k5.4, k5.5
+    ))
+}
+
+/// SPIKE-138 (2): the band's pits before (KH + r) and after (KH + r''), the band's std and local relief kept, ridge cells of S0 lowered over 20 m.
+#[allow(clippy::too_many_arguments)]
+fn band_report(
+    tag: &str,
+    kh: &[f64],
+    r: &[f64],
+    r2: &[f64],
+    start: &[f64],
+    w: usize,
+    h: usize,
+    in_box: &[bool],
+    seed: &dyn Fn(usize) -> bool,
+    dx: f64,
+    st: &planet_generators::bake::drain::DrainStats,
+) -> String {
+    use planet_generators::bake::drain::{pit_census, sea_outlets};
+    let n = w * h;
+    let land = |p: usize| start[p] > 0.0;
+    let inside = |p: usize| in_box[p] && land(p);
+    let area = |_p: usize| dx * dx;
+    let z1: Vec<f64> = (0..n).map(|p| kh[p] + r[p]).collect();
+    let o1 = sea_outlets(&z1, w, h, seed, 0.0);
+    let before = pit_census(&z1, w, h, &o1, &inside, &area);
+    drop(o1);
+    drop(z1);
+    let z2: Vec<f64> = (0..n).map(|p| kh[p] + r2[p]).collect();
+    let o2 = sea_outlets(&z2, w, h, seed, 0.0);
+    let after = pit_census(&z2, w, h, &o2, &inside, &area);
+    drop(o2);
+    let (rel1, sd1) = relief(r, w, h, &|p| in_box[p], &land, 10);
+    let (rel2, sd2) = relief(r2, w, h, &|p| in_box[p], &land, 10);
+    let (srel1, _) = relief(start, w, h, &|p| in_box[p], &land, 10);
+    let s2: Vec<f64> = (0..n).map(|p| start[p] + r2[p] - r[p]).collect();
+    let (srel2, _) = relief(&s2, w, h, &|p| in_box[p], &land, 10);
+    drop(s2);
+    let ridge = ridge_cells(start, w, h, &inside, 2.0);
+    let ridge_n = ridge.iter().filter(|&&b| b).count();
+    let r20 = (0..n).filter(|&p| ridge[p] && r2[p] < r[p] - 20.0).count();
+    let (mut lo, mut hi, mut lv, mut hv, mut lo20) = (0usize, 0usize, 0.0f64, 0.0f64, 0usize);
+    for p in (0..n).filter(|&p| inside(p)) {
+        let d = r2[p] - r[p];
+        if d < -0.01 {
+            lo += 1;
+            lv += -d * dx * dx / 1e9;
+        }
+        if d > 0.01 {
+            hi += 1;
+            hv += d * dx * dx / 1e9;
+        }
+        lo20 += usize::from(d < -20.0);
+    }
+    println!(
+        "HO {tag} A+ band: drain {} rounds, {} depressions met ({} filled, {} breached), {} left; pits of KH + r (land of the box) any {} / G-DRAIN {} / over 5 m {} ({:.4} km3) -> of KH + r'' {} / {} / {} ({:.4} km3); band std {sd1:.2} -> {sd2:.2} m, band 1 km relief p50 {rel1:.2} -> {rel2:.2} m, S0's 1 km relief p50 {srel1:.2} -> {srel2:.2} m; band lowered {lo} cells ({lv:.4} km3, over 20 m {lo20}), raised {hi} cells ({hv:.4} km3); ridge cells of S0 {ridge_n}, lowered over 20 m {r20}",
+        st.rounds, st.depressions, st.filled, st.breached, st.left, before.0, before.1, before.2, before.3 / 1e9, after.0, after.1, after.2, after.3 / 1e9
+    );
+    format!(
+        "#band,{tag},{},{},{},{},{},{},{},{},{:.5},{},{},{},{:.5},{sd1:.3},{sd2:.3},{rel1:.3},{rel2:.3},{srel1:.3},{srel2:.3},{lo},{lv:.5},{lo20},{hi},{hv:.5},{ridge_n},{r20}\n",
+        st.rounds, st.depressions, st.filled, st.breached, st.left, before.0, before.1, before.2, before.3 / 1e9, after.0, after.1, after.2, after.3 / 1e9
+    )
 }
