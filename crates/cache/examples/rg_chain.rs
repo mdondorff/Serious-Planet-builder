@@ -2369,6 +2369,9 @@ fn main() -> Result<(), String> {
     g.nodes.retain(|x| x.kind != NodeKind::TribJunction || ends.contains(&x.id));
     println!("RG stitch: {} junction markers without a reach ending at them dropped", before - g.nodes.len());
     g.sort();
+    // gap 3 (crusader's KV/KC writer, lead #159): every KV/KC residual's reach flagged exception(budget_residual); KS's residuals name no reach
+    let flagged = planet_generators::bake::kv_kc::flag_residuals(&mut g, &res_kvkc);
+    println!("RG residual flags: {flagged:?}");
     drop(ks0);
     println!("RG domains: {} nodes, {} reaches, {} basins after the stitch; landmass items with different contents in two domains: {landmass_conflicts}", g.nodes.len(), g.reaches.len(), g.basins.len());
     for (name, secs) in [("basins", t_basins), ("KG-trib", t_trib), ("KS1", t_ks1), ("KV and KC", t_kvkc)] {
