@@ -237,3 +237,43 @@ pub fn run(grid: &Grid, s0: &[f64], outlet: &[bool], g: &Graph, protected: &[boo
     }
     KvKc { kv, kc, kv_wanted, residuals, divide, near_divide, patches, nearest }
 }
+
+/// What [`flag_residuals`] did.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Flagged {
+    /// Reaches that now carry `budget_residual`.
+    pub reaches: usize,
+    /// Of them, reaches that were already exceptional for another reason (reading 9: both kept in the list).
+    pub with_other: usize,
+    /// Residuals whose feature is no reach of the graph (`u64::MAX`: no reach within KV's reach).
+    pub no_feature: usize,
+}
+
+/// Flags every residual's feature `exception(budget_residual)` in `g` (contract section 6, reading 9; lead #159): the value is the largest excess `needed - available` of its residuals. A
+/// reach already carrying `budget_residual` keeps the larger value. One pass over the residuals; reaches looked up by id.
+pub fn flag_residuals(g: &mut Graph, residuals: &[Residual]) -> Flagged {
+    let at: std::collections::HashMap<u64, usize> = g.reaches.iter().enumerate().map(|(i, r)| (r.id, i)).collect();
+    let mut excess: BTreeMap<usize, f64> = BTreeMap::new();
+    let mut out = Flagged::default();
+    for r in residuals {
+        match at.get(&r.feature) {
+            Some(&i) => {
+                let e = excess.entry(i).or_insert(f64::NEG_INFINITY);
+                *e = e.max(r.needed_m - r.available_m);
+            }
+            None => out.no_feature += 1,
+        }
+    }
+    for (i, need) in excess {
+        let x = &mut g.reaches[i];
+        if !x.has_exception(Reason::BudgetResidual) && !x.exceptions.is_empty() {
+            out.with_other += 1;
+        }
+        match x.exceptions.iter_mut().find(|e| e.reason == Reason::BudgetResidual) {
+            Some(e) => e.value = e.value.max(need),
+            None => x.exceptions.push(Exception { reason: Reason::BudgetResidual, value: need }),
+        }
+        out.reaches += 1;
+    }
+    out
+}
