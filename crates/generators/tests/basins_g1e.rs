@@ -439,3 +439,40 @@ mod fixture_case {
         }
     }
 }
+
+// spec: SPIKE-130
+#[test]
+fn a_basin_pass_without_the_tributaries_puts_inlets_on_their_node_cells() {
+    // lead #160: a pass that does not see a tributary may put a lake_inlet on the cell where that tributary ends (the chain runner merged its first pass's nodes, 99 on R1h); the
+    // validator finds it, and the pass that sees every reach puts none there
+    let mut z = base(false);
+    cone(&mut z, 12.0, 12.0, 5.0, 10.0);
+    let r = line(&(0..8).map(|j| cell(12, 3 + j)).collect::<Vec<_>>(), NodeKind::OutletSea).0;
+    let (_, first) = run(&z, std::slice::from_ref(&r));
+    let x = first
+        .nodes
+        .iter()
+        .find(|n| n.kind == NodeKind::LakeInlet && r.vertices.contains(&n.anchor))
+        .expect("the reach enters the lake")
+        .anchor as usize;
+    // a tributary ending at that cell (a confluence there)
+    let (i, j) = (x % N, x / N);
+    let (t, t_up, t_down) = line(&(0..4).map(|k| cell(i - 3 + k, j)).collect::<Vec<_>>(), NodeKind::Confluence);
+    let adj = |_: Level, a: u64, b: u64| {
+        let g = Grid::cube(N, R);
+        (0..8).any(|d| g.neighbour(a as usize, d) == Some(b as usize))
+    };
+    let at_x = |v: &[Violation]| v.iter().any(|v| matches!(v, Violation::TwoNodesOneAnchor { anchor, .. } if *anchor == x as u64));
+    let merged = graph_of(&first, &[r.clone(), t.clone()], &[t_up.clone(), t_down.clone()]);
+    assert!(
+        at_x(&validate(&merged, &Checks { adjacent: &adj, tile_of: None, open: true })),
+        "the first pass's inlet beside the confluence"
+    );
+    let (_, second) = run(&z, &[r.clone(), t.clone()]);
+    assert!(
+        !second.nodes.iter().any(|n| n.kind == NodeKind::LakeInlet && n.anchor == x as u64),
+        "the pass that sees the tributary puts no inlet on its node cell"
+    );
+    let g = graph_of(&second, &[r, t], &[t_up, t_down]);
+    assert!(!at_x(&validate(&g, &Checks { adjacent: &adj, tile_of: None, open: true })));
+}
