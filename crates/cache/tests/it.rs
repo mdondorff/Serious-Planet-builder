@@ -64,6 +64,8 @@ mod river_gate_graph;
 mod river_suite;
 #[path = "stage_keys.rs"]
 mod stage_keys;
+#[path = "stage_sheet.rs"]
+mod stage_sheet;
 #[path = "stamp_keys.rs"]
 mod stamp_keys;
 #[path = "tiles.rs"]
