@@ -315,13 +315,16 @@ impl Graph {
         self.nodes.sort_by_key(|n| n.id);
         self.reaches.sort_by_key(|r| r.id);
         self.basins.sort_by_key(|b| b.id);
+        for r in &mut self.reaches {
+            r.exceptions.sort_unstable_by_key(|e| (e.reason.name(), (e.value + 0.0).to_bits()));
+        }
     }
 
     /// The canonical serialisation: one line per item in id order, fixed field order, f64 as bit patterns.
     pub fn canonical(&self) -> String {
         let mut g = self.clone();
         g.sort();
-        let mut s = format!("river-graph 1 body={:016x}\n", g.body);
+        let mut s = format!("river-graph 2 body={:016x}\n", g.body);
         for n in &g.nodes {
             let m = n.marker.map_or("-".into(), |m| format!("{:016x}@{}", m.on_reach, m.at_vertex));
             let _ = writeln!(
@@ -338,7 +341,8 @@ impl Graph {
         }
         for r in &g.reaches {
             // the exceptions in a fixed order: by the reason's name, then by the value's bits
-            let mut ex: Vec<(&str, u64)> = r.exceptions.iter().map(|e| (e.reason.name(), e.value.to_bits())).collect();
+            // (a signed zero written as +0.0)
+            let mut ex: Vec<(&str, u64)> = r.exceptions.iter().map(|e| (e.reason.name(), (e.value + 0.0).to_bits())).collect();
             ex.sort_unstable();
             let exceptions =
                 if ex.is_empty() { "-".to_string() } else { ex.iter().map(|(n, b)| format!("{n}:{b:016x}")).collect::<Vec<_>>().join(";") };
@@ -384,8 +388,14 @@ impl Graph {
     pub fn parse(text: &str) -> Result<Graph, String> {
         let mut lines = text.lines();
         let head = lines.next().ok_or("empty")?;
-        let body = head.strip_prefix("river-graph 1 body=").ok_or_else(|| format!("header '{head}'"))?;
-        let hex = |s: &str| u64::from_str_radix(s, 16).map_err(|_| format!("hex '{s}'"));
+        let body = head.strip_prefix("river-graph 2 body=").ok_or_else(|| format!("header '{head}'"))?;
+        // exactly the 16 lowercase digits the canonical form writes
+        let hex = |s: &str| {
+            if s.len() != 16 || !s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+                return Err(format!("hex '{s}'"));
+            }
+            u64::from_str_radix(s, 16).map_err(|_| format!("hex '{s}'"))
+        };
         let f = |s: &str| hex(s).map(f64::from_bits);
         let optid = |s: &str| if s == "-" { Ok(None) } else { hex(s).map(Some) };
         let mut g = Graph { body: hex(body)?, ..Graph::default() };
@@ -424,8 +434,15 @@ impl Graph {
                                 let (r, v) = e.split_once(':').ok_or_else(|| format!("exception '{e}'"))?;
                                 Ok(Exception { reason: Reason::parse(r)?, value: f(v)? })
                             })
-                            .collect::<Result<Vec<_>, String>>()?,
+                            .collect::<Result<Vec<Exception>, String>>()?,
                     };
+                    // the canonical order only: by the reason's name, then the value's bits
+                    if exceptions
+                        .windows(2)
+                        .any(|w| (w[0].reason.name(), w[0].value.to_bits()) > (w[1].reason.name(), w[1].value.to_bits()))
+                    {
+                        return Err(format!("exceptions out of order '{}'", get("exceptions")?));
+                    }
                     let fl = |k: &str| -> Result<Vec<f64>, String> { list(k)?.into_iter().map(f).collect() };
                     let attrs = Attrs {
                         a_geo: fl("a_geo")?,
@@ -1086,11 +1103,20 @@ pub fn validate_budget(s0: &[f64], budget: &[f64], stages: &[Stage], residuals: 
     }
     for st in stages {
         for c in 0..n {
-            if !st.out[c].is_finite()
-                || st.wanted_lowering.is_some_and(|w| !w[c].is_finite())
-                || st.wanted_fill.is_some_and(|w| !w[c].is_finite())
-            {
+            // a wanted value is finite and not negative; a stage that may not fill wants no fill
+            let bad_wanted = |w: Option<&[f64]>| w.is_some_and(|w| !w[c].is_finite() || w[c] < 0.0);
+            let fill_on_lowering = !st.fills && st.wanted_fill.is_some_and(|w| w[c] > 0.0);
+            if !st.out[c].is_finite() || bad_wanted(st.wanted_lowering) || bad_wanted(st.wanted_fill) || fill_on_lowering {
                 v.push(Violation::BudgetInput { cell: c, stage: st.name });
+                // a finite output still uses the budget: a later overrun stays reported
+                if st.out[c].is_finite() {
+                    let lowered = (input[c] - st.out[c]).max(0.0);
+                    let before = used[c];
+                    used[c] += lowered;
+                    if lowered > 0.0 && used[c] > budget[c] + BUDGET_EPS_M && before <= budget[c] + BUDGET_EPS_M {
+                        v.push(Violation::BudgetOverrun { cell: c, stage: st.name, used_m: used[c], budget_m: budget[c] });
+                    }
+                }
                 // a residual here records nothing that can be checked
                 for _ in residuals.iter().filter(|r| r.cell == c && r.stage == st.name) {
                     v.push(Violation::ResidualMismatch { cell: c, stage: st.name, why: "its stage's output is not finite there" });

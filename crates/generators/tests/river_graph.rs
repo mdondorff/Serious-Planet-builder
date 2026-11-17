@@ -643,6 +643,25 @@ fn a_fill_held_under_its_wanted_fill_needs_a_residual() {
     // a wanted fill that is not finite or does not fit
     assert!(run(&kc, &[0.0, f64::NAN, 0.0], &[], &g).iter().any(|v| matches!(v, Violation::BudgetInput { cell: 1, stage: "kc" })));
     assert!(matches!(run(&kc, &[0.0, 15.0], &[], &g)[..], [Violation::BudgetInput { stage: "kc", .. }]));
+    // a negative wanted fill is an input error, not a silent pass
+    assert!(run(&kc, &[0.0, -15.0, 0.0], &[], &g).iter().any(|v| matches!(v, Violation::BudgetInput { cell: 1, stage: "kc" })));
+    // a stage that may not fill wants no fill
+    let ks_wants_fill = [
+        Stage { name: "ks", out: &ks, wanted_lowering: None, wanted_fill: Some(&[0.0, 5.0, 0.0]), fills: false },
+        Stage { name: "kv", out: &kv, wanted_lowering: None, wanted_fill: None, fills: true },
+    ];
+    assert!(validate_budget(&s0, &budget, &ks_wants_fill, &[], &g)
+        .iter()
+        .any(|v| matches!(v, Violation::BudgetInput { cell: 1, stage: "ks" })));
+    // a stage with a bad wanted value still uses the budget: KS 6 m, KV 4 m (its wanted fill NaN), KC 2 m is a KC overrun
+    let kv_bad = [
+        Stage { name: "ks", out: &[94.0], wanted_lowering: None, wanted_fill: None, fills: false },
+        Stage { name: "kv", out: &[90.0], wanted_lowering: None, wanted_fill: Some(&[f64::NAN]), fills: true },
+        Stage { name: "kc", out: &[88.0], wanted_lowering: Some(&[-1.0]), wanted_fill: None, fills: true },
+    ];
+    let v = validate_budget(&[100.0], &[10.0], &kv_bad, &[], &g);
+    assert!(v.iter().any(|x| matches!(x, Violation::BudgetInput { cell: 0, stage: "kv" })), "{v:?}");
+    assert!(v.iter().any(|x| matches!(x, Violation::BudgetOverrun { cell: 0, stage: "kc", .. })), "{v:?}");
 }
 
 // spec: TEST-140
@@ -673,6 +692,24 @@ fn a_reach_carries_a_list_of_exceptions() {
     assert!(check(&nan).contains(&Violation::NotFinite { at: id, field: "exceptions" }));
     assert!(Graph::parse(&text.replacen("exceptions=budget_residual:", "exceptions=too_steep:", 1)).is_err());
     assert!(Graph::parse(&text.replacen(";rise_over_budget:", ";rise_over_budget", 1)).is_err());
+    // the parser takes the canonical order only, and full hex
+    let at = text.find("exceptions=budget_residual:").unwrap();
+    let (lo, hi) = (at + 11, at + text[at..].find(' ').unwrap());
+    let parts: Vec<&str> = text[lo..hi].split(';').collect();
+    let swapped = format!("{}{};{}{}", &text[..lo], parts[1], parts[0], &text[hi..]);
+    assert!(Graph::parse(&swapped).is_err(), "out of order");
+    let short = format!("{}budget_residual:0;{}{}", &text[..lo], parts[1], &text[hi..]);
+    assert!(Graph::parse(&short).is_err(), "short hex");
+    assert!(Graph::parse(&text.replacen("body=0000000000005eed", "body=0000000000005EED", 1)).is_err(), "upper-case hex");
+    // the graph parsed back equals the sorted graph, also with a signed zero
+    let mut sorted = reordered.clone();
+    sorted.sort();
+    assert_eq!(Graph::parse(&reordered.canonical()).unwrap(), sorted);
+    let mut zero = g.clone();
+    reach_mut(&mut zero, cell(2, 3)).exceptions[0].value = -0.0;
+    let mut pos = g.clone();
+    reach_mut(&mut pos, cell(2, 3)).exceptions[0].value = 0.0;
+    assert_eq!(zero.canonical(), pos.canonical(), "a signed zero is written as +0.0");
 }
 
 // spec: TEST-140
