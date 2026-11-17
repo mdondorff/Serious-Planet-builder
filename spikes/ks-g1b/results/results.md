@@ -138,7 +138,7 @@ F1, H from K6': lowering at most 5.2 m; no residual.
 Question: what does KS do on the start that SPIKE-136 settled, KH(h4c) + the band with a sea floor, against KS on `C1(z_s)` + `r` above? How much of KS's work did the hand-over take over?
 Time box: half a day (used: about 3 h).
 
-Code location: spikes' branch `spike/kh-stage` @ c9344138 (never merged): `crates/cache/examples/ks_kh.rs`, a copy of this spike's `ks_g1b` (e359dfae).
+Code location: spikes' branch `spike/kh-stage` @ c9344138 (never merged): `crates/cache/examples/ks_kh.rs`, a copy of this spike's `ks_g1b` (e359dfae). Explorer told (2026-11-17); `spike/ks-g1b` is untouched.
 - `--kh c1`: the code above, unchanged except `g2: None` for main's `GateInput`. It reproduces this spike's R1h rows exactly (`raw/ks-c1check-r1h.csv` against `raw/ks-c1-r1h.csv`).
 - `--kh h4c`: KS's base is KH(h4c)(`z_s`) + `r'` (`planet_generators::bake::kh`, reading 20).
   - `r'` = max(`r`, sea + 0.5 m - KH) on the cells where KH(`z_s`) lies above the sea level + 0.5 m, so the base stays at or above that level there (reading 17).
@@ -151,7 +151,7 @@ Code location: spikes' branch `spike/kh-stage` @ c9344138 (never merged): `crate
 ### The band's sea floor
 Over the box (from `raw/ks-kh-run-<w>.txt`):
 
-| Window | Cells floored | Of them within 2 km of KH's sea | Volume raised, km3 | Base against `S0`: lower / higher over 10 m, cells | Reading 17's clamp held KS below its budget, cells |
+| Window | Cells floored | Of them within 2 km of KH's sea | Volume raised, km3 | Base against `S0`: lower / higher over 10 m, cells | Reading 17's clamp held KS below its budget, cells summed over RG-1 and RG-2 |
 |---|---|---|---|---|---|
 | R1h | 24,186 | 3,712 | 0.637 | 372,341 / 191,685 | 257,889 |
 | R3a | 57,806 | 412 | 0.065 | 5,915 / 993 | 1,018,149 |
@@ -159,11 +159,12 @@ Over the box (from `raw/ks-kh-run-<w>.txt`):
 | M1 | 0 | 0 | 0 | 2,607,168 / 2,118,673 | 0 |
 | F1 | 11,964 | 0 | 0.033 | 41,331 / 8,823 | 246,443 |
 
+- "Within 2 km of KH's sea": within 20 L cells (Chebyshev) of a cell where KH(`z_s`) lies at or below 0 m.
 - Most floored cells lie inland, where the band dips the base under 0.5 m, not on the coast.
 - The clamp is broad on R3a's coastal plain, where the base lies just above 0.5 m.
 - The base's differences from `S0` are SPIKE-136's: KH against the C1 read.
 
-- Cells where KH(`z_s`) itself lies at or below the sea level + 0.5 m are not floored. They stay land at or below 0 m in RG-0: 0 (M1) to 71,615 cells (R3a).
+- Cells where KH(`z_s`) itself lies at or below the sea level + 0.5 m are not floored. "Land at or below 0 m" counts the cells of `S0`'s land in the box whose base is at or below 0 m: 0 (M1) to 71,615 (R3a) in RG-0. They include cells with KH(`z_s`) between 0 and 0.5 m where `r` is negative.
 - Reading 17's clamp keeps KS from adding any: these counts are the same in RG-1 and RG-2. On `C1` + `r` KS pushed 2,454-57,118 land cells under the sea on four windows (M1 none).
 
 ### Results
@@ -205,7 +206,7 @@ SPIKE-135's split of KS's lowering, share on interpolation-class cells / on cell
 Ridges and saddles against `S0` (`raw/ks-kh-tables.md`):
 - On the new start, RG-0 already has 0.49-7.10 % of `S0`'s ridge cells lower than `S0` by over 20 m. That is the hand-over itself: KH against the C1 read (SPIKE-136 addendum 3).
 - KS adds 0.00-0.93 points.
-- The cut-through saddle count (a ridge cell lowered over 20 m next to a channel `S0` does not have) rises to 54-13,008 at RG-2, against 0-3,432 on `C1`.
+- The cut-through saddle count (a ridge cell lowered over 20 m next to a channel `S0` does not have) rises to 54-13,008 at RG-2, against 0-3,432 on `C1`. It is not measured at RG-0 (no channels are routed there), so the RG-0 cells of `raw/ks-kh-tables.md` read "-".
   - It is measured against `S0`'s ridges and channels, so on the new start it also counts the hand-over's own moves of channels and ridges.
   - It does not compare with section 3's count. KS's own share was not separated.
 
@@ -220,4 +221,4 @@ Ridges and saddles against `S0` (`raw/ks-kh-tables.md`):
    - KS adds no land below the sea.
    - Land at or below 0 m stays only where KH itself is that low: coastal strips, 0-71,615 cells.
 
-One line: **the hand-over takes over the drainage repair. River length in basins before KS falls from 54-88 % to 12-61 %, and after KS1 it reaches 8-50 %, against 52-87 % on `C1` + `r`. KS's lowering is unchanged in KS0 and 15-49 % smaller in KS1; it stays the band against HAND.**
+One line: **the hand-over takes over the drainage repair. River length in basins before KS falls from 54-88 % to 12-61 %, and after KS1 it reaches 8-50 %, against 52-86 % on `C1` + `r`. KS0's request is unchanged (its lowering 0-19 % smaller, where reading 17's clamp holds it) and KS1's lowering is 15-49 % smaller; KS stays the band against HAND.**

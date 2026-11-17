@@ -51,8 +51,8 @@ table('KS\'s lowering: land cells lowered, %; p95, m; volume / requested, km3', 
       lambda r: f"{pct(r['lowered'], r['land']):.2f} %; {float(r['low_p95_m']):.1f}; {float(r['vol_km3']):.2f} / {float(r['vol_req_km3']):.2f}")
 table('Residuals (need over the budget), cells; at 95-100 % of the budget or residual, cells; land at or below the sea after the stage, cells', ['RG-0', 'RG-1', 'RG-2'],
       lambda r: f"{int(r['resid']):,}; {int(r['at95']):,}; {int(r['to_sea']):,}")
-table('`S0`\'s ridge cells lowered over 20 m against `S0` (of the ridge cells); cut-through saddles at 1 km2 (cells)', ['RG-0', 'RG-1', 'RG-2'],
-      lambda r: f"{int(r['ridge20']):,} ({pct(r['ridge20'], r['ridge_n']):.2f} %); {int(r['saddle1']):,} ({int(r['saddle1_cells']):,})")
+table('`S0`\'s ridge cells lowered over 20 m against `S0` (of the ridge cells); cut-through saddles at 1 km2 (cells; not measured at RG-0)', ['RG-0', 'RG-1', 'RG-2'],
+      lambda r: f"{int(r['ridge20']):,} ({pct(r['ridge20'], r['ridge_n']):.2f} %); " + ('-' if r['rung'] == 'RG-0' else f"{int(r['saddle1']):,} ({int(r['saddle1_cells']):,})"))
 table('River gate: basins; G-DRAIN, % of river cells in basins; relief10 / `S0`\'s, m; uphill, %', ['RG-0', 'RG-1', 'RG-2'],
       lambda r: f"{int(r['basins']):,}; {float(r['basin_pct']):.1f}; {float(r['relief10_m']):.1f} / {float(r['relief10_start_m']):.1f}; {float(r['uphill_pct']):.1f}")
 
