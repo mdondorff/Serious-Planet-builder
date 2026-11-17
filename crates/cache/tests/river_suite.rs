@@ -41,6 +41,7 @@ fn run_in(start: &[f64], surface: &[f64], region: &[bool], h1: &[Crossing]) -> G
             sea_level_m: 0.0,
             outside_drains: false,
             trunks: &[],
+            g2: None,
         },
         &params(),
     )
@@ -262,6 +263,7 @@ fn a_baked_store_read_through_the_reader_gives_the_numbers_of_its_surface() {
                 sea_level_m: 0.0,
                 outside_drains: true,
                 trunks: &[],
+                g2: None,
             },
             &p,
         )
@@ -337,6 +339,7 @@ fn a_trunk_over_a_dam_needs_a_burn_and_one_down_a_draining_floor_none() {
             sea_level_m: 0.0,
             outside_drains: false,
             trunks: &floor,
+            g2: None,
         },
         &params(),
     );
@@ -391,6 +394,7 @@ fn a_corridor_routes_a_trunk_around_a_partial_dam_but_not_through_a_narrow_one()
             sea_level_m: 0.0,
             outside_drains: false,
             trunks: &floor,
+            g2: None,
         },
         &p,
     );
@@ -587,6 +591,7 @@ fn the_corridor_bar_reads_the_start_relief_over_the_region_box_not_the_counted_c
             sea_level_m: 0.0,
             outside_drains: false,
             trunks: &[],
+            g2: None,
         },
         &params(),
     );
@@ -633,6 +638,7 @@ fn a_corridor_measures_rises_above_the_water_surface_not_the_sea_floor() {
             sea_level_m: 0.0,
             outside_drains: false,
             trunks: &line,
+            g2: None,
         },
         &params(),
     );

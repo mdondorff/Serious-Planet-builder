@@ -6,7 +6,12 @@ use crate::util::{run, Res};
 use std::path::Path;
 
 /// The options the example takes after the target, each with a value.
-const OPTIONS: [&str; 6] = ["--window", "--margin", "--min-cells", "--d", "--threads", "--network-km2"];
+/// `--graph`, `--stages` and `--partition` are BUILD-060's G2 inputs (a canonical graph file, a directory of per-stage budget fields, two graph files `one,two`).
+const OPTIONS: [&str; 9] =
+    ["--window", "--margin", "--min-cells", "--d", "--threads", "--network-km2", "--graph", "--stages", "--partition"];
+
+/// The G2 inputs a `--table` row may carry as `#key=value` suffixes (BUILD-060): the row's own graph, stages or partition pair.
+const ROW_INPUTS: [&str; 3] = ["graph", "stages", "partition"];
 
 /// The canonical region windows (lead, 2026-11-14): `face,i0,i1,j0,j1,seed`, 620-cell cores (with the gate's 200-cell margin SPIKE-111's 1,020-cell windows). R1h is the E1 region stores'
 /// window (r3a-e1, r3a-p2, r3a-p2e). M1 (mountain belt) and F1 (low-gradient river landscape) are SPIKE-119's (spikes, 2026-11-15).
@@ -25,7 +30,7 @@ pub fn window_of(arg: &str) -> String {
 
 /// The example's arguments for the xtask's: the target becomes `--window` or `--store`; an unknown option, a missing value or a second window is refused.
 pub fn example_args(args: &[String]) -> Result<Vec<String>, String> {
-    let usage = "usage: cargo xtask river-gate <store dir | face,i0,i1,j0,j1,seed | r1h | r3a | r3b | m1 | f1 | grid=file,w,h,sea_level_m> [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--network-km2 A,B] [--no-key-check]";
+    let usage = "usage: cargo xtask river-gate <store dir | face,i0,i1,j0,j1,seed | r1h | r3a | r3b | m1 | f1 | grid=file,w,h,sea_level_m> [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--network-km2 A,B] [--graph FILE] [--stages DIR] [--partition ONE,TWO] [--no-key-check]";
     let Some(target) = args.first().filter(|a| !a.starts_with("--")) else { return Err(usage.to_string()) };
     let mut out = Vec::new();
     let window = window_of(target);
@@ -80,7 +85,7 @@ pub struct TableRow {
 /// The rows of `river-gate --table <row>... [--windows W,W...] [options]` (BUILD-057): a row is a window (its start surface), `<store dir>@<window>` (the store on that window) or a store dir (on
 /// `--window`, default R1h); `--windows` adds one start-surface row per window. The other options go to every row. A row's label is the store's directory name or "start", then the window.
 pub fn table_rows(args: &[String]) -> Result<Vec<TableRow>, String> {
-    let usage = "usage: cargo xtask river-gate --table <window | store dir@window | store dir | grid=file,w,h,sea_level_m>... [--windows W,W...] [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--network-km2 A,B] [--no-key-check]";
+    let usage = "usage: cargo xtask river-gate --table <window | store dir@window | store dir | grid=file,w,h,sea_level_m>... [--windows W,W...] [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--network-km2 A,B] [--no-key-check]; a row may end in #graph=FILE, #stages=DIR, #partition=ONE,TWO";
     let (mut targets, mut common, mut windows) = (Vec::new(), Vec::new(), Vec::new());
     let mut k = 0;
     while k < args.len() {
@@ -130,6 +135,17 @@ pub fn table_rows(args: &[String]) -> Result<Vec<TableRow>, String> {
     targets
         .iter()
         .map(|t| {
+            // the row's own G2 inputs: `#key=value` suffixes
+            let mut parts = t.split('#');
+            let t = &parts.next().unwrap_or_default().to_string();
+            let mut extra: Vec<String> = Vec::new();
+            for p in parts {
+                let (k, v) = p
+                    .split_once('=')
+                    .filter(|(k, v)| ROW_INPUTS.contains(k) && !v.is_empty())
+                    .ok_or_else(|| format!("a row's suffix is #graph=, #stages= or #partition=, not '#{p}'; {usage}"))?;
+                extra.extend([format!("--{k}"), v.to_string()]);
+            }
             let (target, window) = match t.rsplit_once('@') {
                 _ if t.starts_with("grid=") => (t.clone(), None),
                 Some((dir, w)) if !dir.is_empty() && is_window(w) => (dir.to_string(), Some(w.to_string())),
@@ -157,6 +173,7 @@ pub fn table_rows(args: &[String]) -> Result<Vec<TableRow>, String> {
             };
             let mut args = a;
             args.extend(base.iter().filter(|x| window.is_some() || x.as_str() != "--no-key-check").cloned());
+            args.extend(extra);
             Ok(TableRow { label, args: example_args(&args)? })
         })
         .collect()
@@ -170,8 +187,17 @@ pub fn parse_fields(out: &str) -> Result<Vec<(String, String)>, String> {
         .collect()
 }
 
+/// The `RIVER-GATE classes:` line of a gate run's output as (column, gate class); empty when the run printed none (BUILD-060).
+pub fn parse_classes(out: &str) -> Vec<(String, String)> {
+    out.lines()
+        .find_map(|l| l.strip_prefix("RIVER-GATE classes: "))
+        .map(|line| line.split_whitespace().filter_map(|kv| kv.split_once('=')).map(|(k, v)| (k.to_string(), v.to_string())).collect())
+        .unwrap_or_default()
+}
+
 /// The table of the rows' fields as (markdown, CSV): one row per run, the columns in the first run's order (every run prints the same columns); a value a row lacks is empty.
-pub fn render_table(rows: &[(String, Vec<(String, String)>)]) -> (String, String) {
+/// With `classes` (BUILD-060: the G2 columns' gate classes, from any run) a `class` row follows the header, empty for a column without one.
+pub fn render_table(rows: &[(String, Vec<(String, String)>)], classes: &[(String, String)]) -> (String, String) {
     let mut cols: Vec<String> = Vec::new();
     for (_, f) in rows {
         for (k, _) in f {
@@ -183,6 +209,11 @@ pub fn render_table(rows: &[(String, Vec<(String, String)>)]) -> (String, String
     let value = |f: &[(String, String)], c: &str| f.iter().find(|(k, _)| k == c).map(|(_, v)| v.clone()).unwrap_or_default();
     let mut md = format!("| row | {} |\n|---|{}\n", cols.join(" | "), "---|".repeat(cols.len()));
     let mut csv = format!("row,{}\n", cols.join(","));
+    if !classes.is_empty() {
+        let cl: Vec<String> = cols.iter().map(|c| value(classes, c)).collect();
+        md.push_str(&format!("| class | {} |\n", cl.join(" | ")));
+        csv.push_str(&format!("\"class\",{}\n", cl.join(",")));
+    }
     for (label, f) in rows {
         let vals: Vec<String> = cols.iter().map(|c| value(f, c)).collect();
         md.push_str(&format!("| {label} | {} |\n", vals.join(" | ")));
@@ -195,6 +226,7 @@ pub fn render_table(rows: &[(String, Vec<(String, String)>)]) -> (String, String
 pub fn run_table(root: &Path, args: &[String]) -> Res {
     let rows = table_rows(args)?;
     let mut table = Vec::new();
+    let mut classes: Vec<(String, String)> = Vec::new();
     for row in &rows {
         eprintln!("river-gate --table: {}", row.label);
         let mut cmd: Vec<&str> = vec!["run", "--release", "-q", "-p", "planet-cache", "--example", "river_gate", "--"];
@@ -202,8 +234,13 @@ pub fn run_table(root: &Path, args: &[String]) -> Res {
         let out = crate::util::capture(root, "cargo", &cmd)?;
         print!("{out}");
         table.push((row.label.clone(), parse_fields(&out).map_err(|e| format!("{}: {e}", row.label))?));
+        for (k, c) in parse_classes(&out) {
+            if !classes.iter().any(|(x, _): &(String, String)| *x == k) {
+                classes.push((k, c));
+            }
+        }
     }
-    let (md, csv) = render_table(&table);
+    let (md, csv) = render_table(&table, &classes);
     let dir = root.join("target").join("review");
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     for (name, text) in [("river-gate-table.md", &md), ("river-gate-table.csv", &csv)] {
@@ -245,7 +282,7 @@ mod tests {
         assert!(parse_fields("RIVER-GATE rivers: 3").unwrap_err().contains("no `RIVER-GATE fields:` line"));
         assert!(parse_fields("RIVER-GATE fields: a=1 b").unwrap_err().contains("not name=value: 'b'"));
         let (md, csv) =
-            render_table(&[("x @ r1h".to_string(), f), ("y @ m1".to_string(), vec![("river_cells".to_string(), "5".to_string())])]);
+            render_table(&[("x @ r1h".to_string(), f), ("y @ m1".to_string(), vec![("river_cells".to_string(), "5".to_string())])], &[]);
         assert_eq!(md, "| row | river_cells | basin_pct |\n|---|---|---|\n| x @ r1h | 3 | 33.33 |\n| y @ m1 | 5 |  |\n");
         assert_eq!(csv, "row,river_cells,basin_pct\n\"x @ r1h\",3,33.33\n\"y @ m1\",5,\n");
     }

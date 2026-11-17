@@ -19,7 +19,9 @@ use planet_cache::river_gate::{
     border_inside, commit_differences, key_note, lay_store_ground, measure, raw_grid_arg, raw_grid_heights, Crossing, GateInput,
     GateParams, LWindow, RawGrid, WindowIdentity, GRID_BORDER, GRID_CELL_M,
 };
+use planet_cache::river_gate_graph::{G2Input, StageField, Window};
 use planet_core::{Face, TangentWarp, Vec3};
+use planet_generators::bake::river_graph::Graph;
 use planet_generators::global::{read_elevation_c1, GlobalSample, LatticeSource, ReadError};
 use planet_generators::runoff::{discharge_weight, pet_mm, runoff_mm};
 use planet_world_def::WorldDefinition;
@@ -106,6 +108,7 @@ fn grid_gate(arg: &str, params: &GateParams) -> Result<(), String> {
             sea_level_m: sea,
             outside_drains: false,
             trunks: &[],
+            g2: None,
         },
         params,
     );
@@ -117,11 +120,68 @@ fn grid_gate(arg: &str, params: &GateParams) -> Result<(), String> {
     Ok(())
 }
 
+/// A canonical river graph file (GEN-189).
+fn read_graph(path: &str) -> Result<Graph, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+    Graph::parse(&text).map_err(|e| format!("{path}: {e}"))
+}
+
+/// The per-stage budget fields of a directory (BUILD-060): `<stage>-lower.u16` and `<stage>-fill.u16` for stage ks, kv, kc (little-endian u16 of 0.1 m, row-major on the window's L grid; a missing
+/// file is a stage that did not run, or a stage without fills), and `residuals.csv` (a header and one line per residual record), when present.
+fn read_stages(dir: &Path, n: usize) -> Result<(Vec<StageField>, Option<usize>), String> {
+    let read = |name: &str| -> Result<Option<Vec<u16>>, String> {
+        let p = dir.join(name);
+        if !p.exists() {
+            return Ok(None);
+        }
+        let b = std::fs::read(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+        if b.len() != 2 * n {
+            return Err(format!("{}: {} bytes, the window's {n} cells of u16 are {}", p.display(), b.len(), 2 * n));
+        }
+        Ok(Some(b.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect()))
+    };
+    let mut out = Vec::new();
+    for st in ["ks", "kv", "kc"] {
+        if let Some(lower) = read(&format!("{st}-lower.u16"))? {
+            out.push(StageField { name: st.to_string(), lower, fill: read(&format!("{st}-fill.u16"))? });
+        }
+    }
+    if out.is_empty() {
+        return Err(format!("{}: no ks-lower.u16, kv-lower.u16 or kc-lower.u16", dir.display()));
+    }
+    let res = dir.join("residuals.csv");
+    let records = if res.exists() {
+        Some(
+            std::fs::read_to_string(&res)
+                .map_err(|e| format!("{}: {e}", res.display()))?
+                .lines()
+                .skip(1)
+                .filter(|l| !l.trim().is_empty())
+                .count(),
+        )
+    } else {
+        None
+    };
+    Ok((out, records))
+}
+
 fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let no_key_check = args.iter().any(|a| a == "--no-key-check");
     let args: Vec<String> = args.into_iter().filter(|a| a != "--no-key-check").collect();
-    let known = ["--window", "--margin", "--store", "--min-cells", "--d", "--threads", "--network-km2", "--grid"];
+    let known = [
+        "--window",
+        "--margin",
+        "--store",
+        "--min-cells",
+        "--d",
+        "--threads",
+        "--network-km2",
+        "--grid",
+        "--graph",
+        "--stages",
+        "--partition",
+    ];
     let mut k = 0;
     while k < args.len() {
         if !known.contains(&args[k].as_str()) {
@@ -309,6 +369,29 @@ fn main() -> Result<(), String> {
     });
     let grid = planet_generators::bake::Grid::new(w, h, front.solve.grid.dx() / l as f64);
     let outlet = grid.outlets(&surface, sea_level_m);
+    // The G2 inputs (BUILD-060): a canonical graph, the per-stage budget fields, a partition pair; global L ids against this window's origin.
+    let graph = value(&args, "--graph").map(read_graph).transpose()?;
+    let partition = match value(&args, "--partition") {
+        None => None,
+        Some(v) => {
+            let (a, b) = v.split_once(',').ok_or_else(|| format!("--partition one,two: two canonical graph files, not '{v}'"))?;
+            Some((read_graph(a)?, read_graph(b)?))
+        }
+    };
+    let (stages, residual_records) = match value(&args, "--stages") {
+        None => (None, None),
+        Some(dir) => {
+            let (st, rec) = read_stages(Path::new(dir), w * h)?;
+            (Some(st), rec)
+        }
+    };
+    let g2_input = (graph.is_some() || partition.is_some() || stages.is_some()).then(|| G2Input {
+        window: Window { x0: x0 as u64, y0: y0 as u64, w, h },
+        graph: graph.as_ref(),
+        stages: stages.as_deref(),
+        residual_records,
+        partition: partition.as_ref().map(|(a, b)| (a, b)),
+    });
     let report = measure(
         &GateInput {
             grid: &grid,
@@ -322,6 +405,7 @@ fn main() -> Result<(), String> {
             sea_level_m,
             outside_drains: store.is_some(),
             trunks: &trunks,
+            g2: g2_input.as_ref(),
         },
         &params,
     );
@@ -330,5 +414,8 @@ fn main() -> Result<(), String> {
         println!("{line}");
     }
     println!("{}", report.fields_line());
+    if let Some(c) = report.classes_line() {
+        println!("{c}");
+    }
     Ok(())
 }

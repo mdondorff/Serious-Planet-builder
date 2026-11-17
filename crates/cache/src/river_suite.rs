@@ -247,7 +247,7 @@ pub fn spectrum(grid: &Grid, z: &[f64], inside: &[bool]) -> Spectrum {
 }
 
 /// The least-squares slope of y on x (0 with fewer than two points).
-fn fit(pts: &[(f64, f64)]) -> f64 {
+pub(crate) fn fit(pts: &[(f64, f64)]) -> f64 {
     if pts.len() < 2 {
         return 0.0;
     }
