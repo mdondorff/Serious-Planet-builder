@@ -2113,7 +2113,7 @@ fn main() -> Result<(), String> {
     // ---- G1d (SPIKE-133): KG-trib extractor-1 on the window, initiation on the D8 area (reading 14), A_crit 1 km2. The stage input: RG-0 (the control rung) S0, KS off;
     // RG-1 with `--z <file>`: explorer's KS0 (spike/ks-g1b), little-endian f64, row-major, the window's L grid (8 x (i0 - margin), 8 x (j0 - margin))
     {
-        use planet_generators::bake::basins_rg::{produce, BasinParams};
+        use planet_generators::bake::basins_rg::{produce_ids, BasinParams, CellIds};
         use planet_generators::bake::kg_trib::{accumulate_trunks, extract, Input, Params, Trunk};
         use planet_generators::bake::river_graph::Represented;
         let t = Instant::now();
@@ -2165,7 +2165,7 @@ fn main() -> Result<(), String> {
             .collect();
         let outlet_l: Vec<bool> = (0..n).map(|c| sea_l[c] || exit[c]).collect();
         let t_b = Instant::now();
-        let pb = produce(&gl, &z_in, &outlet_l, &[], &tile_l, &BasinParams::l(BODY));
+        let pb = produce_ids(&gl, &z_in, &outlet_l, &[], &tile_l, &BasinParams::l(BODY), &CellIds { gid: &gid_l, local: &to_local });
         let mut kept = vec![false; n];
         for b in pb.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface) {
             for &c in &pb.cells[&b.id] {
