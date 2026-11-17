@@ -83,7 +83,7 @@ Code location: spike branch `spike/deep-basins` (f6395a8f): `crates/cache/exampl
 7. **The deepest basins are not lakes one would draw:** on M1 the three deepest of each base (755-1,643 m deep, 10,500-15,600 km2) have their H1 floor about 85-550 m below the lowest `S0` along the channel and their spill about 500-1,400 m above it (stills); on R1h K6''s three deepest have floors 46-75 m below the sea level (an inland L pocket under the sea level drags the node down) while today's three deepest are 5 m coastal flats (stills).
 
 ## 4. Recommendation (input to decision 5)
-- Fix at the source stage: the deep and the large kept basins on trunks are closed 814 m depressions of the base `z_b` (R1h, R3b, F1, most of R3a) and, on M1, also depressions K5 makes in `z_s` (M1 K6' 56 % of the river length; today's deepest); they are not lakes. The base generator (K0-K4) and K5's treatment of closed depressions are the stages to change, not the kept-lake share; K6''s band and node basins come on top (finding 2).
+- Fix at the source stage: the deep and the large kept basins on trunks are closed 814 m depressions of the base `z_b` (R1h, R3b, F1, the largest share of R3a) and, on M1, also depressions K5 makes in `z_s` (M1 K6' 56 % of the river length; today's deepest); they are not lakes. The base generator (K0-K4) and K5's treatment of closed depressions are the stages to change, not the kept-lake share; K6''s band and node basins come on top (finding 2).
 - Until then: reading 13 for the trunk graph, with the crossing reach's `q_w` rule added to the contract; lakes only from basins within the budget (today's K6: 0-1.5 % of the river length on four windows, 21.6 % on R3a).
 - The Earth share at 814 m is not a target for decision 5: it measures resolution.
 
