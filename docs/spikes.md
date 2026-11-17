@@ -36,6 +36,7 @@ Per-spike register sections of M5 and M6: `docs/archive/M6/spikes.md`. Closed sp
 | SPIKE-131 | K5' on sills (G1a) | closed 11-17: stop test an artefact; not adopted | `spikes/k5p-sills/results/results.md` |
 | SPIKE-130 | Basin topology (G1e) | closed 11-17: stable under layouts; S0 3-19 % in basins | `spikes/basins-g1e/results/results.md` |
 | SPIKE-132 | KV and KC on the fixture (G1f) | closed 11-17: budget kept; fill clamp, 2 exceptions gaps | `spikes/kv-kc/results/results.md` |
+| SPIKE-135 | Repair debt of S0 by origin (ladder z_b to S0) | closed 11-17: 77-93 % of S0's breach from the read at L; F1 base | `spikes/repair-debt/results/results.md` |
 | SPIKE-134 | Deep H1 basins on trunks, origin (decision 5) | closed 11-17: base z_b depressions; Earth at 814 m is resolution | `spikes/deep-basins/results/results.md` |
 | SPIKE-133 | KG-trib extractor-1 on the fixture (G1d) | results 11-17: valid, layout-stable; MFD stubs; windows wait | `spikes/kg-trib/results/results.md` |
 | SPIKE-128 | KS in isolation, five windows (G1b) | closed 11-17: stop rule not reached; M1 residual 0.23 % | `spikes/ks-g1b/results/results.md` |
