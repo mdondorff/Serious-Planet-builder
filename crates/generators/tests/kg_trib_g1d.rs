@@ -45,7 +45,12 @@ pub(crate) fn case(threads: usize) -> Case {
         .reaches
         .iter()
         .filter(|r| r.level == Level::L && r.parent.is_some())
-        .map(|r| Trunk { id: r.id, vertices: r.vertices.iter().map(|&c| c as usize).collect(), attrs: r.attrs.clone() })
+        .map(|r| Trunk {
+            id: r.id,
+            vertices: r.vertices.iter().map(|&c| c as usize).collect(),
+            attrs: r.attrs.clone(),
+            down: b.graph.nodes.iter().find(|n| n.id == r.down).expect("the trunk's down node").clone(),
+        })
         .collect();
     Case { fx, graph: b.graph, trunks, sea }
 }

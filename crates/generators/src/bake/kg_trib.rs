@@ -9,7 +9,7 @@
 //!    no other node), and the ends: `trib_junction` on a trunk vertex, `outlet_sea` on the first sea cell, `lake_inlet` on the first cell of a kept basin; a chain reaching a window exit is open.
 //! 4. Attributes: the D8 accumulation of true cell areas, with (`a_geo`, `a_run`) and without (`a_run_no_ext`) the seed; `a_ext` the seed at its entry vertex; `q = q_w = a_run r`; Strahler by the
 //!    standard rule, one order a reach; the bed the running minimum of the 0.5 m codes, lifted to the end's bed (a junction carries the trunk's), one value at a node. A reach ending on a trunk
-//!    takes the trunk's attributes on its last vertex.
+//!    takes the trunk's bed on its last vertex; a reach reaching a trunk's last vertex ends at the trunk's down node.
 //! 5. Ids: GEN-189's (node: body, kind, level, anchor; reach: body, level, up, down); owners: a tile of the anchor (`trib_junction`: the landmass, as the trunk), a reach the tile of its second vertex.
 //!
 //! Single-threaded, fixed orders (CON-14).
@@ -45,6 +45,8 @@ pub struct Trunk {
     pub id: u64,
     pub vertices: Vec<usize>,
     pub attrs: Attrs,
+    /// The trunk's down node: a tributary reaching the trunk's last vertex ends there (a junction never sits on a reach's last vertex).
+    pub down: Node,
 }
 
 /// The inputs of one domain.
@@ -105,7 +107,17 @@ pub fn extract(inp: &Input, p: &Params) -> Extracted {
     order_t.sort_by_key(|&t| inp.trunks[t].id);
     for t in order_t {
         for (k, &c) in inp.trunks[t].vertices.iter().enumerate() {
-            on_trunk.entry(c).or_insert((t, k));
+            // a claim on a trunk's last vertex yields to a claim inside another trunk (a junction there is valid)
+            let last = k + 1 == inp.trunks[t].vertices.len();
+            match on_trunk.get(&c) {
+                None => {
+                    on_trunk.insert(c, (t, k));
+                }
+                Some(&(t0, k0)) if k0 + 1 == inp.trunks[t0].vertices.len() && !last => {
+                    on_trunk.insert(c, (t, k));
+                }
+                Some(_) => {}
+            }
         }
     }
     let mut is_trunk = vec![false; n];
@@ -243,6 +255,9 @@ pub fn extract(inp: &Input, p: &Params) -> Extracted {
                 continue;
             }
             if let Some(&(ti, k)) = on_trunk.get(&t) {
+                if k + 1 == inp.trunks[ti].vertices.len() {
+                    break Some(inp.trunks[ti].down.clone());
+                }
                 let mut j = node(NodeKind::TribJunction, t, Domain::Landmass);
                 j.marker = Some(Marker { on_reach: inp.trunks[ti].id, at_vertex: k as u32 });
                 j.id = node_id_of(p.body, &j);
@@ -273,15 +288,10 @@ pub fn extract(inp: &Input, p: &Params) -> Extracted {
             strahler: vec![st; cells.len()],
             bed: cells.iter().map(|&c| if channel[c] { bed_at(c) } else { code(inp.z[c]).min(bed_at(cells[cells.len() - 2])) }).collect(),
         };
+        // on a trunk the last vertex shares the trunk's bed; its areas and discharges stay the tributary's own (the D8 inflow there): the trunk's are the landmass pass's
         if let Some(&(ti, k)) = on_trunk.get(&last) {
             let ta = &inp.trunks[ti].attrs;
             let m = cells.len() - 1;
-            a.a_geo[m] = ta.a_geo[k];
-            a.a_ext[m] = ta.a_ext[k];
-            a.a_run[m] = ta.a_run[k];
-            a.a_run_no_ext[m] = ta.a_run_no_ext[k];
-            a.q[m] = ta.q[k];
-            a.q_w[m] = ta.q_w[k];
             a.bed[m] = ta.bed[k];
             if m > 0 && ta.a_geo[k] < a.a_geo[m - 1] {
                 trunk_area_breaks += 1;
