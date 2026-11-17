@@ -3,7 +3,7 @@
 //!
 //! - **Entities.** Nodes (kinds `source`, `confluence`, `trib_junction` and `exception` markers, `tile_crossing`, `outlet_sea`, `lake_inlet`, `lake_spill`), reaches (directed downstream, an 8-connected chain
 //!   of global cell ids from `up`'s anchor to `down`'s, per-vertex attributes) and basins, at two levels (H1 and L), owned by a domain (`landmass` or a canonical tile).
-//! - **Identities.** `node = hash(body, kind, level, anchor)`, `reach = hash(body, level, up, down)`, `basin = hash(body, level, floor anchor)` ([`id_hash`], GEN-145's mixer). Ownership never enters an id.
+//! - **Identities.** `node = hash(body, kind, level, anchor)`, `reach = hash(body, level, up, down)`, `basin = hash(body, level, floor anchor, spill anchor)` ([`id_hash`], GEN-145's mixer). Ownership never enters an id.
 //! - **Canonical form.** Nodes, reaches and basins sorted by id, fixed field order, f64 as IEEE-754 bit patterns in hex: the same graph gives the same bytes, and [`Graph::parse`] reads them back.
 //! - **Diff.** Ids added or removed (topology) apart from same ids with different fields (attributes), each named by (id, field).
 //! - **Validators.** Each check of the contract's section 8 returns [`Violation`]s; none repairs anything.
@@ -278,9 +278,15 @@ pub fn reach_id(body: u64, level: Level, up: u64, down: u64) -> u64 {
     id_hash(body ^ REACH_TAG ^ level.code(), up, down)
 }
 
-/// The id of a basin.
-pub fn basin_id(body: u64, level: Level, floor: u64) -> u64 {
-    id_hash(body ^ BASIN_TAG ^ level.code(), floor, 0)
+/// The id of a basin: its floor and spill anchors (the contract's reading 4: a parent shares its floor with its deepest child, so the floor alone collides). `spill` is the spill cell,
+/// `None` only for a basin with no spill cell at all; it enters as the cell plus one, so 0 means none.
+pub fn basin_id(body: u64, level: Level, floor: u64, spill: Option<u64>) -> u64 {
+    id_hash(body ^ BASIN_TAG ^ level.code(), floor, spill.map_or(0, |s| s + 1))
+}
+
+/// The spill anchor of a stored basin: its spill cell, or `None` when it has none (an infinite spill height).
+pub fn spill_anchor(b: &Basin) -> Option<u64> {
+    b.spill_m.is_finite().then_some(b.spill_cell)
 }
 
 fn opt(v: Option<u64>) -> String {
@@ -694,7 +700,7 @@ pub fn validate(graph: &Graph, checks: &Checks) -> Vec<Violation> {
         }
     }
     for b in &g.basins {
-        if b.id != basin_id(g.body, b.level, b.floor_cell) {
+        if b.id != basin_id(g.body, b.level, b.floor_cell, spill_anchor(b)) {
             v.push(Violation::IdMismatch { id: b.id });
         }
     }
