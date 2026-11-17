@@ -1960,10 +1960,11 @@ fn main() -> Result<(), String> {
         reaches.iter().filter(|r| r.up_kind == NodeKind::LakeSpill).count()
     );
     // ================================================================ the RG chain (explorer #166, G1f plumbing; no tuning, no judgement)
-    // switches: --kh c1 (h1 | h2: SPIKE-136, not landed); --ks off | ks0 | ks1 (default ks1); --skip a,b,... of kg-trunk, basins, kg-trib, kv, kc; --regions 1 | 2
+    // switches: --kh c1 | h2 (SPIKE-136's h2, reading 19: KS starts from KH(z_s) + r; spikes #137); --ks off | ks0 | ks1 (default ks1); --skip a,b,... of kg-trunk, basins, kg-trib, kv, kc;
+    // --regions 1 | 2
     let kh = value(&args, "--kh").unwrap_or("c1");
-    if kh != "c1" {
-        return Err(format!("--kh {kh}: SPIKE-136's hand-over is not landed; only c1 runs"));
+    if !["c1", "h2"].contains(&kh) {
+        return Err(format!("--kh c1 | h2, not '{kh}'"));
     }
     let ks_mode = value(&args, "--ks").unwrap_or("ks1");
     if !["off", "ks0", "ks1"].contains(&ks_mode) {
@@ -2030,24 +2031,84 @@ fn main() -> Result<(), String> {
         }
         p
     };
+    // ---- KH (spikes #137, reading 19): the surface KS starts from. c1: S0 itself; h2: KH(z_s) + r, KH the flow-diagonal triangulation of z_s (planet_generators::bake::kh). S0 stays
+    // the reference of the ocean, the sills, the budget and the measures (explorer, 2026-11-17).
+    let t = Instant::now();
+    let ks_base: Vec<f64> = if kh == "h2" {
+        use planet_generators::bake::kh;
+        // KH's routing of z_s at 814 m: reading 12's outlets (the edge, and cells at or below the sea connected to it or to a K5 sea outlet)
+        let mut ol: Vec<bool> = (0..cells).map(|c| grid.is_edge(c)).collect();
+        let mut stack: Vec<usize> = (0..cells).filter(|&c| solve.zs[c] <= sea && (grid.is_edge(c) || outlet[c])).collect();
+        for &c in &stack {
+            ol[c] = true;
+        }
+        while let Some(c) = stack.pop() {
+            for d in 0..8 {
+                if let Some(q) = grid.neighbour(c, d) {
+                    if !ol[q] && solve.zs[q] <= sea {
+                        ol[q] = true;
+                        stack.push(q);
+                    }
+                }
+            }
+        }
+        let (recv, area) = kh::routing(grid, &solve.zs, &ol);
+        let (split, st) = kh::split(&solve.zs, rw, rh, &|c| (recv[c] != NONE).then(|| recv[c] as usize), &|c| area[c]);
+        let lr = L as f64;
+        let at = |p: usize| kh::read(&solve.zs, rw, rh, &split, ((p % w) as f64 - (lr - 1.0) / 2.0) / lr, ((p / w) as f64 - (lr - 1.0) / 2.0) / lr) + rl[p];
+        // the run's read on `threads` threads; tile-locality: the same read over two regions cut at a tile column, and on one thread
+        let mut one = vec![0f64; n_l];
+        par_fill(&mut one, w, threads, &at);
+        let two: Vec<f64> = {
+            let mut out = vec![0f64; n_l];
+            for r in 0..2 {
+                for p in (0..n_l).filter(|&p| usize::from(p % w >= half) == r) {
+                    out[p] = at(p);
+                }
+            }
+            out
+        };
+        let mut serial = vec![0f64; n_l];
+        for p in 0..n_l {
+            serial[p] = at(p);
+        }
+        let differ2 = (0..n_l).filter(|&p| one[p].to_bits() != two[p].to_bits()).count();
+        let differ1 = (0..n_l).filter(|&p| one[p].to_bits() != serial[p].to_bits()).count();
+        let land = (0..n_l).filter(|&p| start[p] > sea).count();
+        let (mut lo10, mut hi10) = (0usize, 0usize);
+        for p in (0..n_l).filter(|&p| start[p] > sea) {
+            lo10 += usize::from(start[p] - one[p] > 10.0);
+            hi10 += usize::from(one[p] - start[p] > 10.0);
+        }
+        println!(
+            "RG KH h2: quads split along a D8 diagonal step {} (both diagonals {}), along the higher pair {}; two regions against one: {differ2} cells differ, one thread against the run: {differ1}; against S0 on {land} land cells: lower over 10 m {lo10}, higher over 10 m {hi10}",
+            st.by_step, st.both, st.by_pair
+        );
+        let b: Vec<u8> = split.clone();
+        std::fs::write(out_dir.join(format!("{tag}-kh-split-{rw}x{rh}.u8")), b).map_err(|e| e.to_string())?;
+        one
+    } else {
+        start.clone()
+    };
+    stamp(&format!("KH ({kh})"), t.elapsed().as_secs_f64());
     let ks = |band: &[f64]| -> (Vec<f64>, Vec<(usize, f64, f64)>) {
-        let mut z = start.clone();
+        let mut z = ks_base.clone();
         let mut res = Vec::new();
         for p in 0..n_l {
             if start[p] <= sea || protected_h1[parent(p)] {
                 continue;
             }
             let want = (rl[p] - band[p]).max(0.0);
-            let avail = budget_l[p].min((start[p] - (sea + 0.5)).max(0.0));
+            let avail = budget_l[p].min((ks_base[p] - (sea + 0.5)).max(0.0));
             let u = want.min(avail);
-            z[p] = start[p] - u;
+            z[p] = ks_base[p] - u;
             if want > avail + 1e-9 {
                 res.push((p, want, avail));
             }
         }
         (z, res)
     };
-    let (ks0, res0) = if ks_mode == "off" { (start.clone(), Vec::new()) } else { ks(&hand_l) };
+    let (ks0, res0) = if ks_mode == "off" { (ks_base.clone(), Vec::new()) } else { ks(&hand_l) };
     drop(hand_l);
     println!("RG KS0 ({}): {} cells lowered, {} residuals", if ks_mode == "off" { "off: S0" } else { "S0 - min(max(0, r - C1(HAND)), budget)" }, (0..n_l).filter(|&p| ks0[p] < start[p]).count(), res0.len());
     stamp("KS0", t.elapsed().as_secs_f64());

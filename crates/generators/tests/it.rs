@@ -106,6 +106,8 @@ mod driver_channels;
 mod erosion;
 #[path = "g0_fixture.rs"]
 mod g0_fixture;
+#[path = "kh_g0.rs"]
+mod kh_g0;
 #[path = "g0_graph.rs"]
 mod g0_graph;
 #[path = "generator_contract.rs"]
