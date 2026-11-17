@@ -1342,6 +1342,7 @@ fn build_graph(
     let mut idx: Vec<usize> = (0..routed.len()).collect();
     idx.sort_by_key(|&i| std::cmp::Reverse(pos[&reaches[routed[i].0].cells[0]]));
     let mut exceptions = 0usize;
+    let mut sea_ends = 0usize;
     let mut l_reaches: Vec<GReach> = Vec::new();
     let mut markers: Vec<Node> = Vec::new();
     for &i in &idx {
@@ -1353,7 +1354,14 @@ fn build_graph(
         let hr = &reaches[k];
         let mut route = route.clone();
         let mut down_c = down_c;
-        if hr.down_kind == NodeKind::OutletSea {
+        let mut down_kind = hr.down_kind;
+        if *route.last().expect("route") != down_c {
+            // the route met the sea before the down node: the image ends at an outlet there
+            down_c = *route.last().expect("route");
+            down_kind = NodeKind::OutletSea;
+            sea_ends += usize::from(hr.down_kind != NodeKind::OutletSea);
+        }
+        if down_kind == NodeKind::OutletSea {
             // reading 2: the outlet image is the first sea cell of the chain
             if let Some(p) = route.iter().position(|&c| s0[c] <= sea) {
                 route.truncate(p + 1);
@@ -1387,7 +1395,7 @@ fn build_graph(
             })
         };
         let up = mk(up_c, hr.up_kind, hr.cells[0]);
-        let down = mk(down_c, hr.down_kind, *hr.cells.last().expect("cells"));
+        let down = mk(down_c, down_kind, *hr.cells.last().expect("cells"));
         let _ = up_c;
         // the bed: running minimum of KS0 from the up node's bed, the cut at most budget - KS_used; beyond it the bed follows the surface (rise_over_budget)
         let n = route.len();
@@ -1436,7 +1444,7 @@ fn build_graph(
         let _ = (failed, rise);
         // attributes: the H1 reach's vertex at the same share of the length
         let m = hr.cells.len();
-        let at = |v: usize| hr.cells[if n > 1 { (v * (m - 1) + (n - 1) / 2) / (n - 1) } else { 0 }.min(m - 1)] as usize;
+        let at = |v: usize| hr.cells[if v + 1 == n { m - 1 } else { (v * (m - 1)) / (n - 1).max(1) }.min(m - 1)] as usize;
         let attrs = Attrs {
             a_geo: (0..n).map(|v| h1.d8[at(v)]).collect(),
             a_ext: vec![0.0; n],
@@ -1469,7 +1477,9 @@ fn build_graph(
     }
     g.reaches.extend(l_reaches);
     g.nodes.extend(markers);
-    notes.push(format!("L reaches skipped (no route or a one-cell chain) {skipped}; anchor collisions (two kinds on one L cell) {collisions}; rise_over_budget reaches {exceptions}"));
+    notes.push(format!(
+        "L reaches skipped (no route or a one-cell chain) {skipped}; routes meeting the sea before their down node (ended at an outlet_sea there) {sea_ends}; anchor collisions (two kinds on one L cell) {collisions}; rise_over_budget reaches {exceptions}"
+    ));
     g.sort();
     (g, notes)
 }
@@ -1666,6 +1676,24 @@ fn main() -> Result<(), String> {
     let sea_outlet = |c: u32| solve.zb[c as usize] <= sea && !grid.is_edge(c as usize);
     let (reaches, edge_ends) = h1_reaches(&h1, grid, &sea_outlet);
     let order = strahler(&h1);
+    {
+        let segs = &h1.hydro.segments;
+        let (mut sc, mut lab, mut full) = (0usize, 0usize, 0usize);
+        for s in segs {
+            let mut c = s.up;
+            let (mut n_, mut l_) = (1usize, usize::from(h1.hydro.label[c as usize] != NONE));
+            while c != s.down {
+                c = h1.routing.receiver[c as usize];
+                n_ += 1;
+                l_ += usize::from(h1.hydro.label[c as usize] != NONE);
+            }
+            sc += n_;
+            lab += l_;
+            full += usize::from(l_ + 1 >= n_);
+        }
+        let basin_cells = h1.hydro.label.iter().filter(|&&b| b != NONE).count();
+        println!("KG segments: {} ({sc} cells, {lab} in kept basins, {full} segments inside one); kept-basin cells {basin_cells} of {cells}", segs.len());
+    }
     println!("KG H1 trunk reaches: {} ({} end on the window's edge; {} lake inlets, {} lake spills)", reaches.len(), edge_ends,
         reaches.iter().filter(|r| r.down_kind == NodeKind::LakeInlet).count(), reaches.iter().filter(|r| r.up_kind == NodeKind::LakeSpill).count());
 
@@ -1694,8 +1722,25 @@ fn main() -> Result<(), String> {
         *kinds.entry(k.split([' ', '{', '(']).next().unwrap_or("").to_string()).or_default() += 1;
     }
     println!("KG validators (open slice): {} violations {:?}", viol.len(), kinds);
-    for v in viol.iter().take(12) {
-        println!("KG violation: {v:?}");
+    {
+        let lev: HashMap<u64, String> = g.nodes.iter().map(|n| (n.id, format!("{:?} node {:?}", n.level, n.kind))).chain(g.reaches.iter().map(|r| (r.id, format!("{:?} reach", r.level)))).collect();
+        let mut by: BTreeMap<String, usize> = BTreeMap::new();
+        for v in &viol {
+            let k = format!("{v:?}");
+            let name = k.split([' ', '{', '(']).next().unwrap_or("").to_string();
+            let id = k.split(|c: char| !c.is_ascii_digit()).filter(|x| x.len() >= 10).next().and_then(|x| x.parse::<u64>().ok());
+            let what = id.and_then(|i| lev.get(&i).cloned()).unwrap_or_else(|| "?".into());
+            *by.entry(format!("{name} on {what}")).or_default() += 1;
+        }
+        println!("KG violations by kind and item: {by:?}");
+        let mut seen: HashSet<String> = HashSet::new();
+        for v in &viol {
+            let k = format!("{v:?}");
+            let name = k.split([' ', '{', '(']).next().unwrap_or("").to_string();
+            if seen.insert(name) {
+                println!("KG violation example: {k}");
+            }
+        }
     }
     // the exceptions: count, values and where
     let exc: Vec<&GReach> = l_reaches.iter().copied().filter(|r| matches!(r.status, Status::Exception { .. })).collect();
@@ -1766,6 +1811,32 @@ fn main() -> Result<(), String> {
     for (name, surf) in [("S0", &start), ("KS0", &ks0)] {
         let t = Instant::now();
         let riv = l_rivers(surf, w, h, dx_l, sea, 75.0e6);
+        {
+            let (cw, cx0, cy0) = (1024usize, w / 2 - 512, h / 2 - 512);
+            let mut img = format!("P6 {cw} {cw} 255
+").into_bytes();
+            let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+            for y in cy0..cy0 + cw {
+                for x in cx0..cx0 + cw {
+                    lo = lo.min(surf[y * w + x]);
+                    hi = hi.max(surf[y * w + x]);
+                }
+            }
+            for y in cy0..cy0 + cw {
+                for x in cx0..cx0 + cw {
+                    let c = y * w + x;
+                    let g8 = (40.0 + 180.0 * (surf[c] - lo) / (hi - lo).max(1.0)) as u8;
+                    let px = match (riv[c], ras[c]) {
+                        (true, true) => [255, 0, 255],
+                        (true, false) => [0, 90, 255],
+                        (false, true) => [255, 30, 0],
+                        _ => [g8, g8, g8],
+                    };
+                    img.extend_from_slice(&px);
+                }
+            }
+            std::fs::write(out_dir.join(format!("{tag}-agree-{name}.ppm")), img).map_err(|e| e.to_string())?;
+        }
         let (mut rc, mut ra, mut gc, mut ga) = (0usize, 0usize, 0usize, 0usize);
         for c in 0..w * h {
             if !in_box[c] {
