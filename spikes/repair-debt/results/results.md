@@ -38,7 +38,7 @@ Code location: branch `spike/repair-debt` @ 5dfa8e8a (never merged):
 | river length on closed depressions | 69-89 % | 29-68 % |
 
   - Its residue is the base's real basins and the band.
-- **KS is partly repair, partly band clipping.**
+- **KS is only partly a repair.**
   - On R1h and M1, 36-63 % of KS's lowering volume lies on cells `S0` does not need breached.
   - On R3a, R3b and F1 that share is 67-92 %.
   - Of the lowering, 17-57 % is what `S0`'s breach also asks for there.
@@ -80,7 +80,7 @@ Code location: branch `spike/repair-debt` @ 5dfa8e8a (never merged):
   - **band:** on `S0` only.
 - "Hand-over fixes": L5 has no breach over 1 m within 4 L cells.
 - KS: RG-1 (KS0, H from today's H1), RG-2 (KS1, flow-path H on a routing of KS0 at L) and RG-1 with K6''s H. The lowering is `S0 - KS`, from SPIKE-128's code (explorer's K6' dump for the third). Its volume is split by the class of the cell (none: no `S0` breach over 1 m).
-- Runs: five windows, 283-496 s each, peak 4.6 GB, under the heavy lock. KS dumps: 125-190 s each, peak 4.0 GB.
+- Runs, under the heavy lock (wall time with setup, peak working set; `raw/peaks.txt`): five windows, 283-496 s each, peak 4.6 GB; KS dumps 125-190 s each, peak 4.0 GB.
 
 ## Results
 ### The rungs
@@ -207,8 +207,8 @@ Cells (share) / volume share / share of the class the hand-over has no breach ne
 | Interpolation, 814 m to L | L2s - L1 | River length on closed depressions rises from 3.5-52 % to 67-85 %. Breach rises from 0.2-4.6 % to 3.3-8.4 % of the land, with 2.4 % of M1's land over 50 m. The base's own read (L2b - L0) adds little: `z_b` is already broken. |
 | Band `r` | L4 - L2s | +1.5 to +4.5 points of river length on closed depressions. Breach volume +8.5 to +62 % (R3b +8.5 %, F1 +24 %, R3a +34 %, R1h +39 %, M1 +62 %). D-2 +6 to +122 % (M1 851 to 1,890). |
 | Hand-over fix potential | L4 - L5 | L5 removes 68-97 % of `S0`'s breach volume on four windows (F1 4 %) and 54-97 % of the D-2 failures. Ridge cells breached over 10 m fall from 570-462,624 to 0-144,928. |
-| Drainage derivation (H1) | D-2 on `S0` | 78-1,890 of 3,094-9,070 H1 trunk reaches fail the corridor measure on `S0` (0.9-31 %); on L3, 2-155. SPIKE-131: K6' (sills, SPIKE-127) alone makes no real change to the trunks on four windows, R3a at noise level. |
-| Rasterisation | G-SURF-I; SPIKE-129 | G-SURF-I (`docs/gates/ledger.md`, 0900c015) compares the runtime's `B + R(L)` with the bake's `C1(z)` on three tiles: 0.30-23.6 % of vertices over 0.25 m, p99 0.15-1.31 m, max 7.19 m. SPIKE-129's graph/raster agreement against routed `S0`: 10.5-40.5 % of river cells within 1 cell of the graph, 30-71 % of graph cells near a routed river (K6' and today's K6). Both are small next to the breach depths above, except at the trench scale. |
+| Drainage derivation (H1) | D-2 on `S0` | 78-1,890 of 3,094-9,070 H1 trunk reaches fail the corridor measure on `S0` (0.9-31.5 %); on L3, 2-155. SPIKE-131: K6' (sills, SPIKE-127) alone makes no real change to the trunks on four windows, R3a at noise level. |
+| Rasterisation | G-SURF-I; SPIKE-129 | G-SURF-I (`docs/gates/ledger.md`, 0900c015) compares the runtime's `B + R(L)` with the bake's `C1(z)` on three tiles: 0.30-23.6 % of vertices over 0.25 m, p99 0.15-1.31 m, max 7.19 m. SPIKE-129's graph/raster agreement against routed `S0`: 10.5-40.5 % of river cells within 1 cell of the graph, 30-71 % of graph cells near a routed river (K6' and today's K6). The read error (at most 7.19 m) is small next to the breach depths above. The low agreement measures the centreline method (SPIKE-129 finding 6), not a defect of the surface. |
 
 ### Where KS lowers `S0`
 KS is SPIKE-128's code; volume in km3. The split is the share of the volume by the cell's class (none: no `S0` breach over 1 m), in %.
@@ -232,7 +232,7 @@ KS is SPIKE-128's code; volume in km3. The split is the share of the volume by t
 | F1 | RG-1 (K6' H) | 1.03 | 68 / 3.6 / 0.1 / 26 / 2.2 | 82 | 39 |
 
 - On R1h and M1 KS acts mostly near the interpolation defects: 71-97 % of its lowering is within 4 cells of an `S0` breach cell.
-- On R3a, R3b and F1, 67-92 % of its lowering is on cells `S0` does not need breached: there KS clips the band on hillslopes.
+- On R3a, R3b and F1, 67-92 % of its lowering is on cells `S0` does not need breached. KS's rule lowers `r` where it exceeds H, so this is likely band on hillslopes; the data do not separate those cells by class (the band class holds 0.5-12 % of KS's volume).
 - KV and KC: measured only on SPIKE-132's synthetic fixture (budget 10 m everywhere). Not measured by defect class; this needs G1f's integrated run on a window.
 
 ## Findings
@@ -241,7 +241,7 @@ KS is SPIKE-128's code; volume in km3. The split is the share of the volume by t
    - The base stage makes valleys that do not connect: M1's p50 breach on lowered cells is 231 m.
 2. **K5 is the repair of the base.** It removes 88-99 % of the base's breached cells (F1 88 %).
    - It is erosion, not a minimal repair: it lowers 4.6-29 times the base's breach volume.
-   - On R1h, R3a and R3b, `z_s` drains at 814 m (residual breach at most 5 m).
+   - On R1h, R3a and R3b, what remains on `z_s` at 814 m is shallow: breach at most 5 m (R3a still has 43 % of its river length on depressions of at most 3 m).
    - On M1 and F1 it does not finish: deep basins (M1) and broad lowland depressions (F1, 61 % of `S0`'s breach cells) stay. That is SPIKE-134's origin finding, here as a share of the debt.
 3. **The scale transition makes most of `S0`'s debt.** On four windows 77-93 % of `S0`'s breach cells (83-96 % of the volume) first appear when `z_s` is read at L.
    - This is SPIKE-116's diagonal-saddle result, now on five windows and as a share. Any C1 or bilinear read of a D8-drained grid closes basins at diagonal steps.
@@ -253,7 +253,7 @@ KS is SPIKE-128's code; volume in km3. The split is the share of the volume by t
      - shallow basins from L sampling (SPIKE-116);
      - the base's basins K5 keeps;
      - the band's own dips (L5 against L3: +3 to +22 points of river length on closed depressions).
-6. **KS repairs the interpolation debt where relief is high and clips the band where it is low.** On the flat windows 67-92 % of KS's volume lies away from any breach need, so KS is not a targeted repair there.
+6. **KS repairs the interpolation debt where relief is high; elsewhere it acts away from the breach need.** On R3a, R3b and F1, 67-92 % of KS's volume lies on cells `S0` does not need breached, so KS is not a targeted repair there. Its rule suggests band clipping on hillslopes; this note does not measure that.
 7. **Coastal strips under 0 m:** with reading 12's sea, `S0` has 25,525-524,775 inland cells at or below 0 m (none on M1). Most are the band dipping under the sea level near the coast (SPIKE-129's early sea ends). On the L rungs they count as land with depressions.
 
 ## Recommendation
@@ -301,4 +301,4 @@ F1: the base's broad lowland depressions (purple fans), which K5 keeps and the h
 - `cargo build --release -p planet-cache --example repair_debt --example ks_dump` on `spike/repair-debt`.
 - KS dumps: `cargo xtask heavy target/release/examples/ks_dump.exe --window <w> --out <dir>/<tag> --dump-only`.
 - Ladder: `cargo xtask heavy target/release/examples/repair_debt.exe --window <w> --out <dir> --tag <tag> --ks <dir>/<tag> --ks0-k6p <explorer's ks0-k6p-8160x8160.f64>`.
-- Tables: `python tools/ladder_tables.py <dir> r1h r3a r3b m1 f1`. Sheets: `python tools/repair_sheet.py <dir> <tag> <title> <out.jpg>`.
+- Tables: `python tools/ladder_tables.py raw r1h r3a r3b m1 f1` (reads `raw/ladder-<w>.csv`). Sheets: `python tools/repair_sheet.py <dir> <tag> <title> <out.jpg>`.

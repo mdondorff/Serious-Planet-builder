@@ -1,6 +1,7 @@
-"""SPIKE-135: the results tables from the probe's per-window CSVs (`<w>-ladder.csv`). Usage: ladder_tables.py <dir> r1h r3a r3b m1 f1 > tables.md"""
+"""SPIKE-135: the results tables from the probe's per-window CSVs (`ladder-<w>.csv` as committed in raw/, or the probe's own `<w>-ladder.csv`).
+Usage: ladder_tables.py <dir> r1h r3a r3b m1 f1 > tables.md"""
+import os
 import sys
-import csv
 
 d, wins = sys.argv[1], sys.argv[2:]
 NAMES = {'r1h': 'R1h', 'r3a': 'R3a', 'r3b': 'R3b', 'm1': 'M1', 'f1': 'F1'}
@@ -17,7 +18,8 @@ LABEL = {
 }
 rows, k5, cls, ks = {}, {}, {}, {}
 for w in wins:
-    for line in open(f'{d}/{w}-ladder.csv', encoding='utf-8'):
+    path = f'{d}/ladder-{w}.csv' if os.path.exists(f'{d}/ladder-{w}.csv') else f'{d}/{w}-ladder.csv'
+    for line in open(path, encoding='utf-8'):
         line = line.strip()
         if line.startswith('window,'):
             head = line.split(',')
