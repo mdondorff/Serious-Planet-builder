@@ -152,14 +152,25 @@ A tile is what the camera sees and changes with distance; a fixed grid (CON-08's
 | driver map | a physical field (soil depth, wetness, drainage) that materials and plants read through suitability rules (ADR 0076); the chunk stage's driver channels leave with it, M9 re-adds drivers from the stored bake | generators, render | proposed |
 | coarse valley carve | a valley cut into the base field along the coupled run's network (ADR 0084) | generators | proposed |
 | terrain descriptor, scorecard | measures of a terrain's form (slope, curvatures, relief, TPI, geomorphons, drainage density) compared against real elevation data (SPIKE-57) | tools | proposed |
+| river graph | the canonical graph of rivers and basins at H1 (814 m) and L (101.8 m); its slices are stored, a slice never defines a feature (GEN-189; G0 contracts, owner 2026-11-16) | generators | proposed |
+| river node | a node of the river graph: source, confluence, outlet to the sea, lake inlet, lake spill, tile crossing, or a marker (tributary junction, exception); id from its kind, level and anchor cell (GEN-189) | generators | proposed |
+| river reach | a directed piece of the river graph between two river nodes, with its cells, areas, discharges, order and bed (GEN-189) | generators | proposed |
+| tributary junction | a marker on a trunk reach where a tributary ends; it does not split the trunk (GEN-189) | generators | proposed |
+| exception marker | a marker where a reach cannot be realised: a rise over the lowering budget, an unresolved endpoint or a budget residual; reported, never repaired silently (GEN-189) | generators | proposed |
+| tile crossing | the river node where an L chain leaves a tile core; tributaries are cut there, trunks never (GEN-189) | generators | proposed |
+| graph domain | where a river feature is computed and stored: the landmass or one canonical K7 tile; regions, windows and halos never are (GEN-189) | generators | proposed |
+| open slice, missing owner | a stored graph slice whose downstream owner is not in the store; a store fact, not a node kind (GEN-189) | generators, cache | proposed |
+| protected surface | a kept basin whose ground every terrain stage leaves at the start surface; its flat water level is water, not ground (GEN-189) | generators | proposed |
+| lowering budget, residual | the per-cell limit on lowering against the start surface `S0`, shared by KS, KV, KC in order; a residual records where a stage needed more than was left (GEN-189) | generators | proposed |
 
 ## 4. Same word, different things
 | Word | Meanings |
 |---|---|
+| reach | an item's distance of effect (section 3); a river reach (section 3) |
 | block | the bake's storage unit; a former name of the chunk (section 8) |
 | cell | a bake lattice interval; a world-def index cell (about 40 km); a tile has 32 cells per edge |
 | chunk | CON-08's generic fixed-grid unit; the 5 km lattice that keys horizon maps (retiring); in old ADRs and logs, the A-net erosion unit (retired, section 8) |
-| node | a definition parameter; a summary hash node; a selected LOD node (a drawn tile) |
+| node | a definition parameter; a summary hash node; a selected LOD node (a drawn tile); a river node (section 3) |
 | summary | the item hash tree; the bake's water summary channel; the editor's health summary |
 | plan | `TerrainPlan` (production); `FramePlan` (M1 debug views) |
 | window | the editor or viewer window; a perf window (section 3) |
