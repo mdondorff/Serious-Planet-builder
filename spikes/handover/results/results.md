@@ -576,15 +576,15 @@ Against `S0`: breach volume % lower, and D-2 failures % fewer:
 
 ### Findings (addendum 3)
 1. **The clamp keeps the gain and improves on it.**
-   - h4c + `r` has h2 + `r`'s drainage: breach volume 76-99 % below `S0`'s on four windows against h2's 76-98 %; D-2 85-99 % fewer on four against h2's 83-99 %; M1 54 % for both.
+   - h4c + `r` matches h2 + `r` on breach volume and D-2 (on the river share on closed depressions it is within 4 points: R1h 51.4 against 47.6 %, R3b over 5 m 2.5 against 7.2 %): breach volume 76-99 % below `S0`'s on four windows against h2's 76-98 %; D-2 85-99 % fewer on four against h2's 83-99 %; M1 54 % for both.
    - Unclamped h4 + `r` has 69-91 % and 75-96 %, M1 21 %.
-   - The clamp removes the overshoot spikes that closed basins: R3b's D-2 falls from 80 to 4.
+   - With the clamp, R3b's D-2 falls from 80 to 4 and its breach volume from 5.1 to 0.7 km3. That the removed overshoot closed those basins is an inference, not traced.
 2. **h4c keeps h4's ridge record.** It cuts the fewest `S0` ridges over 50 m together with h4 (21-101,055, against h2's 34-594,900).
 3. **No new look.** The renders show h4c as h4: no facets, the faint crinkles along the steps. The clamp makes no flat tops visible at a 10-degree sun.
 4. **Left:**
    - h4c still lies outside its triangle's three-corner range on 0.29-1.15 % of the land, within the quad's range;
    - the rising steps inside `z_s`'s depressions;
-   - the band's pits: with `r`, 24-69 % of the river length on closed depressions.
+   - the band's pits: h4c + `r` keeps 29.6-68.3 % of the river length on closed depressions (h2 + `r` 24.3-66.4 %).
 
 ### Recommendation (addendum 3)
 **h4c (h4 clamped to its quad's corners) is KH: drainage at h2's level, no facets, no cell beyond its quad's corners. It is `rg_chain`'s default on `spike/kh-stage` @ 3a632d48.** Next, before KS:
