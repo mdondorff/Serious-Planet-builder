@@ -321,11 +321,25 @@ pub fn produce_ids(
     // the vertex index of every reach cell (first reach by id, first vertex)
     let mut sorted_reaches: Vec<&Reach> = reaches.iter().filter(|r| r.level == p.level).collect();
     sorted_reaches.sort_by_key(|r| r.id);
-    let mut on_reach: BTreeMap<usize, (u64, u32)> = BTreeMap::new();
+    // (explorer, R1h: a spill onto a reach's last vertex names that reach's down node, a junction never sits there; a claim on a last vertex yields to one inside another reach)
+    let mut on_reach: BTreeMap<usize, (u64, u32, Option<u64>)> = BTreeMap::new();
+    let mut node_cells: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
     for r in &sorted_reaches {
+        let last = r.vertices.len().saturating_sub(1);
         for (k, &c) in r.vertices.iter().enumerate() {
-            if let Some(c) = (ids.local)(c) {
-                on_reach.entry(c).or_insert((r.id, k as u32));
+            let Some(c) = (ids.local)(c) else { continue };
+            if k == 0 || k == last {
+                node_cells.insert(c);
+            }
+            let claim = (r.id, k as u32, (k == last).then_some(r.down));
+            match on_reach.get(&c) {
+                None => {
+                    on_reach.insert(c, claim);
+                }
+                Some(&(_, _, Some(_))) if k != last => {
+                    on_reach.insert(c, claim);
+                }
+                Some(_) => {}
             }
         }
     }
@@ -366,6 +380,25 @@ pub fn produce_ids(
                 let mut target = 0u64;
                 let mut steps = 0usize;
                 loop {
+                    if let Some(&(r, v, end)) = on_reach.get(&c) {
+                        if let Some(down) = end {
+                            target = down;
+                            break;
+                        }
+                        let mut j = Node {
+                            id: marker_id(p.body, NodeKind::TribJunction, p.level, gid(c), r),
+                            kind: NodeKind::TribJunction,
+                            level: p.level,
+                            anchor: gid(c),
+                            parent: None,
+                            owner: owner(c),
+                            marker: Some(Marker { on_reach: r, at_vertex: v }),
+                        };
+                        j.owner = owner(c);
+                        target = j.id;
+                        nodes.entry(j.id).or_insert(j);
+                        break;
+                    }
                     if let Some(b) = basin_at(c) {
                         let b = b as usize;
                         // another basin: not this one, not one nested in it, not an ancestor it merges into (the water goes on into the sibling)
@@ -382,21 +415,6 @@ pub fn produce_ids(
                             target = inlet(c, &mut nodes);
                             break;
                         }
-                    }
-                    if let Some(&(r, v)) = on_reach.get(&c) {
-                        let mut j = Node {
-                            id: marker_id(p.body, NodeKind::TribJunction, p.level, gid(c), r),
-                            kind: NodeKind::TribJunction,
-                            level: p.level,
-                            anchor: gid(c),
-                            parent: None,
-                            owner: owner(c),
-                            marker: Some(Marker { on_reach: r, at_vertex: v }),
-                        };
-                        j.owner = owner(c);
-                        target = j.id;
-                        nodes.entry(j.id).or_insert(j);
-                        break;
                     }
                     let next = routing.receiver[c];
                     steps += 1;
@@ -432,6 +450,12 @@ pub fn produce_ids(
     for r in &sorted_reaches {
         for k in 1..r.vertices.len() {
             let (Some(c), prev) = ((ids.local)(r.vertices[k]), (ids.local)(r.vertices[k - 1])) else { continue };
+            // a reach entering at its last vertex ends at its own node there: the inlet only when that node is this cell's lake_inlet (the same id); a node's cell takes no inlet beside
+            // it (explorer, R1h)
+            let own_inlet = node_id(p.body, NodeKind::LakeInlet, p.level, gid(c)) == r.down;
+            if (k + 1 == r.vertices.len() && !own_inlet) || (node_cells.contains(&c) && !(k + 1 == r.vertices.len() && own_inlet)) {
+                break;
+            }
             if let Some(b) = basin_at(c) {
                 if keep[b as usize] == Keep::Kept && prev.and_then(|q| basin_at(q)) != Some(b) {
                     inlet(c, &mut nodes);
