@@ -2340,6 +2340,11 @@ fn main() -> Result<(), String> {
         );
         csv += &format!("#census,{tag},{n},{cells_on},{:.1},{deep},{tect},{rift},{bas}\n", cells_on as f64 * grid.dx() / 1000.0);
     }
+    if args.iter().any(|a| a == "--base-only") {
+        flush(&csv, &csv2)?;
+        println!("HO {tag} done (--base-only): {:.0} s", t_all.elapsed().as_secs_f64());
+        return Ok(());
+    }
     let d2 = |z: &[f64]| -> String {
         let t = Instant::now();
         let water: Vec<f64> = z.iter().map(|&v| v.max(sea)).collect();
