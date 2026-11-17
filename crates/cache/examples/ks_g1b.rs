@@ -666,6 +666,24 @@ fn main() -> Result<(), String> {
     };
     let (ks0, used0, want0) = apply(&hand_l);
     drop(hand_l);
+    if k6p {
+        // For crusader's G1d extractor (lead, 2026-11-17): KS0 at L, little-endian f64, row-major, w x h, with a text header.
+        let bytes: Vec<u8> = ks0.iter().flat_map(|v| v.to_le_bytes()).collect();
+        let f = format!("{out_dir}/ks0-k6p-{w}x{h}.f64");
+        std::fs::write(&f, bytes).map_err(|e| format!("{f}: {e}"))?;
+        let note = format!(
+            "KS0 (RG-1, H from SPIKE-127's K6') of the window {:?} (face, i0, i1, j0, j1 in regional cells, seed), margin {margin}
+file: {f}
+format: little-endian f64, row-major, {w} x {h} L cells, cell (0, 0) = global L cell ({x0}, {y0}) of face {}; L = 8 cells a regional cell; cell size {:.4} m at the face's centre metric
+counted region (the box): L cells x {}..{}, y {}..{} of this grid (half-open)
+sea level 0 m; land = S0 > 0; KS0 = S0 - min(max(0, r - H), budget) on land outside H1's lake water, S0 elsewhere
+S0 = the river gate's start surface of the window (B + C1(z_s - z_b)); spike code: spike/ks-g1b, crates/cache/examples/ks_g1b.rs
+",
+            win, face.0, front.solve.grid.dx() / l as f64, bi0 - x0, bi1 - x0, bj0 - y0, bj1 - y0
+        );
+        std::fs::write(format!("{out_dir}/ks0-k6p.txt"), note).map_err(|e| e.to_string())?;
+        println!("KS KS0 written: {f}");
+    }
 
     // Routings at L: S0 (channels for saddles, divides), KS0 (H_f, channels), KS1 (channels).
     let lg = planet_generators::bake::Grid::new(w, h, front.solve.grid.dx() / l as f64);
