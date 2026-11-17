@@ -2228,49 +2228,18 @@ fn main() -> Result<(), String> {
         // basins (crusader's G1e) on KS0, the L trunk reaches as spill receivers
         let t = Instant::now();
         if on("basins") {
-            use planet_generators::bake::basins_rg::{produce, BasinParams};
+            use planet_generators::bake::basins_rg::BasinParams;
             use planet_generators::bake::river_graph::Represented;
-            // the producer reads reach vertices as grid cells and writes anchors as grid indices (crusader told; default until it takes a gid): trunks passed in window
-            // cells, its anchors mapped to global ids and every id it made recomputed, with the spill-node and parent references
-            let l_trunks_local: Vec<GReach> = l_trunks
-                .iter()
-                .filter_map(|r| {
-                    let v: Option<Vec<u64>> = r.vertices.iter().map(|&c| to_local(c).map(|x| x as u64)).collect();
-                    v.map(|vertices| GReach { vertices, ..r.clone() })
-                })
-                .collect();
-            let pb = produce(&grid_d, &ks0, &outlet_d, &l_trunks_local, &tile_l, &BasinParams::l(BODY));
+            // crusader's produce_ids (spike/g1d c75c8641): reach vertices read and every anchor and id written as global ids; Produced.cells in grid cells
+            let ids = planet_generators::bake::basins_rg::CellIds { gid: &gid_l, local: &to_local };
+            let pb = planet_generators::bake::basins_rg::produce_ids(&grid_d, &ks0, &outlet_d, &l_trunks, &tile_l, &BasinParams::l(BODY), &ids);
             for b in pb.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface) {
                 for &c in &pb.cells[&b.id] {
                     kept[c] = true;
                 }
             }
-            let mut nid: HashMap<u64, u64> = HashMap::new();
-            for n in &pb.nodes {
-                let mut m = n.clone();
-                m.anchor = gid_l(n.anchor as usize);
-                m.id = planet_generators::bake::river_graph::node_id_of(BODY, &m);
-                nid.insert(n.id, m.id);
-                gd.nodes.push(m);
-            }
-            let mut bid: HashMap<u64, u64> = HashMap::new();
-            let mut basins_g = Vec::new();
-            for b in &pb.basins {
-                let mut m = b.clone();
-                m.floor_cell = gid_l(b.floor_cell as usize);
-                let spill = (b.spill_m != f64::INFINITY).then(|| gid_l(b.spill_cell as usize));
-                if let Some(s) = spill {
-                    m.spill_cell = s;
-                }
-                m.id = planet_generators::bake::river_graph::basin_id(BODY, b.level, m.floor_cell, spill);
-                bid.insert(b.id, m.id);
-                basins_g.push(m);
-            }
-            for m in &mut basins_g {
-                m.parent = m.parent.map(|p| bid.get(&p).copied().unwrap_or(p));
-                m.spill_node = nid.get(&m.spill_node).copied().unwrap_or(m.spill_node);
-            }
-            gd.basins.extend(basins_g);
+            gd.nodes.extend(pb.nodes.iter().cloned());
+            gd.basins.extend(pb.basins.iter().cloned());
             println!("RG domain {d} basins: {} L basins ({} kept), {} unresolved spills", pb.basins.len(), pb.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface).count(), pb.unresolved.len());
         }
         t_basins += t.elapsed().as_secs_f64();
