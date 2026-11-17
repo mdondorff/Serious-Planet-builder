@@ -13,7 +13,12 @@ use planet_cache::region_bake::{lattice_direction, region_front, RegionSpec, LOC
 use planet_cache::river_gate::{measure, GateInput, GateParams};
 use planet_core::{Face, TangentWarp, Vec3};
 use planet_generators::global::{read_elevation_c1, GlobalSample, LatticeSource, ReadError};
-use planet_generators::bake::route::{route_rules, RoundRules, NONE};
+use std::collections::BinaryHeap;
+
+use planet_generators::bake::channel_graph::{q_value, ChannelGraph};
+use planet_generators::bake::hydro::{hydrology, Hydro, HydroParams};
+use planet_generators::bake::route::{catchment_roots, jitter, route_rules, RoundRules, Routing, MFD_EXPONENT, NONE};
+use planet_generators::bake::{Grid, NEIGHBOURS};
 use planet_generators::runoff::{discharge_weight, pet_mm, runoff_mm};
 use planet_world_def::WorldDefinition;
 
@@ -77,11 +82,347 @@ fn par_fill(out: &mut [f64], w: usize, threads: usize, f: &(dyn Fn(usize) -> f64
     });
 }
 
+// ---------------------------------------------------------------- SPIKE-127's K6' (copied from spike/g1a-sills 1d4e63f5, lines 84-414)
+const L: usize = LOCAL_PER_REGIONAL;
+const EDGE_Q: f64 = 1.0;
+
+fn noise(seed: u64, key: u64) -> f64 {
+    let mut x = seed ^ key.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    x = (x ^ (x >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    x = (x ^ (x >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    x ^= x >> 31;
+    (x >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0
+}
+
+// ---------------------------------------------------------------- nodes and sills
+
+/// The forward edges of a cell: E, S, SE, SW (block offsets).
+const FWD: [(i64, i64); 4] = [(1, 0), (0, 1), (1, 1), (-1, 1)];
+
+struct Sills {
+    /// Node height (lowest L cell of S0) and its L index, per H1 cell.
+    h: Vec<f64>,
+    low: Vec<u32>,
+    /// Per H1 cell the sills of its forward edges (NaN off the grid).
+    fwd: Vec<[f64; 4]>,
+}
+
+impl Sills {
+    /// The sill between `p` and its neighbour in NEIGHBOURS direction `d` (`q` that neighbour).
+    fn at(&self, p: usize, d: usize, q: usize) -> f64 {
+        let (dx, dy) = NEIGHBOURS[d];
+        if let Some(k) = FWD.iter().position(|&f| f == (dx, dy)) {
+            self.fwd[p][k]
+        } else {
+            let k = FWD.iter().position(|&f| f == (-dx, -dy)).expect("every direction is forward or backward");
+            self.fwd[q][k]
+        }
+    }
+}
+
+/// One block's L cells sorted by (height, L index): (height, L index).
+fn sorted_block(s0: &(dyn Fn(usize) -> f64 + Sync), lw: usize, bx: usize, by: usize) -> Vec<(f64, u32)> {
+    let mut v: Vec<(f64, u32)> = Vec::with_capacity(L * L);
+    for y in by * L..(by + 1) * L {
+        for x in bx * L..(bx + 1) * L {
+            let c = y * lw + x;
+            v.push((s0(c), c as u32));
+        }
+    }
+    v.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    v
+}
+
+fn find(parent: &mut [u8], mut a: usize) -> usize {
+    while parent[a] as usize != a {
+        parent[a] = parent[parent[a] as usize];
+        a = parent[a] as usize;
+    }
+    a
+}
+
+/// The minimax height of 8-connected L paths between the lowest cells of block A (at (ax, ay)) and block B (A offset by `off` blocks), inside the two blocks.
+fn sill_of(a: &[(f64, u32)], b: &[(f64, u32)], lw: usize, ax: usize, ay: usize, off: (i64, i64)) -> f64 {
+    let n = L * L;
+    // slot of an L cell given its frame coordinates relative to A's origin
+    let (ox, oy) = (off.0 * L as i64, off.1 * L as i64);
+    let slot = |fx: i64, fy: i64| -> Option<usize> {
+        if fx >= 0 && fy >= 0 && fx < L as i64 && fy < L as i64 {
+            Some((fy * L as i64 + fx) as usize)
+        } else if fx >= ox && fy >= oy && fx < ox + L as i64 && fy < oy + L as i64 {
+            Some(n + ((fy - oy) * L as i64 + (fx - ox)) as usize)
+        } else {
+            None
+        }
+    };
+    let (gx0, gy0) = ((ax * L) as i64, (ay * L) as i64);
+    let frame = |c: u32| ((c as usize % lw) as i64 - gx0, (c as usize / lw) as i64 - gy0);
+    let mut parent: Vec<u8> = (0..2 * n).map(|k| k as u8).collect();
+    let mut added = vec![false; 2 * n];
+    let (fa, fb) = (frame(a[0].1), frame(b[0].1));
+    let (sa, sb) = (slot(fa.0, fa.1).expect("A's lowest is in A"), slot(fb.0, fb.1).expect("B's lowest is in B"));
+    let (mut i, mut j) = (0usize, 0usize);
+    loop {
+        // the next cell of the merged order (height, L index)
+        let take_a = j >= b.len() || (i < a.len() && (a[i].0.total_cmp(&b[j].0).then(a[i].1.cmp(&b[j].1))).is_lt());
+        let (v, c) = if take_a {
+            i += 1;
+            a[i - 1]
+        } else {
+            j += 1;
+            b[j - 1]
+        };
+        let (fx, fy) = frame(c);
+        let s = slot(fx, fy).expect("a cell of the two blocks");
+        added[s] = true;
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                if dx == 0 && dy == 0 {
+                    continue;
+                }
+                if let Some(t) = slot(fx + dx, fy + dy) {
+                    if added[t] {
+                        let (ra, rb) = (find(&mut parent, s), find(&mut parent, t));
+                        if ra != rb {
+                            parent[ra.max(rb)] = ra.min(rb) as u8;
+                        }
+                    }
+                }
+            }
+        }
+        if added[sa] && added[sb] && find(&mut parent, sa) == find(&mut parent, sb) {
+            return v;
+        }
+        assert!(i < a.len() || j < b.len(), "the two blocks are connected");
+    }
+}
+
+/// Node heights and forward sills over the H1 grid `rw` x `rh` (L window `rw L` x `rh L`), S0 read by `s0(L index)`; `sill_noise` adds a uniform +-amplitude
+/// per edge (then lifts the sill to its nodes).
+fn nodes_and_sills(s0: &(dyn Fn(usize) -> f64 + Sync), rw: usize, rh: usize, threads: usize, sill_noise: Option<(u64, f64)>) -> Sills {
+    let lw = rw * L;
+    let n = rw * rh;
+    let mut h = vec![0f64; n];
+    let mut low = vec![0u32; n];
+    let mut fwd = vec![[f64::NAN; 4]; n];
+    let rows = rh.div_ceil(threads.max(1)).max(1);
+    std::thread::scope(|s| {
+        for (band, ((hc, lc), fc)) in h.chunks_mut(rows * rw).zip(low.chunks_mut(rows * rw)).zip(fwd.chunks_mut(rows * rw)).enumerate() {
+            let j0 = band * rows;
+            s.spawn(move || {
+                let j1 = (j0 + rows).min(rh);
+                let row = |j: usize| (0..rw).map(|i| sorted_block(s0, lw, i, j)).collect::<Vec<_>>();
+                let mut cur = row(j0);
+                for j in j0..j1 {
+                    let next = if j + 1 < rh { row(j + 1) } else { Vec::new() };
+                    for i in 0..rw {
+                        let c = (j - j0) * rw + i;
+                        hc[c] = cur[i][0].0;
+                        lc[c] = cur[i][0].1;
+                        for (k, &(ox, oy)) in FWD.iter().enumerate() {
+                            let (ni, nj) = (i as i64 + ox, j as i64 + oy);
+                            if ni < 0 || ni >= rw as i64 || nj >= rh as i64 {
+                                continue;
+                            }
+                            let other = if oy == 0 { &cur[ni as usize] } else { &next[ni as usize] };
+                            let mut v = sill_of(&cur[i], other, lw, i, j, (ox, oy));
+                            if let Some((seed, amp)) = sill_noise {
+                                let id = ((j * rw + i) as u64) * 4 + k as u64;
+                                v = (v + amp * noise(seed, id)).max(cur[i][0].0).max(other[0].0);
+                            }
+                            fc[c][k] = v;
+                        }
+                    }
+                    cur = next;
+                }
+            });
+        }
+    });
+    Sills { h, low, fwd }
+}
+
+// ---------------------------------------------------------------- K6' routing
+
+#[derive(PartialEq)]
+struct Key(f64, u32);
+impl Eq for Key {}
+impl PartialOrd for Key {
+    fn partial_cmp(&self, o: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(o))
+    }
+}
+impl Ord for Key {
+    // min-heap by (level, id)
+    fn cmp(&self, o: &Self) -> std::cmp::Ordering {
+        o.0.total_cmp(&self.0).then(o.1.cmp(&self.1))
+    }
+}
+
+/// The filled levels: outlets at their node height, every other cell the minimax over paths to an outlet of `max(sill, W + eps)` (Dijkstra by (level, id)).
+fn flood(grid: &Grid, h: &[f64], sill: &dyn Fn(usize, usize, usize) -> f64, outlet: &[bool], eps: f64) -> Vec<f64> {
+    let n = grid.len();
+    let mut w = vec![f64::INFINITY; n];
+    let mut done = vec![false; n];
+    let mut heap = BinaryHeap::new();
+    for p in 0..n {
+        if outlet[p] {
+            w[p] = h[p];
+            heap.push(Key(h[p], p as u32));
+        }
+    }
+    while let Some(Key(l, p)) = heap.pop() {
+        let p = p as usize;
+        if done[p] || l > w[p] {
+            continue;
+        }
+        done[p] = true;
+        for d in 0..8 {
+            let Some(q) = grid.neighbour(p, d) else { continue };
+            if done[q] || outlet[q] {
+                continue;
+            }
+            let v = sill(p, d, q).max(w[p] + eps).max(h[q]);
+            if v < w[q] {
+                w[q] = v;
+                heap.push(Key(v, q as u32));
+            }
+        }
+    }
+    assert!(w.iter().all(|v| v.is_finite()), "every cell reaches an outlet");
+    w
+}
+
+fn topological_order(receiver: &[u32]) -> Vec<u32> {
+    let n = receiver.len();
+    let mut start = vec![0u32; n + 1];
+    for &r in receiver {
+        if r != NONE {
+            start[r as usize + 1] += 1;
+        }
+    }
+    for i in 0..n {
+        start[i + 1] += start[i];
+    }
+    let mut next = start.clone();
+    let mut donors = vec![0u32; n];
+    for (p, &r) in receiver.iter().enumerate() {
+        if r != NONE {
+            donors[next[r as usize] as usize] = p as u32;
+            next[r as usize] += 1;
+        }
+    }
+    let mut order = Vec::with_capacity(n);
+    let mut stack: Vec<u32> = (0..n as u32).rev().filter(|&p| receiver[p as usize] == NONE).collect();
+    while let Some(p) = stack.pop() {
+        order.push(p);
+        let (a, b) = (start[p as usize] as usize, start[p as usize + 1] as usize);
+        stack.extend(donors[a..b].iter().rev());
+    }
+    assert_eq!(order.len(), n, "the order reaches every cell");
+    order
+}
+
+/// K6's routing on the filled levels with the sill condition: a neighbour is open when it is lower and the cell's level reaches the sill between them.
+fn route_sills(grid: &Grid, w: &[f64], sill: &dyn Fn(usize, usize, usize) -> f64, outlet: &[bool], seed: u64, weights: &[f32], mfd_open: bool) -> Routing {
+    let n = grid.len();
+    let open = |p: usize, d: usize| -> Option<usize> {
+        let q = grid.neighbour(p, d)?;
+        (w[q] < w[p] && sill(p, d, q) <= w[p]).then_some(q)
+    };
+    let mut receiver = vec![NONE; n];
+    for p in 0..n {
+        if outlet[p] || !grid.is_active(p) {
+            continue;
+        }
+        let mut best = (0.0f64, NONE);
+        for d in 0..8 {
+            let Some(q) = open(p, d) else { continue };
+            let mut s = (w[p] - w[q]) / grid.distance_at(p, d);
+            s *= 1.0 + 0.5 * jitter(seed, grid.global_id(p), d);
+            if s > best.0 {
+                best = (s, q as u32);
+            }
+        }
+        assert!(best.1 != NONE, "cell {p} has no open lower neighbour");
+        receiver[p] = best.1;
+    }
+    let order = topological_order(&receiver);
+    let root = catchment_roots(&receiver, &order);
+    // the clipped (Local) MFD area over the open neighbours, highest first, ties by index
+    let mut by_height: Vec<u32> = (0..n as u32).collect();
+    by_height.sort_unstable_by(|&a, &b| w[b as usize].total_cmp(&w[a as usize]).then(a.cmp(&b)));
+    let mut area: Vec<f64> = (0..n).map(|p| grid.cell_area(p) * f64::from(weights[p])).collect();
+    for &p in &by_height {
+        let p = p as usize;
+        if outlet[p] {
+            continue;
+        }
+        let mut wt = [0.0f64; 8];
+        let mut sum = 0.0;
+        for (d, x) in wt.iter_mut().enumerate() {
+            let q = if mfd_open { open(p, d) } else { grid.neighbour(p, d).filter(|&q| w[q] < w[p]) };
+            if let Some(q) = q {
+                if root[q] != root[p] {
+                    continue;
+                }
+                *x = libm::pow((w[p] - w[q]) / grid.distance_at(p, d), MFD_EXPONENT);
+                sum += *x;
+            }
+        }
+        if sum > 0.0 {
+            let held = area[p];
+            for (d, x) in wt.iter().enumerate() {
+                if *x > 0.0 {
+                    area[grid.neighbour(p, d).expect("weighted")] += held * x / sum;
+                }
+            }
+        }
+    }
+    Routing { receiver, order, area }
+}
+
+/// A routed H1: routing, filled levels, hydrology and graph, with the trunk reaches (q >= 1 m3/s, 2 cells or more) as segment indices.
+struct H1 {
+    routing: Routing,
+    hydro: Hydro,
+    graph: ChannelGraph,
+    trunk_seg: Vec<usize>,
+    trunk_cells: Vec<Vec<u32>>,
+    /// The D8 drainage area (true area, unweighted) of each cell along the receivers, m2.
+    d8: Vec<f64>,
+}
+
+fn h1_from(grid: &Grid, z: &[f64], filled: &[f64], routing: Routing, outlet: &[bool], runoff: &[f32], evap: &[f32]) -> H1 {
+    let hydro = hydrology(grid, z, filled, &routing, outlet, Some(runoff), Some(evap), &HydroParams::default());
+    let graph = ChannelGraph::from_hydro(grid, &routing, &hydro, z);
+    let (mut trunk_seg, mut trunk_cells) = (Vec::new(), Vec::new());
+    graph.for_each(|s| {
+        let cells = s.cells(grid);
+        let q_max = s.q.iter().map(|&q| q_value(q)).fold(0.0, f64::max);
+        if cells.len() >= 2 && q_max >= EDGE_Q {
+            trunk_seg.push(s.index);
+            trunk_cells.push(cells);
+        }
+    });
+    let mut d8: Vec<f64> = (0..grid.len()).map(|p| grid.cell_area(p)).collect();
+    for &c in routing.order.iter().rev() {
+        let r = routing.receiver[c as usize];
+        if r != NONE {
+            d8[r as usize] += d8[c as usize];
+        }
+    }
+    H1 { routing, hydro, graph, trunk_seg, trunk_cells, d8 }
+}
+
+// ---------------------------------------------------------------- the corridor measure (land-only snap)
+
 fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let no_key_check = args.iter().any(|a| a == "--no-key-check");
+    let k6p = args.iter().any(|a| a == "--k6p");
+    let args: Vec<String> = args.into_iter().filter(|a| a != "--k6p").collect();
     let args: Vec<String> = args.into_iter().filter(|a| a != "--no-key-check").collect();
-    let known = ["--window", "--margin", "--store", "--min-cells", "--d", "--threads", "--network-km2", "--grid", "--out"];
+    let known = ["--window", "--margin", "--store", "--min-cells", "--d", "--threads", "--network-km2", "--grid", "--out", "--k6p"];
     let mut k = 0;
     while k < args.len() {
         if !known.contains(&args[k].as_str()) {
@@ -216,7 +557,13 @@ fn main() -> Result<(), String> {
 
     // H: today's H1 at 814 m. The routing as region_front runs it; channel cells are the channel graph's cells; H = zs over the first channel cell (or outlet) on the receiver chain.
     let dir_reg = |c: usize| solve.face_spec.halo_direction((solve.ri0 + c % rw) as i64, (solve.rj0 + c / rw) as i64);
-    let weight: Vec<f32> = (0..rn).map(|c| if solve.zs[c] > 0.0 { climate(dir_reg(c)).2 as f32 } else { 1.0 }).collect();
+    let (mut weight, mut runoff, mut evap) = (vec![1.0f32; rn], vec![0.0f32; rn], vec![0.0f32; rn]);
+    for c in (0..rn).filter(|&c| solve.zs[c] > 0.0) {
+        let (ro, ev, wt) = climate(dir_reg(c));
+        runoff[c] = ro as f32;
+        evap[c] = ev as f32;
+        weight[c] = wt as f32;
+    }
     let h1 = route_rules(&solve.grid, &solve.zs, &solve.outlet, solve.precision.epsilon_w, solve.stream, 0.0, Some(&weight), RoundRules::ROUND);
     let mut channel_h1 = vec![false; rn];
     front.graph.for_each(|s| {
@@ -230,8 +577,32 @@ fn main() -> Result<(), String> {
         let rcv = h1.receiver[c];
         target[c] = if channel_h1[c] || rcv == NONE { c } else { target[rcv as usize] };
     }
-    let hand: Vec<f32> = (0..rn).map(|c| (solve.zs[c] - solve.zs[target[c]].max(sea)).max(0.0) as f32).collect();
+    let mut hand: Vec<f32> = (0..rn).map(|c| (solve.zs[c] - solve.zs[target[c]].max(sea)).max(0.0) as f32).collect();
     drop((h1, target));
+    if k6p {
+        // H over K6' (SPIKE-127): node heights (the lowest L cell of S0), the sill flood and routing, K6's hydrology and channel graph; H = node height over the first channel cell's.
+        let s0_read = |c: usize| start[c];
+        let sills = nodes_and_sills(&s0_read, rw, rh, threads, None);
+        let sill = |p: usize, d: usize, q: usize| sills.at(p, d, q);
+        let eps = solve.precision.epsilon_w;
+        let f = flood(&solve.grid, &sills.h, &sill, &solve.outlet, eps);
+        let ro = route_sills(&solve.grid, &f, &sill, &solve.outlet, solve.stream, &weight, true);
+        let k6 = h1_from(&solve.grid, &sills.h, &f, ro, &solve.outlet, &runoff, &evap);
+        let mut ch = vec![false; rn];
+        k6.graph.for_each(|s| {
+            for c in s.cells(&solve.grid) {
+                ch[c as usize] = true;
+            }
+        });
+        let mut tg = vec![0usize; rn];
+        for &c in &k6.routing.order {
+            let c = c as usize;
+            let rcv = k6.routing.receiver[c];
+            tg[c] = if ch[c] || rcv == NONE { c } else { tg[rcv as usize] };
+        }
+        hand = (0..rn).map(|c| (sills.h[c] - sills.h[tg[c]].max(sea)).max(0.0) as f32).collect();
+        println!("KS K6': {} channel cells (today's H1 {}); H from node heights", ch.iter().filter(|&&b| b).count(), channel_h1.iter().filter(|&&b| b).count());
+    }
     let hand_field = field(hand.clone());
     let mut hand_l = vec![0f64; n_l];
     par_fill(&mut hand_l, w, threads, &|p| hand_field.at(dir_l(p)).max(0.0));
@@ -307,26 +678,26 @@ fn main() -> Result<(), String> {
     };
     let ro = route_l(&start);
     let (ch_s0_1, ch_s0_5) = chans(&start, &ro);
-    // Divides: catchments of the 75 km2 river network's segments (a segment starts at a head or a confluence; direct drainage to an outlet is one catchment); a land cell with a land 4-neighbour of another catchment.
+    // Divides: catchments of the 75 km2 network's streams (a stream runs from a head down through every confluence along its larger donor; direct drainage to an outlet is one catchment); a land cell with a land 4-neighbour of another catchment.
     let river: Vec<bool> = (0..n_l).map(|p| ro.area[p] >= 75.0e6 && land(p)).collect();
-    let mut donors = vec![0u8; n_l];
-    for p in 0..n_l {
-        let rc = ro.receiver[p];
-        if river[p] && rc != NONE && river[rc as usize] {
-            donors[rc as usize] = donors[rc as usize].saturating_add(1);
-        }
-    }
+    let mut best = vec![(f64::NEG_INFINITY, u32::MAX); n_l];
     let mut seg = vec![u32::MAX; n_l];
     for &p in ro.order.iter().rev() {
         let p = p as usize;
-        if river[p] && seg[p] == u32::MAX {
-            seg[p] = p as u32;
+        if !river[p] {
+            continue;
         }
+        seg[p] = if best[p].1 == u32::MAX { p as u32 } else { seg[best[p].1 as usize] };
         let rc = ro.receiver[p];
-        if river[p] && rc != NONE && river[rc as usize] && donors[rc as usize] == 1 {
-            seg[rc as usize] = seg[p];
+        if rc != NONE && river[rc as usize] {
+            let cand = (ro.area[p], p as u32);
+            let b = &mut best[rc as usize];
+            if cand.0 > b.0 || (cand.0 == b.0 && cand.1 < b.1) {
+                *b = cand;
+            }
         }
     }
+    drop(best);
     let mut label = vec![u32::MAX; n_l];
     for &p in &ro.order {
         let p = p as usize;
@@ -334,7 +705,7 @@ fn main() -> Result<(), String> {
         // A chain that reaches an outlet without a river cell drains to the coast or the window's edge directly: one shared label, so the coast's own strips are not divides.
         label[p] = if river[p] { seg[p] } else if rc == NONE { u32::MAX - 1 } else { label[rc as usize] };
     }
-    drop((river, donors, seg, ro));
+    drop((river, seg, ro));
     let mut dist = vec![u16::MAX; n_l];
     for p in 0..n_l {
         if !land(p) {
@@ -439,7 +810,7 @@ fn main() -> Result<(), String> {
         let k = ((v.len() as f64 * f) as usize).min(v.len() - 1);
         *v.select_nth_unstable_by(k, |a, b| a.total_cmp(b)).1
     };
-    let label_w = format!("{},{},{},{},{},{}", win[0], win[1], win[2], win[3], win[4], win[5]);
+    let label_w = format!("{},{},{},{},{},{}{}", win[0], win[1], win[2], win[3], win[4], win[5], if k6p { " K6p" } else { "" });
     let mut csv = String::new();
     let rungs: [(&str, &[f64], Option<(&[f32], &[f32])>, Option<(&[bool], &[bool])>); 3] = [
         ("RG-0", &start, None, None),
