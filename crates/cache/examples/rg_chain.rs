@@ -2170,7 +2170,19 @@ fn main() -> Result<(), String> {
             (true, false) => Switch::KvOnly,
             _ => Switch::KcOnly,
         };
-        let r = run(&gl, &ks_out, &sea_l, &g, &kept, &remain, &KvParams::plan(dx_l), sw);
+        // KV and KC read a reach's vertices as cells of their grid (the fixture's ids): a copy of the graph with the L reaches inside the window in window cells; ids unchanged
+        let mut g_local = g.clone();
+        g_local.reaches = g
+            .reaches
+            .iter()
+            .filter(|r| r.level == Level::L)
+            .filter_map(|r| {
+                let v: Option<Vec<u64>> = r.vertices.iter().map(|&c| to_local(c).map(|x| x as u64)).collect();
+                v.map(|vertices| GReach { vertices, ..r.clone() })
+            })
+            .collect();
+        println!("RG KV/KC input: {} of {} L reaches inside the window", g_local.reaches.len(), g.reaches.iter().filter(|r| r.level == Level::L).count());
+        let r = run(&gl, &ks_out, &sea_l, &g_local, &kept, &remain, &KvParams::plan(dx_l), sw);
         let kv = if on("kv") { r.kv.clone() } else { ks_out.clone() };
         let kc = if on("kc") { r.kc.clone() } else { kv.clone() };
         println!("RG KV/KC ({sw:?}): {} residuals, {} KC patches", r.residuals.len(), r.patches.len());
