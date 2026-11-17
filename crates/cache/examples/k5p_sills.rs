@@ -1379,6 +1379,27 @@ fn main() -> Result<(), String> {
         adz[cells * 99 / 100],
         adz[cells - 1]
     );
+    {
+        // K5 and K5' erosion on the box's land (z_b - z_s), and the signed change
+        let land: Vec<usize> = (0..cells)
+            .filter(|&c| {
+                let (i, j) = (sri0 + c % rw, srj0 + c / rw);
+                i >= region.0 && i <= region.1 && j >= region.2 && j <= region.3 && !outlet[c]
+            })
+            .collect();
+        let q = |mut v: Vec<f64>| {
+            v.sort_by(f64::total_cmp);
+            let k = v.len();
+            format!("p10 {:.1} p50 {:.1} p90 {:.1} mean {:.1}", v[k / 10], v[k / 2], v[k * 9 / 10], v.iter().sum::<f64>() / k as f64)
+        };
+        println!(
+            "G1A erosion z_b - z_s on the box's land: K5 {}; K5' {}; z_s' - z_s {}; r_min (lowest L cell of r) {}",
+            q(land.iter().map(|&c| solve.zb[c] - solve.zs[c]).collect()),
+            q(land.iter().map(|&c| solve.zb[c] - zs2[c]).collect()),
+            q(land.iter().map(|&c| zs2[c] - solve.zs[c]).collect()),
+            q(land.iter().map(|&c| r_sills.h[c]).collect())
+        );
+    }
     let field2 = RegionField::new(face, REGIONAL, (sri0 as i64, srj0 as i64), rw, rh, (0..cells).map(|c| (zs2[c] - solve.zb[c]) as f32).collect());
     let mut start2 = vec![0f64; w * h];
     par_fill(&mut start2, w, threads, &|p| bl[p] + field2.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
