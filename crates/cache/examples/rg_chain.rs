@@ -1700,6 +1700,18 @@ fn main() -> Result<(), String> {
     let base_today = value(&args, "--base") == Some("today");
     let low = value(&args, "--centre") != Some("maximin");
     std::fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;
+    // --chain DIR (lead #167a): the chain layout of `planet_cache::stage_sheet` (BUILD-060's chain sheet), one surface per stage
+    let chain_dir: Option<PathBuf> = value(&args, "--chain").map(PathBuf::from);
+    if let Some(d) = &chain_dir {
+        std::fs::create_dir_all(d.join("stages")).map_err(|e| e.to_string())?;
+    }
+    let chain_f32 = |name: &str, z: &[f64]| -> Result<(), String> {
+        if let Some(d) = &chain_dir {
+            let b: Vec<u8> = z.iter().flat_map(|&v| (v as f32).to_le_bytes()).collect();
+            std::fs::write(d.join(name), b).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    };
     let (face, seed) = (Face(win[0] as u8), win[5] as u64);
     let region = (win[1], win[2], win[3], win[4]);
     let def = WorldDefinition::single_planet(R, seed);
@@ -1756,6 +1768,8 @@ fn main() -> Result<(), String> {
     par_fill(&mut rl, w, threads, &|p| bl[p] - zb_field.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
     let mut start = vec![0f64; w * h];
     par_fill(&mut start, w, threads, &|p| bl[p] + front.regional_field.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
+    chain_f32("base.f32", &bl)?;
+    chain_f32("zs.f32", &solve.zs)?;
     drop(bl);
 
     // ---- the ocean at L: cells at or below the sea level connected (8 neighbours) to an L cell of an H1 sea outlet or to the window's edge
@@ -1823,6 +1837,14 @@ fn main() -> Result<(), String> {
         let r2 = route_sills(grid, &f2, &plain, outlet, stream, &weight, true);
         (with, Some(h1_from(grid, hh, &f2, r2, outlet, &runoff, &evap)))
     };
+    if let Some(d) = &chain_dir {
+        // H1 rivers: the cells of the H1 channel segments the chain hands over (q at least EDGE_Q)
+        let mut riv = vec![0u8; cells];
+        for c in h1.trunk_cells.iter().flatten() {
+            riv[*c as usize] = 1;
+        }
+        std::fs::write(d.join("h1-rivers.u8"), riv).map_err(|e| e.to_string())?;
+    }
     // the basin census (lead #132a): kept H1 basins, their depth and size against GEN-145's artefact floor (fewer than 4 cells and shallower than 2 m) and the
     // 0.5 m pit limit, the channel-segment cells they hold by depth class, and (K6') those that the sills alone close
     {
@@ -2103,6 +2125,7 @@ fn main() -> Result<(), String> {
     } else {
         start.clone()
     };
+    chain_f32("kh.f32", &ks_base)?;
     stamp(&format!("KH ({kh})"), t.elapsed().as_secs_f64());
     let ks = |band: &[f64]| -> (Vec<f64>, Vec<(usize, f64, f64)>) {
         let mut z = ks_base.clone();
@@ -2426,7 +2449,22 @@ fn main() -> Result<(), String> {
     std::fs::create_dir_all(&stages_dir).map_err(|e| e.to_string())?;
     std::fs::write(out_dir.join(format!("{tag}-graph.txt")), g.canonical()).map_err(|e| e.to_string())?;
     let field = |v: &dyn Fn(usize) -> f64| -> Vec<u8> { (0..n_l).flat_map(|p| ((v(p).max(0.0) / 0.1).floor().min(65535.0) as u16).to_le_bytes()).collect() };
-    let write = |name: &str, bytes: Vec<u8>| std::fs::write(stages_dir.join(name), bytes).map_err(|e| e.to_string());
+    let write = |name: &str, bytes: Vec<u8>| -> Result<(), String> {
+        if let Some(d) = &chain_dir {
+            std::fs::write(d.join("stages").join(name), &bytes).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(stages_dir.join(name), bytes).map_err(|e| e.to_string())
+    };
+    if let Some(d) = &chain_dir {
+        std::fs::write(d.join("graph.txt"), g.canonical()).map_err(|e| e.to_string())?;
+        // the manifest of `planet_cache::stage_sheet` (written by hand: the module is on main, not on this spike branch)
+        let m = format!("stage-chain 1\nwindow {x0} {y0} {w} {h}\ncoarse {L}\ncell_m {dx_l}\nsea_m {sea}\nlabel {tag}\n");
+        std::fs::write(d.join("chain.txt"), m).map_err(|e| e.to_string())?;
+    }
+    chain_f32("s0.f32", &start)?;
+    chain_f32("ks.f32", &ks_out)?;
+    chain_f32("kv.f32", &kv_out)?;
+    chain_f32("final.f32", &kc_out)?;
     if ks_mode != "off" {
         write("ks-lower.u16", field(&|p| start[p] - ks_out[p]))?;
     }
