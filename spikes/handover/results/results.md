@@ -22,7 +22,7 @@ Code location: branch `spike/handover` @ 3c578b2d (never merged):
 ## Answer
 - **h2 + `r` becomes the start of KS. It replaces the plan's `C1(z_s)`.** h2 is the flow-diagonal triangulation of `z_s` with the raw band. Against h1 + `r`:
   - **Drainage is as good or better.** River length on closed depressions: 24-66 %, against 29-68 % for h1 + `r` and 69-89 % for `S0`. D-2 failures: 1-864, against 2-866 and 78-1,890.
-  - **Breach volume is 76-98 % lower than `S0`'s on four windows** (h1 + `r`: 68-97 %). On F1 it is 14 % lower (h1: 4 %).
+  - **Breach volume is 76-98 % lower than `S0`'s on R1h, R3a, R3b and M1** (h1 + `r`: 68-97 %). On F1 it is 14 % lower (h1: 4 %).
   - **No lowering at 814 m.** h1's 4-neighbour breach lowers 4.0-8.3 % of the land at 814 m, and 0.02-2.05 % by more than 50 m. Its cuts reach 134-1,272 m and lower 17-2,716 ridge cells of `z_s` by more than 50 m.
   - **More relief kept:**
 
@@ -45,7 +45,7 @@ Code location: branch `spike/handover` @ 3c578b2d (never merged):
 - **Neither hand-over removes the base's debt.**
   - On F1, 88 % of `S0`'s breach cells keep a breach nearby under both hand-overs.
   - On M1, D-2 falls only by half (1,890 to 864).
-  - On M1, `z_s` at 814 m is too rough for any linear read. The choice of interpolant alone (C1 against bilinear) moves 1.17 million land cells by more than 50 m.
+  - On M1, `z_s` at 814 m is too rough for any linear read. The choice of interpolant alone (C1 against bilinear) lowers 1.17 million land cells and raises 0.75 million by more than 50 m.
   - This debt is the base's and K5's (decision 5; SPIKE-134, SPIKE-135).
 - **The band stays a defect source after the hand-over.** Adding `r` to h2 raises river length on closed depressions by 5-32 points. This is KS's work on the new start.
 
@@ -147,8 +147,8 @@ Relief kept against `S0`, band std / 1 km p50 / 1 km p95, %:
 | h2 | 30 / 100 / 81 / 96 / 79 | 40 / 76 / 73 / 97 / 71 | 40 / 96 / 80 / 97 / 78 | 10 / 11 / 83 / 97 / 78 | 7 / 10 / 40 / 94 / 21 |
 | h2 + `r` | 21 / 100 / 48 / 35 / 46 | 29 / 81 / 52 / 64 / 50 | 39 / 96 / 77 / 90 / 75 | 2 / 2 / 40 / 26 / 34 | 1 / 3 / 29 / 29 / 12 |
 
-- With the band, 25-66 % of the cells `S0` breaches keep a breach nearby on four windows (F1 88 %), on both hand-overs: the band makes its own pits in the same valleys. The breach volume still falls 76-98 % on four windows (h2 + `r`), because the remaining breaches are shallow.
-- The surface's breach volume by `S0`'s class is in `raw/tables.md`. On M1 and F1 most of it lies on `S0`'s base class: h2 + `r` 131 and 63 km3, h1 + `r` 133 and 71 km3.
+- With the band, 25-66 % (h2 + `r`) and 28-69 % (h1 + `r`) of the cells `S0` breaches keep a breach nearby on R1h, R3a, R3b and M1; on F1 88 % on both. The band makes its own pits in the same valleys. The breach volume still falls 76-98 % on those four windows (h2 + `r`), because the remaining breaches are shallow.
+- The surface's breach volume by `S0`'s class is in `raw/tables.md`. On F1 most of it lies on `S0`'s base class: h2 + `r` 63 of 107 km3, h1 + `r` 71 of 120 km3. On M1 base and interpolation hold about equal parts: h2 + `r` 131 and 129 of 347 km3, h1 + `r` 133 and 148 of 382 km3.
 
 ### h1's 814 m lowering
 | Window | Lowered, % of land | p50 / p95 / max, m | Over 10 / 50 / 100 / 200 m, cells (over 50 m, % of land) | Volume, km3 | Ridge cells of `z_s` lowered over 10 / 50 m |
@@ -174,7 +174,7 @@ Against bilinear(`z_s`), over the land of the box. Per cell: lowered over 10 m /
 | h2 against `C1(z_s)` | 1,325,946 / 38,279; 16,172; 407,685 / 18,206; 20.1 / 250 | 18,512 / 53; 31; 4,464 / 34; 2.6 / 97 | 255,518 / 1,783; 231; 78,576 / 1,183; 5.9 / 105 | 7,247,074 / 1,450,643; 720,500; 2,372,106 / 589,269; 73.4 / 661 | 87,252 / 58; 2; 31,526 / 57; 4.1 / 64 |
 
 - h2's cuts over 50 m against bilinear are 3-48 times fewer than h1's on R1h, R3a, R3b and F1, and reach fewer `S0` ridge cells. On M1 the two are of one size (656 k against 693 k cells over 50 m).
-- The interpolant alone (C1 against bilinear) moves M1 by more than 50 m on 1.17 M cells in both directions. M1's `z_s` changes by hundreds of metres between 814 m nodes; no read of it at L keeps both its ridges and its drainage.
+- The interpolant alone (C1 against bilinear) lowers 1.17 M and raises 0.75 M of M1's land cells by more than 50 m. M1's `z_s` changes by hundreds of metres between 814 m nodes; no read of it at L keeps both its ridges and its drainage.
 
 ### h2's quads
 | Window | Split along a D8 diagonal step | Both diagonals stepped | Split along the higher pair |
@@ -195,19 +195,19 @@ Against bilinear(`z_s`), over the land of the box. Per cell: lowered over 10 m /
 | h2 | 0 | 0 | 0 | 0 | 0 |
 | h2 + `r` | 53,032 | 301,396 | 32,995 | 0 | 13,840 |
 
-- h2 makes no inland cell under 0 m: a linear read never dips below its nodes.
+- h2 makes no inland cell under 0 m on any window (measured).
 - h1 makes them on R3a (164,592 cells): the breach floors land at 5 mm beside sea nodes, and the bilinear read between them dips under 0 m.
-- The band brings them back: 13,840-301,396 cells on h2 + `r`. SPIKE-135's recommendation stands: floor the band at the sea level near the coast.
+- The band brings them back: 13,840-301,396 cells on h2 + `r` (M1: none). SPIKE-135's recommendation stands: floor the band at the sea level near the coast.
 
 ## Findings
 1. **Both hand-overs remove most of the interpolation debt.** h2 does it without lowering at 814 m.
-   - On four windows, with the band, h2 + `r` cuts `S0`'s breach volume by 76-98 % and the D-2 failures by 83-99 % (M1: 54 %).
-   - h1 + `r` does about as well (68-97 %, 54-97 %), but only by cutting `z_s` by up to 1,272 m.
+   - With the band, h2 + `r` cuts `S0`'s breach volume by 76-98 % on R1h, R3a, R3b and M1 (F1 14 %), and the D-2 failures by 83-99 % on R1h, R3a, R3b and F1 (M1 54 %).
+   - h1 + `r` does about as well (breach volume 68-97 % on the same four, F1 4 %; D-2 86-97 %, M1 54 %), but only by cutting `z_s` by up to 1,272 m.
 2. **h1 is the red flag.**
    - It lowers 0.02-2.05 % of the land by more than 50 m at 814 m, and 17-2,716 ridge cells of `z_s` by more than 50 m.
    - At L its own cut lowers 417-191,137 of `S0`'s ridge cells by more than 50 m.
    - These are the deep cuts the owner rules a fault.
-3. **h2 keeps more relief:** band std 94-95 % of `S0` with the band, against 84-88 % for h1. It never dips under the sea inland.
+3. **h2 keeps more relief:** band std 94-95 % of `S0` with the band, against 84-88 % for h1. Without the band it makes no inland cell under the sea on any window.
    - Its cost is cuts inside the quads it splits along a flow diagonal: 144-655,747 cells over 50 m against a bilinear read, up to 653 m (M1).
 4. **M1 and F1 keep their debt whatever the read.**
    - F1's is the base's (88 % of `S0`'s breach cells keep a breach nearby).
@@ -238,7 +238,7 @@ Each sheet shows the window's region box, 4 L cells (407 m) a pixel, over a low-
 R1h: h1's cuts (magenta) along the valley sides; both hand-overs leave short blue reaches on the trunks.
 
 ![R3a](images/handover-r3a.jpg)
-R3a, the flat coastal window: few breach cells on either; h1's cuts are rare (0.02 % of the land over 50 m).
+R3a, the flat coastal window: h1 + `r` breaches a long strip of the central lowland trough where `S0` has none (black, 12,968 px); h2 + `r` does not (8,596 black px over the whole window). h1's cuts over 50 m are rare (0.02 % of the land).
 
 ![R3b](images/handover-r3b.jpg)
 R3b: h1's cuts at the tributary heads on the valley sides; h2 + `r` has 5 D-2 failures, h1 + `r` 29.
