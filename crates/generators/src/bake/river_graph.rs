@@ -3,7 +3,7 @@
 //!
 //! - **Entities.** Nodes (kinds `source`, `confluence`, `trib_junction` and `exception` markers, `tile_crossing`, `outlet_sea`, `lake_inlet`, `lake_spill`), reaches (directed downstream, an 8-connected chain
 //!   of global cell ids from `up`'s anchor to `down`'s, per-vertex attributes) and basins, at two levels (H1 and L), owned by a domain (`landmass` or a canonical tile).
-//! - **Identities.** `node = hash(body, kind, level, anchor)`, `reach = hash(body, level, up, down)`, `basin = hash(body, level, floor anchor, spill anchor)` ([`id_hash`], GEN-145's mixer). Ownership never enters an id.
+//! - **Identities.** `node = hash(body, kind, level, anchor)` (a marker also hashes its reach: [`marker_id`], reading 8), `reach = hash(body, level, up, down)`, `basin = hash(body, level, floor anchor, spill anchor)` ([`id_hash`], GEN-145's mixer). Ownership never enters an id.
 //! - **Canonical form.** Nodes, reaches and basins sorted by id, fixed field order, f64 as IEEE-754 bit patterns in hex: the same graph gives the same bytes, and [`Graph::parse`] reads them back.
 //! - **Diff.** Ids added or removed (topology) apart from same ids with different fields (attributes), each named by (id, field).
 //! - **Validators.** Each check of the contract's section 8 returns [`Violation`]s; none repairs anything.
@@ -279,6 +279,22 @@ pub struct Graph {
 /// The id of a node.
 pub fn node_id(body: u64, kind: NodeKind, level: Level, anchor: u64) -> u64 {
     id_hash(body ^ NODE_TAG, (kind.code() << 8) | level.code(), anchor)
+}
+
+/// The salt of a marker id (reading 15: the spikes lane's G1c value).
+pub const MARKER_SALT: u64 = 0x8A2E_0008;
+
+/// The id of a marker node (reading 8): its node hash with the reach it sits on, so markers are unique per (reach, anchor).
+pub fn marker_id(body: u64, kind: NodeKind, level: Level, anchor: u64, on_reach: u64) -> u64 {
+    id_hash(node_id(body, kind, level, anchor), on_reach, MARKER_SALT)
+}
+
+/// The id a node must have: [`marker_id`] for a node with a marker field, else [`node_id`].
+pub fn node_id_of(body: u64, n: &Node) -> u64 {
+    match n.marker {
+        Some(m) => marker_id(body, n.kind, n.level, n.anchor, m.on_reach),
+        None => node_id(body, n.kind, n.level, n.anchor),
+    }
 }
 
 /// The id of a reach (GEN-145's rule on node ids).
@@ -729,7 +745,7 @@ pub fn validate(graph: &Graph, checks: &Checks) -> Vec<Violation> {
         }
     }
     for n in &g.nodes {
-        if n.id != node_id(g.body, n.kind, n.level, n.anchor) {
+        if n.id != node_id_of(g.body, n) {
             v.push(Violation::IdMismatch { id: n.id });
         }
     }
@@ -765,13 +781,17 @@ pub fn validate(graph: &Graph, checks: &Checks) -> Vec<Violation> {
                     Some(&c) if c != n.anchor || r.level != n.level => {
                         v.push(Violation::InvalidMarker { node: n.id, why: "not at its reach's vertex" })
                     }
+                    // a reach ends at a node, so a junction on its last vertex joins nothing (numerics review of reading 8)
+                    Some(_) if n.kind == NodeKind::TribJunction && m.at_vertex as usize + 1 == r.vertices.len() => {
+                        v.push(Violation::InvalidMarker { node: n.id, why: "a junction at its reach's last vertex" })
+                    }
                     _ => {}
                 },
             },
             (false, None) => {}
         }
     }
-    // uniqueness (section 2.1 and reading 1): one non-marker node per (level, anchor); markers of one kind once per anchor; a marker shares an anchor with a non-marker only as the `up` node of
+    // uniqueness (section 2.1, readings 1 and 8): one non-marker node per (level, anchor); markers of one kind once per (reach, anchor); a marker shares an anchor with a non-marker only as the `up` node of
     // the reach it sits on, at vertex 0
     let mut plain: BTreeMap<(Level, u64), Vec<u64>> = BTreeMap::new();
     let mut markers: BTreeMap<(Level, u64), Vec<&Node>> = BTreeMap::new();
@@ -789,7 +809,7 @@ pub fn validate(graph: &Graph, checks: &Checks) -> Vec<Violation> {
         }
     }
     for (key, ms) in &markers {
-        let kinds: BTreeSet<NodeKind> = ms.iter().map(|m| m.kind).collect();
+        let kinds: BTreeSet<(NodeKind, Option<u64>)> = ms.iter().map(|m| (m.kind, m.marker.map(|x| x.on_reach))).collect();
         let shared_ok = |m: &Node| {
             m.marker.is_some_and(|mk| {
                 mk.at_vertex == 0
@@ -797,6 +817,13 @@ pub fn validate(graph: &Graph, checks: &Checks) -> Vec<Violation> {
             })
         };
         if kinds.len() < ms.len() || (plain.contains_key(key) && !ms.iter().all(|m| shared_ok(m))) {
+            twice.insert(*key);
+        }
+    }
+    // tributaries ending at one (level, anchor) end at one trib_junction, whatever reaches the junctions sit on (section 2.1 with reading 8)
+    let ends: BTreeSet<u64> = g.reaches.iter().map(|r| r.down).collect();
+    for (key, ms) in &markers {
+        if ms.iter().filter(|m| m.kind == NodeKind::TribJunction && ends.contains(&m.id)).count() > 1 {
             twice.insert(*key);
         }
     }
