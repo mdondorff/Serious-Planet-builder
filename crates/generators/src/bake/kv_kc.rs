@@ -55,8 +55,8 @@ pub struct KvKc {
     pub near_divide: Vec<bool>,
     /// KC's patches: (cells, volume m3).
     pub patches: Vec<(usize, f64)>,
-    /// The nearest L reach of each cell KV reached (`u64::MAX`: none).
-    pub nearest: Vec<u64>,
+    /// The nearest L reach of each cell KV reached, as an index into the graph's L reaches sorted by id (`u32::MAX`: none; order #161's memory cut).
+    pub nearest: Vec<u32>,
 }
 
 /// The bed level (m) of a code (GEN-170: 0.5 m codes).
@@ -65,22 +65,22 @@ fn bed_m(code: i32) -> f64 {
 }
 
 /// The chamfer distance (m) from the given sources, with each cell's nearest source; ties by the source's cell id.
-fn chamfer(grid: &Grid, sources: &[(usize, usize)], cell_m: f64, limit_m: f64) -> (Vec<f64>, Vec<usize>) {
+fn chamfer(grid: &Grid, sources: &[(usize, usize)], cell_m: f64, limit_m: f64) -> (Vec<f64>, Vec<u32>) {
     let n = grid.len();
     let mut dist = vec![f64::INFINITY; n];
-    let mut src = vec![usize::MAX; n];
+    let mut src = vec![u32::MAX; n];
     let mut heap: BinaryHeap<Reverse<(u64, usize, usize)>> = BinaryHeap::new();
     for &(c, tag) in sources {
-        if dist[c] > 0.0 || tag < src[c] {
+        if dist[c] > 0.0 || (tag as u32) < src[c] {
             dist[c] = 0.0;
-            src[c] = tag;
+            src[c] = tag as u32;
             heap.push(Reverse((0, tag, c)));
         }
     }
     // distances as integer millimetres in the heap key: fixed order
     while let Some(Reverse((dmm, tag, c))) = heap.pop() {
         let d = dmm as f64 / 1000.0;
-        if d > dist[c] || (d == dist[c] && tag != src[c]) {
+        if d > dist[c] || (d == dist[c] && tag as u32 != src[c]) {
             continue;
         }
         for k in 0..8 {
@@ -90,9 +90,9 @@ fn chamfer(grid: &Grid, sources: &[(usize, usize)], cell_m: f64, limit_m: f64) -
             if nd > limit_m {
                 continue;
             }
-            if nd < dist[q] || (nd == dist[q] && tag < src[q]) {
+            if nd < dist[q] || (nd == dist[q] && (tag as u32) < src[q]) {
                 dist[q] = nd;
-                src[q] = tag;
+                src[q] = tag as u32;
                 heap.push(Reverse(((nd * 1000.0) as u64, tag, q)));
             }
         }
@@ -102,7 +102,26 @@ fn chamfer(grid: &Grid, sources: &[(usize, usize)], cell_m: f64, limit_m: f64) -
 
 /// Runs KV and KC on `s0` (the stage input; KS off in the prototype) around the L reaches of `g`, within `budget` per cell. `protected` marks the protected basins' cells; `outlet` the sea.
 pub fn run(grid: &Grid, s0: &[f64], outlet: &[bool], g: &Graph, protected: &[bool], budget: &[f64], p: &KvParams, switch: Switch) -> KvKc {
+    run_with(grid, s0, outlet, g, protected, budget, None, p, switch)
+}
+
+/// [`run`] with the budget's reference (reading 21, owner #161): `reference` is `S_KH`, and the lowering budget left at a cell is `budget - max(0, S_KH - s0)` (what KS used before
+/// KV and KC). `None`: the budget is the budget left already.
+#[allow(clippy::too_many_arguments)]
+pub fn run_with(
+    grid: &Grid,
+    s0: &[f64],
+    outlet: &[bool],
+    g: &Graph,
+    protected: &[bool],
+    budget: &[f64],
+    reference: Option<&[f64]>,
+    p: &KvParams,
+    switch: Switch,
+) -> KvKc {
     let n = s0.len();
+    // the lowering budget left before KV (reading 21)
+    let left_at = |c: usize| (budget[c] - reference.map_or(0.0, |r| (r[c] - s0[c]).max(0.0))).max(0.0);
     let law = WidthLaw::STANDARD;
     let mut reaches: Vec<&Reach> = g.reaches.iter().filter(|r| r.level == Level::L).collect();
     reaches.sort_by_key(|r| r.id);
@@ -131,16 +150,23 @@ pub fn run(grid: &Grid, s0: &[f64], outlet: &[bool], g: &Graph, protected: &[boo
         }
         reaches[x].id
     };
-    let chain: Vec<u64> = (0..reaches.len()).map(chain_of).collect();
+    // chains as dense u32 indices (order #161's memory cut: catch holds 4 bytes a cell)
+    let chain_ids: Vec<u64> = (0..reaches.len()).map(chain_of).collect();
+    let mut dense: BTreeMap<u64, u32> = BTreeMap::new();
+    for &id in &chain_ids {
+        let next = dense.len() as u32;
+        dense.entry(id).or_insert(next);
+    }
+    let chain: Vec<u32> = chain_ids.iter().map(|id| dense[id]).collect();
     let routing = route_rules(grid, s0, outlet, 1e-3, p.seed, 0.0, None, RoundRules::ROUND);
     let reached = 1.5 * p.cell_m;
-    let mut catch = vec![u64::MAX - 1; n];
+    let mut catch = vec![u32::MAX - 1; n];
     for c in 0..n {
         let mut x = c;
         let mut steps = 0;
         loop {
-            if dist[x] <= reached && src[x] != usize::MAX {
-                catch[c] = chain[vtx[&src[x]].0];
+            if dist[x] <= reached && src[x] != u32::MAX {
+                catch[c] = chain[vtx[&(src[x] as usize)].0];
                 break;
             }
             let to = routing.receiver[x];
@@ -151,24 +177,28 @@ pub fn run(grid: &Grid, s0: &[f64], outlet: &[bool], g: &Graph, protected: &[boo
             steps += 1;
         }
     }
+    drop(routing);
     let divide: Vec<bool> =
         (0..n).map(|c| !outlet[c] && (0..8).filter_map(|k| grid.neighbour(c, k)).any(|q| !outlet[q] && catch[q] != catch[c])).collect();
-    let div_src: Vec<(usize, usize)> = (0..n).filter(|&c| divide[c]).map(|c| (c, c)).collect();
-    let (ddiv, _) = chamfer(grid, &div_src, p.cell_m, p.d_buf_m + p.cell_m);
-    let near_divide: Vec<bool> = (0..n).map(|c| ddiv[c] < p.d_buf_m).collect();
+    drop(catch);
+    let near_divide: Vec<bool> = {
+        let div_src: Vec<(usize, usize)> = (0..n).filter(|&c| divide[c]).map(|c| (c, c)).collect();
+        let (ddiv, _) = chamfer(grid, &div_src, p.cell_m, p.d_buf_m + p.cell_m);
+        (0..n).map(|c| ddiv[c] < p.d_buf_m).collect()
+    };
     // KV
     let mut kv = s0.to_vec();
     let mut kv_wanted = vec![0.0; n];
     let mut residuals = Vec::new();
-    let mut nearest = vec![u64::MAX; n];
+    let mut nearest = vec![u32::MAX; n];
     let kv_on = switch != Switch::KcOnly;
     for c in 0..n {
-        if src[c] == usize::MAX {
+        if src[c] == u32::MAX {
             continue;
         }
-        let (ri, k) = vtx[&src[c]];
+        let (ri, k) = vtx[&(src[c] as usize)];
         let r = reaches[ri];
-        nearest[c] = r.id;
+        nearest[c] = ri as u32;
         if !kv_on || outlet[c] || protected[c] || near_divide[c] {
             continue;
         }
@@ -179,13 +209,16 @@ pub fn run(grid: &Grid, s0: &[f64], outlet: &[bool], g: &Graph, protected: &[boo
             continue;
         }
         kv_wanted[c] = want;
-        let left = budget[c].max(0.0);
+        let left = left_at(c);
         let low = want.min(left);
         kv[c] = s0[c] - low;
         if want > low + BUDGET_EPS_M {
             residuals.push(Residual { cell: c, stage: "kv", needed_m: want, available_m: left, feature: r.id });
         }
     }
+    drop(dist);
+    drop(src);
+    let feature_of = |c: usize| if nearest[c] == u32::MAX { u64::MAX } else { reaches[nearest[c] as usize].id };
     // KC: the pits of KV's output outside protected basins, filled within the budget
     let mut kc = kv.clone();
     let mut patches = Vec::new();
@@ -222,7 +255,7 @@ pub fn run(grid: &Grid, s0: &[f64], outlet: &[bool], g: &Graph, protected: &[boo
                 kc[c] = kv[c] + fill;
                 vol += fill * grid.cell_area(c);
                 if need > fill + BUDGET_EPS_M {
-                    let feature = nearest[c];
+                    let feature = feature_of(c);
                     residuals.push(Residual { cell: c, stage: "kc", needed_m: need, available_m: budget[c].max(0.0), feature });
                 }
                 for q in (0..8).filter_map(|k| grid.neighbour(c, k)) {
