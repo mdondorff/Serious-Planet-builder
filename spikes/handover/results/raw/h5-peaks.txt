@@ -1,0 +1,5 @@
+r1h ﻿BAKE-TIME 537 s, peak working set 9,65 GB, exit 
+r3a ﻿BAKE-TIME 464 s, peak working set 9,66 GB, exit 
+r3b ﻿BAKE-TIME 503 s, peak working set 9,57 GB, exit 
+m1 ﻿BAKE-TIME 725 s, peak working set 9,51 GB, exit 
+f1 ﻿BAKE-TIME 572 s, peak working set 9,56 GB, exit 
