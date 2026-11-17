@@ -11,6 +11,7 @@
   - `node_id_of(body, node)` picks the rule by the node's marker field;
   - the id validator reads `node_id_of`;
   - uniqueness counts a marker kind per reach.
+  - numerics review of this change: tributaries ending at one (level, anchor) end at one `trib_junction` on any reach, and a junction on its reach's last vertex is invalid.
 - TEST-140: the marker id with its salt, its mismatch, and two junctions on one anchor on two reaches. A kind change on a trunk's end retires the junction on that reach and the tributary ending there.
 
 ## Impact

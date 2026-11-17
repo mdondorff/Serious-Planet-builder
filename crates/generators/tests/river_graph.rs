@@ -124,7 +124,9 @@ fn reach_mut(g: &mut Graph, up: u64) -> &mut Reach {
 /// Recomputes every id from its fields, and the references to them.
 fn rehash(g: &mut Graph) {
     // to a fixed point: a marker's id reads its reach's id, a reach's id its ends' ids
-    for _ in 0..4 {
+    for round in 0.. {
+        assert!(round < 32, "rehash reaches a fixed point");
+        let before = g.clone();
         let mut map = std::collections::BTreeMap::new();
         for n in g.nodes.iter_mut() {
             let new = node_id_of(BODY, n);
@@ -146,6 +148,9 @@ fn rehash(g: &mut Graph) {
         }
         for b in g.basins.iter_mut() {
             b.spill_node = *map.get(&b.spill_node).unwrap_or(&b.spill_node);
+        }
+        if *g == before {
+            break;
         }
     }
     g.sort();
@@ -259,13 +264,43 @@ fn each_injected_structural_failure_is_found() {
     j2.marker = Some(Marker { on_reach: r3, at_vertex: 1 });
     g.nodes.push(j2);
     assert!(found(&g, &|v| matches!(v, Violation::TwoNodesOneAnchor { .. })), "two junctions on one vertex");
+    // a junction on its own reach's last vertex joins nothing
     let mut g = base();
     let t_id = g.reaches.iter().find(|r| r.up == id(NodeKind::Source, 2, 3)).unwrap().id;
     let mut j3 = node(NodeKind::TribJunction, cell(2, 1));
     j3.marker = Some(Marker { on_reach: t_id, at_vertex: 2 });
     j3.id = marker_id(BODY, j3.kind, Level::L, j3.anchor, t_id);
     g.nodes.push(j3);
-    assert!(!found(&g, &|v| matches!(v, Violation::TwoNodesOneAnchor { .. })), "junctions on one anchor, on two reaches");
+    assert!(found(&g, &|v| matches!(v, Violation::InvalidMarker { why: "a junction at its reach's last vertex", .. })));
+    // a second reach X through (2, 1) (from (1, 0) to a sea outlet at (3, 0)): markers of one kind on two reaches share the anchor (reading 8), but tributaries ending there end at one
+    // junction
+    let with_x = || {
+        let mut g = base();
+        let (sx, ox) = (node(NodeKind::Source, cell(1, 0)), node(NodeKind::OutletSea, cell(3, 0)));
+        let x = reach(&sx, &ox, vec![cell(1, 0), cell(2, 1), cell(3, 0)], attrs(&[1.0e4, 2.0e4, 3.0e4], &[30, 16, 0], 1));
+        let xid = x.id;
+        g.nodes.extend([sx, ox]);
+        g.reaches.push(x);
+        (g, xid)
+    };
+    let (mut g, xid) = with_x();
+    for on in [r3, xid] {
+        let mut e = node(NodeKind::Exception, cell(2, 1));
+        e.marker = Some(Marker { on_reach: on, at_vertex: 1 });
+        e.id = marker_id(BODY, e.kind, Level::L, e.anchor, on);
+        g.nodes.push(e);
+    }
+    assert!(!found(&g, &|v| matches!(v, Violation::TwoNodesOneAnchor { .. })), "exception markers on one anchor, on two reaches");
+    let (mut g, xid) = with_x();
+    let mut j4 = node(NodeKind::TribJunction, cell(2, 1));
+    j4.marker = Some(Marker { on_reach: xid, at_vertex: 1 });
+    j4.id = marker_id(BODY, j4.kind, Level::L, j4.anchor, xid);
+    g.nodes.push(j4.clone());
+    assert!(!found(&g, &|v| matches!(v, Violation::TwoNodesOneAnchor { .. })), "a junction without inflow beside the one with T");
+    let sy = node(NodeKind::Source, cell(1, 2));
+    g.reaches.push(reach(&sy, &j4, vec![cell(1, 2), cell(2, 1)], attrs(&[1.0e4, 2.0e4], &[30, 16], 1)));
+    g.nodes.push(sy);
+    assert!(found(&g, &|v| matches!(v, Violation::TwoNodesOneAnchor { .. })), "two junctions with inflows on one anchor");
     // markers off their reach: no reach, out of range, another vertex; a marker kind without, and a non-marker with, the field
     for (mk, why) in [
         (Marker { on_reach: 42, at_vertex: 1 }, "its reach does not exist"),

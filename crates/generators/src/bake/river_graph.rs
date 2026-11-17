@@ -781,6 +781,10 @@ pub fn validate(graph: &Graph, checks: &Checks) -> Vec<Violation> {
                     Some(&c) if c != n.anchor || r.level != n.level => {
                         v.push(Violation::InvalidMarker { node: n.id, why: "not at its reach's vertex" })
                     }
+                    // a reach ends at a node, so a junction on its last vertex joins nothing (numerics review of reading 8)
+                    Some(_) if n.kind == NodeKind::TribJunction && m.at_vertex as usize + 1 == r.vertices.len() => {
+                        v.push(Violation::InvalidMarker { node: n.id, why: "a junction at its reach's last vertex" })
+                    }
                     _ => {}
                 },
             },
@@ -813,6 +817,13 @@ pub fn validate(graph: &Graph, checks: &Checks) -> Vec<Violation> {
             })
         };
         if kinds.len() < ms.len() || (plain.contains_key(key) && !ms.iter().all(|m| shared_ok(m))) {
+            twice.insert(*key);
+        }
+    }
+    // tributaries ending at one (level, anchor) end at one trib_junction, whatever reaches the junctions sit on (section 2.1 with reading 8)
+    let ends: BTreeSet<u64> = g.reaches.iter().map(|r| r.down).collect();
+    for (key, ms) in &markers {
+        if ms.iter().filter(|m| m.kind == NodeKind::TribJunction && ends.contains(&m.id)).count() > 1 {
             twice.insert(*key);
         }
     }
