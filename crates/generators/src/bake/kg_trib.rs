@@ -107,16 +107,14 @@ pub fn extract(inp: &Input, p: &Params) -> Extracted {
     order_t.sort_by_key(|&t| inp.trunks[t].id);
     for t in order_t {
         for (k, &c) in inp.trunks[t].vertices.iter().enumerate() {
-            // a claim on a trunk's last vertex yields to a claim inside another trunk (a junction there is valid)
-            let last = k + 1 == inp.trunks[t].vertices.len();
+            // the claim of a cell several trunks pass: a trunk's first vertex (a junction there shares the anchor with that trunk's up node, reading 1), then an interior vertex, then
+            // a last vertex (the tributary ends at that trunk's down node); ties by trunk id
+            let rank = |t: usize, k: usize| if k == 0 { 0 } else if k + 1 == inp.trunks[t].vertices.len() { 2 } else { 1 };
             match on_trunk.get(&c) {
-                None => {
+                Some(&(t0, k0)) if rank(t0, k0) <= rank(t, k) => {}
+                _ => {
                     on_trunk.insert(c, (t, k));
                 }
-                Some(&(t0, k0)) if k0 + 1 == inp.trunks[t0].vertices.len() && !last => {
-                    on_trunk.insert(c, (t, k));
-                }
-                Some(_) => {}
             }
         }
     }
