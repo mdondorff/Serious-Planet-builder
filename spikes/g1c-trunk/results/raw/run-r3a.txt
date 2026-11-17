@@ -1,0 +1,37 @@
+KG sea at L: 21084251 cells of S0 at or below the sea level, 804618 of them inland (not connected to an H1 sea outlet or the window's edge; 1.208 % of the window)
+KG basin census: 195 kept H1 basins; depth spill - floor p10 0.5 p50 0.8 p90 6.3 m; cells p50 39 p90 872 max 26601; shallower than 2 m 157 (of them under 0.5 m 0), fewer than 4 cells 0
+KG basin census: channel-segment cells in kept basins by basin depth: < 0.5 m 0, 0.5-2 m 50259, 2-5 m 14516, 5-10 m 1665, 10-50 m 11383, >= 50 m 2886 (of 128699 segment cells)
+KG basin census (K6'): without the sills (each edge at the higher node height) 733 kept basins, 31404 basin cells; 115 of the 195 K6' basins (5246 cells) have their floor in no basin there: the sills alone close them; they hold 3701 of the 80709 segment cells in kept basins
+KG centreline: lowest path (Dijkstra, step cost length x (1 + height over the corridor's minimum / 10 m))
+KG base H1: K6' on the sills of S0 (SPIKE-127) (33466 segments, 195 kept basins)
+KG KS0 = S0 - max(0, r - C1(HAND)): 2.2 s; lowered on 4.2 % of land cells, p50 0.1 p95 0.7 max 24.4 m
+KG budget field (contract §6, relief10 on every 4th H1 cell): 1.0 s; p10 10.0 p50 10.0 p90 17.4 m
+KG segments: 33466 (128699 cells, 80709 in kept basins, 23322 segments inside one); kept-basin cells 105591 of 1040400
+KG H1 trunk reaches: 11709 (99 end on the window's edge; 3098 lake inlets, 1170 lake spills)
+KG graph: 34181 nodes, 23418 reaches (11709 at L, 207324 L vertices) in 1.8 s; L reaches skipped (no route or a one-cell chain) 0; routes meeting the sea before their down node (ended at an outlet_sea there) 2865, of them on an inland cell 2764; anchor collisions (two kinds on one L cell) 20; rise_over_budget reaches 320; L nodes standing for two or more H1 nodes 25
+KG conservation breaks: 0 nodes or reaches, 0 of them at L nodes standing for two or more H1 nodes
+KG validators (open slice): 1475 violations {"IdMismatch": 1447, "TwoNodesOneAnchor": 28}
+KG violations by kind and item: {"IdMismatch on L node Exception": 1447, "TwoNodesOneAnchor on ?": 28}
+KG violation example: IdMismatch { id: 10042963208191993420 }
+KG violation example: TwoNodesOneAnchor { level: L, anchor: 155739809127480 }
+KG exceptions rise_over_budget: 320 of 11709 L reaches (46 of 4964 with a vertex in the box); excess over the remainder p50 5.1 p90 23.8 max 44.4 m
+KG profiles: 0 bed rises (0.5 m codes) outside exceptional reaches, 1376 inside them
+KG raster: 190638 L cells claimed; raster validator 0 violations
+KG l_rivers check: 0 river cells whose receiver is land, not an outlet and not a river cell; 0 cells whose receiver holds less area
+KG agreement with the routed S0 (D8 area >= 75 km2, land; in the box): 33.60 % of 73002 river cells have a graph cell within 1; 38.76 % of 64251 graph cells have a river cell within 1 (110.7 s)
+KG l_rivers check: 0 river cells whose receiver is land, not an outlet and not a river cell; 0 cells whose receiver holds less area
+KG agreement with the routed KS0 (D8 area >= 75 km2, land; in the box): 33.86 % of 72672 river cells have a graph cell within 1; 39.06 % of 64251 graph cells have a river cell within 1 (173.8 s)
+KG determinism: 1 thread against 8: canonical form identical
+KG partition: KS0 of two regions against one: 0 cells differ; the graph's canonical form identical
+KG tile rebuild: tile (5, 5) of the window evaluated again: 0 differences (0 topology)
+KG basins on the trunks: 162 H1 basins; L image spill - H1 spill p10 -1.9 p50 -0.8 p90 3.3 m
+KG basin 0: H1 spill 20.4 m, L image spill 21.4 m (depth 5.3 m)
+KG basin 1: H1 spill 12.7 m, L image spill -1.3 m (depth 0.0 m)
+KG basin 2: H1 spill 8.4 m, L image spill -2.0 m (depth 0.0 m)
+KG basin 3: H1 spill 12.9 m, L image spill -0.9 m (depth 0.0 m)
+KG basin 4: H1 spill 7.6 m, L image spill 8.7 m (depth 1.7 m)
+KG basin 6: H1 spill 664.1 m, L image spill 674.0 m (depth 25.1 m)
+KG basin 7: H1 spill 676.1 m, L image spill 678.5 m (depth 7.0 m)
+KG basin 8: H1 spill 676.5 m, L image spill 678.6 m (depth 5.4 m)
+KG done in 592.8 s
+BAKE-TIME 594 s, peak working set 3,67 GB, exit 
