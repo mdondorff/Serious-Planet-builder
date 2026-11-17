@@ -141,6 +141,73 @@ Setup:
 - Before KV and KC run on windows (G1f): the producer's memory (finding 8) and the trunk's L attributes from its tributaries (finding 9).
 - The density, length and order distributions are in the table. Junction angles are not measured.
 
+## 8. Order #159 (lead, 2026-11-17): producer memory, reading 18, the density check, M1's RG-1
+Code: spike branch `spike/g1d` (never merged):
+- `bake/basins_rg.rs` (the producer);
+- `bake/kg_trib.rs` (`accumulate_trunks`);
+- `bake/kv_kc.rs` (`flag_residuals`);
+- `crates/cache/examples/kg_trib.rs` (`--density-check`, `--write-graph`).
+
+Run logs are in `raw/159/`.
+
+### 8.1 The G1e producer's memory
+- Each depression's subtree is a contiguous range of one flat cell array, not a sorted copy per node.
+- A subtree is sorted into one reused buffer only where the old code read sorted cells: the area sum, kept in cell order so the result keeps the same bits, and the spill walk's membership test.
+- A per-cell basin array replaces the cell-to-basin map.
+- `Produced::cells[&id]` gives a basin's cells as a slice, unsorted.
+
+| Check | Result |
+|---|---|
+| Fixture digests (H1 and L: basins, nodes, sorted cell sets) | unchanged (a tier-A test pins them) |
+| Kept L basins on the windows, RG-0 | 46,130 / 9,461 / 29,572 / 103,066 / 44,299, the same as before |
+| Peak commit, 10 runs | 7.83-8.09 GB (before: 7.9-55.5 GB; M1's RG-1 failed) |
+
+### 8.2 Reading 18: the landmass pass
+- `accumulate_trunks` orders the L trunk reaches topologically: a reach comes after every trunk reach ending at its up node.
+- A vertex carries the vertex before it plus its own cell plus the D8 inflow into it: its tributaries and the hillslope draining straight into the trunk cell, with and without the halo seed.
+- A node shares one value with all its reaches: the sum of its inflowing trunk reaches' second-to-last vertices plus its own inflow.
+- A head with no inflowing trunk takes the larger of its H1 seed and its own L inflow.
+- `q = q_w = a_run r`.
+
+| | R1h | R3a | R3b | M1 | F1 |
+|---|---|---|---|---|---|
+| Junction breaks before / after (RG-0) | 630 / 0 | 2,877 / 0 | 2,275 / 0 | 511 / 0 | 322 / 0 |
+| Heads whose L inflow exceeds the H1 seed (of trunk reaches) | 1,086 of 5,044 | 2,027 of 11,709 | 2,480 of 12,672 | 891 of 2,840 | 964 of 4,177 |
+| Violations added to G1c's | 1 | 4 | 0 | 0 | 0 |
+
+- Fixture: the trunk's mouth carries 228.5 km2, equal to the expected graph's D8 area. The graph validates (closed) and no tributary brings more than its trunk carries (tier-A test).
+
+### 8.3 The density check (BUILD-059 at 1 km2)
+Combined graph means the river gate's `graph_report` (BUILD-060, `river-gate --graph`'s code) over the rasterised L graph. The other columns apply BUILD-059's rule to the stage input (outlets the sea and the window's edge, round rules, seed 7). They differ only in which area defines a channel cell.
+
+| Window | Bar (`S0`, network-bar.md) | D8 area | MFD area | D8 outside kept basins | Extractor's channel cells | Combined graph RG-0 / RG-1 |
+|---|---|---|---|---|---|---|
+| R1h | 0.656 | 0.659 | 1.314 | 0.468 | 0.452 | 0.487 / 0.490 |
+| R3a | 0.679 | 0.644 | 1.179 | 0.560 | 0.531 | 0.571 / 0.573 |
+| R3b | 0.664 | 0.671 | 1.323 | 0.510 | 0.478 | 0.535 / 0.536 |
+| M1 | 0.859 | 0.870 | 2.269 | 0.392 | 0.385 | 0.397 / 0.401 |
+| F1 | 0.615 | 0.632 | 1.313 | 0.394 | 0.383 | 0.404 / 0.404 |
+
+- `river-gate r1h --graph` on R1h's written graph gives 0.4867, the same as the example's own `graph_report` call, and the gate's routed network 0.6561 beside it.
+- **The bar is a D8 network.** BUILD-059's rule with the D8 accumulation reproduces the bar within 0.04 on every window. With the routing's MFD area it gives about double.
+- **Outside kept basins the extractor is the D8 network**, within 0.007-0.032 km/km2. The rest is the trunk cells, which are outlets in the extractor.
+- **The gap is the kept basins' channel length.** A tributary ends at a lake inlet, so the channel length inside kept L basins is not in the graph. That is 13 % (R3a), 24 % (R3b), 29 % (R1h), 38 % (F1) and 55 % (M1) of the D8 network.
+- These are `S0`'s and KS0's basins; reading 5 names KS1, which is not built.
+- Answer: not a definition difference of the density, and not a shortfall of the extractor. The shortfall is the lakes of the unconditioned surface. On these numbers it is no RG-3 trigger: the extractor's network is the D8 network wherever it runs.
+- What to measure next: the same check on KS1 once built. The density then follows how much of the network KS1 leaves in kept basins.
+
+### 8.4 M1's RG-1
+Ran in 485 s at a peak commit of 7.94 GB. Within 1 % of RG-0 on every measure (99,338 tributary reaches in the box, density 0.329; combined graph 0.401).
+
+### 8.5 Fixes for the chain runner (explorer, R1h)
+- `kv_kc::flag_residuals` flags every residual's reach `exception(budget_residual)`, with its largest `needed - available`. The fixture test uses it, and every residual names a reach.
+- `basins_rg::produce_ids` takes the window's cell ids both ways (`CellIds { gid, local }`): reach vertices are read as global ids, and every anchor, basin cell and id is written global. `produce` is the identity case.
+- A spill onto a reach's last vertex names that reach's down node.
+- A spill path joins a reach vertex before it can become another basin's inlet.
+- No lake inlet goes on a reach's node cell.
+- A spill junction is owned by the reach it sits on.
+- Explorer on R1h: invalid markers 452 to 0; `TwoNodesOneAnchor` 992 to 421. 99 of those 421 are lake inlets on node cells with no reach of their own, from a basin pass that did not see those tributaries (open with explorer).
+
 ## Visuals
 ![Network](images/network.png)
 The whole-body extraction on the G0 fixture (CPU, no GPU path; KS off, input `S0`; L cells of 101.8 m). Left: MFD initiation (extractor-1); right: D8 initiation. Red: the expected graph's trunk. Blue: tributaries by Strahler order. Black: confluences. Purple: tile crossings. Green: `S0`'s kept basins and their inlets. Dotted lines: the tile lines at -15 and 15 and the cube edge at 45. The run's numbers are in `report.txt`.

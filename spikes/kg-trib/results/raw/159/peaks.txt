@@ -1,0 +1,10 @@
+exit ; wall 659 s (after the lock); peak commit 7,94 GB
+exit ; wall 485 s (after the lock); peak commit 7,94 GB
+exit ; wall 240 s (after the lock); peak commit 7,83 GB
+exit ; wall 304 s (after the lock); peak commit 7,83 GB
+exit ; wall 250 s (after the lock); peak commit 7,90 GB
+exit ; wall 244 s (after the lock); peak commit 7,88 GB
+exit ; wall 377 s (after the lock); peak commit 8,09 GB
+exit ; wall 316 s (after the lock); peak commit 8,09 GB
+exit ; wall 306 s (after the lock); peak commit 8,05 GB
+exit ; wall 332 s (after the lock); peak commit 8,05 GB
