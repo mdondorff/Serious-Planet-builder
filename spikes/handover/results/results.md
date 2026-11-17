@@ -682,10 +682,10 @@ Analysis renders (CPU), not the production path. #137's crops, 52 km, at a 10-de
 R1h: h5 keeps C1's hills; the bead stair stays on the diagonal main valley, where C1 has it too.
 
 ![M1](images/kh-h5-m1.jpg)
-M1: h4c's dark triangles (top middle) are gone in h5; h4m adds speckle.
+M1: h4c's facets are weaker in h5 off the channels; the dark triangle at the top middle sits on a channel step and stays (C1 has it too); h4m adds speckle.
 
 ![F1](images/kh-h5-f1.jpg)
-F1: the diamond hatching of h4c, h4m and h4b (lower left) is weaker in h5, which reads C1 there except near the channel.
+F1: the diamond hatching of h4c, h4m and h4b (lower left) is only slightly weaker in h5: it lies near a channel, inside h5's zone.
 
 ### Reproduce (addendum 4)
 - Runs: `cargo xtask heavy target/release/examples/kh_smooth.exe --window <w> --out <dir> --tag <tag> --crop-at <cx,cy,crop> --h5` (@ ea023ce9). Crops: R1h 5696,1600; R3a 1600,1856; R3b 2112,2880; M1 4672,4416; F1 1600,5696; 512 each.
