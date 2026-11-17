@@ -177,8 +177,8 @@ fn main() -> Result<(), String> {
         ..GateParams::default()
     };
     if let Some(g) = value(&args, "--grid") {
-        if value(&args, "--store").is_some() || value(&args, "--window").is_some() {
-            return Err("--grid is its own input: it takes no --store or --window".to_string());
+        if value(&args, "--store").is_some() || value(&args, "--window").is_some() || value(&args, "--surface").is_some() {
+            return Err("--grid is its own input: it takes no --store, --window or --surface".to_string());
         }
         return grid_gate(g, &params);
     }
