@@ -576,7 +576,7 @@ Against `S0`: breach volume % lower, and D-2 failures % fewer:
 
 ### Findings (addendum 3)
 1. **The clamp keeps the gain and improves on it.**
-   - h4c + `r` matches h2 + `r` on breach volume and D-2 (on the river share on closed depressions it is within 4 points: R1h 51.4 against 47.6 %, R3b over 5 m 2.5 against 7.2 %): breach volume 76-99 % below `S0`'s on four windows against h2's 76-98 %; D-2 85-99 % fewer on four against h2's 83-99 %; M1 54 % for both.
+   - h4c + `r` matches h2 + `r` on breach volume and D-2 (on the river share on closed depressions it is within 5 points: F1 58.7 against 53.8 %, R1h 51.4 against 47.6 %, R3b over 5 m 2.5 against 7.2 %): breach volume 76-99 % below `S0`'s on four windows against h2's 76-98 %; D-2 85-99 % fewer on four against h2's 83-99 %; M1 54 % for both.
    - Unclamped h4 + `r` has 69-91 % and 75-96 %, M1 21 %.
    - With the clamp, R3b's D-2 falls from 80 to 4 and its breach volume from 5.1 to 0.7 km3. That the removed overshoot closed those basins is an inference, not traced.
 2. **h4c keeps h4's ridge record.** It cuts the fewest `S0` ridges over 50 m together with h4 (21-101,055, against h2's 34-594,900).
