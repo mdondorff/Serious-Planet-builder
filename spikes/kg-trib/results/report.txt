@@ -1,0 +1,30 @@
+SPIKE-133 run report (branch spike/g1d, commit 26031eef); G1D_PRINT=1 cargo test -p planet-generators --test it -- kg_trib_g1d --nocapture
+
+one-region: same ids true; missing 0; extra 0; attributes differ on 0
+two-regions region 1: 466 reaches owned, 0 open ends
+two-regions: same ids true; missing 0; extra 0; attributes differ on 0
+expected tributary cells on the extracted network: 243 of 265
+confluences checked: 187
+missing expected TileCrossing at 19519 (None)
+missing expected TileCrossing at 12271 (None)
+missing expected TribJunction at 19331 (Some(Marker { on_reach: 14573670242606930634, at_vertex: 0 }))
+inside    : reaches   43; present unseeded   36, seeded   36; same vertices and a_geo within 1 %: unseeded   36, seeded   36
+            a_geo error at the end (36 reaches): p50 0.000 / max 0.000 unseeded, p50 0.000 / max 0.000 seeded
+just below: reaches    6; present unseeded    5, seeded    5; same vertices and a_geo within 1 %: unseeded    4, seeded    4
+            a_geo error at the end (5 reaches): p50 0.000 / max 0.015 unseeded, p50 0.000 / max 0.015 seeded
+just above: reaches   41; present unseeded   37, seeded   37; same vertices and a_geo within 1 %: unseeded   21, seeded   21
+            a_geo error at the end (37 reaches): p50 0.000 / max 0.055 unseeded, p50 0.000 / max 0.055 seeded
+far above : reaches  376; present unseeded   94, seeded   95; same vertices and a_geo within 1 %: unseeded   49, seeded   49
+            a_geo error at the end (93 reaches): p50 0.000 / max 0.782 unseeded, p50 0.000 / max 0.510 seeded
+confluences fed by a source outside their tile: 81; found unseeded 29, seeded 30
+nodes: source 258, confluence 187, tile_crossing 21, trib_junction 27, outlet_sea 12, lake_inlet 16, lake_spill 1
+max Strahler 3; MFD-only channel cells 445; trunk area breaks 0; open ends 0
+reach length p50 204 m, p90 712 m, max 3765 m; order 1: 272 reaches, end area p50 0.07 km2; order 2: 145 reaches, end area p50 3.27 km2; order 3: 49 reaches, end area p50 7.13 km2;
+L basins: kept 3, reported 1; unresolved spills 0
+-- initiation on the D8 area (comparison):
+L tributary reaches 205; channel cells 2326; channel length 236.7 km; land 357.0 km2; density 0.66 km/km2
+nodes: source 112, confluence 55, tile_crossing 38, trib_junction 27, outlet_sea 13, lake_inlet 17, lake_spill 1
+max Strahler 3; MFD-only channel cells 0; trunk area breaks 0; open ends 0
+reach length p50 712 m, p90 2747 m, max 3866 m; order 1: 146 reaches, end area p50 1.58 km2; order 2: 47 reaches, end area p50 8.27 km2; order 3: 12 reaches, end area p50 38.32 km2;
+L basins: kept 3, reported 1; unresolved spills 0
+D8 initiation: 0 violations
