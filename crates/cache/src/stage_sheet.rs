@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 
 use planet_generators::bake::river_graph::{Graph, Level, Represented};
 use planet_generators::dump::Rgba;
-use planet_generators::preview::{put_text, TEXT_ROW_H};
+use planet_generators::preview::{put_text, TEXT_CELL_W, TEXT_ROW_H};
 
 use crate::river_gate_graph::read_graph;
 
@@ -363,7 +363,7 @@ pub fn panels(dir: &Path, m: &Manifest, v: &View) -> Result<Vec<Panel>, String> 
     let ks = surf("ks")?;
     let ks_rgb = plain(&ks);
     out.push(Panel {
-        label: format!("6 KS (RED: KS LOWERING, {LOWER_M:.0} M FULL)"),
+        label: format!("6 KS - KH (RED LOWER, BLUE RAISE, {LOWER_M:.0} M FULL)"),
         rgb: match (&ks_rgb, &kh, &ks) {
             (Some(rgb), Some(kh), Some(ks)) => {
                 let mut rgb = rgb.clone();
@@ -387,7 +387,7 @@ pub fn panels(dir: &Path, m: &Manifest, v: &View) -> Result<Vec<Panel>, String> 
         rgb: with_graph(&ks_rgb, &|rgb, g| draw_reaches(rgb, m, v, g, Reaches::Trunks)),
     });
     out.push(Panel {
-        label: format!("8 TRIBUTARIES (A >= {:.1} KM2), BASINS (MAGENTA KEPT)", trib_min_m2(m, v) / 1.0e6),
+        label: format!("8 TRIBUTARIES A >= {:.1} KM2, BASINS (KEPT MAGENTA)", trib_min_m2(m, v) / 1.0e6),
         rgb: with_graph(&ks_rgb, &|rgb, g| {
             draw_reaches(rgb, m, v, g, Reaches::Tributaries);
             draw_basins(rgb, m, v, g);
@@ -472,7 +472,10 @@ pub fn compose(m: &Manifest, v: &View, panels: &[Panel]) -> Rgba {
     for (k, p) in panels.iter().enumerate() {
         let (ox, oy) = (GAP + (k % COLUMNS) * (pw + GAP), title + (k / COLUMNS) * (band + ph + GAP));
         let missing = p.rgb.is_none();
-        put_text(&mut img, ox, oy, &if missing { format!("{} - NOT DUMPED", p.label) } else { p.label.clone() }, [230, 230, 230]);
+        let label = if missing { format!("{} - NOT DUMPED", p.label) } else { p.label.clone() };
+        // a label longer than its panel is cut at the panel's width
+        let fit: String = label.chars().take((pw / TEXT_CELL_W).max(1)).collect();
+        put_text(&mut img, ox, oy, &fit, [230, 230, 230]);
         for y in 0..ph {
             for x in 0..pw {
                 let c = p.rgb.as_ref().map_or([0.35; 3], |rgb| rgb[y * pw + x]);

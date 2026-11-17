@@ -169,6 +169,8 @@ const CELL_W: usize = 6 * SCALE;
 const ROW_H: usize = 10 * SCALE;
 /// The height of a text row of [`put_text`] in pixels (glyphs 5 x 7 at scale 2, with spacing).
 pub const TEXT_ROW_H: usize = ROW_H;
+/// The width of one glyph of [`put_text`] with its spacing, in pixels.
+pub const TEXT_CELL_W: usize = CELL_W;
 
 /// Writes `text` (upper-cased; 5 x 7 glyphs at scale 2) at `(x, y)` in `color`, clipped to the image.
 pub fn put_text(img: &mut Rgba, x: usize, y: usize, text: &str, color: [u8; 3]) {
