@@ -1,0 +1,1 @@
+- 2026-11-17 marker-id-reach (GEN-189, TEST-140): a marker's id hashes the reach it sits on, and markers are unique per (reach, anchor) (reading 8).

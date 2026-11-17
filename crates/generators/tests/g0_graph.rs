@@ -149,6 +149,7 @@ pub(crate) fn expected(fx: &Fixture) -> Built {
     let at_h = trunk_h.iter().position(|&c| c == spill_path_h[join_h]).unwrap();
     let mut junction_h = node_h(NodeKind::TribJunction, trunk_h[at_h]);
     junction_h.marker = Some(Marker { on_reach: reach_h.id, at_vertex: at_h as u32 });
+    junction_h.id = node_id_of(BODY, &junction_h);
     let basin_h = Basin {
         id: basin_id(BODY, Level::H1, floor_h as u64, Some(spill_h as u64)),
         level: Level::H1,
@@ -261,6 +262,7 @@ pub(crate) fn expected(fx: &Fixture) -> Built {
         if bed[k] > bed[k - 1] {
             let mut m = node_l(NodeKind::Exception, trunk_l[k], Domain::Landmass);
             m.marker = Some(Marker { on_reach: trunk_l_id, at_vertex: k as u32 });
+            m.id = node_id_of(BODY, &m);
             exceptions.push(m);
         }
     }
@@ -287,6 +289,7 @@ pub(crate) fn expected(fx: &Fixture) -> Built {
             .or_insert_with(|| {
                 let mut j = node_l(NodeKind::TribJunction, trunk_l[k], Domain::Landmass);
                 j.marker = Some(Marker { on_reach: trunk_l_id, at_vertex: k as u32 });
+                j.id = node_id_of(BODY, &j);
                 j
             })
             .id
