@@ -1083,20 +1083,26 @@ pub fn validate_budget(s0: &[f64], budget: &[f64], stages: &[Stage], residuals: 
             }
             // a residual's numbers are the stage's: a clamp needed the wanted lowering and had the budget left before the stage; a fill needed the fill and had the budget
             let fill_over = st.fills && filled > budget[c] + BUDGET_EPS_M;
-            for r in residuals.iter().filter(|r| r.cell == c && r.stage == st.name) {
-                let near = |a: f64, b: f64| (a - b).abs() <= BUDGET_EPS_M;
-                let why = if clamped {
-                    let w = st.wanted_lowering.map_or(0.0, |w| w[c]);
-                    (!(near(r.needed_m, w) && near(r.available_m, (budget[c] - before).max(0.0))))
-                        .then_some("not the clamp's needed and available")
-                } else if fill_over {
-                    (!(near(r.needed_m, filled) && near(r.available_m, budget[c]))).then_some("not the fill's needed and available")
-                } else {
+            // a cell may both clamp and over-fill in one stage: each residual records one of the two, and there are no more residuals than events
+            let near = |a: f64, b: f64| (a - b).abs() <= BUDGET_EPS_M;
+            let w = st.wanted_lowering.map_or(0.0, |w| w[c]);
+            let is_clamp = |r: &Residual| clamped && near(r.needed_m, w) && near(r.available_m, (budget[c] - before).max(0.0));
+            let is_fill = |r: &Residual| fill_over && near(r.needed_m, filled) && near(r.available_m, budget[c]);
+            let here: Vec<&Residual> = residuals.iter().filter(|r| r.cell == c && r.stage == st.name).collect();
+            for r in &here {
+                let why = if !clamped && !fill_over {
                     Some("no clamp or fill overrun at its cell and stage")
+                } else if !is_clamp(r) && !is_fill(r) {
+                    Some(if clamped { "not the clamp's needed and available" } else { "not the fill's needed and available" })
+                } else {
+                    None
                 };
                 if let Some(why) = why {
                     v.push(Violation::ResidualMismatch { cell: c, stage: st.name, why });
                 }
+            }
+            if (clamped || fill_over) && here.len() > usize::from(clamped) + usize::from(fill_over) {
+                v.push(Violation::ResidualMismatch { cell: c, stage: st.name, why: "more residuals than clamps and fill overruns" });
             }
         }
         for (i, &o) in input.iter_mut().zip(st.out) {
@@ -1106,6 +1112,10 @@ pub fn validate_budget(s0: &[f64], budget: &[f64], stages: &[Stage], residuals: 
         }
     }
     for r in residuals {
+        // a residual naming a cell outside the surface or a stage that did not run is visited nowhere above
+        if r.cell >= n || !stages.iter().any(|st| st.name == r.stage) {
+            v.push(Violation::ResidualMismatch { cell: r.cell, stage: r.stage, why: "no such cell or stage" });
+        }
         let flagged =
             g.reaches.iter().any(|x| x.id == r.feature && matches!(x.status, Status::Exception { reason: Reason::BudgetResidual, .. }));
         if !flagged {

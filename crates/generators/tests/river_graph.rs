@@ -545,6 +545,31 @@ fn the_budget_validator_finds_overruns_raises_and_clamps_without_residuals() {
     assert!(mismatch(&run(&ks, &kv, &kc3, None, &wrong_fill, &flagged)));
     let idle = [Residual { cell: 2, stage: "kc", needed_m: 1.0, available_m: 10.0, feature }];
     assert!(matches!(run(&ks, &kv, &kc, None, &idle, &flagged)[..], [Violation::ResidualMismatch { cell: 2, stage: "kc", .. }]));
+    // a residual naming no stage that ran, or a cell outside the surface
+    for (cell, stage) in [(0, "kx"), (99, "kv")] {
+        let stray = [Residual { cell, stage, needed_m: 1.0, available_m: 1.0, feature }];
+        assert!(
+            run(&ks, &kv, &kc, None, &stray, &flagged)
+                .iter()
+                .any(|v| matches!(v, Violation::ResidualMismatch { why: "no such cell or stage", .. })),
+            "{cell} {stage}"
+        );
+    }
+    // a duplicate residual is one more than the events
+    let twice = [res[0].clone(), res[0].clone()];
+    assert!(run(&ks, &kv, &kc, Some(&wanted), &twice, &flagged)
+        .iter()
+        .any(|v| matches!(v, Violation::ResidualMismatch { why: "more residuals than clamps and fill overruns", .. })));
+    // one cell that clamps and over-fills in one stage (KV wanted 7 m at cell 0 and raised it 12 m): one residual for each event passes, a wrong one fails
+    let kv_up = [106.0, 100.0, 100.0];
+    let kc_up = [106.0, 103.0, 100.0];
+    let both = [
+        Residual { cell: 0, stage: "kv", needed_m: 7.0, available_m: 4.0, feature },
+        Residual { cell: 0, stage: "kv", needed_m: 12.0, available_m: 10.0, feature },
+    ];
+    assert_eq!(run(&ks, &kv_up, &kc_up, Some(&wanted), &both, &flagged), vec![]);
+    let wrong = [both[0].clone(), Residual { cell: 0, stage: "kv", needed_m: 11.0, available_m: 10.0, feature }];
+    assert!(mismatch(&run(&ks, &kv_up, &kc_up, Some(&wanted), &wrong, &flagged)));
     // inputs that are not finite or do not fit
     let kv_nan = [f64::NAN, 100.0, 100.0];
     assert!(run(&ks, &kv_nan, &kc, None, &[], &g).iter().any(|v| matches!(v, Violation::BudgetInput { cell: 0, stage: "kv" })));
