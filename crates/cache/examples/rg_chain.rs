@@ -1960,11 +1960,12 @@ fn main() -> Result<(), String> {
         reaches.iter().filter(|r| r.up_kind == NodeKind::LakeSpill).count()
     );
     // ================================================================ the RG chain (explorer #166, G1f plumbing; no tuning, no judgement)
-    // switches: --kh c1 | h2 (SPIKE-136's h2, reading 19: KS starts from KH(z_s) + r; spikes #137); --ks off | ks0 | ks1 (default ks1); --skip a,b,... of kg-trunk, basins, kg-trib, kv, kc;
+    // switches: --kh c1 | h2 | h4 | h4c (KS starts from KH(z_s) + r: h2 the triangulation, reading 19, spikes #137; h4 Clough-Tocher on its split and h4c, h4 clamped to
+    // its quad's corners, reading 20, spikes #138 and #139); --ks off | ks0 | ks1 (default ks1); --skip a,b,... of kg-trunk, basins, kg-trib, kv, kc;
     // --regions 1 | 2
     let kh = value(&args, "--kh").unwrap_or("c1");
-    if !["c1", "h2"].contains(&kh) {
-        return Err(format!("--kh c1 | h2, not '{kh}'"));
+    if !["c1", "h2", "h4", "h4c"].contains(&kh) {
+        return Err(format!("--kh c1 | h2 | h4 | h4c, not '{kh}'"));
     }
     let ks_mode = value(&args, "--ks").unwrap_or("ks1");
     if !["off", "ks0", "ks1"].contains(&ks_mode) {
@@ -2034,7 +2035,8 @@ fn main() -> Result<(), String> {
     // ---- KH (spikes #137, reading 19): the surface KS starts from. c1: S0 itself; h2: KH(z_s) + r, KH the flow-diagonal triangulation of z_s (planet_generators::bake::kh). S0 stays
     // the reference of the ocean, the sills, the budget and the measures (explorer, 2026-11-17).
     let t = Instant::now();
-    let ks_base: Vec<f64> = if kh == "h2" {
+    let kh_form = kh;
+    let ks_base: Vec<f64> = if kh != "c1" {
         use planet_generators::bake::kh;
         // KH's routing of z_s at 814 m: reading 12's outlets (the edge, and cells at or below the sea connected to it or to a K5 sea outlet)
         let mut ol: Vec<bool> = (0..cells).map(|c| grid.is_edge(c)).collect();
@@ -2055,7 +2057,17 @@ fn main() -> Result<(), String> {
         let (recv, area) = kh::routing(grid, &solve.zs, &ol);
         let (split, st) = kh::split(&solve.zs, rw, rh, &|c| (recv[c] != NONE).then(|| recv[c] as usize), &|c| area[c]);
         let lr = L as f64;
-        let at = |p: usize| kh::read(&solve.zs, rw, rh, &split, ((p % w) as f64 - (lr - 1.0) / 2.0) / lr, ((p / w) as f64 - (lr - 1.0) / 2.0) / lr) + rl[p];
+        let grad = kh::gradients(&solve.zs, rw, rh);
+        let step = |p: usize, q: usize| recv[p] == q as u32 || recv[q] == p as u32;
+        let at = |p: usize| {
+            let (fx, fy) = (((p % w) as f64 - (lr - 1.0) / 2.0) / lr, ((p / w) as f64 - (lr - 1.0) / 2.0) / lr);
+            rl[p]
+                + match kh_form {
+                    "h2" => kh::read(&solve.zs, rw, rh, &split, fx, fy),
+                    "h4" => kh::read_ct(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0,
+                    _ => kh::read_ct_clamped(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0,
+                }
+        };
         // the run's read on `threads` threads; tile-locality: the same read over two regions cut at a tile column, and on one thread
         let mut one = vec![0f64; n_l];
         par_fill(&mut one, w, threads, &at);
@@ -2081,7 +2093,7 @@ fn main() -> Result<(), String> {
             hi10 += usize::from(one[p] - start[p] > 10.0);
         }
         println!(
-            "RG KH h2: quads split along a D8 diagonal step {} (both diagonals {}), along the higher pair {}; two regions against one: {differ2} cells differ, one thread against the run: {differ1}; against S0 on {land} land cells: lower over 10 m {lo10}, higher over 10 m {hi10}",
+            "RG KH {kh_form}: quads split along a D8 diagonal step {} (both diagonals {}), along the higher pair {}; two regions against one: {differ2} cells differ, one thread against the run: {differ1}; against S0 on {land} land cells: lower over 10 m {lo10}, higher over 10 m {hi10}",
             st.by_step, st.both, st.by_pair
         );
         let b: Vec<u8> = split.clone();

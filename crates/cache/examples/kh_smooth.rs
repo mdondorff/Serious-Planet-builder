@@ -1,4 +1,5 @@
 #![allow(dead_code, unused_imports, unused_variables)]
+//! spikes #139: the surfaces h2 + r, h4, h4 + r, h4c (h4 clamped to its quad's corners, reading 20), h4c + r.
 //! spikes #138 (spike/kh-stage, never merged): kh_smooth, SPIKE-136's handover.rs with h2 (the triangulation), h3 (the skeleton) and h4 (Clough-Tocher on h2's split)
 //! from planet_generators::bake::kh, measured on SPIKE-135's ladder; `--crop-at cx,cy,crop` writes #137's render crops.
 //! SPIKE-136 (lead #136; spike/handover, never merged): two drainage-preserving hand-overs of z_s at L (h1: SPIKE-116's 4-neighbour breach, bilinear; h2: a flow-diagonal
@@ -2398,13 +2399,28 @@ fn main() -> Result<(), String> {
         let (fx, fy) = fxy(c);
         kh::read_ct(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0
     });
-    // h4's overshoot beyond the corners of its macro triangle, over land of the box
-    {
-        let (mut n_land, mut over, mut under, mut omax, mut umax) = (0usize, 0usize, 0usize, 0f64, 0f64);
+    // h4c (reading 20, spikes #139): h4 clamped to its quad's four corners
+    let mut h4cz = vec![0f64; nl];
+    par_fill(&mut h4cz, w, threads, &|c| {
+        let (fx, fy) = fxy(c);
+        kh::read_ct_clamped(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0
+    });
+    // the overshoot of h4 and h4c beyond the corners of the macro triangle and of the quad, over land of the box; each along every D8 step of the box's land
+    for (form, clamped) in [("h4", false), ("h4c", true)] {
+        let read = |fx: f64, fy: f64| -> f64 {
+            if clamped {
+                kh::read_ct_clamped(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0
+            } else {
+                kh::read_ct(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0
+            }
+        };
+        let (mut n_land, mut over, mut under, mut omax, mut umax, mut qover, mut qunder) = (0usize, 0usize, 0usize, 0f64, 0f64, 0usize, 0usize);
         for p in (0..nl).filter(|&p| in_core_l(p) && start[p] > 0.0) {
             n_land += 1;
             let (fx, fy) = fxy(p);
-            let (v, lo, hi) = kh::read_ct(&solve.zs, rw, rh, &split, &grad, &step, fx, fy);
+            let v = read(fx, fy);
+            let (_, lo, hi) = kh::read_ct(&solve.zs, rw, rh, &split, &grad, &step, fx, fy);
+            let (_, qlo, qhi) = kh::read_ct_clamped(&solve.zs, rw, rh, &split, &grad, &step, fx, fy);
             if v > hi + 0.01 {
                 over += 1;
                 omax = omax.max(v - hi);
@@ -2413,8 +2429,9 @@ fn main() -> Result<(), String> {
                 under += 1;
                 umax = umax.max(lo - v);
             }
+            qover += usize::from(v > qhi + 0.01);
+            qunder += usize::from(v < qlo - 0.01);
         }
-        // h4 along every D8 step of the box's land cells: 32 samples from the cell centre to its receiver's, any rise over 1 mm
         let (mut steps, mut rising, mut rmax) = (0usize, 0usize, 0f64);
         for p in 0..cells {
             let Some(q) = rcv(p) else { continue };
@@ -2427,7 +2444,7 @@ fn main() -> Result<(), String> {
             let (mut prev, mut worst) = (f64::INFINITY, 0f64);
             for k in 0..=32 {
                 let t = k as f64 / 32.0;
-                let v = kh::read_ct(&solve.zs, rw, rh, &split, &grad, &step, ax + t * (bx - ax), ay + t * (by - ay)).0;
+                let v = read(ax + t * (bx - ax), ay + t * (by - ay));
                 worst = worst.max(v - prev);
                 prev = v;
             }
@@ -2437,11 +2454,11 @@ fn main() -> Result<(), String> {
             }
         }
         println!(
-            "HO {tag} h4 overshoot over {n_land} land cells of the box: above the macro triangle's corners by over 1 cm {over} ({:.3} %, max {omax:.2} m), below {under} ({:.3} %, max {umax:.2} m); D8 steps of the box's land {steps}: rising over 1 mm along the step {rising} (max rise {rmax:.3} m)",
+            "HO {tag} {form} overshoot over {n_land} land cells of the box: above the macro triangle's corners by over 1 cm {over} ({:.3} %, max {omax:.2} m), below {under} ({:.3} %, max {umax:.2} m); beyond the quad's corners: above {qover}, below {qunder}; D8 steps of the box's land {steps}: rising over 1 mm along the step {rising} (max rise {rmax:.3} m)",
             100.0 * over as f64 / n_land.max(1) as f64,
             100.0 * under as f64 / n_land.max(1) as f64
         );
-        csv += &format!("#h4,{tag},{n_land},{over},{omax:.3},{under},{umax:.3},{steps},{rising},{rmax:.4}\n");
+        csv += &format!("#{form},{tag},{n_land},{over},{omax:.3},{under},{umax:.3},{steps},{rising},{rmax:.4},{qover},{qunder}\n");
     }
     // the render crop (#137's: the box's 512 x 512 block of the largest p50 1 km relief), every L cell: S0 and the three hand-overs with the band
     let crop_at: Option<(usize, usize, usize)> = value(&args, "--crop-at").map(|v| {
@@ -2449,7 +2466,7 @@ fn main() -> Result<(), String> {
         (x[0], x[1], x[2])
     });
     if let Some((cx, cy, cr)) = crop_at {
-        for (name, f) in [("s0", &start), ("h2r", &h2z), ("h3r", &h3z), ("h4r", &h4z)] {
+        for (name, f) in [("s0", &start), ("h2r", &h2z), ("h4r", &h4z), ("h4cr", &h4cz)] {
             let band = name != "s0";
             let mut b: Vec<u8> = Vec::with_capacity(cr * cr * 4);
             for y in cy..cy + cr {
@@ -2465,11 +2482,13 @@ fn main() -> Result<(), String> {
     // ---- the hand-over surfaces (spikes #138)
     let near_s0 = dilate(&k4.breach.iter().map(|&v| v > PRESENT as f32).collect::<Vec<_>>(), w, h, L / 2);
     let ca = lg.dx() * lg.dx() / 1.0e9;
-    for (name, key) in [("h2 + r", "h2r"), ("h3 skeleton", "h3"), ("h3 + r", "h3r"), ("h4 Clough-Tocher", "h4"), ("h4 + r", "h4r")] {
-        let src = match &key[..2] {
-            "h2" => &h2z,
-            "h3" => &h3z,
-            _ => &h4z,
+    for (name, key) in [("h2 + r", "h2r"), ("h4 Clough-Tocher", "h4"), ("h4 + r", "h4r"), ("h4c clamped", "h4c"), ("h4c + r", "h4cr")] {
+        let src = if key.starts_with("h4c") {
+            &h4cz
+        } else if key.starts_with("h4") {
+            &h4z
+        } else {
+            &h2z
         };
         let z: Vec<f64> = if key.ends_with('r') { (0..nl).map(|p| src[p] + rl[p]).collect() } else { src.clone() };
         let e = d2(&z);

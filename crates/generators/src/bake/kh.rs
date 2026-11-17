@@ -262,6 +262,17 @@ pub fn read_ct(z: &[f64], w: usize, h: usize, split: &[u8], grad: &[[f64; 2]], s
     (val, f[0].min(f[1]).min(f[2]), f[0].max(f[1]).max(f[2]))
 }
 
+/// h4c (reading 20, spikes #139): [`read_ct`] clamped to the range of its quad's four corners. Returns the value and that range.
+#[allow(clippy::too_many_arguments)]
+pub fn read_ct_clamped(z: &[f64], w: usize, h: usize, split: &[u8], grad: &[[f64; 2]], step: &dyn Fn(usize, usize) -> bool, fx: f64, fy: f64) -> (f64, f64, f64) {
+    let ix = (fx.floor().max(0.0) as usize).min(w - 2);
+    let iy = (fy.floor().max(0.0) as usize).min(h - 2);
+    let q = iy * w + ix;
+    let (a, b, c, d) = (z[q], z[q + 1], z[q + w], z[q + w + 1]);
+    let (lo, hi) = (a.min(b).min(c).min(d), a.max(b).max(c).max(d));
+    (read_ct(z, w, h, split, grad, step, fx, fy).0.clamp(lo, hi), lo, hi)
+}
+
 // ---------------------------------------------------------------- h3: the skeleton (spikes #138)
 
 /// h3: the base read `base` (C1) lowered toward each D8 diagonal step line of the block near the point, never raised: within `full` L cells of a step line (the segment
@@ -321,6 +332,39 @@ mod tests {
         assert!((side(1.0 - e, 0.4) - side(1.0 + e, 0.4)).abs() < 1e-4, "across a quad edge");
         // the corners are the heights
         assert!((side(1.0, 1.0) - z[5]).abs() < 1e-9);
+    }
+
+    // spec: GEN-189 (reading 20, KH h4c): the clamped read stays within its quad's corners, equals h4 where h4 does, and keeps a monotone step edge monotone.
+    #[test]
+    fn clamped_read_stays_in_the_quad() {
+        let (w, h) = (4, 4);
+        let z: Vec<f64> = (0..w * h).map(|p| ((p * 37 % 11) as f64) * 10.0 + if p == 5 { 300.0 } else { 0.0 }).collect();
+        let g = gradients(&z, w, h);
+        let split = vec![MAIN; w * h];
+        let step = |p: usize, q: usize| (p == 5 && q == 10) || (p == 10 && q == 5);
+        let mut clamped = 0;
+        for k in 0..=60 {
+            for l in 0..=60 {
+                let (fx, fy) = (k as f64 * 0.05, l as f64 * 0.05);
+                let (v, lo, hi) = read_ct_clamped(&z, w, h, &split, &g, &step, fx, fy);
+                assert!(v >= lo && v <= hi, "inside the quad's range at ({fx}, {fy})");
+                let raw = read_ct(&z, w, h, &split, &g, &step, fx, fy).0;
+                if raw != v {
+                    clamped += 1;
+                } else {
+                    assert_eq!(raw, v);
+                }
+            }
+        }
+        assert!(clamped > 0, "the rough block overshoots somewhere");
+        // along the step 5 -> 10 (the main diagonal of quad 5): non-increasing
+        let mut prev = f64::INFINITY;
+        for k in 0..=32 {
+            let t = k as f64 / 32.0;
+            let v = read_ct_clamped(&z, w, h, &split, &g, &step, 1.0 + t, 1.0 + t).0;
+            assert!(v <= prev + 1e-9, "monotone along the step at t = {t}");
+            prev = v;
+        }
     }
 
     // spec: GEN-189 (reading 19, KH h3): the skeleton never raises, lowers to the step line on it, and leaves cells far from any step unchanged.
