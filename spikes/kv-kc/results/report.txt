@@ -1,0 +1,18 @@
+KvOnly: KC fill clamps (residual held at the budget, outside the validator's terms): 0
+KvOnly: KV lowered 1310 cells, p50 4.48 p99 10.00 max 10.00 m, 525 clamps (residuals)
+KvOnly: KC filled 0 cells in 0 patches, -0 m3, max 0.00 m, 0 residuals
+KvOnly: residual features already exceptional (kept): 458; budget violations 458
+KvOnly: divide cells 3474 (6741 within d_buf), KV changes there 0; protected cells 243, changed 0
+KvOnly: trunk: largest lowering 10.00 m (budget 10.0); rise over its running minimum after the stage 261.9 m
+KcOnly: KC fill clamps (residual held at the budget, outside the validator's terms): 21
+KcOnly: KV lowered 0 cells, p50 0.00 p99 0.00 max 0.00 m, 0 clamps (residuals)
+KcOnly: KC filled 31 cells in 2 patches, 2217399 m3, max 10.00 m, 21 residuals
+KcOnly: residual features already exceptional (kept): 21; budget violations 42
+KcOnly: divide cells 3474 (6741 within d_buf), KV changes there 0; protected cells 243, changed 0
+KcOnly: trunk: largest lowering 0.00 m (budget 10.0); rise over its running minimum after the stage 271.9 m
+Both: KC fill clamps (residual held at the budget, outside the validator's terms): 19
+Both: KV lowered 1310 cells, p50 4.48 p99 10.00 max 10.00 m, 525 clamps (residuals)
+Both: KC filled 29 cells in 2 patches, 2098902 m3, max 10.00 m, 19 residuals
+Both: residual features already exceptional (kept): 477; budget violations 496
+Both: divide cells 3474 (6741 within d_buf), KV changes there 0; protected cells 243, changed 0
+Both: trunk: largest lowering 10.00 m (budget 10.0); rise over its running minimum after the stage 261.9 m
