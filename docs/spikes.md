@@ -24,14 +24,15 @@ Per-spike register sections of M5 and M6: `docs/archive/M6/spikes.md`. Closed sp
 | SPIKE-117 | The combination of ADR 0123 (4-neighbour drain at 814 m, one round at L) on R1h, R3a and R3b (P3 E1, lead 2026-11-14) | closed 2026-11-14: with the basin metric agreed with spikes (at least 0.5 m deep and 16 L cells, fill epsilon 1e-7) both variants meet the bars on all three windows: basins 0.0-4.6 % of river cells, no canyon over 50 m, no lakes at D = 20 m, relief 110-121 %; the 4-neighbour hand-over aligns 66.5 % and 68.6 % of channel steps to the grid axes on R1h and R3b (47 % for B alone); one round at L alone meets the bars without that bias; the L round over an edit's dirty catchments 0.02-0.31 s; peak 6.06 GB | `spikes/combo-117/results/results.md` |
 | SPIKE-118 | Schott 2024 done fairly against the 4-neighbour drain plus one round at L (P3 E1) | closed 2026-11-14: no; it drains fully (0.00 % basins) but costs 2-5x the L round, raises 200 m relief 19-23 %, carves 1.4-20.7 % of river cells over 50 m and has no local edit path; its final breach and retargeting transfer | `spikes/schott-fair/results/results.md` |
 | SPIKE-119 | River measurement suite: windows M1, F1, transects, the GLO-30 benchmark (P3 E1) | closed 2026-11-15 | `spikes/river-suite/results/results.md` |
-| SPIKE-120 | The critical reads' verification items (P3 E2) | closed 2026-11-15: the breach drains and cuts the narrow incision; baked store 0.58 % basins; edit discovery needs a full route | `spikes/verification/results/results.md` |
+| SPIKE-120 | Critical reads' verification (P3 E2) | closed 11-15: breach drains; store 0.58 % basins | `spikes/verification/results/results.md` |
 | SPIKE-121 | E3 variants B, C against A on five windows (P3 E3) | closed 2026-11-15: B passes both bars (K dt x 1/4); C fails G-DRAIN on M1 | `spikes/e3-variants-bc/results/results.md` |
 | SPIKE-122 | E3 variants D, E, F (P3 E3) | closed 2026-11-15: all pass both bars; ridge cut from the hand-over | `spikes/e3-variants-def/results/results.md` |
 | SPIKE-123 | Lakes as objects (E5) | closed 11-15: A keeps 2-40 lakes | `spikes/lakes-d4/results/results.md` |
 | SPIKE-124 | Protect lakes (E5) | closed 11-15: K7 leak fixed | `spikes/lakes-protect/results/results.md` |
 | SPIKE-125 | Variant G: B on E's valley-aware base (P3 E3) | closed 2026-11-16: passes bars; up to 2x B's saddles | `spikes/e3-variant-g/results/results.md` |
-| SPIKE-126 | The ponding rule on B's trunks (P3 D-1) | closed 2026-11-16: ponds rescue 0-13 % of over-bar reaches; most rises have no basin (D-2) | `spikes/ponding/results/results.md` |
+| SPIKE-126 | Ponding rule on B's trunks (D-1) | closed 11-16: ponds rescue 0-13 %; rises are D-2 | `spikes/ponding/results/results.md` |
 | SPIKE-127 | H1 on sub-cell sills of S0 (G1a) | closed 2026-11-17: 59 % of D-2 gain a route; stop test see SPIKE-131 | `spikes/g1a-sills/results/results.md` |
 | SPIKE-131 | K5' on sill edges (G1a) | closed 2026-11-17: stop test an artefact; K5' not adopted | `spikes/k5p-sills/results/results.md` |
+| SPIKE-130 | Basin topology on the river graph (G1e) | closed 11-17: stable under layouts; S0 keeps 3-19 % of land | `spikes/basins-g1e/results/results.md` |
 
 Every exploration gets a `SPIKE-NN` entry.
