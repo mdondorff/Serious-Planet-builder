@@ -36,8 +36,8 @@ Code location: spike branch `spike/g1a-sills` (`crates/cache/examples/g1a_sills.
 | The control off K5's channel cells: exact / more than 1 cell | 0.5 / 0.3 % | 0.8 / 0.2 % | 0.1 / 0.1 % | 0.1 / 0.1 % | 0.1 / 0.0 % |
 | Stop test: rivers changed (of 10) today -> K6' / control / `z_s` +-0.5 m | 7 / 1 / 1 | 4 / 4 / 8 | 3 / 0 / 1 | 9 / 0 / 0 | 4 / 0 / 0 (of 9) |
 | Major confluences lost (of) / gained, today -> K6' | 10 (34) / 3 | 9 (28) / 0 | 5 (40) / 3 | 17 (55) / 7 | 5 (10) / 3 |
-| Outlets more than 8 km off, today -> K6' | 0 | 1 | 0 | 0 | 0 |
-| Box land draining to an outlet over 8 km away, today -> K6' | 0.41 % | 5.21 % | 0.36 % | 0.20 % | 0.08 % |
+| K6': outlets more than 8 km off today's | 0 | 1 | 0 | 0 | 0 |
+| K6': box land draining to an outlet over 8 km from today's | 0.41 % | 5.21 % | 0.36 % | 0.20 % | 0.08 % |
 | Kept H1 basins today -> K6' | 69 -> 236 | 227 -> 195 | 61 -> 115 | 106 -> 230 | 224 -> 212 |
 | Corridor pass on `S0`, today -> K6' | 88.6 -> 87.3 % | 99.1 -> 99.2 % | 90.2 -> 88.3 % | 68.5 -> 63.0 % | 93.7 -> 93.2 % |
 | Corridor pass on B, today -> K6' | 98.6 -> 98.4 % | 99.97 -> 99.97 % | 99.85 -> 99.60 % | 95.1 -> 96.9 % | 99.3 -> 99.5 % |
@@ -68,7 +68,7 @@ Code location: spike branch `spike/g1a-sills` (`crates/cache/examples/g1a_sills.
 | K6', `S0` +-0.5 m | 1.7 % / 3 | 5.3 % / 2 | 1.7 % / 1 | 0.3 % / 0 | 2.8 % / 1 |
 | K6', sills +-1 m | 3.8 % / 4 | 6.1 % / 1 | 3.1 % / 2 | 2.4 % / 0 | 5.2 % / 1 |
 
-- K6' under a 0.5 m perturbation of `S0` moves about as much as today's K6 under the same perturbation of `z_s`; a 1 m sill perturbation moves 2-4x more.
+- K6' under a 0.5 m perturbation of `S0` moves about as much as today's K6 under the same perturbation of `z_s`; a 1 m sill perturbation moves 1.2-8x more.
 - R3a (flat) is unstable under every perturbation, today's K6 included: its stop test is at noise level (control 4, baseline 8 of 10).
 
 ### 2.3 Where the extra trunk cells come from (#131a)
@@ -79,7 +79,7 @@ Code location: spike branch `spike/g1a-sills` (`crates/cache/examples/g1a_sills.
 | Trunk length in the box, km | 12,987 -> 14,904 | 27,229 -> 30,953 | 22,251 -> 26,016 | 21,185 -> 24,351 | 27,742 -> 25,427 |
 | K6' with the MFD over all lower neighbours: heads / km | 4,024 / 15,147 | 8,858 / 31,022 | 6,951 / 26,601 | 6,180 / 24,242 | 6,027 / 25,728 |
 
-- The extra trunk cells are new heads, not longer paths: heads +33 to +65 % (F1 +2 %); length per cell within 5 % (0.83-0.91 km).
+- The extra trunk cells are new heads, not longer paths: heads +33 to +65 % (F1 +2 %); length per cell within 8 % (0.83-0.93 km).
 - 87-99 % of the heads, today and on K6', have a D8 area under 75 km2: a trunk head is mostly where the clipped MFD's share of a valley's flow on a parallel D8 line reaches 1 m3/s, not a new catchment over 75 km2.
 - The sill rule on the MFD is not the cause: with the MFD over all lower neighbours the heads rise further. The node heights make the 814 m surface more incised (`z_s - h` p50 3-134 m), which splits more of the valleys' flow onto parallel D8 lines.
 
@@ -131,4 +131,4 @@ R3b (face 2, seed 15): K6' joins the central valleys into one east-west trunk; i
 M1 (face 4, seed 15): mountains; failures on `S0` lie along the valleys of both graphs (K6': 2,495 of 3,287 at mountain relief).
 
 ![F1](images/map-f1.png)
-F1 (face 4, seed 15): lowland; K6' keeps the main trunks and their confluences in place.
+F1 (face 4, seed 15): lowland; K6' keeps the main stems in place.
