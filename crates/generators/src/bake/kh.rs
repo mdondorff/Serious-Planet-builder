@@ -133,9 +133,208 @@ pub fn routing(grid: &Grid, z: &[f64], outlet: &[bool]) -> (Vec<u32>, Vec<f64>) 
     (recv, area)
 }
 
+// ---------------------------------------------------------------- h4: Clough-Tocher patches on the split (spikes #138)
+
+/// Central-difference gradients of a `w x h` block in block units (one-sided at the border).
+pub fn gradients(z: &[f64], w: usize, h: usize) -> Vec<[f64; 2]> {
+    (0..w * h)
+        .map(|p| {
+            let (i, j) = (p % w, p / w);
+            let gx = if i == 0 {
+                z[p + 1] - z[p]
+            } else if i + 1 == w {
+                z[p] - z[p - 1]
+            } else {
+                0.5 * (z[p + 1] - z[p - 1])
+            };
+            let gy = if j == 0 {
+                z[p + w] - z[p]
+            } else if j + 1 == h {
+                z[p] - z[p - w]
+            } else {
+                0.5 * (z[p + w] - z[p - w])
+            };
+            [gx, gy]
+        })
+        .collect()
+}
+
+/// The triangle of the split that holds the point `(u, v)` of quad `q`: its corners as block indices and quad-local coordinates.
+fn triangle(q: usize, w: usize, flag: u8, u: f64, v: f64) -> [(usize, [f64; 2]); 3] {
+    let (a, b, c, d) = ((q, [0.0, 0.0]), (q + 1, [1.0, 0.0]), (q + w, [0.0, 1.0]), (q + w + 1, [1.0, 1.0]));
+    if flag == MAIN {
+        if u >= v {
+            [a, b, d]
+        } else {
+            [a, d, c]
+        }
+    } else if u + v <= 1.0 {
+        [a, b, c]
+    } else {
+        [b, d, c]
+    }
+}
+
+/// One reduced Clough-Tocher macro triangle (cubic Bezier patches on the centroid split, the normal derivative linear along each outer edge) at the point `x`, from the
+/// corners `p`, values `f` and gradients `g`; an edge `(i, i + 1)` with `mono[i]` keeps its control polygon monotone (the edge points clamped between the corner values).
+/// Returns the value.
+fn clough_tocher(p: [[f64; 2]; 3], f: [f64; 3], g: [[f64; 2]; 3], mono: [bool; 3], x: [f64; 2]) -> f64 {
+    let dot = |a: [f64; 2], b: [f64; 2]| a[0] * b[0] + a[1] * b[1];
+    let sub = |a: [f64; 2], b: [f64; 2]| [a[0] - b[0], a[1] - b[1]];
+    let s = [(p[0][0] + p[1][0] + p[2][0]) / 3.0, (p[0][1] + p[1][1] + p[2][1]) / 3.0];
+    // the edge points (i near, j far) of edge (i, j) = (k, k + 1)
+    let edge = |k: usize| -> (f64, f64) {
+        let (i, j) = (k, (k + 1) % 3);
+        let mut cij = f[i] + dot(g[i], sub(p[j], p[i])) / 3.0;
+        let mut cji = f[j] + dot(g[j], sub(p[i], p[j])) / 3.0;
+        if mono[k] {
+            let (lo, hi) = (f[i].min(f[j]), f[i].max(f[j]));
+            cij = cij.clamp(lo, hi);
+            cji = cji.clamp(lo, hi);
+            if (f[i] >= f[j] && cij < cji) || (f[i] < f[j] && cij > cji) {
+                let m = 0.5 * (cij + cji);
+                cij = m;
+                cji = m;
+            }
+        }
+        (cij, cji)
+    };
+    let e = [edge(0), edge(1), edge(2)];
+    let q: Vec<f64> = (0..3).map(|i| f[i] + dot(g[i], sub(s, p[i])) / 3.0).collect();
+    // the interior point next to edge k, from the normal derivative being linear along it
+    let inner = |k: usize| -> f64 {
+        let (i, j) = (k, (k + 1) % 3);
+        let t = sub(p[j], p[i]);
+        let nrm = [-t[1], t[0]];
+        let (ai, aj) = (sub(p[i], s), sub(p[j], s));
+        let det = ai[0] * aj[1] - ai[1] * aj[0];
+        let di = (nrm[0] * aj[1] - nrm[1] * aj[0]) / det;
+        let dj = (ai[0] * nrm[1] - ai[1] * nrm[0]) / det;
+        let ds = -(di + dj);
+        let (cij, cji) = e[k];
+        let c0 = di * f[i] + dj * cij + ds * q[i];
+        let c2 = di * cji + dj * f[j] + ds * q[j];
+        (0.5 * (c0 + c2) - di * cij - dj * cji) / ds
+    };
+    let inn = [inner(0), inner(1), inner(2)];
+    let pt: Vec<f64> = (0..3).map(|i| (q[i] + inn[i] + inn[(i + 2) % 3]) / 3.0).collect();
+    let centre = (pt[0] + pt[1] + pt[2]) / 3.0;
+    // the sub-triangle (i, j, s) holding x and its barycentric coordinates
+    let bary = |i: usize, j: usize| -> [f64; 3] {
+        let (v0, v1, v2) = (sub(p[i], s), sub(p[j], s), sub(x, s));
+        let det = v0[0] * v1[1] - v0[1] * v1[0];
+        let li = (v2[0] * v1[1] - v2[1] * v1[0]) / det;
+        let lj = (v0[0] * v2[1] - v0[1] * v2[0]) / det;
+        [li, lj, 1.0 - li - lj]
+    };
+    let mut best = (0usize, [0.0; 3], f64::NEG_INFINITY);
+    for k in 0..3 {
+        let l = bary(k, (k + 1) % 3);
+        let m = l[0].min(l[1]).min(l[2]);
+        if m > best.2 {
+            best = (k, l, m);
+        }
+    }
+    let (k, l, _) = best;
+    let (i, j) = (k, (k + 1) % 3);
+    let (cij, cji) = e[k];
+    let (a, b, c) = (l[0], l[1], l[2]);
+    f[i] * a * a * a
+        + f[j] * b * b * b
+        + centre * c * c * c
+        + 3.0 * (cij * a * a * b + cji * a * b * b + q[i] * a * a * c + q[j] * b * b * c + pt[i] * a * c * c + pt[j] * b * c * c)
+        + 6.0 * inn[k] * a * b * c
+}
+
+/// h4: the Clough-Tocher read on the split at block coordinates `(fx, fy)`. `grad` from [`gradients`]; `step(p, q)` whether the edge between cells `p` and `q` is a D8 step
+/// (its control polygon is kept monotone). Returns the value and the lowest and highest corner of the macro triangle (for the overshoot).
+#[allow(clippy::too_many_arguments)]
+pub fn read_ct(z: &[f64], w: usize, h: usize, split: &[u8], grad: &[[f64; 2]], step: &dyn Fn(usize, usize) -> bool, fx: f64, fy: f64) -> (f64, f64, f64) {
+    let ix = (fx.floor().max(0.0) as usize).min(w - 2);
+    let iy = (fy.floor().max(0.0) as usize).min(h - 2);
+    let (u, v) = ((fx - ix as f64).clamp(0.0, 1.0), (fy - iy as f64).clamp(0.0, 1.0));
+    let q = iy * w + ix;
+    let t = triangle(q, w, split[q], u, v);
+    let f = [z[t[0].0], z[t[1].0], z[t[2].0]];
+    let g = [grad[t[0].0], grad[t[1].0], grad[t[2].0]];
+    let mono = [step(t[0].0, t[1].0), step(t[1].0, t[2].0), step(t[2].0, t[0].0)];
+    let val = clough_tocher([t[0].1, t[1].1, t[2].1], f, g, mono, [u, v]);
+    (val, f[0].min(f[1]).min(f[2]), f[0].max(f[1]).max(f[2]))
+}
+
+// ---------------------------------------------------------------- h3: the skeleton (spikes #138)
+
+/// h3: the base read `base` (C1) lowered toward each D8 diagonal step line of the block near the point, never raised: within `full` L cells of a step line (the segment
+/// between the two cell centres) to the line's linear value at the point's projection, falling off smoothly to no change at `outer` L cells. `diag(q)` lists the quad's
+/// diagonal steps as (from, to) block indices; `l` is L cells a block cell.
+#[allow(clippy::too_many_arguments)]
+pub fn read_skeleton(z: &[f64], w: usize, h: usize, diag: &dyn Fn(usize) -> Option<(usize, usize)>, base: f64, fx: f64, fy: f64, l: f64, full: f64, outer: f64) -> f64 {
+    let ix = (fx.floor().max(0.0) as i64).min(w as i64 - 2);
+    let iy = (fy.floor().max(0.0) as i64).min(h as i64 - 2);
+    let mut out = base;
+    for qy in (iy - 1)..=(iy + 1) {
+        for qx in (ix - 1)..=(ix + 1) {
+            if qx < 0 || qy < 0 || qx > w as i64 - 2 || qy > h as i64 - 2 {
+                continue;
+            }
+            let Some((a, b)) = diag(qy as usize * w + qx as usize) else { continue };
+            let (ax, ay, bx, by) = ((a % w) as f64, (a / w) as f64, (b % w) as f64, (b / w) as f64);
+            let (dx, dy) = (bx - ax, by - ay);
+            let t = (((fx - ax) * dx + (fy - ay) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+            let dist = ((fx - ax - t * dx).powi(2) + (fy - ay - t * dy).powi(2)).sqrt() * l;
+            if dist >= outer {
+                continue;
+            }
+            let target = z[a] + t * (z[b] - z[a]);
+            if target >= base {
+                continue;
+            }
+            let s = ((dist - full) / (outer - full)).clamp(0.0, 1.0);
+            let weight = 1.0 - s * s * (3.0 - 2.0 * s);
+            out = out.min(base - weight * (base - target));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // spec: GEN-189 (reading 19, KH h4): the Clough-Tocher read reproduces a plane and is continuous across the split and across quads.
+    #[test]
+    fn clough_tocher_plane_and_continuity() {
+        let (w, h) = (4, 4);
+        let plane: Vec<f64> = (0..w * h).map(|p| 2.0 * (p % w) as f64 + 3.0 * (p / w) as f64 + 1.0).collect();
+        let g = gradients(&plane, w, h);
+        let split = vec![MAIN, ANTI, MAIN, ANTI, MAIN, ANTI, MAIN, ANTI, MAIN, ANTI, MAIN, ANTI, MAIN, ANTI, MAIN, ANTI];
+        for (fx, fy) in [(0.3, 0.7), (1.5, 1.2), (2.9, 0.1), (1.0, 2.5)] {
+            let (v, _, _) = read_ct(&plane, w, h, &split, &g, &|_, _| false, fx, fy);
+            assert!((v - (2.0 * fx + 3.0 * fy + 1.0)).abs() < 1e-9, "a plane at ({fx}, {fy}): {v}");
+        }
+        // a rough block: values match on both sides of the split diagonal and of a quad edge
+        let z: Vec<f64> = (0..w * h).map(|p| ((p * 37 % 11) as f64) * 10.0).collect();
+        let g = gradients(&z, w, h);
+        let e = 1e-7;
+        let side = |fx: f64, fy: f64| read_ct(&z, w, h, &split, &g, &|_, _| false, fx, fy).0;
+        assert!((side(0.5 + e, 0.5 - e) - side(0.5 - e, 0.5 + e)).abs() < 1e-4, "across the split");
+        assert!((side(1.0 - e, 0.4) - side(1.0 + e, 0.4)).abs() < 1e-4, "across a quad edge");
+        // the corners are the heights
+        assert!((side(1.0, 1.0) - z[5]).abs() < 1e-9);
+    }
+
+    // spec: GEN-189 (reading 19, KH h3): the skeleton never raises, lowers to the step line on it, and leaves cells far from any step unchanged.
+    #[test]
+    fn skeleton_lowers_along_the_step_only() {
+        let z = [100.0, 200.0, 200.0, 0.0];
+        let diag = |q: usize| (q == 0).then_some((0usize, 3usize));
+        let on = read_skeleton(&z, 2, 2, &diag, 150.0, 0.5, 0.5, 8.0, 1.0, 2.0);
+        assert_eq!(on, 50.0);
+        let far = read_skeleton(&z, 2, 2, &diag, 150.0, 1.0, 0.0, 8.0, 1.0, 2.0);
+        assert_eq!(far, 150.0);
+        let low = read_skeleton(&z, 2, 2, &diag, 10.0, 0.5, 0.5, 8.0, 1.0, 2.0);
+        assert_eq!(low, 10.0, "never raised");
+    }
 
     // spec: GEN-189 (reading 19, KH): a read at a node is the node's height; a quad split along a step keeps the step's diagonal linear.
     #[test]
