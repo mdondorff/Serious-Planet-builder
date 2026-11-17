@@ -133,3 +133,92 @@ M1, H from today's H1: RG-1 lowers about 40 % of K6''s cells; RG-2 as K6'.
 
 ![F1, H from K6'](images/ks-f1-k6p.jpg)
 F1, H from K6': lowering at most 5.2 m; no residual.
+
+## Addendum: KS on the new start, KH(h4c) + r' (spikes lane, lead #140, 2026-11-17)
+Question: what does KS do on the start that SPIKE-136 settled, KH(h4c) + the band with a sea floor, against KS on `C1(z_s)` + `r` above? How much of KS's work did the hand-over take over?
+Time box: half a day (used: about 3 h).
+
+Code location: spikes' branch `spike/kh-stage` @ c9344138 (never merged): `crates/cache/examples/ks_kh.rs`, a copy of this spike's `ks_g1b` (e359dfae). Explorer told (2026-11-17); `spike/ks-g1b` is untouched.
+- `--kh c1`: the code above, unchanged except `g2: None` for main's `GateInput`. It reproduces this spike's R1h rows exactly (`raw/ks-c1check-r1h.csv` against `raw/ks-c1-r1h.csv`).
+- `--kh h4c`: KS's base is KH(h4c)(`z_s`) + `r'` (`planet_generators::bake::kh`, reading 20).
+  - `r'` = max(`r`, sea + 0.5 m - KH) on the cells where KH(`z_s`) lies above the sea level + 0.5 m, so the base stays at or above that level there (reading 17).
+  - KS lowers the base by min(max(0, `r'` - band), budget, base - (sea + 0.5 m)).
+- `S0` stays the reference of every measure (ridges, saddles, the gate's relief), as above.
+- KS's lowering (RG-1, RG-2) is dumped, and SPIKE-135's probe (`repair_debt`, spike/repair-debt) splits it by `S0`'s defect class.
+- H from today's K6. The other rules are those of section 1 (budget, protected cells, counted cells, gate).
+- Tables: `raw/ks-kh-tables.md`, built by `tools/ks_kh_tables.py raw r1h r3a r3b m1 f1` from `raw/ks-kh-<w>.csv` (this run), `raw/ks-c1-<w>.csv` (section 3's runs, H from today; the same values as `raw/ks.csv`'s `h1` rows) and the split lines `raw/split-kh-<w>.txt`, `raw/split-c1-<w>.txt` (SPIKE-135's probe; `split-c1` from SPIKE-135's `raw/ladder-<w>.csv`).
+
+### The band's sea floor
+Over the box (from `raw/ks-kh-run-<w>.txt`):
+
+| Window | Cells floored | Of them within 2 km of KH's sea | Volume raised, km3 | Base against `S0`: lower / higher over 10 m, cells | Reading 17's clamp held KS below its budget, cells summed over RG-1 and RG-2 |
+|---|---|---|---|---|---|
+| R1h | 24,186 | 3,712 | 0.637 | 372,341 / 191,685 | 257,889 |
+| R3a | 57,806 | 412 | 0.065 | 5,915 / 993 | 1,018,149 |
+| R3b | 6,004 | 41 | 0.004 | 110,658 / 29,943 | 233,493 |
+| M1 | 0 | 0 | 0 | 2,607,168 / 2,118,673 | 0 |
+| F1 | 11,964 | 0 | 0.033 | 41,331 / 8,823 | 246,443 |
+
+- "Within 2 km of KH's sea": within 20 L cells (Chebyshev) of a cell where KH(`z_s`) lies at or below 0 m.
+- Most floored cells lie inland, where the band dips the base under 0.5 m, not on the coast.
+- The clamp is broad on R3a's coastal plain, where the base lies just above 0.5 m.
+- The base's differences from `S0` are SPIKE-136's: KH against the C1 read.
+
+- Cells where KH(`z_s`) itself lies at or below the sea level + 0.5 m are not floored. "Land at or below 0 m" counts the cells of `S0`'s land in the box whose base is at or below 0 m: 0 (M1) to 71,615 (R3a) in RG-0. They include cells with KH(`z_s`) between 0 and 0.5 m where `r` is negative.
+- Reading 17's clamp keeps KS from adding any: these counts are the same in RG-1 and RG-2. On `C1` + `r` KS pushed 2,454-57,118 land cells under the sea on four windows (M1 none).
+
+### Results
+River gate on the stages, G-DRAIN (% of river cells in closed basins):
+
+| Start | Stage | R1h | R3a | R3b | M1 | F1 |
+|---|---|---|---|---|---|---|
+| `C1(z_s)` + `r` | RG-0 | 67.3 | 53.5 | 62.3 | 88.0 | 73.0 |
+| `C1(z_s)` + `r` | RG-2 | 66.0 | 52.0 | 62.0 | 86.5 | 72.2 |
+| KH(h4c) + `r'` | RG-0 | 36.3 | 32.0 | 11.8 | 61.4 | 54.0 |
+| KH(h4c) + `r'` | RG-1 | 32.1 | 29.9 | 11.2 | 55.2 | 53.2 |
+| KH(h4c) + `r'` | RG-2 | 21.0 | 22.6 | 8.1 | 43.5 | 49.7 |
+
+KS's lowering, volume / requested, km3:
+
+| Start | Stage | R1h | R3a | R3b | M1 | F1 |
+|---|---|---|---|---|---|---|
+| `C1(z_s)` + `r` | RG-1 | 4.68 / 4.70 | 0.44 / 0.44 | 0.27 / 0.27 | 46.15 / 49.50 | 0.33 / 0.33 |
+| `C1(z_s)` + `r` | RG-2 | 18.24 / 18.27 | 1.84 / 1.84 | 1.56 / 1.56 | 208.74 / 220.11 | 3.10 / 3.10 |
+| KH(h4c) + `r'` | RG-1 | 4.57 / 4.70 | 0.35 / 0.44 | 0.26 / 0.27 | 46.15 / 49.50 | 0.32 / 0.33 |
+| KH(h4c) + `r'` | RG-2 | 12.57 / 12.65 | 1.52 / 1.59 | 1.07 / 1.08 | 105.71 / 109.95 | 2.64 / 2.64 |
+
+- **RG-1 asks for the same.** KS0's want is `r` - H, with H from H1 at 814 m; the hand-over does not change it. The volume falls only where reading 17's clamp holds it (R1h, R3a; by 0.01 km3 on R3b and F1).
+- **RG-2 asks 14-50 % less and lowers 15-49 % less.** Its H_f comes from the routing of KS0, which drains better on the new start.
+- Residuals: the same in RG-1. In RG-2: 141 against 299 (R1h), 23,480 against 55,787 (M1), 0 elsewhere.
+
+SPIKE-135's split of KS's lowering, share on interpolation-class cells / on cells with no `S0` breach, %:
+
+| Window | RG-1, `C1` | RG-1, KH | RG-2, `C1` | RG-2, KH |
+|---|---|---|---|---|
+| R1h | 41 / 50 | 42 / 49 | 33 / 63 | 22 / 74 |
+| R3a | 5 / 92 | 6 / 91 | 7 / 91 | 4 / 95 |
+| R3b | 8 / 90 | 9 / 90 | 19 / 80 | 7 / 92 |
+| M1 | 51 / 36 | 51 / 36 | 46 / 47 | 28 / 64 |
+| F1 | 14 / 78 | 14 / 77 | 16 / 81 | 14 / 79 |
+
+- On the new start, KS1 spends less of its lowering on the interpolation defects (M1 46 to 28 %, R3b 19 to 7 %): the hand-over already removed them. Its remaining work lies more on cells `S0` does not need breached. That is the band against H_f, not a drainage repair.
+
+Ridges and saddles against `S0` (`raw/ks-kh-tables.md`):
+- On the new start, RG-0 already has 0.49-7.10 % of `S0`'s ridge cells lower than `S0` by over 20 m. That is the hand-over itself: KH against the C1 read (SPIKE-136 addendum 3).
+- KS adds 0.00-0.93 points.
+- The cut-through saddle count (a ridge cell lowered over 20 m next to a channel `S0` does not have) rises to 54-13,008 at RG-2, against 0-3,432 on `C1`. It is not measured at RG-0 (no channels are routed there), so the RG-0 cells of `raw/ks-kh-tables.md` read "-".
+  - It is measured against `S0`'s ridges and channels, so on the new start it also counts the hand-over's own moves of channels and ridges.
+  - It does not compare with section 3's count. KS's own share was not separated.
+
+### Reading
+1. **The hand-over took over most of the drainage repair; KS's lowering is about the same.**
+   - Before KS, the new start already brings G-DRAIN from 53.5-88.0 % (`S0`) to 11.8-61.4 %.
+   - KS then takes it further, to 8.1-49.7 % after RG-2. On `C1` + `r`, KS took it only from 53.5-88.0 % to 52.0-86.5 %.
+   - KS's requested lowering is unchanged in RG-1 and 14-50 % lower in RG-2.
+2. **KS works on the band, not on the drainage defects.** Of KS1's lowering on the new start, 64-95 % lies on cells `S0` does not need breached (`C1`: 47-91 %).
+3. **Reading 17 holds.**
+   - The band's floor lifts the base on the cells where KH lies above the sea + 0.5 m.
+   - KS adds no land below the sea.
+   - Land at or below 0 m stays only where KH itself is that low: coastal strips, 0-71,615 cells.
+
+One line: **the hand-over takes over the drainage repair. River length in basins before KS falls from 54-88 % to 12-61 %, and after KS1 it reaches 8-50 %, against 52-86 % on `C1` + `r`. KS0's request is unchanged (its lowering 0-19 % smaller, where reading 17's clamp holds it) and KS1's lowering is 15-49 % smaller; KS stays the band against HAND.**
