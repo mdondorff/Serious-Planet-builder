@@ -330,6 +330,25 @@ mod tests {
         assert_eq!(rows[1].label, "start @ r1h");
     }
 
+    // spec: TEST-137, BUILD-060
+    #[test]
+    fn a_row_carries_its_own_graph_stages_and_partition_and_the_table_prints_a_class_row() {
+        let rows = table_rows(&s(&["r1h#graph=C:/g/r1h.txt#stages=C:/st", "C:/w/b-m1@m1#partition=a.txt,b.txt", "r3a"])).unwrap();
+        assert_eq!(rows[0].label, "start @ r1h");
+        assert_eq!(rows[0].args, s(&["--window", "1,8056,8675,760,1379,14", "--graph", "C:/g/r1h.txt", "--stages", "C:/st"]));
+        assert_eq!(rows[1].args[..4], s(&["--store", "C:/w/b-m1", "--window", "4,6600,7219,10200,10819,15"])[..]);
+        assert_eq!(rows[1].args[4..], s(&["--partition", "a.txt,b.txt"])[..]);
+        assert!(!rows[2].args.contains(&"--graph".to_string()), "a row without a suffix reads no graph");
+        assert!(table_rows(&s(&["r1h#gaph=x"])).unwrap_err().contains("#graph=, #stages= or #partition="));
+        assert!(table_rows(&s(&["r1h#graph="])).is_err());
+        let out = "RIVER-GATE fields: river_cells=4 g_nodes=6\nRIVER-GATE classes: g_nodes=correctness\n";
+        let classes = parse_classes(out);
+        assert_eq!(classes, vec![("g_nodes".to_string(), "correctness".to_string())]);
+        let (md, csv) = render_table(&[("x".to_string(), parse_fields(out).unwrap())], &classes);
+        assert!(md.contains("| class |  | correctness |") && csv.contains("\"class\",,correctness"), "{md}{csv}");
+        assert!(parse_classes("RIVER-GATE fields: a=1").is_empty());
+    }
+
     // spec: BUILD-055
     #[test]
     fn a_missing_target_an_unknown_option_a_missing_value_and_two_windows_are_refused() {
