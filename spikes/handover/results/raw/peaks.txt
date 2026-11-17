@@ -1,0 +1,11 @@
+# peak.ps1 lines (wall time incl. setup, peak working set)
+handover r1h: BAKE-TIME 394 s, peak working set 5,74 GB, exit 
+handover_low r1h: BAKE-TIME 49 s, peak working set 1,78 GB, exit 
+handover r3a: BAKE-TIME 485 s, peak working set 5,77 GB, exit 
+handover_low r3a: BAKE-TIME 51 s, peak working set 1,78 GB, exit 
+handover r3b: BAKE-TIME 452 s, peak working set 5,66 GB, exit 
+handover_low r3b: BAKE-TIME 43 s, peak working set 1,78 GB, exit 
+handover m1: BAKE-TIME 560 s, peak working set 5,61 GB, exit 
+handover_low m1: BAKE-TIME 54 s, peak working set 1,78 GB, exit 
+handover f1: BAKE-TIME 505 s, peak working set 5,65 GB, exit 
+handover_low f1: BAKE-TIME 64 s, peak working set 1,78 GB, exit 

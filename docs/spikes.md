@@ -31,13 +31,14 @@ Per-spike register sections of M5 and M6: `docs/archive/M6/spikes.md`. Closed sp
 | SPIKE-124 | Protect lakes (E5) | closed 11-15: K7 leak fixed | `spikes/lakes-protect/results/results.md` |
 | SPIKE-125 | Variant G (P3 E3) | closed 11-16: passes bars; up to 2x B's saddles | `spikes/e3-variant-g/results/results.md` |
 | SPIKE-126 | Ponding rule on B's trunks (D-1) | closed 11-16: ponds rescue 0-13 %; rises are D-2 | `spikes/ponding/results/results.md` |
-| SPIKE-127 | H1 on sills of S0 (G1a) | closed 11-17: 59 % of D-2 gain a route; see SPIKE-131 | `spikes/g1a-sills/results/results.md` |
-| SPIKE-129 | KG-trunk at L (G1c) | closed 11-17: continuous; lakes cut it (DEC) | `spikes/g1c-trunk/results/results.md` |
-| SPIKE-131 | K5' on sills (G1a) | closed 11-17: stop test an artefact; not adopted | `spikes/k5p-sills/results/results.md` |
+| SPIKE-127 | H1 on sills of S0 (G1a) | closed 11-17: 59 % of D-2 gain a route | `spikes/g1a-sills/results/results.md` |
+| SPIKE-129 | KG-trunk at L (G1c) | closed 11-17: continuous | `spikes/g1c-trunk/results/results.md` |
+| SPIKE-131 | K5' on sills (G1a) | closed 11-17: not adopted | `spikes/k5p-sills/results/results.md` |
 | SPIKE-130 | Basin topology (G1e) | closed 11-17: stable under layouts; S0 3-19 % in basins | `spikes/basins-g1e/results/results.md` |
 | SPIKE-132 | KV and KC on the fixture (G1f) | closed 11-17: budget kept; fill clamp, 2 exceptions gaps | `spikes/kv-kc/results/results.md` |
-| SPIKE-135 | Repair debt of S0 by origin (ladder z_b to S0) | closed 11-17: 77-93 % of S0's breach from the read at L; F1 base | `spikes/repair-debt/results/results.md` |
-| SPIKE-134 | Deep H1 basins on trunks, origin (decision 5) | closed 11-17: base z_b depressions; Earth at 814 m is resolution | `spikes/deep-basins/results/results.md` |
+| SPIKE-136 | Drained hand-over of z_s at L | closed 11-17: h2 + r (flow-diagonal TIN) starts KS | `spikes/handover/results/results.md` |
+| SPIKE-135 | Repair debt of S0 by origin | closed 11-17: most from the read of z_s at L | `spikes/repair-debt/results/results.md` |
+| SPIKE-134 | Deep H1 basins on trunks (decision 5) | closed 11-17: base z_b depressions | `spikes/deep-basins/results/results.md` |
 | SPIKE-133 | KG-trib extractor-1 on the fixture (G1d) | results 11-17: valid on fixture and 5 windows; producer memory | `spikes/kg-trib/results/results.md` |
 | SPIKE-128 | KS in isolation, five windows (G1b) | closed 11-17: stop rule not reached; M1 residual 0.23 % | `spikes/ks-g1b/results/results.md` |
 | SPIKE-137 | G1f chain runner, plumbing (R1h) | closed 11-17: R1h end to end, 11 min, 12.9 GiB peak | `spikes/rg-chain/results/results.md` |

@@ -1,0 +1,6 @@
+window,comparison,land,lowered10,lowered50,raised10,raised50,ridge_lowered10,ridge_lowered50,lowered_p95_m,lowered_max_m
+r3a,h1 breach at L: bilinear(z_s) - h1 = bilinear(814 m lowering),19998573,28984,1365,0,0,3509,417,3.704,151.69
+r3a,h2 against bilinear(z_s): bilinear - TIN,19998573,15899,212,3301,12,2611,111,1.854,100.83
+r3a,C1(z_s) against bilinear(z_s): C1 - bilinear,19998573,4537,0,11735,0,1665,0,2.044,31.81
+r3a,h1 against C1(z_s): C1 - h1,19998573,33053,1494,7916,0,5022,459,2.547,167.43
+r3a,h2 against C1(z_s): C1 - TIN,19998573,18512,53,9600,31,4464,34,2.555,96.77
