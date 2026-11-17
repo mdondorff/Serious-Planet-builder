@@ -1978,12 +1978,12 @@ fn main() -> Result<(), String> {
     let on = |s: &str| !skip.contains(&s);
     let regions: usize = value(&args, "--regions").map_or(Ok(1), str::parse).map_err(|_| "--regions 1 | 2")?;
     let mut timing: Vec<(String, f64, u64, u64)> = Vec::new();
-    let mut stamp = |name: &str, t: Instant| {
+    let mut stamp = |name: &str, secs: f64| {
         let (peak, now) = memory_mib();
-        println!("RG stage {name}: {:.1} s; peak working set {peak} MiB, now {now} MiB", t.elapsed().as_secs_f64());
-        timing.push((name.to_string(), t.elapsed().as_secs_f64(), peak, now));
+        println!("RG stage {name}: {secs:.1} s; peak working set {peak} MiB, now {now} MiB");
+        timing.push((name.to_string(), secs, peak, now));
     };
-    stamp("setup (S0, ocean, H1 base)", t_all);
+    stamp("setup (S0, ocean, H1 base)", t_all.elapsed().as_secs_f64());
     let n_l = w * h;
     let dx_l = grid.dx() / L as f64;
     let gl = Grid::new(w, h, dx_l);
@@ -2007,7 +2007,7 @@ fn main() -> Result<(), String> {
     let t = Instant::now();
     let budget_l = planet_cache::river_gate_graph::budget_field(&start, w, h, L, dx_l, 25_000.0);
     let budget: Vec<f64> = (0..cells).map(|c| budget_l[((c / rw) * L) * w + (c % rw) * L]).collect();
-    stamp("budget field", t);
+    stamp("budget field", t.elapsed().as_secs_f64());
 
     // ---- KH: the hand-over (c1: C1(z_s) + r, the start surface S0 itself)
     // ---- HAND at H1 (z_s over the channel cell the 814 m flow path reaches)
@@ -2050,7 +2050,7 @@ fn main() -> Result<(), String> {
     let (ks0, res0) = if ks_mode == "off" { (start.clone(), Vec::new()) } else { ks(&hand_l) };
     drop(hand_l);
     println!("RG KS0 ({}): {} cells lowered, {} residuals", if ks_mode == "off" { "off: S0" } else { "S0 - min(max(0, r - C1(HAND)), budget)" }, (0..n_l).filter(|&p| ks0[p] < start[p]).count(), res0.len());
-    stamp("KS0", t);
+    stamp("KS0", t.elapsed().as_secs_f64());
 
     // ---- KG-trunk (spikes' code, G1c) on KS0
     let t = Instant::now();
@@ -2061,38 +2061,14 @@ fn main() -> Result<(), String> {
         Graph { body: BODY, nodes: Vec::new(), reaches: Vec::new(), basins: Vec::new() }
     };
     println!("RG KG-trunk: {} nodes, {} reaches", g.nodes.len(), g.reaches.len());
-    stamp("KG-trunk", t);
+    stamp("KG-trunk", t.elapsed().as_secs_f64());
 
-    // ---- basins (crusader's G1e) on KS0, the L trunk reaches as spill receivers
-    let t = Instant::now();
+    // ---- the L stages per domain (#166a gap 2): one domain (the window), or two regions cut at a tile column, each run on its own window: its core and a halo of 16 H1 cells
+    // (13 km, plan section 3.2), the window's border its exits except the entry cells, which carry the A_d of the H1 cell outside that drains into them (crusader's G1d rule).
+    // Each domain keeps the graph items its core's tiles own and its core's cells; the stitched result is the regions' answer.
     let gid_l = |c: usize| gid(x0 as u64 + (c % w) as u64, y0 as u64 + (c / w) as u64);
     let tile_l = |c: usize| Domain::Tile { face: face.0, ti: ((x0 as u64 + (c % w) as u64) / TILE) as u32, tj: ((y0 as u64 + (c / w) as u64) / TILE) as u32 };
     let sea_l: Vec<bool> = (0..n_l).map(|c| start[c] <= sea).collect();
-    let exit: Vec<bool> = (0..n_l).map(|c| !sea_l[c] && (c % w == 0 || c / w == 0 || c % w == w - 1 || c / w == h - 1)).collect();
-    let outlet_l: Vec<bool> = (0..n_l).map(|c| sea_l[c] || exit[c]).collect();
-    let mut kept = vec![false; n_l];
-    for p in 0..n_l {
-        kept[p] = protected_h1[parent(p)];
-    }
-    if on("basins") {
-        use planet_generators::bake::basins_rg::{produce, BasinParams};
-        use planet_generators::bake::river_graph::Represented;
-        let l_trunks: Vec<GReach> = g.reaches.iter().filter(|r| r.level == Level::L).cloned().collect();
-        let pb = produce(&gl, &ks0, &outlet_l, &l_trunks, &tile_l, &BasinParams::l(BODY));
-        for b in pb.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface) {
-            for &c in &pb.cells[&b.id] {
-                kept[c] = true;
-            }
-        }
-        let have: HashSet<u64> = g.nodes.iter().map(|x| x.id).collect();
-        g.nodes.extend(pb.nodes.iter().filter(|x| !have.contains(&x.id)).cloned());
-        g.basins.extend(pb.basins.iter().cloned());
-        println!("RG basins: {} L basins ({} kept), {} unresolved spills", pb.basins.len(), pb.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface).count(), pb.unresolved.len());
-    }
-    stamp("basins", t);
-
-    // ---- KG-trib (crusader's G1d extractor-1) on KS0, A_crit 1 km2
-    let t = Instant::now();
     let land_h1: Vec<f64> = (0..cells).filter(|&c| solve.zs[c] > 0.0).map(|c| f64::from(runoff[c])).collect();
     let runoff_mean = land_h1.iter().sum::<f64>() / land_h1.len().max(1) as f64;
     let to_local = |id: u64| -> Option<usize> {
@@ -2100,97 +2076,215 @@ fn main() -> Result<(), String> {
         let (lx, ly) = (x as i64 - x0, y as i64 - y0);
         (lx >= 0 && ly >= 0 && (lx as usize) < w && (ly as usize) < h).then(|| ly as usize * w + lx as usize)
     };
-    let mut fine: Option<(Vec<u32>, Vec<bool>)> = None;
-    if on("kg-trib") {
-        use planet_generators::bake::kg_trib::{extract, Input, Params, Trunk};
-        let trunks: Vec<Trunk> = g
-            .reaches
-            .iter()
-            .filter(|r| r.level == Level::L)
-            .filter_map(|r| {
-                let v: Option<Vec<usize>> = r.vertices.iter().map(|&c| to_local(c)).collect();
-                let down = g.nodes.iter().find(|x| x.id == r.down)?.clone();
-                v.map(|vertices| Trunk { id: r.id, vertices, attrs: r.attrs.clone(), down })
-            })
-            .collect();
-        let zero = vec![0.0; n_l];
-        let inp = Input { grid: &gl, z: &ks0, sea: &sea_l, exit: &exit, trunks: &trunks, kept: &kept, seed_ext: &zero, tile: &tile_l, gid: &gid_l, keep_fields: false };
-        let ex = extract(&inp, &Params { mfd_init: false, ..Params::plan(BODY, runoff_mean) });
-        let have: HashSet<u64> = g.nodes.iter().map(|x| x.id).collect();
-        g.nodes.extend(ex.nodes.iter().filter(|x| !have.contains(&x.id)).cloned());
-        g.reaches.extend(ex.reaches.iter().cloned());
-        println!("RG KG-trib: {} reaches, {} nodes, {} open ends", ex.reaches.len(), ex.nodes.len(), ex.open_ends);
-        fine = Some((ex.receiver, ex.channel));
-    }
-    g.sort();
-    stamp("KG-trib", t);
-
-    // ---- KS1: H_f by flow path on KG-trib's routing of KS0: KS0 over the bed of the first graph cell on the receiver chain (the rasterised reach's bed code; the cell's KS0 where no reach owns it)
-    let t = Instant::now();
-    let (ks_out, res_ks) = match (ks_mode, &fine) {
-        ("ks1", Some((receiver, channel))) => {
-            let raster = rasterise(&g);
-            let mut bed = vec![f64::NAN; n_l];
-            let reach_at: HashMap<u64, &GReach> = g.reaches.iter().map(|r| (r.id, r)).collect();
-            for (&cell, &(rid, k)) in &raster {
-                if let Some(c) = to_local(cell) {
-                    bed[c] = f64::from(reach_at[&rid].attrs.bed[k]) * 0.5;
+    // the region of a tile-owned item (by the tile's column), None for the landmass
+    let owner_region = |d: Domain| -> Option<usize> {
+        match d {
+            Domain::Landmass => None,
+            Domain::Tile { ti, .. } => Some(region_of(((u64::from(ti) * TILE) as i64 - x0).max(0) as usize)),
+        }
+    };
+    let l_trunks: Vec<GReach> = g.reaches.iter().filter(|r| r.level == Level::L).cloned().collect();
+    let on_trunk: HashSet<usize> = l_trunks.iter().flat_map(|r| r.vertices.iter().filter_map(|&c| to_local(c))).collect();
+    let mut ks_out = ks0.clone();
+    let mut kv_out = ks0.clone();
+    let mut kc_out = ks0.clone();
+    let mut res_ks: Vec<(usize, f64, f64)> = Vec::new();
+    let mut res_kvkc: Vec<planet_generators::bake::river_graph::Residual> = Vec::new();
+    let mut extra = Graph { body: BODY, nodes: Vec::new(), reaches: Vec::new(), basins: Vec::new() };
+    let (mut t_basins, mut t_trib, mut t_ks1, mut t_kvkc) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+    for d in 0..regions.max(1) {
+        // the domain's window: its core's H1 cells and 16 rings around them, inside the whole window
+        let core_h1: Vec<bool> = (0..cells).map(|c| region_of((c % rw) * L) == d).collect();
+        let mut win_h1 = core_h1.clone();
+        if regions == 2 {
+            for _ in 0..16 {
+                let prev = win_h1.clone();
+                for c in 0..cells {
+                    if !prev[c] {
+                        let (cx, cy) = ((c % rw) as i64, (c / rw) as i64);
+                        win_h1[c] = (-1..=1i64).any(|dy| (-1..=1i64).any(|dx| {
+                            let (x, y) = (cx + dx, cy + dy);
+                            x >= 0 && y >= 0 && (x as usize) < rw && (y as usize) < rh && prev[y as usize * rw + x as usize]
+                        }));
+                    }
                 }
             }
-            // targets in topological order of the receivers (downstream first)
-            let order_d = topological_order(receiver);
-            let mut tgt = vec![f64::NAN; n_l];
-            for &c in &order_d {
-                let c = c as usize;
-                let r = receiver[c];
-                tgt[c] = if channel[c] || r == NONE {
-                    if bed[c].is_finite() { bed[c] } else { ks0[c] }
-                } else {
-                    tgt[r as usize]
-                };
-            }
-            let hf = per_region(&|p| (ks0[p] - tgt[p].max(sea)).max(0.0));
-            let (z, res) = ks(&hf);
-            println!("RG KS1 = S0 - min(max(0, r - H_f), budget): {} cells lowered, {} residuals", (0..n_l).filter(|&p| z[p] < start[p]).count(), res.len());
-            (z, res)
         }
-        ("ks1", None) => return Err("--ks ks1 needs KG-trib's routing: do not skip kg-trib".into()),
-        _ => (ks0.clone(), res0.clone()),
-    };
-    drop(ks0);
-    stamp("KS1", t);
-
-    // ---- KV and KC (crusader's G1f spike code) on the KS output, within the budget KS left
-    let t = Instant::now();
-    let remain: Vec<f64> = (0..n_l).map(|p| (budget_l[p] - (start[p] - ks_out[p]).max(0.0)).max(0.0)).collect();
-    let (kv_out, kc_out, res_kvkc) = if on("kv") || on("kc") {
-        use planet_generators::bake::kv_kc::{run, KvParams, Switch};
-        let sw = match (on("kv"), on("kc")) {
-            (true, true) => Switch::Both,
-            (true, false) => Switch::KvOnly,
-            _ => Switch::KcOnly,
-        };
-        // KV and KC read a reach's vertices as cells of their grid (the fixture's ids): a copy of the graph with the L reaches inside the window in window cells; ids unchanged
-        let mut g_local = g.clone();
-        g_local.reaches = g
-            .reaches
-            .iter()
-            .filter(|r| r.level == Level::L)
-            .filter_map(|r| {
-                let v: Option<Vec<u64>> = r.vertices.iter().map(|&c| to_local(c).map(|x| x as u64)).collect();
-                v.map(|vertices| GReach { vertices, ..r.clone() })
+        let active: Vec<bool> = (0..n_l).map(|p| win_h1[parent(p)]).collect();
+        let core: Vec<bool> = (0..n_l).map(|p| core_h1[parent(p)]).collect();
+        let border: Vec<bool> = (0..n_l)
+            .map(|p| {
+                let (x, y) = ((p % w) as i64, (p / w) as i64);
+                active[p]
+                    && (-1..=1i64).any(|dy| (-1..=1i64).any(|dx| {
+                        let (a, b) = (x + dx, y + dy);
+                        a < 0 || b < 0 || a as usize >= w || b as usize >= h || !active[b as usize * w + a as usize]
+                    }))
             })
             .collect();
-        println!("RG KV/KC input: {} of {} L reaches inside the window", g_local.reaches.len(), g.reaches.iter().filter(|r| r.level == Level::L).count());
-        let r = run(&gl, &ks_out, &sea_l, &g_local, &kept, &remain, &KvParams::plan(dx_l), sw);
-        let kv = if on("kv") { r.kv.clone() } else { ks_out.clone() };
-        let kc = if on("kc") { r.kc.clone() } else { kv.clone() };
-        println!("RG KV/KC ({sw:?}): {} residuals, {} KC patches", r.residuals.len(), r.patches.len());
-        (kv, kc, r.residuals)
-    } else {
-        (ks_out.clone(), ks_out.clone(), Vec::new())
-    };
-    stamp("KV and KC", t);
+        let mut seed = vec![0.0f64; n_l];
+        let mut entry = vec![false; n_l];
+        if regions == 2 {
+            for q in 0..cells {
+                let to = h1.routing.receiver[q];
+                if win_h1[q] || to == NONE || !win_h1[to as usize] {
+                    continue;
+                }
+                let (tx, ty) = ((to as usize % rw) * L, (to as usize / rw) * L);
+                let mut best: Option<usize> = None;
+                for y in ty..ty + L {
+                    for x in tx..tx + L {
+                        let p = y * w + x;
+                        if !border[p] || sea_l[p] || on_trunk.contains(&p) {
+                            continue;
+                        }
+                        let touches = (-1..=1i64).any(|dy| (-1..=1i64).any(|dx| {
+                            let (a, b) = (x as i64 + dx, y as i64 + dy);
+                            a >= 0 && b >= 0 && (a as usize) < w && (b as usize) < h && parent(b as usize * w + a as usize) == q
+                        }));
+                        if touches && best.is_none_or(|b| start[p] < start[b] || (start[p] == start[b] && p < b)) {
+                            best = Some(p);
+                        }
+                    }
+                }
+                if let Some(p) = best {
+                    entry[p] = true;
+                    seed[p] += h1.d8[q];
+                }
+            }
+        }
+        let exit: Vec<bool> = (0..n_l).map(|p| border[p] && !sea_l[p] && !entry[p]).collect();
+        let outlet_d: Vec<bool> = (0..n_l).map(|p| active[p] && (sea_l[p] || exit[p])).collect();
+        let grid_d = Grid::new(w, h, dx_l).with_active(active.clone());
+        let mut kept = vec![false; n_l];
+        for p in 0..n_l {
+            kept[p] = protected_h1[parent(p)];
+        }
+        let mut gd = Graph { body: BODY, nodes: g.nodes.clone(), reaches: l_trunks.clone(), basins: Vec::new() };
+        // basins (crusader's G1e) on KS0, the L trunk reaches as spill receivers
+        let t = Instant::now();
+        if on("basins") {
+            use planet_generators::bake::basins_rg::{produce, BasinParams};
+            use planet_generators::bake::river_graph::Represented;
+            let pb = produce(&grid_d, &ks0, &outlet_d, &l_trunks, &tile_l, &BasinParams::l(BODY));
+            for b in pb.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface) {
+                for &c in &pb.cells[&b.id] {
+                    kept[c] = true;
+                }
+            }
+            gd.nodes.extend(pb.nodes.iter().cloned());
+            gd.basins.extend(pb.basins.iter().cloned());
+            println!("RG domain {d} basins: {} L basins ({} kept), {} unresolved spills", pb.basins.len(), pb.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface).count(), pb.unresolved.len());
+        }
+        t_basins += t.elapsed().as_secs_f64();
+        // KG-trib (crusader's G1d extractor-1) on KS0, A_crit 1 km2
+        let t = Instant::now();
+        let mut fine: Option<(Vec<u32>, Vec<bool>)> = None;
+        if on("kg-trib") {
+            use planet_generators::bake::kg_trib::{extract, Input, Params, Trunk};
+            let trunks: Vec<Trunk> = l_trunks
+                .iter()
+                .filter_map(|r| {
+                    let v: Option<Vec<usize>> = r.vertices.iter().map(|&c| to_local(c)).collect();
+                    let down = g.nodes.iter().find(|x| x.id == r.down)?.clone();
+                    v.map(|vertices| Trunk { id: r.id, vertices, attrs: r.attrs.clone(), down })
+                })
+                .collect();
+            let inp = Input { grid: &grid_d, z: &ks0, sea: &sea_l, exit: &exit, trunks: &trunks, kept: &kept, seed_ext: &seed, tile: &tile_l, gid: &gid_l, keep_fields: false };
+            let ex = extract(&inp, &Params { mfd_init: false, ..Params::plan(BODY, runoff_mean) });
+            gd.nodes.extend(ex.nodes.iter().cloned());
+            gd.reaches.extend(ex.reaches.iter().cloned());
+            println!("RG domain {d} KG-trib: {} reaches, {} nodes, {} open ends, {} entry cells", ex.reaches.len(), ex.nodes.len(), ex.open_ends, entry.iter().filter(|&&e| e).count());
+            fine = Some((ex.receiver, ex.channel));
+        }
+        let mut seen: HashSet<u64> = HashSet::new();
+        gd.nodes.retain(|x| seen.insert(x.id));
+        gd.sort();
+        t_trib += t.elapsed().as_secs_f64();
+        // KS1: H_f by flow path on the domain's KG-trib routing of KS0 (the rasterised reach's bed code; the cell's KS0 where no reach owns it)
+        let t = Instant::now();
+        let (ks_d, res_d) = match (ks_mode, &fine) {
+            ("ks1", Some((receiver, channel))) => {
+                let raster = rasterise(&gd);
+                let mut bed = vec![f64::NAN; n_l];
+                let reach_at: HashMap<u64, &GReach> = gd.reaches.iter().map(|r| (r.id, r)).collect();
+                for (&cell, &(rid, k)) in &raster {
+                    if let Some(c) = to_local(cell) {
+                        bed[c] = f64::from(reach_at[&rid].attrs.bed[k]) * 0.5;
+                    }
+                }
+                let mut tgt = vec![f64::NAN; n_l];
+                for &c in &topological_order(receiver) {
+                    let c = c as usize;
+                    let r = receiver[c];
+                    tgt[c] = if channel[c] || r == NONE {
+                        if bed[c].is_finite() { bed[c] } else { ks0[c] }
+                    } else {
+                        tgt[r as usize]
+                    };
+                }
+                let hf: Vec<f64> = (0..n_l).map(|p| if active[p] { (ks0[p] - tgt[p].max(sea)).max(0.0) } else { f64::INFINITY }).collect();
+                ks(&hf)
+            }
+            ("ks1", None) => return Err("--ks ks1 needs KG-trib's routing: do not skip kg-trib".into()),
+            _ => (ks0.clone(), res0.iter().filter(|r| core[r.0]).cloned().collect()),
+        };
+        println!("RG domain {d} KS: {} core cells lowered, {} core residuals", (0..n_l).filter(|&p| core[p] && ks_d[p] < start[p]).count(), res_d.iter().filter(|r| core[r.0]).count());
+        t_ks1 += t.elapsed().as_secs_f64();
+        // KV and KC (crusader's G1f) on the domain's KS output, within the budget KS left; the domain's L reaches in window cells (the module reads vertices as grid cells)
+        let t = Instant::now();
+        let (kv_d, kc_d, rkc) = if on("kv") || on("kc") {
+            use planet_generators::bake::kv_kc::{run, KvParams, Switch};
+            let sw = match (on("kv"), on("kc")) {
+                (true, true) => Switch::Both,
+                (true, false) => Switch::KvOnly,
+                _ => Switch::KcOnly,
+            };
+            let remain: Vec<f64> = (0..n_l).map(|p| (budget_l[p] - (start[p] - ks_d[p]).max(0.0)).max(0.0)).collect();
+            let mut g_local = gd.clone();
+            g_local.reaches = gd
+                .reaches
+                .iter()
+                .filter(|r| r.level == Level::L)
+                .filter_map(|r| {
+                    let v: Option<Vec<u64>> = r.vertices.iter().map(|&c| to_local(c).map(|x| x as u64)).collect();
+                    v.map(|vertices| GReach { vertices, ..r.clone() })
+                })
+                .collect();
+            let r = run(&gl, &ks_d, &sea_l, &g_local, &kept, &remain, &KvParams::plan(dx_l), sw);
+            let kv = if on("kv") { r.kv.clone() } else { ks_d.clone() };
+            let kc = if on("kc") { r.kc.clone() } else { kv.clone() };
+            println!("RG domain {d} KV/KC ({sw:?}): {} residuals, {} KC patches", r.residuals.len(), r.patches.len());
+            (kv, kc, r.residuals)
+        } else {
+            (ks_d.clone(), ks_d.clone(), Vec::new())
+        };
+        t_kvkc += t.elapsed().as_secs_f64();
+        // the domain's share: its core's cells and residuals, the items its core's tiles own
+        for p in (0..n_l).filter(|&p| core[p]) {
+            (ks_out[p], kv_out[p], kc_out[p]) = (ks_d[p], kv_d[p], kc_d[p]);
+        }
+        res_ks.extend(res_d.into_iter().filter(|r| core[r.0]));
+        res_kvkc.extend(rkc.into_iter().filter(|r| r.cell < n_l && core[r.cell]));
+        let mine = |o: Domain| regions == 1 || owner_region(o) == Some(d);
+        extra.nodes.extend(gd.nodes.iter().filter(|x| x.owner != Domain::Landmass && mine(x.owner)).cloned());
+        extra.reaches.extend(gd.reaches.iter().filter(|x| x.owner != Domain::Landmass && mine(x.owner)).cloned());
+        extra.basins.extend(gd.basins.iter().filter(|x| x.owner != Domain::Landmass && mine(x.owner)).cloned());
+    }
+    let have: HashSet<u64> = g.nodes.iter().map(|x| x.id).collect();
+    let mut seen: HashSet<u64> = have.clone();
+    g.nodes.extend(extra.nodes.into_iter().filter(|x| seen.insert(x.id)));
+    let mut seen_r: HashSet<u64> = g.reaches.iter().map(|x| x.id).collect();
+    g.reaches.extend(extra.reaches.into_iter().filter(|x| seen_r.insert(x.id)));
+    let mut seen_b: HashSet<u64> = g.basins.iter().map(|x| x.id).collect();
+    g.basins.extend(extra.basins.into_iter().filter(|x| seen_b.insert(x.id)));
+    g.sort();
+    drop(ks0);
+    println!("RG domains: {} nodes, {} reaches, {} basins after the stitch", g.nodes.len(), g.reaches.len(), g.basins.len());
+    for (name, secs) in [("basins", t_basins), ("KG-trib", t_trib), ("KS1", t_ks1), ("KV and KC", t_kvkc)] {
+        stamp(name, secs);
+    }
+
 
     // ---- outputs: what river-gate --graph --stages --partition reads (BUILD-060), and the final surface
     let t = Instant::now();
@@ -2222,7 +2316,7 @@ fn main() -> Result<(), String> {
     }
     let bytes: Vec<u8> = kc_out.iter().flat_map(|v| v.to_le_bytes()).collect();
     std::fs::write(out_dir.join(format!("{tag}-final-{w}x{h}.f64")), bytes).map_err(|e| e.to_string())?;
-    stamp("write", t);
+    stamp("write", t.elapsed().as_secs_f64());
     {
         let mut f = std::fs::File::create(out_dir.join(format!("{tag}-timing.csv"))).map_err(|e| e.to_string())?;
         writeln!(f, "stage,seconds,peak_mib,now_mib").map_err(|e| e.to_string())?;
