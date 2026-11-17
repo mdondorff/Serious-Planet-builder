@@ -1,0 +1,11 @@
+stage,seconds,peak_mib,now_mib
+setup (S0, ocean, H1 base),40.7,1650,1337
+budget field,17.9,1860,1852
+KH (c1),0.1,3385,2872
+KS0,0.5,3385,2876
+KG-trunk,1.0,3500,2891
+basins,139.1,13800,4396
+KG-trib,227.5,13800,4396
+KS1,3.2,13800,4396
+KV and KC,164.0,13800,4396
+write,117.7,13800,4438

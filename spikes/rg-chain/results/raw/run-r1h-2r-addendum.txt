@@ -1,0 +1,27 @@
+RG stage setup (S0, ocean, H1 base): 40.0 s; peak working set 1627 MiB, now 1334 MiB
+RG stage budget field: 17.4 s; peak working set 1858 MiB, now 1850 MiB
+RG stage KH (c1): 0.1 s; peak working set 2889 MiB, now 2872 MiB
+RG KS0 (S0 - min(max(0, r - C1(HAND)), budget)): 991555 cells lowered, 103006 residuals
+RG stage KS0: 0.5 s; peak working set 3384 MiB, now 2875 MiB
+RG KG-trunk: 16881 nodes, 10088 reaches
+RG stage KG-trunk: 0.9 s; peak working set 3499 MiB, now 2890 MiB
+RG domain 0 basins: 31320 L basins (25234 kept), 1077 unresolved spills
+RG domain 0 KG-trib: 121320 reaches, 151555 nodes, 257 open ends, 204 entry cells
+RG domain 0 basins (second pass, tributaries as receivers): 31320 L basins, 712 unresolved spills; 74.9 s
+RG domain 0 KS: 886638 core cells lowered, 24208 core residuals
+RG domain 0 KV/KC (Both): 2622700 residuals, 29800 KC patches
+RG domain 1 basins: 25076 L basins (20843 kept), 1339 unresolved spills
+RG domain 1 KG-trib: 83369 reaches, 104463 nodes, 231 open ends, 239 entry cells
+RG domain 1 basins (second pass, tributaries as receivers): 25076 L basins, 506 unresolved spills; 60.9 s
+RG domain 1 KS: 612312 core cells lowered, 30267 core residuals
+RG domain 1 KV/KC (Both): 3018112 residuals, 32286 KC patches
+RG stitch: 300 junction markers without a reach ending at them dropped
+RG residual flags: Flagged { reaches: 27980, with_other: 595, no_feature: 29495 }
+RG domains: 322067 nodes, 209212 reaches, 55501 basins after the stitch; landmass items with different contents in two domains: 0
+RG stage basins: 139.5 s; peak working set 13431 MiB, now 4139 MiB
+RG stage KG-trib: 224.4 s; peak working set 13431 MiB, now 4139 MiB
+RG stage KS1: 5.1 s; peak working set 13431 MiB, now 4139 MiB
+RG stage KV and KC: 429.2 s; peak working set 13431 MiB, now 4139 MiB
+RG stage write: 123.8 s; peak working set 13431 MiB, now 4214 MiB
+RG done: kh c1, ks ks1, skipped [], regions 2; 322067 nodes, 209212 reaches, 55501 basins; files in C:/DEV/SeriousPlanetData/tmp/rg-chain4: r1h-2r-graph.txt, r1h-2r-stages/, r1h-2r-final-8160x8160.f64, r1h-2r-timing.csv; 996.1 s
+EXIT 0

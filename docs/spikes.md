@@ -41,6 +41,6 @@ Per-spike register sections of M5 and M6: `docs/archive/M6/spikes.md`. Closed sp
 | SPIKE-134 | Deep H1 basins on trunks (decision 5) | closed 11-17: base z_b depressions | `spikes/deep-basins/results/results.md` |
 | SPIKE-133 | KG-trib extractor-1 on the fixture (G1d) | results 11-17: valid on fixture and 5 windows; producer memory | `spikes/kg-trib/results/results.md` |
 | SPIKE-128 | KS in isolation, five windows (G1b) | closed 11-17: stop rule not reached; M1 residual 0.23 % | `spikes/ks-g1b/results/results.md` |
-| SPIKE-137 | G1f chain runner, plumbing (R1h) | closed 11-17: R1h end to end, 11 min, 12.9 GiB peak | `spikes/rg-chain/results/results.md` |
+| SPIKE-137 | G1f chain runner, plumbing (R1h) | closed 11-17: R1h 12 min, 13.5 GiB; 2 regions = 1 | `spikes/rg-chain/results/results.md` |
 
 Every exploration gets a `SPIKE-NN` entry.
