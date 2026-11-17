@@ -2268,7 +2268,9 @@ fn main() -> Result<(), String> {
             use planet_generators::bake::river_graph::Represented;
             // crusader's produce_ids (spike/g1d c75c8641): reach vertices read and every anchor and id written as global ids; Produced.cells in grid cells
             let ids = planet_generators::bake::basins_rg::CellIds { gid: &gid_l, local: &to_local };
+            { let (pk, nw) = memory_mib(); println!("RG mem before basin pass 1: peak {pk} MiB, now {nw} MiB"); }
             let pb = planet_generators::bake::basins_rg::produce_ids(&grid_d, &ks0, &outlet_d, &l_trunks, &tile_l, &BasinParams::l(BODY), &ids);
+            { let (pk, nw) = memory_mib(); println!("RG mem after basin pass 1: peak {pk} MiB, now {nw} MiB"); }
             for b in pb.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface) {
                 for &c in &pb.cells[&b.id] {
                     kept[c] = true;
@@ -2339,7 +2341,9 @@ fn main() -> Result<(), String> {
             let t2 = Instant::now();
             let all: Vec<GReach> = gd.reaches.iter().filter(|r| r.level == Level::L).cloned().collect();
             let ids = CellIds { gid: &gid_l, local: &to_local };
+            { let (pk, nw) = memory_mib(); println!("RG mem before basin pass 2: peak {pk} MiB, now {nw} MiB"); }
             let pb = produce_ids(&grid_d, &ks_d, &outlet_d, &all, &tile_l, &BasinParams::l(BODY), &ids);
+            { let (pk, nw) = memory_mib(); println!("RG mem after basin pass 2: peak {pk} MiB, now {nw} MiB"); }
             for p in 0..n_l {
                 kept[p] = protected_h1[parent(p)];
             }
