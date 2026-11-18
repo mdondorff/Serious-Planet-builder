@@ -984,28 +984,16 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
             .collect(),
         g2: input.g2.map(|x| {
             let land: Vec<bool> = z.iter().map(|&v| v > input.sea_level_m).collect();
-            // reading 21 (lead #168): the budget from S_KH when the row gives it, else from the start surface
-            let budget = x.stages.map(|_| {
-                budget_field(
-                    x.reference.unwrap_or(input.start),
-                    g.w(),
-                    g.h(),
-                    (params.h1_cell_m / g.dx()).round() as usize,
-                    g.dx(),
-                    R_RELIEF_M,
-                )
-            });
-            let reference = if x.reference.is_some() { "S_KH" } else { "start" };
+            // reading 28 (lead #170): the budget's relief field on the start surface S0; the stage fields carry the lowering against S_KH (reading 21)
+            let budget =
+                x.stages.map(|_| budget_field(input.start, g.w(), g.h(), (params.h1_cell_m / g.dx()).round() as usize, g.dx(), R_RELIEF_M));
             G2Report {
                 graph: x.graph.map(|gr| graph_report(gr, &x.window, input.inside, &land, g.dx())),
                 agreement: x
                     .graph
                     .map(|gr| params.network_km2.iter().map(|&a| agreement(gr, &x.window, &area, &land, input.inside, a * 1.0e6)).collect())
                     .unwrap_or_default(),
-                budget: x
-                    .stages
-                    .zip(budget.as_ref())
-                    .map(|(st, b)| budget_report(st, b, reference, &land, input.inside, x.residual_records, x.graph)),
+                budget: x.stages.zip(budget.as_ref()).map(|(st, b)| budget_report(st, b, &land, input.inside, x.residual_records, x.graph)),
                 partition: x.partition.map(|(a, b)| partition_report(a, b)),
             }
         }),

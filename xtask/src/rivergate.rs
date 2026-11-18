@@ -7,7 +7,7 @@ use std::path::Path;
 
 /// The options the example takes after the target, each with a value.
 /// `--graph`, `--stages` and `--partition` are BUILD-060's G2 inputs (a canonical graph file, a directory of per-stage budget fields, two graph files `one,two`).
-const OPTIONS: [&str; 12] = [
+const OPTIONS: [&str; 11] = [
     "--window",
     "--margin",
     "--min-cells",
@@ -18,12 +18,11 @@ const OPTIONS: [&str; 12] = [
     "--stages",
     "--partition",
     "--surface",
-    "--reference",
     "--corridor-bar",
 ];
 
 /// The G2 inputs a `--table` row may carry as `#key=value` suffixes (BUILD-060): the row's own graph, stages or partition pair.
-const ROW_INPUTS: [&str; 5] = ["graph", "stages", "partition", "surface", "reference"];
+const ROW_INPUTS: [&str; 4] = ["graph", "stages", "partition", "surface"];
 
 /// The canonical region windows (lead, 2026-11-14): `face,i0,i1,j0,j1,seed`, 620-cell cores (with the gate's 200-cell margin SPIKE-111's 1,020-cell windows). R1h is the E1 region stores'
 /// window (r3a-e1, r3a-p2, r3a-p2e). M1 (mountain belt) and F1 (low-gradient river landscape) are SPIKE-119's (spikes, 2026-11-15).
@@ -42,7 +41,7 @@ pub fn window_of(arg: &str) -> String {
 
 /// The example's arguments for the xtask's: the target becomes `--window` or `--store`; an unknown option, a missing value or a second window is refused.
 pub fn example_args(args: &[String]) -> Result<Vec<String>, String> {
-    let usage = "usage: cargo xtask river-gate <store dir | face,i0,i1,j0,j1,seed | r1h | r3a | r3b | m1 | f1 | grid=file,w,h,sea_level_m> [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--network-km2 A,B] [--graph FILE] [--stages DIR] [--partition ONE,TWO] [--surface FILE] [--reference FILE] [--corridor-bar PCT] [--no-key-check]";
+    let usage = "usage: cargo xtask river-gate <store dir | face,i0,i1,j0,j1,seed | r1h | r3a | r3b | m1 | f1 | grid=file,w,h,sea_level_m> [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--network-km2 A,B] [--graph FILE] [--stages DIR] [--partition ONE,TWO] [--surface FILE] [--corridor-bar PCT] [--no-key-check]";
     let Some(target) = args.first().filter(|a| !a.starts_with("--")) else { return Err(usage.to_string()) };
     let mut out = Vec::new();
     let window = window_of(target);
@@ -92,12 +91,14 @@ pub fn run_gate(root: &Path, args: &[String]) -> Res {
 pub struct TableRow {
     pub label: String,
     pub args: Vec<String>,
+    /// The run's chain file (`#chain=`, lead #169): read by the table only, never passed to the gate.
+    pub chain: Option<String>,
 }
 
 /// The rows of `river-gate --table <row>... [--windows W,W...] [options]` (BUILD-057): a row is a window (its start surface), `<store dir>@<window>` (the store on that window) or a store dir (on
 /// `--window`, default R1h); `--windows` adds one start-surface row per window. The other options go to every row. A row's label is the store's directory name or "start", then the window.
 pub fn table_rows(args: &[String]) -> Result<Vec<TableRow>, String> {
-    let usage = "usage: cargo xtask river-gate --table <window | store dir@window | store dir | grid=file,w,h,sea_level_m>... [--windows W,W...] [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--network-km2 A,B] [--corridor-bar PCT] [--no-key-check]; a row may end in #graph=FILE, #stages=DIR, #partition=ONE,TWO, #surface=FILE, #reference=FILE";
+    let usage = "usage: cargo xtask river-gate --table <window | store dir@window | store dir | grid=file,w,h,sea_level_m>... [--windows W,W...] [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--network-km2 A,B] [--corridor-bar PCT] [--no-key-check]; a row may end in #graph=FILE, #stages=DIR, #partition=ONE,TWO, #surface=FILE, #chain=FILE (the run's chain.txt: the row's label and its chain under the table)";
     let (mut targets, mut common, mut windows) = (Vec::new(), Vec::new(), Vec::new());
     let mut k = 0;
     while k < args.len() {
@@ -151,9 +152,14 @@ pub fn table_rows(args: &[String]) -> Result<Vec<TableRow>, String> {
             let mut parts = t.split('#');
             let t = &parts.next().unwrap_or_default().to_string();
             let mut extra: Vec<String> = Vec::new();
+            let mut chain = None;
             for p in parts {
+                if let Some(v) = p.strip_prefix("chain=").filter(|v| !v.is_empty()) {
+                    chain = Some(v.to_string());
+                    continue;
+                }
                 let (k, v) = p.split_once('=').filter(|(k, v)| ROW_INPUTS.contains(k) && !v.is_empty()).ok_or_else(|| {
-                    format!("a row's suffix is #graph=, #stages=, #partition=, #surface= or #reference=, not '#{p}'; {usage}")
+                    format!("a row's suffix is #graph=, #stages=, #partition=, #surface= or #chain=, not '#{p}'; {usage}")
                 })?;
                 extra.extend([format!("--{k}"), v.to_string()]);
             }
@@ -185,7 +191,7 @@ pub fn table_rows(args: &[String]) -> Result<Vec<TableRow>, String> {
             let mut args = a;
             args.extend(base.iter().filter(|x| window.is_some() || x.as_str() != "--no-key-check").cloned());
             args.extend(extra);
-            Ok(TableRow { label, args: example_args(&args)? })
+            Ok(TableRow { label, args: example_args(&args)?, chain })
         })
         .collect()
 }
@@ -204,6 +210,52 @@ pub fn parse_classes(out: &str) -> Vec<(String, String)> {
         .find_map(|l| l.strip_prefix("RIVER-GATE classes: "))
         .map(|line| line.split_whitespace().filter_map(|kv| kv.split_once('=')).map(|(k, v)| (k.to_string(), v.to_string())).collect())
         .unwrap_or_default()
+}
+
+/// A run's chain file (lead #169, BUILD-060): its `label` value and its `commit`, `switch` and `stage` lines, in the file's order.
+pub fn parse_chain(text: &str) -> (Option<String>, Vec<String>) {
+    let label = text.lines().find_map(|l| l.strip_prefix("label ")).map(|l| l.trim().to_string()).filter(|l| !l.is_empty());
+    let lines = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("commit ") || l.starts_with("switch ") || l.starts_with("stage "))
+        .map(str::to_string)
+        .collect();
+    (label, lines)
+}
+
+/// A row's label with its chain's: a start-surface row (`start @ w`) given a chain becomes `<chain label> @ w`; any other row keeps its label.
+pub fn chained_label(label: &str, chain_label: Option<&str>) -> String {
+    match (label.strip_prefix("start @ "), chain_label) {
+        (Some(w), Some(c)) => format!("{c} @ {w}"),
+        _ => label.to_string(),
+    }
+}
+
+/// The table's chain section: per row with a chain, its label and the chain's lines (markdown); empty without chains.
+pub fn render_chains(chains: &[(String, Vec<String>)]) -> String {
+    if chains.is_empty() {
+        return String::new();
+    }
+    let mut md = String::from(
+        "
+## Chains
+",
+    );
+    for (label, lines) in chains {
+        md.push_str(&format!(
+            "
+### {label}
+"
+        ));
+        for l in lines {
+            md.push_str(&format!(
+                "- `{l}`
+"
+            ));
+        }
+    }
+    md
 }
 
 /// The table of the rows' fields as (markdown, CSV): one row per run, the columns in the first run's order (every run prints the same columns); a value a row lacks is empty.
@@ -238,13 +290,25 @@ pub fn run_table(root: &Path, args: &[String]) -> Res {
     let rows = table_rows(args)?;
     let mut table = Vec::new();
     let mut classes: Vec<(String, String)> = Vec::new();
+    let mut chains: Vec<(String, Vec<String>)> = Vec::new();
     for row in &rows {
-        eprintln!("river-gate --table: {}", row.label);
+        let (label, chain) = match &row.chain {
+            Some(path) => {
+                let text = std::fs::read_to_string(path).map_err(|e| format!("{}: #chain={path}: {e}", row.label))?;
+                let (l, lines) = parse_chain(&text);
+                (chained_label(&row.label, l.as_deref()), Some(lines))
+            }
+            None => (row.label.clone(), None),
+        };
+        eprintln!("river-gate --table: {label}");
         let mut cmd: Vec<&str> = vec!["run", "--release", "-q", "-p", "planet-cache", "--example", "river_gate", "--"];
         cmd.extend(row.args.iter().map(String::as_str));
         let out = crate::util::capture(root, "cargo", &cmd)?;
         print!("{out}");
-        table.push((row.label.clone(), parse_fields(&out).map_err(|e| format!("{}: {e}", row.label))?));
+        table.push((label.clone(), parse_fields(&out).map_err(|e| format!("{label}: {e}"))?));
+        if let Some(lines) = chain {
+            chains.push((label, lines));
+        }
         for (k, c) in parse_classes(&out) {
             if !classes.iter().any(|(x, _): &(String, String)| *x == k) {
                 classes.push((k, c));
@@ -252,6 +316,7 @@ pub fn run_table(root: &Path, args: &[String]) -> Res {
         }
     }
     let (md, csv) = render_table(&table, &classes);
+    let md = md + &render_chains(&chains);
     let dir = root.join("target").join("review");
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     for (name, text) in [("river-gate-table.md", &md), ("river-gate-table.csv", &csv)] {
@@ -352,10 +417,12 @@ mod tests {
         assert!(!rows[2].args.contains(&"--graph".to_string()), "a row without a suffix reads no graph");
         let r = table_rows(&s(&["r1h#surface=C:/rg/r1h-final.f64#graph=g.txt"])).unwrap();
         assert_eq!(r[0].args[2..], s(&["--surface", "C:/rg/r1h-final.f64", "--graph", "g.txt"])[..]);
-        assert!(table_rows(&s(&["r1h#gaph=x"])).unwrap_err().contains("#graph=, #stages=, #partition=, #surface= or #reference="));
-        // lead #168: the budget's reference S_KH as a row suffix, and the corridor bar as an option
-        let r = table_rows(&s(&["r1h#stages=st#reference=C:/rg/skh.f64"])).unwrap();
-        assert_eq!(r[0].args[2..], s(&["--stages", "st", "--reference", "C:/rg/skh.f64"])[..]);
+        assert!(table_rows(&s(&["r1h#gaph=x"])).unwrap_err().contains("#graph=, #stages=, #partition=, #surface= or #chain="));
+        // lead #169: a row's chain file stays with the table, never goes to the gate; reading 28 retired #reference=
+        let r = table_rows(&s(&["r1h#stages=st#chain=C:/rg/r1h-chain.txt"])).unwrap();
+        assert_eq!(r[0].args[2..], s(&["--stages", "st"])[..]);
+        assert_eq!(r[0].chain.as_deref(), Some("C:/rg/r1h-chain.txt"));
+        assert!(table_rows(&s(&["r1h#reference=a.f64"])).is_err(), "reading 28: no budget reference");
         assert_eq!(example_args(&s(&["m1", "--corridor-bar", "95"])).unwrap()[2..], s(&["--corridor-bar", "95"])[..]);
         assert!(table_rows(&s(&["r1h#graph="])).is_err());
         let out = "RIVER-GATE fields: river_cells=4 g_nodes=6\nRIVER-GATE classes: g_nodes=correctness\n";
@@ -364,6 +431,29 @@ mod tests {
         let (md, csv) = render_table(&[("x".to_string(), parse_fields(out).unwrap())], &classes);
         assert!(md.contains("| class |  | correctness |") && csv.contains("\"class\",,correctness"), "{md}{csv}");
         assert!(parse_classes("RIVER-GATE fields: a=1").is_empty());
+    }
+
+    // spec: BUILD-060
+    #[test]
+    fn a_rows_chain_names_the_row_and_lists_its_commit_switches_and_stages_under_the_table() {
+        let text = "stage-chain 1
+window 0 0 8 8
+coarse 8
+cell_m 1
+label r1h-proto
+commit 9858448f
+switch kh h5
+stage 5 5 kh h5
+";
+        let (label, lines) = parse_chain(text);
+        assert_eq!(label.as_deref(), Some("r1h-proto"));
+        assert_eq!(lines, s(&["commit 9858448f", "switch kh h5", "stage 5 5 kh h5"]));
+        assert_eq!(chained_label("start @ r1h", label.as_deref()), "r1h-proto @ r1h");
+        assert_eq!(chained_label("b-r1h @ r1h", label.as_deref()), "b-r1h @ r1h", "a store row keeps its label");
+        assert_eq!(chained_label("start @ r1h", None), "start @ r1h");
+        let md = render_chains(&[("r1h-proto @ r1h".to_string(), lines)]);
+        assert!(md.contains("## Chains") && md.contains("### r1h-proto @ r1h") && md.contains("- `switch kh h5`"), "{md}");
+        assert!(render_chains(&[]).is_empty());
     }
 
     // spec: BUILD-055

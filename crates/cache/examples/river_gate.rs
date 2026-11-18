@@ -138,7 +138,6 @@ fn main() -> Result<(), String> {
         "--stages",
         "--partition",
         "--surface",
-        "--reference",
         "--corridor-bar",
     ];
     let mut k = 0;
@@ -359,19 +358,12 @@ fn main() -> Result<(), String> {
             "--stages: the budget field reads H1 blocks of {l} L cells, and the window's origin ({x0}, {y0}) is not on an H1 corner"
         ));
     }
-    // reading 21 (lead #168): the budget's reference surface S_KH on the window's L grid
-    let reference = match value(&args, "--reference") {
-        None => None,
-        Some(_) if stages.is_none() => return Err("--reference is the budget's surface: it goes with --stages".to_string()),
-        Some(path) => Some(read_surface(path, w * h)?),
-    };
     let g2_input = (graph.is_some() || partition.is_some() || stages.is_some()).then(|| G2Input {
         window: Window { x0: x0 as u64, y0: y0 as u64, w, h },
         graph: graph.as_ref(),
         stages: stages.as_deref(),
         residual_records,
         partition: partition.as_ref().map(|(a, b)| (a, b)),
-        reference: reference.as_deref(),
     });
     let report = measure(
         &GateInput {

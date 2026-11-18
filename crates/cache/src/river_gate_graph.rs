@@ -78,8 +78,6 @@ pub struct G2Input<'a> {
     pub residual_records: Option<usize>,
     /// The canonical graphs of one region and of two regions (the partition diff).
     pub partition: Option<(&'a Graph, &'a Graph)>,
-    /// The budget's reference surface `S_KH` on the window's L grid (reading 21, lead #168): the budget field is computed from it instead of the gate's start surface.
-    pub reference: Option<&'a [f64]>,
 }
 
 /// The graph report (BUILD-060 item 1).
@@ -161,8 +159,6 @@ pub struct BudgetReport {
     /// The same with stage `kh`'s lowering added (reading 21: the use against `S0`; equal to the above without a `kh` field).
     pub overrun_s0: usize,
     pub at_95_s0: usize,
-    /// The surface the budget field was computed from: `S_KH` (a reference given) or `start`.
-    pub reference: String,
     pub residual_records: Option<usize>,
     /// Reaches flagged `budget_residual` in the graph, when a graph is given.
     pub residual_reaches: Option<usize>,
@@ -453,7 +449,6 @@ pub fn budget_field(s0: &[f64], w: usize, h: usize, block: usize, dx: f64, r_rel
 pub fn budget_report(
     stages: &[StageField],
     budget: &[f64],
-    reference: &str,
     land: &[bool],
     inside: &[bool],
     residual_records: Option<usize>,
@@ -461,7 +456,6 @@ pub fn budget_report(
 ) -> BudgetReport {
     let n = budget.len();
     let mut r = BudgetReport {
-        reference: reference.to_string(),
         residual_records,
         residual_reaches: g.map(|g| g.reaches.iter().filter(|x| x.has_exception(Reason::BudgetResidual)).count()),
         ..BudgetReport::default()
@@ -600,7 +594,6 @@ impl G2Report {
             push("b_at_95_pct", format!("{:.3}", 100.0 * b.at_95 as f64 / b.land.max(1) as f64), Preservation);
             push("b_overrun_s0", b.overrun_s0.to_string(), Preservation);
             push("b_at_95_s0", b.at_95_s0.to_string(), Preservation);
-            push("b_reference", b.reference.clone(), Preservation);
             push("b_residual_records", b.residual_records.map_or("-".into(), |v| v.to_string()), Correctness);
             push("b_residual_reaches", b.residual_reaches.map_or("-".into(), |v| v.to_string()), Correctness);
         }
@@ -676,9 +669,8 @@ impl G2Report {
                 })
                 .collect();
             out.push(format!(
-                "RIVER-GATE budget [preservation; diagnostic fields, the f64 validator is the correctness gate]: over {} land cells inside, the budget from {}: {}; vs S_KH (ks, kv, kc) {} cells over the budget, {} at 95 % of it or more; vs S0 (kh added) {} over, {} at 95 % or more; residual records {}, residual reaches {}",
+                "RIVER-GATE budget [preservation; diagnostic fields, the f64 validator is the correctness gate]: over {} land cells inside, the budget from S0's relief: {}; vs S_KH (ks, kv, kc) {} cells over the budget, {} at 95 % of it or more; vs S0 (kh added) {} over, {} at 95 % or more; residual records {}, residual reaches {}",
                 b.land,
-                b.reference,
                 st.join("; "),
                 b.overrun,
                 b.at_95,
