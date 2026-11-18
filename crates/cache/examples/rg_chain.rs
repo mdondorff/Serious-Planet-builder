@@ -1783,6 +1783,14 @@ fn l_rivers(z: &[f64], w: usize, h: usize, dx: f64, sea: f64, a_min: f64) -> Vec
 #[allow(clippy::type_complexity)]
 fn main() -> Result<(), String> {
     let t_all = Instant::now();
+    // the commit and the tree's state at the run's start (lead #169: chain.txt names them; read now, since the worktree may change branch before the run ends)
+    let run_commit = std::process::Command::new("git")
+        .args(["rev-parse", "--short=8", "HEAD"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map_or("unknown".to_string(), |v| v.trim().to_string());
+    let run_dirty = std::process::Command::new("git").args(["status", "--porcelain", "--untracked-files=no"]).output().map_or(true, |o| !o.stdout.is_empty());
     let args: Vec<String> = std::env::args().skip(1).collect();
     let win: Vec<usize> = value(&args, "--window")
         .ok_or("--window face,i0,i1,j0,j1,seed")?
@@ -2748,13 +2756,7 @@ fn main() -> Result<(), String> {
     // lead #169 item 2, #170 item 9: the run's chain (`{tag}-chain.txt`, and the chain layout's chain.txt): the commit, every switch's value and every stage's form, in the
     // execution order of pipeline-technical.md section 0.1 (`stage <step> <stage number> <name> <form>`)
     let chain_text = {
-        let commit = std::process::Command::new("git")
-            .args(["rev-parse", "--short=8", "HEAD"])
-            .output()
-            .ok()
-            .and_then(|o| String::from_utf8(o.stdout).ok())
-            .map_or("unknown".to_string(), |v| v.trim().to_string());
-        let dirty = std::process::Command::new("git").args(["status", "--porcelain", "--untracked-files=no"]).output().map_or(true, |o| !o.stdout.is_empty());
+        let (commit, dirty) = (&run_commit, run_dirty);
         let on_off = |s: &str, form: &str| if on(s) { form.to_string() } else { "skipped".to_string() };
         let ks_form = |pass: &str| match ks_mode {
             "off" => "off".to_string(),
