@@ -20,7 +20,7 @@ use planet_cache::river_gate::{
     GateParams, LWindow, RawGrid, WindowIdentity, GRID_BORDER, GRID_CELL_M,
 };
 use planet_cache::river_gate_graph::{
-    h1_trunks, read_graph, read_stages, read_surface, G2Input, Window, CORRIDOR_MIN_PCT, CORRIDOR_MIN_PCT_MOUNTAIN,
+    h1_trunks, read_graph, read_kc_patches, read_stages, read_surface, G2Input, Window, CORRIDOR_MIN_PCT, CORRIDOR_MIN_PCT_MOUNTAIN,
 };
 use planet_core::{Face, TangentWarp, Vec3};
 use planet_generators::global::{read_elevation_c1, GlobalSample, LatticeSource, ReadError};
@@ -377,12 +377,18 @@ fn main() -> Result<(), String> {
             "--stages: the budget field reads H1 blocks of {l} L cells, and the window's origin ({x0}, {y0}) is not on an H1 corner"
         ));
     }
+    // lead #172: KC's patches written beside the stage fields
+    let kc_patches = match value(&args, "--stages") {
+        Some(dir) => read_kc_patches(Path::new(dir))?,
+        None => None,
+    };
     let g2_input = (graph.is_some() || partition.is_some() || stages.is_some()).then(|| G2Input {
         window: Window { x0: x0 as u64, y0: y0 as u64, w, h },
         graph: graph.as_ref(),
         stages: stages.as_deref(),
         residual_records,
         partition: partition.as_ref().map(|(a, b)| (a, b)),
+        kc_patches,
     });
     let report = measure(
         &GateInput {

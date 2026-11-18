@@ -81,6 +81,8 @@ pub struct G2Input<'a> {
     pub residual_records: Option<usize>,
     /// The canonical graphs of one region and of two regions (the partition diff).
     pub partition: Option<(&'a Graph, &'a Graph)>,
+    /// KC's patches written with the stages (`kc-patches.csv`, lead #172): their count and total volume (m3), when given.
+    pub kc_patches: Option<(usize, f64)>,
 }
 
 /// The graph report (BUILD-060 item 1).
@@ -164,7 +166,12 @@ pub struct StageUse {
     pub fill_max_m: f64,
     /// Cells whose fill exceeds the budget.
     pub fill_over: usize,
+    /// Cells the stage lowers by more than [`OVER_CUT_M`] (plan section 4.1: ground lowered over 50 m per stage).
+    pub over_cut: usize,
 }
+
+/// A stage's lowering counted as deep (metres): the plan's "ground lowered > 50 m" per stage (lead #172).
+pub const OVER_CUT_M: f64 = 50.0;
 
 /// The budget report (BUILD-060 item 3).
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -180,6 +187,8 @@ pub struct BudgetReport {
     pub residual_records: Option<usize>,
     /// Reaches flagged `budget_residual` in the graph, when a graph is given.
     pub residual_reaches: Option<usize>,
+    /// KC's patches: count and total volume (m3), when the stages carry `kc-patches.csv`.
+    pub kc_patches: Option<(usize, f64)>,
 }
 
 /// The partition diff (BUILD-060 item 4): the changes between the canonical graphs of one and of two regions, the topology changes among them, and the first change.
@@ -596,6 +605,7 @@ pub fn budget_report(
             }
         }
         u.lowered = low.len();
+        u.over_cut = low.iter().filter(|&&l| l > OVER_CUT_M).count();
         u.lower_max_m = low.iter().copied().fold(0.0, f64::max);
         u.lower_p50_m = quant(&mut low, 0.5);
         u.lower_p95_m = quant(&mut low, 0.95);
@@ -702,6 +712,7 @@ impl G2Report {
                 push(&format!("b_{n}_lowered_pct"), format!("{:.2}", 100.0 * s.lowered as f64 / b.land.max(1) as f64), Preservation);
                 push(&format!("b_{n}_p95_m"), format!("{:.1}", s.lower_p95_m), Preservation);
                 push(&format!("b_{n}_max_m"), format!("{:.1}", s.lower_max_m), Preservation);
+                push(&format!("b_{n}_over50"), s.over_cut.to_string(), Preservation);
                 push(&format!("b_{n}_filled"), s.filled.to_string(), Preservation);
                 push(&format!("b_{n}_fill_max_m"), format!("{:.1}", s.fill_max_m), Preservation);
                 push(&format!("b_{n}_fill_over"), s.fill_over.to_string(), Preservation);
@@ -714,6 +725,10 @@ impl G2Report {
             push("b_at_95_s0", b.at_95_s0.to_string(), Preservation);
             push("b_residual_records", b.residual_records.map_or("-".into(), |v| v.to_string()), Correctness);
             push("b_residual_reaches", b.residual_reaches.map_or("-".into(), |v| v.to_string()), Correctness);
+            if let Some((count, volume)) = b.kc_patches {
+                push("b_kc_patches", count.to_string(), Preservation);
+                push("b_kc_patch_km3", format!("{:.4}", volume / 1.0e9), Preservation);
+            }
         }
         if let Some(p) = &self.partition {
             push("part_changes", p.changes.to_string(), Partition);
@@ -861,6 +876,40 @@ pub fn read_graph(path: &str) -> Result<Graph, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
     Graph::parse(&text).map_err(|e| format!("{path}: {e}"))
 }
+
+/// KC's patches of a stage directory (lead #172): `kc-patches.csv`, a header `cells,volume_m3` and one line per patch; none when the file is missing. A line that is not two numbers
+/// is refused naming the file and the line.
+pub fn read_kc_patches(dir: &Path) -> Result<Option<(usize, f64)>, String> {
+    let p = dir.join("kc-patches.csv");
+    if !p.exists() {
+        return Ok(None);
+    }
+    let text = std::fs::read_to_string(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+    let (mut count, mut volume) = (0usize, 0.0f64);
+    for (k, line) in text.lines().enumerate().skip(1).filter(|(_, l)| !l.trim().is_empty()) {
+        let v = line.split(',').nth(1).and_then(|x| x.trim().parse::<f64>().ok()).ok_or(format!(
+            "{}: line {}: not `cells,volume_m3`",
+            p.display(),
+            k + 1
+        ))?;
+        count += 1;
+        volume += v;
+    }
+    Ok(Some((count, volume)))
+}
+
+/// The spectrum bars (plan section 4.1, lead #172): the relief spectrum slope `beta` within the benchmark's range ([`BETA_MIN`] to [`BETA_MAX`], SPIKE-119's 25 GLO-30 and 3DEP
+/// tiles), as two bars (too steep, too rough), geomorphology. The comparison with B's loss is the table's (BUILD-060).
+pub fn spectrum_bars(beta: f64) -> Vec<Bar> {
+    vec![
+        Bar { name: "bar_spectrum_steep".into(), value: beta, limit: BETA_MIN, at_most: false, class: GateClass::Geomorphology },
+        Bar { name: "bar_spectrum_rough".into(), value: beta, limit: BETA_MAX, at_most: true, class: GateClass::Geomorphology },
+    ]
+}
+
+/// The benchmark's spectrum range (SPIKE-119's benchmark.csv: 25 GLO-30 and 3DEP tiles).
+pub const BETA_MIN: f64 = -4.13;
+pub const BETA_MAX: f64 = -2.05;
 
 /// The per-stage budget fields of a directory (BUILD-060): `<stage>-lower.u16` and `<stage>-fill.u16` for stage ks, kv, kc (little-endian u16 of 0.1 m, row-major on the window's L grid; a missing
 /// file is a stage that did not run, or a stage without fills), and `residuals.csv` (a header and one line per residual record), when present.
