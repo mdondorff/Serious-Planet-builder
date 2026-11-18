@@ -2335,6 +2335,8 @@ fn main() -> Result<(), String> {
     let on_trunk: HashSet<usize> = l_trunks.iter().flat_map(|r| r.vertices.iter().filter_map(|&c| to_local(c))).collect();
     // the stitched KS, KV and KC outputs (lead #168 item 2, memory): made after the first domain's KV/KC, not before; with one region the domain's own fields are moved in
     let mut outs: Option<(Vec<f64>, Vec<f64>, Vec<f64>)> = None;
+    // reading 18: one region's accumulated L trunk attributes, written into the stitched graph
+    let mut acc_trunks: HashMap<u64, planet_generators::bake::river_graph::Attrs> = HashMap::new();
     let mut res_ks: Vec<(usize, f64, f64)> = Vec::new();
     let mut res_kvkc: Vec<planet_generators::bake::river_graph::Residual> = Vec::new();
     let mut extra = Graph { body: BODY, nodes: Vec::new(), reaches: Vec::new(), basins: Vec::new() };
@@ -2454,7 +2456,7 @@ fn main() -> Result<(), String> {
         let t = Instant::now();
         let mut fine: Option<(Vec<u32>, Vec<bool>)> = None;
         if on("kg-trib") {
-            use planet_generators::bake::kg_trib::{extract, Input, Params, Trunk};
+            use planet_generators::bake::kg_trib::{accumulate_trunks, extract, Input, Params, Trunk};
             let trunks: Vec<Trunk> = l_trunks
                 .iter()
                 .filter_map(|r| {
@@ -2478,6 +2480,14 @@ fn main() -> Result<(), String> {
             let ex = extract(&inp, &Params { mfd_init: false, ..Params::plan(BODY, runoff_mean) });
             gd.nodes.extend(ex.nodes.iter().cloned());
             gd.reaches.extend(ex.reaches.iter().cloned());
+            // reading 18 (lead #170 item 4): the landmass pass, the L trunks' areas and discharge (q_w, KV's width) accumulated at L from their tributaries and hillslope
+            let trunk_ids: BTreeSet<u64> = l_trunks.iter().map(|r| r.id).collect();
+            let inflow = |id: u64| to_local(id).map_or((0.0, 0.0), |c| (dx_l * dx_l + ex.d8[c], dx_l * dx_l + ex.d8_no_ext[c]));
+            let acc = accumulate_trunks(&mut gd, &trunk_ids, &inflow, runoff_mean);
+            println!("RG domain {d} reading 18: {} trunk reaches accumulated at L, {} unordered, {} heads over their H1 seed", acc.reaches, acc.unordered, acc.heads_over_seed);
+            if regions <= 1 {
+                acc_trunks = gd.reaches.iter().filter(|r| trunk_ids.contains(&r.id)).map(|r| (r.id, r.attrs.clone())).collect();
+            }
             println!(
                 "RG domain {d} KG-trib: {} reaches, {} nodes, {} open ends, {} entry cells",
                 ex.reaches.len(),
@@ -2663,6 +2673,11 @@ fn main() -> Result<(), String> {
     println!("RG residual flags: {flagged:?}");
     drop(ks0);
     let (ks_out, kv_out, kc_out) = outs.expect("at least one domain");
+    for r in g.reaches.iter_mut() {
+        if let Some(a) = acc_trunks.remove(&r.id) {
+            r.attrs = a;
+        }
+    }
     println!("RG domains: {} nodes, {} reaches, {} basins after the stitch; landmass items with different contents in two domains: {landmass_conflicts}", g.nodes.len(), g.reaches.len(), g.basins.len());
     for (name, secs) in [("basins", t_basins), ("KG-trib", t_trib), ("KS1", t_ks1), ("KV and KC", t_kvkc)] {
         stamp(name, secs);
