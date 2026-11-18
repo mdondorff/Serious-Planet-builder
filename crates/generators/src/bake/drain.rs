@@ -163,9 +163,37 @@ pub fn drain_selective(
     cut_cap: &dyn Fn(usize) -> f64,
     fill_cap: &dyn Fn(usize) -> f64,
 ) -> (Vec<f64>, DrainStats) {
+    let (z, st, _) = drain_selective_report(z0, w, h, outlet, keep, area, max_rounds, search, cut_cap, fill_cap);
+    (z, st)
+}
+
+/// A depression [`drain_selective`] left: its floor cell, its cells, its depth (fill level - floor) and its least breach cut (+inf when no path was found).
+#[derive(Clone, Copy, Debug)]
+pub struct Deep {
+    pub floor: usize,
+    pub cells: usize,
+    pub depth: f64,
+    pub cut: f64,
+}
+
+/// [`drain_selective`] that also returns the depressions of its last round neither breached nor filled (spikes #147: the census per stage).
+#[allow(clippy::too_many_arguments)]
+pub fn drain_selective_report(
+    z0: &[f64],
+    w: usize,
+    h: usize,
+    outlet: &[bool],
+    keep: &dyn Fn(usize) -> bool,
+    area: &dyn Fn(usize) -> f64,
+    max_rounds: usize,
+    search: usize,
+    cut_cap: &dyn Fn(usize) -> f64,
+    fill_cap: &dyn Fn(usize) -> f64,
+) -> (Vec<f64>, DrainStats, Vec<Deep>) {
     let n = w * h;
     let mut z = z0.to_vec();
     let mut st = DrainStats::default();
+    let mut deeps: Vec<Deep> = Vec::new();
     let mut dist = vec![f64::INFINITY; n];
     let mut parent = vec![u32::MAX; n];
     let mut seen: Vec<usize> = Vec::new();
@@ -177,12 +205,13 @@ pub fn drain_selective(
         if active.is_empty() {
             st.kept = comps.len();
             st.left = 0;
-            return (z, st);
+            return (z, st, Vec::new());
         }
         st.depressions += active.len();
         let mut fills: Vec<usize> = Vec::new();
         let mut cuts: Vec<(usize, f64)> = Vec::new();
         let mut deep = 0usize;
+        deeps.clear();
         for &k in &active {
             let (cells, floor) = &comps[k];
             let zf = z[*floor];
@@ -238,12 +267,12 @@ pub fn drain_selective(
             }
             seen.clear();
             let fill_ok = lv - zf <= fill_cap(*floor);
-            let (breach_ok, breach_v) = if path.is_empty() {
-                (false, f64::INFINITY)
+            let (breach_ok, breach_v, cut) = if path.is_empty() {
+                (false, f64::INFINITY, f64::INFINITY)
             } else {
                 let v: f64 = path.iter().enumerate().map(|(i, &c)| (z[c] - z[c].min(zf - DELTA * i as f64)).max(0.0) * area(c)).sum();
                 let cut: f64 = path.iter().enumerate().map(|(i, &c)| z[c] - z[c].min(zf - DELTA * i as f64)).fold(0.0, f64::max);
-                (cut <= cut_cap(*floor), v)
+                (cut <= cut_cap(*floor), v, cut)
             };
             if breach_ok && (!fill_ok || breach_v <= fill_v) {
                 for (i, &c) in path.iter().enumerate() {
@@ -254,6 +283,7 @@ pub fn drain_selective(
                 fills.push(k);
             } else {
                 deep += 1;
+                deeps.push(Deep { floor: *floor, cells: cells.len(), depth: lv - zf, cut });
             }
         }
         st.deep = deep;
@@ -277,7 +307,7 @@ pub fn drain_selective(
     let intended = comps.iter().filter(|(cells, _)| cells.iter().any(|&c| keep(c as usize))).count();
     st.kept = intended;
     st.left = comps.len() - intended;
-    (z, st)
+    (z, st, deeps)
 }
 
 #[cfg(test)]

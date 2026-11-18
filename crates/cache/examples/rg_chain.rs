@@ -2184,6 +2184,9 @@ fn main() -> Result<(), String> {
     // the reference of the ocean, the sills, the budget and the measures (explorer, 2026-11-17).
     let t = Instant::now();
     let kh_form = kh;
+    // spikes #147: `--census` counts, per stage surface, the depressions the selective drain leaves over the budget both ways (band6's rule), and traces band6's
+    let census = args.iter().any(|a| a == "--census");
+    let mut kh_only: Option<Vec<f64>> = None;
     let ks_base: Vec<f64> = if kh != "c1" {
         use planet_generators::bake::kh;
         // KH's routing of z_s at 814 m: reading 12's outlets (the edge, and cells at or below the sea connected to it or to a K5 sea outlet)
@@ -2219,9 +2222,9 @@ fn main() -> Result<(), String> {
         // readings 17 and 19 (lead #170 item 3): S_KH = KH(z_s) + r', the band floored so that a cell whose KH lies above the sea + 0.5 m stays there (as ks_kh.rs)
         let floor = sea + 0.5;
         let band = |k: f64, r: f64| if k > floor { r.max(floor - k) } else { r };
-        let at = |p: usize| {
+        let kval = |p: usize| {
             let (fx, fy) = (((p % w) as f64 - (lr - 1.0) / 2.0) / lr, ((p / w) as f64 - (lr - 1.0) / 2.0) / lr);
-            let k = match kh_form {
+            match kh_form {
                 "h2" => kh::read(&solve.zs, rw, rh, &split, fx, fy),
                 "h4" => kh::read_ct(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0,
                 "h5" => {
@@ -2230,11 +2233,19 @@ fn main() -> Result<(), String> {
                     c1 + kh::zone_weight(zone.as_ref().expect("h5's zone"), rw, rh, fx, fy) * (h4c - c1)
                 }
                 _ => kh::read_ct_clamped(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0,
-            };
+            }
+        };
+        let at = |p: usize| {
+            let k = kval(p);
             k + band(k, rl[p])
         };
         if let Some(z) = &zone {
             println!("RG KH h5: h4c on {} zone cells of 814 m, C1 elsewhere", z.iter().filter(|&&x| x).count());
+        }
+        if census {
+            let mut k = vec![0f64; n_l];
+            par_fill(&mut k, w, threads, &|p| kval(p));
+            kh_only = Some(k);
         }
         // the run's read on `threads` threads; tile-locality: the same read over two regions cut at a tile column, and on one thread
         let mut one = vec![0f64; n_l];
@@ -2555,7 +2566,26 @@ fn main() -> Result<(), String> {
         let ks_d = if base_form == "aplus" && ks_mode != "off" {
             let t6 = Instant::now();
             let outl: Vec<bool> = (0..n_l).map(|p| outlet_d[p] || !active[p]).collect();
-            let (d6, st) = planet_generators::bake::drain::drain_selective(
+            // spikes #147: the census, the same drain on each earlier stage's surface (KH alone, S_KH = KH + r', KS0, KS1); band6's deep depressions are traced to the first
+            // stage with a deep depression whose floor lies within 4 L cells
+            let run_deep = |z: &[f64]| {
+                planet_generators::bake::drain::drain_selective_report(z, w, h, &outl, &|_| false, &|_| dx_l * dx_l, 8, 4096, &|p| budget_l[p], &|p| budget_l[p]).2
+            };
+            let stages_deep: Vec<(&str, Vec<planet_generators::bake::drain::Deep>)> = if census {
+                let t9 = Instant::now();
+                let mut v = Vec::new();
+                if let Some(k) = &kh_only {
+                    v.push(("KH alone", run_deep(k)));
+                }
+                v.push(("S_KH = KH + r'", run_deep(&ks_base)));
+                v.push(("KS0", run_deep(&ks0)));
+                v.push(("KS1", run_deep(&ks_d)));
+                println!("RG domain {d} census: {:.0} s", t9.elapsed().as_secs_f64());
+                v
+            } else {
+                Vec::new()
+            };
+            let (d6, st, deep6) = planet_generators::bake::drain::drain_selective_report(
                 &ks_d,
                 w,
                 h,
@@ -2575,6 +2605,35 @@ fn main() -> Result<(), String> {
                 } else {
                     hi += dz;
                 }
+            }
+            if census {
+                let in_core = |f: usize| core[f];
+                let near = |a: usize, b: usize| ((a % w) as i64 - (b % w) as i64).abs() <= 4 && ((a / w) as i64 - (b / w) as i64).abs() <= 4;
+                let summary = |name: &str, ds: &[planet_generators::bake::drain::Deep]| {
+                    let ds: Vec<_> = ds.iter().filter(|x| in_core(x.floor)).collect();
+                    let mut dep: Vec<f64> = ds.iter().map(|x| x.depth).collect();
+                    dep.sort_by(f64::total_cmp);
+                    let cells: usize = ds.iter().map(|x| x.cells).sum();
+                    let p = |q: f64| if dep.is_empty() { 0.0 } else { dep[((dep.len() - 1) as f64 * q) as usize] };
+                    println!("RG census {name}: {} deep depressions in the core ({cells} cells), depth p50 {:.1} p90 {:.1} max {:.1} m", ds.len(), p(0.5), p(0.9), p(1.0));
+                };
+                for (name, ds) in &stages_deep {
+                    summary(name, ds);
+                }
+                summary("band6 (KS1 + drain)", &deep6);
+                // the first stage holding each of band6's deep depressions (a deep floor within 4 L cells)
+                let mut first: Vec<usize> = vec![0; stages_deep.len() + 1];
+                for x in deep6.iter().filter(|x| in_core(x.floor)) {
+                    let k = stages_deep.iter().position(|(_, ds)| ds.iter().any(|y| near(x.floor, y.floor))).unwrap_or(stages_deep.len());
+                    first[k] += 1;
+                }
+                let names: Vec<&str> = stages_deep.iter().map(|x| x.0).chain(["none before band6"]).collect();
+                println!(
+                    "RG census: band6's deep depressions by the first stage that has one within 4 L cells: {}",
+                    names.iter().zip(&first).map(|(n, c)| format!("{n} {c}")).collect::<Vec<_>>().join(", ")
+                );
+                let b: Vec<u8> = deep6.iter().flat_map(|x| [(x.floor as u32).to_le_bytes(), (x.cells as u32).to_le_bytes(), (x.depth as f32).to_le_bytes(), (x.cut.min(1e9) as f32).to_le_bytes()].concat()).collect();
+                std::fs::write(out_dir.join(format!("{tag}-band6-deep.bin")), b).map_err(|e| e.to_string())?;
             }
             println!(
                 "RG domain {d} band6 (reading 23 post): {} rounds, {} depressions met ({} filled, {} breached), {} left of them {} over the budget both ways; core lowered {lo:.4} km3, raised {hi:.4} km3; {:.1} s",
