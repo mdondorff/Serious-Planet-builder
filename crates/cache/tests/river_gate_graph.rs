@@ -170,8 +170,7 @@ fn the_g2_bars_pass_or_fail_against_the_owners_limits() {
     use planet_cache::river_gate_graph::{bars_line, g2_bars, Agreement, GraphReport, CORRIDOR_MIN_PCT, CORRIDOR_MIN_PCT_MOUNTAIN};
     // no graph, no bars (B's row)
     assert!(g2_bars(&G2Report::default(), 0.0, 100.0, CORRIDOR_MIN_PCT).is_empty());
-    let mut gr = GraphReport::default();
-    gr.basin_spill_missing = 3;
+    let gr = GraphReport { basin_spill_missing: 3, ..GraphReport::default() };
     let g2 = G2Report {
         graph: Some(gr),
         agreement: vec![
