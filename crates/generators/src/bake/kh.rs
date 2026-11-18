@@ -344,6 +344,44 @@ pub fn zone_weight(zone: &[bool], w: usize, h: usize, fx: f64, fy: f64) -> f64 {
     t * t * (3.0 - 2.0 * t)
 }
 
+// ---------------------------------------------------------------- h5d (spikes #147a; the owner's decision-7 fallback): h4c also on the diagonal steps C1 dams
+
+/// Per quad (indexed by its lower-left cell), the D8 diagonal step it holds when C1 dams it: `c1_centre(q)`, C1 at the quad's centre, lies above the step line's
+/// value there (the mean of its two cells) by more than `tol` m. `diag(q)` lists the quad's diagonal step as (from, to).
+pub fn dammed_steps(z: &[f64], w: usize, h: usize, diag: &dyn Fn(usize) -> Option<(usize, usize)>, c1_centre: &dyn Fn(usize) -> f64, tol: f64) -> Vec<Option<(usize, usize)>> {
+    (0..w * h)
+        .map(|q| {
+            if q % w + 1 >= w || q / w + 1 >= h {
+                return None;
+            }
+            let (a, b) = diag(q)?;
+            (c1_centre(q) > 0.5 * (z[a] + z[b]) + tol).then_some((a, b))
+        })
+        .collect()
+}
+
+/// h5d's weight of h4c from the dammed steps at block coordinates `(fx, fy)`: 1 within `full` L cells of a dammed step line (the segment between its two cell centres),
+/// smoothstep to 0 at `outer` L cells; `l` is L cells a block cell.
+pub fn dam_weight(steps: &[Option<(usize, usize)>], w: usize, h: usize, fx: f64, fy: f64, l: f64, full: f64, outer: f64) -> f64 {
+    let ix = (fx.floor().max(0.0) as i64).min(w as i64 - 2);
+    let iy = (fy.floor().max(0.0) as i64).min(h as i64 - 2);
+    let mut d = f64::INFINITY;
+    for qy in iy - 1..=iy + 1 {
+        for qx in ix - 1..=ix + 1 {
+            if qx < 0 || qy < 0 || qx > w as i64 - 2 || qy > h as i64 - 2 {
+                continue;
+            }
+            let Some((a, b)) = steps[qy as usize * w + qx as usize] else { continue };
+            let (ax, ay, bx, by) = ((a % w) as f64, (a / w) as f64, (b % w) as f64, (b / w) as f64);
+            let (dx, dy) = (bx - ax, by - ay);
+            let t = (((fx - ax) * dx + (fy - ay) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+            d = d.min(((fx - ax - t * dx).powi(2) + (fy - ay - t * dy).powi(2)).sqrt() * l);
+        }
+    }
+    let s = ((d - full) / (outer - full)).clamp(0.0, 1.0);
+    1.0 - s * s * (3.0 - 2.0 * s)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

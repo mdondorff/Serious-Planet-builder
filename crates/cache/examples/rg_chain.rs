@@ -1824,10 +1824,11 @@ fn main() -> Result<(), String> {
     }
     // spikes #147: `--breach-cost cell` (SPIKE-138) or `length` (the cut cost times the step's length, plus a length term)
     let breach_cost = value(&args, "--breach-cost").unwrap_or("cell");
-    if !["cell", "length"].contains(&breach_cost) {
-        return Err(format!("--breach-cost cell | length, not '{breach_cost}'"));
+    if !["cell", "length", "square"].contains(&breach_cost) {
+        return Err(format!("--breach-cost cell | length | square, not '{breach_cost}'"));
     }
     planet_generators::bake::drain::BREACH_BY_LENGTH.store(breach_cost == "length", std::sync::atomic::Ordering::Relaxed);
+    planet_generators::bake::drain::BREACH_SQUARE.store(breach_cost == "square", std::sync::atomic::Ordering::Relaxed);
     // spikes #147: `--drain-rule volume` (SPIKE-138: the smaller volume when both are within the caps) or `fill` (the fill first; a breach only where the fill is over its cap)
     let drain_rule = value(&args, "--drain-rule").unwrap_or("volume");
     if !["volume", "fill"].contains(&drain_rule) {
@@ -2197,8 +2198,9 @@ fn main() -> Result<(), String> {
     // --regions 1 | 2
     // reading 25 (lead #168b): KH is h5 by default
     let kh = value(&args, "--kh").unwrap_or("h5");
-    if !["c1", "h2", "h4", "h4c", "h5"].contains(&kh) {
-        return Err(format!("--kh c1 | h2 | h4 | h4c | h5, not '{kh}'"));
+    // spikes #147a: `h5d` is h5 plus h4c within 2 L cells of the D8 diagonal steps C1 dams (smoothstep to C1 by 4 L cells), the owner's decision-7 fallback
+    if !["c1", "h2", "h4", "h4c", "h5", "h5d"].contains(&kh) {
+        return Err(format!("--kh c1 | h2 | h4 | h4c | h5 | h5d, not '{kh}'"));
     }
     let ks_mode = value(&args, "--ks").unwrap_or("ks1");
     if !["off", "ks0", "ks1"].contains(&ks_mode) {
@@ -2301,11 +2303,37 @@ fn main() -> Result<(), String> {
         // C1(z_s) elsewhere, blended by kh::zone_weight over one 814 m cell
         // reading 27 (lead #170 item 2): the zone is H1's channel cells (GEN-145: runoff-weighted area of at least 75 km2, then downstream) and their 8 neighbours, not KH's
         // own D8 area on z_s; the channel mask goes in as a 0/1 field
-        let zone = (kh_form == "h5").then(|| {
+        let zone = (kh_form == "h5" || kh_form == "h5d").then(|| {
             let mask: Vec<f64> = h1.hydro.channel.iter().map(|&c| if c { 1.0 } else { 0.0 }).collect();
             kh::channel_zone(&mask, rw, rh, 0.5)
         });
         let zs_field = RegionField::new(face, REGIONAL, (sri0 as i64, srj0 as i64), rw, rh, solve.zs.iter().map(|&v| v as f32).collect());
+        // h5d: the quads whose D8 diagonal step C1 dams (C1 at the quad's centre over the step line by more than 1 m); C1 at the centre is the mean of the four L cells there
+        let dams = (kh_form == "h5d").then(|| {
+            let rcv = |c: usize| (recv[c] != NONE).then(|| recv[c] as usize);
+            let diag = |q: usize| -> Option<(usize, usize)> {
+                let (a, b, c, d) = (q, q + 1, q + rw, q + rw + 1);
+                if rcv(a) == Some(d) {
+                    Some((a, d))
+                } else if rcv(d) == Some(a) {
+                    Some((d, a))
+                } else if rcv(b) == Some(c) {
+                    Some((b, c))
+                } else if rcv(c) == Some(b) {
+                    Some((c, b))
+                } else {
+                    None
+                }
+            };
+            let centre = |q: usize| {
+                let (cx, cy) = ((q % rw * L + L - 1) as i64, (q / rw * L + L - 1) as i64);
+                [(0, 0), (1, 0), (0, 1), (1, 1)].iter().map(|&(dx, dy)| f64::from(zs_field.at(dir_of(x0 + cx + dx, y0 + cy + dy)))).sum::<f64>() / 4.0
+            };
+            let steps = kh::dammed_steps(&solve.zs, rw, rh, &diag, &centre, 1.0);
+            let all = (0..cells).filter(|&q| q % rw + 1 < rw && q / rw + 1 < rh && diag(q).is_some()).count();
+            println!("RG KH h5d: C1 dams {} of {all} D8 diagonal steps (by over 1 m at the quad's centre)", steps.iter().filter(|s| s.is_some()).count());
+            steps
+        });
         // readings 17 and 19 (lead #170 item 3): S_KH = KH(z_s) + r', the band floored so that a cell whose KH lies above the sea + 0.5 m stays there (as ks_kh.rs)
         let floor = sea + 0.5;
         let band = |k: f64, r: f64| if k > floor { r.max(floor - k) } else { r };
@@ -2314,10 +2342,14 @@ fn main() -> Result<(), String> {
             match kh_form {
                 "h2" => kh::read(&solve.zs, rw, rh, &split, fx, fy),
                 "h4" => kh::read_ct(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0,
-                "h5" => {
+                "h5" | "h5d" => {
                     let c1 = f64::from(zs_field.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
                     let h4c = kh::read_ct_clamped(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0;
-                    c1 + kh::zone_weight(zone.as_ref().expect("h5's zone"), rw, rh, fx, fy) * (h4c - c1)
+                    let mut wgt = kh::zone_weight(zone.as_ref().expect("h5's zone"), rw, rh, fx, fy);
+                    if let Some(s) = &dams {
+                        wgt = wgt.max(kh::dam_weight(s, rw, rh, fx, fy, lr, 2.0, 4.0));
+                    }
+                    c1 + wgt * (h4c - c1)
                 }
                 _ => kh::read_ct_clamped(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0,
             }
@@ -2653,6 +2685,15 @@ fn main() -> Result<(), String> {
         let ks_d = if (base_form == "aplus" || census) && ks_mode != "off" {
             let t6 = Instant::now();
             let outl: Vec<bool> = (0..n_l).map(|p| outlet_d[p] || !active[p]).collect();
+            // spikes #147a: the drain switches (--breach-cost, --drain-rule, --breach-max-len) are the base stages' (1 and 3, at 814 m); band6 keeps SPIKE-138's rule
+            {
+                use std::sync::atomic::Ordering::Relaxed;
+                use planet_generators::bake::drain as dr;
+                dr::BREACH_BY_LENGTH.store(false, Relaxed);
+                dr::BREACH_SQUARE.store(false, Relaxed);
+                dr::PREFER_FILL.store(false, Relaxed);
+                dr::BREACH_MAX_LEN.store(0, Relaxed);
+            }
             // spikes #147: the census, the same drain on each earlier stage's surface (KH alone, S_KH = KH + r', KS0, KS1); band6's deep depressions are traced to the first
             // stage with a deep depression whose floor lies within 4 L cells
             let run_deep = |z: &[f64]| {

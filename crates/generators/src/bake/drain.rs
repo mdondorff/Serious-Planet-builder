@@ -23,6 +23,9 @@ pub static BREACH_BY_LENGTH: std::sync::atomic::AtomicBool = std::sync::atomic::
 pub static PREFER_FILL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// spikes #147 (spike only): a breach only along a path of at most this many cells (Lindsay's hybrid breach-fill); 0: no limit.
 pub static BREACH_MAX_LEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// spikes #147a (spike only): the breach path's cost per cell is the square of the cut (`max(0, z - z_floor)`^2, m^2), so a path of many shallow cuts beats one of a few
+/// deep ones: the wide shallow saddle over the narrow deep notch. Wins over [`BREACH_BY_LENGTH`].
+pub static BREACH_SQUARE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// The cost per unit of path length of [`BREACH_BY_LENGTH`] (m).
 pub const LENGTH_COST_M: f64 = 0.01;
 
@@ -252,8 +255,12 @@ pub fn drain_selective_report(
                     break;
                 }
                 let by_length = BREACH_BY_LENGTH.load(std::sync::atomic::Ordering::Relaxed);
+                let square = BREACH_SQUARE.load(std::sync::atomic::Ordering::Relaxed);
                 for q in neighbours(w, h, c) {
-                    let nd = if by_length {
+                    let nd = if square {
+                        let cut = (z[q] - zf).max(0.0);
+                        d + cut * cut
+                    } else if by_length {
                         let len = if q % w != c % w && q / w != c / w { std::f64::consts::SQRT_2 } else { 1.0 };
                         d + len * ((z[q] - zf).max(0.0) + LENGTH_COST_M)
                     } else {
