@@ -385,3 +385,18 @@ fn kv_floors_rise_from_the_line_toward_their_edge() {
     let higher = (0..n).filter(|&c| a.kv[c] > b.kv[c] + 1e-9).count();
     assert!(higher > 0, "off the line the floor stands higher");
 }
+
+// spec: SPIKE-132
+#[test]
+fn a_floors_lowering_carries_outward_falling_at_the_grade() {
+    // lead #166 (numerics review: no cliff at the floor's edge): KV's side cap carries the floor's lowering outward, falling s_wall a metre; each cell keeps the largest arrival
+    use planet_generators::bake::kv_kc::carry_down;
+    let g = Grid::new(9, 3, 100.0);
+    // a 30 m seed at (1, 1) and a 10 m one at (7, 1)
+    let v = carry_down(&g, &[(10, 30.0), (16, 10.0)], 0.2, 100.0);
+    let at = |x: usize, y: usize| v[y * 9 + x];
+    assert_eq!((at(1, 1), at(2, 1), at(3, 1), at(4, 1)), (30.0, 10.0, 0.0, 0.0), "20 m a straight step");
+    assert!((at(2, 2) - (30.0 - 0.2 * 100.0 * core::f64::consts::SQRT_2)).abs() < 1e-3, "diagonal: 0.2 x 141 m");
+    assert_eq!((at(7, 1), at(6, 1), at(5, 1)), (10.0, 0.0, 0.0), "the smaller seed reaches no neighbour");
+    assert_eq!(v, carry_down(&g, &[(16, 10.0), (10, 30.0)], 0.2, 100.0), "seed order changes nothing");
+}

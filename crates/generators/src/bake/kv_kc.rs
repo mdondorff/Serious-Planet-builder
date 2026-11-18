@@ -32,9 +32,9 @@ pub struct KvParams {
     /// Reading 10 (G0 contracts section 12, lead #165): a divide cell within `W_floor(q_w)/2 + d_buf` of a graph line (the nearest vertex's `q_w`) is valley floor, not a divide, so
     /// it puts no buffer around it; `false`: every divide cell does (SPIKE-132's form).
     pub exempt_near_lines: bool,
-    /// Lead #166 (M1: KV cut every side steeper than `s_wall` within `reach_m` to the budget): outside the floor a cell's target is the `s_wall` cone measured as if the cell stood no higher
-    /// than its nearest vertex's cell (`want = min(s0[c], s0[v]) - v_target`), so a side is lowered only where the line's own height above the bed, carried up an `s_wall` wall, reaches it;
-    /// the floor (`dist <= W_floor/2`) is cut as before. On KS's output the line stands near its bed, so KV leaves the sides; `false`: the cone alone (SPIKE-132's form).
+    /// Lead #166 (M1: KV cut every side steeper than `s_wall` within `reach_m` to the budget): outside the floor a cell is lowered at most by the larger of the cone measured as if the cell
+    /// stood no higher than its nearest vertex's cell (`min(s0[c], s0[v]) - v_target`) and the floor's own lowering carried outward, falling `s_wall` a metre; the floor
+    /// (`dist <= W_floor/2`) is cut as before. A side then follows the line's height above its bed and the floor's edge, never a cone to `reach_m`; `false`: the cone alone (SPIKE-132's form).
     pub cap_at_incision: bool,
     /// Lead #166 (source fix 5, graph offset misses): the valley floor rises from the line toward its edge at this grade (m per m), so the routing on the floor runs to the line; 0: a flat
     /// floor (SPIKE-132's form). 1e-3 is 0.1 m a cell, 100 times the gate's flood grade, and 0.5 m (one bed code) at the edge of a 500 m half floor.
@@ -128,6 +128,39 @@ fn chamfer(grid: &Grid, sources: &[(usize, usize)], cell_m: f64, limit_m: f64) -
         }
     }
     (dist, src)
+}
+
+/// Values carried outward from `seeds` (cell, value m), falling `grade` a metre of chamfer step (`cell_m`, diagonals sqrt 2); each cell holds the largest arrival, 0 where none arrives.
+/// Values as integer millimetres in the heap key: a fixed order.
+pub fn carry_down(grid: &Grid, seeds: &[(usize, f64)], grade: f64, cell_m: f64) -> Vec<f64> {
+    let mut val = vec![0u64; grid.len()];
+    let mut heap: BinaryHeap<(u64, Reverse<usize>)> = BinaryHeap::new();
+    for &(c, v) in seeds {
+        let mm = libm::round(v.max(0.0) * 1000.0) as u64;
+        if mm > val[c] {
+            val[c] = mm;
+            heap.push((mm, Reverse(c)));
+        }
+    }
+    while let Some((mm, Reverse(c))) = heap.pop() {
+        if mm < val[c] {
+            continue;
+        }
+        for k in 0..8 {
+            let Some(q) = grid.neighbour(c, k) else { continue };
+            let step = if k < 4 { cell_m } else { cell_m * core::f64::consts::SQRT_2 };
+            let nv = mm as f64 / 1000.0 - grade * step;
+            if nv <= 0.0 {
+                continue;
+            }
+            let nmm = libm::round(nv * 1000.0) as u64;
+            if nmm > val[q] {
+                val[q] = nmm;
+                heap.push((nmm, Reverse(q)));
+            }
+        }
+    }
+    val.into_iter().map(|mm| mm as f64 / 1000.0).collect()
 }
 
 /// Runs KV and KC on `s0` (the stage input; KS off in the prototype) around the L reaches of `g`, within `budget` per cell. `protected` marks the protected basins' cells; `outlet` the sea.
@@ -231,21 +264,35 @@ pub fn run_with(
     let mut residuals = Vec::new();
     let mut nearest = vec![u32::MAX; n];
     let kv_on = switch != Switch::KcOnly;
-    for c in 0..n {
-        if src[c] == u32::MAX {
-            continue;
+    // an eligible cell's reach, whether it lies on the floor, the cone's want, and outside the floor the cone measured from no higher than its nearest vertex's cell (lead #166)
+    let wants = |c: usize| -> Option<(usize, bool, f64, f64)> {
+        if src[c] == u32::MAX || !kv_on || outlet[c] || protected[c] || near_divide[c] {
+            return None;
         }
         let (ri, k) = vtx[&(src[c] as usize)];
         let r = reaches[ri];
-        nearest[c] = ri as u32;
-        if !kv_on || outlet[c] || protected[c] || near_divide[c] {
-            continue;
-        }
         let half = 0.5 * p.w_floor_factor * law.width_m(r.attrs.q_w[k]);
         let bed = bed_m(r.attrs.bed[k]);
         let v = bed + p.s_floor * dist[c].min(half) + p.s_wall * (dist[c] - half).max(0.0);
-        let top = if p.cap_at_incision && dist[c] > half { s0[c].min(s0[src[c] as usize]) } else { s0[c] };
-        let want = (top - v).max(0.0);
+        let cone = (s0[c] - v).max(0.0);
+        let floor = dist[c] <= half;
+        let capped = if floor { cone } else { (s0[c].min(s0[src[c] as usize]) - v).max(0.0) };
+        Some((ri, floor, cone, capped))
+    };
+    // the floor's lowering carried outward, falling s_wall a metre, so a side next to a lowered floor follows it down (no cliff at the floor's edge; lead #166)
+    let carry: Vec<f64> = if p.cap_at_incision {
+        let seeds: Vec<(usize, f64)> = (0..n).filter_map(|c| wants(c).filter(|w| w.1 && w.2 > 0.0).map(|w| (c, w.2))).collect();
+        carry_down(grid, &seeds, p.s_wall, p.cell_m)
+    } else {
+        Vec::new()
+    };
+    for c in 0..n {
+        if src[c] != u32::MAX {
+            nearest[c] = vtx[&(src[c] as usize)].0 as u32;
+        }
+        let Some((ri, floor, cone, capped)) = wants(c) else { continue };
+        let r = reaches[ri];
+        let want = if !p.cap_at_incision || floor { cone } else { cone.min(capped.max(carry[c])) };
         if want <= 0.0 {
             continue;
         }
