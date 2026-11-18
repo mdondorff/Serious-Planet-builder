@@ -135,13 +135,59 @@ fn the_budget_field_and_report_follow_the_contract() {
     let mut fill = vec![0u16; 16];
     fill[3] = 150;
     let stages = [StageField { name: "ks".into(), lower: ks, fill: None }, StageField { name: "kv".into(), lower: kv, fill: Some(fill) }];
-    let r = budget_report(&stages, &budget, &all, &all, Some(2), None);
+    let r = budget_report(&stages, &budget, "start", &all, &all, Some(2), None);
     // cell 1 uses 10.1 m and cell 2 12 m of a 10 m budget: two overruns, both at 95 % or more; cell 3 fills 15 m
     assert_eq!((r.land, r.overrun, r.at_95, r.residual_records, r.residual_reaches), (16, 2, 2, Some(2), None), "{r:?}");
     assert_eq!(
         (r.stages[0].lowered, r.stages[0].lower_max_m, r.stages[1].lowered, r.stages[1].filled, r.stages[1].fill_over),
         (3, 12.0, 1, 1, 1)
     );
+    // without a kh field the use against S0 is the use against S_KH
+    assert_eq!((r.overrun_s0, r.at_95_s0, r.reference.as_str()), (2, 2, "start"));
+}
+
+// spec: BUILD-060
+#[test]
+fn the_budget_use_is_against_s_kh_without_kh_and_against_s0_with_it() {
+    // reading 21 (lead #168): ks, kv, kc count against S_KH; kh (S0 against KH) only in the use against S0
+    let budget = vec![10.0; 4];
+    let all = vec![true; 4];
+    let kh = StageField { name: "kh".into(), lower: vec![50, 0, 95, 0], fill: Some(vec![0, 30, 0, 0]) };
+    let ks = StageField { name: "ks".into(), lower: vec![60, 0, 0, 0], fill: None };
+    let r = budget_report(&[kh, ks], &budget, "S_KH", &all, &all, None, None);
+    // cell 0: 6 m vs S_KH, 11 m vs S0 (over); cell 2: 0 m vs S_KH, 9.5 m vs S0 (at 95 %)
+    assert_eq!((r.overrun, r.at_95, r.overrun_s0, r.at_95_s0), (0, 0, 1, 2), "{r:?}");
+    assert_eq!(r.stages[0].name, "kh");
+    let cols = G2Report { budget: Some(r), ..G2Report::default() }.columns();
+    let get = |n: &str| cols.iter().find(|c| c.0 == n).map(|c| c.1.clone());
+    assert_eq!((get("b_overrun_s0"), get("b_reference")), (Some("1".into()), Some("S_KH".into())));
+    assert_eq!(get("b_kh_lowered"), Some("2".into()));
+}
+
+// spec: BUILD-060
+#[test]
+fn the_g2_bars_pass_or_fail_against_the_owners_limits() {
+    use planet_cache::river_gate_graph::{bars_line, g2_bars, Agreement, GraphReport, CORRIDOR_MIN_PCT, CORRIDOR_MIN_PCT_MOUNTAIN};
+    // no graph, no bars (B's row)
+    assert!(g2_bars(&G2Report::default(), 0.0, 100.0, CORRIDOR_MIN_PCT).is_empty());
+    let gr = GraphReport { basin_spill_missing: 3, ..GraphReport::default() };
+    let g2 = G2Report {
+        graph: Some(gr),
+        agreement: vec![
+            Agreement { threshold_km2: 1.0, routed: 100, routed_agree: 90, ..Agreement::default() },
+            Agreement { threshold_km2: 75.0, routed: 100, routed_agree: 89, ..Agreement::default() },
+        ],
+        ..G2Report::default()
+    };
+    let bars = g2_bars(&g2, 1.0, 97.4, CORRIDOR_MIN_PCT);
+    let pass = |n: &str| bars.iter().find(|b| b.name == n).map(|b| b.pass()).unwrap();
+    // at the limits: uphill 1.0 % and agreement 90 % pass; 89 % and a corridor of 97.4 % fail; no violations pass; 3 missing spill nodes fail
+    assert!(pass("bar_uphill") && pass("bar_agree_1km2") && pass("bar_violations"));
+    assert!(!pass("bar_agree_75km2") && !pass("bar_corridor") && !pass("bar_spill_missing"));
+    assert!(g2_bars(&g2, 1.0, 97.4, CORRIDOR_MIN_PCT_MOUNTAIN).iter().find(|b| b.name == "bar_corridor").unwrap().pass(), "95 % on M1");
+    assert_eq!(bars.iter().find(|b| b.name == "bar_spill_missing").unwrap().cell(), "FAIL:3.00");
+    let line = bars_line(&bars).unwrap();
+    assert!(line.contains("bar_uphill PASS 1.00 (<= 1)") && line.ends_with("3 of 6 pass"), "{line}");
 }
 
 // spec: TEST-137, BUILD-060
@@ -191,7 +237,7 @@ fn the_gate_prints_g2_columns_with_their_classes_only_when_given_g2_inputs() {
     // B's row: no G2 input, no G2 column, no classes line
     let b = run(None);
     assert!(b.g2.is_none() && b.classes_line().is_none() && !b.fields_line().contains("g_nodes="));
-    let input = G2Input { window: W, graph: Some(&g), stages: None, residual_records: None, partition: Some((&g, &g)) };
+    let input = G2Input { window: W, graph: Some(&g), stages: None, residual_records: None, partition: Some((&g, &g)), reference: None };
     let rg = run(Some(&input));
     let line = rg.fields_line();
     assert!(line.contains(" g_nodes=6 ") && line.contains(" part_first=identical") && line.contains(" agree1_km2=1 "), "{line}");
@@ -201,6 +247,11 @@ fn the_gate_prints_g2_columns_with_their_classes_only_when_given_g2_inputs() {
         "{classes}"
     );
     assert!(rg.lines().iter().any(|l| l.starts_with("RIVER-GATE graph [correctness]")));
+    // a row with a graph prints the G2 bars (lead #168), each with its class; B's row prints none
+    assert!(line.contains(" bar_violations=PASS:0.00") && line.contains(" bar_uphill="), "{line}");
+    assert!(classes.contains("bar_corridor=preservation") && classes.contains("bar_spill_missing=correctness"), "{classes}");
+    assert!(rg.lines().iter().any(|l| l.starts_with("RIVER-GATE bars [owner decision 1]")));
+    assert!(b.bars().is_empty() && !b.lines().iter().any(|l| l.starts_with("RIVER-GATE bars")));
     // every G2 column has one class
     let cols = rg.g2.as_ref().map(G2Report::columns).unwrap_or_default();
     assert!(cols.iter().all(|(_, _, c)| *c != GateClass::Incremental));
@@ -216,7 +267,7 @@ fn the_stage_and_graph_readers_take_the_files_the_spec_names_and_refuse_a_wrong_
     std::fs::create_dir_all(&dir).expect("a temp dir");
     let u16s = |v: &[u16]| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
     // no stage file at all is refused
-    assert!(read_stages(&dir, 4).unwrap_err().contains("no ks-lower.u16"));
+    assert!(read_stages(&dir, 4).unwrap_err().contains("no kh-lower.u16, ks-lower.u16, kv-lower.u16 or kc-lower.u16"));
     // KS lowers only, KV lowers and fills, KC did not run; three residual records under a header
     std::fs::write(dir.join("ks-lower.u16"), u16s(&[0, 5, 300, 0])).unwrap();
     std::fs::write(dir.join("kv-lower.u16"), u16s(&[1, 0, 0, 0])).unwrap();
@@ -226,6 +277,11 @@ fn the_stage_and_graph_readers_take_the_files_the_spec_names_and_refuse_a_wrong_
     assert_eq!(st.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["ks", "kv"]);
     assert_eq!((st[0].lower.clone(), st[0].fill.is_none(), st[1].fill.clone()), (vec![0, 5, 300, 0], true, Some(vec![0, 0, 0, 7])));
     assert_eq!(rec, Some(3));
+    // KH's field (reading 21) is read first, in stage order
+    std::fs::write(dir.join("kh-lower.u16"), u16s(&[2, 0, 0, 0])).unwrap();
+    let (st, _) = read_stages(&dir, 4).unwrap();
+    assert_eq!(st.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["kh", "ks", "kv"]);
+    std::fs::remove_file(dir.join("kh-lower.u16")).unwrap();
     // a field of another size is refused, naming the file
     assert!(read_stages(&dir, 5).unwrap_err().contains("ks-lower.u16"));
     // a graph file round-trips its canonical form; another header is refused

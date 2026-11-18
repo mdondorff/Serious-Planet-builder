@@ -5,7 +5,9 @@ use planet_generators::bake::flood::priority_flood_with;
 use planet_generators::bake::route::{route_rules_filled, RoundRules, Routing, NONE};
 use planet_generators::bake::Grid;
 
-use crate::river_gate_graph::{agreement, budget_field, budget_report, graph_report, partition_report, G2Input, G2Report};
+use crate::river_gate_graph::{
+    agreement, bars_line, budget_field, budget_report, g2_bars, graph_report, partition_report, Bar, G2Input, G2Report, CORRIDOR_MIN_PCT,
+};
 use crate::river_suite::{
     corridor_bar_m, measure_suite, network, trunk_burn, trunk_corridor, Network, Snap, SuiteInput, SuiteReport, TrunkReport, CORRIDOR_K,
     NETWORK_KM2,
@@ -45,6 +47,8 @@ pub struct GateParams {
     pub h1_cell_m: f64,
     /// The channel thresholds of the network measure (BUILD-059), km2.
     pub network_km2: [f64; 2],
+    /// The corridor bar of the G2 bars (lead #168): the share of snapped k_c 2 trunk reaches passing, percent (95 on a mountain window).
+    pub corridor_min_pct: f64,
 }
 
 impl Default for GateParams {
@@ -59,6 +63,7 @@ impl Default for GateParams {
             edge_q_m3s: 1.0,
             h1_cell_m: 814.0,
             network_km2: NETWORK_KM2,
+            corridor_min_pct: CORRIDOR_MIN_PCT,
         }
     }
 }
@@ -418,12 +423,14 @@ impl GateReport {
     pub fn fields_line(&self) -> String {
         let mut f: Vec<String> = self.fields().into_iter().map(|(k, v)| format!("{k}={v}")).collect();
         f.extend(self.g2.iter().flat_map(|g| g.columns()).map(|(k, v, _)| format!("{k}={v}")));
+        f.extend(self.bars().iter().map(|b| format!("{}={}", b.name, b.cell())));
         format!("RIVER-GATE fields: {}", f.join(" "))
     }
 
     /// The gate class of every G2 column (BUILD-060): `RIVER-GATE classes: name=class ...`, or `None` without G2 columns.
     pub fn classes_line(&self) -> Option<String> {
-        let c: Vec<String> = self.g2.iter().flat_map(|g| g.columns()).map(|(k, _, c)| format!("{k}={}", c.name())).collect();
+        let mut c: Vec<String> = self.g2.iter().flat_map(|g| g.columns()).map(|(k, _, c)| format!("{k}={}", c.name())).collect();
+        c.extend(self.bars().iter().map(|b| format!("{}={}", b.name, b.class.name())));
         (!c.is_empty()).then(|| format!("RIVER-GATE classes: {}", c.join(" ")))
     }
 
@@ -524,7 +531,17 @@ impl GateReport {
         .chain(std::iter::once(self.corridor_line()))
         .chain(self.network_lines())
         .chain(self.g2.iter().flat_map(|g| g.lines()))
+        .chain(bars_line(&self.bars()))
         .collect()
+    }
+
+    /// The G2 bars of a row with a graph (lead #168; none without): the snapped k_c 2 corridor share against `corridor_min_pct`, the uphill river steps, the graph/raster
+    /// agreement, the graph's violations and missing spill nodes.
+    pub fn bars(&self) -> Vec<Bar> {
+        let Some(g2) = &self.g2 else { return Vec::new() };
+        let k2 = CORRIDOR_K.iter().position(|&k| k == 2.0).expect("k_c 2 is a corridor form");
+        let corridor = self.trunk_corridors_snapped.get(k2).map_or(0.0, |t| share(t.reaches - t.reaches_over, t.reaches));
+        g2_bars(g2, share(self.suite.uphill_steps, self.suite.steps), corridor, self.params.corridor_min_pct)
     }
 
     /// The corridor trunk line (BUILD-057, lead #158): per `k_c`, the reaches whose best route inside the corridor still rises more than the bar above its running
@@ -967,15 +984,28 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
             .collect(),
         g2: input.g2.map(|x| {
             let land: Vec<bool> = z.iter().map(|&v| v > input.sea_level_m).collect();
-            let budget =
-                x.stages.map(|_| budget_field(input.start, g.w(), g.h(), (params.h1_cell_m / g.dx()).round() as usize, g.dx(), R_RELIEF_M));
+            // reading 21 (lead #168): the budget from S_KH when the row gives it, else from the start surface
+            let budget = x.stages.map(|_| {
+                budget_field(
+                    x.reference.unwrap_or(input.start),
+                    g.w(),
+                    g.h(),
+                    (params.h1_cell_m / g.dx()).round() as usize,
+                    g.dx(),
+                    R_RELIEF_M,
+                )
+            });
+            let reference = if x.reference.is_some() { "S_KH" } else { "start" };
             G2Report {
                 graph: x.graph.map(|gr| graph_report(gr, &x.window, input.inside, &land, g.dx())),
                 agreement: x
                     .graph
                     .map(|gr| params.network_km2.iter().map(|&a| agreement(gr, &x.window, &area, &land, input.inside, a * 1.0e6)).collect())
                     .unwrap_or_default(),
-                budget: x.stages.zip(budget.as_ref()).map(|(st, b)| budget_report(st, b, &land, input.inside, x.residual_records, x.graph)),
+                budget: x
+                    .stages
+                    .zip(budget.as_ref())
+                    .map(|(st, b)| budget_report(st, b, reference, &land, input.inside, x.residual_records, x.graph)),
                 partition: x.partition.map(|(a, b)| partition_report(a, b)),
             }
         }),
