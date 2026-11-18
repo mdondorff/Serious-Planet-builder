@@ -36,6 +36,9 @@ pub struct KvParams {
     /// than its nearest vertex's cell (`want = min(s0[c], s0[v]) - v_target`), so a side is lowered only where the line's own height above the bed, carried up an `s_wall` wall, reaches it;
     /// the floor (`dist <= W_floor/2`) is cut as before. On KS's output the line stands near its bed, so KV leaves the sides; `false`: the cone alone (SPIKE-132's form).
     pub cap_at_incision: bool,
+    /// Lead #166 (source fix 5, graph offset misses): the valley floor rises from the line toward its edge at this grade (m per m), so the routing on the floor runs to the line; 0: a flat
+    /// floor (SPIKE-132's form). 1e-3 is 0.1 m a cell, 100 times the gate's flood grade, and 0.5 m (one bed code) at the edge of a 500 m half floor.
+    pub s_floor: f64,
 }
 
 impl KvParams {
@@ -49,6 +52,7 @@ impl KvParams {
             seed: 1,
             exempt_near_lines: true,
             cap_at_incision: true,
+            s_floor: 1.0e-3,
         }
     }
 }
@@ -239,7 +243,7 @@ pub fn run_with(
         }
         let half = 0.5 * p.w_floor_factor * law.width_m(r.attrs.q_w[k]);
         let bed = bed_m(r.attrs.bed[k]);
-        let v = bed + p.s_wall * (dist[c] - half).max(0.0);
+        let v = bed + p.s_floor * dist[c].min(half) + p.s_wall * (dist[c] - half).max(0.0);
         let top = if p.cap_at_incision && dist[c] > half { s0[c].min(s0[src[c] as usize]) } else { s0[c] };
         let want = (top - v).max(0.0);
         if want <= 0.0 {

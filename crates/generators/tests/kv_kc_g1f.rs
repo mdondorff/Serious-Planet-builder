@@ -283,7 +283,8 @@ fn kv_and_kc_give_the_pinned_output() {
 }
 
 // KC only: re-pinned for reading 22 (#161); KV only and both re-pinned for reading 10 (#165: 93 of 3,462 divide cells exempted, KV acts on 57 more cells), and for the
-// incision cap (#166: 1,030 cells lowered less, KV's total lowering 6,787 -> 158 m: the fixture's lines stand near their bed, so KV keeps to the floors)
+// incision cap (#166: 1,030 cells lowered less, KV's total lowering 6,787 -> 158 m: the fixture's lines stand near their bed, so KV keeps to the floors); the floor's rise (#166,
+// source fix 5) leaves them: on the fixture the capped floors stand at their target already
 const KVKC_DIGESTS: [u64; 3] = [0xc1c6_65a7_670e_453a, 0x4c07_3ae4_4545_fb75, 0xd7f3_400b_df31_8fcd];
 
 // spec: SPIKE-132
@@ -364,4 +365,23 @@ fn kv_lowers_a_side_only_as_far_as_the_lines_own_height_reaches() {
     if std::env::var_os("G1F_PRINT").is_some() {
         println!("incision cap: {less} cells lowered less; total lowering {:.0} -> {:.0} m", total(&b.kv), total(&a.kv));
     }
+}
+
+// spec: SPIKE-132
+#[test]
+fn kv_floors_rise_from_the_line_toward_their_edge() {
+    // lead #166 (source fix 5): within the floor KV's target rises s_floor a metre from the line, so a floor cell is never lowered more than with a flat floor, and on the line the same
+    let k = case();
+    let gl = Grid::cube(L_N, RADIUS_M);
+    // the floor rule alone (without the incision cap, which leaves most of the fixture's sides alone)
+    let on = KvParams { cap_at_incision: false, ..KvParams::plan(RADIUS_M * core::f64::consts::FRAC_PI_2 / L_N as f64) };
+    let flat = KvParams { s_floor: 0.0, ..on };
+    let a = run(&gl, &k.s0, &k.outlet, &k.graph, &k.protected, &k.budget, &on, Switch::KvOnly);
+    let b = run(&gl, &k.s0, &k.outlet, &k.graph, &k.protected, &k.budget, &flat, Switch::KvOnly);
+    let n = k.s0.len();
+    assert!((0..n).all(|c| a.kv[c] >= b.kv[c] - 1e-9), "a rising floor never lowers more");
+    let line: std::collections::BTreeSet<usize> = k.graph.reaches.iter().flat_map(|r| r.vertices.iter().map(|&v| v as usize)).collect();
+    assert!(line.iter().all(|&c| (a.kv[c] - b.kv[c]).abs() < 1e-9), "on the line the floor is the bed");
+    let higher = (0..n).filter(|&c| a.kv[c] > b.kv[c] + 1e-9).count();
+    assert!(higher > 0, "off the line the floor stands higher");
 }
