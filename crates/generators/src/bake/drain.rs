@@ -14,6 +14,13 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
+/// spikes #147 (spike only): the breach path's cost per step. `false` (SPIKE-138): `max(0, z - z_floor)` per cell, whatever the step's length, so a diagonal step covers
+/// sqrt 2 of the distance at the price of one cell and paths across even ground run diagonal. `true`: that cost times the step's length (1 or sqrt 2), plus
+/// `LENGTH_COST_M` m per unit length, so a path on even ground is the shortest one in the octile metric.
+pub static BREACH_BY_LENGTH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The cost per unit of path length of [`BREACH_BY_LENGTH`] (m).
+pub const LENGTH_COST_M: f64 = 0.01;
+
 /// A depression is a fill over this depth (m).
 pub const TOL: f64 = 1e-3;
 /// The descent per cell of a breach path (m).
@@ -239,8 +246,14 @@ pub fn drain_selective_report(
                 if settled > limit {
                     break;
                 }
+                let by_length = BREACH_BY_LENGTH.load(std::sync::atomic::Ordering::Relaxed);
                 for q in neighbours(w, h, c) {
-                    let nd = d + (z[q] - zf).max(0.0);
+                    let nd = if by_length {
+                        let len = if q % w != c % w && q / w != c / w { std::f64::consts::SQRT_2 } else { 1.0 };
+                        d + len * ((z[q] - zf).max(0.0) + LENGTH_COST_M)
+                    } else {
+                        d + (z[q] - zf).max(0.0)
+                    };
                     if nd < dist[q] {
                         if dist[q].is_infinite() {
                             seen.push(q);

@@ -1817,6 +1817,12 @@ fn main() -> Result<(), String> {
     if base_form == "aplus" {
         planet_cache::region_bake::install_s138("sel-post", f64::INFINITY, &tag)?;
     }
+    // spikes #147: `--breach-cost cell` (SPIKE-138) or `length` (the cut cost times the step's length, plus a length term)
+    let breach_cost = value(&args, "--breach-cost").unwrap_or("cell");
+    if !["cell", "length"].contains(&breach_cost) {
+        return Err(format!("--breach-cost cell | length, not '{breach_cost}'"));
+    }
+    planet_generators::bake::drain::BREACH_BY_LENGTH.store(breach_cost == "length", std::sync::atomic::Ordering::Relaxed);
     let base_today = h1_form == "k6";
     let low = value(&args, "--centre") != Some("maximin");
     std::fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;
@@ -1960,6 +1966,66 @@ fn main() -> Result<(), String> {
         let r2 = route_sills(grid, &f2, &plain, outlet, stream, &weight, true);
         (with, Some(h1_from(grid, hh, &f2, r2, outlet, &runoff, &evap, Some(&budget))))
     };
+    // spikes #147: `--probe-base` stops after H1: the channel steps (H1's channel cells to their receivers, in the region box) by direction, the straight runs along each
+    // segment (consecutive steps in one direction, in steps of 814 m), and the 814 m fields z_b, z_b_in, z_s and the channel mask for the sheets
+    if args.iter().any(|a| a == "--probe-base") {
+        let in_core = |c: usize| {
+            let (i, j) = (sri0 + c % rw, srj0 + c / rw);
+            i >= region.0 && i <= region.1 && j >= region.2 && j <= region.3
+        };
+        let (mut diag, mut axis) = (0usize, 0usize);
+        let mut runs: Vec<usize> = Vec::new();
+        for sg in &h1.hydro.segments {
+            let (mut c, mut last, mut run) = (sg.up as usize, (0i64, 0i64), 0usize);
+            while c != sg.down as usize {
+                let r = h1.routing.receiver[c] as usize;
+                let dir = ((r % rw) as i64 - (c % rw) as i64, (r / rw) as i64 - (c / rw) as i64);
+                if in_core(c) {
+                    if dir.0 != 0 && dir.1 != 0 {
+                        diag += 1;
+                    } else {
+                        axis += 1;
+                    }
+                }
+                if dir == last {
+                    run += 1;
+                } else {
+                    if run > 0 {
+                        runs.push(run);
+                    }
+                    run = 1;
+                    last = dir;
+                }
+                c = r;
+            }
+            if run > 0 {
+                runs.push(run);
+            }
+        }
+        runs.sort_unstable();
+        let tot = (diag + axis).max(1);
+        let long8 = runs.iter().filter(|&&r| r >= 8).count();
+        let cells8: usize = runs.iter().filter(|&&r| r >= 8).sum();
+        let all_steps: usize = runs.iter().sum();
+        println!(
+            "PROBE {tag} (base {base_form}, breach cost {breach_cost}): H1 channel steps in the box {tot}, diagonal {diag} ({:.1} %); straight runs: p50 {} p90 {} p99 {} max {} steps; runs of 8 steps (6.5 km) or more: {long8}, holding {:.1} % of the steps",
+            100.0 * diag as f64 / tot as f64,
+            runs[runs.len() / 2],
+            runs[runs.len() * 9 / 10],
+            runs[runs.len() * 99 / 100],
+            runs.last().copied().unwrap_or(0),
+            100.0 * cells8 as f64 / all_steps.max(1) as f64
+        );
+        let dump = |name: &str, v: &[f32]| -> Result<(), String> {
+            let b: Vec<u8> = v.iter().flat_map(|x| x.to_le_bytes()).collect();
+            std::fs::write(out_dir.join(format!("{tag}-h1-{name}-{rw}x{rh}.f32")), b).map_err(|e| e.to_string())
+        };
+        dump("zb", &solve.zb.iter().map(|&v| v as f32).collect::<Vec<_>>())?;
+        dump("zbin", &solve.zb_in.iter().map(|&v| v as f32).collect::<Vec<_>>())?;
+        dump("zs", &solve.zs.iter().map(|&v| v as f32).collect::<Vec<_>>())?;
+        dump("chan", &h1.hydro.channel.iter().map(|&c| if c { 1.0 } else { 0.0 }).collect::<Vec<_>>())?;
+        return Ok(());
+    }
     if let Some(d) = &chain_dir {
         // H1 rivers: the cells of the H1 channel segments the chain hands over (q at least EDGE_Q)
         let mut riv = vec![0u8; cells];
