@@ -2452,6 +2452,13 @@ fn main() -> Result<(), String> {
         let b: Vec<u8> = ks_base.iter().flat_map(|v| v.to_le_bytes()).collect();
         std::fs::write(out_dir.join(format!("{tag}-skh-{w}x{h}.f64")), b).map_err(|e| e.to_string())?;
     }
+    // spikes #147a: `--stop-after-kh` writes S0 and S_KH (with --dump-s0) and stops: the KH sheets' inputs without the rest of the chain
+    if args.iter().any(|a| a == "--stop-after-kh") {
+        let b: Vec<u8> = start.iter().flat_map(|v| v.to_le_bytes()).collect();
+        std::fs::write(out_dir.join(format!("{tag}-s0-{w}x{h}.f64")), b).map_err(|e| e.to_string())?;
+        println!("RG stopped after KH (--stop-after-kh)");
+        return Ok(());
+    }
     stamp("budget field", t.elapsed().as_secs_f64());
     let ks = |band: &[f64]| -> (Vec<f64>, Vec<(usize, f64, f64)>) {
         let mut z = ks_base.clone();
