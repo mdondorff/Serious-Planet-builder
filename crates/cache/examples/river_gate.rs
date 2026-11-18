@@ -19,7 +19,7 @@ use planet_cache::river_gate::{
     border_inside, commit_differences, key_note, lay_store_ground, measure, raw_grid_arg, raw_grid_heights, Crossing, GateInput,
     GateParams, LWindow, RawGrid, WindowIdentity, GRID_BORDER, GRID_CELL_M,
 };
-use planet_cache::river_gate_graph::{read_graph, read_stages, read_surface, G2Input, Window};
+use planet_cache::river_gate_graph::{read_graph, read_stages, read_surface, G2Input, Window, CORRIDOR_MIN_PCT, CORRIDOR_MIN_PCT_MOUNTAIN};
 use planet_core::{Face, TangentWarp, Vec3};
 use planet_generators::global::{read_elevation_c1, GlobalSample, LatticeSource, ReadError};
 use planet_generators::runoff::{discharge_weight, pet_mm, runoff_mm};
@@ -31,6 +31,8 @@ const REGIONAL: usize = 12_288;
 const SECONDS_PER_YEAR: f64 = 31_557_600.0;
 /// R1h: face 1, regional cells i 8,056 to 8,675, j 760 to 1,379, seed 14 (the E1 region stores' window: r3a-e1, r3a-p2, r3a-p2e).
 const R1H: [usize; 6] = [1, 8056, 8675, 760, 1379, 14];
+/// The mountain window (SPIKE-119), whose corridor bar is 95 % (lead #168).
+const M1: [usize; 6] = [4, 6600, 7219, 10200, 10819, 15];
 
 /// The base lattice's nodes over the region (the C1 read's footprint).
 struct Lattice {
@@ -136,6 +138,8 @@ fn main() -> Result<(), String> {
         "--stages",
         "--partition",
         "--surface",
+        "--reference",
+        "--corridor-bar",
         "--dump-surface",
     ];
     let mut k = 0;
@@ -175,6 +179,8 @@ fn main() -> Result<(), String> {
         basin_cells: parsed(&args, "--min-cells", GateParams::default().basin_cells)?,
         lake_depth_m: parsed(&args, "--d", 20.0)?,
         network_km2,
+        // lead #168: the corridor bar is 95 % on the mountain window M1, 97.5 % elsewhere
+        corridor_min_pct: parsed(&args, "--corridor-bar", if win[..] == M1 { CORRIDOR_MIN_PCT_MOUNTAIN } else { CORRIDOR_MIN_PCT })?,
         ..GateParams::default()
     };
     if let Some(g) = value(&args, "--grid") {
@@ -360,12 +366,19 @@ fn main() -> Result<(), String> {
             "--stages: the budget field reads H1 blocks of {l} L cells, and the window's origin ({x0}, {y0}) is not on an H1 corner"
         ));
     }
+    // reading 21 (lead #168): the budget's reference surface S_KH on the window's L grid
+    let reference = match value(&args, "--reference") {
+        None => None,
+        Some(_) if stages.is_none() => return Err("--reference is the budget's surface: it goes with --stages".to_string()),
+        Some(path) => Some(read_surface(path, w * h)?),
+    };
     let g2_input = (graph.is_some() || partition.is_some() || stages.is_some()).then(|| G2Input {
         window: Window { x0: x0 as u64, y0: y0 as u64, w, h },
         graph: graph.as_ref(),
         stages: stages.as_deref(),
         residual_records,
         partition: partition.as_ref().map(|(a, b)| (a, b)),
+        reference: reference.as_deref(),
     });
     let report = measure(
         &GateInput {
