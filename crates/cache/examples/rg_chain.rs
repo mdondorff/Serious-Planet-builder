@@ -2629,7 +2629,7 @@ fn main() -> Result<(), String> {
             res_d.iter().filter(|r| core[r.0]).count()
         );
         // stage 6 (spikes #146, reading 23 post): the band drain after KS1, capped by the budget at the floor; the domain's outlets and the cells outside it are its outlets
-        let ks_d = if base_form == "aplus" && ks_mode != "off" {
+        let ks_d = if (base_form == "aplus" || census) && ks_mode != "off" {
             let t6 = Instant::now();
             let outl: Vec<bool> = (0..n_l).map(|p| outlet_d[p] || !active[p]).collect();
             // spikes #147: the census, the same drain on each earlier stage's surface (KH alone, S_KH = KH + r', KS0, KS1); band6's deep depressions are traced to the first
@@ -2711,7 +2711,12 @@ fn main() -> Result<(), String> {
                 st.deep,
                 t6.elapsed().as_secs_f64()
             );
-            d6
+            // under `--base today` the census runs but band6 is not applied
+            if base_form == "aplus" {
+                d6
+            } else {
+                ks_d
+            }
         } else {
             ks_d
         };
