@@ -2047,9 +2047,10 @@ fn main() -> Result<(), String> {
     // switches: --kh c1 | h2 | h4 | h4c, default h4c (spikes #139; KS starts from KH(z_s) + r: h2 the triangulation, reading 19, spikes #137; h4 Clough-Tocher on its split and h4c, h4 clamped to
     // its quad's corners, reading 20, spikes #138 and #139); --ks off | ks0 | ks1 (default ks1); --skip a,b,... of kg-trunk, basins, kg-trib, kv, kc;
     // --regions 1 | 2
-    let kh = value(&args, "--kh").unwrap_or("h4c");
-    if !["c1", "h2", "h4", "h4c"].contains(&kh) {
-        return Err(format!("--kh c1 | h2 | h4 | h4c, not '{kh}'"));
+    // reading 25 (lead #168b): KH is h5 by default
+    let kh = value(&args, "--kh").unwrap_or("h5");
+    if !["c1", "h2", "h4", "h4c", "h5"].contains(&kh) {
+        return Err(format!("--kh c1 | h2 | h4 | h4c | h5, not '{kh}'"));
     }
     let ks_mode = value(&args, "--ks").unwrap_or("ks1");
     if !["off", "ks0", "ks1"].contains(&ks_mode) {
@@ -2138,15 +2139,27 @@ fn main() -> Result<(), String> {
         let lr = L as f64;
         let grad = kh::gradients(&solve.zs, rw, rh);
         let step = |p: usize, q: usize| recv[p] == q as u32 || recv[q] == p as u32;
+        // h5 (reading 25, spikes' spike/drain-aplus 91b38d6f): h4c on the channel zone (814 m cells of KH's routing with a D8 area of at least 75 km2 and their 8 neighbours),
+        // C1(z_s) elsewhere, blended by kh::zone_weight over one 814 m cell
+        let zone = (kh_form == "h5").then(|| kh::channel_zone(&area, rw, rh, 75.0e6));
+        let zs_field = RegionField::new(face, REGIONAL, (sri0 as i64, srj0 as i64), rw, rh, solve.zs.iter().map(|&v| v as f32).collect());
         let at = |p: usize| {
             let (fx, fy) = (((p % w) as f64 - (lr - 1.0) / 2.0) / lr, ((p / w) as f64 - (lr - 1.0) / 2.0) / lr);
             rl[p]
                 + match kh_form {
                     "h2" => kh::read(&solve.zs, rw, rh, &split, fx, fy),
                     "h4" => kh::read_ct(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0,
+                    "h5" => {
+                        let c1 = f64::from(zs_field.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
+                        let h4c = kh::read_ct_clamped(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0;
+                        c1 + kh::zone_weight(zone.as_ref().expect("h5's zone"), rw, rh, fx, fy) * (h4c - c1)
+                    }
                     _ => kh::read_ct_clamped(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0,
                 }
         };
+        if let Some(z) = &zone {
+            println!("RG KH h5: h4c on {} zone cells of 814 m, C1 elsewhere", z.iter().filter(|&&x| x).count());
+        }
         // the run's read on `threads` threads; tile-locality: the same read over two regions cut at a tile column, and on one thread
         let mut one = vec![0f64; n_l];
         par_fill(&mut one, w, threads, &at);
