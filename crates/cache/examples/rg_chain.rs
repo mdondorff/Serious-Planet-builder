@@ -2456,6 +2456,15 @@ fn main() -> Result<(), String> {
     if args.iter().any(|a| a == "--stop-after-kh") {
         let b: Vec<u8> = start.iter().flat_map(|v| v.to_le_bytes()).collect();
         std::fs::write(out_dir.join(format!("{tag}-s0-{w}x{h}.f64")), b).map_err(|e| e.to_string())?;
+        // SPIKE-139: `--dump-c1` also writes C1(z_s) at L (S0 - r, f32), z_s and H1's channel mask at 814 m (f32), for the washboard measure
+        if args.iter().any(|a| a == "--dump-c1") {
+            let b: Vec<u8> = (0..n_l).flat_map(|p| ((start[p] - rl[p]) as f32).to_le_bytes()).collect();
+            std::fs::write(out_dir.join(format!("{tag}-c1-{w}x{h}.f32")), b).map_err(|e| e.to_string())?;
+            let b: Vec<u8> = solve.zs.iter().flat_map(|&v| (v as f32).to_le_bytes()).collect();
+            std::fs::write(out_dir.join(format!("{tag}-zs-{rw}x{rh}.f32")), b).map_err(|e| e.to_string())?;
+            let b: Vec<u8> = h1.hydro.channel.iter().flat_map(|&c| (if c { 1.0f32 } else { 0.0 }).to_le_bytes()).collect();
+            std::fs::write(out_dir.join(format!("{tag}-chan-{rw}x{rh}.f32")), b).map_err(|e| e.to_string())?;
+        }
         println!("RG stopped after KH (--stop-after-kh)");
         return Ok(());
     }
