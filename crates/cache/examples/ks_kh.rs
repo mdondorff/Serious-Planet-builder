@@ -432,7 +432,7 @@ fn main() -> Result<(), String> {
         }
     }
     let args: Vec<String> = args.into_iter().filter(|a| a != "--no-key-check").collect();
-    let known = ["--window", "--margin", "--store", "--min-cells", "--d", "--threads", "--network-km2", "--grid", "--out", "--k6p", "--kh", "--drain", "--drain-cap", "--base-form"];
+    let known = ["--window", "--margin", "--store", "--min-cells", "--d", "--threads", "--network-km2", "--grid", "--out", "--k6p", "--kh", "--drain", "--drain-cap", "--base-form", "--band-cap"];
     let mut k = 0;
     while k < args.len() {
         if !known.contains(&args[k].as_str()) {
@@ -610,7 +610,8 @@ fn main() -> Result<(), String> {
                 solve.outlet[c] && !grid.is_edge(c) && solve.zs[c] <= sea
             };
             let dxl = grid.dx() / l as f64;
-            let (r2, st) = planet_generators::bake::drain::drain_band(&khz, &r, w, h, &seed, &|_| false, &|_| dxl * dxl, 8);
+            let band_cap: f64 = value(&args, "--band-cap").map_or(Ok(f64::INFINITY), str::parse).map_err(|_| "--band-cap metres".to_string())?;
+            let (r2, st) = planet_generators::bake::drain::drain_band_capped(&khz, &r, w, h, &seed, &|_| false, &|_| dxl * dxl, 8, band_cap);
             println!("KS A+ band drain: {} rounds, {} depressions ({} filled, {} breached), {} left", st.rounds, st.depressions, st.filled, st.breached, st.left);
             r2
         } else {

@@ -392,9 +392,29 @@ pub fn drain_band(
     area: &dyn Fn(usize) -> f64,
     max_rounds: usize,
 ) -> (Vec<f64>, DrainStats) {
+    drain_band_capped(kh, r, w, h, seed, keep, area, max_rounds, f64::INFINITY)
+}
+
+/// [`drain_band`] with [`drain_selective`]'s rule: a breach only within `cap` m of cut, a fill only within `cap` m of depth (spikes #145: the basins K5 left stay).
+#[allow(clippy::too_many_arguments)]
+pub fn drain_band_capped(
+    kh: &[f64],
+    r: &[f64],
+    w: usize,
+    h: usize,
+    seed: &dyn Fn(usize) -> bool,
+    keep: &dyn Fn(usize) -> bool,
+    area: &dyn Fn(usize) -> f64,
+    max_rounds: usize,
+    cap: f64,
+) -> (Vec<f64>, DrainStats) {
     let z: Vec<f64> = (0..w * h).map(|p| kh[p] + r[p]).collect();
     let outlet = sea_outlets(&z, w, h, seed, 0.0);
-    let (d, st) = drain(&z, w, h, &outlet, keep, area, max_rounds, 4096);
+    let (d, st) = if cap.is_finite() {
+        drain_selective(&z, w, h, &outlet, keep, area, max_rounds, 4096, &|_| cap, &|_| cap)
+    } else {
+        drain(&z, w, h, &outlet, keep, area, max_rounds, 4096)
+    };
     ((0..w * h).map(|p| d[p] - kh[p]).collect(), st)
 }
 

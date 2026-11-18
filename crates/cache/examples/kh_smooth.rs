@@ -2539,7 +2539,8 @@ fn main() -> Result<(), String> {
         let t = Instant::now();
         let seed = |p: usize| sea_h1(to_h1(p));
         let area = |_p: usize| lg.dx() * lg.dx();
-        let (r2, st) = planet_generators::bake::drain::drain_band(&h4cz, &rl, w, h, &seed, &|_| false, &area, 8);
+        let band_cap: f64 = value(&args, "--band-cap").map_or(Ok(f64::INFINITY), str::parse).map_err(|_| "--band-cap metres")?;
+        let (r2, st) = planet_generators::bake::drain::drain_band_capped(&h4cz, &rl, w, h, &seed, &|_| false, &area, 8, band_cap);
         csv += &band_report(&tag, &h4cz, &rl, &r2, &start, w, h, &in_box, &seed, lg.dx(), &st);
         raised = Some((0..nl).map(|p| r2[p] > rl[p] + 1e-9).collect());
         println!("HO {tag} A+ band drain: {:.0} s", t.elapsed().as_secs_f64());
