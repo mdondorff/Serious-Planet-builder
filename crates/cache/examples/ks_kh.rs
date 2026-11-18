@@ -425,10 +425,12 @@ fn main() -> Result<(), String> {
     let no_key_check = args.iter().any(|a| a == "--no-key-check");
     let k6p = args.iter().any(|a| a == "--k6p");
     let args: Vec<String> = args.into_iter().filter(|a| a != "--k6p").collect();
-    let kh_h4c = value(&args, "--kh") == Some("h4c");
+    // SPIKE-138 with reading 25: `--kh h5` (h4c on the channel zone, C1 elsewhere) behaves as h4c in every other respect
+    let kh_h5 = value(&args, "--kh") == Some("h5");
+    let kh_h4c = value(&args, "--kh") == Some("h4c") || kh_h5;
     if let Some(v) = value(&args, "--kh") {
-        if v != "c1" && v != "h4c" {
-            return Err(format!("--kh c1 | h4c, not '{v}'"));
+        if v != "c1" && v != "h4c" && v != "h5" {
+            return Err(format!("--kh c1 | h4c | h5, not '{v}'"));
         }
     }
     let args: Vec<String> = args.into_iter().filter(|a| a != "--no-key-check").collect();
@@ -603,6 +605,18 @@ fn main() -> Result<(), String> {
         par_fill(&mut khz, w, threads, &|p| {
             kh::read_ct_clamped(&solve.zs, rw, rh, &split, &grad, &step, ((p % w) as f64 - (lr - 1.0) / 2.0) / lr, ((p / w) as f64 - (lr - 1.0) / 2.0) / lr).0
         });
+        if kh_h5 {
+            let zone = kh::channel_zone(&area, rw, rh, 75.0e6);
+            let zs_field = field(solve.zs.iter().map(|&v| v as f32).collect());
+            let h4c = std::mem::take(&mut khz);
+            khz = vec![0f64; n_l];
+            par_fill(&mut khz, w, threads, &|p| {
+                let (fx, fy) = (((p % w) as f64 - (lr - 1.0) / 2.0) / lr, ((p / w) as f64 - (lr - 1.0) / 2.0) / lr);
+                let c1 = f64::from(zs_field.at(dir_l(p)));
+                c1 + kh::zone_weight(&zone, rw, rh, fx, fy) * (h4c[p] - c1)
+            });
+            println!("KS KH: h5 (h4c on {} zone cells of 814 m, C1 elsewhere)", zone.iter().filter(|&&z| z).count());
+        }
         // SPIKE-138 (2): A+, the band drained on KH(h4c)(z_s) before the floor and KS
         let r = if drain_mode == "aplus" {
             let seed = |p: usize| {

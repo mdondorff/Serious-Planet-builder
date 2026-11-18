@@ -308,6 +308,42 @@ pub fn read_skeleton(z: &[f64], w: usize, h: usize, diag: &dyn Fn(usize) -> Opti
     out
 }
 
+// ---------------------------------------------------------------- h5 (reading 25, spikes #144b): h4c on the channel zone only
+
+/// The channel zone of h5: the cells whose D8 area is at least `min_area` m2, and their 8 neighbours.
+pub fn channel_zone(area: &[f64], w: usize, h: usize, min_area: f64) -> Vec<bool> {
+    let mut zone = vec![false; w * h];
+    for p in (0..w * h).filter(|&p| area[p] >= min_area) {
+        let (x, y) = ((p % w) as i64, (p / w) as i64);
+        for dy in -1..=1i64 {
+            for dx in -1..=1i64 {
+                let (a, b) = (x + dx, y + dy);
+                if a >= 0 && b >= 0 && (a as usize) < w && (b as usize) < h {
+                    zone[b as usize * w + a as usize] = true;
+                }
+            }
+        }
+    }
+    zone
+}
+
+/// h5's weight of h4c at block coordinates `(fx, fy)`: `smoothstep(1 - d)`, `d` the distance in cells from the point to the nearest zone cell's square (1 inside the zone).
+pub fn zone_weight(zone: &[bool], w: usize, h: usize, fx: f64, fy: f64) -> f64 {
+    let (ix, iy) = (fx.round() as i64, fy.round() as i64);
+    let mut d = f64::INFINITY;
+    for j in iy - 2..=iy + 2 {
+        for i in ix - 2..=ix + 2 {
+            if i < 0 || j < 0 || i >= w as i64 || j >= h as i64 || !zone[j as usize * w + i as usize] {
+                continue;
+            }
+            let (ex, ey) = (((fx - i as f64).abs() - 0.5).max(0.0), ((fy - j as f64).abs() - 0.5).max(0.0));
+            d = d.min((ex * ex + ey * ey).sqrt());
+        }
+    }
+    let t = (1.0 - d).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

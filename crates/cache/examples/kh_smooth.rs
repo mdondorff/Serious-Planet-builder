@@ -2481,7 +2481,7 @@ fn main() -> Result<(), String> {
     // h5: C1 everywhere; h4c on the 814 m cells of KH's routing with a D8 area of at least 75 km2 and their 8 neighbours, blended into C1 over one 814 m cell
     // (weight smoothstep(1 - d), d the distance in 814 m cells from the L cell's centre to the nearest zone cell's square)
     let chan: Vec<bool> = (0..cells).map(|c| area[c] >= 75.0e6).collect();
-    let zone = dilate(&chan, rw, rh, 1);
+    let zone = kh::channel_zone(&area, rw, rh, 75.0e6);
     let smooth = |t: f64| {
         let t = t.clamp(0.0, 1.0);
         t * t * (3.0 - 2.0 * t)
@@ -2489,18 +2489,7 @@ fn main() -> Result<(), String> {
     let mut h5z = vec![0f64; nl];
     par_fill(&mut h5z, w, threads, &|c| {
         let (fx, fy) = fxy(c);
-        let (ix, iy) = (fx.round() as i64, fy.round() as i64);
-        let mut d = f64::INFINITY;
-        for j in iy - 2..=iy + 2 {
-            for i in ix - 2..=ix + 2 {
-                if i < 0 || j < 0 || i >= rw as i64 || j >= rh as i64 || !zone[j as usize * rw + i as usize] {
-                    continue;
-                }
-                let (ex, ey) = (((fx - i as f64).abs() - 0.5).max(0.0), ((fy - j as f64).abs() - 0.5).max(0.0));
-                d = d.min((ex * ex + ey * ey).sqrt());
-            }
-        }
-        let wgt = smooth(1.0 - d);
+        let wgt = kh::zone_weight(&zone, rw, rh, fx, fy);
         c1[c] + wgt * (h4cz[c] - c1[c])
     });
     // h4b: h4c within 2 L cells of a D8 diagonal step line (the segment between the two 814 m cell centres), C1 beyond 4 L cells, smoothstep between
@@ -2535,13 +2524,16 @@ fn main() -> Result<(), String> {
     // base (z_b and z_s), K5 (z_s only), interpolation residue (KH, not z_s), band (F only).
     // SPIKE-138 (2): A+, the band drained on KH(h4c)(z_s) (its pits connected or filled); r'' replaces r
     let mut raised: Option<Vec<bool>> = None;
+    // SPIKE-138 with reading 25: `--kh h5` makes h5 KS's and the ladder's KH (h4c otherwise)
+    let khz: &Vec<f64> = if value(&args, "--kh") == Some("h5") { &h5z } else { &h4cz };
+    println!("HO {tag} KH for A+ and the ladder: {}", if value(&args, "--kh") == Some("h5") { "h5" } else { "h4c" });
     let rl = if drain_mode == "aplus" {
         let t = Instant::now();
         let seed = |p: usize| sea_h1(to_h1(p));
         let area = |_p: usize| lg.dx() * lg.dx();
         let band_cap: f64 = value(&args, "--band-cap").map_or(Ok(f64::INFINITY), str::parse).map_err(|_| "--band-cap metres")?;
-        let (r2, st) = planet_generators::bake::drain::drain_band_capped(&h4cz, &rl, w, h, &seed, &|_| false, &area, 8, band_cap);
-        csv += &band_report(&tag, &h4cz, &rl, &r2, &start, w, h, &in_box, &seed, lg.dx(), &st);
+        let (r2, st) = planet_generators::bake::drain::drain_band_capped(khz, &rl, w, h, &seed, &|_| false, &area, 8, band_cap);
+        csv += &band_report(&tag, khz, &rl, &r2, &start, w, h, &in_box, &seed, lg.dx(), &st);
         raised = Some((0..nl).map(|p| r2[p] > rl[p] + 1e-9).collect());
         println!("HO {tag} A+ band drain: {:.0} s", t.elapsed().as_secs_f64());
         r2
@@ -2553,8 +2545,8 @@ fn main() -> Result<(), String> {
         let used2 = read_f32(&format!("{dir}/ks-rg2-used-{w}x{h}.f32"), nl)?;
         let f: Vec<f64> = (0..nl)
             .map(|p| {
-                let rr = if h4cz[p] > 0.5 { rl[p].max(0.5 - h4cz[p]) } else { rl[p] };
-                h4cz[p] + rr - f64::from(used2[p])
+                let rr = if khz[p] > 0.5 { rl[p].max(0.5 - khz[p]) } else { rl[p] };
+                khz[p] + rr - f64::from(used2[p])
             })
             .collect();
         // SPIKE-138 (spikes #145, reading 23): KS never lowers below drain_band's fill. `--r23 clamp`: no KS lowering on the cells drain_band raised (filled);
@@ -2599,7 +2591,7 @@ fn main() -> Result<(), String> {
             variants.push(("-r23p".into(), fp));
         }
         variants.insert(0, (String::new(), f));
-        let (row, kh_k) = rung(&tag, "KH(h4c) no band", &lg, &h4cz, &in_core_l, &sea_l, true, threads, "-,-");
+        let (row, kh_k) = rung(&tag, "KH(h4c) no band", &lg, khz, &in_core_l, &sea_l, true, threads, "-,-");
         csv += &format!("{row}
 ");
         let kh_k = kh_k.expect("kept");
