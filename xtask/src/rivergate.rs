@@ -152,10 +152,9 @@ pub fn table_rows(args: &[String]) -> Result<Vec<TableRow>, String> {
             let t = &parts.next().unwrap_or_default().to_string();
             let mut extra: Vec<String> = Vec::new();
             for p in parts {
-                let (k, v) = p
-                    .split_once('=')
-                    .filter(|(k, v)| ROW_INPUTS.contains(k) && !v.is_empty())
-                    .ok_or_else(|| format!("a row's suffix is #graph=, #stages=, #partition=, #surface= or #reference=, not '#{p}'; {usage}"))?;
+                let (k, v) = p.split_once('=').filter(|(k, v)| ROW_INPUTS.contains(k) && !v.is_empty()).ok_or_else(|| {
+                    format!("a row's suffix is #graph=, #stages=, #partition=, #surface= or #reference=, not '#{p}'; {usage}")
+                })?;
                 extra.extend([format!("--{k}"), v.to_string()]);
             }
             let (target, window) = match t.rsplit_once('@') {
