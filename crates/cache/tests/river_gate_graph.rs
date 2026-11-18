@@ -111,10 +111,91 @@ fn agreement_counts_both_shares_within_one_cell() {
     for (x, y) in [(101, 201), (102, 202), (103, 203), (104, 203), (105, 203), (106, 203), (110, 210)] {
         area[cell(x, y)] = 2.0e6;
     }
-    let a = agreement(&g, &W, &area, &all, &all, 1.0e6);
+    let (none, recv) = (vec![false; 144], vec![u32::MAX; 144]);
+    let a = agreement(&g, &W, &area, &all, &all, &none, &recv, 1.0e6);
     // seven routed cells, the far one (110, 210) unmatched; twelve graph cells, those of S2's first cell and three of T's away from a routed cell
     assert_eq!((a.routed, a.routed_agree, a.graph, a.graph_agree), (7, 6, 12, 8), "{a:?}");
-    assert_eq!(agreement(&g, &W, &area, &all, &all, 5.0e6).routed, 0);
+    assert_eq!(agreement(&g, &W, &area, &all, &all, &none, &recv, 5.0e6).routed, 0);
+}
+
+// spec: TEST-137, BUILD-060
+#[test]
+fn agreement_counts_kept_interiors_and_cells_above_a_graph_head_apart() {
+    // lead #166: routed cells in a kept basin's interior and routed cells above a graph head leave both shares and are counted apart
+    let g = graph();
+    let all = vec![true; 144];
+    let cell = |x: usize, y: usize| (y - 200) * 12 + (x - 100);
+    let mut area = vec![0.0; 144];
+    let mut recv = vec![u32::MAX; 144];
+    // above S3's head (104, 207): (104, 210) -> (104, 209) -> (104, 208), the last within one cell of the head
+    // a side channel (108, 201) -> (107, 201) -> (106, 202), the last within one cell of C -> O away from every head
+    for (a, b) in [((104, 210), (104, 209)), ((104, 209), (104, 208)), ((108, 201), (107, 201)), ((107, 201), (106, 202))] {
+        recv[cell(a.0, a.1)] = cell(b.0, b.1) as u32;
+    }
+    for (x, y) in [(104, 210), (104, 209), (104, 208), (108, 201), (107, 201), (106, 202), (110, 210)] {
+        area[cell(x, y)] = 2.0e6;
+    }
+    let mut kept = vec![false; 144];
+    kept[cell(110, 210)] = true;
+    kept[cell(104, 206)] = true;
+    let a = agreement(&g, &W, &area, &all, &all, &kept, &recv, 1.0e6);
+    // (104, 208) and (106, 202) agree; (104, 210) and (104, 209) lie above the head; (108, 201) and (107, 201) are misses; (110, 210) is kept
+    assert_eq!((a.routed, a.routed_agree, a.routed_above_head, a.routed_kept), (4, 2, 2, 1), "{a:?}");
+    // T's cell (104, 206) is in the kept interior: one graph cell leaves the graph share
+    assert_eq!((a.graph, a.graph_kept), (11, 1), "{a:?}");
+}
+
+// spec: TEST-137, BUILD-060
+#[test]
+fn a_kept_basins_interior_is_its_floors_component_below_the_spill_and_its_river_steps_are_counted_apart() {
+    use planet_cache::river_gate_graph::{kept_interiors, kept_steps};
+    let mut g = graph();
+    let cell = |x: usize, y: usize| (y - 200) * 12 + (x - 100);
+    // a bowl at (108, 208): floor 1 m, its ring 5 m, the rest 20 m; spill 6 m
+    let mut z = vec![20.0; 144];
+    for y in 207..=209 {
+        for x in 107..=109 {
+            z[cell(x, y)] = 5.0;
+        }
+    }
+    z[cell(108, 208)] = 1.0;
+    let basin = |floor: (u64, u64), spill_m: f64, represented: Represented| Basin {
+        id: floor.0 * 1000 + floor.1,
+        level: Level::L,
+        parent: None,
+        floor_cell: gid(floor.0, floor.1),
+        floor_m: 1.0,
+        spill_cell: gid(110, 208),
+        spill_m,
+        spill_node: g.nodes[0].id,
+        outlet: Outlet::Active,
+        represented,
+        owner: Domain::Landmass,
+    };
+    // a kept basin, a drained one (not kept) and a kept one whose floor stands above its spill on the measured surface
+    g.basins = vec![
+        basin((108, 208), 6.0, Represented::ProtectedSurface),
+        basin((102, 210), 30.0, Represented::None),
+        basin((102, 209), 10.0, Represented::ProtectedSurface),
+    ];
+    let (kept, basins) = kept_interiors(&g, &W, &z);
+    assert_eq!((basins, kept.iter().filter(|&&k| k).count()), (1, 9));
+    assert!(kept[cell(107, 207)] && !kept[cell(106, 208)]);
+    // river steps: into the floor, out over the rim (rising 4 m), and one outside on the plain rising 1 m
+    let mut river = vec![false; 144];
+    let mut recv = vec![u32::MAX; 144];
+    for (a, b) in
+        [((106, 208), (107, 208)), ((107, 208), (108, 208)), ((108, 208), (109, 208)), ((109, 208), (110, 208)), ((102, 203), (102, 204))]
+    {
+        river[cell(a.0, a.1)] = true;
+        river[cell(b.0, b.1)] = true;
+        recv[cell(a.0, a.1)] = cell(b.0, b.1) as u32;
+    }
+    z[cell(102, 204)] = 21.0;
+    let all = vec![true; 144];
+    let k = kept_steps(&kept, basins, &recv, &river, &all, &z);
+    // four steps touch the interior; (108, 208) -> (109, 208) rises 4 m and (109, 208) -> (110, 208) 15 m: two uphill; the plain's step is not theirs
+    assert_eq!((k.basins, k.cells, k.steps, k.uphill), (1, 9, 4, 2), "{k:?}");
 }
 
 // spec: TEST-137, BUILD-060
@@ -248,6 +329,12 @@ fn the_gate_prints_g2_columns_with_their_classes_only_when_given_g2_inputs() {
         "{classes}"
     );
     assert!(rg.lines().iter().any(|l| l.starts_with("RIVER-GATE graph [correctness]")));
+    // the graph has no kept basin: the kept columns are zero, and the uphill bar is the uphill share (lead #166)
+    assert!(
+        line.contains(" kept_steps=0 ") && line.contains(" kept_uphill_steps=0 ") && line.contains(" agree1_routed_above_head="),
+        "{line}"
+    );
+    assert!(rg.lines().iter().any(|l| l.starts_with("RIVER-GATE kept basins [correctness]")));
     // a row with a graph prints the G2 bars (lead #168), each with its class; B's row prints none
     assert!(line.contains(" bar_violations=PASS:0.00") && line.contains(" bar_uphill="), "{line}");
     assert!(classes.contains("bar_corridor=preservation") && classes.contains("bar_spill_missing=correctness"), "{classes}");

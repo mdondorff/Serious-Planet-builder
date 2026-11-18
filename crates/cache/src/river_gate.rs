@@ -6,7 +6,8 @@ use planet_generators::bake::route::{route_rules_filled, RoundRules, Routing, NO
 use planet_generators::bake::Grid;
 
 use crate::river_gate_graph::{
-    agreement, bars_line, budget_field, budget_report, g2_bars, graph_report, partition_report, Bar, G2Input, G2Report, CORRIDOR_MIN_PCT,
+    agreement, bars_line, budget_field, budget_report, g2_bars, graph_report, kept_interiors, kept_steps, partition_report, Bar, G2Input,
+    G2Report, CORRIDOR_MIN_PCT,
 };
 use crate::river_suite::{
     corridor_bar_m, measure_suite, network, trunk_burn, trunk_corridor, Network, Snap, SuiteInput, SuiteReport, TrunkReport, CORRIDOR_K,
@@ -541,7 +542,9 @@ impl GateReport {
         let Some(g2) = &self.g2 else { return Vec::new() };
         let k2 = CORRIDOR_K.iter().position(|&k| k == 2.0).expect("k_c 2 is a corridor form");
         let corridor = self.trunk_corridors_snapped.get(k2).map_or(0.0, |t| share(t.reaches - t.reaches_over, t.reaches));
-        g2_bars(g2, share(self.suite.uphill_steps, self.suite.steps), corridor, self.params.corridor_min_pct)
+        // lead #166: the river steps in kept-basin interiors are counted apart from the uphill bar
+        let k = g2.kept.clone().unwrap_or_default();
+        g2_bars(g2, share(self.suite.uphill_steps - k.uphill, self.suite.steps - k.steps), corridor, self.params.corridor_min_pct)
     }
 
     /// The corridor trunk line (BUILD-057, lead #158): per `k_c`, the reaches whose best route inside the corridor still rises more than the bar above its running
@@ -987,12 +990,22 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
             // reading 28 (lead #170): the budget's relief field on the start surface S0; the stage fields carry the lowering against S_KH (reading 21)
             let budget =
                 x.stages.map(|_| budget_field(input.start, g.w(), g.h(), (params.h1_cell_m / g.dx()).round() as usize, g.dx(), R_RELIEF_M));
+            // lead #166: kept-basin interiors on the measured surface, counted apart from the uphill and agreement bars
+            let kept = x.graph.map(|gr| kept_interiors(gr, &x.window, input.surface));
             G2Report {
                 graph: x.graph.map(|gr| graph_report(gr, &x.window, input.inside, &land, g.dx())),
                 agreement: x
                     .graph
-                    .map(|gr| params.network_km2.iter().map(|&a| agreement(gr, &x.window, &area, &land, input.inside, a * 1.0e6)).collect())
+                    .zip(kept.as_ref())
+                    .map(|(gr, (k, _))| {
+                        params
+                            .network_km2
+                            .iter()
+                            .map(|&a| agreement(gr, &x.window, &area, &land, input.inside, k, &routing.receiver, a * 1.0e6))
+                            .collect()
+                    })
                     .unwrap_or_default(),
+                kept: kept.as_ref().map(|(k, b)| kept_steps(k, *b, &routing.receiver, &river, input.inside, input.surface)),
                 budget: x.stages.zip(budget.as_ref()).map(|(st, b)| budget_report(st, b, &land, input.inside, x.residual_records, x.graph)),
                 partition: x.partition.map(|(a, b)| partition_report(a, b)),
             }

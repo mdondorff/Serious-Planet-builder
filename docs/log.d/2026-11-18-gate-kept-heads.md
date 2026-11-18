@@ -1,0 +1,1 @@
+- 2026-11-18 gate-kept-heads (BUILD-060): the river gate counts kept-basin interiors and routed cells above a graph head apart from the uphill and agreement bars (lead #166).
