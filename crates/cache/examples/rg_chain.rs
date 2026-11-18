@@ -1793,7 +1793,17 @@ fn main() -> Result<(), String> {
     let threads: usize = value(&args, "--threads").map_or(Ok(8), str::parse).map_err(|_| "--threads")?;
     let out_dir = PathBuf::from(value(&args, "--out").unwrap_or("target/kg"));
     let tag = value(&args, "--tag").unwrap_or("w").to_string();
-    let base_today = value(&args, "--base") == Some("today");
+    // stage 4 (lead #170 item 1): H1 is today's K6 by default; `--h1 k6p` is K6' on the sills of S0 (SPIKE-127). `--base aplus|today` is the base stages 1, 3, 6 (spikes' fold-in;
+    // until it lands only `today`)
+    let h1_form = value(&args, "--h1").unwrap_or("k6");
+    if !["k6", "k6p"].contains(&h1_form) {
+        return Err(format!("--h1 k6 | k6p, not '{h1_form}'"));
+    }
+    let base_form = value(&args, "--base").unwrap_or("today");
+    if base_form != "today" {
+        return Err(format!("--base today (aplus comes with spikes' fold-in), not '{base_form}'"));
+    }
+    let base_today = h1_form == "k6";
     let low = value(&args, "--centre") != Some("maximin");
     std::fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;
     // --chain DIR (lead #167a): the chain layout of `planet_cache::stage_sheet` (BUILD-060's chain sheet), one surface per stage
