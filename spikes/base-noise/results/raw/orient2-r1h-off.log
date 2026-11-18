@@ -1,0 +1,8 @@
+r1h-off grid: energy per 15 deg bin over the mean (0 = gradient along x): 1.69 2.15 1.83 1.27 0.93 0.68 0.53 0.42 0.40 0.46 0.62 1.03
+r1h-off grid: structure tensor anisotropy 0.391, main gradient direction 27.8 deg
+r1h-off metric-corrected: energy per 15 deg bin over the mean (0 = gradient along x): 2.35 2.56 1.66 0.95 0.62 0.44 0.36 0.31 0.32 0.43 0.68 1.32
+r1h-off metric-corrected: structure tensor anisotropy 0.495, main gradient direction 19.1 deg
+r1h-off spectrum, wavelengths 8-32 L cells (0.8-3.3 km): 9.6 % of the power within 5 deg of the axes (isotropic: 11.2 %)
+r1h-off spectrum, wavelengths 32-128 L cells (3.3-13.0 km): 8.6 % of the power within 5 deg of the axes (isotropic: 11.4 %)
+r1h-off spectrum, wavelengths 128-512 L cells (13.0-52.1 km): 9.2 % of the power within 5 deg of the axes (isotropic: 12.3 %)
+r1h-off spectrum, wavelengths 512-2048 L cells (52.1-208.5 km): 27.9 % of the power within 5 deg of the axes (isotropic: 14.7 %)
