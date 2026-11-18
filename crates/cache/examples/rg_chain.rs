@@ -1856,6 +1856,10 @@ fn main() -> Result<(), String> {
     let (face, seed) = (Face(win[0] as u8), win[5] as u64);
     let region = (win[1], win[2], win[3], win[4]);
     let def = WorldDefinition::single_planet(R, seed);
+    // SPIKE-140 (lead #167): --turned-noise turns the band and crease noise's lattice per octave (GEN-140) for the whole run
+    if args.iter().any(|a| a == "--turned-noise") {
+        planet_generators::height::set_turned_noise(true);
+    }
     let inputs = class_inputs(&def, seed, threads);
     let (ri0, ri1, rj0, rj1) = (region.0 - margin, region.1 + margin, region.2 - margin, region.3 + margin);
     let to_node = |reg: usize| reg * LATTICE / REGIONAL;
@@ -2970,6 +2974,7 @@ fn main() -> Result<(), String> {
             ("skip", if skip.is_empty() { "-".to_string() } else { skip.join(",") }),
             ("window", win.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",")),
             ("margin", margin.to_string()),
+            ("turned-noise", planet_generators::height::turned_noise().to_string()),
         ] {
             t += &format!("switch {k} {v}\n");
         }
