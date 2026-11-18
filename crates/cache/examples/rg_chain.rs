@@ -2195,19 +2195,22 @@ fn main() -> Result<(), String> {
             kh::channel_zone(&mask, rw, rh, 0.5)
         });
         let zs_field = RegionField::new(face, REGIONAL, (sri0 as i64, srj0 as i64), rw, rh, solve.zs.iter().map(|&v| v as f32).collect());
+        // readings 17 and 19 (lead #170 item 3): S_KH = KH(z_s) + r', the band floored so that a cell whose KH lies above the sea + 0.5 m stays there (as ks_kh.rs)
+        let floor = sea + 0.5;
+        let band = |k: f64, r: f64| if k > floor { r.max(floor - k) } else { r };
         let at = |p: usize| {
             let (fx, fy) = (((p % w) as f64 - (lr - 1.0) / 2.0) / lr, ((p / w) as f64 - (lr - 1.0) / 2.0) / lr);
-            rl[p]
-                + match kh_form {
-                    "h2" => kh::read(&solve.zs, rw, rh, &split, fx, fy),
-                    "h4" => kh::read_ct(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0,
-                    "h5" => {
-                        let c1 = f64::from(zs_field.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
-                        let h4c = kh::read_ct_clamped(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0;
-                        c1 + kh::zone_weight(zone.as_ref().expect("h5's zone"), rw, rh, fx, fy) * (h4c - c1)
-                    }
-                    _ => kh::read_ct_clamped(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0,
+            let k = match kh_form {
+                "h2" => kh::read(&solve.zs, rw, rh, &split, fx, fy),
+                "h4" => kh::read_ct(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0,
+                "h5" => {
+                    let c1 = f64::from(zs_field.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
+                    let h4c = kh::read_ct_clamped(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0;
+                    c1 + kh::zone_weight(zone.as_ref().expect("h5's zone"), rw, rh, fx, fy) * (h4c - c1)
                 }
+                _ => kh::read_ct_clamped(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0,
+            };
+            k + band(k, rl[p])
         };
         if let Some(z) = &zone {
             println!("RG KH h5: h4c on {} zone cells of 814 m, C1 elsewhere", z.iter().filter(|&&x| x).count());
