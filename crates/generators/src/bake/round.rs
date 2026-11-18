@@ -94,6 +94,33 @@ pub fn catchment_round(inp: &mut CatchmentInputs, p: &CarveParams, steps: usize)
     }
 }
 
+/// SPIKE-139 (spike branch only): a hillslope term in K5, the f64 bits of `c` (0: off). After each round's steps, `p.reroute_every` explicit sweeps of
+/// z += c (sum of the 4 orthogonal neighbours - 4 z) on land cells that are not outlets and have all 4 neighbours (Jacobi, so the bits do not depend on threads).
+pub static K5_DIFFUSE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn diffuse_round(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, c: f64) {
+    let n = grid.len();
+    for _ in 0..p.reroute_every {
+        let old = z.to_vec();
+        for q in 0..n {
+            if outlet[q] || !grid.is_active(q) || old[q] <= p.sea_level {
+                continue;
+            }
+            let mut sum = 0.0;
+            let mut all = true;
+            for d in 0..4 {
+                match grid.neighbour(q, d) {
+                    Some(r) => sum += old[r],
+                    None => all = false,
+                }
+            }
+            if all {
+                z[q] = (old[q] + c * (sum - 4.0 * old[q])).max(p.sea_level + p.epsilon);
+            }
+        }
+    }
+}
+
 /// SPIKE-139 (spike branch only): K5's steps with two receivers, D-infinity (Tarboton 1997), see [`dinf_round`].
 pub static RECEIVER_DINF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -371,9 +398,13 @@ pub fn solve_rounds_with(
     }
     let taper = taper_of(z, p, drivers);
     let dinf = RECEIVER_DINF.load(std::sync::atomic::Ordering::Relaxed);
+    let diffuse = f64::from_bits(K5_DIFFUSE.load(std::sync::atomic::Ordering::Relaxed));
     for round in 0..rounds {
         if dinf {
             dinf_round(grid, z, outlet, p, seed, drivers, &taper);
+            if diffuse > 0.0 {
+                diffuse_round(grid, z, outlet, p, diffuse);
+            }
             if p.round_f32 {
                 super::carve::narrow_f32_checked(z, p.epsilon);
             }
@@ -394,6 +425,9 @@ pub fn solve_rounds_with(
             for (&c, v) in cuts.members[k].iter().zip(zk) {
                 z[c as usize] = v;
             }
+        }
+        if diffuse > 0.0 {
+            diffuse_round(grid, z, outlet, p, diffuse);
         }
         if p.round_f32 {
             super::carve::narrow_f32_checked(z, p.epsilon);

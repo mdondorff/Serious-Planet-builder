@@ -1864,8 +1864,8 @@ fn main() -> Result<(), String> {
     // steps, bilinear, perpendicular to the central-difference gradient) on every cell but H1's channel cells, so S0 = C1(z_s') + r and KH's C1 reads z_s'; K5, H1, HAND, KH's
     // routing and its h4c on the zone keep z_s (spike only)
     let zs_read = value(&args, "--zs-read").unwrap_or("c1");
-    if !["c1", "contour"].contains(&zs_read) {
-        return Err(format!("--zs-read c1 | contour, not '{zs_read}'"));
+    if !["c1", "contour", "gauss"].contains(&zs_read) {
+        return Err(format!("--zs-read c1 | contour | gauss, not '{zs_read}'"));
     }
     // SPIKE-139 (lead #148 item 2): `--k5-route d8` (default: the jittered steepest D8), `ltd` (D8-LTD, Orlandini et al. 2003) or `dinf` (D-infinity's two receivers in
     // K5's steps, Tarboton 1997) for K5's rounds only (spike only)
@@ -1875,7 +1875,13 @@ fn main() -> Result<(), String> {
     }
     planet_cache::region_bake::K5_LTD.store(k5_route == "ltd", std::sync::atomic::Ordering::Relaxed);
     planet_cache::region_bake::K5_DINF.store(k5_route == "dinf", std::sync::atomic::Ordering::Relaxed);
-    if zs_read == "contour" && !base_today {
+    // SPIKE-139: `--k5-diffuse C` (default 0, off): a hillslope term in K5's rounds, C per sweep on the 5-point Laplacian (round::K5_DIFFUSE; spike only)
+    let k5_diffuse: f64 = value(&args, "--k5-diffuse").map_or(Ok(0.0), str::parse).map_err(|_| "--k5-diffuse C")?;
+    if !(0.0..=0.25).contains(&k5_diffuse) {
+        return Err("--k5-diffuse C needs 0 <= C <= 0.25".into());
+    }
+    planet_generators::bake::round::K5_DIFFUSE.store(k5_diffuse.to_bits(), std::sync::atomic::Ordering::Relaxed);
+    if zs_read != "c1" && !base_today {
         return Err("--zs-read contour needs --h1 k6".into());
     }
     let low = value(&args, "--centre") != Some("maximin");
@@ -1953,7 +1959,7 @@ fn main() -> Result<(), String> {
     let sea = 0.0;
 
     // SPIKE-139: the read's z_s (z_s itself unless `--zs-read contour`) and its regional field
-    let zs_l: Vec<f64> = if zs_read == "contour" {
+    let zs_l: Vec<f64> = if zs_read != "c1" {
         let dir_h1 = |c: usize| solve.face_spec.halo_direction((sri0 + c % rw) as i64, (srj0 + c / rw) as i64);
         let (mut weight, mut runoff, mut evap) = (vec![1.0f32; cells], vec![0.0f32; cells], vec![0.0f32; cells]);
         for c in (0..cells).filter(|&c| solve.zs[c] > 0.0) {
@@ -1981,6 +1987,12 @@ fn main() -> Result<(), String> {
                 if chan[c] || x < 2 || y < 2 || x + 2 >= rw || y + 2 >= rh || z[c] <= sea {
                     return z[c];
                 }
+                if zs_read == "gauss" {
+                    // isotropic: the 3 x 3 binomial [1 2 1] x [1 2 1] / 16 (sigma about 0.7 cell)
+                    changed += 1;
+                    let row = |c: usize| (z[c - 1] + 2.0 * z[c] + z[c + 1]) / 4.0;
+                    return (row(c - rw) + 2.0 * row(c) + row(c + rw)) / 4.0;
+                }
                 let (gx, gy) = ((z[c + 1] - z[c - 1]) / 2.0, (z[c + rw] - z[c - rw]) / 2.0);
                 let g = (gx * gx + gy * gy).sqrt();
                 if g < 1e-9 {
@@ -1995,7 +2007,7 @@ fn main() -> Result<(), String> {
         let mut ds = d.clone();
         ds.sort_by(f64::total_cmp);
         println!(
-            "ZSREAD {tag} contour: {changed} of {cells} H1 cells smoothed along the contour (channel cells kept); |z_s' - z_s| p50 {:.2} p99 {:.2} max {:.2} m",
+            "ZSREAD {tag} {zs_read}: {changed} of {cells} H1 cells smoothed (channel cells kept); |z_s' - z_s| p50 {:.2} p99 {:.2} max {:.2} m",
             ds[ds.len() / 2],
             ds[ds.len() * 99 / 100],
             ds[ds.len() - 1]
@@ -2004,7 +2016,7 @@ fn main() -> Result<(), String> {
     } else {
         solve.zs.clone()
     };
-    let read_field = (zs_read == "contour").then(|| {
+    let read_field = (zs_read != "c1").then(|| {
         RegionField::new(face, REGIONAL, (sri0 as i64, srj0 as i64), rw, rh, zs_l.iter().zip(&solve.zb).map(|(s, b)| (s - b) as f32).collect())
     });
     let regional_read = read_field.as_ref().unwrap_or(&front.regional_field);
@@ -3139,6 +3151,7 @@ fn main() -> Result<(), String> {
             ("kh", kh.to_string()),
             ("zs-read", zs_read.to_string()),
             ("k5-route", k5_route.to_string()),
+            ("k5-diffuse", k5_diffuse.to_string()),
             ("ks", ks_mode.to_string()),
             ("h1-lakes", h1_lakes.to_string()),
             ("regions", regions.to_string()),
