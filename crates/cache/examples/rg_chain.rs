@@ -2605,6 +2605,9 @@ fn main() -> Result<(), String> {
             let r = run_with(&gl, &ks_d, &outlet_kv, &g_local, &kept, &budget_l, Some(&ks_base), &KvParams::plan(dx_l), sw);
             drop(outlet_kv);
             println!("RG domain {d} KC breaches: {} ({:.4} km3)", r.breaches, r.breach_volume / 1.0e9);
+            // reading 10 (crusader #165): the divide cells within W_floor/2 + d_buf of a graph line that put no buffer
+            let (div, exempt) = (r.divide.iter().filter(|&&x| x).count(), r.divide_exempt.iter().filter(|&&x| x).count());
+            println!("RG domain {d} KV reading 10: {exempt} of {div} divide cells exempt from the divide buffer ({:.2} %)", 100.0 * exempt as f64 / div.max(1) as f64);
             drop(g_local);
             let kv = if on("kv") { r.kv } else { ks_d.clone() };
             let kc = if on("kc") { r.kc } else { kv.clone() };
