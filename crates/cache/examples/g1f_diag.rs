@@ -159,7 +159,7 @@ fn main() -> Result<(), String> {
     // ---- agreement misses at 1 and 75 km2
     let filled = {
         let outlet: Vec<bool> = (0..n).map(|c| !land(c) || c % w == 0 || c / w == 0 || c % w == w - 1 || c / w == h - 1).collect();
-        priority_flood_with(&Grid::new(w, h, dx), &z, &outlet, 0.0, false)
+        priority_flood_with(&Grid::new(w, h, dx), &z, &outlet, 1e-3, false)
     };
     let g1 = dilate(&on_graph, 1);
     let g3 = dilate(&on_graph, 3);
