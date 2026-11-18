@@ -2838,9 +2838,7 @@ fn main() -> Result<(), String> {
     }
     // BUILD-060 (lead #172): KC's patches beside the stage fields, read by river-gate as `b_kc_patches` and `b_kc_patch_km3`
     {
-        let text: String = std::iter::once("cells,volume_m3
-".to_string()).chain(kc_patches.iter().map(|(c, v)| format!("{c},{v:.3}
-"))).collect();
+        let text: String = std::iter::once("cells,volume_m3\n".to_string()).chain(kc_patches.iter().map(|(c, v)| format!("{c},{v:.3}\n"))).collect();
         std::fs::write(stages_dir.join("kc-patches.csv"), &text).map_err(|e| e.to_string())?;
         if let Some(d) = &chain_dir {
             std::fs::write(d.join("stages").join("kc-patches.csv"), &text).map_err(|e| e.to_string())?;
