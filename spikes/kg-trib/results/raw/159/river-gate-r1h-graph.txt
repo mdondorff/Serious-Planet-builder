@@ -1,0 +1,2 @@
+RIVER-GATE network at 1 km2: drainage density 0.6561 km/km2 (115398.9 km of channel over 175882.7 km2 of land); Strahler streams starting inside by order 55536 / 12198 / 2588 / 562 / 127 / 32 / 6 / 1; bifurcation ratio R_b 4.530 over orders 1 to 7
+RIVER-GATE graph hierarchy [geomorphology]: 85605.1 km of rasterised L channel over 175882.7 km2 of land inside, density 0.4867 km/km2; Strahler streams by order 51851 / 11195 / 2271 / 212 / 83 / 15; R_b 5.388 over orders 1 to 5 (against BUILD-059's bar)

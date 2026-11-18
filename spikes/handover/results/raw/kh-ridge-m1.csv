@@ -1,0 +1,2 @@
+window,stepped_quads,stepped_in_box,pair_quads,ridge_cells_on_cut,quads_with_ridge,cut_cells,cut_p50_m,cut_p95_m,cut_max_m,cut_over10_cells,cut_over10_quads,cut_over50_cells,cut_over50_quads
+m1,359781,148014,678580,345836,70180,260226,29.876,158.504,661.27,203576,44933,83387,20415

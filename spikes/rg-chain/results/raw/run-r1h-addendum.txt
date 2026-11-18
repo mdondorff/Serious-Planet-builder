@@ -1,0 +1,22 @@
+RG stage setup (S0, ocean, H1 base): 40.4 s; peak working set 1627 MiB, now 1336 MiB
+RG stage budget field: 17.4 s; peak working set 1859 MiB, now 1852 MiB
+RG stage KH (c1): 0.1 s; peak working set 3384 MiB, now 2872 MiB
+RG KS0 (S0 - min(max(0, r - C1(HAND)), budget)): 991555 cells lowered, 103006 residuals
+RG stage KS0: 0.5 s; peak working set 3384 MiB, now 2875 MiB
+RG KG-trunk: 16881 nodes, 10088 reaches
+RG stage KG-trunk: 0.9 s; peak working set 3498 MiB, now 2890 MiB
+RG domain 0 basins: 55502 L basins (45438 kept), 2310 unresolved spills
+RG domain 0 KG-trib: 199124 reaches, 249067 nodes, 301 open ends, 0 entry cells
+RG domain 0 basins (second pass, tributaries as receivers): 55502 L basins, 1182 unresolved spills; 136.7 s
+RG domain 0 KS: 1498950 core cells lowered, 54475 core residuals
+RG domain 0 KV/KC (Both): 2317780 residuals, 32344 KC patches
+RG stitch: 0 junction markers without a reach ending at them dropped
+RG residual flags: Flagged { reaches: 27980, with_other: 595, no_feature: 29495 }
+RG domains: 316142 nodes, 209212 reaches, 55501 basins after the stitch; landmass items with different contents in two domains: 0
+RG stage basins: 136.4 s; peak working set 13802 MiB, now 4402 MiB
+RG stage KG-trib: 221.7 s; peak working set 13802 MiB, now 4402 MiB
+RG stage KS1: 3.3 s; peak working set 13802 MiB, now 4402 MiB
+RG stage KV and KC: 163.9 s; peak working set 13802 MiB, now 4402 MiB
+RG stage write: 124.4 s; peak working set 13802 MiB, now 4453 MiB
+RG done: kh c1, ks ks1, skipped [], regions 1; 316142 nodes, 209212 reaches, 55501 basins; files in C:/DEV/SeriousPlanetData/tmp/rg-chain5: r1h-graph.txt, r1h-stages/, r1h-final-8160x8160.f64, r1h-timing.csv; 722.3 s
+EXIT 0

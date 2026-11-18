@@ -985,8 +985,39 @@ Detail:
 | Partition | the changes between the two canonical graphs (GEN-189's diff), the topology changes among them, and the first change (`identical` for none) | partition |
 
 - budget field: GEN-189's, from the gate's start surface, on the window's H1 blocks (`--stages` refuses an origin off an H1 corner); the centre L cell of a block is its index `block / 2`; the p50 follows BUILD-057's quantile convention; the 25 km neighbourhood is cut at the window's edge (a gate approximation of the landmass field);
-- chain sheet: `cargo xtask stages --chain DIR [--step S] [--view X,Y,SX,SY] [--out FILE]` renders a chain directory (`planet_cache::stage_sheet`, the `stage_sheet` example; no spike code) as one PNG, by default the whole window at 12 L cells per pixel to `target/review/stages/chain/<label>.png`; the layout: `chain.txt` (`stage-chain 1`; `window X0 Y0 W H` in global L cells; `coarse C`, L cells per H1 cell; `cell_m`; `sea_m`; `label`), little-endian f32 row-major on the L grid `base`, `s0`, `kh`, `ks`, `kv`, `final` (`.f32`), on the H1 grid `zs.f32` and `h1-rivers.u8` (1 on a river cell), `graph.txt` (GEN-189 canonical form) and `stages/` (the stage fields above); every file but `chain.txt` optional (its panel is grey and says `not dumped`), a wrong size refused naming the file and both sizes;
-- the sheet's twelve panels, in rows of four under a title band (label, sun, km per pixel, a 50 km bar): base, `z_s`, H1 rivers on `z_s`, `S0`, KH, KS (its lowering against KH tinted), the trunk graph (H1 reaches and L reaches with a parent) on KS, tributaries and basins (kept magenta) on KS, KV and KC (each with its stage fields tinted: lowering red, fill blue), the final surface with the whole graph, and final minus `S0`; one fixed scale for all panels and runs: the sun at azimuth 315 and altitude 10 degrees, grey = 0.5 + 2 (shade - sin 10 degrees) per L cell averaged over the pixel, tints full at 20 m (stages) and 50 m (change);
+- chain sheet: `cargo xtask stages --chain DIR [--step S] [--view X,Y,SX,SY] [--out FILE]` renders a chain directory as one PNG (`planet_cache::stage_sheet`, the `stage_sheet` example; no spike code);
+  - default: the whole window at 12 L cells per pixel, written to `target/review/stages/chain/<label>.png` (every character of the label but a letter, a digit or `-` written as `-`; `chain.png` without a label);
+  - `chain.txt`: `stage-chain 1`, then `window X0 Y0 W H` (global L cells), `coarse C` (L cells per H1 cell), `cell_m M`, and optionally `sea_m S` (default 0) and `label TEXT`;
+  - L grid, little-endian f32, row-major: `base.f32`, `s0.f32`, `kh.f32`, `ks.f32`, `kv.f32`, `final.f32`;
+  - H1 grid: `zs.f32` (f32) and `h1-rivers.u8` (1 on a river cell);
+  - `graph.txt` (GEN-189 canonical form) and `stages/` (the stage fields above);
+  - every file but `chain.txt` is optional: its panel is grey and its label ends `not dumped`; a file of the wrong size is refused, naming the file and both sizes;
+- the sheet: a title band (label, sun, km per pixel, a 50 km bar), then the panels in rows of four, each under its label (cut at the panel's width):
+
+| Panel | Content |
+|---|---|
+| 1 | the base (the H1 base read at L) |
+| 2 | `z_s`, held per H1 cell |
+| 3 | H1 rivers on `z_s` |
+| 4 | `S0` |
+| 5 | KH |
+| 6 | KS, its change against KH tinted (lowering red, raise blue) |
+| 7 | the trunk graph (H1 reaches and L reaches with a parent) on KS |
+| 8 | tributaries whose drained area is at least 25 pixels, and basin floors (kept magenta), on KS |
+| 9 | KV, its stage fields tinted (lowering red, fill blue) |
+| 10 | KC (the final surface), its stage fields tinted the same way |
+| 11 | the final surface with the trunks and the drawn tributaries |
+| 12 | final minus `S0` (lowering red, raise blue; the sea in its sea colour) |
+
+- one fixed scale for every panel and run:
+
+| Quantity | Value |
+|---|---|
+| sun | azimuth 315, altitude 10 degrees |
+| grey | 0.5 + 2 (shade - sin 10 degrees) per L cell, averaged over the pixel |
+| stage tints (panels 6, 9, 10) | full at 20 m |
+| change tint (panel 12) | full at 50 m |
+
 - not here: incremental correctness (fresh against incremental) and the owner's flight; the bar for each geomorphology column is BUILD-059's or the plan's.
 
 #### Scenario: A hand graph

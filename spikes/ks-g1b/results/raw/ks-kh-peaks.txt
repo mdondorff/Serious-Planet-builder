@@ -1,0 +1,12 @@
+# peak.ps1 lines (wall time incl. setup, peak working set)
+ks_kh --kh h4c r1h: BAKE-TIME 598 s, peak working set 9,53 GB, exit 
+repair_debt (split) r1h: BAKE-TIME 318 s, peak working set 4,57 GB, exit 
+ks_kh --kh h4c r3a: BAKE-TIME 580 s, peak working set 9,66 GB, exit 
+repair_debt (split) r3a: BAKE-TIME 306 s, peak working set 4,59 GB, exit 
+ks_kh --kh h4c r3b: BAKE-TIME 673 s, peak working set 9,22 GB, exit 
+repair_debt (split) r3b: BAKE-TIME 359 s, peak working set 4,50 GB, exit 
+ks_kh --kh h4c m1: BAKE-TIME 858 s, peak working set 9,89 GB, exit 
+repair_debt (split) m1: BAKE-TIME 443 s, peak working set 4,45 GB, exit 
+ks_kh --kh h4c f1: BAKE-TIME 755 s, peak working set 9,89 GB, exit 
+repair_debt (split) f1: BAKE-TIME 362 s, peak working set 4,50 GB, exit 
+ks_kh --kh c1 r1h: BAKE-TIME 509 s, peak working set 9,03 GB, exit 

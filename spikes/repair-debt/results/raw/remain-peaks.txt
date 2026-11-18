@@ -1,0 +1,6 @@
+# peak.ps1 lines (wall time incl. setup, peak working set) of kh_smooth --ks1
+kh_smooth --ks1 r1h: BAKE-TIME 266 s, peak working set 8,32 GB, exit 
+kh_smooth --ks1 r3a: BAKE-TIME 269 s, peak working set 8,34 GB, exit 
+kh_smooth --ks1 r3b: BAKE-TIME 297 s, peak working set 8,25 GB, exit 
+kh_smooth --ks1 m1: BAKE-TIME 403 s, peak working set 8,19 GB, exit 
+kh_smooth --ks1 f1: BAKE-TIME 339 s, peak working set 8,24 GB, exit 
