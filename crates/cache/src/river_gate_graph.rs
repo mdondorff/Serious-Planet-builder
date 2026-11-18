@@ -818,6 +818,31 @@ impl G2Report {
     }
 }
 
+/// The H1 trunk reaches of a canonical graph as the gate's trunks (BUILD-060 `--start`, lead #171): each H1-level reach's vertices, upstream first, as the window's L cell coordinates
+/// of the H1 cell centres (`coarse` L cells per H1 cell; an H1 id is `(gy << 32) | gx` in global H1 cells). A reach with a vertex outside the window is cut there; a reach left with fewer than
+/// two vertices is dropped.
+pub fn h1_trunks(g: &Graph, window: &Window, coarse: usize) -> Vec<Vec<(f64, f64)>> {
+    let c = coarse as f64;
+    g.reaches
+        .iter()
+        .filter(|r| r.level == Level::H1)
+        .filter_map(|r| {
+            let v: Vec<(f64, f64)> = r
+                .vertices
+                .iter()
+                .map(|&id| {
+                    (
+                        (id & 0xffff_ffff) as f64 * c + (c - 1.0) / 2.0 - window.x0 as f64,
+                        (id >> 32) as f64 * c + (c - 1.0) / 2.0 - window.y0 as f64,
+                    )
+                })
+                .take_while(|&(x, y)| x >= 0.0 && y >= 0.0 && x < window.w as f64 && y < window.h as f64)
+                .collect();
+            (v.len() >= 2).then_some(v)
+        })
+        .collect()
+}
+
 /// A candidate's surface on the window's L grid (BUILD-060 `--surface`): `n` little-endian f64 heights, row-major; refused when the byte count differs or a height is not finite.
 pub fn read_surface(path: &str, n: usize) -> Result<Vec<f64>, String> {
     let b = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
