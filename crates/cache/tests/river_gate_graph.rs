@@ -175,7 +175,7 @@ fn a_missing_spill_node_of_a_basin_in_the_margin_is_counted_apart() {
 
 // spec: TEST-137, BUILD-060
 #[test]
-fn a_kept_basins_interior_is_its_floors_component_below_the_spill_and_its_river_steps_are_counted_apart() {
+fn a_kept_basins_interior_is_the_depression_holding_its_floor_and_its_river_steps_are_counted_apart() {
     use planet_cache::river_gate_graph::{kept_interiors, kept_steps};
     let mut g = graph();
     let cell = |x: usize, y: usize| (y - 200) * 12 + (x - 100);
@@ -200,13 +200,21 @@ fn a_kept_basins_interior_is_its_floors_component_below_the_spill_and_its_river_
         represented,
         owner: Domain::Landmass,
     };
-    // a kept basin, a drained one (not kept) and a kept one whose floor stands above its spill on the measured surface
+    // a kept basin, a drained one (not kept) and a kept one whose floor lies in no depression of the measured surface
     g.basins = vec![
         basin((108, 208), 6.0, Represented::ProtectedSurface),
         basin((102, 210), 30.0, Represented::None),
         basin((102, 209), 10.0, Represented::ProtectedSurface),
     ];
-    let (kept, basins) = kept_interiors(&g, &W, &z);
+    // the gate's depressions: the bowl (label 0) and a pit at (102, 210) (label 1); (102, 209) is dry
+    let mut label = vec![u32::MAX; 144];
+    for y in 207..=209 {
+        for x in 107..=109 {
+            label[cell(x, y)] = 0;
+        }
+    }
+    label[cell(102, 210)] = 1;
+    let (kept, basins) = kept_interiors(&g, &W, &label);
     assert_eq!((basins, kept.iter().filter(|&&k| k).count()), (1, 9));
     assert!(kept[cell(107, 207)] && !kept[cell(106, 208)]);
     // river steps: into the floor, out over the rim (rising 4 m), and one outside on the plain rising 1 m
@@ -363,6 +371,44 @@ fn the_gate_prints_g2_columns_with_their_classes_only_when_given_g2_inputs() {
         "{line}"
     );
     assert!(rg.lines().iter().any(|l| l.starts_with("RIVER-GATE kept basins [correctness]")));
+    // a 6 m pit at (104, 209) holding a kept basin's floor: the gate's own basin flood finds it, and only it is the interior
+    let mut zp = z.clone();
+    zp[9 * 12 + 4] = 24.0;
+    let mut gk = g.clone();
+    gk.basins = vec![Basin {
+        id: 9,
+        level: Level::L,
+        parent: None,
+        floor_cell: gid(104, 209),
+        floor_m: 24.0,
+        spill_cell: gid(105, 209),
+        spill_m: 30.0,
+        spill_node: gk.nodes[0].id,
+        outlet: Outlet::Active,
+        represented: Represented::ProtectedSurface,
+        owner: Domain::Landmass,
+    }];
+    let input_k = G2Input { window: W, graph: Some(&gk), stages: None, residual_records: None, partition: None };
+    let outlet_p = grid.outlets(&zp, 0.0);
+    let rk = measure(
+        &GateInput {
+            grid: &grid,
+            start: &zp,
+            surface: &zp,
+            outlet: &outlet_p,
+            inside: &all,
+            region: &all,
+            h1: &[],
+            seed: 7,
+            sea_level_m: 0.0,
+            outside_drains: false,
+            trunks: &[],
+            g2: Some(&input_k),
+        },
+        &GateParams::default(),
+    );
+    let lk = rk.fields_line();
+    assert!(lk.contains(" kept_basins=1 ") && lk.contains(" kept_cells=1 "), "{lk}");
     // a row with a graph prints the G2 bars (lead #168), each with its class; B's row prints none
     assert!(line.contains(" bar_violations=PASS:0.00") && line.contains(" bar_uphill="), "{line}");
     assert!(classes.contains("bar_corridor=preservation") && classes.contains("bar_spill_missing=correctness"), "{classes}");

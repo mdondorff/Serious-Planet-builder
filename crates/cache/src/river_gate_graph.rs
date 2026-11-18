@@ -143,8 +143,7 @@ pub struct Agreement {
     pub graph_kept: usize,
 }
 
-/// The river steps inside kept-basin interiors (lead #166): a kept basin (`protected_surface`) whose floor cell lies in the window below its spill height holds, on the measured surface, the
-/// cells 8-connected to its floor that stand below its spill height. Its river steps (BUILD-057's, either end inside the interior) and their uphill ones are counted apart from the uphill bar.
+/// The river steps inside kept-basin interiors (lead #166): a kept basin (`protected_surface`) whose floor cell lies in a depression of the measured surface holds that depression. Its river steps (BUILD-057's, either end inside the interior) and their uphill ones are counted apart from the uphill bar.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct KeptReport {
     pub basins: usize,
@@ -401,36 +400,18 @@ fn dilate(m: &[bool], w: usize, h: usize) -> Vec<bool> {
     out
 }
 
-/// The kept-basin interiors on the window (lead #166; [`KeptReport`]): per cell, whether it lies in one; and the number of kept basins whose floor lies in the window below its spill.
-pub fn kept_interiors(g: &Graph, window: &Window, surface: &[f64]) -> (Vec<bool>, usize) {
-    let (w, h) = (window.w, window.h);
-    let mut kept = vec![false; w * h];
+/// The kept-basin interiors on the window (lead #166; [`KeptReport`]): `label` the gate's depression of each cell on the measured surface (BUILD-057's basin flood, `u32::MAX` dry); an
+/// interior is every cell of a depression that holds a kept basin's floor cell. Returns per cell whether it lies in one, and the number of kept basins whose floor lies in a depression.
+pub fn kept_interiors(g: &Graph, window: &Window, label: &[u32]) -> (Vec<bool>, usize) {
+    let mut held = BTreeSet::new();
     let mut basins = 0usize;
     for b in g.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface) {
-        let Some(f) = window.cell(b.floor_cell) else { continue };
-        if surface[f] >= b.spill_m {
-            continue;
-        }
-        basins += 1;
-        if kept[f] {
-            continue;
-        }
-        kept[f] = true;
-        let mut stack = vec![f];
-        while let Some(c) = stack.pop() {
-            let (x, y) = (c % w, c / w);
-            for yy in y.saturating_sub(1)..=(y + 1).min(h - 1) {
-                for xx in x.saturating_sub(1)..=(x + 1).min(w - 1) {
-                    let d = yy * w + xx;
-                    if !kept[d] && surface[d] < b.spill_m {
-                        kept[d] = true;
-                        stack.push(d);
-                    }
-                }
-            }
+        if let Some(f) = window.cell(b.floor_cell).filter(|&f| label[f] != u32::MAX) {
+            held.insert(label[f]);
+            basins += 1;
         }
     }
-    (kept, basins)
+    (label.iter().map(|l| *l != u32::MAX && held.contains(l)).collect(), basins)
 }
 
 /// The river steps of BUILD-057 (a river cell inside to its river receiver; uphill above [`UPHILL_M`] on `surface`) with either end in `kept`.
