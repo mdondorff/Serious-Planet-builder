@@ -920,6 +920,21 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
     }
     let (edge_matched, edge_h1) = edge_agreement(&l_cross, input.h1, g.dx(), params);
     let pairs = edge_pairs(&l_cross, &l_area, input.h1, g.dx(), params);
+    // crusader #162 (spike/g1f-diag only): the gate's own routing for the uphill and agreement diagnosis, when CRUSADER_DIAG_DIR names a directory: area (f32 m2), receiver (u32),
+    // inside (u8), little-endian, the window's cell order
+    if let Some(dir) = std::env::var_os("CRUSADER_DIAG_DIR") {
+        let dir = std::path::PathBuf::from(dir);
+        let _ = std::fs::create_dir_all(&dir);
+        let a: Vec<u8> = area.iter().flat_map(|&x| (x as f32).to_le_bytes()).collect();
+        let r: Vec<u8> = routing.receiver.iter().flat_map(|&x| x.to_le_bytes()).collect();
+        let i: Vec<u8> = input.inside.iter().map(|&x| u8::from(x)).collect();
+        for (name, bytes) in [("gate-area.f32", a), ("gate-receiver.u32", r), ("gate-inside.u8", i)] {
+            if let Err(e) = std::fs::write(dir.join(name), bytes) {
+                eprintln!("CRUSADER_DIAG_DIR: {name}: {e}");
+            }
+        }
+        eprintln!("CRUSADER_DIAG_DIR: the gate's area, receiver and inside written to {}", dir.display());
+    }
     let suite = measure_suite(&SuiteInput {
         grid: g,
         start: input.start,
