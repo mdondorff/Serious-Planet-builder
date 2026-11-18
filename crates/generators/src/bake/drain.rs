@@ -18,6 +18,9 @@ use std::collections::BinaryHeap;
 /// sqrt 2 of the distance at the price of one cell and paths across even ground run diagonal. `true`: that cost times the step's length (1 or sqrt 2), plus
 /// `LENGTH_COST_M` m per unit length, so a path on even ground is the shortest one in the octile metric.
 pub static BREACH_BY_LENGTH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// spikes #147 (spike only): the choice when both a breach and a fill are within their caps. `false` (SPIKE-138): the smaller volume. `true`: the fill (on a lowland the
+/// smaller volume is a long narrow trench, which K5 then follows as a straight channel).
+pub static PREFER_FILL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// The cost per unit of path length of [`BREACH_BY_LENGTH`] (m).
 pub const LENGTH_COST_M: f64 = 0.01;
 
@@ -287,7 +290,8 @@ pub fn drain_selective_report(
                 let cut: f64 = path.iter().enumerate().map(|(i, &c)| z[c] - z[c].min(zf - DELTA * i as f64)).fold(0.0, f64::max);
                 (cut <= cut_cap(*floor), v, cut)
             };
-            if breach_ok && (!fill_ok || breach_v <= fill_v) {
+            let prefer_fill = PREFER_FILL.load(std::sync::atomic::Ordering::Relaxed);
+            if breach_ok && (!fill_ok || (!prefer_fill && breach_v <= fill_v)) {
                 for (i, &c) in path.iter().enumerate() {
                     cuts.push((c, zf - DELTA * i as f64));
                 }
