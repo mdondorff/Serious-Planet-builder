@@ -21,6 +21,8 @@ pub static BREACH_BY_LENGTH: std::sync::atomic::AtomicBool = std::sync::atomic::
 /// spikes #147 (spike only): the choice when both a breach and a fill are within their caps. `false` (SPIKE-138): the smaller volume. `true`: the fill (on a lowland the
 /// smaller volume is a long narrow trench, which K5 then follows as a straight channel).
 pub static PREFER_FILL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// spikes #147 (spike only): a breach only along a path of at most this many cells (Lindsay's hybrid breach-fill); 0: no limit.
+pub static BREACH_MAX_LEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 /// The cost per unit of path length of [`BREACH_BY_LENGTH`] (m).
 pub const LENGTH_COST_M: f64 = 0.01;
 
@@ -288,7 +290,8 @@ pub fn drain_selective_report(
             } else {
                 let v: f64 = path.iter().enumerate().map(|(i, &c)| (z[c] - z[c].min(zf - DELTA * i as f64)).max(0.0) * area(c)).sum();
                 let cut: f64 = path.iter().enumerate().map(|(i, &c)| z[c] - z[c].min(zf - DELTA * i as f64)).fold(0.0, f64::max);
-                (cut <= cut_cap(*floor), v, cut)
+                let max_len = BREACH_MAX_LEN.load(std::sync::atomic::Ordering::Relaxed);
+                (cut <= cut_cap(*floor) && (max_len == 0 || path.len() <= max_len), v, cut)
             };
             let prefer_fill = PREFER_FILL.load(std::sync::atomic::Ordering::Relaxed);
             if breach_ok && (!fill_ok || (!prefer_fill && breach_v <= fill_v)) {

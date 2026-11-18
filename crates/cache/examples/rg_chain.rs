@@ -1829,6 +1829,9 @@ fn main() -> Result<(), String> {
         return Err(format!("--drain-rule volume | fill, not '{drain_rule}'"));
     }
     planet_generators::bake::drain::PREFER_FILL.store(drain_rule == "fill", std::sync::atomic::Ordering::Relaxed);
+    // spikes #147: `--breach-max-len N` (cells of the grid the drain runs on; 0: none), the hybrid breach-fill's limit
+    let breach_max_len: usize = value(&args, "--breach-max-len").map_or(Ok(0), str::parse).map_err(|_| "--breach-max-len cells")?;
+    planet_generators::bake::drain::BREACH_MAX_LEN.store(breach_max_len, std::sync::atomic::Ordering::Relaxed);
     let base_today = h1_form == "k6";
     let low = value(&args, "--centre") != Some("maximin");
     std::fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;
@@ -2014,7 +2017,7 @@ fn main() -> Result<(), String> {
         let cells8: usize = runs.iter().filter(|&&r| r >= 8).sum();
         let all_steps: usize = runs.iter().sum();
         println!(
-            "PROBE {tag} (base {base_form}, breach cost {breach_cost}, drain rule {drain_rule}): H1 channel steps in the box {tot}, diagonal {diag} ({:.1} %); straight runs: p50 {} p90 {} p99 {} max {} steps; runs of 8 steps (6.5 km) or more: {long8}, holding {:.1} % of the steps",
+            "PROBE {tag} (base {base_form}, breach cost {breach_cost}, drain rule {drain_rule}, breach max len {breach_max_len}): H1 channel steps in the box {tot}, diagonal {diag} ({:.1} %); straight runs: p50 {} p90 {} p99 {} max {} steps; runs of 8 steps (6.5 km) or more: {long8}, holding {:.1} % of the steps",
             100.0 * diag as f64 / tot as f64,
             runs[runs.len() / 2],
             runs[runs.len() * 9 / 10],
