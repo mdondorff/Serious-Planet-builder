@@ -1,0 +1,6 @@
+G1d RG-1 (explorer's KS0); D8 initiation, A_crit 1 km2: basins 148.9 s (9821 kept L basins, 2.9 % of the box's land), extractor 120.5 s; runoff 5.71e-9 m/s; cells below S0 35015451
+G1d box: 131914 tributary reaches, 1046737 channel cells, 106554 km, land 254681 km2, density 0.418 km/km2; trunks given 4177
+G1d density check (BUILD-059's rule on the stage input, 1 km2): MFD area 0.9540 km/km2 (2012255 channel cells); D8 area 0.5817 km/km2 (1221645); D8 outside kept basins 0.5165 (1084003); the extractor's channel cells 0.4988 (1046737); 116.4 s
+G1d graph hierarchy (river-gate --graph's code, BUILD-059 definition): 132221.6 km of rasterised L channel over 254680.8 km2, density 0.5192 km/km2; streams [73976, 16186, 3521, 811, 64, 1]; R_b 5.53 (5 orders)
+KS KH h4c: base = KH(z_s) + r'; the band floored at the sea level + 0.5 m on 11964 cells of the box (0 within 2 km of KH's sea), raised 0.0334 km3; the base against S0 on land of the box: lower over 10 m 41331, higher over 10 m 8823
+KS KS1 written: C:/DEV/SeriousPlanetData/tmp/crusader-ks1/f1/ks1-8160x8160.f64

@@ -34,7 +34,7 @@ Per-spike register sections of M5 and M6: `docs/archive/M6/spikes.md`. Closed sp
 | SPIKE-127 | H1 on sills of S0 (G1a) | closed 11-17: 59 % of D-2 gain a route | `spikes/g1a-sills/results/results.md` |
 | SPIKE-129 | KG-trunk at L (G1c) | closed 11-17: continuous | `spikes/g1c-trunk/results/results.md` |
 | SPIKE-131 | K5' on sills (G1a) | closed 11-17: not adopted | `spikes/k5p-sills/results/results.md` |
-| SPIKE-130 | Basin topology (G1e) | closed 11-17: stable under layouts; S0 3-19 % in basins | `spikes/basins-g1e/results/results.md` |
+| SPIKE-130 | Basin topology (G1e) | closed 11-17: stable; KS1 lake share 0.2-20 % (#160) | `spikes/basins-g1e/results/results.md` |
 | SPIKE-132 | KV and KC on the fixture (G1f) | closed 11-17: budget kept; fill clamp, 2 exceptions gaps | `spikes/kv-kc/results/results.md` |
 | SPIKE-136 | Drained hand-over of z_s at L | closed 11-17: h2 + r (flow-diagonal TIN) starts KS | `spikes/handover/results/results.md` |
 | SPIKE-135 | Repair debt of S0 by origin | closed 11-17: most from the read of z_s at L | `spikes/repair-debt/results/results.md` |
