@@ -94,6 +94,108 @@ pub fn catchment_round(inp: &mut CatchmentInputs, p: &CarveParams, steps: usize)
     }
 }
 
+/// SPIKE-139 (spike branch only): K5's steps with two receivers, D-infinity (Tarboton 1997), see [`dinf_round`].
+pub static RECEIVER_DINF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// SPIKE-139 (spike only): one round of K5 with D-infinity receivers. The routing (D8 receivers, the clipped MFD area) and every catchment's pre-step breach are today's
+/// ([`catchment_round`] with no steps); then `p.reroute_every` implicit steps over the whole region, cell by cell in ascending filled height (ties by the index), which is a
+/// topological order of the two-receiver graph, so each step is exact in one sweep. A cell's receivers are the cardinal and diagonal neighbour of Tarboton's steepest facet on
+/// the filled surface, weighted (pi/4 - alpha) / (pi/4) and alpha / (pi/4), both lower than the cell on it (else its D8 receiver alone). A step uses only the receivers below
+/// the cell: z' = (z + up + sum f_i h_i) / (1 + sum f_i), f_i = k_dt scale sqrt(A) w_i / d_i, at least the lowest receiver + epsilon; a cell below both keeps today's pit rule.
+/// Sequential, so the bits do not depend on threads.
+fn dinf_round(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, seed: u64, drivers: &Drivers, taper: &[f32]) {
+    use super::NEIGHBOURS;
+    const FACETS: [(usize, usize); 8] = [(1, 5), (1, 7), (0, 4), (0, 6), (2, 4), (2, 5), (3, 6), (3, 7)];
+    let n = grid.len();
+    let filled = super::flood::priority_flood_with(grid, &*z, outlet, p.epsilon, p.round_rules.canonical_flood);
+    let r = route_rules(grid, &*z, outlet, p.epsilon, seed, p.max_area, drivers.runoff, p.round_rules);
+    {
+        let cuts = cut_in(Some(grid), &r);
+        let queue: Vec<usize> = (0..cuts.members.len()).filter(|&k| cuts.members[k].len() > 1).collect();
+        let zr: &[f64] = z;
+        let done: Vec<Vec<f64>> = queue
+            .iter()
+            .map(|&k| {
+                let mut inp = gather_with(grid, zr, outlet, &r, &cuts, taper, drivers, p, k);
+                catchment_round(&mut inp, p, 0);
+                inp.z
+            })
+            .collect();
+        for (&k, zk) in queue.iter().zip(done) {
+            for (&c, v) in cuts.members[k].iter().zip(zk) {
+                z[c as usize] = v;
+            }
+        }
+    }
+    // the receivers: up to two (cell, weight, distance) per cell
+    let mut rec: Vec<[(u32, f64, f64); 2]> = vec![[(NONE, 0.0, 1.0); 2]; n];
+    for c in 0..n {
+        let d8 = r.receiver[c];
+        if d8 == NONE {
+            continue;
+        }
+        let z0 = filled[c];
+        let mut top: Option<(f64, f64, usize, usize, usize, usize)> = None;
+        for &(e1, e2) in &FACETS {
+            let (Some(q1), Some(q2)) = (grid.neighbour(c, e1), grid.neighbour(c, e2)) else { continue };
+            let d = grid.distance_at(c, e1);
+            let (s1, s2) = ((z0 - filled[q1]) / d, (filled[q1] - filled[q2]) / d);
+            let (mut alpha, mut slope) = (libm::atan2(s2, s1), libm::sqrt(s1 * s1 + s2 * s2));
+            if alpha < 0.0 {
+                alpha = 0.0;
+                slope = s1;
+            } else if alpha > std::f64::consts::FRAC_PI_4 {
+                alpha = std::f64::consts::FRAC_PI_4;
+                slope = (z0 - filled[q2]) / grid.distance_at(c, e2);
+            }
+            if slope > 0.0 && top.is_none_or(|t| slope > t.0) {
+                top = Some((slope, alpha, q1, q2, e1, e2));
+            }
+        }
+        let _ = NEIGHBOURS;
+        let two = top.and_then(|(_, alpha, q1, q2, e1, e2)| {
+            let w2 = alpha / std::f64::consts::FRAC_PI_4;
+            (filled[q1] < z0 && filled[q2] < z0)
+                .then(|| [(q1 as u32, 1.0 - w2, grid.distance_at(c, e1)), (q2 as u32, w2, grid.distance_at(c, e2))])
+        });
+        rec[c] = two.unwrap_or([(d8, 1.0, distance(grid, c, d8 as usize)), (NONE, 0.0, 1.0)]);
+    }
+    let mut by_height: Vec<u32> = (0..n as u32).collect();
+    by_height.sort_unstable_by(|&a, &b| filled[a as usize].total_cmp(&filled[b as usize]).then(a.cmp(&b)));
+    let floor = p.sea_level + p.epsilon;
+    let uplift = p.u_over_k * p.k_dt;
+    for _ in 0..p.reroute_every {
+        for &c in &by_height {
+            let c = c as usize;
+            if rec[c][0].0 == NONE {
+                continue;
+            }
+            let class = drivers.k_scale.map_or(1.0, |f| f[c]);
+            let up_unit = match drivers.uplift {
+                Some(u) => p.k_dt * f64::from(u[c]),
+                None => uplift * class,
+            };
+            let up = up_unit * f64::from(taper.get(c).copied().unwrap_or(1.0));
+            let (mut num, mut den, mut low) = (z[c] + up, 1.0, f64::INFINITY);
+            for &(q, w, d) in &rec[c] {
+                if q == NONE || w <= 0.0 || z[q as usize] >= z[c] {
+                    continue;
+                }
+                let f = p.k_dt * class * libm::sqrt(r.area[c]) * w / d;
+                num += f * z[q as usize];
+                den += f;
+                low = low.min(z[q as usize]);
+            }
+            let new = if low == f64::INFINITY {
+                if p.keep_pits && !p.incise_only { (z[c] + up).max(floor) } else { z[c] }
+            } else {
+                (num / den).max(low + p.epsilon).max(floor)
+            };
+            z[c] = if p.incise_only { new.min(z[c]) } else { new };
+        }
+    }
+}
+
 /// One round's routing cut into catchments: the members of each in the region order.
 pub struct Catchments {
     pub members: Vec<Vec<u32>>,
@@ -268,7 +370,15 @@ pub fn solve_rounds_with(
         report.pre_breach = Some(super::breach::breach_basins(grid, z, outlet, p.epsilon, pb));
     }
     let taper = taper_of(z, p, drivers);
+    let dinf = RECEIVER_DINF.load(std::sync::atomic::Ordering::Relaxed);
     for round in 0..rounds {
+        if dinf {
+            dinf_round(grid, z, outlet, p, seed, drivers, &taper);
+            if p.round_f32 {
+                super::carve::narrow_f32_checked(z, p.epsilon);
+            }
+            continue;
+        }
         let r = route_rules(grid, z, outlet, p.epsilon, seed, p.max_area, drivers.runoff, p.round_rules);
         let cuts = cut_in(Some(grid), &r);
         // A lone outlet keeps its height, so it is not queued.
