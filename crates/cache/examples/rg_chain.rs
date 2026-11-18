@@ -2353,6 +2353,8 @@ fn main() -> Result<(), String> {
     let mut acc_trunks: HashMap<u64, planet_generators::bake::river_graph::Attrs> = HashMap::new();
     let mut res_ks: Vec<(usize, f64, f64)> = Vec::new();
     let mut res_kvkc: Vec<planet_generators::bake::river_graph::Residual> = Vec::new();
+    // KC's patches, (cells, volume m3), for `kc-patches.csv` (lead #172; with two regions a halo's patch is counted in each domain)
+    let mut kc_patches: Vec<(usize, f64)> = Vec::new();
     let mut extra = Graph { body: BODY, nodes: Vec::new(), reaches: Vec::new(), basins: Vec::new() };
     let (mut t_basins, mut t_trib, mut t_ks1, mut t_kvkc) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
     let mut landmass_seen: HashMap<u64, String> = HashMap::new();
@@ -2665,6 +2667,7 @@ fn main() -> Result<(), String> {
             let kv = if on("kv") { r.kv } else { ks_d.clone() };
             let kc = if on("kc") { r.kc } else { kv.clone() };
             println!("RG domain {d} KV/KC ({sw:?}): {} residuals, {} KC patches", r.residuals.len(), r.patches.len());
+            kc_patches.extend(r.patches.iter().copied());
             (kv, kc, r.residuals)
         } else {
             (ks_d.clone(), ks_d.clone(), Vec::new())
@@ -2831,6 +2834,16 @@ fn main() -> Result<(), String> {
         }
         for r in &res_kvkc {
             writeln!(f, "{},{},{:.4},{:.4},{:016x}", r.cell, r.stage, r.needed_m, r.available_m, r.feature).map_err(|e| e.to_string())?;
+        }
+    }
+    // BUILD-060 (lead #172): KC's patches beside the stage fields, read by river-gate as `b_kc_patches` and `b_kc_patch_km3`
+    {
+        let text: String = std::iter::once("cells,volume_m3
+".to_string()).chain(kc_patches.iter().map(|(c, v)| format!("{c},{v:.3}
+"))).collect();
+        std::fs::write(stages_dir.join("kc-patches.csv"), &text).map_err(|e| e.to_string())?;
+        if let Some(d) = &chain_dir {
+            std::fs::write(d.join("stages").join("kc-patches.csv"), &text).map_err(|e| e.to_string())?;
         }
     }
     if args.iter().any(|a| a == "--dump-s0") {
