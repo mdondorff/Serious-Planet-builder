@@ -2,7 +2,7 @@
 use planet_cache::l_writer::read_l_tile;
 use planet_cache::pack::TileStore;
 use planet_cache::river_gate::{edge_pairs, lay_store_ground, measure, Crossing, GateInput, GateParams, GateReport, LWindow};
-use planet_cache::river_suite::spectrum;
+use planet_cache::river_suite::{ridge_cells, ridge_report, spectrum};
 use planet_core::Face;
 use planet_generators::bake::Grid;
 
@@ -736,4 +736,39 @@ fn a_raw_grid_parses_its_argument_reads_little_endian_heights_and_counts_inside_
     let inside = border_inside(25, 23, GRID_BORDER);
     assert_eq!(inside.iter().filter(|&&b| b).count(), 15);
     assert!(inside[10 * 25 + 10] && inside[12 * 25 + 14] && !inside[10 * 25 + 9] && !inside[13 * 25 + 10] && !inside[10 * 25 + 15]);
+}
+
+// spec: BUILD-060, TEST-137
+#[test]
+fn a_notch_with_a_new_channel_is_one_cut_through_saddle_and_a_rounded_crest_only_lowering() {
+    let g = Grid::new(N, N, DX);
+    // a ridge along x = 20, falling 5 m a cell to each side: only its crest stands 2 m above both cells 2 away
+    let start: Vec<f64> = (0..N * N).map(|c| 100.0 - 5.0 * ((c % N) as f64 - 20.0).abs()).collect();
+    let all = vec![true; N * N];
+    let ridge = ridge_cells(&g, &start, &all, 0.0);
+    assert!(ridge.iter().enumerate().all(|(c, &r)| r == (c % N == 20)), "the crest column is the ridge");
+    assert!(!ridge_cells(&g, &start, &all, 100.0).iter().any(|&r| r), "a crest at or below the sea is no ridge");
+    // a notch of 30 m at rows 10 to 12 with a 2 km2 channel beside it; crest rounding of 25 m at rows 30 and 31 with no channel
+    let mut surface = start.clone();
+    let mut area = vec![0.0; N * N];
+    for y in 10..=12 {
+        surface[y * N + 20] -= 30.0;
+        area[y * N + 21] = 2.0e6;
+    }
+    for y in 30..=31 {
+        surface[y * N + 20] -= 25.0;
+    }
+    let none = vec![0.0; N * N];
+    let r = ridge_report(&g, &start, &surface, &ridge, &area, &none);
+    assert_eq!((r.ridge_cells, r.lowered), (N, 5));
+    // p95 of 35 zeros, two 25s and three 30s: index 38 of 40
+    assert_eq!((r.lowering_p95_m, r.lowering_max_m), (30.0, 30.0));
+    assert_eq!((r.cut_through, r.saddles), ([3, 0], [1, 0]), "the 2 km2 channel counts at 1 km2, not at 5 km2");
+    // a channel the reference already has there is no cut-through
+    let r = ridge_report(&g, &start, &surface, &ridge, &area, &area);
+    assert_eq!((r.lowered, r.cut_through, r.saddles), (5, [0, 0], [0, 0]));
+    // a raise counts as no lowering
+    let raised: Vec<f64> = start.iter().map(|z| z + 40.0).collect();
+    let r = ridge_report(&g, &start, &raised, &ridge, &none, &none);
+    assert_eq!((r.lowered, r.lowering_p95_m, r.lowering_max_m), (0, 0.0, 0.0));
 }
