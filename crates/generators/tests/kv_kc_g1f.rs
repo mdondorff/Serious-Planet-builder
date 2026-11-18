@@ -400,3 +400,26 @@ fn a_floors_lowering_carries_outward_falling_at_the_grade() {
     assert_eq!((at(7, 1), at(6, 1), at(5, 1)), (10.0, 0.0, 0.0), "the smaller seed reaches no neighbour");
     assert_eq!(v, carry_down(&g, &[(16, 10.0), (10, 30.0)], 0.2, 100.0), "seed order changes nothing");
 }
+
+// spec: SPIKE-132
+#[test]
+fn kc_breaches_along_the_graph_line_when_it_can() {
+    // lead #166 (source fix 3): KC's breach first stays within one cell of a graph vertex; on the fixture the free breach already runs there, so both forms give the same surface
+    let k = case();
+    let gl = Grid::cube(L_N, RADIUS_M);
+    let on = KvParams::plan(RADIUS_M * core::f64::consts::FRAC_PI_2 / L_N as f64);
+    let free = KvParams { breach_along_line: false, ..on };
+    let a = run(&gl, &k.s0, &k.outlet, &k.graph, &k.protected, &k.budget, &on, Switch::KcOnly);
+    let b = run(&gl, &k.s0, &k.outlet, &k.graph, &k.protected, &k.budget, &free, Switch::KcOnly);
+    assert!(a.breaches >= 1 && a.breaches == b.breaches, "{} and {} breaches", a.breaches, b.breaches);
+    let mut near = vec![false; k.s0.len()];
+    for r in k.graph.reaches.iter().filter(|r| r.level == Level::L) {
+        for &v in &r.vertices {
+            near[v as usize] = true;
+            (0..8).filter_map(|d| gl.neighbour(v as usize, d)).for_each(|q| near[q] = true);
+        }
+    }
+    let cut: Vec<usize> = (0..k.s0.len()).filter(|&c| a.kc[c] < k.s0[c] - 1e-9).collect();
+    assert!(!cut.is_empty() && cut.iter().all(|&c| near[c]), "every cell the breach cuts lies within one cell of the line");
+    assert_eq!(a.kc, b.kc);
+}

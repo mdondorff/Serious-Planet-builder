@@ -39,6 +39,9 @@ pub struct KvParams {
     /// Lead #166 (source fix 5, graph offset misses): the valley floor rises from the line toward its edge at this grade (m per m), so the routing on the floor runs to the line; 0: a flat
     /// floor (SPIKE-132's form). 1e-3 is 0.1 m a cell, 100 times the gate's flood grade, and 0.5 m (one bed code) at the edge of a 500 m half floor.
     pub s_floor: f64,
+    /// Lead #166 (source fix 3, KC breach misses): KC's breach first searches a path within one cell of a graph vertex (or inside the depression), so the drained depression's outlet runs
+    /// along the graph's line; only without one the free least-cost breach of reading 22; `false`: the free breach alone.
+    pub breach_along_line: bool,
 }
 
 impl KvParams {
@@ -53,6 +56,7 @@ impl KvParams {
             exempt_near_lines: true,
             cap_at_incision: true,
             s_floor: 1.0e-3,
+            breach_along_line: true,
         }
     }
 }
@@ -304,6 +308,21 @@ pub fn run_with(
             residuals.push(Residual { cell: c, stage: "kv", needed_m: want, available_m: left, feature: r.id });
         }
     }
+    // the cells within one cell of a graph vertex (KC's breach along the line, lead #166)
+    let near_line: Vec<bool> = if p.breach_along_line {
+        let mut m = vec![false; n];
+        for &c in vtx.keys() {
+            m[c] = true;
+            for k in 0..8 {
+                if let Some(q) = grid.neighbour(c, k) {
+                    m[q] = true;
+                }
+            }
+        }
+        m
+    } else {
+        Vec::new()
+    };
     drop(dist);
     drop(src);
     let feature_of = |c: usize| if nearest[c] == u32::MAX { u64::MAX } else { reaches[nearest[c] as usize].id };
@@ -362,17 +381,12 @@ pub fn run_with(
                 let fill_vol: f64 = cells.iter().map(|&c| (level[c] - kv[c]) * grid.cell_area(c)).sum();
                 let pit = *cells.iter().min_by(|&&a, &&b| kv[a].total_cmp(&kv[b]).then(a.cmp(&b))).unwrap();
                 let floor = kv[pit];
-                let found = super::basins_rg::breach_path(
-                    grid,
-                    &kv,
-                    outlet,
-                    pit,
-                    floor,
-                    &remaining,
-                    &|c| patch_of[c] == id as u32,
-                    &|c| protected[c],
-                    BREACH_CAP,
-                );
+                let inside = |c: usize| patch_of[c] == id as u32;
+                let breach = |blocked: &dyn Fn(usize) -> bool| {
+                    super::basins_rg::breach_path(grid, &kv, outlet, pit, floor, &remaining, &inside, blocked, BREACH_CAP)
+                };
+                let along = || breach(&|c| protected[c] || !(near_line[c] || inside(c)));
+                let found = if p.breach_along_line { along().or_else(|| breach(&|c| protected[c])) } else { breach(&|c| protected[c]) };
                 if let Some((vol, path)) = found {
                     if vol < fill_vol || !fill_ok {
                         for &c in &path {
