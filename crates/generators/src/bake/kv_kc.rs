@@ -134,9 +134,10 @@ fn chamfer(grid: &Grid, sources: &[(usize, usize)], cell_m: f64, limit_m: f64) -
     (dist, src)
 }
 
-/// Values carried outward from `seeds` (cell, value m), falling `grade` a metre of chamfer step (`cell_m`, diagonals sqrt 2); each cell holds the largest arrival, 0 where none arrives.
-/// Values as integer millimetres in the heap key: a fixed order.
-pub fn carry_down(grid: &Grid, seeds: &[(usize, f64)], grade: f64, cell_m: f64) -> Vec<f64> {
+/// Values carried outward from `seeds` (cell, value m) through the cells `pass` admits, falling `grade` a metre of chamfer step (`cell_m`, diagonals sqrt 2); each cell holds the largest
+/// arrival, 0 where none arrives. Values as integer millimetres in the heap key: a fixed order. `grade * cell_m` must exceed a millimetre, or a value would spread undiminished.
+pub fn carry_down(grid: &Grid, seeds: &[(usize, f64)], grade: f64, cell_m: f64, pass: &dyn Fn(usize) -> bool) -> Vec<f64> {
+    assert!(grade * cell_m >= 1.0e-3, "carry_down: a step must fall at least a millimetre");
     let mut val = vec![0u64; grid.len()];
     let mut heap: BinaryHeap<(u64, Reverse<usize>)> = BinaryHeap::new();
     for &(c, v) in seeds {
@@ -151,7 +152,7 @@ pub fn carry_down(grid: &Grid, seeds: &[(usize, f64)], grade: f64, cell_m: f64) 
             continue;
         }
         for k in 0..8 {
-            let Some(q) = grid.neighbour(c, k) else { continue };
+            let Some(q) = grid.neighbour(c, k).filter(|&q| pass(q)) else { continue };
             let step = if k < 4 { cell_m } else { cell_m * core::f64::consts::SQRT_2 };
             let nv = mm as f64 / 1000.0 - grade * step;
             if nv <= 0.0 {
@@ -285,8 +286,10 @@ pub fn run_with(
     };
     // the floor's lowering carried outward, falling s_wall a metre, so a side next to a lowered floor follows it down (no cliff at the floor's edge; lead #166)
     let carry: Vec<f64> = if p.cap_at_incision {
-        let seeds: Vec<(usize, f64)> = (0..n).filter_map(|c| wants(c).filter(|w| w.1 && w.2 > 0.0).map(|w| (c, w.2))).collect();
-        carry_down(grid, &seeds, p.s_wall, p.cell_m)
+        // seeded with the floor's cut within the budget left, entering only cells KV acts on (no divide buffer, protected basin or sea; within reach_m of a vertex)
+        let seeds: Vec<(usize, f64)> =
+            (0..n).filter_map(|c| wants(c).filter(|w| w.1 && w.2 > 0.0).map(|w| (c, w.2.min(left_at(c))))).collect();
+        carry_down(grid, &seeds, p.s_wall, p.cell_m, &|q| wants(q).is_some())
     } else {
         Vec::new()
     };
@@ -308,8 +311,9 @@ pub fn run_with(
             residuals.push(Residual { cell: c, stage: "kv", needed_m: want, available_m: left, feature: r.id });
         }
     }
+    drop(carry);
     // the cells within one cell of a graph vertex (KC's breach along the line, lead #166)
-    let near_line: Vec<bool> = if p.breach_along_line {
+    let near_line: Vec<bool> = if p.breach_along_line && switch != Switch::KvOnly {
         let mut m = vec![false; n];
         for &c in vtx.keys() {
             m[c] = true;
@@ -386,7 +390,12 @@ pub fn run_with(
                     super::basins_rg::breach_path(grid, &kv, outlet, pit, floor, &remaining, &inside, blocked, BREACH_CAP)
                 };
                 let along = || breach(&|c| protected[c] || !(near_line[c] || inside(c)));
-                let found = if p.breach_along_line { along().or_else(|| breach(&|c| protected[c])) } else { breach(&|c| protected[c]) };
+                // the along path is taken when it beats the fill (or the fill does not fit); otherwise the free breach of reading 22 decides
+                let found = if p.breach_along_line {
+                    along().filter(|(vol, _)| *vol < fill_vol || !fill_ok).or_else(|| breach(&|c| protected[c]))
+                } else {
+                    breach(&|c| protected[c])
+                };
                 if let Some((vol, path)) = found {
                     if vol < fill_vol || !fill_ok {
                         for &c in &path {

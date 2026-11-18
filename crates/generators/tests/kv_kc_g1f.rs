@@ -393,12 +393,16 @@ fn a_floors_lowering_carries_outward_falling_at_the_grade() {
     use planet_generators::bake::kv_kc::carry_down;
     let g = Grid::new(9, 3, 100.0);
     // a 30 m seed at (1, 1) and a 10 m one at (7, 1)
-    let v = carry_down(&g, &[(10, 30.0), (16, 10.0)], 0.2, 100.0);
+    let v = carry_down(&g, &[(10, 30.0), (16, 10.0)], 0.2, 100.0, &|_| true);
     let at = |x: usize, y: usize| v[y * 9 + x];
     assert_eq!((at(1, 1), at(2, 1), at(3, 1), at(4, 1)), (30.0, 10.0, 0.0, 0.0), "20 m a straight step");
     assert!((at(2, 2) - (30.0 - 0.2 * 100.0 * core::f64::consts::SQRT_2)).abs() < 1e-3, "diagonal: 0.2 x 141 m");
     assert_eq!((at(7, 1), at(6, 1), at(5, 1)), (10.0, 0.0, 0.0), "the smaller seed reaches no neighbour");
-    assert_eq!(v, carry_down(&g, &[(16, 10.0), (10, 30.0)], 0.2, 100.0), "seed order changes nothing");
+    assert_eq!(v, carry_down(&g, &[(16, 10.0), (10, 30.0)], 0.2, 100.0, &|_| true), "seed order changes nothing");
+    // a barred cell (a divide buffer, a protected basin) stops the carry: (2, 0..3) barred keeps (3, 1) and beyond at 0
+    let w = carry_down(&g, &[(10, 60.0)], 0.2, 100.0, &|q| q % 9 != 2);
+    assert_eq!((w[11], w[12], w[13]), (0.0, 0.0, 0.0), "nothing passes the barred column");
+    assert!(w[9] > 0.0, "the open side still gets it");
 }
 
 // spec: SPIKE-132
