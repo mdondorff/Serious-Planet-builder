@@ -197,6 +197,9 @@ fn main() -> Result<(), String> {
     if value(&args, "--surface").is_some() && store.is_some() {
         return Err("--surface is the candidate's surface on the window: it takes no --store".to_string());
     }
+    if value(&args, "--start").is_some() && store.is_some() {
+        return Err("--start is a chain run's own start surface: a store's ground lies on main's base, so it takes no --store".to_string());
+    }
     let (face, seed) = (Face(win[0] as u8), win[5] as u64);
     let region = (win[1], win[2], win[3], win[4]);
     // The C1 read meets base nodes 3 below and 4 above the margin's (to_node below): the window keeps 4 regional cells of the face beyond its margin on each side.
@@ -252,7 +255,7 @@ fn main() -> Result<(), String> {
         base(d) + front.regional_field.at(d)
     });
     // BUILD-060 `--start` (lead #171): the run's own start surface on the window's L grid (a chain that conditions its base, as A+, has another S0 than main's); every delta and the
-    // corridor are then measured against it, and the trunks come from the run's own graph (`--graph`'s H1 reaches)
+    // corridor are then measured against it, and the trunks come from the run's own graph (`--graph`'s H1 reaches); the H1 edge-agreement check still reads main's H1
     let own_start = value(&args, "--start");
     if let Some(path) = own_start {
         start = read_surface(path, w * h)?;
