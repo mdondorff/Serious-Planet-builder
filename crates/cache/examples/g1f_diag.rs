@@ -98,6 +98,29 @@ fn main() -> Result<(), String> {
         budget.len(),
         stages.iter().map(|s| s.name.clone()).collect::<Vec<_>>()
     );
+    let filled = {
+        let outlet: Vec<bool> = (0..n).map(|c| !land(c) || c % w == 0 || c / w == 0 || c % w == w - 1 || c / w == h - 1).collect();
+        priority_flood_with(&Grid::new(w, h, dx), &z, &outlet, 1e-3, false)
+    };
+    let g3 = dilate(&on_graph, 3);
+    let kc_near: Vec<bool> = match stages.iter().find(|s| s.name.starts_with("kc")) {
+        Some(k) => dilate(&k.lower.iter().map(|&v| v > 0).collect::<Vec<_>>(), 1),
+        None => vec![false; n],
+    };
+    let cause = |c: usize, t: f64| -> &'static str {
+        if filled[c] - z[c] > 0.1 {
+            "lake_interior"
+        } else if kc_near[c] {
+            "kc_breach"
+        } else if area[c] < 2.0 * t {
+            "near_threshold"
+        } else if g3[c] {
+            "graph_offset_2_3"
+        } else {
+            "other"
+        }
+    };
+    let mut off_cause: HashMap<&str, usize> = HashMap::new();
     // ---- uphill steps on 75 km2 rivers
     let river = |c: usize| area[c] >= 75.0e6 && land(c);
     let order = ["exception", "lake_inlet", "junction", "tile_crossing", "budget_full", "on_graph_trunk", "on_graph_trib", "off_graph"];
@@ -138,6 +161,9 @@ fn main() -> Result<(), String> {
             *labels.entry(l).or_default() += 1;
         }
         let p = order.iter().find(|o| ls.contains(o)).unwrap();
+        if *p == "off_graph" {
+            *off_cause.entry(cause(c, 75.0e6)).or_default() += 1;
+        }
         let e = primary.entry(p).or_insert((0, Vec::new()));
         e.0 += 1;
         e.1.push(rise);
@@ -156,17 +182,11 @@ fn main() -> Result<(), String> {
             );
         }
     }
+    let mut oc: Vec<(&&str, &usize)> = off_cause.iter().collect();
+    oc.sort();
+    println!("DIAG uphill off_graph by cause: {oc:?}");
     // ---- agreement misses at 1 and 75 km2
-    let filled = {
-        let outlet: Vec<bool> = (0..n).map(|c| !land(c) || c % w == 0 || c / w == 0 || c % w == w - 1 || c / w == h - 1).collect();
-        priority_flood_with(&Grid::new(w, h, dx), &z, &outlet, 1e-3, false)
-    };
     let g1 = dilate(&on_graph, 1);
-    let g3 = dilate(&on_graph, 3);
-    let kc_near: Vec<bool> = match stages.iter().find(|s| s.name.starts_with("kc")) {
-        Some(k) => dilate(&k.lower.iter().map(|&v| v > 0).collect::<Vec<_>>(), 1),
-        None => vec![false; n],
-    };
     for t in [1.0e6, 75.0e6] {
         let order = ["lake_interior", "kc_breach", "near_threshold", "graph_offset_2_3", "other"];
         let mut cnt: HashMap<&str, usize> = HashMap::new();
@@ -177,17 +197,7 @@ fn main() -> Result<(), String> {
                 continue;
             }
             miss += 1;
-            let k = if filled[c] - z[c] > 0.1 {
-                "lake_interior"
-            } else if kc_near[c] {
-                "kc_breach"
-            } else if area[c] < 2.0 * t {
-                "near_threshold"
-            } else if g3[c] {
-                "graph_offset_2_3"
-            } else {
-                "other"
-            };
+            let k = cause(c, t);
             *cnt.entry(k).or_default() += 1;
         }
         println!(
