@@ -165,11 +165,11 @@ fn a_missing_spill_node_of_a_basin_in_the_margin_is_counted_apart() {
     g.basins = vec![b(1, (108, 208)), b(2, (110, 210))];
     // the counted cells: all but the last column and row hold both floors
     let inside: Vec<bool> = (0..144).map(|c| c % 12 < 11 && c / 12 < 11).collect();
-    let r = graph_report(&g, &W, &inside, &vec![true; 144], DX);
+    let r = graph_report(&g, &W, &inside, &[true; 144], DX);
     assert_eq!((r.basin_spill_missing, r.basin_spill_missing_edge), (2, 0), "{r:?}");
     // two columns and rows fewer: the second floor (110, 210) lies in the margin
     let inside: Vec<bool> = (0..144).map(|c| c % 12 < 10 && c / 12 < 10).collect();
-    let r = graph_report(&g, &W, &inside, &vec![true; 144], DX);
+    let r = graph_report(&g, &W, &inside, &[true; 144], DX);
     assert_eq!((r.basin_spill_missing, r.basin_spill_missing_edge), (1, 1), "{r:?}");
 }
 
