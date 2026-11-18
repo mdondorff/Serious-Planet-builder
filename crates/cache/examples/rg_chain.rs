@@ -2697,11 +2697,63 @@ fn main() -> Result<(), String> {
         }
         std::fs::write(stages_dir.join(name), bytes).map_err(|e| e.to_string())
     };
+    // lead #169 item 2, #170 item 9: the run's chain (`{tag}-chain.txt`, and the chain layout's chain.txt): the commit, every switch's value and every stage's form, in the
+    // execution order of pipeline-technical.md section 0.1 (`stage <step> <stage number> <name> <form>`)
+    let chain_text = {
+        let commit = std::process::Command::new("git")
+            .args(["rev-parse", "--short=8", "HEAD"])
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map_or("unknown".to_string(), |v| v.trim().to_string());
+        let dirty = std::process::Command::new("git").args(["status", "--porcelain", "--untracked-files=no"]).output().map_or(true, |o| !o.stdout.is_empty());
+        let on_off = |s: &str, form: &str| if on(s) { form.to_string() } else { "skipped".to_string() };
+        let ks_form = |pass: &str| match ks_mode {
+            "off" => "off".to_string(),
+            "ks0" if pass == "ks1" => "off".to_string(),
+            _ => pass.to_string(),
+        };
+        let mut t = format!("stage-chain 1\nwindow {x0} {y0} {w} {h}\ncoarse {L}\ncell_m {dx_l}\nsea_m {sea}\nlabel {tag}\n");
+        t += &format!("commit {commit}{}\n", if dirty { "-dirty" } else { "" });
+        for (k, v) in [
+            ("h1", h1_form.to_string()),
+            ("base", base_form.to_string()),
+            ("kh", kh.to_string()),
+            ("ks", ks_mode.to_string()),
+            ("h1-lakes", h1_lakes.to_string()),
+            ("regions", regions.to_string()),
+            ("skip", if skip.is_empty() { "-".to_string() } else { skip.join(",") }),
+            ("window", win.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",")),
+            ("margin", margin.to_string()),
+        ] {
+            t += &format!("switch {k} {v}\n");
+        }
+        let today = base_form == "today";
+        for (step, stage, name, form) in [
+            (1, "1", "base1", if today { "off" } else { "sel" }.to_string()),
+            (2, "2", "k5", "main".to_string()),
+            (3, "3", "base3", if today { "off" } else { "post" }.to_string()),
+            (4, "4", "h1", h1_form.to_string()),
+            (5, "5", "kh", format!("{kh}, band floored at the sea + 0.5 m")),
+            (6, "13", "budget", "relief10 on S0, lowering against S_KH".to_string()),
+            (7, "7", "ks0", ks_form("ks0")),
+            (8, "8", "kg-trunk", on_off("kg-trunk", "corridor, readings 24 and 26")),
+            (9, "10", "basins-1", on_off("basins", "kept set on KS0")),
+            (10, "9", "kg-trib", on_off("kg-trib", "1 km2, readings 14 and 18")),
+            (11, "7", "ks1", ks_form("ks1")),
+            (12, "6", "band6", if today { "off" } else { "post" }.to_string()),
+            (13, "10", "basins-2", on_off("basins", "on the KS output, reading 22")),
+            (14, "11", "kv-kc", format!("kv {}, kc {}, outlets sea and window edge, against S_KH", on_off("kv", "on"), on_off("kc", "on"))),
+            (15, "12", "k7-hillslope", "off".to_string()),
+        ] {
+            t += &format!("stage {step} {stage} {name} {form}\n");
+        }
+        t
+    };
+    std::fs::write(out_dir.join(format!("{tag}-chain.txt")), &chain_text).map_err(|e| e.to_string())?;
     if let Some(d) = &chain_dir {
         std::fs::write(d.join("graph.txt"), g.canonical()).map_err(|e| e.to_string())?;
-        // the manifest of `planet_cache::stage_sheet` (written by hand: the module is on main, not on this spike branch)
-        let m = format!("stage-chain 1\nwindow {x0} {y0} {w} {h}\ncoarse {L}\ncell_m {dx_l}\nsea_m {sea}\nlabel {tag}\n");
-        std::fs::write(d.join("chain.txt"), m).map_err(|e| e.to_string())?;
+        std::fs::write(d.join("chain.txt"), &chain_text).map_err(|e| e.to_string())?;
     }
     chain_f32("s0.f32", &start)?;
     chain_f32("ks.f32", &ks_out)?;
