@@ -142,6 +142,7 @@ fn main() -> Result<(), String> {
         "--surface",
         "--corridor-bar",
         "--start",
+        "--noise",
     ];
     let mut k = 0;
     while k < args.len() {
@@ -150,6 +151,13 @@ fn main() -> Result<(), String> {
         }
         k += 2;
     }
+    // reading 30 (lead #173): the base's band and crease noise with GEN-140's per-octave lattice turn (`turned`) or axis-aligned (`axis`, the default: main's bakes); the window's
+    // start surface and a store's reading follow it, so a turned run is measured on a turned start
+    let noise = value(&args, "--noise").unwrap_or("axis");
+    if !["axis", "turned"].contains(&noise) {
+        return Err(format!("--noise axis | turned, not '{noise}'"));
+    }
+    planet_generators::height::set_turned_noise(noise == "turned");
     let win: Vec<usize> = match value(&args, "--window") {
         None => R1H.to_vec(),
         Some(v) => v
