@@ -1860,6 +1860,16 @@ fn main() -> Result<(), String> {
     let breach_max_len: usize = value(&args, "--breach-max-len").map_or(Ok(0), str::parse).map_err(|_| "--breach-max-len cells")?;
     planet_generators::bake::drain::BREACH_MAX_LEN.store(breach_max_len, std::sync::atomic::Ordering::Relaxed);
     let base_today = h1_form == "k6";
+    // SPIKE-139 (lead #148 item 2, control): `--zs-read c1` (default) reads z_s at L by C1; `contour` first smooths z_s along its contour (5 taps [1 4 6 4 1]/16 at half-cell
+    // steps, bilinear, perpendicular to the central-difference gradient) on every cell but H1's channel cells, so S0 = C1(z_s') + r and KH's C1 reads z_s'; K5, H1, HAND, KH's
+    // routing and its h4c on the zone keep z_s (spike only)
+    let zs_read = value(&args, "--zs-read").unwrap_or("c1");
+    if !["c1", "contour"].contains(&zs_read) {
+        return Err(format!("--zs-read c1 | contour, not '{zs_read}'"));
+    }
+    if zs_read == "contour" && !base_today {
+        return Err("--zs-read contour needs --h1 k6".into());
+    }
     let low = value(&args, "--centre") != Some("maximin");
     std::fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;
     // --chain DIR (lead #167a): the chain layout of `planet_cache::stage_sheet` (BUILD-060's chain sheet), one surface per stage
@@ -1934,6 +1944,63 @@ fn main() -> Result<(), String> {
     let cells = rw * rh;
     let sea = 0.0;
 
+    // SPIKE-139: the read's z_s (z_s itself unless `--zs-read contour`) and its regional field
+    let zs_l: Vec<f64> = if zs_read == "contour" {
+        let dir_h1 = |c: usize| solve.face_spec.halo_direction((sri0 + c % rw) as i64, (srj0 + c / rw) as i64);
+        let (mut weight, mut runoff, mut evap) = (vec![1.0f32; cells], vec![0.0f32; cells], vec![0.0f32; cells]);
+        for c in (0..cells).filter(|&c| solve.zs[c] > 0.0) {
+            let (ro, ev, wt) = climate(dir_h1(c));
+            runoff[c] = ro as f32;
+            evap[c] = ev as f32;
+            weight[c] = wt as f32;
+        }
+        let r0 = route_rules(grid, &solve.zs, outlet, solve.precision.epsilon_w, solve.stream, 0.0, Some(&weight), RoundRules::ROUND);
+        let f0 = priority_flood_with(grid, &solve.zs, outlet, solve.precision.epsilon_w, true);
+        let chan = h1_from(grid, &solve.zs, &f0, r0, outlet, &runoff, &evap, Some(&Vec::new())).hydro.channel;
+        let z = &solve.zs;
+        let bil = |x: f64, y: f64| -> f64 {
+            let (xf, yf) = (x.floor(), y.floor());
+            let (i, j) = (xf as usize, yf as usize);
+            let (u, v) = (x - xf, y - yf);
+            let at = |a: usize, b: usize| z[b * rw + a];
+            (1.0 - v) * ((1.0 - u) * at(i, j) + u * at(i + 1, j)) + v * ((1.0 - u) * at(i, j + 1) + u * at(i + 1, j + 1))
+        };
+        let (taps, wts) = ([-1.0, -0.5, 0.0, 0.5, 1.0], [1.0 / 16.0, 4.0 / 16.0, 6.0 / 16.0, 4.0 / 16.0, 1.0 / 16.0]);
+        let mut changed = 0usize;
+        let out: Vec<f64> = (0..cells)
+            .map(|c| {
+                let (x, y) = (c % rw, c / rw);
+                if chan[c] || x < 2 || y < 2 || x + 2 >= rw || y + 2 >= rh || z[c] <= sea {
+                    return z[c];
+                }
+                let (gx, gy) = ((z[c + 1] - z[c - 1]) / 2.0, (z[c + rw] - z[c - rw]) / 2.0);
+                let g = (gx * gx + gy * gy).sqrt();
+                if g < 1e-9 {
+                    return z[c];
+                }
+                let (tx, ty) = (-gy / g, gx / g);
+                changed += 1;
+                taps.iter().zip(wts).map(|(&s, w)| w * bil(x as f64 + s * tx, y as f64 + s * ty)).sum()
+            })
+            .collect();
+        let d: Vec<f64> = out.iter().zip(z).map(|(a, b)| (a - b).abs()).collect();
+        let mut ds = d.clone();
+        ds.sort_by(f64::total_cmp);
+        println!(
+            "ZSREAD {tag} contour: {changed} of {cells} H1 cells smoothed along the contour (channel cells kept); |z_s' - z_s| p50 {:.2} p99 {:.2} max {:.2} m",
+            ds[ds.len() / 2],
+            ds[ds.len() * 99 / 100],
+            ds[ds.len() - 1]
+        );
+        out
+    } else {
+        solve.zs.clone()
+    };
+    let read_field = (zs_read == "contour").then(|| {
+        RegionField::new(face, REGIONAL, (sri0 as i64, srj0 as i64), rw, rh, zs_l.iter().zip(&solve.zb).map(|(s, b)| (s - b) as f32).collect())
+    });
+    let regional_read = read_field.as_ref().unwrap_or(&front.regional_field);
+
     // ---- B, r, S0 at L
     let mut bl = vec![0f64; w * h];
     par_fill(&mut bl, w, threads, &|p| base(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
@@ -1941,7 +2008,7 @@ fn main() -> Result<(), String> {
     let mut rl = vec![0f64; w * h];
     par_fill(&mut rl, w, threads, &|p| bl[p] - zb_field.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
     let mut start = vec![0f64; w * h];
-    par_fill(&mut start, w, threads, &|p| bl[p] + front.regional_field.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
+    par_fill(&mut start, w, threads, &|p| bl[p] + regional_read.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
     chain_f32("base.f32", &bl)?;
     chain_f32("zs.f32", &solve.zs)?;
     drop(bl);
@@ -2340,7 +2407,7 @@ fn main() -> Result<(), String> {
             let mask: Vec<f64> = h1.hydro.channel.iter().map(|&c| if c { 1.0 } else { 0.0 }).collect();
             kh::channel_zone(&mask, rw, rh, 0.5)
         });
-        let zs_field = RegionField::new(face, REGIONAL, (sri0 as i64, srj0 as i64), rw, rh, solve.zs.iter().map(|&v| v as f32).collect());
+        let zs_field = RegionField::new(face, REGIONAL, (sri0 as i64, srj0 as i64), rw, rh, zs_l.iter().map(|&v| v as f32).collect());
         // h5d: the quads whose D8 diagonal step C1 dams (C1 at the quad's centre over the step line by more than 1 m); C1 at the centre is the mean of the four L cells there
         let dams = (kh_form == "h5d").then(|| {
             let rcv = |c: usize| (recv[c] != NONE).then(|| recv[c] as usize);
@@ -3056,6 +3123,7 @@ fn main() -> Result<(), String> {
             ("h1", h1_form.to_string()),
             ("base", base_form.to_string()),
             ("kh", kh.to_string()),
+            ("zs-read", zs_read.to_string()),
             ("ks", ks_mode.to_string()),
             ("h1-lakes", h1_lakes.to_string()),
             ("regions", regions.to_string()),
