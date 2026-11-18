@@ -1,0 +1,41 @@
+# SPIKE-138: the drain stages' own lines from the run logs (kh_smooth stdout); base-only runs (sel-post, sel-clamp) and the ladder runs (A+ band, reading 23 post)
+HO r1h-sel-post A drain of z_b (sel-post, cap inf): 7 rounds, 16721 depressions met (3540 filled, 3701 breached), 1352 left of them 1352 deep (both over 50 m); 3.5 s
+HO r1h-sel-post post-K5 drain of z_s: 3 rounds, 125 depressions met (11 filled, 24 breached), 30 left of them 30 deep; lowered 0.091 km3, raised 0.392 km3
+HO r1h-sel-clamp A drain of z_b (sel-clamp, cap inf): 7 rounds, 16721 depressions met (3540 filled, 3701 breached), 1352 left of them 1352 deep (both over 50 m); 3.5 s
+HO r1h-sel-clamp K5 clamp: the breach floor at the fill level on 199270 cells of the basins left
+HO r1h A+ band drain: 411 s
+HO r1h reading 23 post: drain of F (caps: the budget at the floor): 6 rounds, 6024 depressions met (3473 filled, 2551 breached), 0 left of them 0 deep; box lowered 0.0622 km3, raised 1.2711 km3; 249 s
+HO r1h-h5 A+ band drain: 363 s
+HO r1h-h5 reading 23 post: drain of F (caps: the budget at the floor): 6 rounds, 7550 depressions met (4794 filled, 2756 breached), 0 left of them 0 deep; box lowered 0.0682 km3, raised 0.9529 km3; 230 s
+HO r3a-sel-post A drain of z_b (sel-post, cap inf): 6 rounds, 9877 depressions met (4174 filled, 5685 breached), 3 left of them 3 deep (both over 50 m); 1.6 s
+HO r3a-sel-post post-K5 drain of z_s: 7 rounds, 180 depressions met (65 filled, 94 breached), 3 left of them 3 deep; lowered 0.183 km3, raised 0.044 km3
+HO r3a-sel-clamp A drain of z_b (sel-clamp, cap inf): 6 rounds, 9877 depressions met (4174 filled, 5685 breached), 3 left of them 3 deep (both over 50 m); 1.6 s
+HO r3a-sel-clamp K5 clamp: the breach floor at the fill level on 4191 cells of the basins left
+HO r3a A+ band drain: 375 s
+HO r3a reading 23 post: drain of F (caps: the budget at the floor): 8 rounds, 3647 depressions met (1808 filled, 1839 breached), 1 left of them 0 deep; box lowered 0.0085 km3, raised 0.1657 km3; 392 s
+HO r3a-h5 A+ band drain: 388 s
+HO r3a-h5 reading 23 post: drain of F (caps: the budget at the floor): 8 rounds, 5464 depressions met (3201 filled, 2263 breached), 1 left of them 0 deep; box lowered 0.0122 km3, raised 0.1996 km3; 392 s
+HO r3b-sel-post A drain of z_b (sel-post, cap inf): 6 rounds, 12653 depressions met (4872 filled, 7745 breached), 6 left of them 6 deep (both over 50 m); 1.4 s
+HO r3b-sel-post post-K5 drain of z_s: 5 rounds, 99 depressions met (24 filled, 45 breached), 6 left of them 6 deep; lowered 0.341 km3, raised 0.031 km3
+HO r3b-sel-clamp A drain of z_b (sel-clamp, cap inf): 6 rounds, 12653 depressions met (4872 filled, 7745 breached), 6 left of them 6 deep (both over 50 m); 1.4 s
+HO r3b-sel-clamp K5 clamp: the breach floor at the fill level on 17323 cells of the basins left
+HO r3b A+ band drain: 352 s
+HO r3b reading 23 post: drain of F (caps: the budget at the floor): 8 rounds, 4339 depressions met (2363 filled, 1240 breached), 92 left of them 92 deep; box lowered 0.0088 km3, raised 0.0355 km3; 338 s
+HO r3b-h5 A+ band drain: 357 s
+HO r3b-h5 reading 23 post: drain of F (caps: the budget at the floor): 8 rounds, 7548 depressions met (5382 filled, 1510 breached), 82 left of them 82 deep; box lowered 0.0098 km3, raised 0.0325 km3; 334 s
+HO m1-sel-post A drain of z_b (sel-post, cap inf): 3 rounds, 12549 depressions met (1157 filled, 842 breached), 3517 left of them 3517 deep (both over 50 m); 11.0 s
+HO m1-sel-post post-K5 drain of z_s: 2 rounds, 183 depressions met (1 filled, 10 breached), 86 left of them 86 deep; lowered 0.212 km3, raised 0.000 km3
+HO m1-sel-clamp A drain of z_b (sel-clamp, cap inf): 3 rounds, 12549 depressions met (1157 filled, 842 breached), 3517 left of them 3517 deep (both over 50 m); 9.8 s
+HO m1-sel-clamp K5 clamp: the breach floor at the fill level on 578285 cells of the basins left
+HO m1 A+ band drain: 418 s
+HO m1 reading 23 post: drain of F (caps: the budget at the floor): 6 rounds, 12508 depressions met (7170 filled, 5338 breached), 0 left of them 0 deep; box lowered 0.2612 km3, raised 2.9184 km3; 248 s
+HO m1-h5 A+ band drain: 458 s
+HO m1-h5 reading 23 post: drain of F (caps: the budget at the floor): 6 rounds, 13446 depressions met (8087 filled, 5359 breached), 0 left of them 0 deep; box lowered 0.2855 km3, raised 3.1037 km3; 267 s
+HO f1-sel-post A drain of z_b (sel-post, cap inf): 7 rounds, 32984 depressions met (14938 filled, 18046 breached), 0 left of them 0 deep (both over 50 m); 4.0 s
+HO f1-sel-post post-K5 drain of z_s: 5 rounds, 252 depressions met (48 filled, 164 breached), 8 left of them 8 deep; lowered 0.554 km3, raised 0.004 km3
+HO f1-sel-clamp A drain of z_b (sel-clamp, cap inf): 7 rounds, 32984 depressions met (14938 filled, 18046 breached), 0 left of them 0 deep (both over 50 m); 3.1 s
+HO f1-sel-clamp K5 clamp: the breach floor at the fill level on 0 cells of the basins left
+HO f1 A+ band drain: 311 s
+HO f1 reading 23 post: drain of F (caps: the budget at the floor): 8 rounds, 8491 depressions met (4411 filled, 4080 breached), 0 left of them 0 deep; box lowered 0.0201 km3, raised 0.3397 km3; 293 s
+HO f1-h5 A+ band drain: 338 s
+HO f1-h5 reading 23 post: drain of F (caps: the budget at the floor): 8 rounds, 12470 depressions met (7915 filled, 4555 breached), 0 left of them 0 deep; box lowered 0.0213 km3, raised 0.3343 km3; 314 s

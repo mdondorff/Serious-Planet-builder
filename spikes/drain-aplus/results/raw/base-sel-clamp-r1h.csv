@@ -1,0 +1,5 @@
+window,rung,cell_m,land_cells,riv75_km,riv75_pit_pct,riv75_pit5_pct,riv1_km,riv1_pit_pct,riv1_pit5_pct,depressions,depr5,gate_basins,fill_cells,fill_p50_m,fill_p95_m,fill_max_m,fill_over10,fill_over50,fill_km3,breach_cells,breach_p50_m,breach_p95_m,breach_max_m,breach_over10,breach_over50,breach_km3,riv_breach_cells,riv_breach_p95_m,riv_breach_max_m,riv_breach_over10,riv_breach_over50,ridge_cells,ridge_breach1,ridge_breach10,d2_measured,d2_failed,inland_cells,stuck,seconds
+#base,r1h-sel-clamp,267606,3893,5801,15,0,22.3566,40.9138,87700,1150,403,207493,46580,103775,0,9707.0658,224.8522,92.83,91.42,136.23,380.72,380.80,358.56
+r1h-sel-clamp,L0 z_b 814 m,814.4,267606,12953.1,39.43,39.43,148860.6,31.97,31.97,378,378,291,56779,86.92,570.98,877.4,52245,36501,4876.0401,30088,51.05,430.62,922.2,25449,15229,1755.1541,7939,609.06,922.2,7449,5685,86607,8490,7787,-,-,0,0,1
+r1h-sel-clamp,L1 z_s 814 m,814.4,267606,12771.9,16.01,15.73,125916.0,10.36,10.26,211,170,115,15541,56.28,207.90,349.3,13295,8286,626.6894,6436,33.24,180.03,349.3,4867,2539,181.3112,2860,226.58,349.3,2390,1551,105551,967,841,-,-,0,0,0
+#census,r1h-sel-clamp,71,3231,2631.4,45,4,4,0
