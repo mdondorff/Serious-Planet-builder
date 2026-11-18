@@ -2539,6 +2539,12 @@ fn main() -> Result<(), String> {
             std::fs::write(out_dir.join(format!("{tag}-zs-{rw}x{rh}.f32")), b).map_err(|e| e.to_string())?;
             let b: Vec<u8> = h1.hydro.channel.iter().flat_map(|&c| (if c { 1.0f32 } else { 0.0 }).to_le_bytes()).collect();
             std::fs::write(out_dir.join(format!("{tag}-chan-{rw}x{rh}.f32")), b).map_err(|e| e.to_string())?;
+            // the same read of the base before stage 1 (C1(z_b) = B - r) and after it (C1(z_b_in), the base K5 starts from)
+            let b: Vec<u8> = (0..n_l).flat_map(|p| (zb_field.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)) as f32).to_le_bytes()).collect();
+            std::fs::write(out_dir.join(format!("{tag}-c1b-{w}x{h}.f32")), b).map_err(|e| e.to_string())?;
+            let zbin_field = RegionField::new(face, REGIONAL, (sri0 as i64, srj0 as i64), rw, rh, solve.zb_in.iter().map(|&v| v as f32).collect());
+            let b: Vec<u8> = (0..n_l).flat_map(|p| (zbin_field.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)) as f32).to_le_bytes()).collect();
+            std::fs::write(out_dir.join(format!("{tag}-c1bin-{w}x{h}.f32")), b).map_err(|e| e.to_string())?;
         }
         println!("RG stopped after KH (--stop-after-kh)");
         return Ok(());
