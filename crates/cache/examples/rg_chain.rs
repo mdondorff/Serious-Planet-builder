@@ -1236,9 +1236,46 @@ fn h1_reaches(h1: &H1, grid: &Grid, sea_outlet: &dyn Fn(u32) -> bool, budget: &[
     // reading 24 (replaces reading 13 for the prototype): no H1 basin cuts a trunk; every trunk crosses, and a crossing over the budget is KG-trunk's rise_over_budget on S_KH
     let _ = budget;
     let kept = |_c: u32| -> Option<usize> { None };
+    // reading 26 (spikes, lead 2026-11-18): inside a crossed basin only the segments fed from outside it stay trunk reaches. A segment is fed when its up cell lies in no
+    // H1 basin, or when a segment flowing into it is fed; an unfed segment (it starts inside a basin and only basin-floor segments flow into it) is the floor's own drainage
+    // and makes no reach. Fed propagates downstream, so a kept segment's downstream segment is kept: the trunk enters the basin and runs on to the spill as one path per inflow.
+    let label = &h1.hydro.label;
+    let mut ups: Vec<Vec<usize>> = vec![Vec::new(); segs.len()];
+    for (k, s) in segs.iter().enumerate() {
+        if s.downstream != NONE {
+            ups[s.downstream as usize].push(k);
+        }
+    }
+    let pos: std::collections::HashMap<u32, usize> = h1.routing.order.iter().enumerate().map(|(i, &c)| (c, i)).collect();
+    let mut by_up: Vec<usize> = (0..segs.len()).collect();
+    // upstream first: the routing order lists a cell after its receiver
+    by_up.sort_by_key(|&k| std::cmp::Reverse(pos.get(&segs[k].up).copied().unwrap_or(0)));
+    let mut fed = vec![false; segs.len()];
+    for &k in &by_up {
+        fed[k] = label[segs[k].up as usize] == NONE || ups[k].iter().any(|&u| fed[u]);
+    }
+    {
+        let dropped = fed.iter().filter(|&&f| !f).count();
+        let cells_dropped: usize = (0..segs.len())
+            .filter(|&k| !fed[k])
+            .map(|k| {
+                let (mut c, mut n) = (segs[k].up, 1usize);
+                while c != segs[k].down {
+                    c = h1.routing.receiver[c as usize];
+                    n += 1;
+                }
+                n
+            })
+            .sum();
+        let broken = (0..segs.len()).filter(|&k| fed[k] && segs[k].downstream != NONE && !fed[segs[k].downstream as usize]).count();
+        println!("KG reading 26: {dropped} of {} H1 segments unfed inside basins ({cells_dropped} cells) make no trunk reach; fed segments flowing into an unfed one {broken}", segs.len());
+    }
     let mut out = Vec::new();
     let mut edge_ends = 0usize;
     for (k, s) in segs.iter().enumerate() {
+        if !fed[k] {
+            continue;
+        }
         let mut cells = vec![s.up];
         let mut c = s.up;
         while c != s.down {
