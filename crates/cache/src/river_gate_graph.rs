@@ -123,6 +123,8 @@ pub struct GraphReport {
     pub basins_endorheic: usize,
     pub basin_parent_missing: usize,
     pub basin_spill_missing: usize,
+    /// Basins whose floor lies outside the counted cells and whose spill node the graph does not hold (apart from `basin_spill_missing` and its bar).
+    pub basin_spill_missing_edge: usize,
     pub basin_order_bad: usize,
 }
 
@@ -362,7 +364,14 @@ pub fn graph_report(g: &Graph, window: &Window, inside: &[bool], land: &[bool], 
     for b in &g.basins {
         r.basins_protected += usize::from(b.represented == planet_generators::bake::river_graph::Represented::ProtectedSurface);
         r.basins_endorheic += usize::from(b.outlet == planet_generators::bake::river_graph::Outlet::Endorheic);
-        r.basin_spill_missing += usize::from(!nodes.contains(&b.spill_node));
+        // a basin whose floor lies outside the counted cells (the window's margin) is counted apart: its spill path may leave the window (lead, 2026-11-18)
+        if !nodes.contains(&b.spill_node) {
+            if window.cell(b.floor_cell).is_some_and(|c| inside[c]) {
+                r.basin_spill_missing += 1;
+            } else {
+                r.basin_spill_missing_edge += 1;
+            }
+        }
         if let Some(p) = b.parent {
             match basins.get(&p) {
                 None => r.basin_parent_missing += 1,
@@ -685,6 +694,7 @@ impl G2Report {
             push("g_basins_endorheic", g.basins_endorheic.to_string(), Correctness);
             push("g_basin_parent_missing", g.basin_parent_missing.to_string(), Correctness);
             push("g_basin_spill_missing", g.basin_spill_missing.to_string(), Correctness);
+            push("g_basin_spill_missing_edge", g.basin_spill_missing_edge.to_string(), Correctness);
             push("g_basin_order_bad", g.basin_order_bad.to_string(), Correctness);
         }
         for (i, a) in self.agreement.iter().enumerate() {
@@ -738,7 +748,7 @@ impl G2Report {
         if let Some(g) = &self.graph {
             let viol: usize = g.violations.values().sum();
             out.push(format!(
-                "RIVER-GATE graph [correctness]: {} nodes, {} H1 and {} L reaches, {} basins; {viol} violations ({}); {} endpoints owned elsewhere; {} of {} sources reach an outlet ({} end open); {} of {} trunk reaches break; {} conservation breaks; bed: {} rises outside exceptions, {} reaches rise above their running minimum (largest {:.1} m); exceptions: {} rise_over_budget, {} unresolved_endpoint, {} budget_residual; {} of {} tributaries attached; basins: {} protected, {} endorheic, {} parents and {} spill nodes missing, {} out of order",
+                "RIVER-GATE graph [correctness]: {} nodes, {} H1 and {} L reaches, {} basins; {viol} violations ({}); {} endpoints owned elsewhere; {} of {} sources reach an outlet ({} end open); {} of {} trunk reaches break; {} conservation breaks; bed: {} rises outside exceptions, {} reaches rise above their running minimum (largest {:.1} m); exceptions: {} rise_over_budget, {} unresolved_endpoint, {} budget_residual; {} of {} tributaries attached; basins: {} protected, {} endorheic, {} parents and {} spill nodes missing ({} more outside the counted cells), {} out of order",
                 g.nodes,
                 g.reaches_h1,
                 g.reaches_l,
@@ -763,6 +773,7 @@ impl G2Report {
                 g.basins_endorheic,
                 g.basin_parent_missing,
                 g.basin_spill_missing,
+                g.basin_spill_missing_edge,
                 g.basin_order_bad
             ));
             out.push(format!(

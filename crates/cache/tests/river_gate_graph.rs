@@ -147,6 +147,34 @@ fn agreement_counts_kept_interiors_and_cells_above_a_graph_head_apart() {
 
 // spec: TEST-137, BUILD-060
 #[test]
+fn a_missing_spill_node_of_a_basin_in_the_margin_is_counted_apart() {
+    let mut g = graph();
+    let b = |id: u64, floor: (u64, u64)| Basin {
+        id,
+        level: Level::L,
+        parent: None,
+        floor_cell: gid(floor.0, floor.1),
+        floor_m: 1.0,
+        spill_cell: gid(floor.0 + 1, floor.1),
+        spill_m: 2.0,
+        spill_node: 0,
+        outlet: Outlet::Active,
+        represented: Represented::None,
+        owner: Domain::Landmass,
+    };
+    g.basins = vec![b(1, (108, 208)), b(2, (110, 210))];
+    // the counted cells: all but the last column and row hold both floors
+    let inside: Vec<bool> = (0..144).map(|c| c % 12 < 11 && c / 12 < 11).collect();
+    let r = graph_report(&g, &W, &inside, &vec![true; 144], DX);
+    assert_eq!((r.basin_spill_missing, r.basin_spill_missing_edge), (2, 0), "{r:?}");
+    // two columns and rows fewer: the second floor (110, 210) lies in the margin
+    let inside: Vec<bool> = (0..144).map(|c| c % 12 < 10 && c / 12 < 10).collect();
+    let r = graph_report(&g, &W, &inside, &vec![true; 144], DX);
+    assert_eq!((r.basin_spill_missing, r.basin_spill_missing_edge), (1, 1), "{r:?}");
+}
+
+// spec: TEST-137, BUILD-060
+#[test]
 fn a_kept_basins_interior_is_its_floors_component_below_the_spill_and_its_river_steps_are_counted_apart() {
     use planet_cache::river_gate_graph::{kept_interiors, kept_steps};
     let mut g = graph();
