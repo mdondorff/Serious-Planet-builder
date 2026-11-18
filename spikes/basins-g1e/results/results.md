@@ -78,5 +78,50 @@ Cube sphere of 24 cells a face edge, 100 m cells, face 0 land falling 0.5 m a ce
 - Decide before G1f which surface the L kept rule reads. Options: `S0`, or KS0/KS1 after conditioning, or a trunk-line exemption. As it stands on `S0`, the protected set would block KV and KC along most trunks.
 - Add an `outlet_sea` receiving reading for basins whose spill reaches the sea without a reach.
 
+## 7. Addendum (lead #160, 2026-11-17): lake inlets on node cells, and kept L basins on KS1
+Code on the spike branches, never merged:
+- `spike/g1d`: the producer, the validator case, and `crates/cache/examples/kg_trib.rs`.
+- `spike/ks1-dump` (from spikes' `spike/kh-stage`): `ks_kh --dump-ks1` writes KS1.
+
+Logs are in `raw/160/`.
+
+### 7.1 The 99 `lake_inlet`s on node cells (explorer's R1h graph)
+- **Cause:** the chain runner merged its first basin pass's nodes into the graph. That pass runs on KS0 and sees only the trunks, so it puts inlets on cells where KG-trib later puts confluences (85), sources (11) and tile crossings (3).
+- **Evidence:**
+  - all 99 have no reach of their own and are no basin's spill node;
+  - no reach passes their cells as an interior vertex;
+  - the graph (`rg-chain4`, 16:38) predates explorer's fix `000a0ea5` (17:06: the graph takes the second pass's nodes only).
+- **After the fix:** `rg-chain5` has 0 anchor collisions between non-markers.
+- **Fixture validator case:** a pass without the tributary puts the inlet on its end cell, the validator finds it, and a pass with every reach puts none there (tier A, `spike/g1d` 79c21cc2).
+
+### 7.2 Kept L basins on KS1 (reading 5's surface)
+Setup:
+- KS1 over `S_KH = KH(h4c)(z_s) + r'`, spikes' `ks_kh --kh h4c` (#140) with the KS1 dump added.
+- The producer runs on KS1 with reading 5's rule only: kept from 0.25 km2 and 2 m, no budget test. Reading 22's drain test (#161) came after this run.
+- Then KG-trib (D8 initiation), and BUILD-059's density at 1 km2 on KS1.
+- The lake share is the channel length inside kept basins over the whole network: the D8 network at 1 km2, minus the same network outside kept basins, over the whole.
+- `S0` is the same measure on the start surface (SPIKE-133 section 8).
+
+| Window | Kept L basins on KS1 | Share of the box's land | Lake share, KS1 / `S0` | D8 density on KS1 / `S0` (bar) | Combined graph density on KS1 |
+|---|---|---|---|---|---|
+| R1h | 24,617 | 0.5 % | 3.3 % / 28.9 % | 0.604 / 0.659 (0.656) | 0.593 |
+| R3a | 1,547 | 0.1 % | 0.7 % / 13.1 % | 0.616 / 0.644 (0.679) | 0.623 |
+| R3b | 6,994 | under 0.1 % | 0.2 % / 24.0 % | 0.621 / 0.671 (0.664) | 0.636 |
+| M1 | 81,757 | 5.8 % | 19.8 % / 55.0 % | 0.715 / 0.870 (0.859) | 0.575 |
+| F1 | 9,821 | 2.9 % | 11.2 % / 37.7 % | 0.582 / 0.632 (0.615) | 0.519 |
+
+- **Lake share against review B and the owner's trigger:**
+  - R1h, R3a and R3b hold 0.2-3.3 % of the river length, inside review B's 2-10 % or under it.
+  - M1 (19.8 %) and F1 (11.2 %) exceed the owner's 10 % trigger.
+  - Reading 22 (owner decision 6) now replaces this kept rule with a drain test against the budget left. Explorer's R1h chain with it drains 20,492 kept-size depressions (#161).
+- **Density:** the combined graph on KS1 measures 0.52-0.64 km/km2 against the bars' 0.62-0.86. That is most of the bar on R1h, R3a and R3b; M1 and F1 stay further under, where the lakes remain.
+- KS1's D8 network itself is 4-18 % shorter than `S0`'s at 1 km2.
+- Outside kept basins the extractor stays within 0.01-0.04 of the D8 network (SPIKE-133's finding holds on KS1).
+- **Cost:** `ks_kh` peaks at 9.9 GB (641-1,192 s); the producer plus KG-trib on KS1 at 7.9-8.1 GB.
+
+### 7.3 Recommendation
+- The kept-basin share on KS1 under reading 5's rule passes on three windows and fails the 10 % trigger on M1 and F1.
+- Reading 22's drain test is the owner's answer. Measure the lake share again with `produce_drain` against the budget left, on the five windows with explorer's runner (#161).
+
 ## Visuals
 None: the results are counts and topology (the cases are asserted in tests).

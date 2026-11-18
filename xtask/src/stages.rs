@@ -1,6 +1,7 @@
 //! `cargo xtask stages [--update]` (BUILD-047): the stage manifest `docs/stages/manifest.txt`, the data hashes and key numbers of the stage probe's fixture. Without `--update` it runs the check
 //! (a stale manifest fails, naming the stage, field and column); with `--update` it rewrites the file from the run, which is the one place the manifest changes. The fixture and the check are the
 //! tier-A test `stage_manifest::the_manifest_is_the_run_of_the_fixture` of `planet-generators`; the sheets are written to `target/review/stages/ci/`.
+//! `cargo xtask stages --chain DIR` (BUILD-060) renders a chain directory as one sheet of the river-graph chain's stages (the `stage_sheet` example of `planet-cache`).
 
 use crate::util::{run, Res};
 use std::path::Path;
@@ -9,11 +10,38 @@ use std::path::Path;
 type Plan = (Vec<String>, Vec<(&'static str, &'static str)>);
 
 pub fn plan(args: &[String]) -> Result<Plan, String> {
+    const USAGE: &str = "usage: cargo xtask stages [--update] | cargo xtask stages --chain DIR [--step S] [--view X,Y,SX,SY] [--out FILE]";
+    if args.iter().any(|a| a == "--chain") {
+        // BUILD-060: the chain sheet of a chain directory, by the `stage_sheet` example of planet-cache
+        let mut tail = Vec::new();
+        let mut dir = None;
+        let mut it = args.iter();
+        while let Some(a) = it.next() {
+            match a.as_str() {
+                "--chain" | "--step" | "--view" | "--out" => {
+                    let v = it.next().filter(|v| !v.starts_with("--")).ok_or(format!("{a} needs a value ({USAGE})"))?;
+                    if a == "--chain" {
+                        if dir.replace(v.clone()).is_some() {
+                            return Err(format!("--chain given twice ({USAGE})"));
+                        }
+                    } else {
+                        tail.extend([a.clone(), v.clone()]);
+                    }
+                }
+                other => return Err(format!("unknown option '{other}' with --chain ({USAGE})")),
+            }
+        }
+        let mut cargo: Vec<String> =
+            ["run", "--release", "-q", "-p", "planet-cache", "--example", "stage_sheet", "--"].iter().map(|s| s.to_string()).collect();
+        cargo.push(dir.expect("--chain was seen"));
+        cargo.extend(tail);
+        return Ok((cargo, Vec::new()));
+    }
     let mut update = false;
     for a in args {
         match a.as_str() {
             "--update" => update = true,
-            other => return Err(format!("unknown option '{other}' (usage: cargo xtask stages [--update])")),
+            other => return Err(format!("unknown option '{other}' ({USAGE})")),
         }
     }
     let cargo = ["nextest", "run", "-p", "planet-generators", "--no-fail-fast", "stage_manifest"].iter().map(|s| s.to_string()).collect();
@@ -24,7 +52,9 @@ pub fn run_cmd(root: &Path, args: &[String]) -> Res {
     let (cargo, env) = plan(args)?;
     let refs: Vec<&str> = cargo.iter().map(String::as_str).collect();
     run(root, "cargo", &refs, &env)?;
-    if env.is_empty() {
+    if cargo.iter().any(|a| a == "stage_sheet") {
+        // the example printed the sheet's path
+    } else if env.is_empty() {
         println!("stages: docs/stages/manifest.txt is the run of the fixture; the sheets are in target/review/stages/ci/");
     } else {
         println!("stages: docs/stages/manifest.txt rewritten from the run; review the diff and commit it");
@@ -129,6 +159,21 @@ mod tests {
         assert_eq!(got[1].1, "docs/stages/sheets/g9/sub/b.png");
         assert!(committed_sheets(&dir.join("none")).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: BUILD-060
+    #[test]
+    fn chain_runs_the_sheet_example_with_its_options_and_refuses_the_rest() {
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let (c, env) = plan(&s(&["--chain", "d/r1h", "--step", "8", "--view", "0,0,800,800", "--out", "x.png"])).unwrap();
+        assert!(env.is_empty());
+        let at = c.iter().position(|a| a == "--").unwrap();
+        assert!(c[..at].contains(&"stage_sheet".to_string()) && c[..at].contains(&"planet-cache".to_string()), "{c:?}");
+        assert_eq!(c[at + 1..], s(&["d/r1h", "--step", "8", "--view", "0,0,800,800", "--out", "x.png"]));
+        assert!(plan(&s(&["--chain"])).unwrap_err().contains("--chain needs a value"));
+        assert!(plan(&s(&["--chain", "d", "--update"])).unwrap_err().contains("unknown option '--update' with --chain"));
+        assert!(plan(&s(&["--chain", "d", "--chain", "e"])).unwrap_err().contains("twice"));
+        assert!(plan(&s(&["--chain", "d", "--step"])).unwrap_err().contains("--step needs a value"));
     }
 
     // spec: BUILD-047

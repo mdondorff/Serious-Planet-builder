@@ -1,0 +1,20 @@
+== r1h ks_kh
+exit ; wall 641 s (after the lock); peak commit 9,91 GB
+== r1h kg_trib
+exit ; wall 369 s (after the lock); peak commit 7,86 GB
+== r3a ks_kh
+exit ; wall 661 s (after the lock); peak commit 9,91 GB
+== r3a kg_trib
+exit ; wall 361 s (after the lock); peak commit 7,92 GB
+== r3b ks_kh
+exit ; wall 688 s (after the lock); peak commit 9,91 GB
+== r3b kg_trib
+exit ; wall 469 s (after the lock); peak commit 8,12 GB
+== m1 ks_kh
+exit ; wall 1.192 s (after the lock); peak commit 9,92 GB
+== m1 kg_trib
+exit ; wall 775 s (after the lock); peak commit 8,07 GB
+== f1 ks_kh
+exit ; wall 798 s (after the lock); peak commit 9,91 GB
+== f1 kg_trib
+exit ; wall 451 s (after the lock); peak commit 8,09 GB
