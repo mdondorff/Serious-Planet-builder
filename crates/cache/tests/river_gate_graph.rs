@@ -135,7 +135,7 @@ fn the_budget_field_and_report_follow_the_contract() {
     let mut fill = vec![0u16; 16];
     fill[3] = 150;
     let stages = [StageField { name: "ks".into(), lower: ks, fill: None }, StageField { name: "kv".into(), lower: kv, fill: Some(fill) }];
-    let r = budget_report(&stages, &budget, "start", &all, &all, Some(2), None);
+    let r = budget_report(&stages, &budget, &all, &all, Some(2), None);
     // cell 1 uses 10.1 m and cell 2 12 m of a 10 m budget: two overruns, both at 95 % or more; cell 3 fills 15 m
     assert_eq!((r.land, r.overrun, r.at_95, r.residual_records, r.residual_reaches), (16, 2, 2, Some(2), None), "{r:?}");
     assert_eq!(
@@ -143,7 +143,7 @@ fn the_budget_field_and_report_follow_the_contract() {
         (3, 12.0, 1, 1, 1)
     );
     // without a kh field the use against S0 is the use against S_KH
-    assert_eq!((r.overrun_s0, r.at_95_s0, r.reference.as_str()), (2, 2, "start"));
+    assert_eq!((r.overrun_s0, r.at_95_s0), (2, 2));
 }
 
 // spec: BUILD-060
@@ -154,13 +154,14 @@ fn the_budget_use_is_against_s_kh_without_kh_and_against_s0_with_it() {
     let all = vec![true; 4];
     let kh = StageField { name: "kh".into(), lower: vec![50, 0, 95, 0], fill: Some(vec![0, 30, 0, 0]) };
     let ks = StageField { name: "ks".into(), lower: vec![60, 0, 0, 0], fill: None };
-    let r = budget_report(&[kh, ks], &budget, "S_KH", &all, &all, None, None);
+    let r = budget_report(&[kh, ks], &budget, &all, &all, None, None);
     // cell 0: 6 m vs S_KH, 11 m vs S0 (over); cell 2: 0 m vs S_KH, 9.5 m vs S0 (at 95 %)
     assert_eq!((r.overrun, r.at_95, r.overrun_s0, r.at_95_s0), (0, 0, 1, 2), "{r:?}");
     assert_eq!(r.stages[0].name, "kh");
     let cols = G2Report { budget: Some(r), ..G2Report::default() }.columns();
     let get = |n: &str| cols.iter().find(|c| c.0 == n).map(|c| c.1.clone());
-    assert_eq!((get("b_overrun_s0"), get("b_reference")), (Some("1".into()), Some("S_KH".into())));
+    assert_eq!(get("b_overrun_s0"), Some("1".into()));
+    assert!(get("b_reference").is_none(), "reading 28: the budget field is always S0's, so no column names it");
     assert_eq!(get("b_kh_lowered"), Some("2".into()));
 }
 
@@ -237,7 +238,7 @@ fn the_gate_prints_g2_columns_with_their_classes_only_when_given_g2_inputs() {
     // B's row: no G2 input, no G2 column, no classes line
     let b = run(None);
     assert!(b.g2.is_none() && b.classes_line().is_none() && !b.fields_line().contains("g_nodes="));
-    let input = G2Input { window: W, graph: Some(&g), stages: None, residual_records: None, partition: Some((&g, &g)), reference: None };
+    let input = G2Input { window: W, graph: Some(&g), stages: None, residual_records: None, partition: Some((&g, &g)) };
     let rg = run(Some(&input));
     let line = rg.fields_line();
     assert!(line.contains(" g_nodes=6 ") && line.contains(" part_first=identical") && line.contains(" agree1_km2=1 "), "{line}");

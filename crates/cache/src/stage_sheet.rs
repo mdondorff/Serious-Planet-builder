@@ -40,6 +40,8 @@ pub struct Manifest {
     pub cell_m: f64,
     pub sea_m: f64,
     pub label: String,
+    /// The run's chain (lead #169): its `commit`, `switch` and `stage` lines, kept as written and in order.
+    pub run: Vec<String>,
 }
 
 impl Manifest {
@@ -49,6 +51,7 @@ impl Manifest {
             return Err("chain.txt: the first line is not `stage-chain 1`".into());
         }
         let (mut win, mut coarse, mut cell_m, mut sea_m, mut label) = (None, None, None, None, None);
+        let mut run = Vec::new();
         for l in lines {
             let (k, v) = l.split_once(' ').unwrap_or((l, ""));
             let num = |s: &str| s.parse::<f64>().map_err(|_| format!("chain.txt: `{l}`: not a number"));
@@ -62,6 +65,7 @@ impl Manifest {
                 "cell_m" => cell_m = Some(num(v)?),
                 "sea_m" => sea_m = Some(num(v)?),
                 "label" => label = Some(v.to_string()),
+                "commit" | "switch" | "stage" => run.push(l.to_string()),
                 _ => return Err(format!("chain.txt: unknown line `{l}`")),
             }
         }
@@ -79,14 +83,25 @@ impl Manifest {
             cell_m: cell_m.ok_or("chain.txt: no cell_m line")?,
             sea_m: sea_m.unwrap_or(0.0),
             label: label.unwrap_or_default(),
+            run,
         })
     }
 
     pub fn text(&self) -> String {
-        format!(
+        let mut t = format!(
             "stage-chain 1\nwindow {} {} {} {}\ncoarse {}\ncell_m {}\nsea_m {}\nlabel {}\n",
             self.x0, self.y0, self.w, self.h, self.coarse, self.cell_m, self.sea_m, self.label
-        )
+        );
+        for l in &self.run {
+            t.push_str(l);
+            t.push('\n');
+        }
+        t
+    }
+
+    /// The run's commit, when the chain names it.
+    pub fn commit(&self) -> Option<&str> {
+        self.run.iter().find_map(|l| l.strip_prefix("commit ")).map(str::trim)
     }
 }
 
@@ -457,8 +472,17 @@ pub fn compose(m: &Manifest, v: &View, panels: &[Panel]) -> Rgba {
         GAP,
         4 + TEXT_ROW_H,
         &format!(
-            "WINDOW L {} {} SIZE {} X {}  VIEW {} {} SIZE {} X {} STEP {}",
-            m.x0, m.y0, m.w, m.h, v.x, v.y, v.size_x, v.size_y, v.step
+            "WINDOW L {} {} SIZE {} X {}  VIEW {} {} SIZE {} X {} STEP {}{}",
+            m.x0,
+            m.y0,
+            m.w,
+            m.h,
+            v.x,
+            v.y,
+            v.size_x,
+            v.size_y,
+            v.step,
+            m.commit().map_or(String::new(), |c| format!("  COMMIT {c}"))
         ),
         [170, 190, 220],
     );
