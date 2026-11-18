@@ -2186,9 +2186,14 @@ fn main() -> Result<(), String> {
         let lr = L as f64;
         let grad = kh::gradients(&solve.zs, rw, rh);
         let step = |p: usize, q: usize| recv[p] == q as u32 || recv[q] == p as u32;
-        // h5 (reading 25, spikes' spike/drain-aplus 91b38d6f): h4c on the channel zone (814 m cells of KH's routing with a D8 area of at least 75 km2 and their 8 neighbours),
+        // h5 (reading 25, spikes' spike/drain-aplus 91b38d6f): h4c on the channel zone (H1's channel cells and their 8 neighbours, reading 27),
         // C1(z_s) elsewhere, blended by kh::zone_weight over one 814 m cell
-        let zone = (kh_form == "h5").then(|| kh::channel_zone(&area, rw, rh, 75.0e6));
+        // reading 27 (lead #170 item 2): the zone is H1's channel cells (GEN-145: runoff-weighted area of at least 75 km2, then downstream) and their 8 neighbours, not KH's
+        // own D8 area on z_s; the channel mask goes in as a 0/1 field
+        let zone = (kh_form == "h5").then(|| {
+            let mask: Vec<f64> = h1.hydro.channel.iter().map(|&c| if c { 1.0 } else { 0.0 }).collect();
+            kh::channel_zone(&mask, rw, rh, 0.5)
+        });
         let zs_field = RegionField::new(face, REGIONAL, (sri0 as i64, srj0 as i64), rw, rh, solve.zs.iter().map(|&v| v as f32).collect());
         let at = |p: usize| {
             let (fx, fy) = (((p % w) as f64 - (lr - 1.0) / 2.0) / lr, ((p / w) as f64 - (lr - 1.0) / 2.0) / lr);
