@@ -6,8 +6,8 @@ use planet_generators::bake::route::{route_rules_filled, RoundRules, Routing, NO
 use planet_generators::bake::Grid;
 
 use crate::river_gate_graph::{
-    agreement, bars_line, budget_field, budget_report, g2_bars, graph_report, kept_interiors, kept_steps, partition_report, Bar, G2Input,
-    G2Report, CORRIDOR_MIN_PCT,
+    agreement, bars_line, budget_field, budget_report, g2_bars, graph_report, kept_interiors, kept_steps, partition_report, Bar,
+    BudgetReport, G2Input, G2Report, CORRIDOR_MIN_PCT,
 };
 use crate::river_suite::{
     corridor_bar_m, measure_suite, network, trunk_burn, trunk_corridor, Network, Snap, SuiteInput, SuiteReport, TrunkReport, CORRIDOR_K,
@@ -318,6 +318,9 @@ impl GateReport {
             ("relief2_start_m", m(self.relief_2_start_m)),
             ("relief10_m", m(self.relief_10_m)),
             ("relief10_start_m", m(self.relief_10_start_m)),
+            // lead #172: the relief lost against the start (positive: lost), and the spectrum slope's change
+            ("relief2_lost_m", m(self.relief_2_start_m - self.relief_2_m)),
+            ("relief10_lost_m", m(self.relief_10_start_m - self.relief_10_m)),
             ("land_cells", c(self.land_cells)),
             ("lowered_cells", c(self.lowered_cells)),
             ("lowered_pct", pct(self.lowered_cells, self.land_cells)),
@@ -362,6 +365,7 @@ impl GateReport {
             ("spectrum_n", c(s.spectrum.n)),
             ("beta", r(s.spectrum.beta)),
             ("beta_start", r(s.spectrum_start.beta)),
+            ("beta_change", r(s.spectrum.beta - s.spectrum_start.beta)),
             ("trunk_reaches", c(self.trunk.reaches)),
             ("trunk_reaches_over", c(self.trunk.reaches_over)),
             ("trunk_reaches_over_pct", pct(self.trunk.reaches_over, self.trunk.reaches)),
@@ -544,7 +548,11 @@ impl GateReport {
         let corridor = self.trunk_corridors_snapped.get(k2).map_or(0.0, |t| share(t.reaches - t.reaches_over, t.reaches));
         // lead #166: the river steps in kept-basin interiors are counted apart from the uphill bar
         let k = g2.kept.clone().unwrap_or_default();
-        g2_bars(g2, share(self.suite.uphill_steps - k.uphill, self.suite.steps - k.steps), corridor, self.params.corridor_min_pct)
+        let mut out =
+            g2_bars(g2, share(self.suite.uphill_steps - k.uphill, self.suite.steps - k.steps), corridor, self.params.corridor_min_pct);
+        // lead #172: the spectrum slope within the benchmark's range
+        out.extend(crate::river_gate_graph::spectrum_bars(self.suite.spectrum.beta));
+        out
     }
 
     /// The corridor trunk line (BUILD-057, lead #158): per `k_c`, the reaches whose best route inside the corridor still rises more than the bar above its running
@@ -1006,7 +1014,10 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
                     })
                     .unwrap_or_default(),
                 kept: kept.as_ref().map(|(k, b)| kept_steps(k, *b, &routing.receiver, &river, input.inside, input.surface)),
-                budget: x.stages.zip(budget.as_ref()).map(|(st, b)| budget_report(st, b, &land, input.inside, x.residual_records, x.graph)),
+                budget: x.stages.zip(budget.as_ref()).map(|(st, b)| BudgetReport {
+                    kc_patches: x.kc_patches,
+                    ..budget_report(st, b, &land, input.inside, x.residual_records, x.graph)
+                }),
                 partition: x.partition.map(|(a, b)| partition_report(a, b)),
             }
         }),

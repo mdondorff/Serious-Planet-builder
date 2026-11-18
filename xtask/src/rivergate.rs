@@ -94,6 +94,8 @@ pub struct TableRow {
     pub args: Vec<String>,
     /// The run's chain file (`#chain=`, lead #169): read by the table only, never passed to the gate.
     pub chain: Option<String>,
+    /// The run's timing file (`#timing=`, lead #172): `stage,seconds,peak_mib` per stage; read by the table only.
+    pub timing: Option<String>,
 }
 
 /// The rows of `river-gate --table <row>... [--windows W,W...] [options]` (BUILD-057): a row is a window (its start surface), `<store dir>@<window>` (the store on that window) or a store dir (on
@@ -153,14 +155,20 @@ pub fn table_rows(args: &[String]) -> Result<Vec<TableRow>, String> {
             let mut parts = t.split('#');
             let t = &parts.next().unwrap_or_default().to_string();
             let mut extra: Vec<String> = Vec::new();
-            let mut chain = None;
+            let (mut chain, mut timing) = (None, None);
             for p in parts {
                 if let Some(v) = p.strip_prefix("chain=").filter(|v| !v.is_empty()) {
                     chain = Some(v.to_string());
                     continue;
                 }
+                if let Some(v) = p.strip_prefix("timing=").filter(|v| !v.is_empty()) {
+                    timing = Some(v.to_string());
+                    continue;
+                }
                 let (k, v) = p.split_once('=').filter(|(k, v)| ROW_INPUTS.contains(k) && !v.is_empty()).ok_or_else(|| {
-                    format!("a row's suffix is #graph=, #stages=, #partition=, #surface=, #start= or #chain=, not '#{p}'; {usage}")
+                    format!(
+                        "a row's suffix is #graph=, #stages=, #partition=, #surface=, #start=, #chain= or #timing=, not '#{p}'; {usage}"
+                    )
                 })?;
                 extra.extend([format!("--{k}"), v.to_string()]);
             }
@@ -192,7 +200,7 @@ pub fn table_rows(args: &[String]) -> Result<Vec<TableRow>, String> {
             let mut args = a;
             args.extend(base.iter().filter(|x| window.is_some() || x.as_str() != "--no-key-check").cloned());
             args.extend(extra);
-            Ok(TableRow { label, args: example_args(&args)?, chain })
+            Ok(TableRow { label, args: example_args(&args)?, chain, timing })
         })
         .collect()
 }
@@ -259,6 +267,68 @@ pub fn render_chains(chains: &[(String, Vec<String>)]) -> String {
     md
 }
 
+/// A row's fields: (column, value).
+type Fields = Vec<(String, String)>;
+
+/// A run's timing file (lead #172): a header, then `stage,seconds,peak_mib` per line (more columns are ignored; a peak of `-` is unknown). Returns the total seconds and the largest
+/// peak (MiB), none when no line gives one.
+pub fn parse_timing(text: &str) -> Result<(f64, Option<f64>), String> {
+    let (mut total, mut peak) = (0.0f64, None::<f64>);
+    for (k, line) in text.lines().enumerate().skip(1).filter(|(_, l)| !l.trim().is_empty()) {
+        let mut f = line.split(',').skip(1);
+        let s: f64 = f.next().and_then(|v| v.trim().parse().ok()).ok_or(format!("timing line {}: no seconds in `{line}`", k + 1))?;
+        total += s;
+        if let Some(p) = f.next().and_then(|v| v.trim().parse::<f64>().ok()) {
+            peak = Some(peak.map_or(p, |q| q.max(p)));
+        }
+    }
+    Ok((total, peak))
+}
+
+/// The table's bars against B (plan section 4.1, lead #172): each row that is not a store row gets, when its window has a store row (B):
+/// - `bar_relief_lost`: its `relief10_lost_m` at most B's, a gain of relief counting as no loss (`<= max(B's, 0)`), preservation;
+/// - `bar_beta_change`: its `|beta_change|` at most B's, geomorphology;
+/// - `bar_cost`: its `cost_s` at most B's, product (only when both rows carry a timing).
+///
+/// A row's window is its label's part after ` @ `. The cells are `PASS:<value>` or `FAIL:<value>`; the columns' classes are added to `classes`.
+pub fn b_bars(table: &mut [(String, Vec<(String, String)>)], stores: &[bool], classes: &mut Vec<(String, String)>) {
+    let window = |label: &str| label.rsplit_once(" @ ").map(|(_, w)| w.to_string());
+    let get = |f: &[(String, String)], k: &str| f.iter().find(|(c, _)| c == k).and_then(|(_, v)| v.parse::<f64>().ok());
+    let refs: Vec<(Option<String>, Fields)> = table.iter().map(|(l, f)| (window(l), f.clone())).collect();
+    let cell = |pass: bool, v: f64| format!("{}:{v:.2}", if pass { "PASS" } else { "FAIL" });
+    let mut used: Vec<(&str, &str)> = Vec::new();
+    for (i, (label, fields)) in table.iter_mut().enumerate() {
+        if stores[i] {
+            continue;
+        }
+        let w = window(label);
+        let Some(j) = (0..refs.len()).find(|&j| stores[j] && refs[j].0.is_some() && refs[j].0 == w) else { continue };
+        let b = &refs[j].1;
+        let mut add = |name: &'static str, class: &'static str, v: Option<f64>, limit: Option<f64>, pass: &dyn Fn(f64, f64) -> bool| {
+            if let (Some(v), Some(l)) = (v, limit) {
+                fields.push((name.to_string(), cell(pass(v, l), v)));
+                used.push((name, class));
+            }
+        };
+        add("bar_relief_lost", "preservation", get(&refs[i].1, "relief10_lost_m"), get(b, "relief10_lost_m"), &|v, l| {
+            v <= l.max(0.0) + 1e-9
+        });
+        add(
+            "bar_beta_change",
+            "geomorphology",
+            get(&refs[i].1, "beta_change").map(f64::abs),
+            get(b, "beta_change").map(f64::abs),
+            &|v, l| v <= l + 1e-9,
+        );
+        add("bar_cost", "product", get(&refs[i].1, "cost_s"), get(b, "cost_s"), &|v, l| v <= l + 1e-9);
+    }
+    for (n, c) in used {
+        if !classes.iter().any(|(k, _)| k == n) {
+            classes.push((n.to_string(), c.to_string()));
+        }
+    }
+}
+
 /// The table of the rows' fields as (markdown, CSV): one row per run, the columns in the first run's order (every run prints the same columns); a value a row lacks is empty.
 /// With `classes` (BUILD-060: the G2 columns' gate classes, from any run) a `class` row follows the header, empty for a column without one.
 pub fn render_table(rows: &[(String, Vec<(String, String)>)], classes: &[(String, String)]) -> (String, String) {
@@ -292,6 +362,7 @@ pub fn run_table(root: &Path, args: &[String]) -> Res {
     let mut table = Vec::new();
     let mut classes: Vec<(String, String)> = Vec::new();
     let mut chains: Vec<(String, Vec<String>)> = Vec::new();
+    let mut stores: Vec<bool> = Vec::new();
     for row in &rows {
         let (label, chain) = match &row.chain {
             Some(path) => {
@@ -306,7 +377,15 @@ pub fn run_table(root: &Path, args: &[String]) -> Res {
         cmd.extend(row.args.iter().map(String::as_str));
         let out = crate::util::capture(root, "cargo", &cmd)?;
         print!("{out}");
-        table.push((label.clone(), parse_fields(&out).map_err(|e| format!("{label}: {e}"))?));
+        let mut fields = parse_fields(&out).map_err(|e| format!("{label}: {e}"))?;
+        if let Some(path) = &row.timing {
+            let text = std::fs::read_to_string(path).map_err(|e| format!("{label}: #timing={path}: {e}"))?;
+            let (total, peak) = parse_timing(&text).map_err(|e| format!("{label}: #timing={path}: {e}"))?;
+            fields.push(("cost_s".to_string(), format!("{total:.1}")));
+            fields.push(("cost_peak_mib".to_string(), peak.map_or("-".to_string(), |p| format!("{p:.0}"))));
+        }
+        stores.push(row.args.iter().any(|a| a == "--store"));
+        table.push((label.clone(), fields));
         if let Some(lines) = chain {
             chains.push((label, lines));
         }
@@ -316,6 +395,7 @@ pub fn run_table(root: &Path, args: &[String]) -> Res {
             }
         }
     }
+    b_bars(&mut table, &stores, &mut classes);
     let (md, csv) = render_table(&table, &classes);
     let md = md + &render_chains(&chains);
     let dir = root.join("target").join("review");
@@ -418,7 +498,9 @@ mod tests {
         assert!(!rows[2].args.contains(&"--graph".to_string()), "a row without a suffix reads no graph");
         let r = table_rows(&s(&["r1h#surface=C:/rg/r1h-final.f64#graph=g.txt"])).unwrap();
         assert_eq!(r[0].args[2..], s(&["--surface", "C:/rg/r1h-final.f64", "--graph", "g.txt"])[..]);
-        assert!(table_rows(&s(&["r1h#gaph=x"])).unwrap_err().contains("#graph=, #stages=, #partition=, #surface=, #start= or #chain="));
+        assert!(table_rows(&s(&["r1h#gaph=x"]))
+            .unwrap_err()
+            .contains("#graph=, #stages=, #partition=, #surface=, #start=, #chain= or #timing="));
         // lead #169: a row's chain file stays with the table, never goes to the gate; reading 28 retired #reference=
         let r = table_rows(&s(&["r1h#stages=st#chain=C:/rg/r1h-chain.txt"])).unwrap();
         assert_eq!(r[0].args[2..], s(&["--stages", "st"])[..]);
@@ -435,6 +517,64 @@ mod tests {
         let (md, csv) = render_table(&[("x".to_string(), parse_fields(out).unwrap())], &classes);
         assert!(md.contains("| class |  | correctness |") && csv.contains("\"class\",,correctness"), "{md}{csv}");
         assert!(parse_classes("RIVER-GATE fields: a=1").is_empty());
+    }
+
+    // spec: BUILD-060
+    #[test]
+    fn a_rows_timing_gives_its_cost_and_the_bars_against_b_read_the_store_row_of_the_same_window() {
+        // lead #172: a timing file's total seconds and largest peak; a `-` peak is unknown
+        assert_eq!(
+            parse_timing(
+                "stage,seconds,peak_mib,now_mib
+setup,30.5,1800,1200
+kv,60,9600,4400
+"
+            )
+            .unwrap(),
+            (90.5, Some(9600.0))
+        );
+        assert_eq!(
+            parse_timing(
+                "stage,seconds,peak_mib
+all,435,-
+"
+            )
+            .unwrap(),
+            (435.0, None)
+        );
+        assert!(parse_timing(
+            "stage,seconds
+x,abc
+"
+        )
+        .unwrap_err()
+        .contains("line 2"));
+        let r = table_rows(&s(&["r1h#timing=t.csv#graph=g.txt"])).unwrap();
+        assert_eq!((r[0].timing.as_deref(), &r[0].args[2..]), (Some("t.csv"), &s(&["--graph", "g.txt"])[..]));
+        let f = |kv: &[(&str, &str)]| kv.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect::<Vec<_>>();
+        let mut table = vec![
+            ("b-r1h @ r1h".to_string(), f(&[("relief10_lost_m", "-8.90"), ("beta_change", "1.074"), ("cost_s", "435.0")])),
+            ("r1h-proto @ r1h".to_string(), f(&[("relief10_lost_m", "-0.55"), ("beta_change", "1.013"), ("cost_s", "900.0")])),
+            ("r3a-proto @ r3a".to_string(), f(&[("relief10_lost_m", "2.0"), ("beta_change", "1.0")])),
+            ("b-r3a @ r3a".to_string(), f(&[("relief10_lost_m", "1.0"), ("beta_change", "1.2")])),
+            ("lonely @ f1".to_string(), f(&[("relief10_lost_m", "0")])),
+        ];
+        let mut classes = Vec::new();
+        b_bars(&mut table, &[true, false, false, true, false], &mut classes);
+        let cell = |row: usize, k: &str| table[row].1.iter().find(|(c, _)| c == k).map(|(_, v)| v.clone());
+        // R1h: B gains relief, the prototype gains less: a gain is no loss, so it passes; its spectrum changes less than B's; it costs more
+        assert_eq!(cell(1, "bar_relief_lost").as_deref(), Some("PASS:-0.55"));
+        assert_eq!(cell(1, "bar_beta_change").as_deref(), Some("PASS:1.01"));
+        assert_eq!(cell(1, "bar_cost").as_deref(), Some("FAIL:900.00"));
+        // R3a: B is after it in the table; it loses 2 m against B's 1 m; no timing, no cost bar
+        assert_eq!(cell(2, "bar_relief_lost").as_deref(), Some("FAIL:2.00"));
+        assert_eq!(cell(2, "bar_cost"), None);
+        // a store row gets no bars, a window without B none either
+        assert!(cell(0, "bar_relief_lost").is_none() && cell(4, "bar_relief_lost").is_none());
+        assert!(
+            classes.contains(&("bar_cost".to_string(), "product".to_string()))
+                && classes.contains(&("bar_relief_lost".to_string(), "preservation".to_string()))
+        );
     }
 
     // spec: BUILD-060
