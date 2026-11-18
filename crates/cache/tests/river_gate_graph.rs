@@ -311,3 +311,45 @@ fn the_surface_reader_takes_the_windows_f64_cells_and_refuses_a_wrong_size_or_a_
     assert!(read_surface(path, 4).unwrap_err().contains("cell 1 is not finite"));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// spec: BUILD-060
+#[test]
+fn the_runs_own_trunks_are_its_graphs_h1_reaches_at_their_h1_cell_centres_cut_at_the_window() {
+    use planet_cache::river_gate_graph::h1_trunks;
+    // H1 cells of 8 L cells; the window starts at L (16, 8): H1 cell (3, 2) is at L cell centre (27.5, 19.5), i.e. (11.5, 11.5) in the window
+    let win = Window { x0: 16, y0: 8, w: 32, h: 32 };
+    let h1 = |x: u64, y: u64| (y << 32) | x;
+    let node = |x: u64, y: u64| {
+        let anchor = h1(x, y);
+        Node {
+            id: node_id(BODY, NodeKind::Source, Level::H1, anchor),
+            kind: NodeKind::Source,
+            level: Level::H1,
+            anchor,
+            parent: None,
+            owner: Domain::Landmass,
+            marker: None,
+        }
+    };
+    let (a, b, c) = (node(3, 2), node(4, 3), node(9, 3));
+    let reach = |up: &Node, down: &Node, cells: &[(u64, u64)], level: Level| Reach {
+        id: reach_id(BODY, level, up.id, down.id),
+        level,
+        up: up.id,
+        down: down.id,
+        vertices: cells.iter().map(|&(x, y)| h1(x, y)).collect(),
+        parent: None,
+        owner: Domain::Landmass,
+        attrs: attrs(&vec![1.0; cells.len()], &vec![0; cells.len()], 1),
+        exceptions: Vec::new(),
+    };
+    let inside = reach(&a, &b, &[(3, 2), (4, 3)], Level::H1);
+    // its third vertex lies past the window's right edge (H1 x 6 is L 51.5 - 16 = 35.5 >= 32): cut there
+    let cut = reach(&b, &c, &[(4, 3), (5, 3), (6, 3), (9, 3)], Level::H1);
+    let l_reach = reach(&a, &c, &[(20, 10), (21, 10)], Level::L);
+    let g = Graph { body: BODY, nodes: vec![a, b, c], reaches: vec![inside, cut, l_reach], basins: Vec::new() };
+    let t = h1_trunks(&g, &win, 8);
+    assert_eq!(t.len(), 2, "the L reach is no trunk");
+    assert_eq!(t[0], vec![(11.5, 11.5), (19.5, 19.5)]);
+    assert_eq!(t[1], vec![(19.5, 19.5), (27.5, 19.5)], "cut at the first vertex outside the window");
+}
