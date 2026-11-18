@@ -32,11 +32,24 @@ pub struct KvParams {
     /// Reading 10 (G0 contracts section 12, lead #165): a divide cell within `W_floor(q_w)/2 + d_buf` of a graph line (the nearest vertex's `q_w`) is valley floor, not a divide, so
     /// it puts no buffer around it; `false`: every divide cell does (SPIKE-132's form).
     pub exempt_near_lines: bool,
+    /// Lead #166 (M1: KV cut every side steeper than `s_wall` within `reach_m` to the budget): outside the floor a cell's target is the `s_wall` cone measured as if the cell stood no higher
+    /// than its nearest vertex's cell (`want = min(s0[c], s0[v]) - v_target`), so a side is lowered only where the line's own height above the bed, carried up an `s_wall` wall, reaches it;
+    /// the floor (`dist <= W_floor/2`) is cut as before. On KS's output the line stands near its bed, so KV leaves the sides; `false`: the cone alone (SPIKE-132's form).
+    pub cap_at_incision: bool,
 }
 
 impl KvParams {
     pub fn plan(cell_m: f64) -> KvParams {
-        KvParams { s_wall: 0.20, w_floor_factor: 3.0, d_buf_m: 200.0, cell_m, reach_m: 3000.0, seed: 1, exempt_near_lines: true }
+        KvParams {
+            s_wall: 0.20,
+            w_floor_factor: 3.0,
+            d_buf_m: 200.0,
+            cell_m,
+            reach_m: 3000.0,
+            seed: 1,
+            exempt_near_lines: true,
+            cap_at_incision: true,
+        }
     }
 }
 
@@ -225,8 +238,10 @@ pub fn run_with(
             continue;
         }
         let half = 0.5 * p.w_floor_factor * law.width_m(r.attrs.q_w[k]);
-        let v = bed_m(r.attrs.bed[k]) + p.s_wall * (dist[c] - half).max(0.0);
-        let want = (s0[c] - v).max(0.0);
+        let bed = bed_m(r.attrs.bed[k]);
+        let v = bed + p.s_wall * (dist[c] - half).max(0.0);
+        let top = if p.cap_at_incision && dist[c] > half { s0[c].min(s0[src[c] as usize]) } else { s0[c] };
+        let want = (top - v).max(0.0);
         if want <= 0.0 {
             continue;
         }

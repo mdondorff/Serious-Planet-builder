@@ -282,8 +282,9 @@ fn kv_and_kc_give_the_pinned_output() {
     assert_eq!(got, KVKC_DIGESTS.to_vec());
 }
 
-// KC only: re-pinned for reading 22 (#161); KV only and both re-pinned for reading 10 (#165: 93 of 3,462 divide cells exempted, KV acts on 57 more cells)
-const KVKC_DIGESTS: [u64; 3] = [0x2459_5f35_b20c_984c, 0x4c07_3ae4_4545_fb75, 0xf32d_c94a_61e4_62f5];
+// KC only: re-pinned for reading 22 (#161); KV only and both re-pinned for reading 10 (#165: 93 of 3,462 divide cells exempted, KV acts on 57 more cells), and for the
+// incision cap (#166: 1,030 cells lowered less, KV's total lowering 6,787 -> 158 m: the fixture's lines stand near their bed, so KV keeps to the floors)
+const KVKC_DIGESTS: [u64; 3] = [0xc1c6_65a7_670e_453a, 0x4c07_3ae4_4545_fb75, 0xd7f3_400b_df31_8fcd];
 
 // spec: SPIKE-132
 #[test]
@@ -325,5 +326,42 @@ fn reading_10_exempts_divide_cells_near_graph_lines() {
     assert_eq!((0..n).filter(|&c| a.near_divide[c] && a.kv[c] != k.s0[c]).count(), 0);
     if std::env::var_os("G1F_PRINT").is_some() {
         println!("reading 10: {exempt} of {divides} divide cells exempted ({:.1} %); cells within d_buf {} -> {}; KV changes {freed} freed cells", 100.0 * exempt as f64 / divides as f64, near(&b), near(&a));
+    }
+}
+
+// spec: SPIKE-132
+#[test]
+fn kv_lowers_a_side_only_as_far_as_the_lines_own_height_reaches() {
+    // lead #166 (M1): outside the floor KV's cone is measured as if the cell stood no higher than its nearest vertex's cell, so it lowers less than the cone alone, never more, and
+    // only sides change
+    let k = case();
+    let gl = Grid::cube(L_N, RADIUS_M);
+    let on = KvParams::plan(RADIUS_M * core::f64::consts::FRAC_PI_2 / L_N as f64);
+    let off = KvParams { cap_at_incision: false, ..on };
+    let a = run(&gl, &k.s0, &k.outlet, &k.graph, &k.protected, &k.budget, &on, Switch::KvOnly);
+    let b = run(&gl, &k.s0, &k.outlet, &k.graph, &k.protected, &k.budget, &off, Switch::KvOnly);
+    let n = k.s0.len();
+    let low = |kv: &[f64], c: usize| k.s0[c] - kv[c];
+    assert!((0..n).all(|c| low(&a.kv, c) <= low(&b.kv, c) + 1e-9), "the capped cone never lowers more");
+    let less = (0..n).filter(|&c| low(&a.kv, c) < low(&b.kv, c) - 1e-9).count();
+    assert!(less > 0, "some side is steeper than s_wall and is lowered less");
+    // a changed cell is a side cell: lowered at most by the deepest L vertex cell's height above its bed (L reaches by id, KV's claim order)
+    let mut ls: Vec<_> = k.graph.reaches.iter().filter(|rc| rc.level == Level::L).collect();
+    ls.sort_by_key(|rc| rc.id);
+    let mut vbed = std::collections::BTreeMap::new();
+    for rc in ls {
+        for (i, &v) in rc.vertices.iter().enumerate() {
+            vbed.entry(v as usize).or_insert(f64::from(rc.attrs.bed[i]) * 0.5);
+        }
+    }
+    let worst = vbed.values().cloned().zip(vbed.keys()).map(|(b, &v)| k.s0[v] - b).fold(f64::NEG_INFINITY, f64::max);
+    let changed = |c: usize| (a.kv[c] - b.kv[c]).abs() > 1e-9;
+    assert!(
+        (0..n).filter(|&c| changed(c)).all(|c| low(&a.kv, c) <= worst.max(0.0) + 1e-9),
+        "no side lowered beyond the deepest line height ({worst:.1} m)"
+    );
+    let total = |kv: &[f64]| (0..n).map(|c| low(kv, c)).sum::<f64>();
+    if std::env::var_os("G1F_PRINT").is_some() {
+        println!("incision cap: {less} cells lowered less; total lowering {:.0} -> {:.0} m", total(&b.kv), total(&a.kv));
     }
 }
