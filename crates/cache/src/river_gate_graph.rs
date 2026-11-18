@@ -4,9 +4,12 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 
-use planet_generators::bake::river_graph::{diff, rasterise, validate, Change, Checks, Graph, Level, NodeKind, Reason, Violation};
+use planet_generators::bake::river_graph::{
+    diff, rasterise, validate, Change, Checks, Graph, Level, NodeKind, Reason, Represented, Violation,
+};
+use planet_generators::bake::route::NONE;
 
-use crate::river_suite::fit;
+use crate::river_suite::{fit, UPHILL_M};
 
 /// The gate class of a column (the plan addendum's section 4): a pass in one class never covers a failure in another. BUILD-060 emits no incremental or product column (the incremental
 /// build and the owner's flight are measured elsewhere); the classes are kept so the names match the addendum.
@@ -120,11 +123,14 @@ pub struct GraphReport {
     pub basins_endorheic: usize,
     pub basin_parent_missing: usize,
     pub basin_spill_missing: usize,
+    /// Basins whose floor lies outside the counted cells and whose spill node the graph does not hold (apart from `basin_spill_missing` and its bar).
+    pub basin_spill_missing_edge: usize,
     pub basin_order_bad: usize,
 }
 
 /// Graph/raster agreement at one channel threshold (contract section 5): routed river cells (land inside, drained area at least the threshold) with a rasterised graph cell within one cell
-/// (Chebyshev), and rasterised cells inside with a routed river cell within one cell.
+/// (Chebyshev), and rasterised cells inside with a routed river cell within one cell. Counted apart, outside both shares (lead #166): cells inside a kept basin's interior
+/// (`routed_kept`, `graph_kept`), and routed cells upstream of a graph head (`routed_above_head`: a miss whose downstream path first comes within one cell of the graph near a source).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Agreement {
     pub threshold_km2: f64,
@@ -132,6 +138,18 @@ pub struct Agreement {
     pub routed_agree: usize,
     pub graph: usize,
     pub graph_agree: usize,
+    pub routed_kept: usize,
+    pub routed_above_head: usize,
+    pub graph_kept: usize,
+}
+
+/// The river steps inside kept-basin interiors (lead #166): a kept basin (`protected_surface`) whose floor cell lies in a depression of the measured surface holds that depression. Its river steps (BUILD-057's, either end inside the interior) and their uphill ones are counted apart from the uphill bar.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct KeptReport {
+    pub basins: usize,
+    pub cells: usize,
+    pub steps: usize,
+    pub uphill: usize,
 }
 
 /// One stage's budget use (land inside, against `S0`).
@@ -177,6 +195,8 @@ pub struct PartitionReport {
 pub struct G2Report {
     pub graph: Option<GraphReport>,
     pub agreement: Vec<Agreement>,
+    /// The kept-basin interiors' river steps (a row with a graph).
+    pub kept: Option<KeptReport>,
     pub budget: Option<BudgetReport>,
     pub partition: Option<PartitionReport>,
 }
@@ -343,7 +363,14 @@ pub fn graph_report(g: &Graph, window: &Window, inside: &[bool], land: &[bool], 
     for b in &g.basins {
         r.basins_protected += usize::from(b.represented == planet_generators::bake::river_graph::Represented::ProtectedSurface);
         r.basins_endorheic += usize::from(b.outlet == planet_generators::bake::river_graph::Outlet::Endorheic);
-        r.basin_spill_missing += usize::from(!nodes.contains(&b.spill_node));
+        // a basin whose floor lies outside the counted cells (the window's margin) is counted apart: its spill path may leave the window (lead, 2026-11-18)
+        if !nodes.contains(&b.spill_node) {
+            if window.cell(b.floor_cell).is_some_and(|c| inside[c]) {
+                r.basin_spill_missing += 1;
+            } else {
+                r.basin_spill_missing_edge += 1;
+            }
+        }
         if let Some(p) = b.parent {
             match basins.get(&p) {
                 None => r.basin_parent_missing += 1,
@@ -373,8 +400,47 @@ fn dilate(m: &[bool], w: usize, h: usize) -> Vec<bool> {
     out
 }
 
-/// The graph/raster agreement at `threshold_m2` (contract section 5): `area` the gate's drained area (m2), `land` above the sea, `inside` the counted cells.
-pub fn agreement(g: &Graph, window: &Window, area: &[f64], land: &[bool], inside: &[bool], threshold_m2: f64) -> Agreement {
+/// The kept-basin interiors on the window (lead #166; [`KeptReport`]): `label` the gate's depression of each cell on the measured surface (BUILD-057's basin flood, `u32::MAX` dry); an
+/// interior is every cell of a depression that holds a kept basin's floor cell. Returns per cell whether it lies in one, and the number of kept basins whose floor lies in a depression.
+pub fn kept_interiors(g: &Graph, window: &Window, label: &[u32]) -> (Vec<bool>, usize) {
+    let mut held = BTreeSet::new();
+    let mut basins = 0usize;
+    for b in g.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface) {
+        if let Some(f) = window.cell(b.floor_cell).filter(|&f| label[f] != u32::MAX) {
+            held.insert(label[f]);
+            basins += 1;
+        }
+    }
+    (label.iter().map(|l| *l != u32::MAX && held.contains(l)).collect(), basins)
+}
+
+/// The river steps of BUILD-057 (a river cell inside to its river receiver; uphill above [`UPHILL_M`] on `surface`) with either end in `kept`.
+pub fn kept_steps(kept: &[bool], basins: usize, receiver: &[u32], river: &[bool], inside: &[bool], surface: &[f64]) -> KeptReport {
+    let mut k = KeptReport { basins, cells: (0..kept.len()).filter(|&c| kept[c] && inside[c]).count(), ..KeptReport::default() };
+    for c in (0..kept.len()).filter(|&c| river[c] && inside[c]) {
+        let r = receiver[c];
+        if r == NONE || !river[r as usize] || !(kept[c] || kept[r as usize]) {
+            continue;
+        }
+        k.steps += 1;
+        k.uphill += usize::from(surface[r as usize] - surface[c] > UPHILL_M);
+    }
+    k
+}
+
+/// The graph/raster agreement at `threshold_m2` (contract section 5): `area` the gate's drained area (m2), `land` above the sea, `inside` the counted cells; `kept` the kept-basin interiors
+/// and `receiver` the gate's routing (lead #166: both counted apart, [`Agreement`]).
+#[allow(clippy::too_many_arguments)]
+pub fn agreement(
+    g: &Graph,
+    window: &Window,
+    area: &[f64],
+    land: &[bool],
+    inside: &[bool],
+    kept: &[bool],
+    receiver: &[u32],
+    threshold_m2: f64,
+) -> Agreement {
     let n = window.w * window.h;
     let mut graph = vec![false; n];
     for &cell in rasterise(g).keys() {
@@ -382,17 +448,59 @@ pub fn agreement(g: &Graph, window: &Window, area: &[f64], land: &[bool], inside
             graph[c] = true;
         }
     }
+    let mut head = vec![false; n];
+    for nd in g.nodes.iter().filter(|nd| nd.kind == NodeKind::Source && nd.level == Level::L) {
+        if let Some(c) = window.cell(nd.anchor) {
+            head[c] = true;
+        }
+    }
     let routed: Vec<bool> = (0..n).map(|c| area[c] >= threshold_m2 && land[c]).collect();
-    let (gd, rd) = (dilate(&graph, window.w, window.h), dilate(&routed, window.w, window.h));
+    let (gd, rd, hd) = (dilate(&graph, window.w, window.h), dilate(&routed, window.w, window.h), dilate(&head, window.w, window.h));
+    // per cell off the graph: 1 when its downstream path first comes within one cell of the graph next to a head, 2 elsewhere or never (0 not yet known)
+    let mut first = vec![0u8; n];
+    let mut path = Vec::new();
     let mut a = Agreement { threshold_km2: threshold_m2 / 1.0e6, ..Agreement::default() };
     for c in (0..n).filter(|&c| inside[c]) {
         if routed[c] {
-            a.routed += 1;
-            a.routed_agree += usize::from(gd[c]);
+            if kept[c] {
+                a.routed_kept += 1;
+            } else if gd[c] {
+                a.routed += 1;
+                a.routed_agree += 1;
+            } else {
+                let mut at = c;
+                let label = loop {
+                    if first[at] != 0 {
+                        break first[at];
+                    }
+                    if gd[at] {
+                        break if hd[at] { 1 } else { 2 };
+                    }
+                    path.push(at);
+                    let r = receiver[at];
+                    if r == NONE || path.len() > n {
+                        break 2;
+                    }
+                    at = r as usize;
+                };
+                for &p in &path {
+                    first[p] = label;
+                }
+                path.clear();
+                if label == 1 {
+                    a.routed_above_head += 1;
+                } else {
+                    a.routed += 1;
+                }
+            }
         }
         if graph[c] {
-            a.graph += 1;
-            a.graph_agree += usize::from(rd[c]);
+            if kept[c] {
+                a.graph_kept += 1;
+            } else {
+                a.graph += 1;
+                a.graph_agree += usize::from(rd[c]);
+            }
         }
     }
     a
@@ -567,6 +675,7 @@ impl G2Report {
             push("g_basins_endorheic", g.basins_endorheic.to_string(), Correctness);
             push("g_basin_parent_missing", g.basin_parent_missing.to_string(), Correctness);
             push("g_basin_spill_missing", g.basin_spill_missing.to_string(), Correctness);
+            push("g_basin_spill_missing_edge", g.basin_spill_missing_edge.to_string(), Correctness);
             push("g_basin_order_bad", g.basin_order_bad.to_string(), Correctness);
         }
         for (i, a) in self.agreement.iter().enumerate() {
@@ -576,6 +685,15 @@ impl G2Report {
             push(&format!("{p}_routed_pct"), format!("{:.2}", 100.0 * a.routed_agree as f64 / a.routed.max(1) as f64), Correctness);
             push(&format!("{p}_graph"), a.graph.to_string(), Correctness);
             push(&format!("{p}_graph_pct"), format!("{:.2}", 100.0 * a.graph_agree as f64 / a.graph.max(1) as f64), Correctness);
+            push(&format!("{p}_routed_kept"), a.routed_kept.to_string(), Correctness);
+            push(&format!("{p}_routed_above_head"), a.routed_above_head.to_string(), Correctness);
+            push(&format!("{p}_graph_kept"), a.graph_kept.to_string(), Correctness);
+        }
+        if let Some(k) = &self.kept {
+            push("kept_basins", k.basins.to_string(), Correctness);
+            push("kept_cells", k.cells.to_string(), Correctness);
+            push("kept_steps", k.steps.to_string(), Correctness);
+            push("kept_uphill_steps", k.uphill.to_string(), Correctness);
         }
         if let Some(b) = &self.budget {
             for s in &b.stages {
@@ -611,7 +729,7 @@ impl G2Report {
         if let Some(g) = &self.graph {
             let viol: usize = g.violations.values().sum();
             out.push(format!(
-                "RIVER-GATE graph [correctness]: {} nodes, {} H1 and {} L reaches, {} basins; {viol} violations ({}); {} endpoints owned elsewhere; {} of {} sources reach an outlet ({} end open); {} of {} trunk reaches break; {} conservation breaks; bed: {} rises outside exceptions, {} reaches rise above their running minimum (largest {:.1} m); exceptions: {} rise_over_budget, {} unresolved_endpoint, {} budget_residual; {} of {} tributaries attached; basins: {} protected, {} endorheic, {} parents and {} spill nodes missing, {} out of order",
+                "RIVER-GATE graph [correctness]: {} nodes, {} H1 and {} L reaches, {} basins; {viol} violations ({}); {} endpoints owned elsewhere; {} of {} sources reach an outlet ({} end open); {} of {} trunk reaches break; {} conservation breaks; bed: {} rises outside exceptions, {} reaches rise above their running minimum (largest {:.1} m); exceptions: {} rise_over_budget, {} unresolved_endpoint, {} budget_residual; {} of {} tributaries attached; basins: {} protected, {} endorheic, {} parents and {} spill nodes missing ({} more outside the counted cells), {} out of order",
                 g.nodes,
                 g.reaches_h1,
                 g.reaches_l,
@@ -636,6 +754,7 @@ impl G2Report {
                 g.basins_endorheic,
                 g.basin_parent_missing,
                 g.basin_spill_missing,
+                g.basin_spill_missing_edge,
                 g.basin_order_bad
             ));
             out.push(format!(
@@ -649,12 +768,21 @@ impl G2Report {
         }
         for a in &self.agreement {
             out.push(format!(
-                "RIVER-GATE graph/raster agreement at {} km2 [correctness]: {:.2} % of {} routed river cells have a graph cell within 1 cell; {:.2} % of {} graph cells have a routed river cell within 1 cell",
+                "RIVER-GATE graph/raster agreement at {} km2 [correctness]: {:.2} % of {} routed river cells have a graph cell within 1 cell; {:.2} % of {} graph cells have a routed river cell within 1 cell; apart: {} routed and {} graph cells in kept-basin interiors, {} routed cells above a graph head",
                 a.threshold_km2,
                 100.0 * a.routed_agree as f64 / a.routed.max(1) as f64,
                 a.routed,
                 100.0 * a.graph_agree as f64 / a.graph.max(1) as f64,
-                a.graph
+                a.graph,
+                a.routed_kept,
+                a.graph_kept,
+                a.routed_above_head
+            ));
+        }
+        if let Some(k) = &self.kept {
+            out.push(format!(
+                "RIVER-GATE kept basins [correctness]: {} kept basins hold {} cells inside; {} river steps in them, {} uphill (apart from the uphill bar)",
+                k.basins, k.cells, k.steps, k.uphill
             ));
         }
         if let Some(b) = &self.budget {
