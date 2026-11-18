@@ -1,0 +1,1 @@
+- 2026-11-17 stage-chain-sheet (BUILD-060): cargo xtask stages --chain renders a chain directory as one sheet of the river-graph chain's twelve stages (lead #167a).
