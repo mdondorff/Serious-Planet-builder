@@ -7,7 +7,7 @@ use std::path::Path;
 
 /// The options the example takes after the target, each with a value.
 /// `--graph`, `--stages` and `--partition` are BUILD-060's G2 inputs (a canonical graph file, a directory of per-stage budget fields, two graph files `one,two`).
-const OPTIONS: [&str; 11] = [
+const OPTIONS: [&str; 12] = [
     "--window",
     "--margin",
     "--min-cells",
@@ -19,10 +19,11 @@ const OPTIONS: [&str; 11] = [
     "--partition",
     "--surface",
     "--corridor-bar",
+    "--start",
 ];
 
 /// The G2 inputs a `--table` row may carry as `#key=value` suffixes (BUILD-060): the row's own graph, stages or partition pair.
-const ROW_INPUTS: [&str; 4] = ["graph", "stages", "partition", "surface"];
+const ROW_INPUTS: [&str; 5] = ["graph", "stages", "partition", "surface", "start"];
 
 /// The canonical region windows (lead, 2026-11-14): `face,i0,i1,j0,j1,seed`, 620-cell cores (with the gate's 200-cell margin SPIKE-111's 1,020-cell windows). R1h is the E1 region stores'
 /// window (r3a-e1, r3a-p2, r3a-p2e). M1 (mountain belt) and F1 (low-gradient river landscape) are SPIKE-119's (spikes, 2026-11-15).
@@ -41,7 +42,7 @@ pub fn window_of(arg: &str) -> String {
 
 /// The example's arguments for the xtask's: the target becomes `--window` or `--store`; an unknown option, a missing value or a second window is refused.
 pub fn example_args(args: &[String]) -> Result<Vec<String>, String> {
-    let usage = "usage: cargo xtask river-gate <store dir | face,i0,i1,j0,j1,seed | r1h | r3a | r3b | m1 | f1 | grid=file,w,h,sea_level_m> [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--network-km2 A,B] [--graph FILE] [--stages DIR] [--partition ONE,TWO] [--surface FILE] [--corridor-bar PCT] [--no-key-check]";
+    let usage = "usage: cargo xtask river-gate <store dir | face,i0,i1,j0,j1,seed | r1h | r3a | r3b | m1 | f1 | grid=file,w,h,sea_level_m> [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--network-km2 A,B] [--graph FILE] [--stages DIR] [--partition ONE,TWO] [--surface FILE] [--start FILE] [--corridor-bar PCT] [--no-key-check]";
     let Some(target) = args.first().filter(|a| !a.starts_with("--")) else { return Err(usage.to_string()) };
     let mut out = Vec::new();
     let window = window_of(target);
@@ -98,7 +99,7 @@ pub struct TableRow {
 /// The rows of `river-gate --table <row>... [--windows W,W...] [options]` (BUILD-057): a row is a window (its start surface), `<store dir>@<window>` (the store on that window) or a store dir (on
 /// `--window`, default R1h); `--windows` adds one start-surface row per window. The other options go to every row. A row's label is the store's directory name or "start", then the window.
 pub fn table_rows(args: &[String]) -> Result<Vec<TableRow>, String> {
-    let usage = "usage: cargo xtask river-gate --table <window | store dir@window | store dir | grid=file,w,h,sea_level_m>... [--windows W,W...] [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--network-km2 A,B] [--corridor-bar PCT] [--no-key-check]; a row may end in #graph=FILE, #stages=DIR, #partition=ONE,TWO, #surface=FILE, #chain=FILE (the run's chain.txt: the row's label and its chain under the table)";
+    let usage = "usage: cargo xtask river-gate --table <window | store dir@window | store dir | grid=file,w,h,sea_level_m>... [--windows W,W...] [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--network-km2 A,B] [--corridor-bar PCT] [--no-key-check]; a row may end in #graph=FILE, #stages=DIR, #partition=ONE,TWO, #surface=FILE, #start=FILE, #chain=FILE (the run's chain.txt: the row's label and its chain under the table)";
     let (mut targets, mut common, mut windows) = (Vec::new(), Vec::new(), Vec::new());
     let mut k = 0;
     while k < args.len() {
@@ -159,7 +160,7 @@ pub fn table_rows(args: &[String]) -> Result<Vec<TableRow>, String> {
                     continue;
                 }
                 let (k, v) = p.split_once('=').filter(|(k, v)| ROW_INPUTS.contains(k) && !v.is_empty()).ok_or_else(|| {
-                    format!("a row's suffix is #graph=, #stages=, #partition=, #surface= or #chain=, not '#{p}'; {usage}")
+                    format!("a row's suffix is #graph=, #stages=, #partition=, #surface=, #start= or #chain=, not '#{p}'; {usage}")
                 })?;
                 extra.extend([format!("--{k}"), v.to_string()]);
             }
@@ -417,11 +418,14 @@ mod tests {
         assert!(!rows[2].args.contains(&"--graph".to_string()), "a row without a suffix reads no graph");
         let r = table_rows(&s(&["r1h#surface=C:/rg/r1h-final.f64#graph=g.txt"])).unwrap();
         assert_eq!(r[0].args[2..], s(&["--surface", "C:/rg/r1h-final.f64", "--graph", "g.txt"])[..]);
-        assert!(table_rows(&s(&["r1h#gaph=x"])).unwrap_err().contains("#graph=, #stages=, #partition=, #surface= or #chain="));
+        assert!(table_rows(&s(&["r1h#gaph=x"])).unwrap_err().contains("#graph=, #stages=, #partition=, #surface=, #start= or #chain="));
         // lead #169: a row's chain file stays with the table, never goes to the gate; reading 28 retired #reference=
         let r = table_rows(&s(&["r1h#stages=st#chain=C:/rg/r1h-chain.txt"])).unwrap();
         assert_eq!(r[0].args[2..], s(&["--stages", "st"])[..]);
         assert_eq!(r[0].chain.as_deref(), Some("C:/rg/r1h-chain.txt"));
+        // lead #171: the run's own start surface as a row suffix
+        let r = table_rows(&s(&["r1h#start=C:/rg/r1h-s0.f64#graph=g.txt"])).unwrap();
+        assert_eq!(r[0].args[2..], s(&["--start", "C:/rg/r1h-s0.f64", "--graph", "g.txt"])[..]);
         assert!(table_rows(&s(&["r1h#reference=a.f64"])).is_err(), "reading 28: no budget reference");
         assert_eq!(example_args(&s(&["m1", "--corridor-bar", "95"])).unwrap()[2..], s(&["--corridor-bar", "95"])[..]);
         assert!(table_rows(&s(&["r1h#graph="])).is_err());

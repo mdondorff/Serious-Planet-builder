@@ -1,0 +1,1 @@
+- 2026-11-18 gate-own-start (BUILD-060): river-gate --start measures a run against its own start surface and its own graph's H1 trunks (lead #171).
