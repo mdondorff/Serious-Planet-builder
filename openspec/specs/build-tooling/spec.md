@@ -1036,3 +1036,7 @@ Detail:
 #### Scenario: The G2 bars and the dual reference
 - **WHEN** a row has a graph, an uphill share of 1.0 %, agreement of 90 % and 89 % at its two thresholds, a corridor share of 97.4 % and three missing spill nodes; and stage fields with kh
 - **THEN** uphill, the first agreement and the violations pass, the second agreement, the corridor (97.5 %) and the spill nodes fail, the corridor passes at M1's 95 %; the budget use counts ks, kv and kc against the budget and adds kh only in the `_s0` columns (TEST-137)
+
+#### Scenario: A row's chain and the budget's relief
+- **WHEN** a `--table` row ends in `#stages=st#chain=c.txt`, `c.txt` naming the label `r1h-proto`, a commit, a switch and a stage
+- **THEN** the gate gets `--stages st` and no chain argument, the row is labelled `r1h-proto @ r1h`, the markdown table ends in a `Chains` section listing the three lines, `#reference=` is refused, and no `b_reference` column is printed (reading 28: the budget's relief is the start surface's)
