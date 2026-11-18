@@ -19,7 +19,9 @@ use planet_cache::river_gate::{
     border_inside, commit_differences, key_note, lay_store_ground, measure, raw_grid_arg, raw_grid_heights, Crossing, GateInput,
     GateParams, LWindow, RawGrid, WindowIdentity, GRID_BORDER, GRID_CELL_M,
 };
-use planet_cache::river_gate_graph::{read_graph, read_stages, read_surface, G2Input, Window, CORRIDOR_MIN_PCT, CORRIDOR_MIN_PCT_MOUNTAIN};
+use planet_cache::river_gate_graph::{
+    h1_trunks, read_graph, read_stages, read_surface, G2Input, Window, CORRIDOR_MIN_PCT, CORRIDOR_MIN_PCT_MOUNTAIN,
+};
 use planet_core::{Face, TangentWarp, Vec3};
 use planet_generators::global::{read_elevation_c1, GlobalSample, LatticeSource, ReadError};
 use planet_generators::runoff::{discharge_weight, pet_mm, runoff_mm};
@@ -139,6 +141,7 @@ fn main() -> Result<(), String> {
         "--partition",
         "--surface",
         "--corridor-bar",
+        "--start",
     ];
     let mut k = 0;
     while k < args.len() {
@@ -182,8 +185,8 @@ fn main() -> Result<(), String> {
         ..GateParams::default()
     };
     if let Some(g) = value(&args, "--grid") {
-        if value(&args, "--store").is_some() || value(&args, "--window").is_some() || value(&args, "--surface").is_some() {
-            return Err("--grid is its own input: it takes no --store, --window or --surface".to_string());
+        if ["--store", "--window", "--surface", "--start"].iter().any(|k| value(&args, k).is_some()) {
+            return Err("--grid is its own input: it takes no --store, --window, --surface or --start".to_string());
         }
         return grid_gate(g, &params);
     }
@@ -248,6 +251,12 @@ fn main() -> Result<(), String> {
         let d = dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64);
         base(d) + front.regional_field.at(d)
     });
+    // BUILD-060 `--start` (lead #171): the run's own start surface on the window's L grid (a chain that conditions its base, as A+, has another S0 than main's); every delta and the
+    // corridor are then measured against it, and the trunks come from the run's own graph (`--graph`'s H1 reaches)
+    let own_start = value(&args, "--start");
+    if let Some(path) = own_start {
+        start = read_surface(path, w * h)?;
+    }
     let (bi0, bi1, bj0, bj1) = ((region.0 * l) as i64, ((region.1 + 1) * l) as i64, (region.2 * l) as i64, ((region.3 + 1) * l) as i64);
     let in_box: Vec<bool> = (0..w * h)
         .map(|c| {
@@ -257,7 +266,10 @@ fn main() -> Result<(), String> {
         .collect();
     let mut surface = start.clone();
     let mut inside = in_box.clone();
-    let mut label = format!("start surface of the window {win:?}, margin {margin}, counted over the region's box");
+    let mut label = match own_start {
+        Some(p) => format!("the run's own start surface {p} on the window {win:?}, margin {margin}, counted over the region's box"),
+        None => format!("start surface of the window {win:?}, margin {margin}, counted over the region's box"),
+    };
     let mut sea_level_m = 0.0;
     // BUILD-060: a candidate's surface on the window's L grid (the RG chain's final surface), measured against the window's start surface
     if let Some(path) = value(&args, "--surface") {
@@ -339,6 +351,10 @@ fn main() -> Result<(), String> {
     let outlet = grid.outlets(&surface, sea_level_m);
     // The G2 inputs (BUILD-060): a canonical graph, the per-stage budget fields, a partition pair; global L ids against this window's origin.
     let graph = value(&args, "--graph").map(read_graph).transpose()?;
+    if own_start.is_some() {
+        // the run's own H1 trunks: its graph's H1 reaches; a run on its own start without its graph has no trunks of its own, so its corridor is not measured
+        trunks = graph.as_ref().map_or_else(Vec::new, |g| h1_trunks(g, &Window { x0: x0 as u64, y0: y0 as u64, w, h }, l));
+    }
     let partition = match value(&args, "--partition") {
         None => None,
         Some(v) => {
