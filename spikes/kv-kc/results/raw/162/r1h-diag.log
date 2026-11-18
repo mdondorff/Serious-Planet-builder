@@ -1,0 +1,25 @@
+DIAG inputs: 8160 x 8160 cells, budget field 66585600 values, stages ["kh", "ks", "kv", "kc"]
+DIAG uphill (75 km2 rivers inside, rise > 0.25 m): 1615 of 117722 steps (1.37 %)
+DIAG uphill primary exception           37 (2.3 %); rise p50 4.65 p90 33.02 max 51.72 m; label count 37
+DIAG uphill primary lake_inlet         125 (7.7 %); rise p50 1.76 p90 10.90 max 27.39 m; label count 132
+DIAG uphill primary junction           276 (17.1 %); rise p50 0.88 p90 3.94 max 15.26 m; label count 330
+DIAG uphill primary budget_full         32 (2.0 %); rise p50 3.10 p90 7.58 max 44.04 m; label count 59
+DIAG uphill primary on_graph_trunk     212 (13.1 %); rise p50 0.95 p90 6.81 max 37.90 m; label count 437
+DIAG uphill primary on_graph_trib       48 (3.0 %); rise p50 0.44 p90 0.97 max 3.65 m; label count 101
+DIAG uphill primary off_graph          885 (54.8 %); rise p50 0.57 p90 3.86 max 35.58 m; label count 1077
+DIAG uphill off_graph by cause: [("lake_interior", 885)]
+DIAG uphill off_graph lake_interior kc_fill_partial       61; depression depth at the step p50 2.72 p90 9.20 max 36.80 m
+DIAG uphill off_graph lake_interior kc_untouched         824; depression depth at the step p50 1.59 p90 15.85 max 116.75 m
+DIAG agreement 1 km2: 169603 of 892024 routed river cells miss the graph (80.99 % agree)
+DIAG agreement 1 km2 miss lake_interior        35472 (20.9 % of misses)
+DIAG agreement 1 km2 miss kc_breach            14383 (8.5 % of misses)
+DIAG agreement 1 km2 miss near_threshold       78911 (46.5 % of misses)
+DIAG agreement 1 km2 miss graph_offset_2_3     30425 (17.9 % of misses)
+DIAG agreement 1 km2 miss other                10412 (6.1 % of misses)
+DIAG agreement 75 km2: 12358 of 117881 routed river cells miss the graph (89.52 % agree)
+DIAG agreement 75 km2 miss lake_interior         4009 (32.4 % of misses)
+DIAG agreement 75 km2 miss kc_breach             3975 (32.2 % of misses)
+DIAG agreement 75 km2 miss near_threshold        1569 (12.7 % of misses)
+DIAG agreement 75 km2 miss graph_offset_2_3      2239 (18.1 % of misses)
+DIAG agreement 75 km2 miss other                  566 (4.6 % of misses)
+DIAG maps written to C:/DEV/SeriousPlanetData/tmp/crusader-diag/h5-r1h/maps
