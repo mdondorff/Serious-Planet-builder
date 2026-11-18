@@ -1,0 +1,1 @@
+- 2026-11-18 gate-chain-rows (BUILD-060): the river gate's budget field on S0 (reading 28); a table row takes its run's chain file; the chain sheet keeps the chain's lines (lead #169, #170).

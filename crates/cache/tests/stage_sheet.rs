@@ -7,7 +7,7 @@ use planet_generators::bake::river_graph::*;
 const N: usize = 32;
 
 fn manifest() -> Manifest {
-    Manifest { x0: 100, y0: 200, w: N, h: N, coarse: 8, cell_m: 100.0, sea_m: 0.0, label: "test window".into() }
+    Manifest { x0: 100, y0: 200, w: N, h: N, coarse: 8, cell_m: 100.0, sea_m: 0.0, label: "test window".into(), run: Vec::new() }
 }
 
 fn dir(name: &str) -> PathBuf {
@@ -65,6 +65,12 @@ fn graph() -> Graph {
 fn the_manifest_round_trips_and_refuses_a_wrong_version_or_size() {
     let m = manifest();
     assert_eq!(Manifest::parse(&m.text()).unwrap(), m);
+    // lead #169: a run's chain lines are kept in order and round-trip; the commit is read from them
+    let chained = Manifest::parse(&format!("{}commit 9858448f\nswitch kh h5\nstage 5 5 kh h5\n", m.text())).unwrap();
+    assert_eq!(chained.run, ["commit 9858448f", "switch kh h5", "stage 5 5 kh h5"]);
+    assert_eq!(chained.commit(), Some("9858448f"));
+    assert_eq!(Manifest::parse(&chained.text()).unwrap(), chained);
+    assert_eq!(m.commit(), None);
     assert!(Manifest::parse("stage-chain 2\n").unwrap_err().contains("stage-chain 1"));
     assert!(Manifest::parse("stage-chain 1\nwindow 0 0 30 32\ncoarse 8\ncell_m 1\n").unwrap_err().contains("multiple of coarse 8"));
     assert!(Manifest::parse("stage-chain 1\nwindow 0 0 32 32\ncoarse 8\ncell_m 1\ncolour red\n").unwrap_err().contains("unknown line"));
