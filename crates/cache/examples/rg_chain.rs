@@ -2152,10 +2152,17 @@ fn main() -> Result<(), String> {
     let hand_l = per_region(&|p| hand_field.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)).max(0.0));
     drop(hand_field);
     // KS with the budget and reading 17: lowering = min(max(0, r - band), budget), never to the sea level + 0.5 m or below; a clamp is a residual (cell, stage, needed, available)
+    // reading 24 (lead #170 item 5): no H1 basin is a lake in the prototype, so KS, KV and KC protect no H1 lake water; `--h1-lakes keep` is the former form (region_front's lakes)
+    let h1_lakes = value(&args, "--h1-lakes").unwrap_or("off");
+    if !["off", "keep"].contains(&h1_lakes) {
+        return Err(format!("--h1-lakes off | keep, not '{h1_lakes}'"));
+    }
     let protected_h1: Vec<bool> = {
         let mut p = vec![false; cells];
-        for &(c, _) in &front.lakes.water {
-            p[c as usize] = true;
+        if h1_lakes == "keep" {
+            for &(c, _) in &front.lakes.water {
+                p[c as usize] = true;
+            }
         }
         p
     };
