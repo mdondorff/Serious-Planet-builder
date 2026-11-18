@@ -121,6 +121,10 @@ fn main() -> Result<(), String> {
         }
     };
     let mut off_cause: HashMap<&str, usize> = HashMap::new();
+    // #163's maps: the uphill class of a step's upper cell (1 on graph, 2 off graph inside a depression, 3 other) and the miss class at 1 and 75 km2 (1 threshold head,
+    // 2 lake interior, 3 KC breach path, 4 other: graph 2-3 cells off or none near)
+    let mut up_map = vec![0u8; n];
+    let mut miss_map = [vec![0u8; n], vec![0u8; n]];
     let mut lake_sub: HashMap<&str, (usize, Vec<f64>)> = HashMap::new();
     let kc_fill: Option<&Vec<u16>> = stages.iter().find(|s| s.name.starts_with("kc")).and_then(|s| s.fill.as_ref());
     // ---- uphill steps on 75 km2 rivers
@@ -163,6 +167,17 @@ fn main() -> Result<(), String> {
             *labels.entry(l).or_default() += 1;
         }
         let p = order.iter().find(|o| ls.contains(o)).unwrap();
+        up_map[r] = if *p == "off_graph" {
+            if cause(c, 75.0e6) == "lake_interior" {
+                2
+            } else {
+                3
+            }
+        } else if on_graph[c] || on_graph[r] {
+            1
+        } else {
+            3
+        };
         if *p == "off_graph" {
             let k = cause(c, 75.0e6);
             *off_cause.entry(k).or_default() += 1;
@@ -204,11 +219,16 @@ fn main() -> Result<(), String> {
     println!("DIAG uphill off_graph by cause: {oc:?}");
     for (k, (cnt, v)) in lake_sub.iter_mut() {
         v.sort_by(f64::total_cmp);
-        println!("DIAG uphill off_graph lake_interior {k:<18} {cnt:>5}; depression depth at the step p50 {:.2} p90 {:.2} max {:.2} m", v[v.len() / 2], v[v.len() * 9 / 10], v[v.len() - 1]);
+        println!(
+            "DIAG uphill off_graph lake_interior {k:<18} {cnt:>5}; depression depth at the step p50 {:.2} p90 {:.2} max {:.2} m",
+            v[v.len() / 2],
+            v[v.len() * 9 / 10],
+            v[v.len() - 1]
+        );
     }
     // ---- agreement misses at 1 and 75 km2
     let g1 = dilate(&on_graph, 1);
-    for t in [1.0e6, 75.0e6] {
+    for (ti, t) in [1.0e6, 75.0e6].into_iter().enumerate() {
         let order = ["lake_interior", "kc_breach", "near_threshold", "graph_offset_2_3", "other"];
         let mut cnt: HashMap<&str, usize> = HashMap::new();
         let (mut routed, mut miss) = (0usize, 0usize);
@@ -219,6 +239,12 @@ fn main() -> Result<(), String> {
             }
             miss += 1;
             let k = cause(c, t);
+            miss_map[ti][c] = match k {
+                "near_threshold" => 1,
+                "lake_interior" => 2,
+                "kc_breach" => 3,
+                _ => 4,
+            };
             *cnt.entry(k).or_default() += 1;
         }
         println!(
@@ -230,6 +256,37 @@ fn main() -> Result<(), String> {
             let k = cnt.get(o).copied().unwrap_or(0);
             println!("DIAG agreement {} km2 miss {o:<17} {k:>8} ({:.1} % of misses)", t / 1.0e6, 100.0 * k as f64 / miss.max(1) as f64);
         }
+    }
+    if let Some(dir) = value(&args, "--dump") {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        // the graph (1: any graph cell, 2: on a reach vertex of at least 75 km2) and the routed rivers (1: at least 1 km2, 2: at least 75 km2), land inside
+        let mut gmap = vec![0u8; n];
+        let reach_at: HashMap<u64, usize> = g.reaches.iter().enumerate().map(|(i, r)| (r.id, i)).collect();
+        for (&cell, &(rid, k)) in &rasterise(&g) {
+            if let Some(c) = local(cell) {
+                let big = g.reaches[reach_at[&rid]].attrs.a_geo.get(k).is_some_and(|&a| a >= 75.0e6);
+                gmap[c] = if big { 2 } else { 1 };
+            }
+        }
+        let rmap: Vec<u8> = (0..n)
+            .map(|c| {
+                if !land(c) {
+                    0
+                } else if area[c] >= 75.0e6 {
+                    2
+                } else if area[c] >= 1.0e6 {
+                    1
+                } else {
+                    0
+                }
+            })
+            .collect();
+        for (name, m) in
+            [("up.u8", &up_map), ("miss1.u8", &miss_map[0]), ("miss75.u8", &miss_map[1]), ("graph.u8", &gmap), ("routed.u8", &rmap)]
+        {
+            std::fs::write(format!("{dir}/{name}"), m).map_err(|e| e.to_string())?;
+        }
+        println!("DIAG maps written to {dir}");
     }
     Ok(())
 }
