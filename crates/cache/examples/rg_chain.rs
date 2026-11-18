@@ -2261,7 +2261,8 @@ fn main() -> Result<(), String> {
     // ---- the budget (G0 contracts section 6; BUILD-060's field, the one river-gate reads), per L cell and per H1 cell. Reading 21 (owner decision 3, 2026-11-17, lead #168):
     // budgets and the L stages' deltas are against S_KH = KH(z_s) + r' (ks_base), not S0; S0 stays the reference of the ocean and the sea tests; KH against S0 is its own field.
     let t = Instant::now();
-    let budget_l = planet_cache::river_gate_graph::budget_field(&ks_base, w, h, L, dx_l, 25_000.0);
+    // reading 28 (lead #170 item 7): the budget's size field relief10 on S0; the lowering it limits is measured against S_KH (reading 21)
+    let budget_l = planet_cache::river_gate_graph::budget_field(&start, w, h, L, dx_l, 25_000.0);
     let budget: Vec<f64> = (0..cells).map(|c| budget_l[((c / rw) * L) * w + (c % rw) * L]).collect();
     if args.iter().any(|a| a == "--dump-s0") {
         let b: Vec<u8> = ks_base.iter().flat_map(|v| v.to_le_bytes()).collect();
