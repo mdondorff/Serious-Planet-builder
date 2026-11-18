@@ -208,8 +208,72 @@ pub(super) fn topological_order(receiver: &[u32]) -> Vec<u32> {
     order
 }
 
+/// SPIKE-139 (spike branch only): the receiver form. `false`: D8 on the jittered steepest slope ([`receiver_of`]); `true`: D8-LTD (Orlandini et al. 2003), see [`receivers_ltd`].
+pub static RECEIVER_LTD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// SPIKE-139 (spike only): D8-LTD, the least-transversal-deviation single receiver with the deviation carried along the path (lambda 1). From the highest filled cell down
+/// (ties by the index), each cell's flow direction is Tarboton's steepest facet direction; of the facet's cardinal and diagonal neighbour it takes the one whose step keeps the
+/// signed perpendicular offset from the intended line (the offset carried in from the donor of the largest D8 area, plus this step's) smallest, and carries that sum on. A chosen
+/// neighbour must lie lower on the filled surface, else the cell falls back to [`receiver_of`]. No jitter. Sequential, so the bits do not depend on threads.
+fn receivers_ltd(grid: &Grid, filled: &[f64], outlet: &[bool], seed: u64) -> Vec<u32> {
+    use super::NEIGHBOURS;
+    let n = grid.len();
+    let mut receiver = vec![NONE; n];
+    let mut by_height: Vec<u32> = (0..n as u32).collect();
+    by_height.sort_unstable_by(|&a, &b| filled[b as usize].total_cmp(&filled[a as usize]).then(a.cmp(&b)));
+    let mut area = vec![1.0f64; n];
+    let (mut best, mut dev_in) = (vec![0.0f64; n], vec![0.0f64; n]);
+    // the facets: (cardinal, diagonal) index pairs into NEIGHBOURS (W, E, N, S, NW, NE, SW, SE)
+    const FACETS: [(usize, usize); 8] = [(1, 5), (1, 7), (0, 4), (0, 6), (2, 4), (2, 5), (3, 6), (3, 7)];
+    for &p in &by_height {
+        let p = p as usize;
+        if outlet[p] || !grid.is_active(p) {
+            continue;
+        }
+        let z0 = filled[p];
+        // the steepest facet: (slope, alpha, cardinal, diagonal, sigma)
+        let mut top: Option<(f64, f64, usize, usize, f64)> = None;
+        for &(e1, e2) in &FACETS {
+            let (Some(q1), Some(q2)) = (grid.neighbour(p, e1), grid.neighbour(p, e2)) else { continue };
+            let d = grid.distance_at(p, e1);
+            let (s1, s2) = ((z0 - filled[q1]) / d, (filled[q1] - filled[q2]) / d);
+            let (mut alpha, mut slope) = (libm::atan2(s2, s1), libm::sqrt(s1 * s1 + s2 * s2));
+            if alpha < 0.0 {
+                alpha = 0.0;
+                slope = s1;
+            } else if alpha > std::f64::consts::FRAC_PI_4 {
+                alpha = std::f64::consts::FRAC_PI_4;
+                slope = (z0 - filled[q2]) / grid.distance_at(p, e2);
+            }
+            let ((ax, ay), (bx, by)) = (NEIGHBOURS[e1], NEIGHBOURS[e2]);
+            let sigma = if ax * by - ay * bx > 0 { 1.0 } else { -1.0 };
+            if slope > 0.0 && top.is_none_or(|t| slope > t.0) {
+                top = Some((slope, alpha, q1, q2, sigma));
+            }
+        }
+        let pick = top.and_then(|(_, alpha, q1, q2, sigma)| {
+            let d = grid.distance_at(p, 0).min(grid.distance_at(p, 1));
+            let card = dev_in[p] - sigma * d * libm::sin(alpha);
+            let diag = dev_in[p] + sigma * d * std::f64::consts::SQRT_2 * libm::sin(std::f64::consts::FRAC_PI_4 - alpha);
+            let (first, second) = if card.abs() <= diag.abs() { ((q1, card), (q2, diag)) } else { ((q2, diag), (q1, card)) };
+            [first, second].into_iter().find(|&(q, _)| filled[q] < z0)
+        });
+        let (r, dev) = pick.unwrap_or_else(|| (receiver_of(grid, filled, p, seed) as usize, 0.0));
+        receiver[p] = r as u32;
+        area[r] += area[p];
+        if area[p] > best[r] {
+            best[r] = area[p];
+            dev_in[r] = dev;
+        }
+    }
+    receiver
+}
+
 /// The receiver of every cell on the filled surface: [`NONE`] for an outlet.
 fn receivers(grid: &Grid, filled: &[f64], outlet: &[bool], seed: u64) -> Vec<u32> {
+    if RECEIVER_LTD.load(std::sync::atomic::Ordering::Relaxed) {
+        return receivers_ltd(grid, filled, outlet, seed);
+    }
     let mut receiver = vec![NONE; grid.len()];
     for p in 0..grid.len() {
         if outlet[p] || !grid.is_active(p) {

@@ -176,6 +176,9 @@ pub struct RegionReport {
 }
 
 /// The regional solve of a region (GEN-175): the base and the solved surface on the window's regional cells, with the world's precision applied.
+/// SPIKE-139 (spike branch only): K5's rounds route by D8-LTD instead of the jittered D8 (`planet_generators::bake::route::RECEIVER_LTD`).
+pub static K5_LTD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 #[derive(Clone, Debug)]
 pub struct RegionSolve {
     pub face_spec: FaceSpec,
@@ -309,7 +312,11 @@ pub fn solve_region(spec: &RegionSpec, base: &(dyn Fn(Vec3) -> f64 + Sync)) -> R
     let mut zs = zb_in.clone();
     // The rounds' own narrowing guard asserts when a round lifts a summit past the binade the epsilon was chosen for: that is the same refusal as the check after them, returned as an error naming the cell.
     let solved = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        solve_rounds(&grid, &mut zs, &outlet, &carve, spec.rounds, &spec.threads, stream)
+        // SPIKE-139 (spike only): K5's receiver form for the rounds alone (`K5_LTD`), back to D8 after them
+        planet_generators::bake::route::RECEIVER_LTD.store(K5_LTD.load(std::sync::atomic::Ordering::Relaxed), std::sync::atomic::Ordering::Relaxed);
+        let r = solve_rounds(&grid, &mut zs, &outlet, &carve, spec.rounds, &spec.threads, stream);
+        planet_generators::bake::route::RECEIVER_LTD.store(false, std::sync::atomic::Ordering::Relaxed);
+        r
     }));
     if let Err(panic) = solved {
         let why =

@@ -1867,6 +1867,12 @@ fn main() -> Result<(), String> {
     if !["c1", "contour"].contains(&zs_read) {
         return Err(format!("--zs-read c1 | contour, not '{zs_read}'"));
     }
+    // SPIKE-139 (lead #148 item 2): `--k5-route d8` (default: the jittered steepest D8) or `ltd` (D8-LTD, Orlandini et al. 2003) for K5's rounds only (spike only)
+    let k5_route = value(&args, "--k5-route").unwrap_or("d8");
+    if !["d8", "ltd"].contains(&k5_route) {
+        return Err(format!("--k5-route d8 | ltd, not '{k5_route}'"));
+    }
+    planet_cache::region_bake::K5_LTD.store(k5_route == "ltd", std::sync::atomic::Ordering::Relaxed);
     if zs_read == "contour" && !base_today {
         return Err("--zs-read contour needs --h1 k6".into());
     }
@@ -3124,6 +3130,7 @@ fn main() -> Result<(), String> {
             ("base", base_form.to_string()),
             ("kh", kh.to_string()),
             ("zs-read", zs_read.to_string()),
+            ("k5-route", k5_route.to_string()),
             ("ks", ks_mode.to_string()),
             ("h1-lakes", h1_lakes.to_string()),
             ("regions", regions.to_string()),
@@ -3138,7 +3145,7 @@ fn main() -> Result<(), String> {
         let today = base_form == "today";
         for (step, stage, name, form) in [
             (1, "1", "base1", if today { "off" } else { "sel" }.to_string()),
-            (2, "2", "k5", "main".to_string()),
+            (2, "2", "k5", if k5_route == "ltd" { "main, D8-LTD receivers" } else { "main" }.to_string()),
             (3, "3", "base3", if today { "off" } else { "post" }.to_string()),
             (4, "4", "h1", h1_form.to_string()),
             (5, "5", "kh", format!("{kh}, band floored at the sea + 0.5 m")),
