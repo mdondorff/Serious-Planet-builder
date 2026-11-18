@@ -103,7 +103,12 @@ fn stage_run(k: &Case, switch: Switch) -> Report {
         format!("{switch:?}: KC breaches (reading 22) {}, cut volume {:.0} m3", r.breaches, r.breach_volume),
     ];
     if switch != Switch::KvOnly {
-        assert!(r.breaches >= 1, "{switch:?}: the coastal pit drains by a breach (reading 22)");
+        // the coastal pit drains: KC breaches it on the stage input; after KV under reading 10 it is lowered with its surroundings and no KC patch is left there
+        if switch == Switch::KcOnly {
+            assert!(r.breaches >= 1, "{switch:?}: the coastal pit drains by a breach (reading 22)");
+        } else {
+            assert_eq!(r.patches.len(), 1, "{switch:?}: only the reported basin is filled; the coastal pit is drained");
+        }
     }
     // divides: KV touches nothing within d_buf of a divide; protected basins: nothing at all
     let div_touched = (0..n).filter(|&c| r.near_divide[c] && r.kv[c] != k.s0[c]).count();
@@ -277,8 +282,8 @@ fn kv_and_kc_give_the_pinned_output() {
     assert_eq!(got, KVKC_DIGESTS.to_vec());
 }
 
-// KV only: pinned before the memory cut and unchanged by it; KC only and both re-pinned for reading 22's breach (#161: the 5-cell coastal pit drains by a 45,181 m3 cut instead of a fill)
-const KVKC_DIGESTS: [u64; 3] = [0x3367_fe24_9007_dfe2, 0x4c07_3ae4_4545_fb75, 0xf327_9595_e00e_14a2];
+// KC only: re-pinned for reading 22 (#161); KV only and both re-pinned for reading 10 (#165: 93 of 3,462 divide cells exempted, KV acts on 57 more cells)
+const KVKC_DIGESTS: [u64; 3] = [0x2459_5f35_b20c_984c, 0x4c07_3ae4_4545_fb75, 0xf32d_c94a_61e4_62f5];
 
 // spec: SPIKE-132
 #[test]
@@ -295,4 +300,30 @@ fn kv_s_budget_is_what_ks_left_against_s_kh() {
     let plain = run(&gl, &k.s0, &k.outlet, &k.graph, &k.protected, &k.budget, &p, Switch::KvOnly);
     let max_low = |kv: &[f64]| (0..kv.len()).map(|c| k.s0[c] - kv[c]).fold(0.0, f64::max);
     assert!(max_low(&r.kv) < max_low(&plain.kv), "the reference takes budget away");
+}
+
+// spec: SPIKE-132
+#[test]
+fn reading_10_exempts_divide_cells_near_graph_lines() {
+    // lead #165: a divide cell within W_floor(q_w)/2 + d_buf of a graph line is valley floor; the buffer spares it, so KV acts at confluences and junctions
+    let k = case();
+    let gl = Grid::cube(L_N, RADIUS_M);
+    let on = KvParams::plan(RADIUS_M * core::f64::consts::FRAC_PI_2 / L_N as f64);
+    let off = KvParams { exempt_near_lines: false, ..on };
+    let a = run(&gl, &k.s0, &k.outlet, &k.graph, &k.protected, &k.budget, &on, Switch::KvOnly);
+    let b = run(&gl, &k.s0, &k.outlet, &k.graph, &k.protected, &k.budget, &off, Switch::KvOnly);
+    let n = k.s0.len();
+    let divides = a.divide.iter().filter(|&&d| d).count();
+    let exempt = a.divide_exempt.iter().filter(|&&d| d).count();
+    assert!(exempt > 0 && exempt < divides, "some divide cells, not all, lie near a graph line: {exempt} of {divides}");
+    assert!(b.divide_exempt.iter().all(|&d| !d), "off: none exempted");
+    let near = |r: &planet_generators::bake::kv_kc::KvKc| r.near_divide.iter().filter(|&&d| d).count();
+    assert!(near(&a) < near(&b), "the buffer shrinks: {} against {}", near(&a), near(&b));
+    // KV now changes cells the old buffer froze, and still none within d_buf of a remaining divide
+    let freed = (0..n).filter(|&c| b.near_divide[c] && !a.near_divide[c] && a.kv[c] != k.s0[c]).count();
+    assert!(freed > 0, "KV acts where the buffer was");
+    assert_eq!((0..n).filter(|&c| a.near_divide[c] && a.kv[c] != k.s0[c]).count(), 0);
+    if std::env::var_os("G1F_PRINT").is_some() {
+        println!("reading 10: {exempt} of {divides} divide cells exempted ({:.1} %); cells within d_buf {} -> {}; KV changes {freed} freed cells", 100.0 * exempt as f64 / divides as f64, near(&b), near(&a));
+    }
 }

@@ -29,11 +29,14 @@ pub struct KvParams {
     pub reach_m: f64,
     /// The routing seed of the graph's build (its D8 paths decide the catchments).
     pub seed: u64,
+    /// Reading 10 (G0 contracts section 12, lead #165): a divide cell within `W_floor(q_w)/2 + d_buf` of a graph line (the nearest vertex's `q_w`) is valley floor, not a divide, so
+    /// it puts no buffer around it; `false`: every divide cell does (SPIKE-132's form).
+    pub exempt_near_lines: bool,
 }
 
 impl KvParams {
     pub fn plan(cell_m: f64) -> KvParams {
-        KvParams { s_wall: 0.20, w_floor_factor: 3.0, d_buf_m: 200.0, cell_m, reach_m: 3000.0, seed: 1 }
+        KvParams { s_wall: 0.20, w_floor_factor: 3.0, d_buf_m: 200.0, cell_m, reach_m: 3000.0, seed: 1, exempt_near_lines: true }
     }
 }
 
@@ -55,6 +58,8 @@ pub struct KvKc {
     pub kv_wanted: Vec<f64>,
     pub residuals: Vec<Residual>,
     pub divide: Vec<bool>,
+    /// The divide cells reading 10 exempts (near a graph line), and the cells within `d_buf` of the divide cells that remain.
+    pub divide_exempt: Vec<bool>,
     pub near_divide: Vec<bool>,
     /// KC's patches: (cells, volume m3).
     pub patches: Vec<(usize, f64)>,
@@ -189,8 +194,17 @@ pub fn run_with(
     let divide: Vec<bool> =
         (0..n).map(|c| !outlet[c] && (0..8).filter_map(|k| grid.neighbour(c, k)).any(|q| !outlet[q] && catch[q] != catch[c])).collect();
     drop(catch);
+    // reading 10: a divide cell near a graph line (within half the valley floor plus d_buf of its nearest vertex) is valley floor, not a divide
+    let divide_exempt: Vec<bool> = (0..n)
+        .map(|c| {
+            divide[c] && p.exempt_near_lines && src[c] != u32::MAX && {
+                let (ri, k) = vtx[&(src[c] as usize)];
+                dist[c] <= 0.5 * p.w_floor_factor * law.width_m(reaches[ri].attrs.q_w[k]) + p.d_buf_m
+            }
+        })
+        .collect();
     let near_divide: Vec<bool> = {
-        let div_src: Vec<(usize, usize)> = (0..n).filter(|&c| divide[c]).map(|c| (c, c)).collect();
+        let div_src: Vec<(usize, usize)> = (0..n).filter(|&c| divide[c] && !divide_exempt[c]).map(|c| (c, c)).collect();
         let (ddiv, _) = chamfer(grid, &div_src, p.cell_m, p.d_buf_m + p.cell_m);
         (0..n).map(|c| ddiv[c] < p.d_buf_m).collect()
     };
@@ -327,7 +341,7 @@ pub fn run_with(
             patches.push((cells.len(), vol));
         }
     }
-    KvKc { kv, kc, kv_wanted, residuals, divide, near_divide, patches, breaches, breach_volume, kc_wanted, nearest }
+    KvKc { kv, kc, kv_wanted, residuals, divide, divide_exempt, near_divide, patches, breaches, breach_volume, kc_wanted, nearest }
 }
 
 /// What [`flag_residuals`] did.
