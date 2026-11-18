@@ -30,7 +30,7 @@ The chain per window (R1h, R3a, R3b, M1, F1; margin 200, L = 8):
 
 - The ladder classifier is SPIKE-135 addendum 2's (base / K5 / interpolation / band), the base rungs on the drained `z_b` and on `z_s`.
 - Measures: the SPIKE-134 census (kept H1 basins holding trunk cells after K5), `z_b`'s change, K5's work, the band's pits before and after, and the river cells (D8 area 75 km2) of the final surface in G-DRAIN basins (at least 0.5 m deep and 16 cells).
-- Raw: `raw/base-sel-post-<w>.csv`, `raw/base-sel-clamp-<w>.csv` (`--base-only`), `raw/ladder-<w>.csv` (h4c), `raw/ladder-h5-<w>.csv`, `raw/bc-ladder-<w>.csv` (band capped; M1, R1h), `raw/today-ladder-<w>.csv` (today's base, #141's chain), `raw/first-ladder-<w>.csv` (#143's first form). Tables: `raw/tables.md`, built by `tools/s138_tables.py raw ../../repair-debt/results/raw r1h r3a r3b m1 f1`.
+- Raw: `raw/drain-runs.txt` (the drain stages' lines of the run logs), `raw/base-sel-post-<w>.csv`, `raw/base-sel-clamp-<w>.csv` (`--base-only`), `raw/ladder-<w>.csv` (h4c), `raw/ladder-h5-<w>.csv`, `raw/bc-ladder-<w>.csv` (band capped; M1, R1h), `raw/today-ladder-<w>.csv` (today's base, #141's chain), `raw/first-ladder-<w>.csv` (#143's first form). Tables: `raw/tables.md`, built by `tools/s138_tables.py raw ../../repair-debt/results/raw r1h r3a r3b m1 f1`.
 
 ## Results
 ### The base after K5
@@ -48,7 +48,7 @@ Kept H1 basins holding trunk cells in the box after K5 (SPIKE-134's census): bas
 
 Stage 1 on `z_b` (land of the box):
 
-| Window | Depressions left (both over 50 m) | Cells lowered / raised over 1 m | km3 lowered / raised | `z_b` ridge cells lowered over 1 m / over 20 m |
+| Window | Depressions left, both over 50 m (the drain's count: any fill over 1 mm) | Cells lowered / raised over 1 m | km3 lowered / raised | `z_b` ridge cells lowered over 1 m / over 20 m |
 |---|---|---|---|---|
 | R1h | 1,352 | 3,893 / 5,801 | 22.4 / 40.9 | 1,150 / 403 of 87,700 |
 | R3a | 3 | 7,737 / 831 | 19.8 / 1.5 | 1,254 / 37 of 51,264 |
@@ -57,6 +57,7 @@ Stage 1 on `z_b` (land of the box):
 | F1 | 0 | 22,705 / 6,642 | 79.9 / 14.5 | 5,553 / 146 of 127,612 |
 
 - Over 50 m: no cell, except 15 lowered on R1h.
+- The depressions left and the breach and fill counts of stages 1, 3 and 5 are the drain's own lines in `raw/drain-runs.txt`. They count every depression of the fill over 1 mm; the ladder's `L0` rung counts its own depressions (R1h 378, R3a 2, M1 1,404 after stage 1).
 - #145's starting point: the uncapped drain (#143) lowered M1's `z_b` 4,869 km3, 15,524 cells over 50 m; the 50 m cap that followed filled 58.1 % of M1's land (lead #145).
 - Stage 3 (post-K5): 10-164 breaches and 1-65 fills per window, at most 0.55 km3 lowered; 3-86 depressions stay (both over 50 m).
 - K5's work on sel-post (km3 lowered) is within 5 % of today's on M1, R1h and R3a, and 14-32 % smaller on R3b and F1. sel-clamp carves 24 % less on M1 (83,414 against 109,802 km3) and 32 % less on R1h, and keeps those basins as basins.
@@ -84,7 +85,7 @@ River length (75 km2 channels) in G-DRAIN basins, % of the river; the new base w
 
 - #143's first form (uncapped stage 1, no stage 3, A+, KS1, h4c): R1h 5.99, M1 2.10, F1 16.47 %.
 - By origin class (h5 + KS1, before reading 23): base 0-10 %, K5 0 %, interpolation 8-35 %, band 58-92 % of the remainder (#141: base 10-86 %). Reading 23's post form leaves no G-DRAIN river cell on any window with KH h5 (with h4c: on four; R3b keeps 12 cells).
-- Breach volume of the final surface (cells over 1 m): #141 0.25-266 km3; h5 + KS1 0.07-8.2 km3; with reading 23 post 0.00-0.05 km3.
+- Breach volume of the final surface (cells over 1 m): #141 0.25-266 km3; h5 + KS1 0.08-8.2 km3; with reading 23 post 0.00-0.05 km3.
 
 ## Findings
 1. **The selective pre-K5 drain does what the cap did not.** It drains F1, R3a and R3b's `z_b` fully or nearly (0-6 depressions left), changes M1's by under 5 km3 (no fill, no cut over 50 m), and leaves the deep basins (R1h 1,352, M1 3,517) to K5.
