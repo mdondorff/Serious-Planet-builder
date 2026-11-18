@@ -1,0 +1,5 @@
+window,rung,cell_m,land_cells,riv75_km,riv75_pit_pct,riv75_pit5_pct,riv1_km,riv1_pit_pct,riv1_pit5_pct,depressions,depr5,gate_basins,fill_cells,fill_p50_m,fill_p95_m,fill_max_m,fill_over10,fill_over50,fill_km3,breach_cells,breach_p50_m,breach_p95_m,breach_max_m,breach_over10,breach_over50,breach_km3,riv_breach_cells,riv_breach_p95_m,riv_breach_max_m,riv_breach_over10,riv_breach_over50,ridge_cells,ridge_breach1,ridge_breach10,d2_measured,d2_failed,inland_cells,stuck,seconds
+#base,r3b-sel-post,342995,5496,203,0,0,16.1682,0.5300,54450,890,37,134637,190666,37078,0,3505.7493,1239.2437,12.02,12.27,32.90,137.80,137.78,147.94
+r3b-sel-post,L0 z_b 814 m,814.4,342995,19187.5,11.36,11.36,192867.1,6.77,6.77,6,6,6,15331,23.10,79.07,130.1,11550,3412,263.7037,8513,9.91,69.52,130.1,4240,1058,95.9664,2075,85.33,130.1,1387,487,55868,984,412,-,-,0,0,1
+r3b-sel-post,L1 z_s 814 m,814.4,342995,18215.7,1.22,1.22,161604.9,0.34,0.34,1,1,1,664,48.91,149.34,174.4,553,328,22.6794,78,56.48,137.89,153.9,67,43,2.6838,51,137.89,144.4,49,33,120988,35,32,-,-,0,0,1
+#census,r3b-sel-post,1,448,364.9,1,1,0,1
