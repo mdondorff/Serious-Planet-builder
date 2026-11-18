@@ -2514,7 +2514,10 @@ fn main() -> Result<(), String> {
                 })
                 .collect();
             // crusader #161: the budget left is budget - max(0, S_KH - KS's output) inside run_with (reading 21); KC breaches before it fills (reading 22)
-            let r = run_with(&gl, &ks_d, &sea_l, &g_local, &kept, &budget_l, Some(&ks_base), &KvParams::plan(dx_l), sw);
+            // KV/KC's outlets: the sea, and the window's edge (as H1's; a window without sea, M1, has no other: the flood needs one)
+            let outlet_kv: Vec<bool> = (0..n_l).map(|p| sea_l[p] || p % w == 0 || p % w == w - 1 || p / w == 0 || p / w == h - 1).collect();
+            let r = run_with(&gl, &ks_d, &outlet_kv, &g_local, &kept, &budget_l, Some(&ks_base), &KvParams::plan(dx_l), sw);
+            drop(outlet_kv);
             println!("RG domain {d} KC breaches: {} ({:.4} km3)", r.breaches, r.breach_volume / 1.0e9);
             drop(g_local);
             let kv = if on("kv") { r.kv } else { ks_d.clone() };
