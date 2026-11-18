@@ -7,7 +7,7 @@ use std::path::Path;
 
 /// The options the example takes after the target, each with a value.
 /// `--graph`, `--stages` and `--partition` are BUILD-060's G2 inputs (a canonical graph file, a directory of per-stage budget fields, two graph files `one,two`).
-const OPTIONS: [&str; 12] = [
+const OPTIONS: [&str; 13] = [
     "--window",
     "--margin",
     "--min-cells",
@@ -20,10 +20,11 @@ const OPTIONS: [&str; 12] = [
     "--surface",
     "--corridor-bar",
     "--start",
+    "--noise",
 ];
 
 /// The G2 inputs a `--table` row may carry as `#key=value` suffixes (BUILD-060): the row's own graph, stages or partition pair.
-const ROW_INPUTS: [&str; 5] = ["graph", "stages", "partition", "surface", "start"];
+const ROW_INPUTS: [&str; 6] = ["graph", "stages", "partition", "surface", "start", "noise"];
 
 /// The canonical region windows (lead, 2026-11-14): `face,i0,i1,j0,j1,seed`, 620-cell cores (with the gate's 200-cell margin SPIKE-111's 1,020-cell windows). R1h is the E1 region stores'
 /// window (r3a-e1, r3a-p2, r3a-p2e). M1 (mountain belt) and F1 (low-gradient river landscape) are SPIKE-119's (spikes, 2026-11-15).
@@ -42,7 +43,7 @@ pub fn window_of(arg: &str) -> String {
 
 /// The example's arguments for the xtask's: the target becomes `--window` or `--store`; an unknown option, a missing value or a second window is refused.
 pub fn example_args(args: &[String]) -> Result<Vec<String>, String> {
-    let usage = "usage: cargo xtask river-gate <store dir | face,i0,i1,j0,j1,seed | r1h | r3a | r3b | m1 | f1 | grid=file,w,h,sea_level_m> [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--network-km2 A,B] [--graph FILE] [--stages DIR] [--partition ONE,TWO] [--surface FILE] [--start FILE] [--corridor-bar PCT] [--no-key-check]";
+    let usage = "usage: cargo xtask river-gate <store dir | face,i0,i1,j0,j1,seed | r1h | r3a | r3b | m1 | f1 | grid=file,w,h,sea_level_m> [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--network-km2 A,B] [--graph FILE] [--stages DIR] [--partition ONE,TWO] [--surface FILE] [--start FILE] [--noise axis|turned] [--corridor-bar PCT] [--no-key-check]";
     let Some(target) = args.first().filter(|a| !a.starts_with("--")) else { return Err(usage.to_string()) };
     let mut out = Vec::new();
     let window = window_of(target);
@@ -101,7 +102,7 @@ pub struct TableRow {
 /// The rows of `river-gate --table <row>... [--windows W,W...] [options]` (BUILD-057): a row is a window (its start surface), `<store dir>@<window>` (the store on that window) or a store dir (on
 /// `--window`, default R1h); `--windows` adds one start-surface row per window. The other options go to every row. A row's label is the store's directory name or "start", then the window.
 pub fn table_rows(args: &[String]) -> Result<Vec<TableRow>, String> {
-    let usage = "usage: cargo xtask river-gate --table <window | store dir@window | store dir | grid=file,w,h,sea_level_m>... [--windows W,W...] [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--network-km2 A,B] [--corridor-bar PCT] [--no-key-check]; a row may end in #graph=FILE, #stages=DIR, #partition=ONE,TWO, #surface=FILE, #start=FILE, #chain=FILE (the run's chain.txt: the row's label and its chain under the table)";
+    let usage = "usage: cargo xtask river-gate --table <window | store dir@window | store dir | grid=file,w,h,sea_level_m>... [--windows W,W...] [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--network-km2 A,B] [--corridor-bar PCT] [--no-key-check]; a row may end in #graph=FILE, #stages=DIR, #partition=ONE,TWO, #surface=FILE, #start=FILE, #noise=axis|turned, #chain=FILE (the run's chain.txt: the row's label and its chain under the table)";
     let (mut targets, mut common, mut windows) = (Vec::new(), Vec::new(), Vec::new());
     let mut k = 0;
     while k < args.len() {
@@ -167,7 +168,7 @@ pub fn table_rows(args: &[String]) -> Result<Vec<TableRow>, String> {
                 }
                 let (k, v) = p.split_once('=').filter(|(k, v)| ROW_INPUTS.contains(k) && !v.is_empty()).ok_or_else(|| {
                     format!(
-                        "a row's suffix is #graph=, #stages=, #partition=, #surface=, #start=, #chain= or #timing=, not '#{p}'; {usage}"
+                        "a row's suffix is #graph=, #stages=, #partition=, #surface=, #start=, #noise=, #chain= or #timing=, not '#{p}'; {usage}"
                     )
                 })?;
                 extra.extend([format!("--{k}"), v.to_string()]);
@@ -246,22 +247,11 @@ pub fn render_chains(chains: &[(String, Vec<String>)]) -> String {
     if chains.is_empty() {
         return String::new();
     }
-    let mut md = String::from(
-        "
-## Chains
-",
-    );
+    let mut md = String::from("\n## Chains\n");
     for (label, lines) in chains {
-        md.push_str(&format!(
-            "
-### {label}
-"
-        ));
+        md.push_str(&format!("\n### {label}\n"));
         for l in lines {
-            md.push_str(&format!(
-                "- `{l}`
-"
-            ));
+            md.push_str(&format!("- `{l}`\n"));
         }
     }
     md
@@ -274,8 +264,12 @@ type Fields = Vec<(String, String)>;
 /// peak (MiB), none when no line gives one.
 pub fn parse_timing(text: &str) -> Result<(f64, Option<f64>), String> {
     let (mut total, mut peak) = (0.0f64, None::<f64>);
+    // the stage column may hold commas ("setup (S0, ocean, H1 base)"): the header's count of columns, the numbers read from the line's right end
+    let cols = text.lines().next().map_or(0, |h| h.split(',').count()).max(2);
     for (k, line) in text.lines().enumerate().skip(1).filter(|(_, l)| !l.trim().is_empty()) {
-        let mut f = line.split(',').skip(1);
+        let mut right: Vec<&str> = line.rsplitn(cols, ',').collect();
+        right.reverse();
+        let mut f = right.into_iter().skip(1);
         let s: f64 = f.next().and_then(|v| v.trim().parse().ok()).ok_or(format!("timing line {}: no seconds in `{line}`", k + 1))?;
         total += s;
         if let Some(p) = f.next().and_then(|v| v.trim().parse::<f64>().ok()) {
@@ -298,7 +292,8 @@ pub fn b_bars(table: &mut [(String, Vec<(String, String)>)], stores: &[bool], cl
     let cell = |pass: bool, v: f64| format!("{}:{v:.2}", if pass { "PASS" } else { "FAIL" });
     let mut used: Vec<(&str, &str)> = Vec::new();
     for (i, (label, fields)) in table.iter_mut().enumerate() {
-        if stores[i] {
+        // a row without a graph (a start surface) is no candidate: B's bars are for the graph rows
+        if stores[i] || !fields.iter().any(|(c, _)| c == "g_nodes") {
             continue;
         }
         let w = window(label);
@@ -500,7 +495,7 @@ mod tests {
         assert_eq!(r[0].args[2..], s(&["--surface", "C:/rg/r1h-final.f64", "--graph", "g.txt"])[..]);
         assert!(table_rows(&s(&["r1h#gaph=x"]))
             .unwrap_err()
-            .contains("#graph=, #stages=, #partition=, #surface=, #start=, #chain= or #timing="));
+            .contains("#graph=, #stages=, #partition=, #surface=, #start=, #noise=, #chain= or #timing="));
         // lead #169: a row's chain file stays with the table, never goes to the gate; reading 28 retired #reference=
         let r = table_rows(&s(&["r1h#stages=st#chain=C:/rg/r1h-chain.txt"])).unwrap();
         assert_eq!(r[0].args[2..], s(&["--stages", "st"])[..]);
@@ -508,6 +503,9 @@ mod tests {
         // lead #171: the run's own start surface as a row suffix
         let r = table_rows(&s(&["r1h#start=C:/rg/r1h-s0.f64#graph=g.txt"])).unwrap();
         assert_eq!(r[0].args[2..], s(&["--start", "C:/rg/r1h-s0.f64", "--graph", "g.txt"])[..]);
+        // lead #173: the base noise per row
+        let r = table_rows(&s(&["target/stores/b-r1h-t@r1h#noise=turned"])).unwrap();
+        assert_eq!(r[0].args[r[0].args.len() - 2..], s(&["--noise", "turned"])[..]);
         assert!(table_rows(&s(&["r1h#reference=a.f64"])).is_err(), "reading 28: no budget reference");
         assert_eq!(example_args(&s(&["m1", "--corridor-bar", "95"])).unwrap()[2..], s(&["--corridor-bar", "95"])[..]);
         assert!(table_rows(&s(&["r1h#graph="])).is_err());
@@ -523,44 +521,30 @@ mod tests {
     #[test]
     fn a_rows_timing_gives_its_cost_and_the_bars_against_b_read_the_store_row_of_the_same_window() {
         // lead #172: a timing file's total seconds and largest peak; a `-` peak is unknown
+        assert_eq!(parse_timing("stage,seconds,peak_mib,now_mib\nsetup,30.5,1800,1200\nkv,60,9600,4400\n").unwrap(), (90.5, Some(9600.0)));
+        assert_eq!(parse_timing("stage,seconds,peak_mib\nall,435,-\n").unwrap(), (435.0, None));
+        assert!(parse_timing("stage,seconds\nx,abc\n").unwrap_err().contains("line 2"));
+        // a stage name with commas (the chain runner's "setup (S0, ocean, H1 base)"): the numbers are read from the line's right end
         assert_eq!(
-            parse_timing(
-                "stage,seconds,peak_mib,now_mib
-setup,30.5,1800,1200
-kv,60,9600,4400
-"
-            )
-            .unwrap(),
-            (90.5, Some(9600.0))
+            parse_timing("stage,seconds,peak_mib,now_mib\nsetup (S0, ocean, H1 base),45.4,1891,1296\nkv,10,2000,1\n").unwrap(),
+            (55.4, Some(2000.0))
         );
-        assert_eq!(
-            parse_timing(
-                "stage,seconds,peak_mib
-all,435,-
-"
-            )
-            .unwrap(),
-            (435.0, None)
-        );
-        assert!(parse_timing(
-            "stage,seconds
-x,abc
-"
-        )
-        .unwrap_err()
-        .contains("line 2"));
         let r = table_rows(&s(&["r1h#timing=t.csv#graph=g.txt"])).unwrap();
         assert_eq!((r[0].timing.as_deref(), &r[0].args[2..]), (Some("t.csv"), &s(&["--graph", "g.txt"])[..]));
         let f = |kv: &[(&str, &str)]| kv.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect::<Vec<_>>();
         let mut table = vec![
             ("b-r1h @ r1h".to_string(), f(&[("relief10_lost_m", "-8.90"), ("beta_change", "1.074"), ("cost_s", "435.0")])),
-            ("r1h-proto @ r1h".to_string(), f(&[("relief10_lost_m", "-0.55"), ("beta_change", "1.013"), ("cost_s", "900.0")])),
-            ("r3a-proto @ r3a".to_string(), f(&[("relief10_lost_m", "2.0"), ("beta_change", "1.0")])),
+            (
+                "r1h-proto @ r1h".to_string(),
+                f(&[("g_nodes", "6"), ("relief10_lost_m", "-0.55"), ("beta_change", "1.013"), ("cost_s", "900.0")]),
+            ),
+            ("r3a-proto @ r3a".to_string(), f(&[("g_nodes", "6"), ("relief10_lost_m", "2.0"), ("beta_change", "1.0")])),
             ("b-r3a @ r3a".to_string(), f(&[("relief10_lost_m", "1.0"), ("beta_change", "1.2")])),
-            ("lonely @ f1".to_string(), f(&[("relief10_lost_m", "0")])),
+            ("lonely @ f1".to_string(), f(&[("g_nodes", "6"), ("relief10_lost_m", "0")])),
+            ("start @ r1h".to_string(), f(&[("relief10_lost_m", "0"), ("beta_change", "0")])),
         ];
         let mut classes = Vec::new();
-        b_bars(&mut table, &[true, false, false, true, false], &mut classes);
+        b_bars(&mut table, &[true, false, false, true, false, false], &mut classes);
         let cell = |row: usize, k: &str| table[row].1.iter().find(|(c, _)| c == k).map(|(_, v)| v.clone());
         // R1h: B gains relief, the prototype gains less: a gain is no loss, so it passes; its spectrum changes less than B's; it costs more
         assert_eq!(cell(1, "bar_relief_lost").as_deref(), Some("PASS:-0.55"));
@@ -571,6 +555,7 @@ x,abc
         assert_eq!(cell(2, "bar_cost"), None);
         // a store row gets no bars, a window without B none either
         assert!(cell(0, "bar_relief_lost").is_none() && cell(4, "bar_relief_lost").is_none());
+        assert!(cell(5, "bar_relief_lost").is_none() && cell(5, "bar_beta_change").is_none(), "a start row (no graph) is no candidate");
         assert!(
             classes.contains(&("bar_cost".to_string(), "product".to_string()))
                 && classes.contains(&("bar_relief_lost".to_string(), "preservation".to_string()))
@@ -580,15 +565,7 @@ x,abc
     // spec: BUILD-060
     #[test]
     fn a_rows_chain_names_the_row_and_lists_its_commit_switches_and_stages_under_the_table() {
-        let text = "stage-chain 1
-window 0 0 8 8
-coarse 8
-cell_m 1
-label r1h-proto
-commit 9858448f
-switch kh h5
-stage 5 5 kh h5
-";
+        let text = "stage-chain 1\nwindow 0 0 8 8\ncoarse 8\ncell_m 1\nlabel r1h-proto\ncommit 9858448f\nswitch kh h5\nstage 5 5 kh h5\n";
         let (label, lines) = parse_chain(text);
         assert_eq!(label.as_deref(), Some("r1h-proto"));
         assert_eq!(lines, s(&["commit 9858448f", "switch kh h5", "stage 5 5 kh h5"]));

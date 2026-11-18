@@ -1,0 +1,1 @@
+- 2026-11-19 gate-noise (BUILD-060): river-gate --noise for runs on the turned base; the table's timing file reads stage names with commas, and the bars against B score only graph rows (lead #173).
