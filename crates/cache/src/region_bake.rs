@@ -206,14 +206,20 @@ pub static POST_HOOK: std::sync::OnceLock<PostHook> = std::sync::OnceLock::new()
 /// the fill level inside the basins left.
 pub fn install_s138(form: &str, cap: f64, tag: &str) -> Result<(), String> {
     use planet_generators::bake::drain;
-    if !["uncapped", "cap", "sel-post", "sel-clamp"].contains(&form) {
-        return Err(format!("--base-form uncapped | cap | sel-post | sel-clamp, not '{form}'"));
+    if !["uncapped", "cap", "sel-post", "sel-clamp", "post-only"].contains(&form) {
+        return Err(format!("--base-form uncapped | cap | sel-post | sel-clamp | post-only, not '{form}'"));
     }
+    // spikes #147: `post-only`, no drain before K5 (K5 drains z_b's pits as today), the selective drain on z_s after it
     let (form, tag) = (form.to_string(), tag.to_string());
     let selective = form.starts_with("sel");
+    let post_only = form == "post-only";
     let t2 = tag.clone();
     let f2 = form.clone();
     let _ = BASE_HOOK.set(Box::new(move |grid: &Grid, outlet: &[bool], zb: &[f64], _dir: &(dyn Fn(usize) -> Vec3 + Sync)| {
+        if post_only {
+            println!("HO {t2} stage 1 off (post-only)");
+            return zb.to_vec();
+        }
         let t = std::time::Instant::now();
         let (w, h) = (grid.w(), grid.len() / grid.w());
         let area = |p: usize| grid.cell_area(p);
@@ -240,7 +246,7 @@ pub fn install_s138(form: &str, cap: f64, tag: &str) -> Result<(), String> {
         }
         d
     }));
-    if form == "sel-post" {
+    if form == "sel-post" || form == "post-only" {
         let _ = POST_HOOK.set(Box::new(move |grid: &Grid, outlet: &[bool], zs: &mut Vec<f64>| {
             let (w, h) = (grid.w(), grid.len() / grid.w());
             let (d, st) =

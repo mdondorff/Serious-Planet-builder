@@ -1814,8 +1814,13 @@ fn main() -> Result<(), String> {
     if !["aplus", "today"].contains(&base_form) {
         return Err(format!("--base aplus | today, not '{base_form}'"));
     }
+    // spikes #147: `--base-stages 13` (stages 1 and 3, the default) or `3` (stage 3 only: no drain before K5)
+    let base_stages = value(&args, "--base-stages").unwrap_or("13");
+    if !["13", "3"].contains(&base_stages) {
+        return Err(format!("--base-stages 13 | 3, not '{base_stages}'"));
+    }
     if base_form == "aplus" {
-        planet_cache::region_bake::install_s138("sel-post", f64::INFINITY, &tag)?;
+        planet_cache::region_bake::install_s138(if base_stages == "3" { "post-only" } else { "sel-post" }, f64::INFINITY, &tag)?;
     }
     // spikes #147: `--breach-cost cell` (SPIKE-138) or `length` (the cut cost times the step's length, plus a length term)
     let breach_cost = value(&args, "--breach-cost").unwrap_or("cell");
@@ -2017,7 +2022,7 @@ fn main() -> Result<(), String> {
         let cells8: usize = runs.iter().filter(|&&r| r >= 8).sum();
         let all_steps: usize = runs.iter().sum();
         println!(
-            "PROBE {tag} (base {base_form}, breach cost {breach_cost}, drain rule {drain_rule}, breach max len {breach_max_len}): H1 channel steps in the box {tot}, diagonal {diag} ({:.1} %); straight runs: p50 {} p90 {} p99 {} max {} steps; runs of 8 steps (6.5 km) or more: {long8}, holding {:.1} % of the steps",
+            "PROBE {tag} (base {base_form}, stages {base_stages}, breach cost {breach_cost}, drain rule {drain_rule}, breach max len {breach_max_len}): H1 channel steps in the box {tot}, diagonal {diag} ({:.1} %); straight runs: p50 {} p90 {} p99 {} max {} steps; runs of 8 steps (6.5 km) or more: {long8}, holding {:.1} % of the steps",
             100.0 * diag as f64 / tot as f64,
             runs[runs.len() / 2],
             runs[runs.len() * 9 / 10],
