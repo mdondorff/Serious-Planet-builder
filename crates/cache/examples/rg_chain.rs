@@ -1799,9 +1799,15 @@ fn main() -> Result<(), String> {
     if !["k6", "k6p"].contains(&h1_form) {
         return Err(format!("--h1 k6 | k6p, not '{h1_form}'"));
     }
-    let base_form = value(&args, "--base").unwrap_or("today");
-    if base_form != "today" {
-        return Err(format!("--base today (aplus comes with spikes' fold-in), not '{base_form}'"));
+    // spikes #146 (SPIKE-138): `--base aplus` (the default) is stages 1 and 3, the selective drain of `z_b` before K5 and of `z_s` after it (a breach only within 50 m of
+    // cut, a fill only within 50 m of depth; deeper basins stay), and stage 6, the same rule on the KS1 output with the budget at the floor as both caps (reading 23 post).
+    // `--base today` is today's base, no drain.
+    let base_form = value(&args, "--base").unwrap_or("aplus");
+    if !["aplus", "today"].contains(&base_form) {
+        return Err(format!("--base aplus | today, not '{base_form}'"));
+    }
+    if base_form == "aplus" {
+        planet_cache::region_bake::install_s138("sel-post", f64::INFINITY, &tag)?;
     }
     let base_today = h1_form == "k6";
     let low = value(&args, "--centre") != Some("maximin");
@@ -2535,6 +2541,45 @@ fn main() -> Result<(), String> {
             (0..n_l).filter(|&p| core[p] && ks_d[p] < start[p]).count(),
             res_d.iter().filter(|r| core[r.0]).count()
         );
+        // stage 6 (spikes #146, reading 23 post): the band drain after KS1, capped by the budget at the floor; the domain's outlets and the cells outside it are its outlets
+        let ks_d = if base_form == "aplus" && ks_mode != "off" {
+            let t6 = Instant::now();
+            let outl: Vec<bool> = (0..n_l).map(|p| outlet_d[p] || !active[p]).collect();
+            let (d6, st) = planet_generators::bake::drain::drain_selective(
+                &ks_d,
+                w,
+                h,
+                &outl,
+                &|_| false,
+                &|_| dx_l * dx_l,
+                8,
+                4096,
+                &|p| budget_l[p],
+                &|p| budget_l[p],
+            );
+            let (mut lo, mut hi) = (0.0f64, 0.0f64);
+            for p in (0..n_l).filter(|&p| core[p]) {
+                let dz = (d6[p] - ks_d[p]) * dx_l * dx_l / 1e9;
+                if dz < 0.0 {
+                    lo -= dz;
+                } else {
+                    hi += dz;
+                }
+            }
+            println!(
+                "RG domain {d} band6 (reading 23 post): {} rounds, {} depressions met ({} filled, {} breached), {} left of them {} over the budget both ways; core lowered {lo:.4} km3, raised {hi:.4} km3; {:.1} s",
+                st.rounds,
+                st.depressions,
+                st.filled,
+                st.breached,
+                st.left,
+                st.deep,
+                t6.elapsed().as_secs_f64()
+            );
+            d6
+        } else {
+            ks_d
+        };
         t_ks1 += t.elapsed().as_secs_f64();
         // the basins again, on the KS output with every L reach as spill receivers and inlets (reading 5: the L kept rule reads KS1; crusader's G1d order: the first pass on KS0 gave
         // KG-trib its kept set); the graph takes this pass's basins and nodes; its kept basins and H1's lake water are KV's and KC's protected cells

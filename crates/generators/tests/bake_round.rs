@@ -410,6 +410,7 @@ fn catchment_key_holds_every_parameter_the_round_reads() {
         scale: vec![1.0; 4],
         up_unit: vec![0.0; 4],
         exit_window_cut: false,
+        level_floor: Vec::new(),
     };
     let p = CarveParams { round_rules: RoundRules::ROUND, ..CarveParams::default() };
     let key = catchment_key(&grid, &cells, &inp, &p);
@@ -487,6 +488,7 @@ fn the_catchment_key_is_the_members_in_the_routing_order_and_another_order_does_
         scale: pick(&inp.scale),
         up_unit: pick(&inp.up_unit),
         exit_window_cut: inp.exit_window_cut,
+        level_floor: Vec::new(),
     };
     let cells_permuted: Vec<u32> = perm.iter().map(|&o| cells[o]).collect();
     assert_ne!(key, catchment_key(&g, &cells_permuted, &permuted, &p), "a round on the same members in another order is not a key match");

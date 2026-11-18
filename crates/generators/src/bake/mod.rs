@@ -27,6 +27,8 @@ pub mod hydro;
 pub mod inputs;
 pub mod k7;
 pub mod kh;
+/// SPIKE-138 (spike only): a surface made to drain by a least-cost breach or a fill.
+pub mod drain;
 pub mod kg_trib;
 pub mod kv_kc;
 pub mod lakes;
