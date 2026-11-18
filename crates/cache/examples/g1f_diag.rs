@@ -121,6 +121,8 @@ fn main() -> Result<(), String> {
         }
     };
     let mut off_cause: HashMap<&str, usize> = HashMap::new();
+    let mut lake_sub: HashMap<&str, (usize, Vec<f64>)> = HashMap::new();
+    let kc_fill: Option<&Vec<u16>> = stages.iter().find(|s| s.name.starts_with("kc")).and_then(|s| s.fill.as_ref());
     // ---- uphill steps on 75 km2 rivers
     let river = |c: usize| area[c] >= 75.0e6 && land(c);
     let order = ["exception", "lake_inlet", "junction", "tile_crossing", "budget_full", "on_graph_trunk", "on_graph_trib", "off_graph"];
@@ -162,7 +164,22 @@ fn main() -> Result<(), String> {
         }
         let p = order.iter().find(|o| ls.contains(o)).unwrap();
         if *p == "off_graph" {
-            *off_cause.entry(cause(c, 75.0e6)).or_default() += 1;
+            let k = cause(c, 75.0e6);
+            *off_cause.entry(k).or_default() += 1;
+            if k == "lake_interior" {
+                // what KC did at the pit: filled to the budget (clamped), filled less, or nothing (a protected basin, or a pit KC does not see)
+                let fill = kc_fill.map_or(0.0, |f| f64::from(f[c]) * 0.1);
+                let sub = if fill <= 0.0 {
+                    "kc_untouched"
+                } else if budget.len() == n && fill >= budget[c] - 0.15 {
+                    "kc_fill_at_budget"
+                } else {
+                    "kc_fill_partial"
+                };
+                let e = lake_sub.entry(sub).or_insert((0, Vec::new()));
+                e.0 += 1;
+                e.1.push(filled[c] - z[c]);
+            }
         }
         let e = primary.entry(p).or_insert((0, Vec::new()));
         e.0 += 1;
@@ -185,6 +202,10 @@ fn main() -> Result<(), String> {
     let mut oc: Vec<(&&str, &usize)> = off_cause.iter().collect();
     oc.sort();
     println!("DIAG uphill off_graph by cause: {oc:?}");
+    for (k, (cnt, v)) in lake_sub.iter_mut() {
+        v.sort_by(f64::total_cmp);
+        println!("DIAG uphill off_graph lake_interior {k:<18} {cnt:>5}; depression depth at the step p50 {:.2} p90 {:.2} max {:.2} m", v[v.len() / 2], v[v.len() * 9 / 10], v[v.len() - 1]);
+    }
     // ---- agreement misses at 1 and 75 km2
     let g1 = dilate(&on_graph, 1);
     for t in [1.0e6, 75.0e6] {
