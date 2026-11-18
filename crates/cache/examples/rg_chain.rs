@@ -1994,14 +1994,21 @@ fn main() -> Result<(), String> {
             while c != sg.down as usize {
                 let r = h1.routing.receiver[c] as usize;
                 let dir = ((r % rw) as i64 - (c % rw) as i64, (r / rw) as i64 - (c / rw) as i64);
-                if in_core(c) {
+                // outside H1's kept basins (a basin's flat floor is channel at H1 and runs straight by the flood's grade)
+                if in_core(c) && h1.hydro.label[c] == NONE {
                     if dir.0 != 0 && dir.1 != 0 {
                         diag += 1;
                     } else {
                         axis += 1;
                     }
                 }
-                if dir == last {
+                if h1.hydro.label[c] != NONE {
+                    if run > 0 {
+                        runs.push(run);
+                    }
+                    run = 0;
+                    last = (0, 0);
+                } else if dir == last {
                     run += 1;
                 } else {
                     if run > 0 {
@@ -2022,7 +2029,7 @@ fn main() -> Result<(), String> {
         let cells8: usize = runs.iter().filter(|&&r| r >= 8).sum();
         let all_steps: usize = runs.iter().sum();
         println!(
-            "PROBE {tag} (base {base_form}, stages {base_stages}, breach cost {breach_cost}, drain rule {drain_rule}, breach max len {breach_max_len}): H1 channel steps in the box {tot}, diagonal {diag} ({:.1} %); straight runs: p50 {} p90 {} p99 {} max {} steps; runs of 8 steps (6.5 km) or more: {long8}, holding {:.1} % of the steps",
+            "PROBE {tag} (base {base_form}, stages {base_stages}, breach cost {breach_cost}, drain rule {drain_rule}, breach max len {breach_max_len}): H1 channel steps in the box outside kept basins {tot}, diagonal {diag} ({:.1} %); straight runs: p50 {} p90 {} p99 {} max {} steps; runs of 8 steps (6.5 km) or more: {long8}, holding {:.1} % of the steps",
             100.0 * diag as f64 / tot as f64,
             runs[runs.len() / 2],
             runs[runs.len() * 9 / 10],
