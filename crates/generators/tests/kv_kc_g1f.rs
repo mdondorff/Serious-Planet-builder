@@ -184,7 +184,7 @@ fn dump(dir: &str, switch: Switch, k: &Case, kv: &[f64], kc: &[f64], near_divide
     }
 }
 
-// spec: SPIKE-132
+// SPIKE-132 (spike prototype; not a spec requirement)
 #[test]
 fn kv_and_kc_keep_the_budget_divides_basins_and_the_ridge_on_the_fixture() {
     let k = case();
@@ -232,7 +232,7 @@ fn kv_and_kc_keep_the_budget_divides_basins_and_the_ridge_on_the_fixture() {
     }
 }
 
-// spec: SPIKE-132
+// SPIKE-132 (spike prototype; not a spec requirement)
 #[test]
 fn kv_and_kc_are_deterministic() {
     let k = case();
@@ -255,7 +255,7 @@ fn kvkc_digest(r: &planet_generators::bake::kv_kc::KvKc) -> u64 {
     h.finish()
 }
 
-// spec: SPIKE-132
+// SPIKE-132 (spike prototype; not a spec requirement)
 #[test]
 fn kv_and_kc_give_the_pinned_output() {
     // order #161: the memory cut keeps KV and KC's output bit-identical (digests pinned before it); the breach (reading 22) and the S_KH budget change it on purpose (re-pinned with
@@ -287,7 +287,7 @@ fn kv_and_kc_give_the_pinned_output() {
 // source fix 5) leaves them: on the fixture the capped floors stand at their target already
 const KVKC_DIGESTS: [u64; 3] = [0xc1c6_65a7_670e_453a, 0x4c07_3ae4_4545_fb75, 0xd7f3_400b_df31_8fcd];
 
-// spec: SPIKE-132
+// SPIKE-132 (spike prototype; not a spec requirement)
 #[test]
 fn kv_s_budget_is_what_ks_left_against_s_kh() {
     // reading 21 (owner, #161): KS used `S_KH - s0` of the budget before KV, so KV lowers at most the rest
@@ -304,7 +304,7 @@ fn kv_s_budget_is_what_ks_left_against_s_kh() {
     assert!(max_low(&r.kv) < max_low(&plain.kv), "the reference takes budget away");
 }
 
-// spec: SPIKE-132
+// SPIKE-132 (spike prototype; not a spec requirement)
 #[test]
 fn reading_10_exempts_divide_cells_near_graph_lines() {
     // lead #165: a divide cell within W_floor(q_w)/2 + d_buf of a graph line is valley floor; the buffer spares it, so KV acts at confluences and junctions
@@ -330,7 +330,7 @@ fn reading_10_exempts_divide_cells_near_graph_lines() {
     }
 }
 
-// spec: SPIKE-132
+// SPIKE-132 (spike prototype; not a spec requirement)
 #[test]
 fn kv_lowers_a_side_only_as_far_as_the_lines_own_height_reaches() {
     // lead #166 (M1): outside the floor KV's cone is measured as if the cell stood no higher than its nearest vertex's cell, so it lowers less than the cone alone, never more, and
@@ -367,7 +367,7 @@ fn kv_lowers_a_side_only_as_far_as_the_lines_own_height_reaches() {
     }
 }
 
-// spec: SPIKE-132
+// SPIKE-132 (spike prototype; not a spec requirement)
 #[test]
 fn kv_floors_rise_from_the_line_toward_their_edge() {
     // lead #166 (source fix 5): within the floor KV's target rises s_floor a metre from the line, so a floor cell is never lowered more than with a flat floor, and on the line the same
@@ -386,7 +386,7 @@ fn kv_floors_rise_from_the_line_toward_their_edge() {
     assert!(higher > 0, "off the line the floor stands higher");
 }
 
-// spec: SPIKE-132
+// SPIKE-132 (spike prototype; not a spec requirement)
 #[test]
 fn a_floors_lowering_carries_outward_falling_at_the_grade() {
     // lead #166 (numerics review: no cliff at the floor's edge): KV's side cap carries the floor's lowering outward, falling s_wall a metre; each cell keeps the largest arrival
@@ -405,7 +405,7 @@ fn a_floors_lowering_carries_outward_falling_at_the_grade() {
     assert!(w[9] > 0.0, "the open side still gets it");
 }
 
-// spec: SPIKE-132
+// SPIKE-132 (spike prototype; not a spec requirement)
 #[test]
 fn kc_breaches_along_the_graph_line_when_it_can() {
     // lead #166 (source fix 3): KC's breach first stays within one cell of a graph vertex; on the fixture the free breach already runs there, so both forms give the same surface

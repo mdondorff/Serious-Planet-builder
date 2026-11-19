@@ -84,7 +84,7 @@ fn basin_at(p: &Produced, c: usize) -> &Basin {
     kept(p).into_iter().filter(|b| p.cells[&b.id].contains(&c)).min_by_key(|b| p.cells[&b.id].len()).expect("a kept basin holds the cell")
 }
 
-// spec: SPIKE-130
+// SPIKE-130 (spike prototype; not a spec requirement)
 #[test]
 fn nested_basins_have_their_parent() {
     let mut z = base(false);
@@ -115,7 +115,7 @@ fn nested_basins_have_their_parent() {
     assert!(p.cells[&big].len() > p.cells[&a.id].len() + p.cells[&b.id].len());
 }
 
-// spec: SPIKE-130
+// SPIKE-130 (spike prototype; not a spec requirement)
 #[test]
 fn two_depressions_share_one_spill_and_spill_into_each_other() {
     let mut z = base(false);
@@ -132,7 +132,7 @@ fn two_depressions_share_one_spill_and_spill_into_each_other() {
     assert_eq!(a.parent, b.parent, "siblings");
 }
 
-// spec: SPIKE-130
+// SPIKE-130 (spike prototype; not a spec requirement)
 #[test]
 fn a_closed_basin_is_endorheic() {
     let mut z = base(true);
@@ -183,7 +183,7 @@ fn line(cells: &[usize], down_kind: NodeKind) -> (Reach, Node, Node) {
     (r, up, down)
 }
 
-// spec: SPIKE-130
+// SPIKE-130 (spike prototype; not a spec requirement)
 #[test]
 fn a_lake_with_three_inlets_has_one_spill() {
     let mut z = base(false);
@@ -205,7 +205,7 @@ fn a_lake_with_three_inlets_has_one_spill() {
     assert_eq!(lake.outlet, Outlet::Active, "one spill");
 }
 
-// spec: SPIKE-130
+// SPIKE-130 (spike prototype; not a spec requirement)
 #[test]
 fn a_basin_spills_into_another() {
     let mut z = base(false);
@@ -244,7 +244,7 @@ fn regional(z: &[f64], reaches: &[Reach], region: &dyn Fn(Domain) -> bool, halo:
     p.basins.iter().filter(|b| region(tile_of(b.floor_cell as usize)) && p.cells[&b.id].iter().all(|&c| !edge[c])).cloned().collect()
 }
 
-// spec: SPIKE-130
+// SPIKE-130 (spike prototype; not a spec requirement)
 #[test]
 fn basins_across_a_tile_line_are_the_same_under_both_layouts() {
     let mut z = base(false);
@@ -271,7 +271,7 @@ fn basins_across_a_tile_line_are_the_same_under_both_layouts() {
     }
 }
 
-// spec: SPIKE-130
+// SPIKE-130 (spike prototype; not a spec requirement)
 #[test]
 fn every_case_validates_and_is_deterministic() {
     let adj = {
@@ -367,7 +367,7 @@ mod fixture_case {
         h.finish()
     }
 
-    // spec: SPIKE-133
+    // SPIKE-133 (spike prototype; not a spec requirement)
     #[test]
     fn the_producer_s_output_is_unchanged() {
         // order #159: the producer's memory rework gives the same basins, nodes and cell sets (digests recorded before the rework)
@@ -379,7 +379,7 @@ mod fixture_case {
         assert_eq!((dh, dl), (DIGEST_H1, DIGEST_L));
     }
 
-    // spec: SPIKE-130
+    // SPIKE-130 (spike prototype; not a spec requirement)
     #[test]
     fn the_fixture_basin_has_its_l_image_and_is_the_same_on_any_thread_count() {
         let (h1, l, pairs, f) = basins(4);
@@ -407,7 +407,7 @@ mod fixture_case {
         assert_eq!((canon(&h1b), canon(&lb1)), (canon(&h1), canon(&l)), "the same bytes on 1 and 4 threads");
     }
 
-    // spec: SPIKE-130
+    // SPIKE-130 (spike prototype; not a spec requirement)
     #[test]
     fn the_fixture_l_basins_are_the_same_under_both_layouts() {
         // the whole run unlinked: an L image's parent and owner come from the landmass pass, not from a region
@@ -453,7 +453,7 @@ mod fixture_case {
     }
 }
 
-// spec: SPIKE-130
+// SPIKE-130 (spike prototype; not a spec requirement)
 #[test]
 fn a_basin_pass_without_the_tributaries_puts_inlets_on_their_node_cells() {
     // lead #160: a pass that does not see a tributary may put a lake_inlet on the cell where that tributary ends (the chain runner merged its first pass's nodes, 99 on R1h); the
@@ -490,7 +490,7 @@ fn a_basin_pass_without_the_tributaries_puts_inlets_on_their_node_cells() {
     assert!(!at_x(&validate(&g, &Checks { adjacent: &adj, tile_of: None, open: true })));
 }
 
-// spec: SPIKE-130
+// SPIKE-130 (spike prototype; not a spec requirement)
 #[test]
 fn a_spill_reaching_the_sea_is_received_by_an_outlet_sea() {
     // reading 6 (owner, #161): a basin with no reach on its spill path spills to an `outlet_sea` on the first sea cell, so no spill is missing
@@ -504,7 +504,7 @@ fn a_spill_reaching_the_sea_is_received_by_an_outlet_sea() {
     assert!(p.unresolved.is_empty(), "no spill missing: {:?}", p.unresolved);
 }
 
-// spec: SPIKE-130
+// SPIKE-130 (spike prototype; not a spec requirement)
 #[test]
 fn a_depression_is_protected_only_when_neither_fill_nor_breach_fits() {
     // reading 22 (owner, #161): a kept-size depression drains (reported) when its fill or a bounded least-cost breach fits the budget left; only the rest are protected

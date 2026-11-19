@@ -189,7 +189,7 @@ fn report(c: &Case, run: &Run, g: &Graph) -> Vec<String> {
     ]
 }
 
-// spec: SPIKE-133
+// SPIKE-133 (spike prototype; not a spec requirement)
 #[test]
 fn the_whole_body_extraction_validates() {
     let c = case(4);
@@ -326,7 +326,7 @@ fn tile_region(layout: &Layout, d: Domain) -> Option<usize> {
     }
 }
 
-// spec: SPIKE-133
+// SPIKE-133 (spike prototype; not a spec requirement)
 #[test]
 fn the_topology_is_the_same_under_both_layouts() {
     let c = case(4);
@@ -391,7 +391,7 @@ fn tainted(ex: &Extracted, win: &[bool], sea: &[bool]) -> Vec<bool> {
 /// The reduced halo of the halo cases (labelled: the fixture's body is 78 km round, so the 13 km halo covers almost all of it): 2 H1 cells (1.6 km).
 const HALO_CASES_H1: usize = 2;
 
-// spec: SPIKE-133
+// SPIKE-133 (spike prototype; not a spec requirement)
 #[test]
 fn catchments_at_the_halo_s_reach_and_sources_outside_a_tile() {
     let c = case(4);
@@ -527,7 +527,7 @@ fn catchments_at_the_halo_s_reach_and_sources_outside_a_tile() {
     assert!(conf_total > 0, "a confluence fed by a source outside its tile\n{report}");
 }
 
-// spec: SPIKE-133
+// SPIKE-133 (spike prototype; not a spec requirement)
 #[test]
 fn the_network_attaches_conserves_orders_and_is_deterministic() {
     let c = case(4);
@@ -636,7 +636,7 @@ fn dump(dir: &std::path::Path, c: &Case, run: &Run, g: &Graph) {
     std::fs::write(dir.join("cells.csv"), s).unwrap();
 }
 
-// spec: SPIKE-133
+// SPIKE-133 (spike prototype; not a spec requirement)
 #[test]
 fn d8_initiation_at_the_halo_s_reach() {
     // the comparison of the results note: the same halo cases with initiation on the D8 area (classes by the D8 catchment of the reach's end)
@@ -710,7 +710,7 @@ fn junction_breaks(g: &Graph) -> usize {
         .count()
 }
 
-// spec: SPIKE-133
+// SPIKE-133 (spike prototype; not a spec requirement)
 #[test]
 fn the_landmass_pass_accumulates_the_trunk_from_its_tributaries() {
     // reading 18: the L trunk's areas and discharge from the combined graph; H1's values only seed its head
