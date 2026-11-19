@@ -1887,6 +1887,12 @@ fn main() -> Result<(), String> {
         return Err(format!("--k5-diffuse-stencil 5 | 9, not '{k5_stencil}'"));
     }
     planet_generators::bake::round::K5_DIFFUSE_NINE.store(k5_stencil == "9", std::sync::atomic::Ordering::Relaxed);
+    // SPIKE-139 (lead #149b): `--k5-uok-scale X` (default 1): K5's uplift ratio u_over_k times X, k_dt kept (region_bake::K5_UOK_SCALE; spike only)
+    let k5_uok_scale: f64 = value(&args, "--k5-uok-scale").map_or(Ok(1.0), str::parse).map_err(|_| "--k5-uok-scale X")?;
+    if !(k5_uok_scale > 0.0 && k5_uok_scale <= 8.0) {
+        return Err("--k5-uok-scale X needs 0 < X <= 8".into());
+    }
+    planet_cache::region_bake::K5_UOK_SCALE.store(k5_uok_scale.to_bits(), std::sync::atomic::Ordering::Relaxed);
     // SPIKE-139 (lead #149 item 3): `--k5-kdt-scale X` (default 1): K5's k_dt times X, the uplift per step with it (region_bake::K5_KDT_SCALE; spike only)
     let k5_kdt_scale: f64 = value(&args, "--k5-kdt-scale").map_or(Ok(1.0), str::parse).map_err(|_| "--k5-kdt-scale X")?;
     if !(k5_kdt_scale > 0.0 && k5_kdt_scale <= 8.0) {
@@ -3286,6 +3292,7 @@ fn main() -> Result<(), String> {
             ("k5-diffuse", k5_diffuse.to_string()),
             ("k5-kdt-scale", k5_kdt_scale.to_string()),
             ("k5-diffuse-stencil", k5_stencil.to_string()),
+            ("k5-uok-scale", k5_uok_scale.to_string()),
             ("k5-diffuse-amax", k5_diffuse_amax.to_string()),
             ("k5-parity", k5_parity.to_string()),
             ("ks", ks_mode.to_string()),

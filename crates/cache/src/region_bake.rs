@@ -180,6 +180,8 @@ pub struct RegionReport {
 pub static K5_LTD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// SPIKE-139 (spike branch only): the f64 bits of a factor on K5's k_dt (0 or 1: unchanged).
 pub static K5_KDT_SCALE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// SPIKE-139 (spike branch only, lead #149b): the f64 bits of a factor on K5's u_over_k (0 or 1: unchanged).
+pub static K5_UOK_SCALE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// SPIKE-139 (spike branch only): K5's rounds step with D-infinity's two receivers (`planet_generators::bake::round::RECEIVER_DINF`).
 pub static K5_DINF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -312,6 +314,11 @@ pub fn solve_region(spec: &RegionSpec, base: &(dyn Fn(Vec3) -> f64 + Sync)) -> R
     let kdt_scale = f64::from_bits(K5_KDT_SCALE.load(std::sync::atomic::Ordering::Relaxed));
     if kdt_scale > 0.0 && kdt_scale != 1.0 {
         carve.k_dt *= kdt_scale;
+    }
+    // SPIKE-139 (spike only, lead #149b): K5's uplift ratio u_over_k scaled by K5_UOK_SCALE (1 unless set); k_dt kept
+    let uok_scale = f64::from_bits(K5_UOK_SCALE.load(std::sync::atomic::Ordering::Relaxed));
+    if uok_scale > 0.0 && uok_scale != 1.0 {
+        carve.u_over_k *= uok_scale;
     }
     let stream = face_spec.stream();
     let zb_in = match BASE_HOOK.get() {
