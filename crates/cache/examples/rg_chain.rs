@@ -2806,7 +2806,9 @@ fn main() -> Result<(), String> {
                 keep_fields: false,
             };
             let ex = extract(&inp, &Params { mfd_init: false, ..Params::plan(BODY, runoff_mean) });
-            trib_first = (ex.reaches.iter().map(|r| r.id).collect(), ex.nodes.iter().map(|x| x.id).collect());
+            // only what the pass adds: a tributary that ends at a trunk's last vertex returns the trunk's own down node, which must stay (numerics review of f5adb6d8)
+            let had: HashSet<u64> = gd.nodes.iter().map(|x| x.id).collect();
+            trib_first = (ex.reaches.iter().map(|r| r.id).collect(), ex.nodes.iter().map(|x| x.id).filter(|id| !had.contains(id)).collect());
             gd.nodes.extend(ex.nodes.iter().cloned());
             gd.reaches.extend(ex.reaches.iter().cloned());
             // reading 18 (lead #170 item 4): the landmass pass, the L trunks' areas and discharge (q_w, KV's width) accumulated at L from their tributaries and hillslope
@@ -3006,6 +3008,27 @@ fn main() -> Result<(), String> {
             let t2 = Instant::now();
             gd.reaches.retain(|r| !trib_first.0.contains(&r.id));
             gd.nodes.retain(|x| !trib_first.1.contains(&x.id));
+            // the kept set on the band6 output (numerics review of f5adb6d8: basin pass 1's set is KS0's, and band6 may have drained those basins): H1's lake water and the kept
+            // basins of a trunk-only basin pass on ks_d, as pass 1 does on KS0
+            if on("basins") {
+                use planet_generators::bake::basins_rg::BasinParams;
+                use planet_generators::bake::river_graph::Represented;
+                let ids = planet_generators::bake::basins_rg::CellIds { gid: &gid_l, local: &to_local };
+                let pk = planet_generators::bake::basins_rg::produce_ids(&grid_d, &ks_d, &outlet_d, &l_trunks, &tile_l, &BasinParams::l(BODY), &ids);
+                for p in 0..n_l {
+                    kept[p] = protected_h1[parent(p)];
+                }
+                for b in pk.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface) {
+                    for &c in &pk.cells[&b.id] {
+                        kept[c] = true;
+                    }
+                }
+                println!(
+                    "RG domain {d} KG-trib post: kept set on the band6 output, {} kept basins of {}",
+                    pk.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface).count(),
+                    pk.basins.len()
+                );
+            }
             let first_attrs: HashMap<u64, planet_generators::bake::river_graph::Attrs> = l_trunks.iter().map(|r| (r.id, r.attrs.clone())).collect();
             for r in gd.reaches.iter_mut() {
                 if let Some(a) = first_attrs.get(&r.id) {
@@ -3041,6 +3064,11 @@ fn main() -> Result<(), String> {
             if regions <= 1 {
                 acc_trunks = gd.reaches.iter().filter(|r| trunk_ids.contains(&r.id)).map(|r| (r.id, r.attrs.clone())).collect();
             }
+            // every reach's ends are held, and every KG-trunk node is still in the domain graph
+            let held: HashSet<u64> = gd.nodes.iter().map(|x| x.id).collect();
+            let dangling = gd.reaches.iter().filter(|r| r.level == Level::L && (!held.contains(&r.up) || !held.contains(&r.down))).count();
+            let lost = g.nodes.iter().filter(|x| !held.contains(&x.id)).count();
+            println!("RG domain {d} KG-trib post check: {dangling} L reaches with an end not held, {lost} KG-trunk nodes missing");
             println!(
                 "RG domain {d} KG-trib post (crusader #168): {} reaches, {} nodes, {} open ends on the band6 output ({} first-pass reaches replaced); reading 18: {} trunk reaches, {} unordered; {:.1} s",
                 ex.reaches.len(),
