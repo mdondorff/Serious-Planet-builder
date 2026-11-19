@@ -9,6 +9,8 @@
 //!   residual. Patches (connected filled cells) are counted with their volume.
 //!
 //! Single-threaded, fixed orders (CON-14).
+// spike only (never merged): kept as run, so the runs keep their bits; main gets its own form through an OpenSpec change
+#![allow(clippy::too_many_arguments, clippy::needless_range_loop)]
 
 use super::k7::WidthLaw;
 use super::river_graph::*;

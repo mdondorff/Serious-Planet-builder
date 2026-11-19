@@ -2,6 +2,8 @@
 //! (L cells of 101.8 m, row-major f64, SPIKE-119's prep), reduces it over 8 x 8 cells (814 m) by the mean, the minimum or the median (`[name] [mean|min|median]`), runs H1 on it (the canonical flood, the clipped MFD routing and
 //! `hydrology` with GEN-145's defaults: initiation 75 km2, pit limit 0.5 m, artefact floor 4 cells or 2 m; no runoff weights, no open-water term) and prints the
 //! share of channel cells that lie in kept basins, counted inside a one-cell border.
+// spike only (never merged): lints allowed as run, the code unchanged
+#![allow(clippy::chunks_exact_to_as_chunks, clippy::unusual_byte_groupings)]
 use planet_generators::bake::flood::priority_flood_with;
 use planet_generators::bake::hydro::{hydrology, HydroParams};
 use planet_generators::bake::route::{route_rules, RoundRules};

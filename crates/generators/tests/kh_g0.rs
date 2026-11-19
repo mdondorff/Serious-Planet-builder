@@ -3,8 +3,8 @@
 
 #![allow(clippy::needless_range_loop)]
 
-#[path = "support/g0_fixture.rs"]
-pub(crate) mod fixture;
+// the fixture module is g0_fixture's (it.rs loads both files; one load of support/g0_fixture.rs)
+use super::g0_fixture::fixture;
 
 use fixture::*;
 use planet_core::Face;

@@ -11,6 +11,8 @@
 //! 5. Ids: GEN-189's `basin_id` (floor and spill anchors, reading 4; the floor the lowest cell of the subtree, ties by the global cell id).
 //!
 //! Single-threaded, fixed orders (CON-14). No water balance.
+// spike only (never merged): kept as run, so the runs keep their bits; main gets its own form through an OpenSpec change
+#![allow(clippy::needless_range_loop, clippy::redundant_closure)]
 
 use super::river_graph::*;
 use super::route::{route_rules, RoundRules, NONE};

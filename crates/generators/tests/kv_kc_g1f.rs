@@ -1,7 +1,7 @@
 //! SPIKE-132 (spike branch spike/kv-kc, never merged): KV and KC on the G0 fixture (TEST-139) with the fixture's expected graph as the synthetic graph input (TEST-140's hand graph: its L beds,
 //! `q_w` and exceptions). KS is off: the stage input is `S0` (labelled), so the protected basins are `S0`'s kept L basins and the H1 bowl's image (reading 5 names KS1; with KS off KS1 is `S0`).
 //! The budget is the fixture's (contract section 6; the 10 m floor everywhere on this tiny body). `G1F_PRINT` prints the report, `G1F_DUMP=dir` writes the cross-sections.
-
+#![allow(clippy::type_complexity)]
 #![allow(clippy::needless_range_loop)]
 
 use crate::g0_fixture::fixture::*;

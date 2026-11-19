@@ -4,6 +4,15 @@
 //! H1 base: K6' on the sills of S0 (SPIKE-127; DEC spikes-3 default) or today's K6 (`--base today`). KS0 = C1(z_s) + min(r, C1(HAND)); L anchors by contract §2.1 on S0;
 //! centrelines by BUILD-057's corridor route on KS0; beds by §3 with the §6 budget remainder (rise_over_budget beyond it); rasterisation by §5.
 //! The helpers below are SPIKE-127's and SPIKE-131's (g1a_sills.rs, k5p_sills.rs).
+// spike only (never merged): lints allowed as run, the code unchanged
+#![allow(
+    clippy::chunks_exact_to_as_chunks,
+    clippy::filter_next,
+    clippy::type_complexity,
+    clippy::unnecessary_sort_by,
+    dead_code,
+    unused_imports
+)]
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};

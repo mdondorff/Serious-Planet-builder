@@ -1,5 +1,7 @@
 //! SPIKE-130 (spike branch spike/basins-g1e, never merged): the basins of `S0` at L on a window (the river gate's setup without `--store`: the start surface B plus the regional change), with the G0
 //! contracts' kept rule (0.25 km2, 2 m), nesting, areas and the share on H1 trunk lines.
+// spike only (never merged): lints allowed as run, the code unchanged
+#![allow(unused_assignments)]
 use std::path::Path;
 use std::sync::Arc;
 

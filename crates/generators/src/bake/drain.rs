@@ -10,6 +10,8 @@
 //! 5. The smaller volume wins (ties: the breach). Fills apply first, then breaches; the whole repeats on the result until no depression is left or `max_rounds`.
 //!
 //! Sequential and deterministic: the result depends on the heights and the order of the cell indices only.
+// spike only (never merged): kept as run, so the runs keep their bits; main gets its own form through an OpenSpec change
+#![allow(clippy::neg_cmp_op_on_partial_ord, clippy::manual_is_multiple_of, clippy::items_after_test_module, clippy::needless_range_loop)]
 
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;

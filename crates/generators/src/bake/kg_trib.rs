@@ -13,6 +13,8 @@
 //! 5. Ids: GEN-189's (node: body, kind, level, anchor; reach: body, level, up, down); owners: a tile of the anchor (`trib_junction`: the landmass, as the trunk), a reach the tile of its second vertex.
 //!
 //! Single-threaded, fixed orders (CON-14).
+// spike only (never merged): kept as run, so the runs keep their bits; main gets its own form through an OpenSpec change
+#![allow(clippy::needless_range_loop)]
 
 use super::river_graph::*;
 use super::route::{catchment_roots, route_rules_filled, RoundRules, NONE};

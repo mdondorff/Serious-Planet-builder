@@ -1,3 +1,12 @@
+// spike only (never merged): lints allowed as run, the code unchanged
+#![allow(
+    clippy::chunks_exact_to_as_chunks,
+    clippy::derive_ord_xor_partial_ord,
+    clippy::empty_line_after_outer_attr,
+    clippy::needless_range_loop,
+    clippy::type_complexity,
+    clippy::unnecessary_sort_by
+)]
 #![allow(dead_code, unused_imports, unused_variables)]
 //! spikes #139: the surfaces h2 + r, h4, h4 + r, h4c (h4 clamped to its quad's corners, reading 20), h4c + r.
 //! spikes #138 (spike/kh-stage, never merged): kh_smooth, SPIKE-136's handover.rs with h2 (the triangulation), h3 (the skeleton) and h4 (Clough-Tocher on h2's split)

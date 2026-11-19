@@ -5,6 +5,8 @@
 //!
 //! No H1 height is changed. The split is an H1 field (from H1's routing, landmass-global like H1); the read of an L cell uses its quad's four heights and one flag only, so any
 //! partition of the L cells gives the same bits.
+// spike only (never merged): kept as run, so the runs keep their bits; main gets its own form through an OpenSpec change
+#![allow(clippy::disallowed_methods, clippy::too_many_arguments)]
 
 use super::flood::priority_flood_with;
 use super::route::NONE;

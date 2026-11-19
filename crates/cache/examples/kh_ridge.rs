@@ -1,3 +1,12 @@
+// spike only (never merged): lints allowed as run, the code unchanged
+#![allow(
+    clippy::chunks_exact_to_as_chunks,
+    clippy::derive_ord_xor_partial_ord,
+    clippy::empty_line_after_outer_attr,
+    clippy::needless_range_loop,
+    clippy::type_complexity,
+    clippy::unnecessary_sort_by
+)]
 #![allow(dead_code, unused_imports, unused_variables)]
 //! spikes #137 kh_ridge (spike/kh-stage, never merged): KH's ridge check (S0's ridge cells on a D8-step split) and the render crops; helpers from handover_low.rs (spike/handover).
 //! SPIKE-136 handover_low: the hand-overs' own lowering at L apart from the interpolant (h1's breach read at L, the TIN and C1 against bilinear); no routing.

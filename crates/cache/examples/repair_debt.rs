@@ -1,3 +1,13 @@
+// spike only (never merged): lints allowed as run, the code unchanged
+#![allow(
+    clippy::chunks_exact_to_as_chunks,
+    clippy::derive_ord_xor_partial_ord,
+    clippy::empty_line_after_outer_attr,
+    clippy::format_in_format_args,
+    clippy::type_complexity,
+    clippy::unnecessary_sort_by,
+    clippy::useless_format
+)]
 #![allow(dead_code, unused_imports, unused_variables)]
 //! SPIKE-135 (lead #135; spike/repair-debt, never merged): the repair-debt ladder of S0 by origin; `main` below the SPIKE-135 line. The helpers above it are kg_trunk.rs's
 //! (spike/deep-basins f6395a8f), kept whole.

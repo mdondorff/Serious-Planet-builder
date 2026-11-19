@@ -10,6 +10,8 @@
 //! - Budget (G0 contracts section 6): `relief_1km` per 814 m cell (range of `S0` over the L cells within 5 cells of its centre L cell), `relief10` its p50 over the 814 m cells within 25 km,
 //!   `budget = min(50, max(10, 0.5 relief10))`; KS lowers at most the budget against `S0` and counts a residual where the conditioning needs more. H1's lake water is never changed.
 //! Alpha = 1. Land: `S0 > 0`.
+// spike only (never merged): lints allowed as run, the code unchanged
+#![allow(clippy::disallowed_methods, clippy::doc_lazy_continuation, clippy::type_complexity, dead_code)]
 use std::path::Path;
 
 use planet_cache::global_store::{class_inputs, class_inputs_key};
