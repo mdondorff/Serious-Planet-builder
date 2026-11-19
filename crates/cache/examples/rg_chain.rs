@@ -2349,6 +2349,12 @@ fn main() -> Result<(), String> {
         return Err(format!("--ks off | ks0 | ks1, not '{ks_mode}'"));
     }
     let skip: Vec<&str> = value(&args, "--skip").map(|v| v.split(',').collect()).unwrap_or_default();
+    // crusader #168 (DEC crusader-17): --trib-on pre (default) places the tributaries once, on KS0 (reading 14); post re-places them on the band6 output, the surface basins-2, KV, KC
+    // and the gate see (the first pass's routing still drives KS1)
+    let trib_on = value(&args, "--trib-on").unwrap_or("pre");
+    if !["pre", "post"].contains(&trib_on) {
+        return Err(format!("--trib-on pre | post, not '{trib_on}'"));
+    }
     for s in &skip {
         if !["kg-trunk", "basins", "kg-trib", "kv", "kc"].contains(s) {
             return Err(format!("--skip: kg-trunk, basins, kg-trib, kv, kc; not '{s}'"));
@@ -2775,6 +2781,8 @@ fn main() -> Result<(), String> {
         // KG-trib (crusader's G1d extractor-1) on KS0, A_crit 1 km2
         let t = Instant::now();
         let mut fine: Option<(Vec<u32>, Vec<bool>)> = None;
+        // the first pass's tributary reaches and nodes (crusader #168: --trib-on post replaces them)
+        let mut trib_first: (BTreeSet<u64>, BTreeSet<u64>) = (BTreeSet::new(), BTreeSet::new());
         if on("kg-trib") {
             use planet_generators::bake::kg_trib::{accumulate_trunks, extract, Input, Params, Trunk};
             let trunks: Vec<Trunk> = l_trunks
@@ -2798,6 +2806,7 @@ fn main() -> Result<(), String> {
                 keep_fields: false,
             };
             let ex = extract(&inp, &Params { mfd_init: false, ..Params::plan(BODY, runoff_mean) });
+            trib_first = (ex.reaches.iter().map(|r| r.id).collect(), ex.nodes.iter().map(|x| x.id).collect());
             gd.nodes.extend(ex.nodes.iter().cloned());
             gd.reaches.extend(ex.reaches.iter().cloned());
             // reading 18 (lead #170 item 4): the landmass pass, the L trunks' areas and discharge (q_w, KV's width) accumulated at L from their tributaries and hillslope
@@ -2990,6 +2999,60 @@ fn main() -> Result<(), String> {
             ks_d
         };
         t_ks1 += t.elapsed().as_secs_f64();
+        // crusader #168 (DEC crusader-17, --trib-on post): KG-trib again on the band6 output; the first pass's tributaries and nodes leave the graph, the trunks take their KG-trunk
+        // attributes back before reading 18 accumulates them again
+        if trib_on == "post" && on("kg-trib") {
+            use planet_generators::bake::kg_trib::{accumulate_trunks, extract, Input, Params, Trunk};
+            let t2 = Instant::now();
+            gd.reaches.retain(|r| !trib_first.0.contains(&r.id));
+            gd.nodes.retain(|x| !trib_first.1.contains(&x.id));
+            let first_attrs: HashMap<u64, planet_generators::bake::river_graph::Attrs> = l_trunks.iter().map(|r| (r.id, r.attrs.clone())).collect();
+            for r in gd.reaches.iter_mut() {
+                if let Some(a) = first_attrs.get(&r.id) {
+                    r.attrs = a.clone();
+                }
+            }
+            let trunks: Vec<Trunk> = l_trunks
+                .iter()
+                .filter_map(|r| {
+                    let v: Option<Vec<usize>> = r.vertices.iter().map(|&c| to_local(c)).collect();
+                    let down = g.nodes.iter().find(|x| x.id == r.down)?.clone();
+                    v.map(|vertices| Trunk { id: r.id, vertices, attrs: r.attrs.clone(), down })
+                })
+                .collect();
+            let inp = Input {
+                grid: &grid_d,
+                z: &ks_d,
+                sea: &sea_l,
+                exit: &exit,
+                trunks: &trunks,
+                kept: &kept,
+                seed_ext: &seed,
+                tile: &tile_l,
+                gid: &gid_l,
+                keep_fields: false,
+            };
+            let ex = extract(&inp, &Params { mfd_init: false, ..Params::plan(BODY, runoff_mean) });
+            gd.nodes.extend(ex.nodes.iter().cloned());
+            gd.reaches.extend(ex.reaches.iter().cloned());
+            let trunk_ids: BTreeSet<u64> = l_trunks.iter().map(|r| r.id).collect();
+            let inflow = |id: u64| to_local(id).map_or((0.0, 0.0), |c| (dx_l * dx_l + ex.d8[c], dx_l * dx_l + ex.d8_no_ext[c]));
+            let acc = accumulate_trunks(&mut gd, &trunk_ids, &inflow, runoff_mean);
+            if regions <= 1 {
+                acc_trunks = gd.reaches.iter().filter(|r| trunk_ids.contains(&r.id)).map(|r| (r.id, r.attrs.clone())).collect();
+            }
+            println!(
+                "RG domain {d} KG-trib post (crusader #168): {} reaches, {} nodes, {} open ends on the band6 output ({} first-pass reaches replaced); reading 18: {} trunk reaches, {} unordered; {:.1} s",
+                ex.reaches.len(),
+                ex.nodes.len(),
+                ex.open_ends,
+                trib_first.0.len(),
+                acc.reaches,
+                acc.unordered,
+                t2.elapsed().as_secs_f64()
+            );
+            t_trib += t2.elapsed().as_secs_f64();
+        }
         // the basins again, on the KS output with every L reach as spill receivers and inlets (reading 5: the L kept rule reads KS1; crusader's G1d order: the first pass on KS0 gave
         // KG-trib its kept set); the graph takes this pass's basins and nodes; its kept basins and H1's lake water are KV's and KC's protected cells
         if on("basins") && on("kg-trib") {
@@ -3188,6 +3251,7 @@ fn main() -> Result<(), String> {
             ("margin", margin.to_string()),
             ("turned-noise", planet_generators::height::turned_noise().to_string()),
             ("trunk-bed", if TRUNK_BED_SHARED.load(std::sync::atomic::Ordering::Relaxed) { "shared" } else { "lift" }.to_string()),
+            ("trib-on", trib_on.to_string()),
         ] {
             t += &format!("switch {k} {v}\n");
         }
@@ -3215,6 +3279,7 @@ fn main() -> Result<(), String> {
             (10, "9", "kg-trib", on_off("kg-trib", "1 km2, readings 14 and 18")),
             (11, "7", "ks1", ks_form("ks1")),
             (12, "6", "band6", if today { "off" } else { "post" }.to_string()),
+            (12, "9", "kg-trib-post", if trib_on == "post" { on_off("kg-trib", "on the band6 output, crusader #168") } else { "off".to_string() }),
             (13, "10", "basins-2", on_off("basins", "on the KS output, reading 22")),
             (14, "11", "kv-kc", format!("kv {}, kc {}, outlets sea and window edge, against S_KH", on_off("kv", "on"), on_off("kc", "on"))),
             (15, "12", "k7-hillslope", "off".to_string()),
