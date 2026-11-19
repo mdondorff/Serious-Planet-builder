@@ -1,0 +1,1 @@
+- 2026-11-19 build-transect-sheet (BUILD-061, TEST-141): `cargo xtask transects --chain DIR` draws S0, the final surface and the matched GLO-30 valley across each of the 15 river transects (SPIKE-119's rule, re-picked on g1f8's prototype S0) with depth and widths at 10 m and 50 m, and marks a transect stale (lead #150, #150a).

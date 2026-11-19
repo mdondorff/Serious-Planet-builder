@@ -7,7 +7,7 @@ Time box: one night of lane work.
 Success criteria: a measure that separates the comb from other relief; per form the measure, sheets, gate rows (G-DRAIN, uphill, corridor, agreement) and F1's diagonal channel probe, on R1h and F1.
 Fallback if it fails: keep today's K5; the comb stays a known defect.
 Code location: branch `spike/rg-prototype-spikes` (on `spike/rg-prototype` 3582b14e; not pushed, prepush refuses the branch); every form is an `rg_chain` switch, default off.
-Status: results 2026-11-19; open for the lead's reading.
+Status: closed 2026-11-19. Owner: `--k5-diffuse` off for G2 (unless g1f8 shows it beats the default on all five windows), k_dt not scaled, no more forms before G2 (lead #150).
 
 ## Method
 - Runner: `rg_chain` with `--stop-after-kh --dump-s0 --dump-c1` for the fields, the full chain plus `river-gate` for the gate rows; reading-30 default (GEN-140's turned noise); R1h `1,8056,8675,760,1379,14`, F1 `4,4800,5419,3300,3919,15`.
@@ -80,6 +80,54 @@ D-infinity: F1's z_s and S0 are bit-equal on 1 and 8 threads (CON-14); K5 takes 
 - A hillslope term in K5 (`--k5-diffuse 0.02`), with the relief won back by K5's erodibility (k_dt), measured on the five windows. Not run: it changes K5's calibration and needs the lead's ruling.
 - Defaults unchanged until the lead's reading and the owner's look.
 
+## Addendum 2026-11-19: relief compensation, the owner's two readings (lead #149 to #150)
+Relief compensation for `--k5-diffuse 0.02` (relief p50 / p90 of max - min over 9 x 9 H1 cells, `raw/relief.txt` for the forms whose fields are kept; band share on 40-45 deg reaches, `raw/washboard-runs.txt`):
+
+| Window | Form | Relief p50 / p90 | Land mean | Band share | Look |
+|---|---|---|---|---|---|
+| R1h | today | 291 / 899 m | 484 m | 0.139 | comb |
+| R1h | diffuse 0.02 | 251 / 807 m | 485 m | 0.086 | comb mostly gone |
+| R1h | + k_dt x 1.5 | 296 / 780 m | 446 m | 0.081 | axis-aligned blocks |
+| R1h | + k_dt x 2 | 333 / 754 m | 408 m | 0.065 | axis-aligned blocks |
+| R1h | + u_over_k x 1.25 / 1.5 / 4 | 251-253 / 802-807 m | 490-538 m | 0.085 (x 1.25) | as diffuse 0.02 |
+| R1h | diffuse 0.01 | 266 / 839 m | 485 m | 0.099 | comb weaker |
+| R1h | diffuse 0.005 | 276 / 864 m | - | 0.113 | comb |
+| F1 | today | 55 / 143 m | 101 m | 0.189 | comb |
+| F1 | diffuse 0.02 | 43 / 116 m | 102 m | 0.076 | comb mostly gone |
+| F1 | + k_dt x 2 | 55 / 123 m | 103 m | 0.051 | axis-aligned blocks |
+| F1 | + u_over_k x 1.25 | 43 / 109 m | 107 m | - | as diffuse 0.02 |
+| F1 | diffuse 0.01 | 47 / 126 m | - | 0.115 | - |
+| F1 | diffuse 0.005 | 50 / 133 m | - | 0.139 | - |
+
+- k_dt x 1.5 without diffusion makes the same blocks; the 9-point stencil (`--k5-diffuse-stencil 9`) does not remove them. So the blocks are K5's own response to a larger k_dt, not the hillslope term's. Dropped (lead #149b).
+- u_over_k lifts the land nearly evenly in K5's 4 rounds and leaves the relief: no compensation.
+- Weaker diffusion trades relief for comb continuously; no value removes the comb at no relief cost.
+- F1 gate rows (river-gate against main's start surface, so the corridor carries step A's open item): diffuse 0.02 + k_dt x 1.5 closed 0.00 %, uphill 0.05 %, corridor 71.2 %; x 2 0.02 / 0.03 / 71.0 %; 9-point 0.00 / 0.06 / 73.3 %; diffuse 0.01 0.07 / 0.08 / 70.8 %, agreement 87.0 / 94.5 %, spill missing 100. The 73.6 % corridor quoted for F1 at k_dt x 1.5 is likewise against main's start.
+
+Owner's reading (a): diffuse 0.02 diffuses valley walls into the carved channels and closes them. Confirmed on R1h (the post-K5 drain's line of each run, `raw/postk5-drain.txt`):
+
+| R1h | Depressions met by the post-K5 drain | Deep, left | Lowered |
+|---|---|---|---|
+| today | 241 | 32 | 0.27 km3 |
+| diffuse 0.02 | 2,766 | 97 | 22.1 km3 |
+| diffuse 0.01 | 2,519 | 33 | 17.3 km3 |
+| diffuse 0.005 | 2,159 | 31 | 7.7 km3 |
+
+F1 has 7-8 deep basins left without compensation and 3-6 with the k_dt and u_over_k forms.
+
+Owner's reading (b): the ~4.9 km blocks at raised k_dt match the 2,048-per-face lattice's bilinear hinges (12,288 / 2,048 = 6 H1 cells = 4.886 km). Not confirmed (`raw/hinge.txt`, `raw/hinge.py.txt`):
+- the mean |second difference| of z_b, z_b_in and z_s, binned by the global H1 index mod 6, varies by at most 1 % across the phases (max / mean 1.00-1.01), today and at k_dt x 1.5;
+- the change z_s(k_dt x 1.5) - z_s(today) has no peak near 4.9 km: the 4.5-5.3 km band holds 0.087-0.092 of the 2-12 km power against 0.082 for white noise;
+- rg_chain reads the base from a 16,384-per-face lattice (`LATTICE`), and K5's uplift in `solve_region` is uniform (no driver field); the 2,048 lattice is the coupled store's, which this chain does not read.
+- The blocks' source stays open; a candidate is K5's axis-aligned D8 routing at the stronger incision.
+
+Tried and rejected: `--k5-parity` (checkerboard damping: diagonal channels filled, axis ones not, so plaid drainage and a straight N-S trunk); `--k5-diffuse-amax` (hillslope term on small-area cells only: the comb stays, it sits in cells over 10 km2 too).
+
+What a G3 form would need:
+- a hillslope term that couples the two cell parities without filling one-cell channels, for example diffusion only between cells not on the same receiver chain, or transport-limited deposition instead of linear creep;
+- relief kept by calibration of K and diffusivity together against GLO-30 (relief and spectrum), not by k_dt alone;
+- the base's stage-1 breach trenches made wider than one cell, since they seed the comb on F1.
+
 ## Visuals
 All panels: C1 reads at L (102 m), 52 km crops, hillshade with the sun at 10 deg from the NW, no vertical exaggeration, CPU analysis render (not the production path).
 
@@ -94,3 +142,15 @@ R1h: today, `--k5-diffuse 0.02`, `--k5-parity 0.5` and `1.0` (axis-aligned drain
 
 ![F1, today against diffusion](images/s139-f1-diffuse.jpg)
 F1: C1(z_s) today and with `--k5-diffuse 0.02`; the axis-aligned streaks that stay are the base's (SPIKE-140).
+
+![R1h, k_dt compensation](images/s139-r1h-kdt.jpg)
+R1h: today, diffuse 0.02, and diffuse 0.02 with k_dt x 1.5 and x 2 (axis-aligned blocks).
+
+![R1h, 5-point against 9-point stencil](images/s139-r1h-stencil.jpg)
+R1h: diffuse 0.02 with the 5-point and the 9-point stencil, at k_dt x 1 and x 1.5: the stencils look alike.
+
+![R1h, where the blocks come from](images/s139-r1h-k15.jpg)
+R1h: today, k_dt x 1.5 without diffusion (blocks and the comb), diffuse 0.02, diffuse 0.02 (9-point) with k_dt x 1.5.
+
+![R1h, diffusion strength](images/s139-r1h-weaker.jpg)
+R1h: today, diffuse 0.005, 0.01 and 0.02: the comb weakens as the relief falls.

@@ -70,6 +70,8 @@ mod stage_sheet;
 mod stamp_keys;
 #[path = "tiles.rs"]
 mod tiles;
+#[path = "transect_sheet.rs"]
+mod transect_sheet;
 #[path = "water_store.rs"]
 mod water_store;
 #[path = "water_summary_store.rs"]
