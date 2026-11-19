@@ -1979,7 +1979,11 @@ fn main() -> Result<(), String> {
         let (ex, ey) = (x - (x0 + u * dx), y - (y0 + u * dy));
         let dist_m = (ex * ex + ey * ey).sqrt() * cell_l_m;
         let bump = hgt * libm::exp(-(dist_m / wid) * (dist_m / wid));
-        if raise { bump } else { -bump }
+        if raise {
+            bump
+        } else {
+            -bump
+        }
     };
     let base = |d: Vec3| -> f64 { base_read(d) + edit_m(d) };
     let orography = inputs.orography();
