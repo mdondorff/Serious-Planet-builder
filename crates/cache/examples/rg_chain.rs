@@ -1666,10 +1666,8 @@ fn build_graph(
         if rise_at.last() == Some(&(n - 1)) {
             rise_at.pop();
             if n == 2 && TRUNK_BED_SHARED.load(std::sync::atomic::Ordering::Relaxed) {
-                // crusader #168a (--trunk-bed shared, default): a two-vertex reach has no vertex for the rise's marker, and raising its first vertex breaks the up node's
-                // shared bed (bed_not_shared); the reach is cut flat at its up node's bed, past the budget, and keeps its rise_over_budget exception (reaches are processed
-                // upstream first, so the down node's bed, and every reach leaving it, take the lower bed)
-                bed[1] = bed[0];
+                // crusader #168b (--trunk-bed shared, default; reading 32): a two-vertex reach has no vertex for the rise's marker, and raising its first vertex breaks the up
+                // node's shared bed (bed_not_shared); its first vertex keeps the up node's bed and the rise at its down end stays, excused by its rise_over_budget exception
             } else if n >= 2 {
                 bed[n - 2] = bed[n - 2].max(bed[n - 1]);
                 if n >= 3 && rise_at.last() != Some(&(n - 2)) && bed[n - 2] > bed[n - 3] {
@@ -1745,7 +1743,8 @@ fn build_graph(
     (g, notes)
 }
 
-/// crusader #168a: `--trunk-bed shared` (default) cuts a two-vertex trunk image that rises over the budget flat at its up node's bed; `lift` raises its first vertex (spikes #142's form).
+/// crusader #168b (reading 32): `--trunk-bed shared` (default) keeps a two-vertex trunk image's first vertex at its up node's bed when it rises over the budget, the rise at its down end
+/// excused by its rise_over_budget exception; `lift` raises its first vertex (spikes #142's form).
 static TRUNK_BED_SHARED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 /// L routing of a window surface (flood with epsilon, D8 steepest receivers, D8 area): the river cells over `a_min` m2 (land only).
