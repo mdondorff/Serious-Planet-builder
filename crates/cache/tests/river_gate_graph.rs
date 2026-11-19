@@ -546,3 +546,48 @@ fn each_stages_deep_lowering_kc_patches_and_the_spectrum_bars_are_reported() {
     assert_eq!((pass(-3.5), pass(BETA_MIN - 0.01), pass(BETA_MAX + 0.01)), (vec![true, true], vec![false, true], vec![true, false]));
     assert_eq!((pass(BETA_MIN), pass(BETA_MAX)), (vec![true, true], vec![true, true]), "the range's ends pass");
 }
+
+// spec: BUILD-060, TEST-137
+#[test]
+fn the_ridge_lowering_is_measured_against_s_kh_when_the_stages_hold_kh_and_against_s0_beside_it() {
+    let grid = Grid::new(12, 12, DX);
+    // a ridge along x = 5, falling 10 m a cell to each side; the surface 30 m lower on the crest, all of it KH's lowering
+    let start: Vec<f64> = (0..144).map(|c| 200.0 - 10.0 * ((c % 12) as f64 - 5.0).abs()).collect();
+    let surface: Vec<f64> = (0..144).map(|c| start[c] - if c % 12 == 5 { 30.0 } else { 0.0 }).collect();
+    let all = vec![true; 144];
+    let outlet = grid.outlets(&surface, 0.0);
+    let kh = StageField { name: "kh".into(), lower: (0..144).map(|c| if c % 12 == 5 { 300 } else { 0 }).collect(), fill: None };
+    let stages = [kh];
+    let input = G2Input { window: W, graph: None, stages: Some(&stages), residual_records: None, partition: None, kc_patches: None };
+    let run = |g2: Option<&G2Input>| {
+        measure(
+            &GateInput {
+                grid: &grid,
+                start: &start,
+                surface: &surface,
+                outlet: &outlet,
+                inside: &all,
+                region: &all,
+                h1: &[],
+                seed: 7,
+                sea_level_m: 0.0,
+                outside_drains: false,
+                trunks: &[],
+                g2,
+            },
+            &GateParams::default(),
+        )
+    };
+    let r = run(Some(&input));
+    assert!(r.ridge_vs_kh);
+    assert_eq!((r.ridge.ridge_cells, r.ridge.lowered, r.ridge.lowering_p95_m), (12, 0, 0.0), "against S_KH nothing is lowered");
+    assert_eq!((r.ridge_s0.lowered, r.ridge_s0.lowering_p95_m), (12, 30.0), "against S0 the whole crest is");
+    let crest = r.bars().into_iter().find(|b| b.name == "bar_crest").expect("a crest bar");
+    assert!(crest.value == 0.0 && crest.limit == 15.0 && crest.at_most);
+    let line = r.fields_line();
+    assert!(line.contains(" ridge_ref=s_kh ") && line.contains(" ridge_s0_p95_m=30.00 ") && line.contains(" bar_crest=PASS"), "{line}");
+    // without a KH field the reference is the start
+    let b = run(None);
+    assert!(!b.ridge_vs_kh && b.ridge == b.ridge_s0 && b.ridge.lowered == 12);
+    assert!(b.lines().iter().any(|l| l.starts_with("RIVER-GATE ridges: 12 ridge cells")));
+}
