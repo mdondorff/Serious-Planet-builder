@@ -8,7 +8,7 @@
 //! - the river level: the lowest sample within [`RIVER_SEARCH_M`] of `d = 0`; its sample is the profile's river point;
 //! - the valley depth: the lower of the two sides' highest samples, less the river level;
 //! - the width at `h`: walking out from the river point on each side to the first sample above the river level + `h`, the distance between the two crossings (linear between
-//!   samples); a side that never rises above it is open, and the width is then at least the distance to that line end (`>=` on the sheet, `open` in the table).
+//!   samples); a side that never rises above it is open, and the width is then at least the distance to that line end (`>` on the sheet, `N open` in the table).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -187,7 +187,8 @@ pub fn in_window<'a>(all: &'a [Transect], m: &Manifest, face: u8) -> Vec<&'a Tra
 pub fn profile(z: &[f32], m: &Manifest, t: &Transect) -> Vec<(f64, f64)> {
     let ((x0, y0), (x1, y1)) =
         ((t.ends[0].0 - m.x0 as f64, t.ends[0].1 - m.y0 as f64), (t.ends[1].0 - m.x0 as f64, t.ends[1].1 - m.y0 as f64));
-    let len = ((x1 - x0).powi(2) + (y1 - y0).powi(2)).sqrt();
+    let (dx, dy) = (x1 - x0, y1 - y0);
+    let len = (dx * dx + dy * dy).sqrt();
     let n = (len / STEP_CELLS).floor() as usize + 1;
     (0..n)
         .map(|k| {
@@ -270,6 +271,9 @@ fn line(img: &mut Rgba, (x0, y0): (i64, i64), (x1, y1): (i64, i64), c: [u8; 3], 
     }
 }
 
+/// A drawn profile: its samples `(d, height)`, its colour and whether it is dashed.
+type Curve = (Vec<(f64, f64)>, [u8; 3], bool);
+
 /// One panel's inputs: the transect, the surfaces' profiles (`S0`, final; heights as read) and the matched GLO-30 profile.
 pub struct Panel<'a> {
     pub t: &'a Transect,
@@ -308,7 +312,7 @@ pub fn compose(m: &Manifest, panels: &[Panel]) -> Rgba {
         GAP,
         4 + TEXT_ROW_H,
         &format!(
-            "WINDOW L {} {} SIZE {} X {}{}  HEIGHTS: CHAIN TO S0'S RIVER, GLO-30 TO ITS OWN",
+            "WINDOW L {} {} SIZE {} X {}{}  HEIGHTS: CHAIN TO THE RIVER OF S0, GLO-30 TO ITS OWN",
             m.x0,
             m.y0,
             m.w,
@@ -330,7 +334,7 @@ pub fn compose(m: &Manifest, panels: &[Panel]) -> Rgba {
         let (v0, vf) = (p.s0.as_deref().and_then(valley), p.fin.as_deref().and_then(valley));
         let vd = p.dem.and_then(|d| valley(&d.samples));
         let base = v0.or(vf).map_or(0.0, |v| v.river_m);
-        let curves: Vec<(Vec<(f64, f64)>, [u8; 3], bool)> = [
+        let curves: Vec<Curve> = [
             p.s0.as_ref().map(|s| (s.iter().map(|&(d, z)| (d, z - base)).collect(), S0_RGB, false)),
             p.fin.as_ref().map(|s| (s.iter().map(|&(d, z)| (d, z - base)).collect(), FINAL_RGB, false)),
             p.dem.map(|d| (d.samples.clone(), DEM_RGB, true)),
@@ -410,7 +414,7 @@ pub fn table(m: &Manifest, panels: &[Panel]) -> String {
                 Some(v) => {
                     t += &format!(
                         "TRANSECT {} {} {} {name} {:.2} {:.2} {} {}{}\n",
-                        &label,
+                        label,
                         p.t.window,
                         p.t.id,
                         v.river_m,
@@ -420,7 +424,7 @@ pub fn table(m: &Manifest, panels: &[Panel]) -> String {
                         if name == "s0" && stale(p.t, Some(&v)) == Some(true) { " stale" } else { "" }
                     )
                 }
-                None => t += &format!("TRANSECT {} {} {} {name} missing\n", &label, p.t.window, p.t.id),
+                None => t += &format!("TRANSECT {} {} {} {name} missing\n", label, p.t.window, p.t.id),
             }
         }
     }
