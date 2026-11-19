@@ -428,13 +428,10 @@ fn kc_breaches_along_the_graph_line_when_it_can() {
     assert_eq!(a.kc, b.kc);
 }
 
-// SPIKE-132 (spike prototype; not a spec requirement)
-#[test]
-fn kv_cross_slope_turns_a_parallel_floor_channel_into_the_line() {
-    // lead #169 item 3 (R3a: on a flat floor the routing runs parallel to a lower line): a 40 x 15 grid of 30 m cells, the sea at x = 0, a line along row 7 at bed 0.5 m, a flat floor
-    // at 1 m and a channel on row 10 (3 cells off the line) below the floor's cone; without the cross-slope the channel runs to the sea beside the line, with it the floor falls to the line
+/// Lead #169 item 3's synthetic floor: a 40 x 15 grid of 30 m cells, the sea at x = 0, a line along row 7 at bed 0.5 m (q_w 400: a 216 m half floor), a flat floor at 1 m and a
+/// channel on row 10 (3 cells off the line) below the floor's cone.
+fn cross_case() -> (Grid, Vec<f64>, Vec<bool>, Graph) {
     let (w, h, dx) = (40usize, 15usize, 30.0);
-    let gl = Grid::new(w, h, dx);
     let n = w * h;
     let s0: Vec<f64> = (0..n).map(|c| if c / w == 10 { 0.52 + 0.001 * (c % w) as f64 } else { 1.0 + 0.002 * (c % w) as f64 }).collect();
     let outlet: Vec<bool> = (0..n).map(|c| c % w == 0).collect();
@@ -460,7 +457,20 @@ fn kv_cross_slope_turns_a_parallel_floor_channel_into_the_line() {
         },
         exceptions: Vec::new(),
     };
-    let g = Graph { body: BODY, nodes: Vec::new(), reaches: vec![reach], basins: Vec::new() };
+    (Grid::new(w, h, dx), s0, outlet, Graph { body: BODY, nodes: Vec::new(), reaches: vec![reach], basins: Vec::new() })
+}
+
+fn kv_stage(r: &planet_generators::bake::kv_kc::KvKc) -> Vec<Stage<'_>> {
+    vec![Stage { name: "kv", out: &r.kv, wanted_lowering: Some(&r.kv_wanted), wanted_fill: None, fills: false }]
+}
+
+// SPIKE-132 (spike prototype; not a spec requirement)
+#[test]
+fn kv_cross_slope_turns_a_parallel_floor_channel_into_the_line() {
+    // lead #169 item 3 (R3a: on a flat floor the routing runs parallel to a lower line): without the cross-slope the channel runs to the sea beside the line, with it the floor falls to
+    // the line
+    let (gl, s0, outlet, g) = cross_case();
+    let (w, n, dx) = (40usize, s0.len(), 30.0);
     let (protected, budget) = (vec![false; n], vec![100.0; n]);
     let plain = KvParams::plan(dx);
     let cross = KvParams { cross_grade: 1.0e-3, ..plain };
@@ -485,14 +495,57 @@ fn kv_cross_slope_turns_a_parallel_floor_channel_into_the_line() {
         *rows.iter().min().unwrap()
     };
     assert_eq!(path_rows(&a.kv), 10, "without the cross-slope the channel stays on its row");
-    assert!(path_rows(&b.kv) <= 8, "with it the channel's water reaches the line's side");
+    assert_eq!(path_rows(&b.kv), 7, "with it the channel's water reaches the line");
     assert!(b.cross_cells > 0 && b.cross_volume > 0.0, "the pass lowered cells");
-    assert_eq!((a.cross_cells, a.cross_volume), (0, 0.0), "grade 0 is off");
+    assert_eq!((a.cross_cells, a.cross_volume, b.cross_short), (0, 0.0, 0), "grade 0 is off; nothing short with a large budget");
     for c in 0..n {
         assert!(b.kv[c] <= a.kv[c] + 1e-12, "lowering only, cell {c}");
-        assert!(b.kv[c] >= 0.5 - 1e-12 || b.kv[c] >= s0[c] - 1e-12, "never below the line's bed, cell {c}: {}", b.kv[c]);
+        assert!(b.kv[c] > 0.5 || b.kv[c] >= s0[c] - 1e-12 || c / w == 7, "off the line strictly above its bed, cell {c}: {}", b.kv[c]);
         assert!(s0[c] - b.kv[c] <= budget[c] + 1e-9, "within the budget, cell {c}");
-        assert!(b.kv_wanted[c] >= s0[c] - b.kv[c] - 1e-12, "the wanted lowering covers the cut, cell {c}");
     }
+    assert!(validate_budget(&s0, &budget, &kv_stage(&b), &b.residuals, &g).is_empty(), "the validator passes");
     assert_eq!(b.kv, run(&gl, &s0, &outlet, &g, &protected, &budget, &cross, Switch::KvOnly).kv, "the same bits again");
+}
+
+// SPIKE-132 (spike prototype; not a spec requirement)
+#[test]
+fn kv_cross_slope_reports_where_the_budget_stops_it() {
+    // numerics review of 8630f2a8: rows 8 and 9 with 0.3 m of budget cannot fall below the channel; the pass counts the shortfall, and the validator still passes
+    let (gl, s0, outlet, g) = cross_case();
+    let (w, n) = (40usize, s0.len());
+    let protected = vec![false; n];
+    let budget: Vec<f64> = (0..n).map(|c| if c / w == 8 || c / w == 9 { 0.3 } else { 100.0 }).collect();
+    let b = run(&gl, &s0, &outlet, &g, &protected, &budget, &KvParams { cross_grade: 1.0e-3, ..KvParams::plan(30.0) }, Switch::KvOnly);
+    assert!(b.cross_short > 0 && b.cross_short_m > 0.0, "the shortfall is counted");
+    assert!((0..n).all(|c| s0[c] - b.kv[c] <= budget[c] + 1e-9), "within the budget");
+    // KV's own clamps on those rows are residuals; the writer flags their reach (lead #159), as in the fixture's runs
+    let mut g = g;
+    flag_residuals(&mut g, &b.residuals);
+    let v = validate_budget(&s0, &budget, &kv_stage(&b), &b.residuals, &g);
+    assert!(v.is_empty(), "the validator passes: {v:?}");
+}
+
+// SPIKE-132 (spike prototype; not a spec requirement)
+#[test]
+fn kv_cross_slope_never_sinks_the_floor_below_a_line_cell_held_by_its_budget() {
+    // numerics review of 8630f2a8: a vertex with no budget stays at s0 above its bed; the pass lowers no cell next to it below what KV alone gives or below the vertex
+    let (gl, s0, outlet, g) = cross_case();
+    let (w, n) = (40usize, s0.len());
+    let v = 7 * w + 30;
+    let protected = vec![false; n];
+    let budget: Vec<f64> = (0..n).map(|c| if c == v { 0.0 } else { 100.0 }).collect();
+    let plain = KvParams::plan(30.0);
+    let a = run(&gl, &s0, &outlet, &g, &protected, &budget, &plain, Switch::KvOnly);
+    let b = run(&gl, &s0, &outlet, &g, &protected, &budget, &KvParams { cross_grade: 1.0e-3, ..plain }, Switch::KvOnly);
+    assert_eq!(b.kv[v], s0[v], "the vertex keeps its height");
+    // the cells straight off the line beside it have it as their nearest vertex (the diagonal ones have the next vertex)
+    for q in [v - w, v + w] {
+        assert!(
+            b.kv[q] >= a.kv[q].min(b.kv[v]) - 1e-12,
+            "neighbour {q}: {} against KV's {} and the vertex's {}",
+            b.kv[q],
+            a.kv[q],
+            b.kv[v]
+        );
+    }
 }

@@ -45,7 +45,7 @@ pub struct KvParams {
     /// along the graph's line; only without one the free least-cost breach of reading 22; `false`: the free breach alone.
     pub breach_along_line: bool,
     /// Lead #169 item 3 (R3a: on flat floors the routing runs parallel to a lower line): after the lowering, every floor cell stands below each floor neighbour farther from the line by at
-    /// least this grade (m per m) times the distance gained, so the floor falls toward the line from any channel on it; lowering only, never below the nearest vertex's bed, within the budget
+    /// least this grade (m per m) times the distance gained (at most `s_floor`: a larger grade lowers the whole floor below its cone, numerics review), so the floor falls toward the line from any channel on it; lowering only, never below the nearest vertex's bed, within the budget
     /// left. 0: off (the cone alone).
     pub cross_grade: f64,
 }
@@ -101,7 +101,13 @@ pub struct KvKc {
     /// The cross-slope pass (lead #169 item 3): cells it lowered, and its volume (m3).
     pub cross_cells: usize,
     pub cross_volume: f64,
+    /// The cells where the budget left stopped the pass above its target, and their shortfall summed (m): the parallel channel may stay there (numerics review of 8630f2a8).
+    pub cross_short: usize,
+    pub cross_short_m: f64,
 }
+
+/// The least fall (m per m) the cross-slope pass keeps toward the line where it reaches the vertex's height: the gate's flood grade (1e-5; `s_floor` is 100 times it).
+const CROSS_MIN_GRADE: f64 = 1.0e-5;
 
 /// The bed level (m) of a code (GEN-170: 0.5 m codes).
 fn bed_m(code: i32) -> f64 {
@@ -323,18 +329,20 @@ pub fn run_with(
     }
     drop(carry);
     // lead #169 item 3: the floor falls toward the line; floor cells farthest first (ties by cell), each at most its farther floor neighbours' height less the grade's drop
-    let (mut cross_cells, mut cross_volume) = (0usize, 0.0f64);
+    let (mut cross_cells, mut cross_volume, mut cross_short, mut cross_short_m) = (0usize, 0.0f64, 0usize, 0.0f64);
     if p.cross_grade > 0.0 && kv_on {
         let mut in_floor = vec![false; n];
-        let mut order: Vec<usize> = Vec::new();
+        let mut order: Vec<u32> = Vec::new();
         for c in 0..n {
             if matches!(wants(c), Some(w) if w.1) {
                 in_floor[c] = true;
-                order.push(c);
+                order.push(c as u32);
             }
         }
-        order.sort_by(|&a, &b| dist[b].total_cmp(&dist[a]).then(a.cmp(&b)));
+        // the keys are unique (cell last), so an unstable sort gives the same order
+        order.sort_unstable_by(|&a, &b| dist[b as usize].total_cmp(&dist[a as usize]).then(a.cmp(&b)));
         for &c in &order {
+            let c = c as usize;
             let mut z = kv[c];
             for k in 0..8 {
                 let Some(q) = grid.neighbour(c, k) else { continue };
@@ -344,8 +352,17 @@ pub fn run_with(
                 // the drop counts the distance gained toward the line, not the step (a diagonal step gains less than its length; a cone at the grade is left as it is)
                 z = z.min(kv[q] - p.cross_grade * (dist[q] - dist[c]));
             }
-            let (ri, k) = vtx[&(src[c] as usize)];
-            let z = z.max(bed_m(reaches[ri].attrs.bed[k])).max(s0[c] - left_at(c));
+            // the floor never sinks to or below its vertex (numerics review of 8630f2a8): the higher of the vertex's bed and the vertex cell's own height (held above the bed where
+            // its budget ran out), plus the flood grade per metre, so the inner floor still falls to the line; the vertex itself is never lowered by this pass
+            let v = src[c] as usize;
+            let (ri, k) = vtx[&v];
+            let lo = bed_m(reaches[ri].attrs.bed[k]).max(kv[v]) + CROSS_MIN_GRADE * dist[c];
+            let lo_budget = s0[c] - left_at(c);
+            if z < lo_budget && lo_budget > lo {
+                cross_short += 1;
+                cross_short_m += lo_budget - z.max(lo);
+            }
+            let z = z.max(lo).max(lo_budget);
             if z < kv[c] {
                 cross_cells += 1;
                 cross_volume += (kv[c] - z) * p.cell_m * p.cell_m;
@@ -487,6 +504,8 @@ pub fn run_with(
         nearest,
         cross_cells,
         cross_volume,
+        cross_short,
+        cross_short_m,
     }
 }
 

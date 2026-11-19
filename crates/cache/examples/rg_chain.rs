@@ -1928,8 +1928,10 @@ fn main() -> Result<(), String> {
     planet_generators::height::set_turned_noise(noise == "turned");
     // crusader #169 item 3: --kv-cross <grade> (m per m; 0 = off, the default until the rows): KV's floor falls toward the line from any channel on it
     let kv_cross: f64 = value(&args, "--kv-cross").map_or(Ok(0.0), |v| v.parse().map_err(|_| format!("--kv-cross <grade>, not '{v}'")))?;
-    if !(0.0..=0.05).contains(&kv_cross) {
-        return Err(format!("--kv-cross in [0, 0.05], not {kv_cross}"));
+    if !(0.0..=1.0e-3).contains(&kv_cross) {
+        return Err(format!(
+            "--kv-cross in [0, 0.001] (at most KV's s_floor; a larger grade lowers the whole floor below its cone), not {kv_cross}"
+        ));
     }
     KV_CROSS_MICRO.store((kv_cross * 1.0e6).round() as u64, std::sync::atomic::Ordering::Relaxed);
     let trunk_bed = value(&args, "--trunk-bed").unwrap_or("shared");
@@ -3192,7 +3194,13 @@ fn main() -> Result<(), String> {
             let kv = if on("kv") { r.kv } else { ks_d.clone() };
             let kc = if on("kc") { r.kc } else { kv.clone() };
             println!("RG domain {d} KV/KC ({sw:?}): {} residuals, {} KC patches", r.residuals.len(), r.patches.len());
-            println!("RG domain {d} KV cross-slope (crusader #169): {} cells lowered, {:.6} km3", r.cross_cells, r.cross_volume / 1.0e9);
+            println!(
+                "RG domain {d} KV cross-slope (crusader #169): {} cells lowered, {:.6} km3; {} cells short at the budget, {:.1} m in all",
+                r.cross_cells,
+                r.cross_volume / 1.0e9,
+                r.cross_short,
+                r.cross_short_m
+            );
             kc_patches.extend(r.patches.iter().copied());
             (kv, kc, r.residuals)
         } else {
