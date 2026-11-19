@@ -485,8 +485,9 @@ fn the_c1_field_identifies_itself_and_is_keyed_apart_from_the_bilinear_one() {
     assert_ne!(a.inputs_hash(), b.inputs_hash(), "the two readers never share a key");
     assert_eq!(b.inputs_hash(), c1_field(&src).inputs_hash());
     assert_eq!(b.source_key(), Some(KEY));
-    // The pinned versions: a change of the interpolant, the stencil or the ghost rule bumps READER_C1_VERSION (known answers below).
-    assert_eq!((READER_C1_VERSION, EROSION_C1_VERSION), (1, 1));
+    // The pinned versions: a change of the interpolant, the stencil or the ghost rule bumps READER_C1_VERSION (known answers below). EROSION_C1_VERSION 2 since
+    // `gen140-default` (GEN-140, owner 2026-11-19: the creases' turned lattices are the default; the reader is unchanged).
+    assert_eq!((READER_C1_VERSION, EROSION_C1_VERSION), (1, 2));
 }
 
 // spec: GEN-107
