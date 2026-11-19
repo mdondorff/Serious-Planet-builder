@@ -2349,9 +2349,9 @@ fn main() -> Result<(), String> {
         return Err(format!("--ks off | ks0 | ks1, not '{ks_mode}'"));
     }
     let skip: Vec<&str> = value(&args, "--skip").map(|v| v.split(',').collect()).unwrap_or_default();
-    // crusader #168 (DEC crusader-17): --trib-on pre (default) places the tributaries once, on KS0 (reading 14); post re-places them on the band6 output, the surface basins-2, KV, KC
-    // and the gate see (the first pass's routing still drives KS1)
-    let trib_on = value(&args, "--trib-on").unwrap_or("pre");
+    // crusader #168 (DEC crusader-17), reading 34 (owner, 2026-11-19): --trib-on post (default) re-places the tributaries on the band6 output, the surface basins-2, KV, KC and the
+    // gate see (the first pass's routing still drives KS1); pre places them once, on KS0 (reading 14)
+    let trib_on = value(&args, "--trib-on").unwrap_or("post");
     if !["pre", "post"].contains(&trib_on) {
         return Err(format!("--trib-on pre | post, not '{trib_on}'"));
     }
