@@ -24,8 +24,10 @@ pub const STEP_CELLS: f64 = 0.5;
 pub const RIVER_SEARCH_M: f64 = 250.0;
 /// The two widths' heights above the river level, in metres.
 pub const WIDTH_HEIGHTS_M: [f64; 2] = [10.0, 50.0];
+/// A transect is stale when `S0`'s valley depth on it is under this share of the relief stored with it (lead #150a: the start surface changed under a fixed transect).
+pub const STALE_SHARE: f64 = 0.1;
 
-/// The transects of SPIKE-119 (`spikes/river-suite/results/transects.csv`), face L cells.
+/// The transects (SPIKE-119's rule, re-picked on g1f8's prototype `S0`, lead #150a), face L cells.
 pub const TRANSECTS_CSV: &str = include_str!("../data/transects.csv");
 /// The GLO-30 valley matched to each transect (SPIKE-119's rule), heights relative to its river point.
 pub const GLO30_CSV: &str = include_str!("../data/transects-glo30.csv");
@@ -104,7 +106,9 @@ pub fn parse_transects(text: &str) -> Result<Vec<Transect>, String> {
             if f.len() <= c.iter().copied().max().unwrap_or(0) {
                 return Err(format!("transects line {}: too few fields", n + 1));
             }
-            let num = |k: usize| -> Result<f64, String> { f[c[k]].parse().map_err(|_| format!("transects line {}: '{}' is not a number", n + 1, f[c[k]])) };
+            let num = |k: usize| -> Result<f64, String> {
+                f[c[k]].parse().map_err(|_| format!("transects line {}: '{}' is not a number", n + 1, f[c[k]]))
+            };
             Ok(Transect {
                 window: f[c[0]].to_string(),
                 id: f[c[1]].to_string(),
@@ -129,7 +133,9 @@ pub fn parse_dem(text: &str) -> Result<BTreeMap<(String, String), DemProfile>, S
         if f.len() <= c.iter().copied().max().unwrap_or(0) {
             return Err(format!("GLO-30 line {}: too few fields", n + 1));
         }
-        let num = |k: usize| -> Result<f64, String> { f[c[k]].parse().map_err(|_| format!("GLO-30 line {}: '{}' is not a number", n + 1, f[c[k]])) };
+        let num = |k: usize| -> Result<f64, String> {
+            f[c[k]].parse().map_err(|_| format!("GLO-30 line {}: '{}' is not a number", n + 1, f[c[k]]))
+        };
         let p = out.entry((f[c[0]].to_string(), f[c[1]].to_string())).or_insert_with(|| DemProfile {
             tile: f[c[2]].to_string(),
             relief_m: f[c[3]].parse().unwrap_or(f64::NAN),
@@ -139,6 +145,11 @@ pub fn parse_dem(text: &str) -> Result<BTreeMap<(String, String), DemProfile>, S
         p.samples.push((num(5)?, num(6)?));
     }
     Ok(out)
+}
+
+/// Whether a transect is stale on this run: `S0`'s valley depth under [`STALE_SHARE`] of the transect's stored relief (`None` without `S0`).
+pub fn stale(t: &Transect, s0: Option<&Valley>) -> Option<bool> {
+    s0.map(|v| v.depth_m < STALE_SHARE * t.relief_m)
 }
 
 /// The chain's face: the first field of its `switch window F,...` line.
@@ -157,7 +168,8 @@ pub fn in_window<'a>(all: &'a [Transect], m: &Manifest, face: u8) -> Vec<&'a Tra
 
 /// A surface's profile along a transect: `(d, z)` every [`STEP_CELLS`], bilinear on the window's grid `z` (`m.w x m.h`); `n = floor(length / step) + 1` samples.
 pub fn profile(z: &[f32], m: &Manifest, t: &Transect) -> Vec<(f64, f64)> {
-    let ((x0, y0), (x1, y1)) = ((t.ends[0].0 - m.x0 as f64, t.ends[0].1 - m.y0 as f64), (t.ends[1].0 - m.x0 as f64, t.ends[1].1 - m.y0 as f64));
+    let ((x0, y0), (x1, y1)) =
+        ((t.ends[0].0 - m.x0 as f64, t.ends[0].1 - m.y0 as f64), (t.ends[1].0 - m.x0 as f64, t.ends[1].1 - m.y0 as f64));
     let len = ((x1 - x0).powi(2) + (y1 - y0).powi(2)).sqrt();
     let n = (len / STEP_CELLS).floor() as usize + 1;
     (0..n)
@@ -167,7 +179,10 @@ pub fn profile(z: &[f32], m: &Manifest, t: &Transect) -> Vec<(f64, f64)> {
             let (xi, yi) = ((x.floor() as usize).min(m.w - 2), (y.floor() as usize).min(m.h - 2));
             let (fx, fy) = (x - xi as f64, y - yi as f64);
             let at = |i: usize, j: usize| f64::from(z[j * m.w + i]);
-            let v = at(xi, yi) * (1.0 - fx) * (1.0 - fy) + at(xi + 1, yi) * fx * (1.0 - fy) + at(xi, yi + 1) * (1.0 - fx) * fy + at(xi + 1, yi + 1) * fx * fy;
+            let v = at(xi, yi) * (1.0 - fx) * (1.0 - fy)
+                + at(xi + 1, yi) * fx * (1.0 - fy)
+                + at(xi, yi + 1) * (1.0 - fx) * fy
+                + at(xi + 1, yi + 1) * fx * fy;
             ((s - 0.5) * len * m.cell_m, v)
         })
         .collect()
@@ -261,15 +276,37 @@ pub fn compose(m: &Manifest, panels: &[Panel]) -> Rgba {
     let title = 3 * TEXT_ROW_H + GAP;
     let (w, h) = (GAP + n * (PLOT_W + GAP), title + band + PLOT_H + TEXT_ROWS * TEXT_ROW_H + GAP);
     let mut img = Rgba { width: w as u32, height: h as u32, data: [24u8, 24, 28, 255].repeat(w * h) };
-    put_text(&mut img, GAP, 4, &format!("CROSS-SECTIONS: {}  S0 GREY, FINAL ORANGE, GLO-30 BLUE DASHED  D DEPTH, W10 W50 WIDTH IN KM AT 10 50 M (> OPEN)", m.label), [240, 240, 240]);
+    put_text(
+        &mut img,
+        GAP,
+        4,
+        &format!(
+            "CROSS-SECTIONS: {}  S0 GREY, FINAL ORANGE, GLO-30 BLUE DASHED  D DEPTH, W10 W50 WIDTH IN KM AT 10 50 M (> OPEN)",
+            m.label
+        ),
+        [240, 240, 240],
+    );
     put_text(
         &mut img,
         GAP,
         4 + TEXT_ROW_H,
-        &format!("WINDOW L {} {} SIZE {} X {}{}  HEIGHTS: CHAIN TO S0'S RIVER, GLO-30 TO ITS OWN", m.x0, m.y0, m.w, m.h, m.commit().map_or(String::new(), |c| format!("  COMMIT {c}"))),
+        &format!(
+            "WINDOW L {} {} SIZE {} X {}{}  HEIGHTS: CHAIN TO S0'S RIVER, GLO-30 TO ITS OWN",
+            m.x0,
+            m.y0,
+            m.w,
+            m.h,
+            m.commit().map_or(String::new(), |c| format!("  COMMIT {c}"))
+        ),
         [170, 190, 220],
     );
-    put_text(&mut img, GAP, 4 + 2 * TEXT_ROW_H, "GLO-30: COPERNICUS WORLDDEM-30 (C) DLR E.V. 2010-2014, AIRBUS DS 2014-2018, PROVIDED UNDER COPERNICUS BY THE EU AND ESA", [140, 140, 140]);
+    put_text(
+        &mut img,
+        GAP,
+        4 + 2 * TEXT_ROW_H,
+        "GLO-30: COPERNICUS WORLDDEM-30 (C) DLR E.V. 2010-2014, AIRBUS DS 2014-2018, PROVIDED UNDER COPERNICUS BY THE EU AND ESA",
+        [140, 140, 140],
+    );
     for (k, p) in panels.iter().enumerate() {
         let ox = GAP + k * (PLOT_W + GAP);
         let oy = title;
@@ -291,8 +328,23 @@ pub fn compose(m: &Manifest, panels: &[Panel]) -> Rgba {
         let px = |d: f64| ox as i64 + ((d + dmax) / (2.0 * dmax) * (PLOT_W - 1) as f64).round() as i64;
         let py = |z: f64| (oy + band) as i64 + ((top - z) / span * (PLOT_H - 1) as f64).round() as i64;
         let exag = (2.0 * dmax / PLOT_W as f64) / (span / PLOT_H as f64);
-        let head = format!("{} {} {:.0} KM2 RELIEF {:.0} M VX {:.1}", p.t.window.to_uppercase(), p.t.id, p.t.area_km2, p.t.relief_m, exag);
-        put_text(&mut img, ox, oy, &head.chars().take(PLOT_W / TEXT_CELL_W).collect::<String>(), [230, 230, 230]);
+        let is_stale = stale(p.t, v0.as_ref()) == Some(true);
+        let head = format!(
+            "{} {} {:.0} KM2 RELIEF {:.0} M VX {:.1}{}",
+            p.t.window.to_uppercase(),
+            p.t.id,
+            p.t.area_km2,
+            p.t.relief_m,
+            exag,
+            if is_stale { " STALE" } else { "" }
+        );
+        put_text(
+            &mut img,
+            ox,
+            oy,
+            &head.chars().take(PLOT_W / TEXT_CELL_W).collect::<String>(),
+            if is_stale { [255, 90, 90] } else { [230, 230, 230] },
+        );
         for y in 0..PLOT_H {
             for x in 0..PLOT_W {
                 set(&mut img, (ox + x) as i64, (oy + band + y) as i64, [36, 36, 42]);
@@ -307,10 +359,13 @@ pub fn compose(m: &Manifest, panels: &[Panel]) -> Rgba {
         }
         let ty = oy + band + PLOT_H + 4;
         let dem_name = p.dem.map_or("GLO".to_string(), |d| d.tile.clone());
-        for (r, (text, c)) in
-            [(row_text("S0", v0), S0_RGB), (row_text("FINAL", vf), FINAL_RGB), (if p.dem.is_some() { row_text(&dem_name, vd) } else { "GLO-30 NO MATCH".into() }, DEM_RGB)]
-                .iter()
-                .enumerate()
+        for (r, (text, c)) in [
+            (row_text("S0", v0), S0_RGB),
+            (row_text("FINAL", vf), FINAL_RGB),
+            (if p.dem.is_some() { row_text(&dem_name, vd) } else { "GLO-30 NO MATCH".into() }, DEM_RGB),
+        ]
+        .iter()
+        .enumerate()
         {
             put_text(&mut img, ox, ty + r * TEXT_ROW_H, &text.chars().take(PLOT_W / TEXT_CELL_W).collect::<String>(), *c);
         }
@@ -318,26 +373,37 @@ pub fn compose(m: &Manifest, panels: &[Panel]) -> Rgba {
     img
 }
 
-/// The table of a sheet: one line per transect and profile, `TRANSECT label window id profile depth_m width10_m width50_m` (a width `N open`: at least N m).
+/// The table of a sheet: one line per transect and profile, `TRANSECT label window id profile river_m depth_m width10_m width50_m` (a width `N open`: at least N m), the `s0`
+/// line ending in `stale` when the transect is stale ([`stale`]).
 pub fn table(m: &Manifest, panels: &[Panel]) -> String {
-    let mut t = String::from("# label window id profile river_m depth_m width10_m width50_m (BUILD-061; a width 'N open' is at least N m: one side never rises that high)\n");
+    let mut t = String::from(
+        "# label window id profile river_m depth_m width10_m width50_m (BUILD-061; a width 'N open' is at least N m: one side never rises that high; 'stale': S0's depth is under 10 % of the transect's stored relief)\n",
+    );
+    // the label as one token: its spaces as '-', '-' when there is none
+    let label = if m.label.is_empty() { "-".to_string() } else { m.label.replace(char::is_whitespace, "-") };
     for p in panels {
-        let rows: [(&str, Option<Valley>); 3] =
-            [("s0", p.s0.as_deref().and_then(valley)), ("final", p.fin.as_deref().and_then(valley)), ("glo30", p.dem.and_then(|d| valley(&d.samples)))];
+        let rows: [(&str, Option<Valley>); 3] = [
+            ("s0", p.s0.as_deref().and_then(valley)),
+            ("final", p.fin.as_deref().and_then(valley)),
+            ("glo30", p.dem.and_then(|d| valley(&d.samples))),
+        ];
         for (name, v) in rows {
             let name = if name == "glo30" { p.dem.map_or("glo30".to_string(), |d| format!("glo30:{}", d.tile)) } else { name.to_string() };
             match v {
-                Some(v) => t += &format!(
-                    "TRANSECT {} {} {} {name} {:.2} {:.2} {} {}\n",
-                    if m.label.is_empty() { "-" } else { &m.label },
-                    p.t.window,
-                    p.t.id,
-                    v.river_m,
-                    v.depth_m,
-                    v.widths[0].table(),
-                    v.widths[1].table()
-                ),
-                None => t += &format!("TRANSECT {} {} {} {name} missing\n", if m.label.is_empty() { "-" } else { &m.label }, p.t.window, p.t.id),
+                Some(v) => {
+                    t += &format!(
+                        "TRANSECT {} {} {} {name} {:.2} {:.2} {} {}{}\n",
+                        &label,
+                        p.t.window,
+                        p.t.id,
+                        v.river_m,
+                        v.depth_m,
+                        v.widths[0].table(),
+                        v.widths[1].table(),
+                        if name == "s0" && stale(p.t, Some(&v)) == Some(true) { " stale" } else { "" }
+                    )
+                }
+                None => t += &format!("TRANSECT {} {} {} {name} missing\n", &label, p.t.window, p.t.id),
             }
         }
     }
@@ -346,13 +412,25 @@ pub fn table(m: &Manifest, panels: &[Panel]) -> String {
 
 /// Reads a chain directory, writes the sheet to `out` and its table beside it (`.txt`); returns the transects drawn and the sheet's size. A window that holds no transect is refused,
 /// naming its face and box.
-pub fn render(dir: &Path, face: Option<u8>, out: &Path, transects: &[Transect], dem: &BTreeMap<(String, String), DemProfile>) -> Result<(usize, u32, u32), String> {
+pub fn render(
+    dir: &Path,
+    face: Option<u8>,
+    out: &Path,
+    transects: &[Transect],
+    dem: &BTreeMap<(String, String), DemProfile>,
+) -> Result<(usize, u32, u32), String> {
     let mp = dir.join("chain.txt");
     let m = Manifest::parse(&std::fs::read_to_string(&mp).map_err(|e| format!("{}: {e}", mp.display()))?)?;
     let face = face.or_else(|| chain_face(&m)).ok_or("chain.txt has no 'switch window F,...' line: give the face with --face F")?;
     let chosen = in_window(transects, &m, face);
     if chosen.is_empty() {
-        return Err(format!("no transect lies inside face {face}, L cells {}..{} x {}..{}", m.x0, m.x0 + m.w as u64, m.y0, m.y0 + m.h as u64));
+        return Err(format!(
+            "no transect lies inside face {face}, L cells {}..{} x {}..{}",
+            m.x0,
+            m.x0 + m.w as u64,
+            m.y0,
+            m.y0 + m.h as u64
+        ));
     }
     let n = m.w * m.h;
     let (s0, fin) = (read_f32(dir, "s0.f32", n)?, read_f32(dir, "final.f32", n)?);

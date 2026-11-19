@@ -26,7 +26,8 @@ pub fn plan(args: &[String]) -> Result<Vec<String>, String> {
         }
     }
     let dir = dir.ok_or(format!("--chain DIR is required ({USAGE})"))?;
-    let mut cargo: Vec<String> = ["run", "--release", "-q", "-p", "planet-cache", "--example", "transect_sheet", "--"].iter().map(|s| s.to_string()).collect();
+    let mut cargo: Vec<String> =
+        ["run", "--release", "-q", "-p", "planet-cache", "--example", "transect_sheet", "--"].iter().map(|s| s.to_string()).collect();
     cargo.push(dir);
     cargo.extend(tail);
     Ok(cargo)
