@@ -1,0 +1,59 @@
+"""SPIKE-139 measure 2: along-valley profiles. For every 2nd H1 channel cell in the box with a straight local reach (structure-tensor coherence >= 0.6, sigma 1.5 H1 cells),
+sample the field (bilinear) on lines parallel to the reach at lateral offsets 0.4-2.0 km each side, 48 samples of one L cell (4.9 km). Per profile: linear detrend, Hann, FFT;
+share of the 600-1300 m band in the 400-4000 m power and the band RMS. Binned by the reach's direction folded to 0 (axis) - 45 (diagonal) degrees.
+Usage: washboard2.py <dir> <tag> [<field> ...]"""
+import sys
+import numpy as np
+from scipy import ndimage
+N, NH, L, DX = 8160, 1020, 8, 101.8
+d, tag = sys.argv[1], sys.argv[2]
+fields = sys.argv[3:] or ['c1', 's0']
+chan = np.fromfile(f'{d}/{tag}-chan-{NH}x{NH}.f32', '<f4').reshape(NH, NH) > 0.5
+m = chan.astype(float)
+gy, gx = ndimage.sobel(ndimage.gaussian_filter(m, 1.0), 0), ndimage.sobel(ndimage.gaussian_filter(m, 1.0), 1)
+jxx, jyy, jxy = (ndimage.gaussian_filter(a, 1.5) for a in (gx * gx, gy * gy, gx * gy))
+lam1 = 0.5 * (jxx + jyy + np.sqrt((jxx - jyy) ** 2 + 4 * jxy ** 2))
+lam2 = 0.5 * (jxx + jyy - np.sqrt((jxx - jyy) ** 2 + 4 * jxy ** 2))
+coh = np.where(lam1 + lam2 > 1e-9, (lam1 - lam2) / (lam1 + lam2 + 1e-12), 0)
+theta_n = 0.5 * np.arctan2(2 * jxy, jxx - jyy)  # gradient (normal) direction
+ys, xs = np.nonzero(chan)
+keep = (ys >= 205) & (ys < NH - 205) & (xs >= 205) & (xs < NH - 205) & (coh[ys, xs] >= 0.6)
+ys, xs = ys[keep][::2], xs[keep][::2]
+tn = theta_n[ys, xs]
+nx, ny = np.cos(tn), np.sin(tn)
+tx, ty = -ny, nx
+ang = np.degrees(np.arctan2(np.abs(ty), np.abs(tx)))
+ang = np.minimum(ang, 90 - ang)
+S = 48
+u = np.arange(S) - S / 2 + 0.5
+offs = np.array([4, 8, 12, 16, 20], float)
+offs = np.concatenate([offs, -offs])
+k = np.fft.rfftfreq(S, d=DX)
+with np.errstate(divide='ignore'):
+    lam = np.where(k > 0, 1 / k, np.inf)
+band, wide = (lam >= 600) & (lam <= 1300), (lam >= 400) & (lam <= 4000)
+hann = np.hanning(S)
+cy, cx = ys * L + L / 2, xs * L + L / 2
+# sample positions: (point, offset, u)
+py = cy[:, None, None] + offs[None, :, None] * ny[:, None, None] + u[None, None, :] * ty[:, None, None]
+px = cx[:, None, None] + offs[None, :, None] * nx[:, None, None] + u[None, None, :] * tx[:, None, None]
+bins = [(0, 10), (10, 20), (20, 30), (30, 40), (40, 45.01)]
+print(f'{tag}: {len(ys):,} straight-reach channel cells (coherence >= 0.6); profiles {S} L cells along the reach at offsets 0.4-2.0 km')
+for name in fields:
+    for ext, dt in (('f32', '<f4'), ('f64', '<f8')):
+        try:
+            z = np.memmap(f'{d}/{tag}-{name}-{N}x{N}.{ext}', dtype=dt, mode='r', shape=(N, N)); break
+        except FileNotFoundError:
+            z = None
+    z = np.asarray(z, dtype=np.float64)
+    v = ndimage.map_coordinates(z, [py.ravel(), px.ravel()], order=1, mode='nearest').reshape(py.shape)
+    t = np.arange(S) - (S - 1) / 2
+    a = v.mean(-1, keepdims=True); b = (v * t).sum(-1, keepdims=True) / (t * t).sum()
+    r = (v - a - b * t) * hann
+    p = np.abs(np.fft.rfft(r, axis=-1)) ** 2
+    pb, pw = p[..., band].sum(-1), p[..., wide].sum(-1)
+    share = (pb / np.maximum(pw, 1e-12)).mean(-1)
+    rms = np.sqrt(2 * pb / (hann ** 2).sum() / S).mean(-1)
+    for b0, b1 in bins:
+        s = (ang >= b0) & (ang < b1)
+        print(f'  {name} reach {b0:>2}-{min(b1, 45):.0f} deg: {s.sum():5d} cells; band share p50 {np.median(share[s]):.3f} p90 {np.percentile(share[s], 90):.3f}; band RMS p50 {np.median(rms[s]):.2f} p90 {np.percentile(rms[s], 90):.2f} m')

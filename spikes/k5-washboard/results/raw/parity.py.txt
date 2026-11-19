@@ -1,0 +1,30 @@
+"""SPIKE-139: the checkerboard (odd-even) mode of an 814 m field. P = (mean of the 4 diagonal neighbours - 2 mean of the 4 orthogonal ones + z) / 4: zero on any quadratic,
+the amplitude a on a +-a checkerboard. RMS of P on valley-side cells (1-4 cells from an H1 channel cell, inside the box) binned by the local reach direction (structure tensor
+of the channel mask, coherence >= 0.6, nearest channel cell), folded 0 (axis) - 45 (diagonal). Usage: parity.py <dir> <tag> <field file at 1020x1020> [...]"""
+import sys
+import numpy as np
+from scipy import ndimage
+NH = 1020
+d, tag = sys.argv[1], sys.argv[2]
+chan = np.fromfile(f'{d}/{tag}-chan-{NH}x{NH}.f32', '<f4').reshape(NH, NH) > 0.5
+m = chan.astype(float)
+gy, gx = ndimage.sobel(ndimage.gaussian_filter(m, 1.0), 0), ndimage.sobel(ndimage.gaussian_filter(m, 1.0), 1)
+jxx, jyy, jxy = (ndimage.gaussian_filter(a, 1.5) for a in (gx * gx, gy * gy, gx * gy))
+tr, df = jxx + jyy, np.sqrt((jxx - jyy) ** 2 + 4 * jxy ** 2)
+coh = np.where(tr > 1e-9, df / (tr + 1e-12), 0)
+th = 0.5 * np.arctan2(2 * jxy, jxx - jyy) + np.pi / 2  # the line direction
+a = np.degrees(np.abs(np.arctan2(np.sin(th), np.cos(th)))) % 90
+ang = np.minimum(a, 90 - a)
+dist, (iy, ix) = ndimage.distance_transform_edt(~chan, return_indices=True)
+side = (dist >= 1) & (dist <= 4)
+box = np.zeros_like(chan); box[205:-205, 205:-205] = True
+ok = side & box & (coh[iy, ix] >= 0.6)
+an = ang[iy, ix]
+bins = [(0, 10), (10, 20), (20, 30), (30, 40), (40, 45.01)]
+for path in sys.argv[3:]:
+    z = np.fromfile(f'{d}/{path}', '<f4').reshape(NH, NH).astype(float)
+    o = (np.roll(z, 1, 0) + np.roll(z, -1, 0) + np.roll(z, 1, 1) + np.roll(z, -1, 1)) / 4
+    g = (np.roll(np.roll(z, 1, 0), 1, 1) + np.roll(np.roll(z, 1, 0), -1, 1) + np.roll(np.roll(z, -1, 0), 1, 1) + np.roll(np.roll(z, -1, 0), -1, 1)) / 4
+    P = (g - 2 * o + z) / 4
+    row = [f'{np.sqrt(np.mean(P[ok & (an >= b0) & (an < b1)] ** 2)):.2f}' for b0, b1 in bins]
+    print(f'{path}: checkerboard RMS (m) on valley sides, reach 0-10 / 10-20 / 20-30 / 30-40 / 40-45 deg: ' + ' / '.join(row) + f'; cells {ok.sum():,}')

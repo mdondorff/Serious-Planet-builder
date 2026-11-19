@@ -1,0 +1,15 @@
+f1-base agree1_routed_pct=86.13 agree2_routed_pct=91.48 basin_pct=9.78 g_basin_spill_missing=154 trunk_c2_reaches_passing_pct=67.26 uphill_pct=0.71 
+f1-contour agree1_routed_pct=87.74 agree2_routed_pct=94.67 basin_pct=7.63 g_basin_spill_missing=149 trunk_c2_reaches_passing_pct=68.99 uphill_pct=0.40 
+f1-dif02 agree1_routed_pct=86.11 agree2_routed_pct=96.17 basin_pct=0.10 g_basin_spill_missing=56 trunk_c2_reaches_passing_pct=73.92 uphill_pct=0.06 
+f1-dinf agree1_routed_pct=85.99 agree2_routed_pct=91.57 basin_pct=9.87 g_basin_spill_missing=110 trunk_c2_reaches_passing_pct=67.40 uphill_pct=0.70 
+f1-ltd agree1_routed_pct=86.18 agree2_routed_pct=91.69 basin_pct=10.79 g_basin_spill_missing=167 trunk_c2_reaches_passing_pct=67.27 uphill_pct=0.68 
+r1h-base agree1_routed_pct=81.79 agree2_routed_pct=86.67 basin_pct=12.05 g_basin_spill_missing=540 trunk_c2_reaches_passing_pct=76.90 uphill_pct=2.58 
+r1h-contour agree1_routed_pct=80.07 agree2_routed_pct=88.81 basin_pct=10.04 g_basin_spill_missing=492 trunk_c2_reaches_passing_pct=77.71 uphill_pct=1.87 
+r1h-dif02 agree1_routed_pct=76.78 agree2_routed_pct=86.58 basin_pct=8.62 g_basin_spill_missing=378 trunk_c2_reaches_passing_pct=80.30 uphill_pct=2.63 
+r1h-dinf agree1_routed_pct=79.26 agree2_routed_pct=86.06 basin_pct=11.66 g_basin_spill_missing=422 trunk_c2_reaches_passing_pct=76.96 uphill_pct=2.60 
+r1h-ltd agree1_routed_pct=80.45 agree2_routed_pct=87.29 basin_pct=11.06 g_basin_spill_missing=534 trunk_c2_reaches_passing_pct=77.22 uphill_pct=2.38 
+PROBE f1-base (base aplus, stages 13, breach cost cell, drain rule volume, breach max len 0): H1 channel steps in the box outside kept basins 20335, diagonal 12223 (60.1 %); straight runs: p50 1 p90 4 p99 7 max 25 steps; runs of 8 steps (6.5 km) or more: 246, holding 5.1 % of the steps
+PROBE f1-contour (base aplus, stages 13, breach cost cell, drain rule volume, breach max len 0): H1 channel steps in the box outside kept basins 20335, diagonal 12223 (60.1 %); straight runs: p50 1 p90 4 p99 7 max 25 steps; runs of 8 steps (6.5 km) or more: 246, holding 5.1 % of the steps
+PROBE f1-dif02 (base aplus, stages 13, breach cost cell, drain rule volume, breach max len 0): H1 channel steps in the box outside kept basins 21313, diagonal 12065 (56.6 %); straight runs: p50 1 p90 3 p99 7 max 25 steps; runs of 8 steps (6.5 km) or more: 223, holding 4.3 % of the steps
+PROBE f1-dinf (base aplus, stages 13, breach cost cell, drain rule volume, breach max len 0): H1 channel steps in the box outside kept basins 20236, diagonal 12256 (60.6 %); straight runs: p50 1 p90 4 p99 7 max 25 steps; runs of 8 steps (6.5 km) or more: 248, holding 5.2 % of the steps
+PROBE f1-ltd (base aplus, stages 13, breach cost cell, drain rule volume, breach max len 0): H1 channel steps in the box outside kept basins 20203, diagonal 12241 (60.6 %); straight runs: p50 1 p90 4 p99 8 max 25 steps; runs of 8 steps (6.5 km) or more: 256, holding 5.4 % of the steps
