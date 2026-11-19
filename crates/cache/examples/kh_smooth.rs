@@ -2190,7 +2190,9 @@ fn main() -> Result<(), String> {
     let (sri0, srj0, rw, rh) = (solve.ri0, solve.rj0, solve.rw, solve.rh);
     let (x0, y0, w, h) = ((sri0 * L) as i64, (srj0 * L) as i64, rw * L, rh * L);
     let n = spec.local() as f64;
-    let dir_of = |x: i64, y: i64| planet_core::cube::face_to_direction(&TangentWarp, face, 2.0 * (x as f64 + 0.5) / n - 1.0, 2.0 * (y as f64 + 0.5) / n - 1.0);
+    let dir_of = |x: i64, y: i64| {
+        planet_core::cube::face_to_direction(&TangentWarp, face, 2.0 * (x as f64 + 0.5) / n - 1.0, 2.0 * (y as f64 + 0.5) / n - 1.0)
+    };
     let grid = &solve.grid;
     let outlet = &solve.outlet;
     let cells = rw * rh;
@@ -2286,7 +2288,10 @@ fn main() -> Result<(), String> {
         let r = measure_all(&m, &lines, &mouth, threads);
         let measured = r.iter().flatten().count();
         let failed = r.iter().flatten().filter(|x| x.failed).count();
-        println!("HO {tag} D-2 (k_c 2 snapped, land-only snap, bar {bar:.1} m): {failed} of {measured} H1 trunk reaches fail; {:.0} s", t.elapsed().as_secs_f64());
+        println!(
+            "HO {tag} D-2 (k_c 2 snapped, land-only snap, bar {bar:.1} m): {failed} of {measured} H1 trunk reaches fail; {:.0} s",
+            t.elapsed().as_secs_f64()
+        );
         format!("{measured},{failed}")
     };
 
@@ -2358,7 +2363,10 @@ fn main() -> Result<(), String> {
     let (recv, area) = kh::routing(grid, &solve.zs, &ol);
     let rcv = |c: usize| (recv[c] != NONE).then(|| recv[c] as usize);
     let (split, st) = kh::split(&solve.zs, rw, rh, &rcv, &|c| area[c]);
-    println!("HO {tag} h2 quads: split along a D8 diagonal step {} (both diagonals stepped {}), along the higher pair {}", st.by_step, st.both, st.by_pair);
+    println!(
+        "HO {tag} h2 quads: split along a D8 diagonal step {} (both diagonals stepped {}), along the higher pair {}",
+        st.by_step, st.both, st.by_pair
+    );
     let grad = kh::gradients(&solve.zs, rw, rh);
     let step = |p: usize, q: usize| recv[p] == q as u32 || recv[q] == p as u32;
     let diag = |q: usize| -> Option<(usize, usize)> {
@@ -2414,7 +2422,8 @@ fn main() -> Result<(), String> {
                 kh::read_ct(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0
             }
         };
-        let (mut n_land, mut over, mut under, mut omax, mut umax, mut qover, mut qunder) = (0usize, 0usize, 0usize, 0f64, 0f64, 0usize, 0usize);
+        let (mut n_land, mut over, mut under, mut omax, mut umax, mut qover, mut qunder) =
+            (0usize, 0usize, 0usize, 0f64, 0f64, 0usize, 0usize);
         for p in (0..nl).filter(|&p| in_core_l(p) && start[p] > 0.0) {
             n_land += 1;
             let (fx, fy) = fxy(p);

@@ -106,8 +106,6 @@ mod driver_channels;
 mod erosion;
 #[path = "g0_fixture.rs"]
 mod g0_fixture;
-#[path = "kh_g0.rs"]
-mod kh_g0;
 #[path = "g0_graph.rs"]
 mod g0_graph;
 #[path = "generator_contract.rs"]
@@ -126,6 +124,8 @@ mod height_fields;
 mod ice;
 #[path = "kg_trib_g1d.rs"]
 mod kg_trib_g1d;
+#[path = "kh_g0.rs"]
+mod kh_g0;
 #[path = "kv_kc_g1f.rs"]
 mod kv_kc_g1f;
 #[path = "lattice_normals.rs"]

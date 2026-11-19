@@ -23,7 +23,12 @@ fn main() -> Result<(), String> {
                     Some(m) => {
                         let r = reach[&m.on_reach];
                         let upn = ns.iter().find(|p| p.id == r.up).map(|p| format!("{:?}", p.kind)).unwrap_or("other".into());
-                        format!("{:?}@v{}{}(up={upn})", n.kind, if m.at_vertex == 0 { 0 } else { 1 }, if m.at_vertex as usize + 1 == r.vertices.len() { "last" } else { "" })
+                        format!(
+                            "{:?}@v{}{}(up={upn})",
+                            n.kind,
+                            if m.at_vertex == 0 { 0 } else { 1 },
+                            if m.at_vertex as usize + 1 == r.vertices.len() { "last" } else { "" }
+                        )
                     }
                 })
                 .collect();
@@ -34,7 +39,15 @@ fn main() -> Result<(), String> {
                 for n in ns {
                     if let Some(m) = n.marker {
                         let r = reach[&m.on_reach];
-                        println!("   {:?} on reach {} at v{} of {} (up {} down {})", n.kind, m.on_reach, m.at_vertex, r.vertices.len(), r.up, r.down);
+                        println!(
+                            "   {:?} on reach {} at v{} of {} (up {} down {})",
+                            n.kind,
+                            m.on_reach,
+                            m.at_vertex,
+                            r.vertices.len(),
+                            r.up,
+                            r.down
+                        );
                     } else {
                         println!("   {:?} id {}", n.kind, n.id);
                     }
@@ -57,10 +70,31 @@ fn main() -> Result<(), String> {
                 if shown_cb < 6 && *field == "q_w" {
                     let qw = &r.attrs.q_w;
                     let i = qw.windows(2).position(|w| w[1] < w[0] * (1.0 - 1e-9)).unwrap_or(0);
-                    println!("reach {at} {:?} up {:?} down {:?} n {}: q_w falls at {i}: {:.4} -> {:.4}; q there {:.4} -> {:.4}", r.level, kind_of.get(&r.up), kind_of.get(&r.down), qw.len(), qw[i], qw[i + 1], r.attrs.q[i], r.attrs.q[i + 1]);
+                    println!(
+                        "reach {at} {:?} up {:?} down {:?} n {}: q_w falls at {i}: {:.4} -> {:.4}; q there {:.4} -> {:.4}",
+                        r.level,
+                        kind_of.get(&r.up),
+                        kind_of.get(&r.down),
+                        qw.len(),
+                        qw[i],
+                        qw[i + 1],
+                        r.attrs.q[i],
+                        r.attrs.q[i + 1]
+                    );
                     shown_cb += 1;
                 }
-                format!("{field} along a {:?} reach ({}), up {:?}", r.level, if r.parent.is_some() { "trunk image" } else if r.level == planet_generators::bake::river_graph::Level::H1 { "H1" } else { "tributary" }, kind_of.get(&r.up))
+                format!(
+                    "{field} along a {:?} reach ({}), up {:?}",
+                    r.level,
+                    if r.parent.is_some() {
+                        "trunk image"
+                    } else if r.level == planet_generators::bake::river_graph::Level::H1 {
+                        "H1"
+                    } else {
+                        "tributary"
+                    },
+                    kind_of.get(&r.up)
+                )
             } else {
                 format!("{field} at a node {:?}", kind_of.get(at))
             };

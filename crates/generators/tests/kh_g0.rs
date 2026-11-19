@@ -41,15 +41,25 @@ fn kh_surface(fx: &Fixture, order: &[usize]) -> (Vec<f64>, kh::SplitStats) {
         })
         .collect();
     let l = GlobalGrid::new(L_N, RADIUS_M);
-    let zb_fields: Vec<RegionField> =
-        (0..6).map(|f| RegionField::new(Face(f as u8), H1_N, (0, 0), H1_N, H1_N, fx.z_b[f * nn..(f + 1) * nn].iter().map(|&x| x as f32).collect())).collect();
+    let zb_fields: Vec<RegionField> = (0..6)
+        .map(|f| {
+            RegionField::new(Face(f as u8), H1_N, (0, 0), H1_N, H1_N, fx.z_b[f * nn..(f + 1) * nn].iter().map(|&x| x as f32).collect())
+        })
+        .collect();
     let ln = L_N * L_N;
     let lr = L_PER_H1 as f64;
     let mut out = vec![f64::NAN; 6 * ln];
     for &p in order {
         let (f, i, j) = (p / ln, p % L_N, (p % ln) / L_N);
         let r = fx.b[p] - zb_fields[f].at(l.direction(p as u32));
-        let z = kh::read(&fx.z_s[f * nn..(f + 1) * nn], H1_N, H1_N, &splits[f], (i as f64 - (lr - 1.0) / 2.0) / lr, (j as f64 - (lr - 1.0) / 2.0) / lr);
+        let z = kh::read(
+            &fx.z_s[f * nn..(f + 1) * nn],
+            H1_N,
+            H1_N,
+            &splits[f],
+            (i as f64 - (lr - 1.0) / 2.0) / lr,
+            (j as f64 - (lr - 1.0) / 2.0) / lr,
+        );
         out[p] = z + r;
     }
     (out, stats)

@@ -249,7 +249,16 @@ fn clough_tocher(p: [[f64; 2]; 3], f: [f64; 3], g: [[f64; 2]; 3], mono: [bool; 3
 /// h4: the Clough-Tocher read on the split at block coordinates `(fx, fy)`. `grad` from [`gradients`]; `step(p, q)` whether the edge between cells `p` and `q` is a D8 step
 /// (its control polygon is kept monotone). Returns the value and the lowest and highest corner of the macro triangle (for the overshoot).
 #[allow(clippy::too_many_arguments)]
-pub fn read_ct(z: &[f64], w: usize, h: usize, split: &[u8], grad: &[[f64; 2]], step: &dyn Fn(usize, usize) -> bool, fx: f64, fy: f64) -> (f64, f64, f64) {
+pub fn read_ct(
+    z: &[f64],
+    w: usize,
+    h: usize,
+    split: &[u8],
+    grad: &[[f64; 2]],
+    step: &dyn Fn(usize, usize) -> bool,
+    fx: f64,
+    fy: f64,
+) -> (f64, f64, f64) {
     let ix = (fx.floor().max(0.0) as usize).min(w - 2);
     let iy = (fy.floor().max(0.0) as usize).min(h - 2);
     let (u, v) = ((fx - ix as f64).clamp(0.0, 1.0), (fy - iy as f64).clamp(0.0, 1.0));
@@ -264,7 +273,16 @@ pub fn read_ct(z: &[f64], w: usize, h: usize, split: &[u8], grad: &[[f64; 2]], s
 
 /// h4c (reading 20, spikes #139): [`read_ct`] clamped to the range of its quad's four corners. Returns the value and that range.
 #[allow(clippy::too_many_arguments)]
-pub fn read_ct_clamped(z: &[f64], w: usize, h: usize, split: &[u8], grad: &[[f64; 2]], step: &dyn Fn(usize, usize) -> bool, fx: f64, fy: f64) -> (f64, f64, f64) {
+pub fn read_ct_clamped(
+    z: &[f64],
+    w: usize,
+    h: usize,
+    split: &[u8],
+    grad: &[[f64; 2]],
+    step: &dyn Fn(usize, usize) -> bool,
+    fx: f64,
+    fy: f64,
+) -> (f64, f64, f64) {
     let ix = (fx.floor().max(0.0) as usize).min(w - 2);
     let iy = (fy.floor().max(0.0) as usize).min(h - 2);
     let q = iy * w + ix;
@@ -279,7 +297,18 @@ pub fn read_ct_clamped(z: &[f64], w: usize, h: usize, split: &[u8], grad: &[[f64
 /// between the two cell centres) to the line's linear value at the point's projection, falling off smoothly to no change at `outer` L cells. `diag(q)` lists the quad's
 /// diagonal steps as (from, to) block indices; `l` is L cells a block cell.
 #[allow(clippy::too_many_arguments)]
-pub fn read_skeleton(z: &[f64], w: usize, h: usize, diag: &dyn Fn(usize) -> Option<(usize, usize)>, base: f64, fx: f64, fy: f64, l: f64, full: f64, outer: f64) -> f64 {
+pub fn read_skeleton(
+    z: &[f64],
+    w: usize,
+    h: usize,
+    diag: &dyn Fn(usize) -> Option<(usize, usize)>,
+    base: f64,
+    fx: f64,
+    fy: f64,
+    l: f64,
+    full: f64,
+    outer: f64,
+) -> f64 {
     let ix = (fx.floor().max(0.0) as i64).min(w as i64 - 2);
     let iy = (fy.floor().max(0.0) as i64).min(h as i64 - 2);
     let mut out = base;
@@ -348,7 +377,14 @@ pub fn zone_weight(zone: &[bool], w: usize, h: usize, fx: f64, fy: f64) -> f64 {
 
 /// Per quad (indexed by its lower-left cell), the D8 diagonal step it holds when C1 dams it: `c1_centre(q)`, C1 at the quad's centre, lies above the step line's
 /// value there (the mean of its two cells) by more than `tol` m. `diag(q)` lists the quad's diagonal step as (from, to).
-pub fn dammed_steps(z: &[f64], w: usize, h: usize, diag: &dyn Fn(usize) -> Option<(usize, usize)>, c1_centre: &dyn Fn(usize) -> f64, tol: f64) -> Vec<Option<(usize, usize)>> {
+pub fn dammed_steps(
+    z: &[f64],
+    w: usize,
+    h: usize,
+    diag: &dyn Fn(usize) -> Option<(usize, usize)>,
+    c1_centre: &dyn Fn(usize) -> f64,
+    tol: f64,
+) -> Vec<Option<(usize, usize)>> {
     (0..w * h)
         .map(|q| {
             if q % w + 1 >= w || q / w + 1 >= h {

@@ -476,7 +476,14 @@ pub fn drain_band_capped(
 }
 
 /// The depressions of `z` (outlets `outlet`) whose floor `inside` admits: (any over TOL, of them at least 0.5 m deep and 16 cells, of them over 5 m deep, their fill volume m3).
-pub fn pit_census(z: &[f64], w: usize, h: usize, outlet: &[bool], inside: &dyn Fn(usize) -> bool, area: &dyn Fn(usize) -> f64) -> (usize, usize, usize, f64) {
+pub fn pit_census(
+    z: &[f64],
+    w: usize,
+    h: usize,
+    outlet: &[bool],
+    inside: &dyn Fn(usize) -> bool,
+    area: &dyn Fn(usize) -> f64,
+) -> (usize, usize, usize, f64) {
     let level = fill_level(z, w, h, outlet);
     let (_, comps) = depressions(z, &level, w, h);
     let (mut any, mut g, mut d5, mut vol) = (0usize, 0usize, 0usize, 0.0f64);

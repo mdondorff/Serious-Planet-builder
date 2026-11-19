@@ -19,6 +19,8 @@ pub mod channel_graph;
 pub mod compact;
 pub mod cube;
 pub mod deposit;
+/// SPIKE-138 (spike only): a surface made to drain by a least-cost breach or a fill.
+pub mod drain;
 pub mod face;
 pub mod fillgeom;
 pub mod flood;
@@ -26,10 +28,8 @@ pub mod h0;
 pub mod hydro;
 pub mod inputs;
 pub mod k7;
-pub mod kh;
-/// SPIKE-138 (spike only): a surface made to drain by a least-cost breach or a fill.
-pub mod drain;
 pub mod kg_trib;
+pub mod kh;
 pub mod kv_kc;
 pub mod lakes;
 pub mod map;

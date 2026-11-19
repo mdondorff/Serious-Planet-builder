@@ -2193,7 +2193,9 @@ fn main() -> Result<(), String> {
     let (sri0, srj0, rw, rh) = (solve.ri0, solve.rj0, solve.rw, solve.rh);
     let (x0, y0, w, h) = ((sri0 * L) as i64, (srj0 * L) as i64, rw * L, rh * L);
     let n = spec.local() as f64;
-    let dir_of = |x: i64, y: i64| planet_core::cube::face_to_direction(&TangentWarp, face, 2.0 * (x as f64 + 0.5) / n - 1.0, 2.0 * (y as f64 + 0.5) / n - 1.0);
+    let dir_of = |x: i64, y: i64| {
+        planet_core::cube::face_to_direction(&TangentWarp, face, 2.0 * (x as f64 + 0.5) / n - 1.0, 2.0 * (y as f64 + 0.5) / n - 1.0)
+    };
     let grid = &solve.grid;
     let outlet = &solve.outlet;
     let cells = rw * rh;

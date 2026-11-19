@@ -9,7 +9,8 @@ use planet_generators::bake::Grid;
 
 fn main() -> Result<(), String> {
     let a: Vec<String> = std::env::args().skip(1).collect();
-    let (path, w, h, sea) = (&a[0], a[1].parse::<usize>().map_err(|_| "w")?, a[2].parse::<usize>().map_err(|_| "h")?, a[3].parse::<f64>().map_err(|_| "sea")?);
+    let (path, w, h, sea) =
+        (&a[0], a[1].parse::<usize>().map_err(|_| "w")?, a[2].parse::<usize>().map_err(|_| "h")?, a[3].parse::<f64>().map_err(|_| "sea")?);
     let name = a.get(4).cloned().unwrap_or_default();
     // the block statistic: mean (default), min (K6''s node height), median
     let stat = a.get(5).cloned().unwrap_or_else(|| "mean".into());

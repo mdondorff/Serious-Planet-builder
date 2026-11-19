@@ -1797,7 +1797,10 @@ fn main() -> Result<(), String> {
         .ok()
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .map_or("unknown".to_string(), |v| v.trim().to_string());
-    let run_dirty = std::process::Command::new("git").args(["status", "--porcelain", "--untracked-files=no"]).output().map_or(true, |o| !o.stdout.is_empty());
+    let run_dirty = std::process::Command::new("git")
+        .args(["status", "--porcelain", "--untracked-files=no"])
+        .output()
+        .map_or(true, |o| !o.stdout.is_empty());
     let args: Vec<String> = std::env::args().skip(1).collect();
     let win: Vec<usize> = value(&args, "--window")
         .ok_or("--window face,i0,i1,j0,j1,seed")?
@@ -2346,11 +2349,18 @@ fn main() -> Result<(), String> {
             };
             let centre = |q: usize| {
                 let (cx, cy) = ((q % rw * L + L - 1) as i64, (q / rw * L + L - 1) as i64);
-                [(0, 0), (1, 0), (0, 1), (1, 1)].iter().map(|&(dx, dy)| f64::from(zs_field.at(dir_of(x0 + cx + dx, y0 + cy + dy)))).sum::<f64>() / 4.0
+                [(0, 0), (1, 0), (0, 1), (1, 1)]
+                    .iter()
+                    .map(|&(dx, dy)| f64::from(zs_field.at(dir_of(x0 + cx + dx, y0 + cy + dy))))
+                    .sum::<f64>()
+                    / 4.0
             };
             let steps = kh::dammed_steps(&solve.zs, rw, rh, &diag, &centre, 1.0);
             let all = (0..cells).filter(|&q| q % rw + 1 < rw && q / rw + 1 < rh && diag(q).is_some()).count();
-            println!("RG KH h5d: C1 dams {} of {all} D8 diagonal steps (by over 1 m at the quad's centre)", steps.iter().filter(|s| s.is_some()).count());
+            println!(
+                "RG KH h5d: C1 dams {} of {all} D8 diagonal steps (by over 1 m at the quad's centre)",
+                steps.iter().filter(|s| s.is_some()).count()
+            );
             steps
         });
         // readings 17 and 19 (lead #170 item 3): S_KH = KH(z_s) + r', the band floored so that a cell whose KH lies above the sea + 0.5 m stays there (as ks_kh.rs)
@@ -2649,7 +2659,10 @@ fn main() -> Result<(), String> {
             let trunk_ids: BTreeSet<u64> = l_trunks.iter().map(|r| r.id).collect();
             let inflow = |id: u64| to_local(id).map_or((0.0, 0.0), |c| (dx_l * dx_l + ex.d8[c], dx_l * dx_l + ex.d8_no_ext[c]));
             let acc = accumulate_trunks(&mut gd, &trunk_ids, &inflow, runoff_mean);
-            println!("RG domain {d} reading 18: {} trunk reaches accumulated at L, {} unordered, {} heads over their H1 seed", acc.reaches, acc.unordered, acc.heads_over_seed);
+            println!(
+                "RG domain {d} reading 18: {} trunk reaches accumulated at L, {} unordered, {} heads over their H1 seed",
+                acc.reaches, acc.unordered, acc.heads_over_seed
+            );
             if regions <= 1 {
                 acc_trunks = gd.reaches.iter().filter(|r| trunk_ids.contains(&r.id)).map(|r| (r.id, r.attrs.clone())).collect();
             }
@@ -2706,8 +2719,8 @@ fn main() -> Result<(), String> {
             let outl: Vec<bool> = (0..n_l).map(|p| outlet_d[p] || !active[p]).collect();
             // spikes #147a: the drain switches (--breach-cost, --drain-rule, --breach-max-len) are the base stages' (1 and 3, at 814 m); band6 keeps SPIKE-138's rule
             {
-                use std::sync::atomic::Ordering::Relaxed;
                 use planet_generators::bake::drain as dr;
+                use std::sync::atomic::Ordering::Relaxed;
                 dr::BREACH_BY_LENGTH.store(false, Relaxed);
                 dr::BREACH_SQUARE.store(false, Relaxed);
                 dr::PREFER_FILL.store(false, Relaxed);
@@ -2716,7 +2729,19 @@ fn main() -> Result<(), String> {
             // spikes #147: the census, the same drain on each earlier stage's surface (KH alone, S_KH = KH + r', KS0, KS1); band6's deep depressions are traced to the first
             // stage with a deep depression whose floor lies within 4 L cells
             let run_deep = |z: &[f64]| {
-                planet_generators::bake::drain::drain_selective_report(z, w, h, &outl, &|_| false, &|_| dx_l * dx_l, 8, 4096, &|p| budget_l[p], &|p| budget_l[p]).2
+                planet_generators::bake::drain::drain_selective_report(
+                    z,
+                    w,
+                    h,
+                    &outl,
+                    &|_| false,
+                    &|_| dx_l * dx_l,
+                    8,
+                    4096,
+                    &|p| budget_l[p],
+                    &|p| budget_l[p],
+                )
+                .2
             };
             let stages_deep: Vec<(&str, Vec<planet_generators::bake::drain::Deep>)> = if census {
                 let t9 = Instant::now();
@@ -2755,14 +2780,21 @@ fn main() -> Result<(), String> {
             }
             if census {
                 let in_core = |f: usize| core[f];
-                let near = |a: usize, b: usize| ((a % w) as i64 - (b % w) as i64).abs() <= 4 && ((a / w) as i64 - (b / w) as i64).abs() <= 4;
+                let near =
+                    |a: usize, b: usize| ((a % w) as i64 - (b % w) as i64).abs() <= 4 && ((a / w) as i64 - (b / w) as i64).abs() <= 4;
                 let summary = |name: &str, ds: &[planet_generators::bake::drain::Deep]| {
                     let ds: Vec<_> = ds.iter().filter(|x| in_core(x.floor)).collect();
                     let mut dep: Vec<f64> = ds.iter().map(|x| x.depth).collect();
                     dep.sort_by(f64::total_cmp);
                     let cells: usize = ds.iter().map(|x| x.cells).sum();
                     let p = |q: f64| if dep.is_empty() { 0.0 } else { dep[((dep.len() - 1) as f64 * q) as usize] };
-                    println!("RG census {name}: {} deep depressions in the core ({cells} cells), depth p50 {:.1} p90 {:.1} max {:.1} m", ds.len(), p(0.5), p(0.9), p(1.0));
+                    println!(
+                        "RG census {name}: {} deep depressions in the core ({cells} cells), depth p50 {:.1} p90 {:.1} max {:.1} m",
+                        ds.len(),
+                        p(0.5),
+                        p(0.9),
+                        p(1.0)
+                    );
                 };
                 for (name, ds) in &stages_deep {
                     summary(name, ds);
@@ -2779,7 +2811,18 @@ fn main() -> Result<(), String> {
                     "RG census: band6's deep depressions by the first stage that has one within 4 L cells: {}",
                     names.iter().zip(&first).map(|(n, c)| format!("{n} {c}")).collect::<Vec<_>>().join(", ")
                 );
-                let b: Vec<u8> = deep6.iter().flat_map(|x| [(x.floor as u32).to_le_bytes(), (x.cells as u32).to_le_bytes(), (x.depth as f32).to_le_bytes(), (x.cut.min(1e9) as f32).to_le_bytes()].concat()).collect();
+                let b: Vec<u8> = deep6
+                    .iter()
+                    .flat_map(|x| {
+                        [
+                            (x.floor as u32).to_le_bytes(),
+                            (x.cells as u32).to_le_bytes(),
+                            (x.depth as f32).to_le_bytes(),
+                            (x.cut.min(1e9) as f32).to_le_bytes(),
+                        ]
+                        .concat()
+                    })
+                    .collect();
                 std::fs::write(out_dir.join(format!("{tag}-band6-deep.bin")), b).map_err(|e| e.to_string())?;
             }
             println!(
@@ -2873,7 +2916,10 @@ fn main() -> Result<(), String> {
             println!("RG domain {d} KC breaches: {} ({:.4} km3)", r.breaches, r.breach_volume / 1.0e9);
             // reading 10 (crusader #165): the divide cells within W_floor/2 + d_buf of a graph line that put no buffer
             let (div, exempt) = (r.divide.iter().filter(|&&x| x).count(), r.divide_exempt.iter().filter(|&&x| x).count());
-            println!("RG domain {d} KV reading 10: {exempt} of {div} divide cells exempt from the divide buffer ({:.2} %)", 100.0 * exempt as f64 / div.max(1) as f64);
+            println!(
+                "RG domain {d} KV reading 10: {exempt} of {div} divide cells exempt from the divide buffer ({:.2} %)",
+                100.0 * exempt as f64 / div.max(1) as f64
+            );
             drop(g_local);
             let kv = if on("kv") { r.kv } else { ks_d.clone() };
             let kc = if on("kc") { r.kc } else { kv.clone() };
@@ -3051,7 +3097,8 @@ fn main() -> Result<(), String> {
     }
     // BUILD-060 (lead #172): KC's patches beside the stage fields, read by river-gate as `b_kc_patches` and `b_kc_patch_km3`
     {
-        let text: String = std::iter::once("cells,volume_m3\n".to_string()).chain(kc_patches.iter().map(|(c, v)| format!("{c},{v:.3}\n"))).collect();
+        let text: String =
+            std::iter::once("cells,volume_m3\n".to_string()).chain(kc_patches.iter().map(|(c, v)| format!("{c},{v:.3}\n"))).collect();
         std::fs::write(stages_dir.join("kc-patches.csv"), &text).map_err(|e| e.to_string())?;
         if let Some(d) = &chain_dir {
             std::fs::write(d.join("stages").join("kc-patches.csv"), &text).map_err(|e| e.to_string())?;

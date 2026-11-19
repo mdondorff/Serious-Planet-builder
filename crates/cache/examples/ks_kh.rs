@@ -327,7 +327,15 @@ fn topological_order(receiver: &[u32]) -> Vec<u32> {
 }
 
 /// K6's routing on the filled levels with the sill condition: a neighbour is open when it is lower and the cell's level reaches the sill between them.
-fn route_sills(grid: &Grid, w: &[f64], sill: &dyn Fn(usize, usize, usize) -> f64, outlet: &[bool], seed: u64, weights: &[f32], mfd_open: bool) -> Routing {
+fn route_sills(
+    grid: &Grid,
+    w: &[f64],
+    sill: &dyn Fn(usize, usize, usize) -> f64,
+    outlet: &[bool],
+    seed: u64,
+    weights: &[f32],
+    mfd_open: bool,
+) -> Routing {
     let n = grid.len();
     let open = |p: usize, d: usize| -> Option<usize> {
         let q = grid.neighbour(p, d)?;
@@ -556,7 +564,8 @@ fn main() -> Result<(), String> {
     let land_n = (0..n_l).filter(|&p| inside_land(p)).count();
 
     // r = B - C1(z_b) = S0 - C1(z_s - z_b) - C1(z_b), through the regional field's own read.
-    let field = |v: Vec<f32>| planet_generators::bake::k7::RegionField::new(face, REGIONAL, (solve.ri0 as i64, solve.rj0 as i64), rw, rh, v);
+    let field =
+        |v: Vec<f32>| planet_generators::bake::k7::RegionField::new(face, REGIONAL, (solve.ri0 as i64, solve.rj0 as i64), rw, rh, v);
     let zb_field = field(solve.zb.iter().map(|&v| v as f32).collect());
     let mut r = vec![0f64; n_l];
     par_fill(&mut r, w, threads, &|p| {
@@ -591,7 +600,17 @@ fn main() -> Result<(), String> {
         let lr = l as f64;
         let mut khz = vec![0f64; n_l];
         par_fill(&mut khz, w, threads, &|p| {
-            kh::read_ct_clamped(&solve.zs, rw, rh, &split, &grad, &step, ((p % w) as f64 - (lr - 1.0) / 2.0) / lr, ((p / w) as f64 - (lr - 1.0) / 2.0) / lr).0
+            kh::read_ct_clamped(
+                &solve.zs,
+                rw,
+                rh,
+                &split,
+                &grad,
+                &step,
+                ((p % w) as f64 - (lr - 1.0) / 2.0) / lr,
+                ((p / w) as f64 - (lr - 1.0) / 2.0) / lr,
+            )
+            .0
         });
         let floor = sea + 0.5;
         let r2: Vec<f64> = (0..n_l).map(|p| if khz[p] > floor { r[p].max(floor - khz[p]) } else { r[p] }).collect();
@@ -641,7 +660,9 @@ fn main() -> Result<(), String> {
             }
         }
         let base: Vec<f64> = (0..n_l).map(|p| khz[p] + r2[p]).collect();
-        let (lo10, hi10) = (0..n_l).filter(|&p| in_box[p] && start[p] > sea).fold((0usize, 0usize), |(a, b), p| (a + usize::from(start[p] - base[p] > 10.0), b + usize::from(base[p] - start[p] > 10.0)));
+        let (lo10, hi10) = (0..n_l)
+            .filter(|&p| in_box[p] && start[p] > sea)
+            .fold((0usize, 0usize), |(a, b), p| (a + usize::from(start[p] - base[p] > 10.0), b + usize::from(base[p] - start[p] > 10.0)));
         println!(
             "KS KH h4c: base = KH(z_s) + r'; the band floored at the sea level + 0.5 m on {fl} cells of the box ({fl_near} within 2 km of KH's sea), raised {:.4} km3; the base against S0 on land of the box: lower over 10 m {lo10}, higher over 10 m {hi10}",
             fl_vol * cell_km2 / 1000.0
@@ -660,7 +681,8 @@ fn main() -> Result<(), String> {
         evap[c] = ev as f32;
         weight[c] = wt as f32;
     }
-    let h1 = route_rules(&solve.grid, &solve.zs, &solve.outlet, solve.precision.epsilon_w, solve.stream, 0.0, Some(&weight), RoundRules::ROUND);
+    let h1 =
+        route_rules(&solve.grid, &solve.zs, &solve.outlet, solve.precision.epsilon_w, solve.stream, 0.0, Some(&weight), RoundRules::ROUND);
     let mut channel_h1 = vec![false; rn];
     front.graph.for_each(|s| {
         for c in s.cells(&solve.grid) {
@@ -697,7 +719,11 @@ fn main() -> Result<(), String> {
             tg[c] = if ch[c] || rcv == NONE { c } else { tg[rcv as usize] };
         }
         hand = (0..rn).map(|c| (sills.h[c] - sills.h[tg[c]].max(sea)).max(0.0) as f32).collect();
-        println!("KS K6': {} channel cells (today's H1 {}); H from node heights", ch.iter().filter(|&&b| b).count(), channel_h1.iter().filter(|&&b| b).count());
+        println!(
+            "KS K6': {} channel cells (today's H1 {}); H from node heights",
+            ch.iter().filter(|&&b| b).count(),
+            channel_h1.iter().filter(|&&b| b).count()
+        );
     }
     let hand_field = field(hand.clone());
     let mut hand_l = vec![0f64; n_l];
@@ -726,7 +752,8 @@ fn main() -> Result<(), String> {
     });
     let rad = 25_000.0 / solve.face_spec.dx();
     let ri = rad.ceil() as i64;
-    let offsets: Vec<(i64, i64)> = (-ri..=ri).flat_map(|dy| (-ri..=ri).map(move |dx| (dx, dy))).filter(|&(dx, dy)| libm::hypot(dx as f64, dy as f64) <= rad).collect();
+    let offsets: Vec<(i64, i64)> =
+        (-ri..=ri).flat_map(|dy| (-ri..=ri).map(move |dx| (dx, dy))).filter(|&(dx, dy)| libm::hypot(dx as f64, dy as f64) <= rad).collect();
     let mut relief10 = vec![0f64; rn];
     par_fill(&mut relief10, rw, threads, &|c| {
         let (cx, cy) = ((c % rw) as i64, (c / rw) as i64);
@@ -741,7 +768,12 @@ fn main() -> Result<(), String> {
         *v.select_nth_unstable_by(k, |a, b| a.total_cmp(b)).1
     });
     let budget: Vec<f64> = relief10.iter().map(|&x| (0.5 * x).clamp(10.0, 50.0)).collect();
-    println!("KS budget: 25 km disc of {} cells at 814 m ({:.1} m); {:.0} s", offsets.len(), solve.face_spec.dx(), t0.elapsed().as_secs_f64());
+    println!(
+        "KS budget: 25 km disc of {} cells at 814 m ({:.1} m); {:.0} s",
+        offsets.len(),
+        solve.face_spec.dx(),
+        t0.elapsed().as_secs_f64()
+    );
 
     // KS with the budget: lowering = min(max(0, r - band), budget); a residual where the conditioning needs more.
     let clamp17 = std::cell::Cell::new(0usize);
@@ -823,7 +855,13 @@ S0 = the river gate's start surface of the window (B + C1(z_s - z_b)); spike cod
         let p = p as usize;
         let rc = ro.receiver[p];
         // A chain that reaches an outlet without a river cell drains to the coast or the window's edge directly: one shared label, so the coast's own strips are not divides.
-        label[p] = if river[p] { seg[p] } else if rc == NONE { u32::MAX - 1 } else { label[rc as usize] };
+        label[p] = if river[p] {
+            seg[p]
+        } else if rc == NONE {
+            u32::MAX - 1
+        } else {
+            label[rc as usize]
+        };
     }
     drop((river, seg, ro));
     let mut dist = vec![u16::MAX; n_l];
@@ -904,7 +942,10 @@ S0 = the river gate's start surface of the window (B + C1(z_s - z_b)); spike cod
                 let a = (x - 2 * dx, y - 2 * dy);
                 let b = (x + 2 * dx, y + 2 * dy);
                 let ok = |q: (i64, i64)| q.0 >= 0 && q.1 >= 0 && q.0 < w as i64 && q.1 < h as i64;
-                ok(a) && ok(b) && start[p] >= start[a.1 as usize * w + a.0 as usize] + 2.0 && start[p] >= start[b.1 as usize * w + b.0 as usize] + 2.0
+                ok(a)
+                    && ok(b)
+                    && start[p] >= start[a.1 as usize * w + a.0 as usize] + 2.0
+                    && start[p] >= start[b.1 as usize * w + b.0 as usize] + 2.0
             })
         })
         .collect();
@@ -951,7 +992,8 @@ S0 = the river gate's start surface of the window (B + C1(z_s - z_b)); spike cod
         // Lowering against the budget, land cells inside.
         let bins = [0.0, 0.1, 0.25, 0.5, 0.75, 0.95, 1.0];
         let mut hist = [0usize; 9]; // 0: none; 1..=6: (b[k-1], b[k]]; 7: at the budget without residual is in 6; 8: residual
-        let (mut lowered, mut vol, mut vol_req, mut resid, mut resid_floor, mut to_sea, mut clipped, mut pos) = (Vec::new(), 0.0, 0.0, 0usize, 0usize, 0usize, 0usize, 0usize);
+        let (mut lowered, mut vol, mut vol_req, mut resid, mut resid_floor, mut to_sea, mut clipped, mut pos) =
+            (Vec::new(), 0.0, 0.0, 0usize, 0usize, 0usize, 0usize, 0usize);
         let (mut near_n, mut near_low, mut near_vol, mut far_n, mut far_low, mut far_vol) = (0usize, 0usize, 0.0, 0usize, 0usize, 0.0);
         let mut near_used: Vec<f64> = Vec::new();
         let mut far_used: Vec<f64> = Vec::new();
@@ -1062,7 +1104,16 @@ S0 = the river gate's start surface of the window (B + C1(z_s - z_b)); spike cod
         println!("KS {name} hist (share of land cells inside by lowering / budget): none {:.2} | <=10 % {:.2} | 10-25 % {:.2} | 25-50 % {:.2} | 50-75 % {:.2} | 75-95 % {:.2} | 95-100 % {:.2} | residual {:.3}", pct(hist[0], land_n), pct(hist[1], land_n), pct(hist[2], land_n), pct(hist[3], land_n), pct(hist[4], land_n), pct(hist[5], land_n), pct(hist[6], land_n), pct(hist[8], land_n));
         println!("KS {name} band: {clipped} of {pos} cells with r > 0 clipped ({:.2} %); near divides (<= 1 km, {near_n} cells): {:.2} % lowered, p95 {np95:.2} m, {:.1} % of the volume on {:.1} % of the land; elsewhere ({far_n}): {:.2} % lowered, p95 {fp95:.2} m", pct(clipped, pos), pct(near_low, near_n), 100.0 * near_vol / (near_vol + far_vol).max(1e-12), pct(near_n, land_n), pct(far_low, far_n));
         println!("KS {name} ridges: {ridge_n} ridge cells of S0; {ridge20} lowered over 20 m ({:.2} %), p95 lowering {rp95:.2} m; cut-through saddles at 1 km2 {s1_comps} ({s1_cells} cells), at 5 km2 {s5_comps} ({s5_cells} cells)", pct(ridge20, ridge_n));
-        println!("KS {name} gate: basins {} G-DRAIN {} % (of {} river cells), lowered {} %, relief10 {} / start {} m, uphill {} %", field_of("basins"), field_of("basin_pct"), field_of("river_cells"), field_of("lowered_pct"), field_of("relief10_m"), field_of("relief10_start_m"), field_of("uphill_pct"));
+        println!(
+            "KS {name} gate: basins {} G-DRAIN {} % (of {} river cells), lowered {} %, relief10 {} / start {} m, uphill {} %",
+            field_of("basins"),
+            field_of("basin_pct"),
+            field_of("river_cells"),
+            field_of("lowered_pct"),
+            field_of("relief10_m"),
+            field_of("relief10_start_m"),
+            field_of("uphill_pct")
+        );
         csv.push_str(&format!(
             "{name},{label_w},{land_n},{low_n},{lp50:.3},{lp95:.3},{lmax:.3},{:.4},{:.4},{resid},{resid_floor},{at_p95},{to_sea},{},{},{},{},{},{},{},{},{clipped},{pos},{near_n},{near_low},{np95:.3},{:.4},{far_n},{far_low},{fp95:.3},{ridge_n},{ridge20},{rp95:.3},{s1_comps},{s1_cells},{s5_comps},{s5_cells},{},{},{},{},{},{},{}\n",
             vol * cell_km2 / 1000.0,
@@ -1090,6 +1141,12 @@ S0 = the river gate's start surface of the window (B + C1(z_s - z_b)); spike cod
     let header = "rung,window,land,lowered,low_p50_m,low_p95_m,low_max_m,vol_km3,vol_req_km3,resid,resid_floor,at95,to_sea,h_none,h_10,h_25,h_50,h_75,h_95,h_100,h_resid,clipped,pos_band,near_n,near_low,near_p95_m,near_vol_share,far_n,far_low,far_p95_m,ridge_n,ridge20,ridge_p95_m,saddle1,saddle1_cells,saddle5,saddle5_cells,basins,basin_pct,river_cells,lowered_pct,relief10_m,relief10_start_m,uphill_pct\n";
     std::fs::write(format!("{out_dir}/ks.csv"), format!("{header}{csv}")).map_err(|e| e.to_string())?;
     let mut bsorted = budget.clone();
-    println!("KS budget field: p5 {:.1} p50 {:.1} p95 {:.1} m over {rn} cells; total {:.0} s", quant(&mut bsorted, 0.05), quant(&mut bsorted, 0.5), quant(&mut bsorted, 0.95), t0.elapsed().as_secs_f64());
+    println!(
+        "KS budget field: p5 {:.1} p50 {:.1} p95 {:.1} m over {rn} cells; total {:.0} s",
+        quant(&mut bsorted, 0.05),
+        quant(&mut bsorted, 0.5),
+        quant(&mut bsorted, 0.95),
+        t0.elapsed().as_secs_f64()
+    );
     Ok(())
 }
