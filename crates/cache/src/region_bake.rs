@@ -178,6 +178,8 @@ pub struct RegionReport {
 /// The regional solve of a region (GEN-175): the base and the solved surface on the window's regional cells, with the world's precision applied.
 /// SPIKE-139 (spike branch only): K5's rounds route by D8-LTD instead of the jittered D8 (`planet_generators::bake::route::RECEIVER_LTD`).
 pub static K5_LTD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// SPIKE-139 (spike branch only): the f64 bits of a factor on K5's k_dt (0 or 1: unchanged).
+pub static K5_KDT_SCALE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// SPIKE-139 (spike branch only): K5's rounds step with D-infinity's two receivers (`planet_generators::bake::round::RECEIVER_DINF`).
 pub static K5_DINF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -306,6 +308,11 @@ pub fn solve_region(spec: &RegionSpec, base: &(dyn Fn(Vec3) -> f64 + Sync)) -> R
         ..CarveParams::default()
     };
     precision.apply(&mut carve);
+    // SPIKE-139 (spike only): K5's k_dt scaled by K5_KDT_SCALE (1 unless set); the uplift per step scales with it (u_over_k is kept)
+    let kdt_scale = f64::from_bits(K5_KDT_SCALE.load(std::sync::atomic::Ordering::Relaxed));
+    if kdt_scale > 0.0 && kdt_scale != 1.0 {
+        carve.k_dt *= kdt_scale;
+    }
     let stream = face_spec.stream();
     let zb_in = match BASE_HOOK.get() {
         Some(hook) => hook(&grid, &outlet, &zb, &dir_of),

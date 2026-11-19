@@ -1881,6 +1881,12 @@ fn main() -> Result<(), String> {
         return Err("--k5-diffuse C needs 0 <= C <= 0.25".into());
     }
     planet_generators::bake::round::K5_DIFFUSE.store(k5_diffuse.to_bits(), std::sync::atomic::Ordering::Relaxed);
+    // SPIKE-139 (lead #149 item 3): `--k5-kdt-scale X` (default 1): K5's k_dt times X, the uplift per step with it (region_bake::K5_KDT_SCALE; spike only)
+    let k5_kdt_scale: f64 = value(&args, "--k5-kdt-scale").map_or(Ok(1.0), str::parse).map_err(|_| "--k5-kdt-scale X")?;
+    if !(k5_kdt_scale > 0.0 && k5_kdt_scale <= 8.0) {
+        return Err("--k5-kdt-scale X needs 0 < X <= 8".into());
+    }
+    planet_cache::region_bake::K5_KDT_SCALE.store(k5_kdt_scale.to_bits(), std::sync::atomic::Ordering::Relaxed);
     // SPIKE-139: `--k5-diffuse-amax KM2` (default 0: every cell): the hillslope term moves only cells of a smaller area (round::K5_DIFFUSE_AMAX; spike only)
     let k5_diffuse_amax: f64 = value(&args, "--k5-diffuse-amax").map_or(Ok(0.0), str::parse).map_err(|_| "--k5-diffuse-amax KM2")?;
     planet_generators::bake::round::K5_DIFFUSE_AMAX.store((k5_diffuse_amax * 1e6).to_bits(), std::sync::atomic::Ordering::Relaxed);
@@ -3161,6 +3167,7 @@ fn main() -> Result<(), String> {
             ("zs-read", zs_read.to_string()),
             ("k5-route", k5_route.to_string()),
             ("k5-diffuse", k5_diffuse.to_string()),
+            ("k5-kdt-scale", k5_kdt_scale.to_string()),
             ("k5-diffuse-amax", k5_diffuse_amax.to_string()),
             ("k5-parity", k5_parity.to_string()),
             ("ks", ks_mode.to_string()),
