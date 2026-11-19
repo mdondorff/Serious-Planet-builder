@@ -127,12 +127,17 @@ fn parity_round(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, c:
     }
 }
 
-fn diffuse_round(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, c: f64) {
+/// SPIKE-139 (spike branch only): with [`K5_DIFFUSE`], the f64 bits of the largest area (m2) of a cell the hillslope term moves (0: every cell); channel cells
+/// above it keep K5's heights and act as the boundary. The D8 rounds only (D-infinity's rounds move every cell).
+pub static K5_DIFFUSE_AMAX: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn diffuse_round(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, c: f64, area: Option<&[f64]>) {
     let n = grid.len();
+    let amax = f64::from_bits(K5_DIFFUSE_AMAX.load(std::sync::atomic::Ordering::Relaxed));
     for _ in 0..p.reroute_every {
         let old = z.to_vec();
         for q in 0..n {
-            if outlet[q] || !grid.is_active(q) || old[q] <= p.sea_level {
+            if outlet[q] || !grid.is_active(q) || old[q] <= p.sea_level || (amax > 0.0 && area.is_some_and(|a| a[q] >= amax)) {
                 continue;
             }
             let mut sum = 0.0;
@@ -433,7 +438,7 @@ pub fn solve_rounds_with(
         if dinf {
             dinf_round(grid, z, outlet, p, seed, drivers, &taper);
             if diffuse > 0.0 {
-                diffuse_round(grid, z, outlet, p, diffuse);
+                diffuse_round(grid, z, outlet, p, diffuse, None);
             }
             if parity > 0.0 {
                 parity_round(grid, z, outlet, p, parity);
@@ -460,7 +465,7 @@ pub fn solve_rounds_with(
             }
         }
         if diffuse > 0.0 {
-            diffuse_round(grid, z, outlet, p, diffuse);
+            diffuse_round(grid, z, outlet, p, diffuse, Some(&r.area));
         }
         if parity > 0.0 {
             parity_round(grid, z, outlet, p, parity);
