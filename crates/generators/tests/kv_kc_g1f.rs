@@ -427,3 +427,72 @@ fn kc_breaches_along_the_graph_line_when_it_can() {
     assert!(!cut.is_empty() && cut.iter().all(|&c| near[c]), "every cell the breach cuts lies within one cell of the line");
     assert_eq!(a.kc, b.kc);
 }
+
+// SPIKE-132 (spike prototype; not a spec requirement)
+#[test]
+fn kv_cross_slope_turns_a_parallel_floor_channel_into_the_line() {
+    // lead #169 item 3 (R3a: on a flat floor the routing runs parallel to a lower line): a 40 x 15 grid of 30 m cells, the sea at x = 0, a line along row 7 at bed 0.5 m, a flat floor
+    // at 1 m and a channel on row 10 (3 cells off the line) below the floor's cone; without the cross-slope the channel runs to the sea beside the line, with it the floor falls to the line
+    let (w, h, dx) = (40usize, 15usize, 30.0);
+    let gl = Grid::new(w, h, dx);
+    let n = w * h;
+    let s0: Vec<f64> = (0..n).map(|c| if c / w == 10 { 0.52 + 0.001 * (c % w) as f64 } else { 1.0 + 0.002 * (c % w) as f64 }).collect();
+    let outlet: Vec<bool> = (0..n).map(|c| c % w == 0).collect();
+    let cells: Vec<u64> = (1..w).rev().map(|x| (7 * w + x) as u64).collect();
+    let k = cells.len();
+    let reach = Reach {
+        id: 1,
+        level: Level::L,
+        up: 10,
+        down: 11,
+        vertices: cells,
+        parent: None,
+        owner: Domain::Tile { face: 0, ti: 0, tj: 0 },
+        attrs: Attrs {
+            a_geo: vec![1.0e8; k],
+            a_ext: vec![0.0; k],
+            a_run: vec![1.0e8; k],
+            a_run_no_ext: vec![1.0e8; k],
+            q: vec![400.0; k],
+            q_w: vec![400.0; k],
+            strahler: vec![3; k],
+            bed: vec![1; k],
+        },
+        exceptions: Vec::new(),
+    };
+    let g = Graph { body: BODY, nodes: Vec::new(), reaches: vec![reach], basins: Vec::new() };
+    let (protected, budget) = (vec![false; n], vec![100.0; n]);
+    let plain = KvParams::plan(dx);
+    let cross = KvParams { cross_grade: 1.0e-3, ..plain };
+    let a = run(&gl, &s0, &outlet, &g, &protected, &budget, &plain, Switch::KvOnly);
+    let b = run(&gl, &s0, &outlet, &g, &protected, &budget, &cross, Switch::KvOnly);
+    // steepest descent from the channel at (30, 10): the row it ends nearest the line
+    let path_rows = |z: &[f64]| {
+        let mut c = 10 * w + 30;
+        let mut rows = vec![c / w];
+        for _ in 0..200 {
+            if outlet[c] {
+                break;
+            }
+            let best = (0..8)
+                .filter_map(|d| gl.neighbour(c, d).map(|q| (q, (z[c] - z[q]) / if d < 4 { dx } else { dx * core::f64::consts::SQRT_2 })))
+                .filter(|&(_, s)| s > 0.0)
+                .max_by(|x, y| x.1.total_cmp(&y.1).then(y.0.cmp(&x.0)));
+            let Some((q, _)) = best else { break };
+            c = q;
+            rows.push(c / w);
+        }
+        *rows.iter().min().unwrap()
+    };
+    assert_eq!(path_rows(&a.kv), 10, "without the cross-slope the channel stays on its row");
+    assert!(path_rows(&b.kv) <= 8, "with it the channel's water reaches the line's side");
+    assert!(b.cross_cells > 0 && b.cross_volume > 0.0, "the pass lowered cells");
+    assert_eq!((a.cross_cells, a.cross_volume), (0, 0.0), "grade 0 is off");
+    for c in 0..n {
+        assert!(b.kv[c] <= a.kv[c] + 1e-12, "lowering only, cell {c}");
+        assert!(b.kv[c] >= 0.5 - 1e-12 || b.kv[c] >= s0[c] - 1e-12, "never below the line's bed, cell {c}: {}", b.kv[c]);
+        assert!(s0[c] - b.kv[c] <= budget[c] + 1e-9, "within the budget, cell {c}");
+        assert!(b.kv_wanted[c] >= s0[c] - b.kv[c] - 1e-12, "the wanted lowering covers the cut, cell {c}");
+    }
+    assert_eq!(b.kv, run(&gl, &s0, &outlet, &g, &protected, &budget, &cross, Switch::KvOnly).kv, "the same bits again");
+}

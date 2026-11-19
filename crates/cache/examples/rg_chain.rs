@@ -1754,6 +1754,9 @@ fn build_graph(
     (g, notes)
 }
 
+/// crusader #169 item 3: `--kv-cross`'s grade in micro (m per m), 0 off.
+static KV_CROSS_MICRO: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// crusader #168b (reading 32): `--trunk-bed shared` (default) keeps a two-vertex trunk image's first vertex at its up node's bed when it rises over the budget, the rise at its down end
 /// excused by its rise_over_budget exception; `lift` raises its first vertex (spikes #142's form).
 static TRUNK_BED_SHARED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
@@ -1923,6 +1926,12 @@ fn main() -> Result<(), String> {
         return Err(format!("--noise turned | axis, not '{noise}'"));
     }
     planet_generators::height::set_turned_noise(noise == "turned");
+    // crusader #169 item 3: --kv-cross <grade> (m per m; 0 = off, the default until the rows): KV's floor falls toward the line from any channel on it
+    let kv_cross: f64 = value(&args, "--kv-cross").map_or(Ok(0.0), |v| v.parse().map_err(|_| format!("--kv-cross <grade>, not '{v}'")))?;
+    if !(0.0..=0.05).contains(&kv_cross) {
+        return Err(format!("--kv-cross in [0, 0.05], not {kv_cross}"));
+    }
+    KV_CROSS_MICRO.store((kv_cross * 1.0e6).round() as u64, std::sync::atomic::Ordering::Relaxed);
     let trunk_bed = value(&args, "--trunk-bed").unwrap_or("shared");
     if !["shared", "lift"].contains(&trunk_bed) {
         return Err(format!("--trunk-bed shared | lift, not '{trunk_bed}'"));
@@ -3157,7 +3166,20 @@ fn main() -> Result<(), String> {
             // crusader #161: the budget left is budget - max(0, S_KH - KS's output) inside run_with (reading 21); KC breaches before it fills (reading 22)
             // KV/KC's outlets: the sea, and the window's edge (as H1's; a window without sea, M1, has no other: the flood needs one)
             let outlet_kv: Vec<bool> = (0..n_l).map(|p| sea_l[p] || p % w == 0 || p % w == w - 1 || p / w == 0 || p / w == h - 1).collect();
-            let r = run_with(&gl, &ks_d, &outlet_kv, &g_local, &kept, &budget_l, Some(&ks_base), &KvParams::plan(dx_l), sw);
+            let r = run_with(
+                &gl,
+                &ks_d,
+                &outlet_kv,
+                &g_local,
+                &kept,
+                &budget_l,
+                Some(&ks_base),
+                &KvParams {
+                    cross_grade: KV_CROSS_MICRO.load(std::sync::atomic::Ordering::Relaxed) as f64 * 1.0e-6,
+                    ..KvParams::plan(dx_l)
+                },
+                sw,
+            );
             drop(outlet_kv);
             println!("RG domain {d} KC breaches: {} ({:.4} km3)", r.breaches, r.breach_volume / 1.0e9);
             // reading 10 (crusader #165): the divide cells within W_floor/2 + d_buf of a graph line that put no buffer
@@ -3170,6 +3192,7 @@ fn main() -> Result<(), String> {
             let kv = if on("kv") { r.kv } else { ks_d.clone() };
             let kc = if on("kc") { r.kc } else { kv.clone() };
             println!("RG domain {d} KV/KC ({sw:?}): {} residuals, {} KC patches", r.residuals.len(), r.patches.len());
+            println!("RG domain {d} KV cross-slope (crusader #169): {} cells lowered, {:.6} km3", r.cross_cells, r.cross_volume / 1.0e9);
             kc_patches.extend(r.patches.iter().copied());
             (kv, kc, r.residuals)
         } else {
@@ -3288,6 +3311,7 @@ fn main() -> Result<(), String> {
             ("window", win.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",")),
             ("margin", margin.to_string()),
             ("turned-noise", planet_generators::height::turned_noise().to_string()),
+            ("kv-cross", format!("{}", KV_CROSS_MICRO.load(std::sync::atomic::Ordering::Relaxed) as f64 * 1.0e-6)),
             ("trunk-bed", if TRUNK_BED_SHARED.load(std::sync::atomic::Ordering::Relaxed) { "shared" } else { "lift" }.to_string()),
             ("trib-on", trib_on.to_string()),
         ] {

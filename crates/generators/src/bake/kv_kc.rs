@@ -44,6 +44,10 @@ pub struct KvParams {
     /// Lead #166 (source fix 3, KC breach misses): KC's breach first searches a path within one cell of a graph vertex (or inside the depression), so the drained depression's outlet runs
     /// along the graph's line; only without one the free least-cost breach of reading 22; `false`: the free breach alone.
     pub breach_along_line: bool,
+    /// Lead #169 item 3 (R3a: on flat floors the routing runs parallel to a lower line): after the lowering, every floor cell stands below each floor neighbour farther from the line by at
+    /// least this grade (m per m) times the distance gained, so the floor falls toward the line from any channel on it; lowering only, never below the nearest vertex's bed, within the budget
+    /// left. 0: off (the cone alone).
+    pub cross_grade: f64,
 }
 
 impl KvParams {
@@ -59,6 +63,7 @@ impl KvParams {
             cap_at_incision: true,
             s_floor: 1.0e-3,
             breach_along_line: true,
+            cross_grade: 0.0,
         }
     }
 }
@@ -93,6 +98,9 @@ pub struct KvKc {
     pub kc_wanted: Vec<f64>,
     /// The nearest L reach of each cell KV reached, as an index into the graph's L reaches sorted by id (`u32::MAX`: none; order #161's memory cut).
     pub nearest: Vec<u32>,
+    /// The cross-slope pass (lead #169 item 3): cells it lowered, and its volume (m3).
+    pub cross_cells: usize,
+    pub cross_volume: f64,
 }
 
 /// The bed level (m) of a code (GEN-170: 0.5 m codes).
@@ -314,6 +322,38 @@ pub fn run_with(
         }
     }
     drop(carry);
+    // lead #169 item 3: the floor falls toward the line; floor cells farthest first (ties by cell), each at most its farther floor neighbours' height less the grade's drop
+    let (mut cross_cells, mut cross_volume) = (0usize, 0.0f64);
+    if p.cross_grade > 0.0 && kv_on {
+        let mut in_floor = vec![false; n];
+        let mut order: Vec<usize> = Vec::new();
+        for c in 0..n {
+            if matches!(wants(c), Some(w) if w.1) {
+                in_floor[c] = true;
+                order.push(c);
+            }
+        }
+        order.sort_by(|&a, &b| dist[b].total_cmp(&dist[a]).then(a.cmp(&b)));
+        for &c in &order {
+            let mut z = kv[c];
+            for k in 0..8 {
+                let Some(q) = grid.neighbour(c, k) else { continue };
+                if !in_floor[q] || dist[q] <= dist[c] {
+                    continue;
+                }
+                // the drop counts the distance gained toward the line, not the step (a diagonal step gains less than its length; a cone at the grade is left as it is)
+                z = z.min(kv[q] - p.cross_grade * (dist[q] - dist[c]));
+            }
+            let (ri, k) = vtx[&(src[c] as usize)];
+            let z = z.max(bed_m(reaches[ri].attrs.bed[k])).max(s0[c] - left_at(c));
+            if z < kv[c] {
+                cross_cells += 1;
+                cross_volume += (kv[c] - z) * p.cell_m * p.cell_m;
+                kv_wanted[c] = kv_wanted[c].max(s0[c] - z);
+                kv[c] = z;
+            }
+        }
+    }
     // the cells within one cell of a graph vertex (KC's breach along the line, lead #166)
     let near_line: Vec<bool> = if p.breach_along_line && switch != Switch::KvOnly {
         let mut m = vec![false; n];
@@ -432,7 +472,22 @@ pub fn run_with(
             patches.push((cells.len(), vol));
         }
     }
-    KvKc { kv, kc, kv_wanted, residuals, divide, divide_exempt, near_divide, patches, breaches, breach_volume, kc_wanted, nearest }
+    KvKc {
+        kv,
+        kc,
+        kv_wanted,
+        residuals,
+        divide,
+        divide_exempt,
+        near_divide,
+        patches,
+        breaches,
+        breach_volume,
+        kc_wanted,
+        nearest,
+        cross_cells,
+        cross_volume,
+    }
 }
 
 /// What [`flag_residuals`] did.
