@@ -906,10 +906,12 @@ pub fn validate(graph: &Graph, checks: &Checks) -> Vec<Violation> {
                 v.push(Violation::TributaryLeavesTile { reach: r.id });
             }
         }
-        // bed: non-increasing on codes, except at an exception marker's vertex on this reach
+        // bed: non-increasing on codes, except at an exception marker's vertex on this reach, and (reading 32, spike only) at the down end of a two-vertex L reach that
+        // carries a rise_over_budget exception: it has no vertex for the marker
         let ex = excepted.get(&r.id);
+        let short_rise = n == 2 && r.level == Level::L && r.has_exception(Reason::RiseOverBudget);
         for k in 1..n {
-            if a.bed[k] > a.bed[k - 1] && !ex.is_some_and(|e| e.contains(&(k as u32))) {
+            if a.bed[k] > a.bed[k - 1] && !ex.is_some_and(|e| e.contains(&(k as u32))) && !(short_rise && k == 1) {
                 v.push(Violation::BedRise { reach: r.id, vertex: k });
             }
         }

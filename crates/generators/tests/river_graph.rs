@@ -413,6 +413,36 @@ fn each_injected_edge_failure_is_found() {
     assert_eq!(check_with(&g, true, false), vec![]);
 }
 
+// spec: TEST-140 (reading 32, lead #168b; spike only, main after G2)
+#[test]
+fn a_two_vertex_reachs_rise_over_budget_excuses_the_rise_at_its_down_end() {
+    // S1 -> C has two vertices; its bed rises from 17 to C's 18 at its down end
+    let mut g = base();
+    reach_mut(&mut g, cell(0, 0)).attrs.bed = vec![17, 18];
+    let r1 = reach_mut(&mut g, cell(0, 0)).id;
+    assert!(
+        found(&g, &|v| matches!(v, Violation::BedRise { reach, vertex: 1 } if *reach == r1)),
+        "without an exception the rise is a violation"
+    );
+    reach_mut(&mut g, cell(0, 0)).exceptions = vec![Exception { reason: Reason::RiseOverBudget, value: 0.5 }];
+    assert!(!found(&g, &|v| matches!(v, Violation::BedRise { .. })), "its rise_over_budget exception excuses the rise at the down end");
+    // another reason does not excuse it, and a reach of three vertices still needs its marker
+    reach_mut(&mut g, cell(0, 0)).exceptions = vec![Exception { reason: Reason::BudgetResidual, value: 0.5 }];
+    assert!(found(&g, &|v| matches!(v, Violation::BedRise { reach, .. } if *reach == r1)));
+    let mut h = base();
+    reach_mut(&mut h, cell(1, 1)).attrs.bed = vec![18, 19, 0];
+    reach_mut(&mut h, cell(1, 1)).exceptions = vec![Exception { reason: Reason::RiseOverBudget, value: 0.5 }];
+    assert!(found(&h, &|v| matches!(v, Violation::BedRise { vertex: 1, .. })), "three vertices: the marker is still required");
+    // an H1 reach is not covered
+    let mut k = base();
+    let r = reach_mut(&mut k, cell(0, 0));
+    r.attrs.bed = vec![17, 18];
+    r.exceptions = vec![Exception { reason: Reason::RiseOverBudget, value: 0.5 }];
+    r.level = Level::H1;
+    let rid = r.id;
+    assert!(found(&k, &|v| matches!(v, Violation::BedRise { reach, vertex: 1 } if *reach == rid)), "an H1 reach still needs its marker");
+}
+
 // spec: TEST-140
 #[test]
 fn each_injected_bed_and_conservation_failure_is_found() {
