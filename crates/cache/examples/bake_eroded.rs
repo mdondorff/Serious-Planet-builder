@@ -68,6 +68,13 @@ fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let _ = Path::new(&args[0]);
     let threads: usize = args.iter().position(|a| a == "--threads").map_or(8, |k| args[k + 1].parse().expect("--threads T"));
+    // lead #173 (reading 30): B on the turned base for g1f8; default axis, the same bits as before
+    let noise = opt(&args, "--noise").unwrap_or("axis");
+    if noise != "axis" && noise != "turned" {
+        return Err(format!("--noise axis|turned, not '{noise}'"));
+    }
+    planet_generators::height::set_turned_noise(noise == "turned");
+    eprintln!("bake_eroded: base noise {noise}");
     // SPIKE-121 (E3): the window, B's K dt scale, C's diffusion, a start surface (spikes' D to F) and the L rounds. The defaults are A on R1h, the same bits as before.
     let win: [usize; 6] = match opt(&args, "--window") {
         None => WINDOWS[0].1,
@@ -358,7 +365,7 @@ fn main() -> Result<(), String> {
     std::fs::write(
         out.join("README.txt"),
         format!(
-            "SPIKE BAKE, not the world bake (SPIKE-115, SPIKE-120, SPIKE-121): window {win:?} (face, i0, i1, j0, j1, seed), K7 started from {} of the regional kernel at L (K dt x {k_scale}, diffusion {kappa}), start surface {}, fed with rivers routed at L (no channel graph stored: the format holds H1 lines only, so no river water is drawn). Commit {:016x}, {} tiles, inputs identity {inputs_id:016x}. Branch spike/e3-variants-bc.\n",
+            "SPIKE BAKE, not the world bake (SPIKE-115, SPIKE-120, SPIKE-121): window {win:?} (face, i0, i1, j0, j1, seed), K7 started from {} of the regional kernel at L (K dt x {k_scale}, diffusion {kappa}), start surface {}, fed with rivers routed at L (no channel graph stored: the format holds H1 lines only, so no river water is drawn). Commit {:016x}, {} tiles, inputs identity {inputs_id:016x}. Branch spike/e3-variants-bc (spike/b-turned), base noise {noise}.\n",
             if l_rounds == 1 { "one round" } else { "no round" },
             start_file.as_ref().map_or_else(|| "B + regional".to_string(), |p| p.display().to_string()),
             commit.id,
