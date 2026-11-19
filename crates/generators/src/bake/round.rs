@@ -248,7 +248,11 @@ fn dinf_round(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, seed
                 low = low.min(z[q as usize]);
             }
             let new = if low == f64::INFINITY {
-                if p.keep_pits && !p.incise_only { (z[c] + up).max(floor) } else { z[c] }
+                if p.keep_pits && !p.incise_only {
+                    (z[c] + up).max(floor)
+                } else {
+                    z[c]
+                }
             } else {
                 (num / den).max(low + p.epsilon).max(floor)
             };

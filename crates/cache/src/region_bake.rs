@@ -322,8 +322,10 @@ pub fn solve_region(spec: &RegionSpec, base: &(dyn Fn(Vec3) -> f64 + Sync)) -> R
     // The rounds' own narrowing guard asserts when a round lifts a summit past the binade the epsilon was chosen for: that is the same refusal as the check after them, returned as an error naming the cell.
     let solved = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         // SPIKE-139 (spike only): K5's receiver form for the rounds alone (`K5_LTD`), back to D8 after them
-        planet_generators::bake::route::RECEIVER_LTD.store(K5_LTD.load(std::sync::atomic::Ordering::Relaxed), std::sync::atomic::Ordering::Relaxed);
-        planet_generators::bake::round::RECEIVER_DINF.store(K5_DINF.load(std::sync::atomic::Ordering::Relaxed), std::sync::atomic::Ordering::Relaxed);
+        planet_generators::bake::route::RECEIVER_LTD
+            .store(K5_LTD.load(std::sync::atomic::Ordering::Relaxed), std::sync::atomic::Ordering::Relaxed);
+        planet_generators::bake::round::RECEIVER_DINF
+            .store(K5_DINF.load(std::sync::atomic::Ordering::Relaxed), std::sync::atomic::Ordering::Relaxed);
         let t = std::time::Instant::now();
         let r = solve_rounds(&grid, &mut zs, &outlet, &carve, spec.rounds, &spec.threads, stream);
         if K5_LTD.load(std::sync::atomic::Ordering::Relaxed) || K5_DINF.load(std::sync::atomic::Ordering::Relaxed) {
