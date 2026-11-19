@@ -343,7 +343,7 @@ pub fn drain_selective_report(
 mod tests {
     use super::*;
 
-    // spec: SPIKE-138 (spike only)
+    // SPIKE-138 (spike only; not a spec requirement)
     #[test]
     fn a_narrow_rim_is_breached_a_wide_shallow_pit_filled() {
         // a 9 x 3 strip, outlet at x = 0: a deep pit behind a one-cell rim
@@ -369,7 +369,7 @@ mod tests {
         assert!((0..w * h).all(|p| level[p] <= d[p] + TOL));
     }
 
-    // spec: SPIKE-138 (spike only)
+    // SPIKE-138 (spike only; not a spec requirement)
     #[test]
     fn a_deep_pit_behind_a_high_rim_stays_under_both_caps() {
         let (w, h) = (9usize, 3usize);
@@ -396,7 +396,7 @@ mod tests {
         assert!(st.breached >= 1);
     }
 
-    // spec: SPIKE-138 (spike only)
+    // SPIKE-138 (spike only; not a spec requirement)
     #[test]
     fn an_intended_depression_stays() {
         let (w, h) = (5usize, 5usize);
