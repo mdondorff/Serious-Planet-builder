@@ -1,0 +1,14 @@
+# relief: p50 / p90 of max - min over 9 x 9 H1 cells of z_s, land in the box (cells 205..815); land mean. The k_dt forms' fields were deleted under lead #149b (disk); their values are in results.md only.
+f1-t-c1 relief p50 55 p90 143 m; land mean 101 m
+f1-t-d02u1.25 relief p50 43 p90 109 m; land mean 107 m
+f1-t-d02u1.5 relief p50 44 p90 110 m; land mean 112 m
+f1-t-dif0.005 relief p50 50 p90 133 m; land mean 102 m
+f1-t-dif0.01 relief p50 47 p90 126 m; land mean 102 m
+f1-t-dif02 relief p50 43 p90 116 m; land mean 102 m
+r1h-t-c1 relief p50 291 p90 899 m; land mean 484 m
+r1h-t-d02u1.25 relief p50 251 p90 803 m; land mean 490 m
+r1h-t-d02u1.5 relief p50 251 p90 802 m; land mean 494 m
+r1h-t-d02u4 relief p50 253 p90 807 m; land mean 538 m
+r1h-t-dif0.005 relief p50 276 p90 864 m; land mean 485 m
+r1h-t-dif0.01 relief p50 266 p90 839 m; land mean 485 m
+r1h-t-dif02 relief p50 251 p90 807 m; land mean 485 m

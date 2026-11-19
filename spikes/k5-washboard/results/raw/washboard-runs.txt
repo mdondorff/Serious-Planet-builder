@@ -264,3 +264,83 @@ f1-t-dinf: 7,854 straight-reach channel cells (coherence >= 0.6); profiles 48 L 
   c1 reach 20-30 deg:  1588 cells; band share p50 0.068 p90 0.154; band RMS p50 0.91 p90 2.59 m
   c1 reach 30-40 deg:  1515 cells; band share p50 0.118 p90 0.287; band RMS p50 1.07 p90 3.17 m
   c1 reach 40-45 deg:   973 cells; band share p50 0.203 p90 0.415; band RMS p50 1.17 p90 3.58 m
+
+== wash2-r1h-t-d02k1.5.txt
+r1h-t-d02k1.5: 5,712 straight-reach channel cells (coherence >= 0.6); profiles 48 L cells along the reach at offsets 0.4-2.0 km
+  c1 reach  0-10 deg:  1456 cells; band share p50 0.030 p90 0.071; band RMS p50 0.58 p90 2.89 m
+  c1 reach 10-20 deg:  1315 cells; band share p50 0.030 p90 0.067; band RMS p50 0.61 p90 2.62 m
+  c1 reach 20-30 deg:  1251 cells; band share p50 0.035 p90 0.086; band RMS p50 0.64 p90 2.59 m
+  c1 reach 30-40 deg:  1103 cells; band share p50 0.052 p90 0.148; band RMS p50 0.64 p90 2.39 m
+  c1 reach 40-45 deg:   587 cells; band share p50 0.081 p90 0.212; band RMS p50 0.53 p90 2.30 m
+
+== wash2-r1h-t-d02k2.txt
+r1h-t-d02k2: 5,650 straight-reach channel cells (coherence >= 0.6); profiles 48 L cells along the reach at offsets 0.4-2.0 km
+  c1 reach  0-10 deg:  1440 cells; band share p50 0.030 p90 0.076; band RMS p50 0.60 p90 2.76 m
+  c1 reach 10-20 deg:  1307 cells; band share p50 0.031 p90 0.073; band RMS p50 0.60 p90 2.43 m
+  c1 reach 20-30 deg:  1225 cells; band share p50 0.035 p90 0.088; band RMS p50 0.67 p90 2.53 m
+  c1 reach 30-40 deg:  1148 cells; band share p50 0.047 p90 0.135; band RMS p50 0.69 p90 2.55 m
+  c1 reach 40-45 deg:   530 cells; band share p50 0.065 p90 0.184; band RMS p50 0.65 p90 2.33 m
+
+== wash2-r1h-t-d02k3.txt
+r1h-t-d02k3: 5,498 straight-reach channel cells (coherence >= 0.6); profiles 48 L cells along the reach at offsets 0.4-2.0 km
+  c1 reach  0-10 deg:  1337 cells; band share p50 0.031 p90 0.070; band RMS p50 0.56 p90 2.36 m
+  c1 reach 10-20 deg:  1322 cells; band share p50 0.031 p90 0.069; band RMS p50 0.53 p90 2.32 m
+  c1 reach 20-30 deg:  1177 cells; band share p50 0.036 p90 0.080; band RMS p50 0.56 p90 2.01 m
+  c1 reach 30-40 deg:  1105 cells; band share p50 0.044 p90 0.119; band RMS p50 0.53 p90 2.09 m
+  c1 reach 40-45 deg:   557 cells; band share p50 0.057 p90 0.187; band RMS p50 0.47 p90 1.72 m
+
+== wash2-f1-t-d02k1.5.txt
+f1-t-d02k1.5: 7,817 straight-reach channel cells (coherence >= 0.6); profiles 48 L cells along the reach at offsets 0.4-2.0 km
+  c1 reach  0-10 deg:  1910 cells; band share p50 0.026 p90 0.058; band RMS p50 0.26 p90 0.63 m
+  c1 reach 10-20 deg:  1817 cells; band share p50 0.026 p90 0.056; band RMS p50 0.27 p90 0.63 m
+  c1 reach 20-30 deg:  1539 cells; band share p50 0.028 p90 0.058; band RMS p50 0.27 p90 0.59 m
+  c1 reach 30-40 deg:  1562 cells; band share p50 0.039 p90 0.096; band RMS p50 0.27 p90 0.57 m
+  c1 reach 40-45 deg:   989 cells; band share p50 0.060 p90 0.151; band RMS p50 0.23 p90 0.54 m
+
+== wash2-f1-t-d02k2.txt
+f1-t-d02k2: 7,765 straight-reach channel cells (coherence >= 0.6); profiles 48 L cells along the reach at offsets 0.4-2.0 km
+  c1 reach  0-10 deg:  1883 cells; band share p50 0.027 p90 0.059; band RMS p50 0.26 p90 0.58 m
+  c1 reach 10-20 deg:  1818 cells; band share p50 0.026 p90 0.056; band RMS p50 0.27 p90 0.58 m
+  c1 reach 20-30 deg:  1571 cells; band share p50 0.028 p90 0.059; band RMS p50 0.26 p90 0.56 m
+  c1 reach 30-40 deg:  1541 cells; band share p50 0.036 p90 0.086; band RMS p50 0.24 p90 0.49 m
+  c1 reach 40-45 deg:   952 cells; band share p50 0.051 p90 0.135; band RMS p50 0.22 p90 0.46 m
+
+== wash2-r1h-t-d02u1.25.txt
+r1h-t-d02u1.25: 5,903 straight-reach channel cells (coherence >= 0.6); profiles 48 L cells along the reach at offsets 0.4-2.0 km
+  c1 reach  0-10 deg:  1499 cells; band share p50 0.028 p90 0.072; band RMS p50 0.51 p90 2.49 m
+  c1 reach 10-20 deg:  1324 cells; band share p50 0.030 p90 0.067; band RMS p50 0.54 p90 2.54 m
+  c1 reach 20-30 deg:  1250 cells; band share p50 0.035 p90 0.089; band RMS p50 0.59 p90 2.71 m
+  c1 reach 30-40 deg:  1178 cells; band share p50 0.060 p90 0.168; band RMS p50 0.58 p90 2.65 m
+  c1 reach 40-45 deg:   652 cells; band share p50 0.085 p90 0.256; band RMS p50 0.63 p90 2.58 m
+
+== wash2-r1h-t-dif0.01.txt
+r1h-t-dif0.01: 5,667 straight-reach channel cells (coherence >= 0.6); profiles 48 L cells along the reach at offsets 0.4-2.0 km
+  c1 reach  0-10 deg:  1417 cells; band share p50 0.036 p90 0.074; band RMS p50 0.91 p90 4.49 m
+  c1 reach 10-20 deg:  1310 cells; band share p50 0.039 p90 0.077; band RMS p50 0.94 p90 4.44 m
+  c1 reach 20-30 deg:  1179 cells; band share p50 0.044 p90 0.103; band RMS p50 0.96 p90 4.34 m
+  c1 reach 30-40 deg:  1147 cells; band share p50 0.078 p90 0.191; band RMS p50 1.06 p90 4.25 m
+  c1 reach 40-45 deg:   614 cells; band share p50 0.099 p90 0.259; band RMS p50 1.25 p90 4.56 m
+
+== wash2-r1h-t-dif0.005.txt
+r1h-t-dif0.005: 5,487 straight-reach channel cells (coherence >= 0.6); profiles 48 L cells along the reach at offsets 0.4-2.0 km
+  c1 reach  0-10 deg:  1402 cells; band share p50 0.041 p90 0.080; band RMS p50 1.34 p90 6.13 m
+  c1 reach 10-20 deg:  1298 cells; band share p50 0.046 p90 0.085; band RMS p50 1.33 p90 6.54 m
+  c1 reach 20-30 deg:  1213 cells; band share p50 0.056 p90 0.121; band RMS p50 1.43 p90 6.26 m
+  c1 reach 30-40 deg:  1046 cells; band share p50 0.082 p90 0.192; band RMS p50 1.69 p90 6.11 m
+  c1 reach 40-45 deg:   528 cells; band share p50 0.113 p90 0.272; band RMS p50 1.88 p90 6.33 m
+
+== wash2-f1-t-dif0.01.txt
+f1-t-dif0.01: 7,789 straight-reach channel cells (coherence >= 0.6); profiles 48 L cells along the reach at offsets 0.4-2.0 km
+  c1 reach  0-10 deg:  1875 cells; band share p50 0.032 p90 0.063; band RMS p50 0.39 p90 1.13 m
+  c1 reach 10-20 deg:  1828 cells; band share p50 0.034 p90 0.065; band RMS p50 0.43 p90 1.16 m
+  c1 reach 20-30 deg:  1580 cells; band share p50 0.042 p90 0.085; band RMS p50 0.45 p90 1.16 m
+  c1 reach 30-40 deg:  1565 cells; band share p50 0.067 p90 0.161; band RMS p50 0.47 p90 1.34 m
+  c1 reach 40-45 deg:   941 cells; band share p50 0.115 p90 0.242; band RMS p50 0.46 p90 1.28 m
+
+== wash2-f1-t-dif0.005.txt
+f1-t-dif0.005: 7,792 straight-reach channel cells (coherence >= 0.6); profiles 48 L cells along the reach at offsets 0.4-2.0 km
+  c1 reach  0-10 deg:  1932 cells; band share p50 0.038 p90 0.070; band RMS p50 0.52 p90 1.46 m
+  c1 reach 10-20 deg:  1810 cells; band share p50 0.042 p90 0.079; band RMS p50 0.58 p90 1.69 m
+  c1 reach 20-30 deg:  1546 cells; band share p50 0.051 p90 0.112; band RMS p50 0.64 p90 1.67 m
+  c1 reach 30-40 deg:  1545 cells; band share p50 0.087 p90 0.210; band RMS p50 0.70 p90 2.07 m
+  c1 reach 40-45 deg:   959 cells; band share p50 0.139 p90 0.306; band RMS p50 0.70 p90 2.02 m

@@ -81,7 +81,7 @@ D-infinity: F1's z_s and S0 are bit-equal on 1 and 8 threads (CON-14); K5 takes 
 - Defaults unchanged until the lead's reading and the owner's look.
 
 ## Addendum 2026-11-19: relief compensation, the owner's two readings (lead #149 to #150)
-Relief compensation for `--k5-diffuse 0.02` (relief p50 / p90 of max - min over 9 x 9 H1 cells; band share on 40-45 deg reaches):
+Relief compensation for `--k5-diffuse 0.02` (relief p50 / p90 of max - min over 9 x 9 H1 cells, `raw/relief.txt` for the forms whose fields are kept; band share on 40-45 deg reaches, `raw/washboard-runs.txt`):
 
 | Window | Form | Relief p50 / p90 | Land mean | Band share | Look |
 |---|---|---|---|---|---|
@@ -113,7 +113,7 @@ Owner's reading (a): diffuse 0.02 diffuses valley walls into the carved channels
 | diffuse 0.01 | 2,519 | 33 | 17.3 km3 |
 | diffuse 0.005 | 2,159 | 31 | 7.7 km3 |
 
-F1 stays at 7-8 deep basins in every form.
+F1 has 7-8 deep basins left without compensation and 3-6 with the k_dt and u_over_k forms.
 
 Owner's reading (b): the ~4.9 km blocks at raised k_dt match the 2,048-per-face lattice's bilinear hinges (12,288 / 2,048 = 6 H1 cells = 4.886 km). Not confirmed (`raw/hinge.txt`, `raw/hinge.py.txt`):
 - the mean |second difference| of z_b, z_b_in and z_s, binned by the global H1 index mod 6, varies by at most 1 % across the phases (max / mean 1.00-1.01), today and at k_dt x 1.5;
