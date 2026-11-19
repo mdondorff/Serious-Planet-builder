@@ -37,7 +37,7 @@ Per-spike register sections of M5 and M6: `docs/archive/M6/spikes.md`. Closed sp
 | SPIKE-130 | Basin topology (G1e) | closed 11-17: stable; KS1 lake share 0.2-20 % (#160) | `spikes/basins-g1e/results/results.md` |
 | SPIKE-132 | KV and KC on the fixture (G1f) | closed 11-17: budget kept; fill clamp, 2 exceptions gaps; #162 shortfall (add. 5) | `spikes/kv-kc/results/results.md` |
 | SPIKE-140 | Base noise and M1's mountain structure (#167) | closed 11-19: unturned lattice; no relief hierarchy, 40 % pits | `spikes/base-noise/results/results.md` |
-| SPIKE-139 | K5 washboard (#148) | results 11-19: no hillslope term | `spikes/k5-washboard/results/results.md` |
+| SPIKE-139 | K5 washboard (#148) | closed 11-19: no hillslope term | `spikes/k5-washboard/results/results.md` |
 | SPIKE-138 | Base drained at both scales (A+) | closed 11-18: G-DRAIN 0-0.5 % | `spikes/drain-aplus/results/results.md` |
 | SPIKE-136 | Drained L hand-over | closed 11-17: KH h4c, then h5 | `spikes/handover/results/results.md` |
 | SPIKE-135 | Repair debt of S0 by origin | closed 11-17: mostly the L read of z_s | `spikes/repair-debt/results/results.md` |
