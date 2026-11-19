@@ -1881,6 +1881,12 @@ fn main() -> Result<(), String> {
         return Err("--k5-diffuse C needs 0 <= C <= 0.25".into());
     }
     planet_generators::bake::round::K5_DIFFUSE.store(k5_diffuse.to_bits(), std::sync::atomic::Ordering::Relaxed);
+    // SPIKE-139: `--k5-parity C` (default 0, off): damps the 814 m checkerboard mode after each K5 round (round::K5_PARITY; spike only)
+    let k5_parity: f64 = value(&args, "--k5-parity").map_or(Ok(0.0), str::parse).map_err(|_| "--k5-parity C")?;
+    if !(0.0..=2.0).contains(&k5_parity) {
+        return Err("--k5-parity C needs 0 <= C <= 2".into());
+    }
+    planet_generators::bake::round::K5_PARITY.store(k5_parity.to_bits(), std::sync::atomic::Ordering::Relaxed);
     if zs_read != "c1" && !base_today {
         return Err("--zs-read contour needs --h1 k6".into());
     }
@@ -3152,6 +3158,7 @@ fn main() -> Result<(), String> {
             ("zs-read", zs_read.to_string()),
             ("k5-route", k5_route.to_string()),
             ("k5-diffuse", k5_diffuse.to_string()),
+            ("k5-parity", k5_parity.to_string()),
             ("ks", ks_mode.to_string()),
             ("h1-lakes", h1_lakes.to_string()),
             ("regions", regions.to_string()),

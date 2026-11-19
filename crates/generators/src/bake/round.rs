@@ -98,6 +98,35 @@ pub fn catchment_round(inp: &mut CatchmentInputs, p: &CarveParams, steps: usize)
 /// z += c (sum of the 4 orthogonal neighbours - 4 z) on land cells that are not outlets and have all 4 neighbours (Jacobi, so the bits do not depend on threads).
 pub static K5_DIFFUSE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// SPIKE-139 (spike branch only): a damping of the 814 m checkerboard (odd-even) mode in K5, the f64 bits of `c` (0: off). After each round's steps, `p.reroute_every`
+/// Jacobi sweeps of z -= c P, P = (mean of the 4 diagonal neighbours - 2 mean of the 4 orthogonal ones + z) / 4: zero on any quadratic surface, the amplitude on a checkerboard;
+/// on land cells that are not outlets and have all 8 neighbours.
+pub static K5_PARITY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn parity_round(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, c: f64) {
+    let n = grid.len();
+    for _ in 0..p.reroute_every {
+        let old = z.to_vec();
+        for q in 0..n {
+            if outlet[q] || !grid.is_active(q) || old[q] <= p.sea_level {
+                continue;
+            }
+            let (mut orth, mut diag, mut all) = (0.0, 0.0, true);
+            for d in 0..8 {
+                match grid.neighbour(q, d) {
+                    Some(r) if d < 4 => orth += old[r],
+                    Some(r) => diag += old[r],
+                    None => all = false,
+                }
+            }
+            if all {
+                let pm = (diag / 4.0 - 2.0 * orth / 4.0 + old[q]) / 4.0;
+                z[q] = (old[q] - c * pm).max(p.sea_level + p.epsilon);
+            }
+        }
+    }
+}
+
 fn diffuse_round(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, c: f64) {
     let n = grid.len();
     for _ in 0..p.reroute_every {
@@ -399,11 +428,15 @@ pub fn solve_rounds_with(
     let taper = taper_of(z, p, drivers);
     let dinf = RECEIVER_DINF.load(std::sync::atomic::Ordering::Relaxed);
     let diffuse = f64::from_bits(K5_DIFFUSE.load(std::sync::atomic::Ordering::Relaxed));
+    let parity = f64::from_bits(K5_PARITY.load(std::sync::atomic::Ordering::Relaxed));
     for round in 0..rounds {
         if dinf {
             dinf_round(grid, z, outlet, p, seed, drivers, &taper);
             if diffuse > 0.0 {
                 diffuse_round(grid, z, outlet, p, diffuse);
+            }
+            if parity > 0.0 {
+                parity_round(grid, z, outlet, p, parity);
             }
             if p.round_f32 {
                 super::carve::narrow_f32_checked(z, p.epsilon);
@@ -428,6 +461,9 @@ pub fn solve_rounds_with(
         }
         if diffuse > 0.0 {
             diffuse_round(grid, z, outlet, p, diffuse);
+        }
+        if parity > 0.0 {
+            parity_round(grid, z, outlet, p, parity);
         }
         if p.round_f32 {
             super::carve::narrow_f32_checked(z, p.epsilon);
