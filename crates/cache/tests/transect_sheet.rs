@@ -76,6 +76,16 @@ fn an_open_side_a_flat_line_and_the_glo30_profile() {
     let t = &parse_transects(TRANSECTS).unwrap()[0];
     assert_eq!(stale(t, Some(&v)), Some(true), "a depth of 0 m on a transect of 300 m is stale");
     assert_eq!(stale(t, None), None, "no S0, no verdict");
+    // with the pick's depth stored: stale against it, not against the relief; a pick without a valley gives no verdict
+    let with = parse_transects(
+        &TRANSECTS.replace("half_km\n", "half_km,s0_depth_m\n").replace(",2.8\n", ",2.8,20.0\n").replace(",3.0\n", ",3.0,0.0\n"),
+    )
+    .unwrap();
+    assert_eq!((with[0].s0_depth_m, with[1].s0_depth_m), (Some(20.0), Some(0.0)));
+    let shallow = Valley { depth_m: 3.0, ..v };
+    assert_eq!(stale(&with[0], Some(&shallow)), Some(false), "3 m is 15 % of the pick's 20 m");
+    assert_eq!(stale(&with[0], Some(&v)), Some(true), "0 m is under 10 % of 20 m");
+    assert_eq!(stale(&with[1], Some(&v)), None, "a pick depth of 0 m has nothing to lose");
     let dem = parse_dem(DEM).unwrap();
     let d = &dem[&("t".to_string(), "T1".to_string())];
     assert_eq!((d.tile.as_str(), d.samples.len()), ("N00E000", 5));

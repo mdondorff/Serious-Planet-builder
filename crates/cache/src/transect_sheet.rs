@@ -1,6 +1,6 @@
 //! The cross-section sheet (BUILD-061, `cargo xtask transects --chain DIR`): per river transect of SPIKE-119 inside a chain directory's window, the start surface `S0` and the chain's
 //! output (`final.f32`) across the river, and the GLO-30 valley matched to it, on one vertical scale per panel; per profile the valley depth and its width at 10 m and 50 m above the
-//! river level. It reads BUILD-060's chain layout ([`crate::stage_sheet`]) and two data files: the transects (face L cells) and the matched GLO-30 profiles (derived data, with the
+//! river level, and marks a transect stale when `S0`'s depth on it fell under 10 % of its depth at the pick. It reads BUILD-060's chain layout ([`crate::stage_sheet`]) and two data files: the transects (face L cells) and the matched GLO-30 profiles (derived data, with the
 //! Copernicus notice).
 //!
 //! Definitions (one per measure):
@@ -24,7 +24,7 @@ pub const STEP_CELLS: f64 = 0.5;
 pub const RIVER_SEARCH_M: f64 = 250.0;
 /// The two widths' heights above the river level, in metres.
 pub const WIDTH_HEIGHTS_M: [f64; 2] = [10.0, 50.0];
-/// A transect is stale when `S0`'s valley depth on it is under this share of the relief stored with it (lead #150a: the start surface changed under a fixed transect).
+/// A transect is stale when `S0`'s valley depth on it is under this share of its depth at the pick (lead #150a: the start surface changed under a fixed transect).
 pub const STALE_SHARE: f64 = 0.1;
 
 /// The transects (SPIKE-119's rule, re-picked on g1f8's prototype `S0`, lead #150a), face L cells.
@@ -42,6 +42,8 @@ pub struct Transect {
     pub river: (f64, f64),
     pub area_km2: f64,
     pub relief_m: f64,
+    /// `S0`'s valley depth on the transect when it was picked (the optional `s0_depth_m` column), by this module's measure.
+    pub s0_depth_m: Option<f64>,
 }
 
 /// The matched GLO-30 profile of a transect: the tile, its relief and drained area, and the samples `(d, z - z_river)` in metres.
@@ -95,11 +97,12 @@ fn data_lines(text: &str) -> impl Iterator<Item = (usize, &str)> {
     text.lines().enumerate().filter(|(_, l)| !l.trim().is_empty() && !l.starts_with('#'))
 }
 
-/// Parses the transects' csv (`window,id,face,seed,gx0,gy0,gx1,gy1,river_gx,river_gy,area_km2,area_scope,relief_m,half_km`).
+/// Parses the transects' csv (`window,id,face,seed,gx0,gy0,gx1,gy1,river_gx,river_gy,area_km2,area_scope,relief_m,half_km`, optionally `s0_depth_m`).
 pub fn parse_transects(text: &str) -> Result<Vec<Transect>, String> {
     let mut lines = data_lines(text);
     let (_, header) = lines.next().ok_or("the transects file is empty")?;
     let c = columns(header, &["window", "id", "face", "gx0", "gy0", "gx1", "gy1", "river_gx", "river_gy", "area_km2", "relief_m"])?;
+    let depth_col = columns(header, &["s0_depth_m"]).ok().map(|v| v[0]);
     lines
         .map(|(n, l)| {
             let f: Vec<&str> = l.split(',').map(str::trim).collect();
@@ -117,6 +120,15 @@ pub fn parse_transects(text: &str) -> Result<Vec<Transect>, String> {
                 river: (num(7)?, num(8)?),
                 area_km2: num(9)?,
                 relief_m: num(10)?,
+                s0_depth_m: match depth_col {
+                    Some(k) => Some(
+                        f.get(k)
+                            .ok_or(format!("transects line {}: too few fields", n + 1))?
+                            .parse()
+                            .map_err(|_| format!("transects line {}: '{}' is not a number", n + 1, f[k]))?,
+                    ),
+                    None => None,
+                },
             })
         })
         .collect()
@@ -147,9 +159,14 @@ pub fn parse_dem(text: &str) -> Result<BTreeMap<(String, String), DemProfile>, S
     Ok(out)
 }
 
-/// Whether a transect is stale on this run: `S0`'s valley depth under [`STALE_SHARE`] of the transect's stored relief (`None` without `S0`).
+/// Whether a transect is stale on this run: `S0`'s valley depth under [`STALE_SHARE`] of its depth at the pick (`s0_depth_m`; the stored relief when the column is absent).
+/// `None` without `S0`, and for a transect picked with no valley (a pick depth of 0: nothing to lose).
 pub fn stale(t: &Transect, s0: Option<&Valley>) -> Option<bool> {
-    s0.map(|v| v.depth_m < STALE_SHARE * t.relief_m)
+    let reference = t.s0_depth_m.unwrap_or(t.relief_m);
+    if reference <= 0.0 {
+        return None;
+    }
+    s0.map(|v| v.depth_m < STALE_SHARE * reference)
 }
 
 /// The chain's face: the first field of its `switch window F,...` line.
@@ -377,7 +394,7 @@ pub fn compose(m: &Manifest, panels: &[Panel]) -> Rgba {
 /// line ending in `stale` when the transect is stale ([`stale`]).
 pub fn table(m: &Manifest, panels: &[Panel]) -> String {
     let mut t = String::from(
-        "# label window id profile river_m depth_m width10_m width50_m (BUILD-061; a width 'N open' is at least N m: one side never rises that high; 'stale': S0's depth is under 10 % of the transect's stored relief)\n",
+        "# label window id profile river_m depth_m width10_m width50_m (BUILD-061; a width 'N open' is at least N m: one side never rises that high; 'stale': S0's depth is under 10 % of its depth at the pick)\n",
     );
     // the label as one token: its spaces as '-', '-' when there is none
     let label = if m.label.is_empty() { "-".to_string() } else { m.label.replace(char::is_whitespace, "-") };
