@@ -257,3 +257,10 @@ f1-k5: valley-side cells 9,488,618 (38.6 % of the box)
   s0 valley  0-15 deg:  970 windows; 600-1300 m share of the 400-4000 m power p50 0.068 p90 0.144; band RMS p50 1.75 p90 4.57 m
   s0 valley 15-30 deg:  727 windows; 600-1300 m share of the 400-4000 m power p50 0.079 p90 0.159; band RMS p50 1.86 p90 4.77 m
   s0 valley 30-45 deg: 1001 windows; 600-1300 m share of the 400-4000 m power p50 0.079 p90 0.156; band RMS p50 1.91 p90 5.03 m
+== f1-t-dinf (washboard2.py)
+f1-t-dinf: 7,854 straight-reach channel cells (coherence >= 0.6); profiles 48 L cells along the reach at offsets 0.4-2.0 km
+  c1 reach  0-10 deg:  1934 cells; band share p50 0.042 p90 0.074; band RMS p50 0.67 p90 1.86 m
+  c1 reach 10-20 deg:  1844 cells; band share p50 0.048 p90 0.086; band RMS p50 0.78 p90 2.27 m
+  c1 reach 20-30 deg:  1588 cells; band share p50 0.068 p90 0.154; band RMS p50 0.91 p90 2.59 m
+  c1 reach 30-40 deg:  1515 cells; band share p50 0.118 p90 0.287; band RMS p50 1.07 p90 3.17 m
+  c1 reach 40-45 deg:   973 cells; band share p50 0.203 p90 0.415; band RMS p50 1.17 p90 3.58 m
