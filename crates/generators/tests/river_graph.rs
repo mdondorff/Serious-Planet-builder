@@ -433,6 +433,14 @@ fn a_two_vertex_reachs_rise_over_budget_excuses_the_rise_at_its_down_end() {
     reach_mut(&mut h, cell(1, 1)).attrs.bed = vec![18, 19, 0];
     reach_mut(&mut h, cell(1, 1)).exceptions = vec![Exception { reason: Reason::RiseOverBudget, value: 0.5 }];
     assert!(found(&h, &|v| matches!(v, Violation::BedRise { vertex: 1, .. })), "three vertices: the marker is still required");
+    // an H1 reach is not covered
+    let mut k = base();
+    let r = reach_mut(&mut k, cell(0, 0));
+    r.attrs.bed = vec![17, 18];
+    r.exceptions = vec![Exception { reason: Reason::RiseOverBudget, value: 0.5 }];
+    r.level = Level::H1;
+    let rid = r.id;
+    assert!(found(&k, &|v| matches!(v, Violation::BedRise { reach, vertex: 1 } if *reach == rid)), "an H1 reach still needs its marker");
 }
 
 // spec: TEST-140
