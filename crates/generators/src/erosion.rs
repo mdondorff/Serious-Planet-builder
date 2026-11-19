@@ -22,8 +22,6 @@ use crate::global::{
     read_direction, read_elevation_c1, read_elevation_c1_cached, LatticeSource, StencilCache, GLOBAL_VERSION, MAX_ELEVATION_M,
     MIN_ELEVATION_M, READER_C1_VERSION,
 };
-#[cfg(test)]
-use crate::height::layer_noise;
 use crate::height::{layer_noise_bounds_t, layer_noise_t, turned_noise, HeightField};
 use crate::terrain::scan_base;
 
