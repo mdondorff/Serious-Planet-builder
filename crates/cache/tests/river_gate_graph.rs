@@ -2,7 +2,7 @@
 //! confluence C (103, 203), which runs to the sea outlet O (106, 203); a tributary T from S3 (104, 207) ends at a `trib_junction` J on C -> O's vertex (105, 203).
 use planet_cache::river_gate::{measure, GateInput, GateParams};
 use planet_cache::river_gate_graph::{
-    agreement, budget_field, budget_report, graph_report, partition_report, G2Input, G2Report, GateClass, StageField, Window,
+    agreement, budget_field, budget_report, graph_report, partition_report, BudgetReport, G2Input, G2Report, GateClass, StageField, Window,
 };
 use planet_generators::bake::river_graph::*;
 use planet_generators::bake::Grid;
@@ -355,7 +355,7 @@ fn the_gate_prints_g2_columns_with_their_classes_only_when_given_g2_inputs() {
     // B's row: no G2 input, no G2 column, no classes line
     let b = run(None);
     assert!(b.g2.is_none() && b.classes_line().is_none() && !b.fields_line().contains("g_nodes="));
-    let input = G2Input { window: W, graph: Some(&g), stages: None, residual_records: None, partition: Some((&g, &g)) };
+    let input = G2Input { window: W, graph: Some(&g), stages: None, residual_records: None, partition: Some((&g, &g)), kc_patches: None };
     let rg = run(Some(&input));
     let line = rg.fields_line();
     assert!(line.contains(" g_nodes=6 ") && line.contains(" part_first=identical") && line.contains(" agree1_km2=1 "), "{line}");
@@ -388,7 +388,7 @@ fn the_gate_prints_g2_columns_with_their_classes_only_when_given_g2_inputs() {
         represented: Represented::ProtectedSurface,
         owner: Domain::Landmass,
     }];
-    let input_k = G2Input { window: W, graph: Some(&gk), stages: None, residual_records: None, partition: None };
+    let input_k = G2Input { window: W, graph: Some(&gk), stages: None, residual_records: None, partition: None, kc_patches: None };
     let outlet_p = grid.outlets(&zp, 0.0);
     let rk = measure(
         &GateInput {
@@ -513,4 +513,81 @@ fn the_runs_own_trunks_are_its_graphs_h1_reaches_at_their_h1_cell_centres_cut_at
     assert_eq!(t.len(), 2, "the L reach is no trunk");
     assert_eq!(t[0], vec![(11.5, 11.5), (19.5, 19.5)]);
     assert_eq!(t[1], vec![(19.5, 19.5), (27.5, 19.5)], "cut at the first vertex outside the window");
+}
+
+// spec: BUILD-060
+#[test]
+fn each_stages_deep_lowering_kc_patches_and_the_spectrum_bars_are_reported() {
+    use planet_cache::river_gate_graph::{read_kc_patches, spectrum_bars, BETA_MAX, BETA_MIN, OVER_CUT_M};
+    // lead #172: a stage's cells lowered by more than 50 m (the field's 0.1 m steps: 500 is exactly 50 m and not counted)
+    let budget = vec![50.0; 4];
+    let all = vec![true; 4];
+    let kv = StageField { name: "kv".into(), lower: vec![501, 500, 10, 0], fill: None };
+    let r = budget_report(&[kv], &budget, &all, &all, None, None);
+    assert_eq!((OVER_CUT_M, r.stages[0].over_cut), (50.0, 1));
+    let cols = G2Report { budget: Some(BudgetReport { kc_patches: Some((3, 2.5e9)), ..r }), ..G2Report::default() }.columns();
+    let get = |n: &str| cols.iter().find(|c| c.0 == n).map(|c| c.1.clone());
+    assert_eq!(
+        (get("b_kv_over50"), get("b_kc_patches"), get("b_kc_patch_km3")),
+        (Some("1".into()), Some("3".into()), Some("2.5000".into()))
+    );
+    // the patch file: a header and one line per patch; a missing file is none; a bad line is refused naming the file
+    let dir = std::env::temp_dir().join(format!("river-gate-kc-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    assert_eq!(read_kc_patches(&dir).unwrap(), None);
+    std::fs::write(dir.join("kc-patches.csv"), "cells,volume_m3\n12,1000.5\n3,20\n\n").unwrap();
+    assert_eq!(read_kc_patches(&dir).unwrap(), Some((2, 1020.5)));
+    std::fs::write(dir.join("kc-patches.csv"), "cells,volume_m3\n12\n").unwrap();
+    assert!(read_kc_patches(&dir).unwrap_err().contains("kc-patches.csv"));
+    let _ = std::fs::remove_dir_all(&dir);
+    // the spectrum's benchmark range: inside passes both bars; steeper than the range fails the first; rougher fails the second
+    let pass = |beta: f64| spectrum_bars(beta).iter().map(|b| b.pass()).collect::<Vec<_>>();
+    assert_eq!((pass(-3.5), pass(BETA_MIN - 0.01), pass(BETA_MAX + 0.01)), (vec![true, true], vec![false, true], vec![true, false]));
+    assert_eq!((pass(BETA_MIN), pass(BETA_MAX)), (vec![true, true], vec![true, true]), "the range's ends pass");
+}
+
+// spec: BUILD-060, TEST-137
+#[test]
+fn the_ridge_lowering_is_measured_against_s_kh_when_the_stages_hold_kh_and_against_s0_beside_it() {
+    let grid = Grid::new(12, 12, DX);
+    // a ridge along x = 5, falling 10 m a cell to each side; the surface 30 m lower on the crest, all of it KH's lowering
+    let start: Vec<f64> = (0..144).map(|c| 200.0 - 10.0 * ((c % 12) as f64 - 5.0).abs()).collect();
+    let surface: Vec<f64> = (0..144).map(|c| start[c] - if c % 12 == 5 { 30.0 } else { 0.0 }).collect();
+    let all = vec![true; 144];
+    let outlet = grid.outlets(&surface, 0.0);
+    let kh = StageField { name: "kh".into(), lower: (0..144).map(|c| if c % 12 == 5 { 300 } else { 0 }).collect(), fill: None };
+    let stages = [kh];
+    let input = G2Input { window: W, graph: None, stages: Some(&stages), residual_records: None, partition: None, kc_patches: None };
+    let run = |g2: Option<&G2Input>| {
+        measure(
+            &GateInput {
+                grid: &grid,
+                start: &start,
+                surface: &surface,
+                outlet: &outlet,
+                inside: &all,
+                region: &all,
+                h1: &[],
+                seed: 7,
+                sea_level_m: 0.0,
+                outside_drains: false,
+                trunks: &[],
+                g2,
+            },
+            &GateParams::default(),
+        )
+    };
+    let r = run(Some(&input));
+    assert!(r.ridge_vs_kh);
+    assert_eq!((r.ridge.ridge_cells, r.ridge.lowered, r.ridge.lowering_p95_m), (12, 0, 0.0), "against S_KH nothing is lowered");
+    assert_eq!((r.ridge_s0.lowered, r.ridge_s0.lowering_p95_m), (12, 30.0), "against S0 the whole crest is");
+    let crest = r.bars().into_iter().find(|b| b.name == "bar_crest").expect("a crest bar");
+    assert!(crest.value == 0.0 && crest.limit == 15.0 && crest.at_most);
+    let line = r.fields_line();
+    assert!(line.contains(" ridge_ref=s_kh ") && line.contains(" ridge_s0_p95_m=30.00 ") && line.contains(" bar_crest=PASS"), "{line}");
+    // without a KH field the reference is the start
+    let b = run(None);
+    assert!(!b.ridge_vs_kh && b.ridge == b.ridge_s0 && b.ridge.lowered == 12);
+    assert!(b.lines().iter().any(|l| l.starts_with("RIVER-GATE ridges: 12 ridge cells")));
 }

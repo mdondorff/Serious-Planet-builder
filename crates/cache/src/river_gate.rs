@@ -6,13 +6,17 @@ use planet_generators::bake::route::{route_rules_filled, RoundRules, Routing, NO
 use planet_generators::bake::Grid;
 
 use crate::river_gate_graph::{
-    agreement, bars_line, budget_field, budget_report, g2_bars, graph_report, kept_interiors, kept_steps, partition_report, Bar, G2Input,
-    G2Report, CORRIDOR_MIN_PCT,
+    agreement, bars_line, budget_field, budget_report, g2_bars, graph_report, kept_interiors, kept_steps, partition_report, Bar,
+    BudgetReport, G2Input, G2Report, CORRIDOR_MIN_PCT,
 };
 use crate::river_suite::{
-    corridor_bar_m, measure_suite, network, trunk_burn, trunk_corridor, Network, Snap, SuiteInput, SuiteReport, TrunkReport, CORRIDOR_K,
-    NETWORK_KM2,
+    corridor_bar_m, measure_suite, network, ridge_cells, ridge_report, trunk_burn, trunk_corridor, Network, RidgeReport, Snap, SuiteInput,
+    SuiteReport, TrunkReport, CORRIDOR_K, NETWORK_KM2, SADDLE_KM2,
 };
+
+/// The crest rounding bar (lead #172; review B Q5): the p95 of the ridge lowering against `S_KH` at most this (metres), and on a mountain window (M1).
+pub const CREST_P95_MAX_M: f64 = 15.0;
+pub const CREST_P95_MAX_M_MOUNTAIN: f64 = 35.0;
 
 /// The routing's flood grade between cells (the spikes' 1e-3 m).
 pub const ROUTE_EPSILON_M: f64 = 1.0e-3;
@@ -50,6 +54,8 @@ pub struct GateParams {
     pub network_km2: [f64; 2],
     /// The corridor bar of the G2 bars (lead #168): the share of snapped k_c 2 trunk reaches passing, percent (95 on a mountain window).
     pub corridor_min_pct: f64,
+    /// The crest rounding bar: the p95 of the ridge lowering, metres (35 on a mountain window).
+    pub crest_max_m: f64,
 }
 
 impl Default for GateParams {
@@ -65,6 +71,7 @@ impl Default for GateParams {
             h1_cell_m: 814.0,
             network_km2: NETWORK_KM2,
             corridor_min_pct: CORRIDOR_MIN_PCT,
+            crest_max_m: CREST_P95_MAX_M,
         }
     }
 }
@@ -249,6 +256,11 @@ pub struct GateReport {
     pub networks: Vec<Network>,
     /// The G2 columns (BUILD-060), when the input names a graph, stages or a partition pair.
     pub g2: Option<G2Report>,
+    /// The ridge measures (BUILD-060, lead #172) on the start's ridge mask: against `S_KH` (the start less KH's stage field, reading 21; the start itself without one,
+    /// `ridge_vs_kh` false) and against the start `S0`.
+    pub ridge: RidgeReport,
+    pub ridge_s0: RidgeReport,
+    pub ridge_vs_kh: bool,
 }
 
 fn share(n: usize, of: usize) -> f64 {
@@ -318,6 +330,9 @@ impl GateReport {
             ("relief2_start_m", m(self.relief_2_start_m)),
             ("relief10_m", m(self.relief_10_m)),
             ("relief10_start_m", m(self.relief_10_start_m)),
+            // lead #172: the relief lost against the start (positive: lost), and the spectrum slope's change
+            ("relief2_lost_m", m(self.relief_2_start_m - self.relief_2_m)),
+            ("relief10_lost_m", m(self.relief_10_start_m - self.relief_10_m)),
             ("land_cells", c(self.land_cells)),
             ("lowered_cells", c(self.lowered_cells)),
             ("lowered_pct", pct(self.lowered_cells, self.land_cells)),
@@ -362,6 +377,7 @@ impl GateReport {
             ("spectrum_n", c(s.spectrum.n)),
             ("beta", r(s.spectrum.beta)),
             ("beta_start", r(s.spectrum_start.beta)),
+            ("beta_change", r(s.spectrum.beta - s.spectrum_start.beta)),
             ("trunk_reaches", c(self.trunk.reaches)),
             ("trunk_reaches_over", c(self.trunk.reaches_over)),
             ("trunk_reaches_over_pct", pct(self.trunk.reaches_over, self.trunk.reaches)),
@@ -398,7 +414,51 @@ impl GateReport {
             ];
             f.extend(names.iter().copied().zip(values));
         }
+        let (rk, r0) = (&self.ridge, &self.ridge_s0);
+        f.extend([
+            ("ridge_ref", if self.ridge_vs_kh { "s_kh" } else { "s0" }.to_string()),
+            ("ridge_cells", c(rk.ridge_cells)),
+            ("ridge_lowered", c(rk.lowered)),
+            ("ridge_lowered_pct", pct(rk.lowered, rk.ridge_cells)),
+            ("ridge_p95_m", m(rk.lowering_p95_m)),
+            ("ridge_max_m", m(rk.lowering_max_m)),
+            ("cut1_cells", c(rk.cut_through[0])),
+            ("saddles1", c(rk.saddles[0])),
+            ("cut5_cells", c(rk.cut_through[1])),
+            ("saddles5", c(rk.saddles[1])),
+            ("ridge_s0_lowered_pct", pct(r0.lowered, r0.ridge_cells)),
+            ("ridge_s0_p95_m", m(r0.lowering_p95_m)),
+            ("saddles1_s0", c(r0.saddles[0])),
+            ("saddles5_s0", c(r0.saddles[1])),
+        ]);
         f
+    }
+
+    /// The ridge line (BUILD-060, lead #172).
+    pub fn ridge_line(&self) -> String {
+        let part = |r: &RidgeReport| {
+            format!(
+                "{} lowered over {} m ({:.2} %), p95 lowering {:.2} m, largest {:.2} m; cut-through saddles at {} km2 {} ({} cells), at {} km2 {} ({} cells)",
+                r.lowered,
+                crate::river_suite::RIDGE_LOWERED_M,
+                share(r.lowered, r.ridge_cells),
+                r.lowering_p95_m,
+                r.lowering_max_m,
+                SADDLE_KM2[0],
+                r.saddles[0],
+                r.cut_through[0],
+                SADDLE_KM2[1],
+                r.saddles[1],
+                r.cut_through[1]
+            )
+        };
+        format!(
+            "RIVER-GATE ridges: {} ridge cells of the start; against {} {}; against S0 {}",
+            self.ridge.ridge_cells,
+            if self.ridge_vs_kh { "S_KH" } else { "S0 (no KH field)" },
+            part(&self.ridge),
+            part(&self.ridge_s0)
+        )
     }
 
     /// The network lines (BUILD-059): one per channel threshold.
@@ -531,6 +591,7 @@ impl GateReport {
         .chain(std::iter::once(self.trunk_line()))
         .chain(std::iter::once(self.corridor_line()))
         .chain(self.network_lines())
+        .chain(std::iter::once(self.ridge_line()))
         .chain(self.g2.iter().flat_map(|g| g.lines()))
         .chain(bars_line(&self.bars()))
         .collect()
@@ -544,7 +605,19 @@ impl GateReport {
         let corridor = self.trunk_corridors_snapped.get(k2).map_or(0.0, |t| share(t.reaches - t.reaches_over, t.reaches));
         // lead #166: the river steps in kept-basin interiors are counted apart from the uphill bar
         let k = g2.kept.clone().unwrap_or_default();
-        g2_bars(g2, share(self.suite.uphill_steps - k.uphill, self.suite.steps - k.steps), corridor, self.params.corridor_min_pct)
+        let mut out =
+            g2_bars(g2, share(self.suite.uphill_steps - k.uphill, self.suite.steps - k.steps), corridor, self.params.corridor_min_pct);
+        // lead #172: the spectrum slope within the benchmark's range
+        out.extend(crate::river_gate_graph::spectrum_bars(self.suite.spectrum.beta));
+        // lead #172: crest rounding, the p95 of the ridge lowering against S_KH
+        out.push(Bar {
+            name: "bar_crest".into(),
+            value: self.ridge.lowering_p95_m,
+            limit: self.params.crest_max_m,
+            at_most: true,
+            class: crate::river_gate_graph::GateClass::Preservation,
+        });
+        out
     }
 
     /// The corridor trunk line (BUILD-057, lead #158): per `k_c`, the reaches whose best route inside the corridor still rises more than the bar above its running
@@ -945,7 +1018,30 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
     let snap = Snap { node_radius: cell_h1, region: input.region };
     // The corridors route and snap on the water surface (DEC explorer-5): a cell under the sea counts at the sea level, as a riverbed at the coast sits there.
     let water: Vec<f64> = input.surface.iter().map(|&z| z.max(input.sea_level_m)).collect();
+    // lead #172: the ridge measures on the start's ridge mask, against S_KH (reading 21: the start less KH's stage field, 0.1 m steps) and against S0; each reference is
+    // routed as the surface is, for the channels it already has
+    let ridge = ridge_cells(g, input.start, input.inside, input.sea_level_m);
+    let ref_area = |r: &[f64]| {
+        let rz: Vec<f64> = (0..n).map(|c| if drained(c) { r[c].min(input.sea_level_m - 1.0) } else { r[c] }).collect();
+        areas(g, &route_rules_filled(g, &rz, &outlet, ROUTE_EPSILON_M, input.seed, 0.0, None, RoundRules::default()).0)
+    };
+    let area_s0 = ref_area(input.start);
+    let ridge_s0 = ridge_report(g, input.start, input.surface, &ridge, &area, &area_s0);
+    let kh = input.g2.as_ref().and_then(|x| x.stages).and_then(|st| st.iter().find(|s| s.name == "kh"));
+    let (ridge_kh, ridge_vs_kh) = match kh {
+        Some(kh) => {
+            let step = crate::river_gate_graph::STAGE_STEP_M;
+            let s_kh: Vec<f64> = (0..n)
+                .map(|c| input.start[c] - f64::from(kh.lower[c]) * step + kh.fill.as_ref().map_or(0.0, |f| f64::from(f[c]) * step))
+                .collect();
+            (ridge_report(g, &s_kh, input.surface, &ridge, &area, &ref_area(&s_kh)), true)
+        }
+        None => (ridge_s0.clone(), false),
+    };
     GateReport {
+        ridge: ridge_kh,
+        ridge_s0,
+        ridge_vs_kh,
         params: *params,
         river_cells,
         basins: pits.iter().filter(|p| is_basin(p)).count(),
@@ -1006,7 +1102,10 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
                     })
                     .unwrap_or_default(),
                 kept: kept.as_ref().map(|(k, b)| kept_steps(k, *b, &routing.receiver, &river, input.inside, input.surface)),
-                budget: x.stages.zip(budget.as_ref()).map(|(st, b)| budget_report(st, b, &land, input.inside, x.residual_records, x.graph)),
+                budget: x.stages.zip(budget.as_ref()).map(|(st, b)| BudgetReport {
+                    kc_patches: x.kc_patches,
+                    ..budget_report(st, b, &land, input.inside, x.residual_records, x.graph)
+                }),
                 partition: x.partition.map(|(a, b)| partition_report(a, b)),
             }
         }),

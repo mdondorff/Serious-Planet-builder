@@ -17,10 +17,10 @@ use planet_cache::pack::TileStore;
 use planet_cache::region_bake::{lattice_direction, region_front, RegionSpec, LOCAL_PER_REGIONAL};
 use planet_cache::river_gate::{
     border_inside, commit_differences, key_note, lay_store_ground, measure, raw_grid_arg, raw_grid_heights, Crossing, GateInput,
-    GateParams, LWindow, RawGrid, WindowIdentity, GRID_BORDER, GRID_CELL_M,
+    GateParams, LWindow, RawGrid, WindowIdentity, CREST_P95_MAX_M, CREST_P95_MAX_M_MOUNTAIN, GRID_BORDER, GRID_CELL_M,
 };
 use planet_cache::river_gate_graph::{
-    h1_trunks, read_graph, read_stages, read_surface, G2Input, Window, CORRIDOR_MIN_PCT, CORRIDOR_MIN_PCT_MOUNTAIN,
+    h1_trunks, read_graph, read_kc_patches, read_stages, read_surface, G2Input, Window, CORRIDOR_MIN_PCT, CORRIDOR_MIN_PCT_MOUNTAIN,
 };
 use planet_core::{Face, TangentWarp, Vec3};
 use planet_generators::global::{read_elevation_c1, GlobalSample, LatticeSource, ReadError};
@@ -142,6 +142,7 @@ fn main() -> Result<(), String> {
         "--surface",
         "--corridor-bar",
         "--start",
+        "--noise",
         "--dump-surface",
     ];
     let mut k = 0;
@@ -151,6 +152,13 @@ fn main() -> Result<(), String> {
         }
         k += 2;
     }
+    // reading 30 (lead #173): the base's band and crease noise with GEN-140's per-octave lattice turn (`turned`) or axis-aligned (`axis`, the default: main's bakes); the window's
+    // start surface and a store's reading follow it, so a turned run is measured on a turned start
+    let noise = value(&args, "--noise").unwrap_or("axis");
+    if !["axis", "turned"].contains(&noise) {
+        return Err(format!("--noise axis | turned, not '{noise}'"));
+    }
+    planet_generators::height::set_turned_noise(noise == "turned");
     let win: Vec<usize> = match value(&args, "--window") {
         None => R1H.to_vec(),
         Some(v) => v
@@ -183,6 +191,7 @@ fn main() -> Result<(), String> {
         network_km2,
         // lead #168: the corridor bar is 95 % on the mountain window M1, 97.5 % elsewhere
         corridor_min_pct: parsed(&args, "--corridor-bar", if win[..] == M1 { CORRIDOR_MIN_PCT_MOUNTAIN } else { CORRIDOR_MIN_PCT })?,
+        crest_max_m: if win[..] == M1 { CREST_P95_MAX_M_MOUNTAIN } else { CREST_P95_MAX_M },
         ..GateParams::default()
     };
     if let Some(g) = value(&args, "--grid") {
@@ -384,12 +393,18 @@ fn main() -> Result<(), String> {
             "--stages: the budget field reads H1 blocks of {l} L cells, and the window's origin ({x0}, {y0}) is not on an H1 corner"
         ));
     }
+    // lead #172: KC's patches written beside the stage fields
+    let kc_patches = match value(&args, "--stages") {
+        Some(dir) => read_kc_patches(Path::new(dir))?,
+        None => None,
+    };
     let g2_input = (graph.is_some() || partition.is_some() || stages.is_some()).then(|| G2Input {
         window: Window { x0: x0 as u64, y0: y0 as u64, w, h },
         graph: graph.as_ref(),
         stages: stages.as_deref(),
         residual_records,
         partition: partition.as_ref().map(|(a, b)| (a, b)),
+        kc_patches,
     });
     let report = measure(
         &GateInput {

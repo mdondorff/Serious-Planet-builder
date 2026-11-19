@@ -955,3 +955,106 @@ pub fn network(grid: &Grid, z: &[f64], receiver: &[u32], area: &[f64], inside: &
         rb,
     }
 }
+
+/// A ridge cell stands at least this much above both cells [`RIDGE_STEP`] cells away along one axis (metres; the G0 contracts' section 9, SPIKE-122 section 6).
+pub const RIDGE_RISE_M: f64 = 2.0;
+/// The distance to the cells a ridge cell is compared with (L cells).
+pub const RIDGE_STEP: i64 = 2;
+/// A ridge cell is lowered when the surface lies more than this below the reference (metres; SPIKE-122 section 6).
+pub const RIDGE_LOWERED_M: f64 = 20.0;
+/// The channel thresholds of the saddle measure (km2; the G0 contracts' section 9).
+pub const SADDLE_KM2: [f64; 2] = [1.0, 5.0];
+
+/// The ridge measures (BUILD-060, lead #172): crest rounding and cut-through saddles against one reference surface.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RidgeReport {
+    /// Ridge cells (the shared mask of [`ridge_cells`]).
+    pub ridge_cells: usize,
+    /// Those the surface lies more than [`RIDGE_LOWERED_M`] below the reference.
+    pub lowered: usize,
+    /// The p95 and the largest of the reference minus the surface over the ridge cells (a raise counts as 0), metres.
+    pub lowering_p95_m: f64,
+    pub lowering_max_m: f64,
+    /// Per [`SADDLE_KM2`] threshold: cut-through cells (a lowered ridge cell with a channel cell of the surface in its 3 x 3 and none of the reference's there) and saddles (their
+    /// 8-connected groups).
+    pub cut_through: [usize; 2],
+    pub saddles: [usize; 2],
+}
+
+/// The shared ridge mask on `start`: a cell inside, on land, at least [`RIDGE_RISE_M`] above both cells [`RIDGE_STEP`] away along a face axis or a diagonal (both in the grid).
+pub fn ridge_cells(g: &Grid, start: &[f64], inside: &[bool], sea_level_m: f64) -> Vec<bool> {
+    let (w, h) = (g.w() as i64, g.h() as i64);
+    let s = RIDGE_STEP;
+    let at = |x: i64, y: i64| (x >= 0 && y >= 0 && x < w && y < h).then(|| start[(y * w + x) as usize]);
+    (0..start.len())
+        .map(|c| {
+            if !inside[c] || start[c] <= sea_level_m {
+                return false;
+            }
+            let (x, y, z) = (c as i64 % w, c as i64 / w, start[c]);
+            [(1, 0), (0, 1), (1, 1), (1, -1)].iter().any(|&(dx, dy)| match (at(x - s * dx, y - s * dy), at(x + s * dx, y + s * dy)) {
+                (Some(a), Some(b)) => z - a >= RIDGE_RISE_M && z - b >= RIDGE_RISE_M,
+                _ => false,
+            })
+        })
+        .collect()
+}
+
+/// Whether a cell of `a` at least `t` lies in the 3 x 3 around `c`.
+fn channel_near(w: usize, h: usize, c: usize, a: &[f64], t: f64) -> bool {
+    let (x, y) = ((c % w) as i64, (c / w) as i64);
+    (-1..=1i64).any(|dy| {
+        (-1..=1i64).any(|dx| {
+            let (u, v) = (x + dx, y + dy);
+            u >= 0 && v >= 0 && (u as usize) < w && (v as usize) < h && a[v as usize * w + u as usize] >= t
+        })
+    })
+}
+
+/// The ridge report of `surface` against `reference` on the mask `ridge`; `area` and `area_ref` are the drained areas (m2) of the surface's and the reference's routing.
+pub fn ridge_report(g: &Grid, reference: &[f64], surface: &[f64], ridge: &[bool], area: &[f64], area_ref: &[f64]) -> RidgeReport {
+    let (w, h, n) = (g.w(), g.h(), surface.len());
+    let mut low: Vec<f64> = Vec::new();
+    let mut lowered = vec![false; n];
+    for c in (0..n).filter(|&c| ridge[c]) {
+        let d = (reference[c] - surface[c]).max(0.0);
+        low.push(d);
+        lowered[c] = d > RIDGE_LOWERED_M;
+    }
+    let mut r = RidgeReport {
+        ridge_cells: low.len(),
+        lowered: lowered.iter().filter(|&&x| x).count(),
+        lowering_max_m: low.iter().copied().fold(0.0, f64::max),
+        lowering_p95_m: quantile(&mut low, 0.95),
+        ..RidgeReport::default()
+    };
+    for (k, km2) in SADDLE_KM2.iter().enumerate() {
+        let t = km2 * 1.0e6;
+        let cut: Vec<bool> = (0..n).map(|c| lowered[c] && channel_near(w, h, c, area, t) && !channel_near(w, h, c, area_ref, t)).collect();
+        r.cut_through[k] = cut.iter().filter(|&&x| x).count();
+        let mut seen = vec![false; n];
+        let mut stack = Vec::new();
+        for c0 in 0..n {
+            if !cut[c0] || seen[c0] {
+                continue;
+            }
+            r.saddles[k] += 1;
+            seen[c0] = true;
+            stack.push(c0);
+            while let Some(c) = stack.pop() {
+                let (x, y) = ((c % w) as i64, (c / w) as i64);
+                for (dx, dy) in (-1..=1i64).flat_map(|dy| (-1..=1i64).map(move |dx| (dx, dy))) {
+                    let (u, v) = (x + dx, y + dy);
+                    if u >= 0 && v >= 0 && (u as usize) < w && (v as usize) < h {
+                        let q = v as usize * w + u as usize;
+                        if cut[q] && !seen[q] {
+                            seen[q] = true;
+                            stack.push(q);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    r
+}

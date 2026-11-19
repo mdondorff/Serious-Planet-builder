@@ -1,0 +1,8 @@
+m1-on grid: energy per 15 deg bin over the mean (0 = gradient along x): 0.67 0.72 0.77 0.86 1.01 1.27 1.58 1.58 1.26 0.91 0.72 0.66
+m1-on grid: structure tensor anisotropy 0.219, main gradient direction -78.6 deg
+m1-on metric-corrected: energy per 15 deg bin over the mean (0 = gradient along x): 0.93 0.92 0.85 0.82 0.84 0.97 1.17 1.31 1.25 1.07 0.95 0.92
+m1-on metric-corrected: structure tensor anisotropy 0.097, main gradient direction -58.6 deg
+m1-on spectrum, wavelengths 8-32 L cells (0.8-3.3 km): 11.6 % of the power within 5 deg of the axes (isotropic: 11.2 %)
+m1-on spectrum, wavelengths 32-128 L cells (3.3-13.0 km): 12.6 % of the power within 5 deg of the axes (isotropic: 11.4 %)
+m1-on spectrum, wavelengths 128-512 L cells (13.0-52.1 km): 11.8 % of the power within 5 deg of the axes (isotropic: 12.3 %)
+m1-on spectrum, wavelengths 512-2048 L cells (52.1-208.5 km): 13.1 % of the power within 5 deg of the axes (isotropic: 14.7 %)
