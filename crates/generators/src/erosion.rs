@@ -42,11 +42,13 @@ const PIN_MEMO_CAP: usize = 1 << 18;
 static NEXT_FIELD_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// Bump whenever any output of this module changes (ADR 0006); it also covers [`GLOBAL_VERSION`] through the bake key.
-pub const EROSION_VERSION: u32 = 2;
+/// 3: the creases' turned lattices by default (GEN-140, owner 2026-11-19; the height key carries no lattice word of its own, numerics review).
+pub const EROSION_VERSION: u32 = 3;
 /// Names this implementation in cache keys (CON-07).
 pub const EROSION_IMPLEMENTATION_ID: &str = "cpu-erosion-v1";
 /// Bump whenever any output of the C1 variant changes (it also covers [`READER_C1_VERSION`] through its key).
-pub const EROSION_C1_VERSION: u32 = 1;
+/// 2: the creases' turned lattices by default (GEN-140, owner 2026-11-19).
+pub const EROSION_C1_VERSION: u32 = 2;
 /// Names the C1 variant in cache keys (GEN-107): the same field with the bake read by `read_elevation_c1` instead of the bilinear blend.
 pub const EROSION_C1_IMPLEMENTATION_ID: &str = "cpu-erosion-v2";
 

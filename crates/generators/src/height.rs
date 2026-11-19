@@ -75,7 +75,12 @@ pub fn turned_noise() -> bool {
 
 /// The fold of the switch into an identity word: unchanged while the switch is off (so no key moves), mixed with a constant while it is on.
 pub fn turned_noise_word(identity: u64) -> u64 {
-    if turned_noise() {
+    turned_noise_word_with(turned_noise(), identity)
+}
+
+/// [`turned_noise_word`] for a given state of the switch, without reading the process's (a test of the off state need not turn the process switch).
+pub fn turned_noise_word_with(on: bool, identity: u64) -> u64 {
+    if on {
         planet_core::hash::mix64(identity ^ TURN_VERSION_WORD)
     } else {
         identity

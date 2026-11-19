@@ -5,7 +5,9 @@ use planet_core::hash::SplitMix64;
 use planet_core::Vec3;
 use planet_generators::classes::ridged_octaves_at;
 use planet_generators::global::hill_octaves_at;
-use planet_generators::height::{layer_noise_bounds_turned, layer_noise_turned, set_turned_noise, turn, turned_noise, turned_noise_word};
+use planet_generators::height::{
+    layer_noise_bounds_turned, layer_noise_turned, turn, turned_noise, turned_noise_word, turned_noise_word_with,
+};
 
 const SEED: u64 = 11;
 const LAYER: u64 = 0x1234;
@@ -22,12 +24,12 @@ fn direction(rng: &mut SplitMix64) -> Vec3 {
 // spec: GEN-140
 #[test]
 fn the_switch_is_on_by_default_and_off_leaves_an_identity_word_alone() {
-    // owner, 2026-11-19: the turn is the default; on it moves every identity word it folds, off it gives the bits before (nextest runs each test in its own process)
+    // owner, 2026-11-19: the turn is the default; on it moves every identity word it folds, off it gives the bits before. The off state is read through the pure helper:
+    // the process switch stays on, so the other tests of this binary see the default (numerics review of e11bfbd2)
     assert!(turned_noise());
     assert_ne!(turned_noise_word(0xdead_beef), 0xdead_beef);
-    set_turned_noise(false);
-    assert!(!turned_noise());
-    assert_eq!(turned_noise_word(0xdead_beef), 0xdead_beef);
+    assert_eq!(turned_noise_word(0xdead_beef), turned_noise_word_with(true, 0xdead_beef));
+    assert_eq!(turned_noise_word_with(false, 0xdead_beef), 0xdead_beef);
 }
 
 // spec: GEN-140
