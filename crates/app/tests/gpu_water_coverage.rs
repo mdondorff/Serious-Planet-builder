@@ -42,7 +42,10 @@ fn compact_pool() -> PoolConfig {
 }
 
 /// The first edge of the exact sea (the bake's sea by the water field) whose land side is a plain below the level: the mean terrain
-/// 20 to 60 km inland is under -8 m. Walks the parallels 20 km a step and bisects the edge.
+/// 20 to 60 km inland is under -15 m. Walks the parallels 20 km a step and bisects the edge.
+/// Re-aimed 2026-11-19 by `gen140-default` (GEN-140, owner 2026-11-19: the turned lattices are the default): under -8 m the first such plain of the
+/// turned world lies mostly between -12 and 0 m, where no pixel is checked (aerial 1,531 and low 0 sea pixels against the 2,000 the views need); under
+/// -15 m the views check 11,359 and 16,259. The views, their bounds and the 2,000 hold.
 fn plain_coast(world: &WorldTerrain, field: &dyn HeightField) -> Coast {
     let is_sea =
         |d: Vec3| world.with_water(|f| planet_frame::water::WaterSource::water_at(f, d).ok().flatten().is_some()).unwrap().unwrap();
@@ -71,7 +74,7 @@ fn plain_coast(world: &WorldTerrain, field: &dyn HeightField) -> Coast {
                 let dir = at(b);
                 let inland = |km: f64| field.height((dir + heading * (km * 1000.0 / R)).normalized());
                 let mean = (20..=60).step_by(5).map(|km| inland(f64::from(km))).sum::<f64>() / 9.0;
-                if is_sea(at(b - 3_000.0)) && mean < -8.0 {
+                if is_sea(at(b - 3_000.0)) && mean < -15.0 {
                     return Coast { dir, heading };
                 }
             }

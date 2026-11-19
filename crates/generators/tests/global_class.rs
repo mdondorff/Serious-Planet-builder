@@ -121,4 +121,5 @@ fn the_class_field_is_pinned_so_that_a_change_of_the_class_source_must_bump_its_
     assert_eq!(bits, PINNED_BITS, "the class field changed: bump CLASS_SOURCE_VERSION and re-pin");
 }
 
-const PINNED_BITS: [u32; 6] = [1116318747, 3290137450, 1158361031, 3248661044, 3314327552, 3314327552];
+// Re-pinned 2026-11-19 by `gen140-default` (GEN-140, owner 2026-11-19: the turned lattice is the default), with CLASS_SOURCE_VERSION 9: the hill and mountain bands turned.
+const PINNED_BITS: [u32; 6] = [1116281087, 3290137450, 1158740374, 3248661044, 3314327552, 3314327552];

@@ -60,8 +60,8 @@ pub(crate) fn layer_noise(seed: u64, layer: u64, octave: u32, p: Vec3) -> f64 {
     lerp(lerp(x00, x10, ty), lerp(x01, x11, ty), tz)
 }
 
-/// Whether the noise of the bands and creases turns its lattice per octave (GEN-140): off by default; the prototype turns it on. Read by the hill and mountain bands of the class source and by the crease noise of the erosion field.
-static TURNED_NOISE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Whether the noise of the bands and creases turns its lattice per octave (GEN-140): on by default (owner, 2026-11-19); `set_turned_noise(false)` gives the axis lattice, the bits before. Read by the hill and mountain bands of the class source and by the crease noise of the erosion field.
+static TURNED_NOISE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 /// Switches the turned lattices (GEN-140) on or off for the process (a run sets it once at its start, before any field is read).
 pub fn set_turned_noise(on: bool) {

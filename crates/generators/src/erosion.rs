@@ -1117,7 +1117,8 @@ mod tests {
             // The reference: the same octaves summed by hand with their weights over the full normaliser.
             let (mut coarse, mut fine, mut amp, mut norm, mut freq) = (0.0, 0.0, 1.0, 0.0, BASE_FREQUENCY);
             for o in 0..OCTAVES {
-                let term = weights[o as usize] * amp * crease(layer_noise(11, LAYER_CREASE, o, d * freq));
+                // the same lattice as the band (GEN-140: turned by default)
+                let term = weights[o as usize] * amp * crease(layer_noise_t(turned_noise(), 11, LAYER_CREASE, o, d * freq));
                 if o < CREASE_SPLIT {
                     coarse += term;
                 } else {
@@ -1149,7 +1150,7 @@ mod tests {
                 }
                 norm_all += libm::pow(PERSISTENCE, f64::from(o));
             }
-            let want = amp10 * crease(layer_noise(11, LAYER_CREASE, 10, d * (BASE_FREQUENCY * 1024.0))) / norm_all;
+            let want = amp10 * crease(layer_noise_t(turned_noise(), 11, LAYER_CREASE, 10, d * (BASE_FREQUENCY * 1024.0))) / norm_all;
             assert!((kept_octave_10 - want).abs() < 1e-14, "octave 10 alone: {kept_octave_10} against {want}");
         }
     }

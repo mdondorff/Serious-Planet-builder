@@ -18,7 +18,8 @@ use planet_core::{smoothstep, Face, Vec3};
 /// The version of the class list (GEN-093): plain, rolling plain, hills, mountains, high mountains, plateau, badlands, sand sea, in that order.
 pub const CLASS_LIST_VERSION: u32 = 1;
 /// Bump whenever the default source's output changes for a seed (the rules of GEN-094 and GEN-095, their constants, or the plate construction).
-pub const CLASS_SOURCE_VERSION: u32 = 8;
+/// 9: the bands' turned lattices by default (GEN-140, owner 2026-11-19).
+pub const CLASS_SOURCE_VERSION: u32 = 9;
 pub const CLASS_COUNT: usize = 8;
 pub const CLASS_NAMES: [&str; CLASS_COUNT] =
     ["plain", "rolling plain", "hills", "mountains", "high mountains", "plateau", "badlands", "sand sea"];
