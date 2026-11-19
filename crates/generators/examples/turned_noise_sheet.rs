@@ -43,7 +43,8 @@ fn main() {
     let up = Vec3::new(libm::cos(lat) * libm::cos(lon), libm::cos(lat) * libm::sin(lon), libm::sin(lat));
     let east = Vec3::new(0.0, 0.0, 1.0).cross(up).normalized();
     let north = up.cross(east).normalized();
-    assert!(!turned_noise());
+    // the process default is the turn (GEN-140, owner 2026-11-19); the panels pass `turned` explicitly, so the default changes none of them
+    assert!(turned_noise());
     let rows: [(f64, f64, NoiseFn); 3] = [(1600.0, 900.0, crease_sum), (300.0, 900.0, crease_sum), (6000.0, 200.0, hill_noise)];
     let (w, h) = (2 * PX, 3 * PX);
     let mut img = vec![0u8; w * h];

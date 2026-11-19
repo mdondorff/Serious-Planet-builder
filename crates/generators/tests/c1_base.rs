@@ -485,8 +485,9 @@ fn the_c1_field_identifies_itself_and_is_keyed_apart_from_the_bilinear_one() {
     assert_ne!(a.inputs_hash(), b.inputs_hash(), "the two readers never share a key");
     assert_eq!(b.inputs_hash(), c1_field(&src).inputs_hash());
     assert_eq!(b.source_key(), Some(KEY));
-    // The pinned versions: a change of the interpolant, the stencil or the ghost rule bumps READER_C1_VERSION (known answers below).
-    assert_eq!((READER_C1_VERSION, EROSION_C1_VERSION), (1, 1));
+    // The pinned versions: a change of the interpolant, the stencil or the ghost rule bumps READER_C1_VERSION (known answers below). EROSION_C1_VERSION 2 since
+    // `gen140-default` (GEN-140, owner 2026-11-19: the creases' turned lattices are the default; the reader is unchanged).
+    assert_eq!((READER_C1_VERSION, EROSION_C1_VERSION), (1, 2));
 }
 
 // spec: GEN-107
@@ -508,11 +509,12 @@ fn known_answers_of_the_c1_read_and_the_field_are_pinned() {
 }
 
 /// `(read_elevation_c1 bits, field height bits)` of the four directions above on the 64-cell bake of seed 7.
+// Re-pinned 2026-11-19 by `gen140-default` (GEN-140, owner 2026-11-19: the turned lattice is the default): the C1 reads keep their bits (the bake's elevations), the field heights moved with the turned creases.
 const PINNED: [(u32, u64); 4] = [
-    (1_118_074_014, 4_633_626_389_980_356_180),
-    (3_299_332_605, 13_876_993_057_341_092_339),
-    (3_311_221_168, 13_883_385_936_620_562_706),
-    (3_308_198_617, 13_881_764_335_007_643_907),
+    (1_118_074_014, 4_634_294_549_062_681_440),
+    (3_299_332_605, 13_876_995_162_502_197_415),
+    (3_311_221_168, 13_883_374_053_092_764_826),
+    (3_308_198_617, 13_881_751_567_943_039_028),
 ];
 
 /// What an adversarial lattice puts at a node: a step, a spike line, a ramp, or noise, deterministic in `(face, i, j)`.

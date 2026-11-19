@@ -22,8 +22,6 @@ use crate::global::{
     read_direction, read_elevation_c1, read_elevation_c1_cached, LatticeSource, StencilCache, GLOBAL_VERSION, MAX_ELEVATION_M,
     MIN_ELEVATION_M, READER_C1_VERSION,
 };
-#[cfg(test)]
-use crate::height::layer_noise;
 use crate::height::{layer_noise_bounds_t, layer_noise_t, turned_noise, HeightField};
 use crate::terrain::scan_base;
 
@@ -42,11 +40,13 @@ const PIN_MEMO_CAP: usize = 1 << 18;
 static NEXT_FIELD_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// Bump whenever any output of this module changes (ADR 0006); it also covers [`GLOBAL_VERSION`] through the bake key.
-pub const EROSION_VERSION: u32 = 2;
+/// 3: the creases' turned lattices by default (GEN-140, owner 2026-11-19; the height key carries no lattice word of its own, numerics review).
+pub const EROSION_VERSION: u32 = 3;
 /// Names this implementation in cache keys (CON-07).
 pub const EROSION_IMPLEMENTATION_ID: &str = "cpu-erosion-v1";
 /// Bump whenever any output of the C1 variant changes (it also covers [`READER_C1_VERSION`] through its key).
-pub const EROSION_C1_VERSION: u32 = 1;
+/// 2: the creases' turned lattices by default (GEN-140, owner 2026-11-19).
+pub const EROSION_C1_VERSION: u32 = 2;
 /// Names the C1 variant in cache keys (GEN-107): the same field with the bake read by `read_elevation_c1` instead of the bilinear blend.
 pub const EROSION_C1_IMPLEMENTATION_ID: &str = "cpu-erosion-v2";
 
@@ -1117,7 +1117,8 @@ mod tests {
             // The reference: the same octaves summed by hand with their weights over the full normaliser.
             let (mut coarse, mut fine, mut amp, mut norm, mut freq) = (0.0, 0.0, 1.0, 0.0, BASE_FREQUENCY);
             for o in 0..OCTAVES {
-                let term = weights[o as usize] * amp * crease(layer_noise(11, LAYER_CREASE, o, d * freq));
+                // the same lattice as the band (GEN-140: turned by default)
+                let term = weights[o as usize] * amp * crease(layer_noise_t(turned_noise(), 11, LAYER_CREASE, o, d * freq));
                 if o < CREASE_SPLIT {
                     coarse += term;
                 } else {
@@ -1149,7 +1150,7 @@ mod tests {
                 }
                 norm_all += libm::pow(PERSISTENCE, f64::from(o));
             }
-            let want = amp10 * crease(layer_noise(11, LAYER_CREASE, 10, d * (BASE_FREQUENCY * 1024.0))) / norm_all;
+            let want = amp10 * crease(layer_noise_t(turned_noise(), 11, LAYER_CREASE, 10, d * (BASE_FREQUENCY * 1024.0))) / norm_all;
             assert!((kept_octave_10 - want).abs() < 1e-14, "octave 10 alone: {kept_octave_10} against {want}");
         }
     }

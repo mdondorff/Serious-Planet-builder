@@ -264,12 +264,13 @@ fn the_class_source_version_goes_with_its_output() {
     }
     assert_eq!(
         (CLASS_SOURCE_VERSION, hash),
-        (8, FINGERPRINT),
+        (9, FINGERPRINT),
         "the default source's output changed: bump CLASS_SOURCE_VERSION and record the new fingerprint"
     );
 }
 
-const FINGERPRINT: u64 = 18223967699825403602;
+// Re-pinned 2026-11-19 by `gen140-default` (GEN-140, owner 2026-11-19: the turned lattice is the default).
+const FINGERPRINT: u64 = 8656538722808717466;
 
 // spec: GEN-103
 #[test]
