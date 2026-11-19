@@ -1665,7 +1665,12 @@ fn build_graph(
         // down node's anchor (reading 1). A two-vertex reach drops it (its bed then starts at its end's level).
         if rise_at.last() == Some(&(n - 1)) {
             rise_at.pop();
-            if n >= 2 {
+            if n == 2 && TRUNK_BED_SHARED.load(std::sync::atomic::Ordering::Relaxed) {
+                // crusader #168a (--trunk-bed shared, default): a two-vertex reach has no vertex for the rise's marker, and raising its first vertex breaks the up node's
+                // shared bed (bed_not_shared); the reach is cut flat at its up node's bed, past the budget, and keeps its rise_over_budget exception (reaches are processed
+                // upstream first, so the down node's bed, and every reach leaving it, take the lower bed)
+                bed[1] = bed[0];
+            } else if n >= 2 {
                 bed[n - 2] = bed[n - 2].max(bed[n - 1]);
                 if n >= 3 && rise_at.last() != Some(&(n - 2)) && bed[n - 2] > bed[n - 3] {
                     rise_at.push(n - 2);
@@ -1739,6 +1744,9 @@ fn build_graph(
     g.sort();
     (g, notes)
 }
+
+/// crusader #168a: `--trunk-bed shared` (default) cuts a two-vertex trunk image that rises over the budget flat at its up node's bed; `lift` raises its first vertex (spikes #142's form).
+static TRUNK_BED_SHARED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 /// L routing of a window surface (flood with epsilon, D8 steepest receivers, D8 area): the river cells over `a_min` m2 (land only).
 fn l_rivers(z: &[f64], w: usize, h: usize, dx: f64, sea: f64, a_min: f64) -> Vec<bool> {
@@ -1863,6 +1871,11 @@ fn main() -> Result<(), String> {
         return Err(format!("--noise turned | axis, not '{noise}'"));
     }
     planet_generators::height::set_turned_noise(noise == "turned");
+    let trunk_bed = value(&args, "--trunk-bed").unwrap_or("shared");
+    if !["shared", "lift"].contains(&trunk_bed) {
+        return Err(format!("--trunk-bed shared | lift, not '{trunk_bed}'"));
+    }
+    TRUNK_BED_SHARED.store(trunk_bed == "shared", std::sync::atomic::Ordering::Relaxed);
     let inputs = class_inputs(&def, seed, threads);
     let (ri0, ri1, rj0, rj1) = (region.0 - margin, region.1 + margin, region.2 - margin, region.3 + margin);
     let to_node = |reg: usize| reg * LATTICE / REGIONAL;
@@ -2978,6 +2991,7 @@ fn main() -> Result<(), String> {
             ("window", win.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",")),
             ("margin", margin.to_string()),
             ("turned-noise", planet_generators::height::turned_noise().to_string()),
+            ("trunk-bed", if TRUNK_BED_SHARED.load(std::sync::atomic::Ordering::Relaxed) { "shared" } else { "lift" }.to_string()),
         ] {
             t += &format!("switch {k} {v}\n");
         }
