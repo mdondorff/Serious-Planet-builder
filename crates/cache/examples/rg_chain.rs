@@ -1881,6 +1881,12 @@ fn main() -> Result<(), String> {
         return Err("--k5-diffuse C needs 0 <= C <= 0.25".into());
     }
     planet_generators::bake::round::K5_DIFFUSE.store(k5_diffuse.to_bits(), std::sync::atomic::Ordering::Relaxed);
+    // SPIKE-139 (lead #149a): `--k5-diffuse-stencil 5` (default) or `9` (the isotropic 9-point Laplacian; round::K5_DIFFUSE_NINE; spike only)
+    let k5_stencil = value(&args, "--k5-diffuse-stencil").unwrap_or("5");
+    if !["5", "9"].contains(&k5_stencil) {
+        return Err(format!("--k5-diffuse-stencil 5 | 9, not '{k5_stencil}'"));
+    }
+    planet_generators::bake::round::K5_DIFFUSE_NINE.store(k5_stencil == "9", std::sync::atomic::Ordering::Relaxed);
     // SPIKE-139 (lead #149 item 3): `--k5-kdt-scale X` (default 1): K5's k_dt times X, the uplift per step with it (region_bake::K5_KDT_SCALE; spike only)
     let k5_kdt_scale: f64 = value(&args, "--k5-kdt-scale").map_or(Ok(1.0), str::parse).map_err(|_| "--k5-kdt-scale X")?;
     if !(k5_kdt_scale > 0.0 && k5_kdt_scale <= 8.0) {
@@ -3279,6 +3285,7 @@ fn main() -> Result<(), String> {
             ("k5-route", k5_route.to_string()),
             ("k5-diffuse", k5_diffuse.to_string()),
             ("k5-kdt-scale", k5_kdt_scale.to_string()),
+            ("k5-diffuse-stencil", k5_stencil.to_string()),
             ("k5-diffuse-amax", k5_diffuse_amax.to_string()),
             ("k5-parity", k5_parity.to_string()),
             ("ks", ks_mode.to_string()),

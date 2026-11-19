@@ -130,26 +130,32 @@ fn parity_round(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, c:
 /// SPIKE-139 (spike branch only): with [`K5_DIFFUSE`], the f64 bits of the largest area (m2) of a cell the hillslope term moves (0: every cell); channel cells
 /// above it keep K5's heights and act as the boundary. The D8 rounds only (D-infinity's rounds move every cell).
 pub static K5_DIFFUSE_AMAX: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// SPIKE-139 (spike branch only, lead #149a): with [`K5_DIFFUSE`], the isotropic 9-point Laplacian instead of the 5-point one.
+pub static K5_DIFFUSE_NINE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn diffuse_round(grid: &Grid, z: &mut [f64], outlet: &[bool], p: &CarveParams, c: f64, area: Option<&[f64]>) {
     let n = grid.len();
     let amax = f64::from_bits(K5_DIFFUSE_AMAX.load(std::sync::atomic::Ordering::Relaxed));
+    let nine = K5_DIFFUSE_NINE.load(std::sync::atomic::Ordering::Relaxed);
     for _ in 0..p.reroute_every {
         let old = z.to_vec();
         for q in 0..n {
             if outlet[q] || !grid.is_active(q) || old[q] <= p.sea_level || (amax > 0.0 && area.is_some_and(|a| a[q] >= amax)) {
                 continue;
             }
-            let mut sum = 0.0;
+            let (mut orth, mut diag) = (0.0, 0.0);
             let mut all = true;
-            for d in 0..4 {
+            for d in 0..if nine { 8 } else { 4 } {
                 match grid.neighbour(q, d) {
-                    Some(r) => sum += old[r],
+                    Some(r) if d < 4 => orth += old[r],
+                    Some(r) => diag += old[r],
                     None => all = false,
                 }
             }
             if all {
-                z[q] = (old[q] + c * (sum - 4.0 * old[q])).max(p.sea_level + p.epsilon);
+                // 5-point: sum of the 4 orthogonal neighbours - 4 z; 9-point (isotropic to second order): (4 orthogonal + diagonal - 20 z) / 6, the same h2 Laplacian
+                let lap = if nine { (4.0 * orth + diag - 20.0 * old[q]) / 6.0 } else { orth - 4.0 * old[q] };
+                z[q] = (old[q] + c * lap).max(p.sea_level + p.epsilon);
             }
         }
     }
