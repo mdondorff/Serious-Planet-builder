@@ -131,3 +131,4 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0120 | [A lead and lanes; short milestones with an exit list; a parking list for new ideas](0120-lead-and-lanes-short-milestones.md) | accepted (owner, 2026-11-12) | process; `docs/routing.md`, `docs/milestones/`, `docs/parking.md` |
 | 0121 | [Two data roots: the repository and SeriousPlanetData](0121-two-data-roots.md) | accepted (owner, 2026-11-13) | process; `CLAUDE.md`, `docs/routing.md` |
 | 0122 | [Fine detail pinned to the stored samples and off on river lines](0122-fine-detail-pinned-to-the-stored-samples.md) | accepted (owner, 2026-11-13) | generator field, render; amends 0098 point 2 |
+| 0123 | [River architecture: drainage that survives each scale, rivers routed at L](0123-river-architecture-drainage-across-scales.md) | proposed (lead, 2026-11-14) | generators, store; amends 0119, STRM-084 |
