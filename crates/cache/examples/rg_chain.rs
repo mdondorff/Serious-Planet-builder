@@ -1934,6 +1934,19 @@ fn main() -> Result<(), String> {
         ));
     }
     KV_CROSS_MICRO.store((kv_cross * 1.0e6).round() as u64, std::sync::atomic::Ordering::Relaxed);
+    // DEC crusader-19 (a switch, default off): --kv-cross-side <m>,<grade>: the cross rule also on flat side cells within <m> of a vertex standing at most <grade> a metre above it
+    let kv_cross_side: (f64, f64) = match value(&args, "--kv-cross-side") {
+        None => (0.0, 0.0),
+        Some(v) => {
+            let bad = || format!("--kv-cross-side <m>,<grade>, not '{v}'");
+            let (a, b) = v.split_once(',').ok_or_else(bad)?;
+            let (a, b): (f64, f64) = (a.parse().map_err(|_| bad())?, b.parse().map_err(|_| bad())?);
+            if !(0.0..=600.0).contains(&a) || !(0.0..=0.1).contains(&b) || kv_cross == 0.0 {
+                return Err(format!("--kv-cross-side: <m> in [0, 600], <grade> in [0, 0.1], with --kv-cross; not '{v}'"));
+            }
+            (a, b)
+        }
+    };
     let trunk_bed = value(&args, "--trunk-bed").unwrap_or("shared");
     if !["shared", "lift"].contains(&trunk_bed) {
         return Err(format!("--trunk-bed shared | lift, not '{trunk_bed}'"));
@@ -2670,6 +2683,8 @@ fn main() -> Result<(), String> {
     let on_trunk: HashSet<usize> = l_trunks.iter().flat_map(|r| r.vertices.iter().filter_map(|&c| to_local(c))).collect();
     // the stitched KS, KV and KC outputs (lead #168 item 2, memory): made after the first domain's KV/KC, not before; with one region the domain's own fields are moved in
     let mut outs: Option<(Vec<f64>, Vec<f64>, Vec<f64>)> = None;
+    // the cross-slope pass's cut per window cell (DEC crusader-19's sheet; empty when off)
+    let mut cross_out: Vec<f32> = Vec::new();
     // reading 18: one region's accumulated L trunk attributes, written into the stitched graph
     let mut acc_trunks: HashMap<u64, planet_generators::bake::river_graph::Attrs> = HashMap::new();
     let mut res_ks: Vec<(usize, f64, f64)> = Vec::new();
@@ -3178,6 +3193,8 @@ fn main() -> Result<(), String> {
                 Some(&ks_base),
                 &KvParams {
                     cross_grade: KV_CROSS_MICRO.load(std::sync::atomic::Ordering::Relaxed) as f64 * 1.0e-6,
+                    cross_side_m: kv_cross_side.0,
+                    cross_side_grade: kv_cross_side.1,
                     ..KvParams::plan(dx_l)
                 },
                 sw,
@@ -3201,6 +3218,25 @@ fn main() -> Result<(), String> {
                 r.cross_short,
                 r.cross_short_m
             );
+            if !r.cross_cut.is_empty() {
+                // DEC crusader-19's report: how deep the pass cut (p50, p95, max over the cells it lowered)
+                let mut cuts: Vec<f32> = r.cross_cut.iter().copied().filter(|&x| x > 0.0).collect();
+                cuts.sort_unstable_by(|a, b| a.total_cmp(b));
+                let q = |f: f64| cuts.get(((cuts.len().max(1) - 1) as f64 * f) as usize).copied().unwrap_or(0.0);
+                println!(
+                    "RG domain {d} KV cross-slope cut: p50 {:.3} m, p95 {:.3} m, max {:.3} m over {} cells",
+                    q(0.5),
+                    q(0.95),
+                    q(1.0),
+                    cuts.len()
+                );
+                if cross_out.is_empty() {
+                    cross_out = vec![0.0f32; n_l];
+                }
+                for p in (0..n_l).filter(|&p| core[p]) {
+                    cross_out[p] = r.cross_cut[p];
+                }
+            }
             kc_patches.extend(r.patches.iter().copied());
             (kv, kc, r.residuals)
         } else {
@@ -3320,6 +3356,7 @@ fn main() -> Result<(), String> {
             ("margin", margin.to_string()),
             ("turned-noise", planet_generators::height::turned_noise().to_string()),
             ("kv-cross", format!("{}", KV_CROSS_MICRO.load(std::sync::atomic::Ordering::Relaxed) as f64 * 1.0e-6)),
+            ("kv-cross-side", format!("{},{}", kv_cross_side.0, kv_cross_side.1)),
             ("trunk-bed", if TRUNK_BED_SHARED.load(std::sync::atomic::Ordering::Relaxed) { "shared" } else { "lift" }.to_string()),
             ("trib-on", trib_on.to_string()),
         ] {
@@ -3381,6 +3418,10 @@ fn main() -> Result<(), String> {
     if on("kv") {
         write("kv-lower.u16", field(&|p| ks_out[p] - kv_out[p]))?;
         write("kv-fill.u16", field(&|p| kv_out[p] - ks_out[p]))?;
+    }
+    if !cross_out.is_empty() {
+        let bytes: Vec<u8> = cross_out.iter().flat_map(|x| x.to_le_bytes()).collect();
+        std::fs::write(stages_dir.join("kv-cross.f32"), bytes).map_err(|e| e.to_string())?;
     }
     if on("kc") {
         write("kc-lower.u16", field(&|p| kv_out[p] - kc_out[p]))?;

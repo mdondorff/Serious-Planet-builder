@@ -431,6 +431,11 @@ fn kc_breaches_along_the_graph_line_when_it_can() {
 /// Lead #169 item 3's synthetic floor: a 40 x 15 grid of 30 m cells, the sea at x = 0, a line along row 7 at bed 0.5 m (q_w 400: a 216 m half floor), a flat floor at 1 m and a
 /// channel on row 10 (3 cells off the line) below the floor's cone.
 fn cross_case() -> (Grid, Vec<f64>, Vec<bool>, Graph) {
+    cross_case_q(400.0)
+}
+
+/// [`cross_case`] with the line's discharge `q_w` (m3/s; 0.01: a tributary's floor under a metre wide).
+fn cross_case_q(q_w: f64) -> (Grid, Vec<f64>, Vec<bool>, Graph) {
     let (w, h, dx) = (40usize, 15usize, 30.0);
     let n = w * h;
     let s0: Vec<f64> = (0..n).map(|c| if c / w == 10 { 0.52 + 0.001 * (c % w) as f64 } else { 1.0 + 0.002 * (c % w) as f64 }).collect();
@@ -450,8 +455,8 @@ fn cross_case() -> (Grid, Vec<f64>, Vec<bool>, Graph) {
             a_ext: vec![0.0; k],
             a_run: vec![1.0e8; k],
             a_run_no_ext: vec![1.0e8; k],
-            q: vec![400.0; k],
-            q_w: vec![400.0; k],
+            q: vec![q_w; k],
+            q_w: vec![q_w; k],
             strahler: vec![3; k],
             bed: vec![1; k],
         },
@@ -476,24 +481,7 @@ fn kv_cross_slope_turns_a_parallel_floor_channel_into_the_line() {
     let cross = KvParams { cross_grade: 1.0e-3, ..plain };
     let a = run(&gl, &s0, &outlet, &g, &protected, &budget, &plain, Switch::KvOnly);
     let b = run(&gl, &s0, &outlet, &g, &protected, &budget, &cross, Switch::KvOnly);
-    // steepest descent from the channel at (30, 10): the row it ends nearest the line
-    let path_rows = |z: &[f64]| {
-        let mut c = 10 * w + 30;
-        let mut rows = vec![c / w];
-        for _ in 0..200 {
-            if outlet[c] {
-                break;
-            }
-            let best = (0..8)
-                .filter_map(|d| gl.neighbour(c, d).map(|q| (q, (z[c] - z[q]) / if d < 4 { dx } else { dx * core::f64::consts::SQRT_2 })))
-                .filter(|&(_, s)| s > 0.0)
-                .max_by(|x, y| x.1.total_cmp(&y.1).then(y.0.cmp(&x.0)));
-            let Some((q, _)) = best else { break };
-            c = q;
-            rows.push(c / w);
-        }
-        *rows.iter().min().unwrap()
-    };
+    let path_rows = |z: &[f64]| nearest_row(&gl, &outlet, z);
     assert_eq!(path_rows(&a.kv), 10, "without the cross-slope the channel stays on its row");
     assert_eq!(path_rows(&b.kv), 7, "with it the channel's water reaches the line");
     assert!(b.cross_cells > 0 && b.cross_volume > 0.0, "the pass lowered cells");
@@ -548,4 +536,52 @@ fn kv_cross_slope_never_sinks_the_floor_below_a_line_cell_held_by_its_budget() {
             b.kv[v]
         );
     }
+}
+
+/// Steepest descent on `z` from the channel at (30, 10) of [`cross_case`]: the row it comes nearest the line (row 7).
+fn nearest_row(gl: &Grid, outlet: &[bool], z: &[f64]) -> usize {
+    let (w, dx) = (40usize, 30.0);
+    let mut c = 10 * w + 30;
+    let mut best_row = c / w;
+    for _ in 0..200 {
+        if outlet[c] {
+            break;
+        }
+        let best = (0..8)
+            .filter_map(|d| gl.neighbour(c, d).map(|q| (q, (z[c] - z[q]) / if d < 4 { dx } else { dx * core::f64::consts::SQRT_2 })))
+            .filter(|&(_, s)| s > 0.0)
+            .max_by(|x, y| x.1.total_cmp(&y.1).then(y.0.cmp(&x.0)));
+        let Some((q, _)) = best else { break };
+        c = q;
+        best_row = best_row.min(c / w);
+    }
+    best_row
+}
+
+// SPIKE-132 (spike prototype; not a spec requirement)
+#[test]
+fn kv_cross_slope_on_flat_sides_reaches_a_tributarys_parallel_channel() {
+    // DEC crusader-19 (lead, 2026-11-19): a tributary's floor is under a cell wide, so the floor rule alone leaves a parallel channel 3 cells off the line; the side rule (within 180 m,
+    // at most 0.05 a metre above the vertex) lowers the ground between down to the channel less the grade, never below the line, within the budget
+    let (gl, s0, outlet, g) = cross_case_q(0.01);
+    let n = s0.len();
+    let (protected, budget) = (vec![false; n], vec![100.0; n]);
+    let floor_only = KvParams { cross_grade: 1.0e-3, ..KvParams::plan(30.0) };
+    let sides = KvParams { cross_side_m: 180.0, cross_side_grade: 0.05, ..floor_only };
+    let a = run(&gl, &s0, &outlet, &g, &protected, &budget, &floor_only, Switch::KvOnly);
+    let b = run(&gl, &s0, &outlet, &g, &protected, &budget, &sides, Switch::KvOnly);
+    assert_eq!(nearest_row(&gl, &outlet, &a.kv), 10, "the floor rule alone leaves the channel on its row");
+    assert_eq!(nearest_row(&gl, &outlet, &b.kv), 7, "with the side rule its water reaches the line");
+    let max_cut = b.cross_cut.iter().fold(0.0f32, |m, &x| m.max(x));
+    assert!(max_cut > 0.0, "the pass cut");
+    assert!((0..n).filter(|&c| b.cross_cut[c] > 0.0).all(|c| b.kv[c] > 0.5), "every cut cell stays above the line's bed");
+    for c in 0..n {
+        assert!(b.kv[c] <= a.kv[c] + 1e-12, "lowering only, cell {c}");
+        // row 11 and beyond lie on the far side of the channel: nothing there drains past it
+        if c / 40 >= 11 {
+            assert_eq!(b.kv[c], a.kv[c], "beyond the channel nothing is cut, cell {c}");
+        }
+    }
+    let v = validate_budget(&s0, &budget, &kv_stage(&b), &b.residuals, &g);
+    assert!(v.is_empty(), "the validator passes: {v:?}");
 }

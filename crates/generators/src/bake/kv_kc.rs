@@ -48,6 +48,10 @@ pub struct KvParams {
     /// least this grade (m per m) times the distance gained (at most `s_floor`: a larger grade lowers the whole floor below its cone, numerics review), so the floor falls toward the line from any channel on it; lowering only, never below the nearest vertex's bed, within the budget
     /// left. 0: off (the cone alone).
     pub cross_grade: f64,
+    /// DEC crusader-19 (lead, 2026-11-19; a switch, default off): the cross rule also holds on side cells within this distance (m) of a vertex that stand at most
+    /// `cross_side_grade` a metre above the vertex (a flat side, where the tributaries' floor is under a cell wide); 0: the floor alone.
+    pub cross_side_m: f64,
+    pub cross_side_grade: f64,
 }
 
 impl KvParams {
@@ -64,6 +68,8 @@ impl KvParams {
             s_floor: 1.0e-3,
             breach_along_line: true,
             cross_grade: 0.0,
+            cross_side_m: 0.0,
+            cross_side_grade: 0.0,
         }
     }
 }
@@ -104,6 +110,8 @@ pub struct KvKc {
     /// The cells where the budget left stopped the pass above its target, and their shortfall summed (m): the parallel channel may stay there (numerics review of 8630f2a8).
     pub cross_short: usize,
     pub cross_short_m: f64,
+    /// The pass's cut per cell (m; empty when the pass is off), for the sheet of DEC crusader-19.
+    pub cross_cut: Vec<f32>,
 }
 
 /// The least fall (m per m) the cross-slope pass keeps toward the line where it reaches the vertex's height: the gate's flood grade (1e-5; `s_floor` is 100 times it).
@@ -330,15 +338,25 @@ pub fn run_with(
     drop(carry);
     // lead #169 item 3: the floor falls toward the line; floor cells farthest first (ties by cell), each at most its farther floor neighbours' height less the grade's drop
     let (mut cross_cells, mut cross_volume, mut cross_short, mut cross_short_m) = (0usize, 0.0f64, 0usize, 0.0f64);
+    let mut cross_cut: Vec<f32> = Vec::new();
     if p.cross_grade > 0.0 && kv_on {
         let mut in_floor = vec![false; n];
         let mut order: Vec<u32> = Vec::new();
+        // the floor, and with DEC crusader-19 the flat side near a vertex (its height above the vertex's measured on KV's output, before this pass)
+        let side = |c: usize| {
+            p.cross_side_m > 0.0 && dist[c] <= p.cross_side_m && {
+                let v = src[c] as usize;
+                let (ri, k) = vtx[&v];
+                kv[c] - bed_m(reaches[ri].attrs.bed[k]).max(kv[v]) <= p.cross_side_grade * dist[c]
+            }
+        };
         for c in 0..n {
-            if matches!(wants(c), Some(w) if w.1) {
+            if matches!(wants(c), Some(w) if w.1 || side(c)) {
                 in_floor[c] = true;
                 order.push(c as u32);
             }
         }
+        cross_cut = vec![0.0f32; n];
         // the keys are unique (cell last), so an unstable sort gives the same order
         order.sort_unstable_by(|&a, &b| dist[b as usize].total_cmp(&dist[a as usize]).then(a.cmp(&b)));
         for &c in &order {
@@ -346,7 +364,11 @@ pub fn run_with(
             let mut z = kv[c];
             for k in 0..8 {
                 let Some(q) = grid.neighbour(c, k) else { continue };
-                if !in_floor[q] || dist[q] <= dist[c] {
+                // only the same vertex's farther cells: across the line's own strip, never along the valley (a farther cell of the next vertex downstream stands lower by the
+                // valley's own fall, and following it would cut the whole side down; found by the side rule's test)
+                // and only a farther cell that stands lower (a channel or a cell already lowered for one): a flat or rising side is never cut, so the pass makes no strip
+                // beside a line where no channel runs (DEC crusader-19: no visible strips)
+                if !in_floor[q] || dist[q] <= dist[c] || src[q] != src[c] || kv[q] >= kv[c] {
                     continue;
                 }
                 // the drop counts the distance gained toward the line, not the step (a diagonal step gains less than its length; a cone at the grade is left as it is)
@@ -366,6 +388,7 @@ pub fn run_with(
             if z < kv[c] {
                 cross_cells += 1;
                 cross_volume += (kv[c] - z) * p.cell_m * p.cell_m;
+                cross_cut[c] = (kv[c] - z) as f32;
                 kv_wanted[c] = kv_wanted[c].max(s0[c] - z);
                 kv[c] = z;
             }
@@ -506,6 +529,7 @@ pub fn run_with(
         cross_volume,
         cross_short,
         cross_short_m,
+        cross_cut,
     }
 }
 
