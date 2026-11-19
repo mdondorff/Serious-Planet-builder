@@ -2808,7 +2808,8 @@ fn main() -> Result<(), String> {
             let ex = extract(&inp, &Params { mfd_init: false, ..Params::plan(BODY, runoff_mean) });
             // only what the pass adds: a tributary that ends at a trunk's last vertex returns the trunk's own down node, which must stay (numerics review of f5adb6d8)
             let had: HashSet<u64> = gd.nodes.iter().map(|x| x.id).collect();
-            trib_first = (ex.reaches.iter().map(|r| r.id).collect(), ex.nodes.iter().map(|x| x.id).filter(|id| !had.contains(id)).collect());
+            trib_first =
+                (ex.reaches.iter().map(|r| r.id).collect(), ex.nodes.iter().map(|x| x.id).filter(|id| !had.contains(id)).collect());
             gd.nodes.extend(ex.nodes.iter().cloned());
             gd.reaches.extend(ex.reaches.iter().cloned());
             // reading 18 (lead #170 item 4): the landmass pass, the L trunks' areas and discharge (q_w, KV's width) accumulated at L from their tributaries and hillslope
@@ -3014,7 +3015,15 @@ fn main() -> Result<(), String> {
                 use planet_generators::bake::basins_rg::BasinParams;
                 use planet_generators::bake::river_graph::Represented;
                 let ids = planet_generators::bake::basins_rg::CellIds { gid: &gid_l, local: &to_local };
-                let pk = planet_generators::bake::basins_rg::produce_ids(&grid_d, &ks_d, &outlet_d, &l_trunks, &tile_l, &BasinParams::l(BODY), &ids);
+                let pk = planet_generators::bake::basins_rg::produce_ids(
+                    &grid_d,
+                    &ks_d,
+                    &outlet_d,
+                    &l_trunks,
+                    &tile_l,
+                    &BasinParams::l(BODY),
+                    &ids,
+                );
                 for p in 0..n_l {
                     kept[p] = protected_h1[parent(p)];
                 }
@@ -3029,7 +3038,8 @@ fn main() -> Result<(), String> {
                     pk.basins.len()
                 );
             }
-            let first_attrs: HashMap<u64, planet_generators::bake::river_graph::Attrs> = l_trunks.iter().map(|r| (r.id, r.attrs.clone())).collect();
+            let first_attrs: HashMap<u64, planet_generators::bake::river_graph::Attrs> =
+                l_trunks.iter().map(|r| (r.id, r.attrs.clone())).collect();
             for r in gd.reaches.iter_mut() {
                 if let Some(a) = first_attrs.get(&r.id) {
                     r.attrs = a.clone();
@@ -3307,7 +3317,12 @@ fn main() -> Result<(), String> {
             (10, "9", "kg-trib", on_off("kg-trib", "1 km2, readings 14 and 18")),
             (11, "7", "ks1", ks_form("ks1")),
             (12, "6", "band6", if today { "off" } else { "post" }.to_string()),
-            (12, "9", "kg-trib-post", if trib_on == "post" { on_off("kg-trib", "on the band6 output, crusader #168") } else { "off".to_string() }),
+            (
+                12,
+                "9",
+                "kg-trib-post",
+                if trib_on == "post" { on_off("kg-trib", "on the band6 output, crusader #168") } else { "off".to_string() },
+            ),
             (13, "10", "basins-2", on_off("basins", "on the KS output, reading 22")),
             (14, "11", "kv-kc", format!("kv {}, kc {}, outlets sea and window edge, against S_KH", on_off("kv", "on"), on_off("kc", "on"))),
             (15, "12", "k7-hillslope", "off".to_string()),
