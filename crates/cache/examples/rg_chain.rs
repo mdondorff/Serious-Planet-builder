@@ -1948,7 +1948,40 @@ fn main() -> Result<(), String> {
     let mut nodes = vec![0f64; nw * nh];
     par_fill(&mut nodes, nw, threads, &|p| inputs.base(lattice_direction(face, LATTICE, ni0 + p % nw, nj0 + p / nw)));
     let lattice = Lattice { face, i0: ni0, j0: nj0, w: nw, h: nh, z: nodes.iter().map(|&v| v as f32).collect() };
-    let base = |d: Vec3| -> f64 { f64::from(read_elevation_c1(&lattice, &TangentWarp, d).expect("a node of the sampled rectangle")) };
+    let base_read = |d: Vec3| -> f64 { f64::from(read_elevation_c1(&lattice, &TangentWarp, d).expect("a node of the sampled rectangle")) };
+    // spikes #151 (G2's ridge edit, spike only): `--edit ridge:X0,Y0,X1,Y1,H,W` adds H m along the segment (global face L cells) with a Gaussian cross-section of width W m
+    // (H exp(-(d/W)^2), d the distance to the segment); `--edit saddle:X,Y,H,W` subtracts H exp(-(r/W)^2) around a point. The edit is in the base B itself, so every stage reads it.
+    let edit: Option<(bool, [f64; 6])> = match value(&args, "--edit") {
+        None => None,
+        Some(e) => {
+            let (kind, nums) = e.split_once(':').ok_or("--edit ridge:X0,Y0,X1,Y1,H,W | saddle:X,Y,H,W")?;
+            let v: Vec<f64> = nums.split(',').map(str::parse).collect::<Result<_, _>>().map_err(|_| "--edit: numbers")?;
+            match (kind, v.len()) {
+                ("ridge", 6) => Some((true, [v[0], v[1], v[2], v[3], v[4], v[5]])),
+                ("saddle", 4) => Some((false, [v[0], v[1], v[0], v[1], v[2], v[3]])),
+                _ => return Err("--edit ridge:X0,Y0,X1,Y1,H,W | saddle:X,Y,H,W".into()),
+            }
+        }
+    };
+    let n_face = (REGIONAL * L) as f64;
+    // an L cell's side at the face's middle (the edit's widths in metres; 101.8 m at Earth's radius)
+    let cell_l_m = R * std::f64::consts::FRAC_PI_2 / n_face;
+    let edit_m = |d: Vec3| -> f64 {
+        let Some((raise, [x0, y0, x1, y1, hgt, wid])) = edit else { return 0.0 };
+        let (f, s, t) = planet_core::cube::direction_to_face(&TangentWarp, d);
+        if f != face {
+            return 0.0;
+        }
+        let (x, y) = ((s + 1.0) * n_face / 2.0 - 0.5, (t + 1.0) * n_face / 2.0 - 0.5);
+        let (dx, dy) = (x1 - x0, y1 - y0);
+        let len2 = dx * dx + dy * dy;
+        let u = if len2 > 0.0 { (((x - x0) * dx + (y - y0) * dy) / len2).clamp(0.0, 1.0) } else { 0.0 };
+        let (ex, ey) = (x - (x0 + u * dx), y - (y0 + u * dy));
+        let dist_m = (ex * ex + ey * ey).sqrt() * cell_l_m;
+        let bump = hgt * libm::exp(-(dist_m / wid) * (dist_m / wid));
+        if raise { bump } else { -bump }
+    };
+    let base = |d: Vec3| -> f64 { base_read(d) + edit_m(d) };
     let orography = inputs.orography();
     let climate = |d: Vec3| {
         let (pm, tc) = (orography.precipitation_mm(d), orography.temperature_c(d));
@@ -3292,6 +3325,7 @@ fn main() -> Result<(), String> {
             ("k5-diffuse", k5_diffuse.to_string()),
             ("k5-kdt-scale", k5_kdt_scale.to_string()),
             ("k5-diffuse-stencil", k5_stencil.to_string()),
+            ("edit", value(&args, "--edit").unwrap_or("-").to_string()),
             ("k5-uok-scale", k5_uok_scale.to_string()),
             ("k5-diffuse-amax", k5_diffuse_amax.to_string()),
             ("k5-parity", k5_parity.to_string()),
