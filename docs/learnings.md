@@ -202,3 +202,9 @@ Scope: project (the GLO-30 benchmark, SPIKE-108's frozen pools, P3 E1)
 Scope: project (river graph, GEN-189)
 - A marker shares a cell only with its reach's up node (contract reading 1); validators follow a chain through a marker's reach, or cycles and outlet-less chains through junctions go unseen.
 - Obsolete when: never.
+
+## 2026-11-19 A fixed transect's staleness is judged against its own pick depth, not its relief
+Scope: project (BUILD-061's transects, picked on g1f8's prototype S0)
+- On the surface the 15 transects were picked on, "S0 depth under 10 % of the relief along the line" marks 2 of 15 stale: M1 T3 (a river on a mountainside, depth 21 m, relief 1,081 m) and R3a T2 (a line descending across the river, depth 0 m).
+- "Under 10 % of the S0 depth at the pick" marks none there, and on g1f8's diffusion row only M1 T3, whose valley moved.
+- Obsolete when: transects are picked per run (parked until Mountain Base v2).

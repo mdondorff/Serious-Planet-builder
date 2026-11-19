@@ -1,5 +1,6 @@
 # Matched GLO-30 valley profiles of the 15 river transects (BUILD-061; SPIKE-119's rule, re-picked on g1f8's prototype S0, lead #150a): heights relative to the profile's river point, every 50.9 m (0.5 cells of 101.8 m) across the line.
-# GLO-30: produced using Copernicus WorldDEM-30 (c) DLR e.V. 2010-2014 and (c) Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved.
+# GLO-30 notice: produced using Copernicus WorldDEM-30 (c) DLR e.V. 2010-2014 and (c) Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved.
+# The organisations in charge of the Copernicus programme by law or by delegation do not incur any liability for any use of the Copernicus WorldDEM-30.
 window,id,tile,relief_m,area_km2,k,d_m,z_rel_m
 r1h,T1,N42W123,603.8,2476,0,-5000.0,444.95
 r1h,T1,N42W123,603.8,2476,1,-4949.0,459.26

@@ -1,5 +1,0 @@
-- [x] `planet_cache::transect_sheet`: parsers, profile, valley measures, stale flag, sheet, table, render
-- [x] `transect_sheet` example and `cargo xtask transects`
-- [x] data: re-picked transects and matched GLO-30 profiles
-- [x] TEST-141 tier-A tests; the xtask plan test
-- [x] sheets for the five g1f8 prototype windows and the diffusion rows rendered and looked at

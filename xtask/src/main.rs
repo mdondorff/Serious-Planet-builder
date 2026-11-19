@@ -154,7 +154,7 @@ fn main() -> ExitCode {
         Some("plan") => plancmd::run(&root),
         Some("gates") => gates::run(&root),
         Some("stages") => heavy::with(&format!("stages {}", args[1..].join(" ")), || stages::run_cmd(&root, &args[1..])),
-        Some("transects") => transects::run_cmd(&root, &args[1..]),
+        Some("transects") => heavy::with(&format!("transects {}", args[1..].join(" ")), || transects::run_cmd(&root, &args[1..])),
         Some("worktrees") => worktrees::run(&root, &args[1..]),
         Some("heavy") => heavy::run_wrapped(&root, &args[1..]),
         Some("quiet") => heavy::quiet(&args[1..]),

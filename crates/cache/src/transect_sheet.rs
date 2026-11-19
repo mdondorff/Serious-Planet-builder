@@ -244,6 +244,15 @@ pub fn valley(p: &[(f64, f64)]) -> Option<Valley> {
     Some(Valley { river_m: river, river_d: p[centre].0, depth_m: depth, widths })
 }
 
+/// The GLO-30 licence's notice for derived data and its liability sentence (`dem/glo30-samples/LICENCE-NOTES.md`, Art. 6), on the sheet's title band; the bitmap font has no `;`, so
+/// the notice's semicolon is the end of its second line.
+pub const GLO30_NOTICE: [&str; 4] = [
+    "PRODUCED USING COPERNICUS WORLDDEM-30 (C) DLR E.V. 2010-2014 AND (C) AIRBUS DEFENCE AND SPACE GMBH 2014-2018",
+    "PROVIDED UNDER COPERNICUS BY THE EUROPEAN UNION AND ESA",
+    "ALL RIGHTS RESERVED. THE ORGANISATIONS IN CHARGE OF THE COPERNICUS PROGRAMME BY LAW OR BY DELEGATION",
+    "DO NOT INCUR ANY LIABILITY FOR ANY USE OF THE COPERNICUS WORLDDEM-30.",
+];
+
 const PLOT_W: usize = 480;
 const PLOT_H: usize = 240;
 const GAP: usize = 16;
@@ -294,8 +303,9 @@ fn row_text(name: &str, v: Option<Valley>) -> String {
 pub fn compose(m: &Manifest, panels: &[Panel]) -> Rgba {
     let n = panels.len().max(1);
     let band = TEXT_ROW_H + 4;
-    let title = 3 * TEXT_ROW_H + GAP;
-    let (w, h) = (GAP + n * (PLOT_W + GAP), title + band + PLOT_H + TEXT_ROWS * TEXT_ROW_H + GAP);
+    let title = (2 + GLO30_NOTICE.len()) * TEXT_ROW_H + GAP;
+    let notice_w = 2 * GAP + GLO30_NOTICE.iter().map(|l| l.len()).max().unwrap_or(0) * TEXT_CELL_W;
+    let (w, h) = ((GAP + n * (PLOT_W + GAP)).max(notice_w), title + band + PLOT_H + TEXT_ROWS * TEXT_ROW_H + GAP);
     let mut img = Rgba { width: w as u32, height: h as u32, data: [24u8, 24, 28, 255].repeat(w * h) };
     put_text(
         &mut img,
@@ -321,13 +331,9 @@ pub fn compose(m: &Manifest, panels: &[Panel]) -> Rgba {
         ),
         [170, 190, 220],
     );
-    put_text(
-        &mut img,
-        GAP,
-        4 + 2 * TEXT_ROW_H,
-        "GLO-30: COPERNICUS WORLDDEM-30 (C) DLR E.V. 2010-2014, AIRBUS DS 2014-2018, PROVIDED UNDER COPERNICUS BY THE EU AND ESA",
-        [140, 140, 140],
-    );
+    for (r, line) in GLO30_NOTICE.iter().enumerate() {
+        put_text(&mut img, GAP, 4 + (2 + r) * TEXT_ROW_H, line, [140, 140, 140]);
+    }
     for (k, p) in panels.iter().enumerate() {
         let ox = GAP + k * (PLOT_W + GAP);
         let oy = title;
