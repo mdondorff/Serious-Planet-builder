@@ -1,0 +1,6 @@
+r1h-today-h1-zb-1020x1020.f32: mean |2nd difference| (m) by global index mod 6, phases 0-5; x: 33.01 33.37 32.81 32.85 33.31 32.91 (max/mean 1.01, peak phase 1); y: 23.17 23.54 23.18 23.13 23.38 23.03 (max/mean 1.01, peak phase 1)
+r1h-today-h1-zbin-1020x1020.f32: mean |2nd difference| (m) by global index mod 6, phases 0-5; x: 33.06 33.44 32.88 32.93 33.37 32.95 (max/mean 1.01, peak phase 1); y: 23.38 23.74 23.38 23.31 23.57 23.26 (max/mean 1.01, peak phase 1)
+r1h-today-h1-zs-1020x1020.f32: mean |2nd difference| (m) by global index mod 6, phases 0-5; x: 53.09 53.15 52.97 52.89 52.78 52.55 (max/mean 1.00, peak phase 1); y: 48.60 48.69 48.68 49.34 48.65 49.01 (max/mean 1.01, peak phase 3)
+r1h-k15-h1-zs-1020x1020.f32: mean |2nd difference| (m) by global index mod 6, phases 0-5; x: 55.74 55.84 55.73 55.66 55.38 55.14 (max/mean 1.00, peak phase 1); y: 53.47 53.63 53.08 53.96 52.98 53.46 (max/mean 1.01, peak phase 3)
+z_s(k_dt x 1.5) - z_s(today), along x: power peak in 2-12 km at 11.82 km; share of 4.5-5.3 km in the 2-12 km power 0.092 (white: 0.082)
+z_s(k_dt x 1.5) - z_s(today), along y: power peak in 2-12 km at 11.82 km; share of 4.5-5.3 km in the 2-12 km power 0.087 (white: 0.082)

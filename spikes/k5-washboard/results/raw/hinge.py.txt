@@ -1,0 +1,29 @@
+"""SPIKE-139, the owner's reading (b): is z_s's curvature phase-locked to the 2048-per-face coupled lattice (6 H1 cells, 4.886 km at 12,288 H1 cells a face)?
+Mean |second difference| along x and along y, binned by the global H1 index mod 6 (the region's first cell is face cell (ri0, rj0)); land cells in the box.
+A bilinear read of the lattice has kinks on its node lines, so a phase-locked field peaks at one phase. Usage: hinge.py <dir> <ri0> <rj0> <file at 1020x1020> ..."""
+import sys
+import numpy as np
+NH = 1020
+d, ri0, rj0 = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+for path in sys.argv[4:]:
+    z = np.fromfile(f'{d}/{path}', '<f4').reshape(NH, NH).astype(float)
+    dxx = np.abs(z[:, 2:] - 2 * z[:, 1:-1] + z[:, :-2])  # at column c = 1..NH-2
+    dyy = np.abs(z[2:, :] - 2 * z[1:-1, :] + z[:-2, :])
+    land = z > 0
+    box = slice(205, NH - 205)
+    rows = []
+    for name, dd, axis in (('x', dxx, 1), ('y', dyy, 0)):
+        m = land[:, 1:-1] if axis == 1 else land[1:-1, :]
+        idx = (np.arange(1, NH - 1) + (ri0 if axis == 1 else rj0)) % 6
+        vals = []
+        for ph in range(6):
+            if axis == 1:
+                sel = dd[box, :][:, idx == ph][:, :]
+                mm = m[box, :][:, idx == ph]
+            else:
+                sel = dd[:, box][idx == ph, :]
+                mm = m[:, box][idx == ph, :]
+            vals.append(sel[mm].mean())
+        v = np.array(vals)
+        rows.append(f'{name}: ' + ' '.join(f'{x:.2f}' for x in v) + f' (max/mean {v.max() / v.mean():.2f}, peak phase {v.argmax()})')
+    print(f'{path}: mean |2nd difference| (m) by global index mod 6, phases 0-5; ' + '; '.join(rows))
