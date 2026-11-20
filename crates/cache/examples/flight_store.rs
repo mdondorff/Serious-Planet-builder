@@ -25,6 +25,10 @@ const REGIONAL: usize = 12_288;
 const MARGIN: usize = 200;
 /// A kept basin is a lake when its floor holds at least this much water on the final surface (metres).
 const LAKE_MIN_DEPTH_M: f64 = 0.5;
+/// A kept basin's recorded spill is valid while the final surface's depression level at its floor lies at most this below it (the gate's spill_mismatch rule, lead #176b).
+const SPILL_MISMATCH_M: f64 = 0.5;
+/// Water stands this far under a rim that lies below the recorded spill: the flood's graded level sits a hair above the rim cell (1e-7 m a cell), so a level at it would cross the rim.
+const RIM_MARGIN_M: f64 = 1.0e-3;
 
 /// The gate's windows (BUILD-055): `face,i0,i1,j0,j1,seed` in regional cells.
 const WINDOWS: [(&str, [usize; 6]); 5] = [
@@ -186,11 +190,16 @@ fn main() -> Result<(), String> {
     std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
     let mut writer = PackWriter::open(&out, world.params(), DEFAULT_MAX_PACK_BYTES).map_err(|e| e.to_string())?;
     // lead #176a: the graph's kept L basins (`protected_surface`) as lakes at their spill level, their water flooded on the final surface from the floor cell
-    let (lakes, lake_of) = match (&graph, args.iter().any(|a| a == "--no-lakes")) {
+    let (lakes, lake_of, invalid) = match (&graph, args.iter().any(|a| a == "--no-lakes")) {
         (Some(g), false) => {
-            kept_lakes(g, &surface, w, h, x0, y0, spec.radius_m * std::f64::consts::FRAC_PI_2 / spec.local() as f64, face, t)?
+            let spill = match opt(&args, "--lake-level").unwrap_or("spill") {
+                "spill" => true,
+                "depression" => false,
+                o => return Err(format!("--lake-level spill|depression, not '{o}'")),
+            };
+            kept_lakes(g, &surface, w, h, x0, y0, spec.radius_m * std::f64::consts::FRAC_PI_2 / spec.local() as f64, face, t, spill)?
         }
-        _ => (Vec::new(), Vec::new()),
+        _ => (Vec::new(), Vec::new(), 0),
     };
     let mut tables = [CacheKey::NONE; 6];
     let mut by_id = lakes.clone();
@@ -332,7 +341,11 @@ fn main() -> Result<(), String> {
     let commit = Commit::new(CommitSpec::of(&l_spec, spec.res)?, tables, keys, graph_cells, graph_keys);
     commit.write(&out)?;
     write_readme(&out, wname, &win, &surface_file, commit.id, tiles.len(), inputs_id, noise)?;
-    println!("FLIGHT-STORE lakes: {} kept L basins, {} wet cells", lakes.len(), lake_of.iter().filter(|&&k| k != u32::MAX).count());
+    println!(
+        "FLIGHT-STORE lakes: {} kept L basins as lakes, {} wet cells; {invalid} kept basins dry (spill mismatch: the final surface's depression at the floor, or a cell its water reaches, more than {SPILL_MISMATCH_M} m under the recorded spill)",
+        lakes.len(),
+        lake_of.iter().filter(|&&k| k != u32::MAX).count()
+    );
     println!(
         "FLIGHT-STORE {wname}: {} tiles from {} into {} (commit {:016x}, inputs identity {inputs_id:016x}); {land} land cells; L from {lowest:.1} to {highest:.1} m; {:.0} s",
         tiles.len(),
@@ -379,12 +392,19 @@ fn kept_lakes(
     cell_m: f64,
     face: Face,
     tile: usize,
-) -> Result<(Vec<planet_generators::bake::lakes::Lake>, Vec<u32>), String> {
+    spill: bool,
+) -> Result<(Vec<planet_generators::bake::lakes::Lake>, Vec<u32>, usize), String> {
     use planet_generators::bake::river_graph::{Level, Outlet, Represented};
     let grid = planet_generators::bake::Grid::new(w, h, cell_m);
     let filled = planet_generators::bake::flood::priority_flood_with(&grid, z, &grid.outlets(z, 0.0), 1.0e-7, false);
     let mut kept: Vec<_> = g.basins.iter().filter(|b| b.level == Level::L && b.represented == Represented::ProtectedSurface).collect();
-    kept.sort_by_key(|b| b.id);
+    // spill (lead #176b): increasing spill, so an enclosing basin's water takes the cells of the ones it holds; depression: by id
+    if spill {
+        kept.sort_by(|a, b| a.spill_m.total_cmp(&b.spill_m).then(a.id.cmp(&b.id)));
+    } else {
+        kept.sort_by_key(|b| b.id);
+    }
+    let (mut invalid, mut leaks, mut no_depression) = (0usize, 0usize, 0usize);
     let mut label = vec![u32::MAX; w * h];
     let mut lakes = Vec::new();
     let mut stack = Vec::new();
@@ -397,16 +417,35 @@ fn kept_lakes(
             continue;
         }
         let start = fy as usize * w + fx as usize;
-        if label[start] != u32::MAX || filled[start] - z[start] < LAKE_MIN_DEPTH_M {
+        // spill: the graph's recorded spill is the level, valid while the final surface's depression at the floor reaches it within SPILL_MISMATCH_M (the gate's spill_mismatch)
+        if spill && (filled[start] < b.spill_m - SPILL_MISMATCH_M || z[start] >= b.spill_m) {
+            invalid += 1;
             continue;
         }
-        let level = filled[start];
+        // spill: a floor the final surface no longer holds water at (filled to its level, no depression) has no lake
+        if spill && filled[start] - z[start] < 1.0e-3 {
+            no_depression += 1;
+            continue;
+        }
+        if !spill && (label[start] != u32::MAX || filled[start] - z[start] < LAKE_MIN_DEPTH_M) {
+            continue;
+        }
+        // spill: the recorded spill, or the floor's depression level where a rim lies up to SPILL_MISMATCH_M lower (crusader and explorer, #171a: the water stays inside)
+        let level = if spill { b.spill_m.min(filled[start] - RIM_MARGIN_M) } else { filled[start] };
         let k = lakes.len() as u32;
         let (mut cells, mut tiles) = (0u32, std::collections::BTreeSet::new());
+        // the cells this lake takes with the label each had, so a lake that leaks over a lowered rim gives them back
+        let mut taken: Vec<(usize, u32)> = vec![(start, label[start])];
+        let mut leaked = false;
         label[start] = k;
         stack.push(start);
         while let Some(c) = stack.pop() {
             cells += 1;
+            // spill: a cell whose depression stands more than SPILL_MISMATCH_M under the spill lies beyond the rim (the water would run out there)
+            if spill && filled[c] < level - SPILL_MISMATCH_M {
+                leaked = true;
+                break;
+            }
             let (x, y) = ((c % w) as i64, (c / w) as i64);
             tiles.insert((((x + x0) as usize / tile) as u32, ((y + y0) as usize / tile) as u32));
             for dy in -1..=1i64 {
@@ -417,12 +456,26 @@ fn kept_lakes(
                     }
                     let q = v as usize * w + u as usize;
                     // the same depression: water stands there, its flood within 1 mm of this level (the flood grades its flats at 1e-7 m a cell)
-                    if label[q] == u32::MAX && filled[q] - z[q] > 1.0e-4 && (filled[q] - level).abs() < 1.0e-3 {
+                    let wet = if spill {
+                        label[q] != k && z[q] < level
+                    } else {
+                        label[q] == u32::MAX && filled[q] - z[q] > 1.0e-4 && (filled[q] - level).abs() < 1.0e-3
+                    };
+                    if wet {
+                        taken.push((q, label[q]));
                         label[q] = k;
                         stack.push(q);
                     }
                 }
             }
+        }
+        if leaked {
+            for &(c, was) in taken.iter().rev() {
+                label[c] = was;
+            }
+            stack.clear();
+            leaks += 1;
+            continue;
         }
         let active = b.outlet == Outlet::Active;
         lakes.push(planet_generators::bake::lakes::Lake {
@@ -447,5 +500,6 @@ fn kept_lakes(
         });
     }
     // the labels index this list in flooding order; the basin tables take a copy sorted by id
-    Ok((lakes, label))
+    println!("FLIGHT-STORE lakes check: {invalid} kept basins whose floor's depression lies more than {SPILL_MISMATCH_M} m under the spill (or whose floor stands at or above it), {leaks} whose water reaches a cell more than that under the spill, {no_depression} whose floor holds no water on the final surface (filled to its level)");
+    Ok((lakes, label, invalid + leaks + no_depression))
 }
