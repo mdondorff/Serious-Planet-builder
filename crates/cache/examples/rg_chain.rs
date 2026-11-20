@@ -1903,8 +1903,8 @@ fn main() -> Result<(), String> {
         return Err(format!("--k5-diffuse-stencil 5 | 9, not '{k5_stencil}'"));
     }
     planet_generators::bake::round::K5_DIFFUSE_NINE.store(k5_stencil == "9", std::sync::atomic::Ordering::Relaxed);
-    // spikes #154: `--k5-edge dam` (default: a window-cut catchment's edge outlet keeps its height) or `free` (the breach lowers it like any receiver; round::K5_EDGE_FREE; spike only)
-    let k5_edge = value(&args, "--k5-edge").unwrap_or("dam");
+    // spikes #154, lead #156 (reading 36): `--k5-edge free` (default: a window-cut catchment's edge outlet is breached like any receiver, a free outflow edge; round::K5_EDGE_FREE) or `dam` (the edge outlet keeps its height, the former rule and main's; spike only)
+    let k5_edge = value(&args, "--k5-edge").unwrap_or("free");
     if !["dam", "free"].contains(&k5_edge) {
         return Err(format!("--k5-edge dam | free, not '{k5_edge}'"));
     }
