@@ -123,6 +123,8 @@ pub struct KvKc {
     /// Lead #173 (spikes #152: trunk-image vertices left uncut mid-reach): every L vertex cell above its bed by more than 0.25 m before KV, by why KV did or did not cut it:
     /// (label, trunk-image vertices, other vertices). A cell is counted once, under its first claiming reach.
     pub census: Vec<(&'static str, usize, usize)>,
+    /// Lead #175: the census per vertex cell: (cell, class index into `census`, trunk image, bed m, height before KV, after KV).
+    pub vertex_class: Vec<(usize, u8, bool, f64, f64, f64)>,
 }
 
 /// The least fall (m per m) the cross-slope pass keeps toward the line where it reaches the vertex's height: the gate's flood grade (1e-5; `s_floor` is 100 times it).
@@ -367,6 +369,7 @@ pub fn run_with(
             }
         }
         let mut count = vec![(0usize, 0usize); labels.len()];
+        let mut per: Vec<(usize, u8, bool, f64, f64, f64)> = Vec::new();
         for (&c, &(ri, k)) in &vtx {
             let bed = bed_m(reaches[ri].attrs.bed[k]);
             if s0[c] - bed <= 0.25 {
@@ -389,14 +392,16 @@ pub fn run_with(
             } else {
                 7
             };
+            per.push((c, class as u8, reaches[ri].parent.is_some(), bed, s0[c], kv[c]));
             if reaches[ri].parent.is_some() {
                 count[class].0 += 1;
             } else {
                 count[class].1 += 1;
             }
         }
-        labels.iter().zip(count).map(|(&l, (a, b))| (l, a, b)).collect::<Vec<_>>()
+        (labels.iter().zip(count).map(|(&l, (a, b))| (l, a, b)).collect::<Vec<_>>(), per)
     };
+    let (census, vertex_class) = census;
     // lead #169 item 3: the floor falls toward the line; floor cells farthest first (ties by cell), each at most its farther floor neighbours' height less the grade's drop
     let (mut cross_cells, mut cross_volume, mut cross_short, mut cross_short_m) = (0usize, 0.0f64, 0usize, 0.0f64);
     let mut cross_cut: Vec<f32> = Vec::new();
@@ -600,6 +605,7 @@ pub fn run_with(
         cross_short_m,
         cross_cut,
         census,
+        vertex_class,
     }
 }
 

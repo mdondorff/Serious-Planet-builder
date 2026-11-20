@@ -3394,6 +3394,25 @@ fn main() -> Result<(), String> {
             for (label, trunk, other) in &r.census {
                 println!("RG domain {d} KV vertex census (lead #173): {label}: {trunk} trunk-image, {other} other");
             }
+            // lead #175: the census per vertex (window cell x, y; class index as printed above, 0 first; trunk image; bed, height before and after KV)
+            if regions <= 1 {
+                let mut f = String::from(
+                    "x,y,class,trunk,bed_m,before_m,after_kv_m,sea,window_edge
+",
+                );
+                for &(c, class, trunk, bed, before, after) in &r.vertex_class {
+                    f += &format!(
+                        "{},{},{class},{},{bed:.2},{before:.3},{after:.3},{},{}
+",
+                        c % w,
+                        c / w,
+                        u8::from(trunk),
+                        u8::from(sea_l[c]),
+                        u8::from(c % w == 0 || c % w == w - 1 || c / w == 0 || c / w == h - 1)
+                    );
+                }
+                std::fs::write(out_dir.join(format!("{tag}-kv-vertices.csv")), f).map_err(|e| e.to_string())?;
+            }
             if !r.cross_cut.is_empty() {
                 // DEC crusader-19's report: how deep the pass cut (p50, p95, max over the cells it lowered)
                 let mut cuts: Vec<f32> = r.cross_cut.iter().copied().filter(|&x| x > 0.0).collect();
