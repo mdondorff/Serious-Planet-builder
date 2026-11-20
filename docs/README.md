@@ -11,6 +11,7 @@
 | The target architecture and its gate table | `docs/design/terrain-target.md` (A3) |
 | Every gate reading with its commit and verdict | `docs/gates/ledger.md` |
 | The stage previews' committed manifest | `docs/stages/manifest.txt` |
+| Interactive offline pipeline DAG, step previews and version pins | `cargo xtask cockpit --help` (`target/review/cockpit/index.html`; brief: `docs/design/pipeline-cockpit.md`) |
 | Where the milestones may go after the current one (non-binding) | `docs/roadmap.md` |
 | What was done, newest first | `cargo xtask log` (current milestone: `docs/log.md` and `docs/log.d/`) |
 | Why something was decided | `docs/adr/` (index: `docs/adr/README.md`) |

@@ -5,6 +5,7 @@ mod agentguard;
 mod bakecmd;
 mod blesscmd;
 mod cistats;
+mod cockpit;
 mod detdiff;
 mod disk;
 mod gate;
@@ -92,6 +93,7 @@ const USAGE: &str = "cargo xtask <command>
   stages [--update]    the stage manifest (BUILD-047): runs the stage probe's fixture and checks docs/stages/manifest.txt against it (a stale manifest fails naming the stage, field and column); --update rewrites it from the run; the sheets go to target/review/stages/ci/
   stages --chain DIR [--step S] [--view X,Y,SX,SY] [--out FILE]   the chain sheet (BUILD-060): one PNG of a chain directory's twelve stage panels (base, z_s, H1 rivers, S0, KH, KS, trunks, tributaries and basins, KV, KC, final, final - S0) at a 10-degree sun and one fixed scale; default the whole window at 12 L cells per pixel to target/review/stages/chain/<label>.png
   transects --chain DIR [--face F] [--out FILE]   the cross-section sheet (BUILD-061): per SPIKE-119 river transect inside a chain directory's window, S0, the final surface and the matched GLO-30 valley on one vertical scale, with each profile's valley depth and its width at 10 m and 50 m above the river; to target/review/stages/transects/<label>.png and a .txt table (the face from chain.txt's `switch window`, or --face)
+  cockpit [--seed N | --world F] [--erosion on|off [--channels on|off] | --commit DIR] [--pipeline-json F] [--run <world|drivers|stages|all>] [--compare-seed N] [--chain DIR [--face F]] [--km N] [--threads N] [--out-dir DIR]   assemble the offline pipeline DAG, switch simulator, Global Authoring preview inspector, and pin/probe ledger under target/review/cockpit/index.html (BUILD-064)
   gates                the gate ledger (BUILD-041): per gate of A3 12.1 the newest verdict, rows and lanes from docs/gates/ledger.md; spec-lint rejects a gate with no row
   worktrees [--prune] [--no-size]   every git worktree with size, branch, uncommitted count, last commit and merged PR (BUILD-039); --prune removes with `git worktree remove` (never --force) only the clean ones whose PR is merged or that are detached at an ancestor of origin/main, never the current one or the root; prepush warns above 12 worktrees; prepush, store and bake refuse below 20 GB free on the drive and warn below 50 GB
   quiet on|off|status   the owner's flag file: while it is up every heavy command (test, prepush, perf, capture, accept, store, heavy) waits (BUILD-026)
@@ -159,6 +161,10 @@ fn main() -> ExitCode {
         Some("gates") => gates::run(&root),
         Some("stages") => heavy::with(&format!("stages {}", args[1..].join(" ")), || stages::run_cmd(&root, &args[1..])),
         Some("transects") => heavy::with(&format!("transects {}", args[1..].join(" ")), || transects::run_cmd(&root, &args[1..])),
+        Some("cockpit") if cockpit::needs_heavy_slot(&args[1..]) => {
+            heavy::with(&format!("cockpit {}", args[1..].join(" ")), || cockpit::run_cmd(&root, &args[1..]))
+        }
+        Some("cockpit") => cockpit::run_cmd(&root, &args[1..]),
         Some("worktrees") => worktrees::run(&root, &args[1..]),
         Some("heavy") => heavy::run_wrapped(&root, &args[1..]),
         Some("quiet") => heavy::quiet(&args[1..]),

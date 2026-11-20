@@ -118,6 +118,7 @@ Everything goes through `cargo xtask`:
 | `cargo xtask det-diff <a> <b>` | compare two determinism manifests (Windows against Linux in CI) |
 | `cargo xtask capture flights` | the coastal flights as PNG sequences for the owner's look review |
 | `cargo xtask ci-stats` | CI job times against the budget |
+| `cargo xtask cockpit [--help]` | offline HTML pipeline DAG, switch simulator, Global Authoring preview runner and pin/probe ledger (`target/review/cockpit/index.html`) |
 | `cargo xtask heavy <command>` | run a command under the machine-wide heavy-run lock |
 | `cargo xtask quiet on\|off\|status` | the owner's flag: while it is up every heavy command waits |
 | `cargo xtask perf [stream\|lit\|preflight\|envelope\|coupled\|global-bake]` | performance harness on the reference machine; it measures readiness and refuses otherwise; runs only on the architect's go |
