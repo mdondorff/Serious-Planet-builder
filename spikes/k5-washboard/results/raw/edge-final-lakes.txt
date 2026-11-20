@@ -1,0 +1,25 @@
+# final_lakes.py.txt on each run's final surface (flood with the window edge and the sea as outlets; closed depressions over 0.5 m and 1 km2; edge band 16 L cells; the box is the window less the 1600-cell margin)
+r1h-dam final: edge lakes over 1 km2 35 (12396 km2, depth max 1105 m); all over 1 km2 436 (14269 km2, of it inside the box 832 km2)
+   lake 2739 km2 depth 351 m at L x 6911..8157 y 2252..3360 edge=True in-box 0 km2
+   lake 2516 km2 depth 542 m at L x 5457..7009 y 4..799 edge=True in-box 0 km2
+   lake 913 km2 depth 937 m at L x 7422..7932 y 4..403 edge=True in-box 0 km2
+   lake 759 km2 depth 136 m at L x 2956..3598 y 5..451 edge=True in-box 0 km2
+   lake 685 km2 depth 446 m at L x 3..322 y 1852..2301 edge=True in-box 0 km2
+r1h-free final: edge lakes over 1 km2 5 (118 km2, depth max 147 m); all over 1 km2 409 (1751 km2, of it inside the box 832 km2)
+   lake 79 km2 depth 147 m at L x 7973..8081 y 1..145 edge=True in-box 0 km2
+   lake 45 km2 depth 18 m at L x 6166..6346 y 2814..3120 edge=False in-box 45 km2
+   lake 39 km2 depth 66 m at L x 7429..7512 y 3835..3947 edge=False in-box 0 km2
+   lake 31 km2 depth 100 m at L x 7053..7113 y 2287..2431 edge=False in-box 0 km2
+   lake 31 km2 depth 133 m at L x 4629..4694 y 2483..2559 edge=False in-box 31 km2
+m1-dam final: edge lakes over 1 km2 98 (102062 km2, depth max 1825 m); all over 1 km2 893 (106052 km2, of it inside the box 7715 km2)
+   lake 22113 km2 depth 1523 m at L x 5782..8157 y 3270..6377 edge=True in-box 3167 km2
+   lake 9419 km2 depth 1114 m at L x 4494..6651 y 5..2113 edge=True in-box 807 km2
+   lake 8458 km2 depth 685 m at L x 1530..4889 y 5..2202 edge=True in-box 640 km2
+   lake 7980 km2 depth 962 m at L x 6094..8154 y 2047..3699 edge=True in-box 1124 km2
+   lake 5371 km2 depth 864 m at L x 2394..5467 y 6494..8155 edge=True in-box 58 km2
+m1-free final: edge lakes over 1 km2 41 (2567 km2, depth max 261 m); all over 1 km2 1039 (6693 km2, of it inside the box 1493 km2)
+   lake 984 km2 depth 222 m at L x 1..336 y 5663..6180 edge=True in-box 0 km2
+   lake 482 km2 depth 221 m at L x 6962..8157 y 3495..4414 edge=True in-box 0 km2
+   lake 175 km2 depth 60 m at L x 1594..1723 y 571..792 edge=False in-box 0 km2
+   lake 170 km2 depth 129 m at L x 2651..2891 y 7036..7260 edge=False in-box 0 km2
+   lake 166 km2 depth 152 m at L x 286..617 y 5607..5791 edge=False in-box 0 km2

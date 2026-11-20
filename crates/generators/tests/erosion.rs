@@ -252,6 +252,7 @@ fn creases_cut_deeper_on_steep_ground_than_on_flat_ground() {
     assert!(steep > 3.0 * flat, "mean incision on the ramp {steep} m, on flat ground {flat} m");
 }
 
+// Re-pinned 2026-11-19 by `gen140-default` (GEN-140, owner 2026-11-19: the turned lattice is the default): every probe moved with the turned creases.
 // Re-pinned 2026-10-25 by `m8-relief-creases` (GEN-061, GEN-062, declared): the second probe lies where the landform is active; its bits moved with the fine creases (4654631722428695292 to 4654644490283343484, landform read from the lattice).
 // spec: GEN-017
 #[test]
@@ -261,7 +262,7 @@ fn known_answers() {
     let f = field(&src);
     let probes = [Vec3::new(0.3, -0.5, 0.8).normalized(), Vec3::new(1.0, 0.2, -0.1).normalized(), Vec3::new(-0.6, -0.6, -0.5).normalized()];
     let got: Vec<u64> = probes.iter().map(|&d| f.height(d).to_bits()).collect();
-    assert_eq!(got, [4627157040197927126, 4639451549527130348, 13882384398712516573]);
+    assert_eq!(got, [4628403745914772058, 4639219879912384853, 13882387953125181606]);
 }
 
 // spec: GEN-062

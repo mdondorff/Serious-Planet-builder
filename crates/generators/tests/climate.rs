@@ -264,7 +264,10 @@ fn fields_over_a_bake_take_their_climate_from_the_integer_reader_and_key_with_th
     let eroded = ErosionGenerator.field(&GenContext::new(&def), BodyId::PLANET, &src, key).unwrap();
     for (name, f) in [("terrain", &terrain as &dyn HeightField), ("eroded", &eroded as &dyn HeightField)] {
         assert_eq!(f.climate(&TangentWarp, t), want, "{name}: the climate is the reader's, not the analytic function's");
-        assert_eq!(f.climate_version_word(), climate_version_word(), "{name}");
+        // the eroded field folds the turned creases (GEN-140, on by default) into its word; the terrain field has no creases
+        let word =
+            if name == "eroded" { planet_generators::height::turned_noise_word(climate_version_word()) } else { climate_version_word() };
+        assert_eq!(f.climate_version_word(), word, "{name}");
         assert_ne!(f.climate(&TangentWarp, t), analytic_climate(SEED, &TangentWarp, t), "{name}: the bake and the analytic climate differ");
     }
     assert_eq!(climate_tile(&src, t).unwrap(), want);
