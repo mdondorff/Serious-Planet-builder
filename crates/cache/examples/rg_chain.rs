@@ -3264,10 +3264,18 @@ fn main() -> Result<(), String> {
                         }
                     }
                 }
-                let (mut dropped, mut checked) = (0usize, 0usize);
+                let (mut dropped, mut checked, mut at_edge) = (0usize, 0usize, 0usize);
+                // lead (DEC crusader-21 b): a basin whose spill leaves the window (its spill path ends at the window's edge unresolved) or that holds a border cell spills beyond
+                // the window; its level is not known here, so it is no kept lake
+                let unresolved: HashSet<u64> = pb.unresolved.iter().copied().collect();
                 for b in pb.basins.iter_mut().filter(|b| b.represented == Represented::ProtectedSurface) {
                     checked += 1;
                     let cells = &pb.cells[&b.id];
+                    if unresolved.contains(&b.id) || cells.iter().any(|&c| border[c]) {
+                        b.represented = Represented::None;
+                        at_edge += 1;
+                        continue;
+                    }
                     let inside: HashSet<usize> = cells.iter().copied().collect();
                     let drains = if exit_only {
                         cells.iter().any(|&c| {
@@ -3285,7 +3293,7 @@ fn main() -> Result<(), String> {
                         dropped += 1;
                     }
                 }
-                println!("RG domain {d} kept-drained (crusader #171): {dropped} of {checked} kept L basins drained by an L line crossing the rim below spill - 0.5 m, no longer protected");
+                println!("RG domain {d} kept-drained (crusader #171): {dropped} of {checked} kept L basins drained by an L line crossing the rim below spill - 0.5 m, {at_edge} spilling beyond the window's edge; no longer protected");
             }
             println!("RG domain {d} second pass, reading 22: {} kept-size depressions drained", pb.drained);
             {
