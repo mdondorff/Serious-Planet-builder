@@ -636,7 +636,7 @@ fn the_closed_basin_bar_counts_river_length_outside_the_kept_lake_interiors() {
     g.basins.clear();
     let open = run(&g);
     assert!(open.basins >= 1 && open.basin_river_cells > 0, "the river runs through the pit: {open:?}");
-    assert_eq!(open.basin_river_cells, open.basin_all_river_cells, "no kept lake: the bar is every closed basin");
+    assert_eq!(open.basin_bar_river_cells, Some(open.basin_river_cells), "no kept lake: the bar is every closed basin");
     assert_eq!((open.kept_lake_river_cells, open.kept_lake_cells), (Some(0), Some(0)));
     g.basins = vec![Basin {
         id: 7,
@@ -652,12 +652,20 @@ fn the_closed_basin_bar_counts_river_length_outside_the_kept_lake_interiors() {
         owner: Domain::Landmass,
     }];
     let kept = run(&g);
-    assert_eq!(kept.basin_all_river_cells, open.basin_all_river_cells, "every closed basin is the same");
-    assert_eq!(kept.basin_river_cells, 0, "the pit's river cells lie in the kept lake: {kept:?}");
+    assert_eq!(kept.basin_river_cells, open.basin_river_cells, "basin_cells is every closed basin on every row");
+    assert_eq!(kept.basin_bar_river_cells, Some(0), "the pit's river cells lie in the kept lake: {kept:?}");
     assert_eq!(kept.kept_lake_river_cells, Some(open.basin_river_cells), "they move to the kept lakes' share");
     assert!(kept.kept_lake_cells.is_some_and(|k| k >= 16), "the interior is the pit: {:?}", kept.kept_lake_cells);
     let line = kept.fields_line();
-    assert!(line.contains(" basin_cells=0 ") && line.contains(" kept_lake_river_pct=") && line.contains(" kept_lake_km2="), "{line}");
+    let pct = 100.0 * open.basin_river_cells as f64 / open.river_cells as f64;
+    assert!(
+        line.contains(" basin_bar_cells=0 ")
+            && line.contains(" basin_bar_pct=0.00 ")
+            && line.contains(&format!(" basin_pct={pct:.2} "))
+            && line.contains(&format!(" kept_lake_river_pct={pct:.2} "))
+            && line.contains(&format!(" kept_lake_km2={:.2} ", kept.kept_lake_cells.unwrap() as f64 * DX * DX / 1.0e6)),
+        "{line}"
+    );
     assert!(kept.lines().iter().any(|l| l.contains("outside the kept-lake interiors") && l.contains("kept lakes:")), "{:?}", kept.lines());
     // without a graph the bar is every closed basin and the kept columns are "-"
     let plain = measure(
@@ -677,6 +685,10 @@ fn the_closed_basin_bar_counts_river_length_outside_the_kept_lake_interiors() {
         },
         &p,
     );
-    assert_eq!((plain.basin_river_cells, plain.kept_lake_river_cells), (open.basin_all_river_cells, None));
-    assert!(plain.fields_line().contains(" kept_lake_river_cells=- "), "{}", plain.fields_line());
+    assert_eq!((plain.basin_river_cells, plain.basin_bar_river_cells, plain.kept_lake_river_cells), (open.basin_river_cells, None, None));
+    assert!(
+        plain.fields_line().contains(" kept_lake_river_cells=- ") && plain.fields_line().contains(" basin_bar_pct=- "),
+        "{}",
+        plain.fields_line()
+    );
 }
