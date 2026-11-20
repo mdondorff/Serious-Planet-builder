@@ -1769,6 +1769,8 @@ static KEPT_DRAINED_EXIT: std::sync::atomic::AtomicBool = std::sync::atomic::Ato
 
 /// crusader #169 item 3: `--kv-cross`'s grade in micro (m per m), 0 off.
 static KV_CROSS_MICRO: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// lead #158 (spikes #157): `--ks-connect 4`: KS (and KH's h5) carve diagonal lines 4-connected; `8` (default): as before.
+static KS_CONNECT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// crusader #168b (reading 32): `--trunk-bed shared` (default) keeps a two-vertex trunk image's first vertex at its up node's bed when it rises over the budget, the rise at its down end
 /// excused by its rise_over_budget exception; `lift` raises its first vertex (spikes #142's form).
@@ -1904,6 +1906,12 @@ fn main() -> Result<(), String> {
     }
     planet_generators::bake::round::K5_DIFFUSE_NINE.store(k5_stencil == "9", std::sync::atomic::Ordering::Relaxed);
     // spikes #154, lead #156 (reading 36): `--k5-edge free` (default: a window-cut catchment's edge outlet is breached like any receiver, a free outflow edge; round::K5_EDGE_FREE) or `dam` (the edge outlet keeps its height, the former rule and main's; spike only)
+    // lead #158: `--ks-connect 8` (default) or `4` (KS and KH h5 lower one shared edge cell on each diagonal step; spike only)
+    let ks_connect = value(&args, "--ks-connect").unwrap_or("8");
+    if !["4", "8"].contains(&ks_connect) {
+        return Err(format!("--ks-connect 4 | 8, not '{ks_connect}'"));
+    }
+    KS_CONNECT.store(ks_connect == "4", std::sync::atomic::Ordering::Relaxed);
     let k5_edge = value(&args, "--k5-edge").unwrap_or("free");
     if !["dam", "free"].contains(&k5_edge) {
         return Err(format!("--k5-edge dam | free, not '{k5_edge}'"));
@@ -2665,6 +2673,33 @@ fn main() -> Result<(), String> {
         );
         let b: Vec<u8> = split.clone();
         std::fs::write(out_dir.join(format!("{tag}-kh-split-{rw}x{rh}.u8")), b).map_err(|e| e.to_string())?;
+        // lead #158 (spikes #157): with `--ks-connect 4`, KH's h5 closes its own corner-only links in the channel zone: a 2 x 2 block whose diagonal pair lies more than 1 m
+        // below both edge cells gets the lower edge cell lowered to the pair's mean. Claims are read from the unchanged read and applied as a minimum (order-free, CON-14).
+        if KS_CONNECT.load(std::sync::atomic::Ordering::Relaxed) {
+            if let Some(zr) = &zone {
+                let mut want = vec![f64::INFINITY; n_l];
+                for y in 0..h - 1 {
+                    for x in 0..w - 1 {
+                        let (a, b, c, d) = (y * w + x, y * w + x + 1, (y + 1) * w + x, (y + 1) * w + x + 1);
+                        if !(zr[parent(a)] || zr[parent(d)]) {
+                            continue;
+                        }
+                        // a-d diagonal low against b and c, or b-c low against a and d
+                        for (p, q, e1, e2) in [(a, d, b, c), (b, c, a, d)] {
+                            if one[e1].min(one[e2]) - one[p].max(one[q]) > 1.0 {
+                                let e = if one[e1] < one[e2] || (one[e1] == one[e2] && e1 < e2) { e1 } else { e2 };
+                                want[e] = want[e].min(0.5 * (one[p] + one[q]));
+                            }
+                        }
+                    }
+                }
+                let cut = (0..n_l).filter(|&e| want[e] < one[e]).count();
+                for e in 0..n_l {
+                    one[e] = one[e].min(want[e]);
+                }
+                println!("RG KH h5 connect 4 (lead #158): {cut} edge cells lowered in the channel zone");
+            }
+        }
         one
     } else {
         start.clone()
@@ -2980,6 +3015,53 @@ fn main() -> Result<(), String> {
             }
             ("ks1", None) => return Err("--ks ks1 needs KG-trib's routing: do not skip kg-trib".into()),
             _ => (ks0.clone(), res0.iter().filter(|r| core[r.0]).cloned().collect()),
+        };
+        // lead #158 (spikes #157): `--ks-connect 4`: on each D8 diagonal step of an L reach, KS also lowers the lower of the two cells sharing an edge with both line cells to the
+        // step's mean height, so the carved line is 4-connected (continuous at the mesh, no bead of corner-joined pits); within the budget left, a shortfall is a residual.
+        // Claims are read from KS1's output and applied as a minimum, so the order of reaches changes nothing.
+        let (ks_d, res_d) = if KS_CONNECT.load(std::sync::atomic::Ordering::Relaxed) {
+            let (mut z, mut res) = (ks_d, res_d);
+            let mut want = vec![f64::INFINITY; n_l];
+            let mut steps = 0usize;
+            for r in gd.reaches.iter().filter(|r| r.level == Level::L) {
+                let cells: Vec<Option<usize>> = r.vertices.iter().map(|&c| to_local(c)).collect();
+                for k in 1..cells.len() {
+                    let (Some(a), Some(b)) = (cells[k - 1], cells[k]) else { continue };
+                    let (ax, ay, bx, by) = (a % w, a / w, b % w, b / w);
+                    if ax.abs_diff(bx) != 1 || ay.abs_diff(by) != 1 {
+                        continue;
+                    }
+                    steps += 1;
+                    let (e1, e2) = (ay * w + bx, by * w + ax);
+                    let t = 0.5 * (z[a] + z[b]);
+                    if z[e1].min(z[e2]) <= t + 1e-9 {
+                        continue;
+                    }
+                    let e = if z[e1] < z[e2] || (z[e1] == z[e2] && e1 < e2) { e1 } else { e2 };
+                    want[e] = want[e].min(t);
+                }
+            }
+            let (mut cut, mut short) = (0usize, 0usize);
+            for e in 0..n_l {
+                if !want[e].is_finite() || !active[e] || start[e] <= sea || protected_h1[parent(e)] {
+                    continue;
+                }
+                let need = z[e] - want[e];
+                let avail = (budget_l[e] - (ks_base[e] - z[e])).max(0.0).min((z[e] - (sea + 0.5)).max(0.0));
+                let u = need.min(avail);
+                if u > 0.0 {
+                    z[e] -= u;
+                    cut += 1;
+                }
+                if need > avail + 1e-9 {
+                    short += 1;
+                    res.push((e, need, avail));
+                }
+            }
+            println!("RG domain {d} KS connect 4 (lead #158): {steps} diagonal steps on L reaches, {cut} edge cells lowered, {short} short at the budget (residuals)");
+            (z, res)
+        } else {
+            (ks_d, res_d)
         };
         println!(
             "RG domain {d} KS: {} core cells lowered, {} core residuals",
@@ -3552,6 +3634,7 @@ fn main() -> Result<(), String> {
             ("edit", value(&args, "--edit").unwrap_or("-").to_string()),
             ("k5-uok-scale", k5_uok_scale.to_string()),
             ("k5-edge", k5_edge.to_string()),
+            ("ks-connect", ks_connect.to_string()),
             ("k5-diffuse-amax", k5_diffuse_amax.to_string()),
             ("k5-parity", k5_parity.to_string()),
             ("ks", ks_mode.to_string()),
