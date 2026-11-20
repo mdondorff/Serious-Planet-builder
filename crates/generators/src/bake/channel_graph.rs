@@ -144,6 +144,53 @@ impl ChannelGraph {
         g
     }
 
+    /// spike/rg-prototype (lead #175 item 3, spike only, never merged): a graph from chains of `grid` cells, each with its `Q_w` (m3/s) and bed code (0.5 m, [`BED_STEP_M`]) per vertex;
+    /// consecutive cells must be 8-neighbours and a chain holds at least two cells. The bed is kept as a running minimum along each chain.
+    pub fn from_chains(grid: &Grid, chains: &[(Vec<u32>, Vec<f64>, Vec<i32>)]) -> Result<ChannelGraph, String> {
+        let mut g = ChannelGraph {
+            q_unit: QUnit::Discharge,
+            max_q_rel_error: 0.0,
+            first: Vec::with_capacity(chains.len()),
+            verts: Vec::with_capacity(chains.len()),
+            dir: Vec::new(),
+            q: Vec::new(),
+            bed: Vec::new(),
+            cuts: Vec::new(),
+        };
+        for (k, (cells, q, bed)) in chains.iter().enumerate() {
+            if cells.len() < 2 || q.len() != cells.len() || bed.len() != cells.len() {
+                return Err(format!(
+                    "chain {k}: {} cells, {} Q_w, {} beds (two cells or more, one of each per cell)",
+                    cells.len(),
+                    q.len(),
+                    bed.len()
+                ));
+            }
+            g.first.push(cells[0]);
+            g.verts.push(cells.len() as u32);
+            let mut level = i32::MAX;
+            for (v, &c) in cells.iter().enumerate() {
+                let into = if v == 0 {
+                    0
+                } else {
+                    let prev = cells[v - 1] as usize;
+                    (0..8)
+                        .find(|&d| grid.neighbour(prev, d) == Some(c as usize))
+                        .ok_or_else(|| format!("chain {k}: cells {prev} and {c} are not neighbours"))? as u8
+                };
+                g.dir.push(into);
+                let code = q_code(q[v]);
+                if q[v] >= Q_CODE_MIN && q[v] <= Q_CODE_MAX {
+                    g.max_q_rel_error = g.max_q_rel_error.max(((q_value(code) - q[v]) / q[v]).abs());
+                }
+                g.q.push(code);
+                level = level.min(bed[v]);
+                g.bed.push(level.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16);
+            }
+        }
+        Ok(g)
+    }
+
     /// Records where the segments go under a lake (the producer's cuts, [`super::lakes::lake_cut_ranges`]): sorted, inside the segments and not empty.
     pub fn set_cuts(&mut self, cuts: Vec<(u32, u32, u32)>) {
         assert!(cuts.windows(2).all(|w| (w[0].0, w[0].1) < (w[1].0, w[1].1)), "the cuts are sorted by segment and vertex");
