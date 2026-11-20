@@ -1,6 +1,7 @@
-//! `cargo xtask stages [--update]` (BUILD-047): the stage manifest `docs/stages/manifest.txt`, the data hashes and key numbers of the stage probe's fixture. Without `--update` it runs the check
-//! (a stale manifest fails, naming the stage, field and column); with `--update` it rewrites the file from the run, which is the one place the manifest changes. The fixture and the check are the
-//! tier-A test `stage_manifest::the_manifest_is_the_run_of_the_fixture` of `planet-generators`; the sheets are written to `target/review/stages/ci/`.
+//! `cargo xtask stages [--update]` (BUILD-047, BUILD-063): the stage manifest `docs/stages/manifest.txt` (data hashes and key numbers of the
+//! stage probe's fixture) and the code-generated pipeline catalog `docs/stages/pipeline.json`. Without `--update` it runs both checks; with `--update`
+//! it rewrites both files from the code, which is the one place they change. The fixture and catalog checks are `stage_manifest` and `pipeline_catalog`
+//! in `planet-generators`; the sheets are written to `target/review/stages/ci/`.
 //! `cargo xtask stages --chain DIR` (BUILD-060) renders a chain directory as one sheet of the river-graph chain's stages (the `stage_sheet` example of `planet-cache`).
 
 use crate::util::{run, Res};
@@ -44,7 +45,10 @@ pub fn plan(args: &[String]) -> Result<Plan, String> {
             other => return Err(format!("unknown option '{other}' ({USAGE})")),
         }
     }
-    let cargo = ["nextest", "run", "-p", "planet-generators", "--no-fail-fast", "stage_manifest"].iter().map(|s| s.to_string()).collect();
+    let cargo = ["nextest", "run", "-p", "planet-generators", "--no-fail-fast", "stage_manifest", "pipeline_catalog"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
     Ok((cargo, if update { vec![("PLANET_UPDATE_STAGES", "1")] } else { Vec::new() }))
 }
 
@@ -55,9 +59,11 @@ pub fn run_cmd(root: &Path, args: &[String]) -> Res {
     if cargo.iter().any(|a| a == "stage_sheet") {
         // the example printed the sheet's path
     } else if env.is_empty() {
-        println!("stages: docs/stages/manifest.txt is the run of the fixture; the sheets are in target/review/stages/ci/");
+        println!(
+            "stages: docs/stages/manifest.txt and docs/stages/pipeline.json match the code; the sheets are in target/review/stages/ci/"
+        );
     } else {
-        println!("stages: docs/stages/manifest.txt rewritten from the run; review the diff and commit it");
+        println!("stages: docs/stages/manifest.txt and docs/stages/pipeline.json rewritten from the run; review the diff and commit them");
     }
     Ok(())
 }
@@ -176,15 +182,30 @@ mod tests {
         assert!(plan(&s(&["--chain", "d", "--step"])).unwrap_err().contains("--step needs a value"));
     }
 
-    // spec: BUILD-047
+    // spec: BUILD-047, BUILD-063
     #[test]
     fn the_command_runs_the_fixture_test_and_only_update_sets_the_variable() {
         let (c, env) = plan(&[]).unwrap();
-        assert!(c.contains(&"stage_manifest".to_string()) && c.contains(&"planet-generators".to_string()), "{c:?}");
+        assert!(
+            c.contains(&"stage_manifest".to_string())
+                && c.contains(&"pipeline_catalog".to_string())
+                && c.contains(&"planet-generators".to_string()),
+            "{c:?}"
+        );
         assert!(env.is_empty(), "the check does not rewrite the manifest");
         let (_, env) = plan(&["--update".to_string()]).unwrap();
         assert_eq!(env, [("PLANET_UPDATE_STAGES", "1")]);
         assert!(plan(&["--force".to_string()]).unwrap_err().contains("usage"));
+    }
+
+    // spec: BUILD-063
+    #[test]
+    fn the_committed_pipeline_json_exists_with_core_stages() {
+        let text = std::fs::read_to_string(crate::util::repo_root().join("docs/stages/pipeline.json")).expect("docs/stages/pipeline.json");
+        assert!(text.len() < 100_000, "pipeline.json unexpectedly large: {} B", text.len());
+        for stage in ["world-definition", "continents-and-plates", "global-bake-lattice", "erosion-bake-chain", "runtime-base-field"] {
+            assert!(text.contains(&format!("\"id\": \"{stage}\"")), "no entry for {stage}");
+        }
     }
 
     // spec: BUILD-047

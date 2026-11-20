@@ -1,0 +1,1 @@
+- 2026-11-20 pipeline-descriptor (BUILD-063, TEST-142): code-generated pipeline catalog in `planet_generators::pipeline_catalog`, committed `docs/stages/pipeline.json` verified via `cargo xtask stages`, `planet generate --pipeline-json`, `HeightField::upstream()` contract test, and non-normative companion brief `docs/design/pipeline-cockpit.md` (ag2-antigravity).
