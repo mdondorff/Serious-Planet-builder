@@ -585,3 +585,28 @@ fn kv_cross_slope_on_flat_sides_reaches_a_tributarys_parallel_channel() {
     let v = validate_budget(&s0, &budget, &kv_stage(&b), &b.residuals, &g);
     assert!(v.is_empty(), "the validator passes: {v:?}");
 }
+
+// SPIKE-132 (spike prototype; not a spec requirement)
+#[test]
+fn a_rim_floor_holds_a_kept_basins_rim_against_kvs_cut_without_a_residual() {
+    // lead #176a (owner's condition on option C): a cell with a rim floor (a kept basin's spill) is not cut below it, and the capped want makes no budget residual
+    use planet_generators::bake::kv_kc::run_with_rims;
+    let (gl, s0, outlet, g) = cross_case();
+    let n = s0.len();
+    let (protected, budget) = (vec![false; n], vec![100.0; n]);
+    let p = KvParams::plan(30.0);
+    let free = run(&gl, &s0, &outlet, &g, &protected, &budget, &p, Switch::KvOnly);
+    let rim = 7 * 40 + 20;
+    assert!(free.kv[rim] < 0.6, "the line's vertex is cut to its bed: {}", free.kv[rim]);
+    let mut floor = vec![f64::NEG_INFINITY; n];
+    floor[rim] = 0.9;
+    let held = run_with_rims(&gl, &s0, &outlet, &g, &protected, &budget, None, &p, Switch::KvOnly, Some(&floor));
+    assert!((held.kv[rim] - 0.9).abs() < 1e-12, "held at the rim floor: {}", held.kv[rim]);
+    assert!(held.residuals.iter().all(|r| r.cell != rim), "no residual at the rim");
+    assert!((0..n).filter(|&c| c != rim).all(|c| held.kv[c] == free.kv[c]), "nothing else moves");
+    assert_eq!(
+        free.kv,
+        run_with_rims(&gl, &s0, &outlet, &g, &protected, &budget, None, &p, Switch::KvOnly, None).kv,
+        "no floor: the bits of run"
+    );
+}

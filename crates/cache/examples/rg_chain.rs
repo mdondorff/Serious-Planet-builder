@@ -1758,6 +1758,9 @@ fn build_graph(
 static KV_SEA_FLOOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static KC_LAKE_OUTLETS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// lead #176a: `--kv-rims on` (default) holds the kept basins' rims at their spill against KV's cut and KC's breach; `off` the form before.
+static KV_RIMS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
 /// crusader #172 (owner, 2026-11-20): `--exception-lakes on` keeps the hollows of over-budget rises as lakes.
 static EXCEPTION_LAKES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -1982,8 +1985,10 @@ fn main() -> Result<(), String> {
     // (every crossing below the spill, the default before) | off (every kept basin protected)
     let kept_drained = value(&args, "--kept-drained").unwrap_or("exit");
     // lead #173: --kv-sea-floor off | on, --kc-lake-outlets off | on (both off by default until the rows)
-    for (opt, flag) in [("--kv-sea-floor", &KV_SEA_FLOOR), ("--kc-lake-outlets", &KC_LAKE_OUTLETS)] {
-        let v = value(&args, opt).unwrap_or("off");
+    for (opt, flag, default) in
+        [("--kv-sea-floor", &KV_SEA_FLOOR, "off"), ("--kc-lake-outlets", &KC_LAKE_OUTLETS, "off"), ("--kv-rims", &KV_RIMS, "on")]
+    {
+        let v = value(&args, opt).unwrap_or(default);
         if !["off", "on"].contains(&v) {
             return Err(format!("{opt} off | on, not '{v}'"));
         }
@@ -2856,6 +2861,8 @@ fn main() -> Result<(), String> {
         let outlet_d: Vec<bool> = (0..n_l).map(|p| active[p] && (sea_l[p] || exit[p])).collect();
         let grid_d = Grid::new(w, h, dx_l).with_active(active.clone());
         let mut kept = vec![false; n_l];
+        // lead #176a: each kept basin's rim (the cells beside its cells) at its recorded spill, a floor KV's cut and KC's breach keep (empty: no floor)
+        let mut rim_floor: Vec<f64> = Vec::new();
         for p in 0..n_l {
             kept[p] = protected_h1[parent(p)];
         }
@@ -3327,6 +3334,25 @@ fn main() -> Result<(), String> {
                     kept[c] = true;
                 }
             }
+            if KV_RIMS.load(std::sync::atomic::Ordering::Relaxed) {
+                rim_floor = vec![f64::NEG_INFINITY; n_l];
+                let mut rims = 0usize;
+                for b in pb.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface && b.spill_m.is_finite()) {
+                    let cells = &pb.cells[&b.id];
+                    let inside: HashSet<usize> = cells.iter().copied().collect();
+                    for &c in cells {
+                        for q in (0..8).filter_map(|k| grid_d.neighbour(c, k)) {
+                            if !inside.contains(&q) && b.spill_m > rim_floor[q] {
+                                if rim_floor[q] == f64::NEG_INFINITY {
+                                    rims += 1;
+                                }
+                                rim_floor[q] = b.spill_m;
+                            }
+                        }
+                    }
+                }
+                println!("RG domain {d} kept rims (lead #176a): {rims} rim cells held at their basin's spill against KV and KC");
+            }
             gd.basins = pb.basins.clone();
             gd.nodes.extend(pb.nodes.iter().cloned());
             first_nodes.clear();
@@ -3341,7 +3367,7 @@ fn main() -> Result<(), String> {
         // KV and KC (crusader's G1f) on the domain's KS output, within the budget KS left; the domain's L reaches in window cells (the module reads vertices as grid cells)
         let t = Instant::now();
         let (kv_d, kc_d, rkc) = if on("kv") || on("kc") {
-            use planet_generators::bake::kv_kc::{run_with, KvParams, Switch};
+            use planet_generators::bake::kv_kc::{run_with_rims, KvParams, Switch};
             let sw = match (on("kv"), on("kc")) {
                 (true, true) => Switch::Both,
                 (true, false) => Switch::KvOnly,
@@ -3360,7 +3386,7 @@ fn main() -> Result<(), String> {
             // crusader #161: the budget left is budget - max(0, S_KH - KS's output) inside run_with (reading 21); KC breaches before it fills (reading 22)
             // KV/KC's outlets: the sea, and the window's edge (as H1's; a window without sea, M1, has no other: the flood needs one)
             let outlet_kv: Vec<bool> = (0..n_l).map(|p| sea_l[p] || p % w == 0 || p % w == w - 1 || p / w == 0 || p / w == h - 1).collect();
-            let r = run_with(
+            let r = run_with_rims(
                 &gl,
                 &ks_d,
                 &outlet_kv,
@@ -3377,6 +3403,7 @@ fn main() -> Result<(), String> {
                     ..KvParams::plan(dx_l)
                 },
                 sw,
+                (!rim_floor.is_empty()).then_some(&rim_floor[..]),
             );
             drop(outlet_kv);
             println!("RG domain {d} KC breaches: {} ({:.4} km3)", r.breaches, r.breach_volume / 1.0e9);
@@ -3562,6 +3589,7 @@ fn main() -> Result<(), String> {
             ("margin", margin.to_string()),
             ("turned-noise", planet_generators::height::turned_noise().to_string()),
             ("kv-cross", format!("{}", KV_CROSS_MICRO.load(std::sync::atomic::Ordering::Relaxed) as f64 * 1.0e-6)),
+            ("kv-rims", if KV_RIMS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-sea-floor", if KV_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kc-lake-outlets", if KC_LAKE_OUTLETS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("exception-lakes", if EXCEPTION_LAKES.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),

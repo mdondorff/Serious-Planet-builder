@@ -224,6 +224,25 @@ pub fn run_with(
     p: &KvParams,
     switch: Switch,
 ) -> KvKc {
+    run_with_rims(grid, s0, outlet, g, protected, budget, reference, p, switch, None)
+}
+
+/// [`run_with`] with a rim floor (lead #176a, the owner's condition on option C): no cell is lowered below `rim_floor` (by KV's cut or KC's breach), so a kept basin's rim stays at its
+/// recorded spill; `-inf` (or `None`) where no rim is.
+#[allow(clippy::too_many_arguments)]
+pub fn run_with_rims(
+    grid: &Grid,
+    s0: &[f64],
+    outlet: &[bool],
+    g: &Graph,
+    protected: &[bool],
+    budget: &[f64],
+    reference: Option<&[f64]>,
+    p: &KvParams,
+    switch: Switch,
+    rim_floor: Option<&[f64]>,
+) -> KvKc {
+    let rim = |c: usize| rim_floor.map_or(f64::NEG_INFINITY, |f| f[c]);
     let n = s0.len();
     // the lowering budget left before KV (reading 21)
     let left_at = |c: usize| (budget[c] - reference.map_or(0.0, |r| (r[c] - s0[c]).max(0.0))).max(0.0);
@@ -340,6 +359,8 @@ pub fn run_with(
         if want <= 0.0 {
             continue;
         }
+        // lead #176a: a kept basin's rim is not lowered below its spill (the want itself stops there, so only the budget makes a residual)
+        let want = want.min((s0[c] - rim(c)).max(0.0));
         kv_wanted[c] = want;
         let left = left_at(c);
         let low = want.min(left);
@@ -545,12 +566,12 @@ pub fn run_with(
                 let breach = |blocked: &dyn Fn(usize) -> bool| {
                     super::basins_rg::breach_path(grid, &kv, outlet, pit, floor, &remaining, &inside, blocked, BREACH_CAP)
                 };
-                let along = || breach(&|c| protected[c] || !(near_line[c] || inside(c)));
+                let along = || breach(&|c| protected[c] || rim(c) > floor || !(near_line[c] || inside(c)));
                 // the along path is taken when it beats the fill (or the fill does not fit); otherwise the free breach of reading 22 decides
                 let found = if p.breach_along_line {
-                    along().filter(|(vol, _)| *vol < fill_vol || !fill_ok).or_else(|| breach(&|c| protected[c]))
+                    along().filter(|(vol, _)| *vol < fill_vol || !fill_ok).or_else(|| breach(&|c| protected[c] || rim(c) > floor))
                 } else {
-                    breach(&|c| protected[c])
+                    breach(&|c| protected[c] || rim(c) > floor)
                 };
                 if let Some((vol, path)) = found {
                     if vol < fill_vol || !fill_ok {
