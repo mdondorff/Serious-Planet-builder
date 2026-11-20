@@ -1759,6 +1759,9 @@ static EXCEPTION_LAKES: std::sync::atomic::AtomicBool = std::sync::atomic::Atomi
 
 /// crusader #171 (DEC crusader-20): `--kept-drained drop` drains a kept basin whose rim an L line crosses below its spill.
 static KEPT_DRAINED_DROP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// crusader #172: `--kept-drained exit` counts only the crossings where an L line leaves the basin (its vertex inside, the next one outside, below spill - 0.5 m); a line
+/// that enters below the spill floods an arm up its own valley and drains nothing.
+static KEPT_DRAINED_EXIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// crusader #169 item 3: `--kv-cross`'s grade in micro (m per m), 0 off.
 static KV_CROSS_MICRO: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -1973,10 +1976,11 @@ fn main() -> Result<(), String> {
         return Err(format!("--exception-lakes off | on, not '{exception_lakes}'"));
     }
     EXCEPTION_LAKES.store(exception_lakes == "on", std::sync::atomic::Ordering::Relaxed);
-    if !["off", "drop"].contains(&kept_drained) {
-        return Err(format!("--kept-drained off | drop, not '{kept_drained}'"));
+    if !["off", "drop", "exit"].contains(&kept_drained) {
+        return Err(format!("--kept-drained off | drop | exit, not '{kept_drained}'"));
     }
-    KEPT_DRAINED_DROP.store(kept_drained == "drop", std::sync::atomic::Ordering::Relaxed);
+    KEPT_DRAINED_DROP.store(kept_drained == "drop" || kept_drained == "exit", std::sync::atomic::Ordering::Relaxed);
+    KEPT_DRAINED_EXIT.store(kept_drained == "exit", std::sync::atomic::Ordering::Relaxed);
     let trunk_bed = value(&args, "--trunk-bed").unwrap_or("shared");
     if !["shared", "lift"].contains(&trunk_bed) {
         return Err(format!("--trunk-bed shared | lift, not '{trunk_bed}'"));
@@ -3248,16 +3252,34 @@ fn main() -> Result<(), String> {
                         }
                     }
                 }
+                // --kept-drained exit: each vertex cell's next vertex downstream and its bed (a reach's last vertex has none)
+                let exit_only = KEPT_DRAINED_EXIT.load(std::sync::atomic::Ordering::Relaxed);
+                let mut next_of: HashMap<usize, Vec<(usize, f64)>> = HashMap::new();
+                if exit_only {
+                    for r in &all {
+                        for k in 0..r.vertices.len().saturating_sub(1) {
+                            if let (Some(c), Some(q)) = (to_local(r.vertices[k]), to_local(r.vertices[k + 1])) {
+                                next_of.entry(c).or_default().push((q, f64::from(r.attrs.bed[k + 1]) * 0.5));
+                            }
+                        }
+                    }
+                }
                 let (mut dropped, mut checked) = (0usize, 0usize);
                 for b in pb.basins.iter_mut().filter(|b| b.represented == Represented::ProtectedSurface) {
                     checked += 1;
                     let cells = &pb.cells[&b.id];
                     let inside: HashSet<usize> = cells.iter().copied().collect();
-                    let drains = cells.iter().any(|&c| {
-                        (0..8)
-                            .filter_map(|k| grid_d.neighbour(c, k))
-                            .any(|q| !inside.contains(&q) && low_bed.get(&q).is_some_and(|&bed| bed < b.spill_m - 0.5))
-                    });
+                    let drains = if exit_only {
+                        cells.iter().any(|&c| {
+                            next_of.get(&c).is_some_and(|v| v.iter().any(|&(q, bed)| !inside.contains(&q) && bed < b.spill_m - 0.5))
+                        })
+                    } else {
+                        cells.iter().any(|&c| {
+                            (0..8)
+                                .filter_map(|k| grid_d.neighbour(c, k))
+                                .any(|q| !inside.contains(&q) && low_bed.get(&q).is_some_and(|&bed| bed < b.spill_m - 0.5))
+                        })
+                    };
                     if drains {
                         b.represented = Represented::None;
                         dropped += 1;
@@ -3488,7 +3510,17 @@ fn main() -> Result<(), String> {
             ("turned-noise", planet_generators::height::turned_noise().to_string()),
             ("kv-cross", format!("{}", KV_CROSS_MICRO.load(std::sync::atomic::Ordering::Relaxed) as f64 * 1.0e-6)),
             ("exception-lakes", if EXCEPTION_LAKES.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
-            ("kept-drained", if KEPT_DRAINED_DROP.load(std::sync::atomic::Ordering::Relaxed) { "drop" } else { "off" }.to_string()),
+            (
+                "kept-drained",
+                if KEPT_DRAINED_EXIT.load(std::sync::atomic::Ordering::Relaxed) {
+                    "exit"
+                } else if KEPT_DRAINED_DROP.load(std::sync::atomic::Ordering::Relaxed) {
+                    "drop"
+                } else {
+                    "off"
+                }
+                .to_string(),
+            ),
             ("kv-cross-side", format!("{},{}", kv_cross_side.0, kv_cross_side.1)),
             ("trunk-bed", if TRUNK_BED_SHARED.load(std::sync::atomic::Ordering::Relaxed) { "shared" } else { "lift" }.to_string()),
             ("trib-on", trib_on.to_string()),
