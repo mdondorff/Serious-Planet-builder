@@ -17,6 +17,13 @@ use crate::river_suite::{
 /// The crest rounding bar (lead #172; review B Q5): the p95 of the ridge lowering against `S_KH` at most this (metres), and on a mountain window (M1).
 pub const CREST_P95_MAX_M: f64 = 15.0;
 pub const CREST_P95_MAX_M_MOUNTAIN: f64 = 35.0;
+/// The ponds bar (BUILD-060, owner 2026-11-20, option C): river length in closed basins outside the kept lakes, over the river length outside them, at most this (percent).
+pub const PONDS_MAX_PCT: f64 = 10.0;
+/// The kept-river bar: river length in kept lakes, over all river length, at most this (percent) on a lowland window and `KEPT_RIVER_MAX_PCT_MOUNTAIN` on a mountain one.
+pub const KEPT_RIVER_MAX_PCT: f64 = 5.0;
+pub const KEPT_RIVER_MAX_PCT_MOUNTAIN: f64 = 10.0;
+/// A kept basin whose depression level on the measured surface lies more than this under its recorded spill is a spill mismatch (metres): a graph violation.
+pub const SPILL_MISMATCH_M: f64 = 0.5;
 
 /// The routing's flood grade between cells (the spikes' 1e-3 m).
 pub const ROUTE_EPSILON_M: f64 = 1.0e-3;
@@ -56,6 +63,8 @@ pub struct GateParams {
     pub corridor_min_pct: f64,
     /// The crest rounding bar: the p95 of the ridge lowering, metres (35 on a mountain window).
     pub crest_max_m: f64,
+    /// The kept-river bar (percent; 10 on a mountain window).
+    pub kept_river_max_pct: f64,
 }
 
 impl Default for GateParams {
@@ -72,6 +81,7 @@ impl Default for GateParams {
             network_km2: NETWORK_KM2,
             corridor_min_pct: CORRIDOR_MIN_PCT,
             crest_max_m: CREST_P95_MAX_M,
+            kept_river_max_pct: KEPT_RIVER_MAX_PCT,
         }
     }
 }
@@ -215,12 +225,13 @@ pub struct GateReport {
     /// Closed basins in the window, and the river cells inside that lie in one.
     pub basins: usize,
     pub basin_river_cells: usize,
-    /// With a graph (BUILD-060, owner 2026-11-20): the river cells inside in a closed basin outside every kept-lake interior, the closed-basin bar's count; `None` without one
-    /// (the bar is then `basin_river_cells`).
-    pub basin_bar_river_cells: Option<usize>,
-    /// With a graph: the river cells inside in a kept-lake interior, and the interiors' cells inside (BUILD-060's kept-basin interior); `None` without one.
-    pub kept_lake_river_cells: Option<usize>,
+    /// With a graph (BUILD-060, owner 2026-11-20, option C; `None` without one): the river cells inside in a closed basin outside every kept-lake interior (the ponds), the
+    /// river cells inside in a kept-lake interior (BUILD-060's kept-basin interior), the interiors' cells inside, and the kept basins whose depression level at the floor lies
+    /// more than `SPILL_MISMATCH_M` under the recorded spill.
+    pub ponds_river_cells: Option<usize>,
+    pub kept_river_cells: Option<usize>,
     pub kept_lake_cells: Option<usize>,
+    pub spill_mismatch: Option<usize>,
     /// The area of an L cell (m2), for the kept lakes' area.
     pub cell_area_m2: f64,
     /// SPIKE-114's reference count: river cells inside in any pit of 5 cm.
@@ -284,6 +295,11 @@ fn percent(v: f64, of: f64) -> f64 {
 }
 
 impl GateReport {
+    /// The ponds' share (BUILD-060, option C): river cells in closed basins outside the kept lakes, over the river cells outside them; `None` without a graph.
+    pub fn ponds_pct(&self) -> Option<f64> {
+        self.ponds_river_cells.zip(self.kept_river_cells).map(|(pd, k)| share(pd, self.river_cells - k))
+    }
+
     pub fn basin_share(&self) -> f64 {
         share(self.basin_river_cells, self.river_cells)
     }
@@ -313,12 +329,13 @@ impl GateReport {
             ("basins", c(self.basins)),
             ("basin_cells", c(self.basin_river_cells)),
             ("basin_pct", pct(self.basin_river_cells, n)),
-            ("basin_bar_cells", self.basin_bar_river_cells.map_or("-".to_string(), c)),
-            ("basin_bar_pct", self.basin_bar_river_cells.map_or("-".to_string(), |k| pct(k, n))),
-            ("kept_lake_river_cells", self.kept_lake_river_cells.map_or("-".to_string(), c)),
-            ("kept_lake_river_pct", self.kept_lake_river_cells.map_or("-".to_string(), |k| pct(k, n))),
+            ("ponds_cells", self.ponds_river_cells.map_or("-".to_string(), c)),
+            ("ponds_pct", self.ponds_pct().map_or("-".to_string(), |v| format!("{v:.2}"))),
+            ("kept_river_cells", self.kept_river_cells.map_or("-".to_string(), c)),
+            ("kept_river_pct", self.kept_river_cells.map_or("-".to_string(), |k| pct(k, n))),
             ("kept_lake_cells", self.kept_lake_cells.map_or("-".to_string(), c)),
             ("kept_lake_km2", self.kept_lake_cells.map_or("-".to_string(), |k| format!("{:.2}", k as f64 * self.cell_area_m2 / 1.0e6))),
+            ("g_spill_mismatch", self.spill_mismatch.map_or("-".to_string(), c)),
             ("reference_cells", c(self.reference_river_cells)),
             ("reference_pct", pct(self.reference_river_cells, n)),
             ("valley_over_cells", c(self.valley.count_over)),
@@ -529,25 +546,25 @@ impl GateReport {
         vec![
             format!("RIVER-GATE rivers: {} river cells inside (drainage area >= {:.0} km2, land)", self.river_cells, p.channel_area_m2 / 1.0e6),
             format!(
-                "RIVER-GATE basins: {:.2} % of river length in closed basins{} ({} of {} cells; {} basins of >= {} m depth and >= {} cells, fill epsilon {BASIN_EPSILON_M:e} m; bar <= 10 %); SPIKE-114 reference (any pit of {REFERENCE_WET_M} m): {:.2} %{}",
-                share(self.basin_bar_river_cells.unwrap_or(self.basin_river_cells), self.river_cells),
-                if self.basin_bar_river_cells.is_some() { " outside the kept-lake interiors" } else { "" },
-                self.basin_bar_river_cells.unwrap_or(self.basin_river_cells),
+                "RIVER-GATE basins: {:.2} % of river length in closed basins ({} of {} cells; {} basins of >= {} m depth and >= {} cells, fill epsilon {BASIN_EPSILON_M:e} m; bar <= 10 %); SPIKE-114 reference (any pit of {REFERENCE_WET_M} m): {:.2} %",
+                self.basin_share(),
+                self.basin_river_cells,
                 self.river_cells,
                 self.basins,
                 p.basin_depth_m,
                 p.basin_cells,
-                share(self.reference_river_cells, self.river_cells),
-                match (self.kept_lake_river_cells, self.kept_lake_cells) {
-                    (Some(k), Some(a)) => format!(
-                        "; every closed basin {:.2} %; kept lakes: {:.2} % of river length ({k} cells), {a} cells inside ({:.2} km2)",
-                        share(self.basin_river_cells, self.river_cells),
-                        share(k, self.river_cells),
-                        a as f64 * self.cell_area_m2 / 1.0e6
-                    ),
-                    _ => String::new(),
-                }
+                share(self.reference_river_cells, self.river_cells)
             ),
+            match (self.ponds_river_cells, self.kept_river_cells, self.kept_lake_cells, self.spill_mismatch) {
+                (Some(pd), Some(k), Some(a), Some(sm)) => format!(
+                    "RIVER-GATE kept lakes (BUILD-060, option C): ponds {:.2} % of the river length outside the kept lakes ({pd} cells; bar <= {PONDS_MAX_PCT} %); kept lakes {:.2} % of river length ({k} cells; bar <= {} %), {a} cells inside ({:.2} km2); {sm} kept basins with a spill mismatch over {SPILL_MISMATCH_M} m",
+                    self.ponds_pct().unwrap_or(0.0),
+                    share(k, self.river_cells),
+                    p.kept_river_max_pct,
+                    a as f64 * self.cell_area_m2 / 1.0e6
+                ),
+                _ => "RIVER-GATE kept lakes: no graph, not measured".to_string(),
+            },
             format!(
                 "RIVER-GATE valley depth: {:.2} % of river cells over {} m below the p50 of the surface {n0} to {n1} cells out (the canyon a viewer sees; {} cells, p50 {:.2} m, p99 {:.2} m, max {:.2} m); bar: at most the share of a GLO-30 tile with 1 to 2 x this window's relief at 10 x 10 cells ({:.2} m; the review table gives the reference)",
                 self.valley_share(),
@@ -631,6 +648,23 @@ impl GateReport {
         let k = g2.kept.clone().unwrap_or_default();
         let mut out =
             g2_bars(g2, share(self.suite.uphill_steps - k.uphill, self.suite.steps - k.steps), corridor, self.params.corridor_min_pct);
+        // owner 2026-11-20 (option C): a kept basin's spill mismatch is a graph violation; the ponds and the kept river length each have a bar
+        if let Some(sm) = self.spill_mismatch {
+            if let Some(v) = out.iter_mut().find(|b| b.name == "bar_violations") {
+                v.value += sm as f64;
+            }
+        }
+        if let (Some(ponds), Some(k)) = (self.ponds_pct(), self.kept_river_cells) {
+            use crate::river_gate_graph::GateClass::Geomorphology;
+            out.push(Bar { name: "bar_ponds".into(), value: ponds, limit: PONDS_MAX_PCT, at_most: true, class: Geomorphology });
+            out.push(Bar {
+                name: "bar_kept_river".into(),
+                value: share(k, self.river_cells),
+                limit: self.params.kept_river_max_pct,
+                at_most: true,
+                class: Geomorphology,
+            });
+        }
         // lead #172: the spectrum slope within the benchmark's range
         out.extend(crate::river_gate_graph::spectrum_bars(self.suite.spectrum.beta));
         // lead #172: crest rounding, the p95 of the ridge lowering against S_KH
@@ -990,7 +1024,7 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
     let breached = levels(&routing, &river, |c| z[c]);
     let with_lakes = levels(&routing, &river, |c| if lake(c) { filled[c] } else { z[c] });
     let (mut river_cells, mut basin_cells, mut reference_cells, mut lake_cells) = (0usize, 0usize, 0usize, 0usize);
-    let (mut basin_bar_cells, mut kept_lake_river) = (0usize, 0usize);
+    let (mut ponds_cells, mut kept_river) = (0usize, 0usize);
     let (mut canyon, mut canyon_b, mut erosion) = (Vec::new(), Vec::new(), Vec::new());
     let (mut valley, mut burn, mut burn_b) = (Vec::new(), Vec::new(), Vec::new());
     let (mut near_depth, mut ring_depth) = (Vec::new(), Vec::new());
@@ -1000,8 +1034,8 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         }
         river_cells += 1;
         basin_cells += usize::from(basin(c));
-        basin_bar_cells += usize::from(basin(c) && !in_kept(c));
-        kept_lake_river += usize::from(in_kept(c));
+        ponds_cells += usize::from(basin(c) && !in_kept(c));
+        kept_river += usize::from(in_kept(c));
         reference_cells += usize::from(reference[c] != u32::MAX);
         lake_cells += usize::from(lake(c));
         let here = input.surface[c];
@@ -1077,9 +1111,20 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         river_cells,
         basins: pits.iter().filter(|p| is_basin(p)).count(),
         basin_river_cells: basin_cells,
-        basin_bar_river_cells: kept_lakes.as_ref().map(|_| basin_bar_cells),
-        kept_lake_river_cells: kept_lakes.as_ref().map(|_| kept_lake_river),
+        ponds_river_cells: kept_lakes.as_ref().map(|_| ponds_cells),
+        kept_river_cells: kept_lakes.as_ref().map(|_| kept_river),
         kept_lake_cells: kept_lakes.as_ref().map(|k| (0..n).filter(|&c| k[c] && input.inside[c]).count()),
+        // a kept basin with its floor in the window whose depression level there (the basin flood) lies more than SPILL_MISMATCH_M under its recorded spill
+        spill_mismatch: input.g2.as_ref().and_then(|x| {
+            x.graph.map(|gr| {
+                gr.basins
+                    .iter()
+                    .filter(|b| b.represented == planet_generators::bake::river_graph::Represented::ProtectedSurface)
+                    .filter_map(|b| x.window.cell(b.floor_cell).map(|f| (f, b)))
+                    .filter(|&(f, b)| filled[f] < b.spill_m - SPILL_MISMATCH_M)
+                    .count()
+            })
+        }),
         cell_area_m2: g.dx() * g.dx(),
         reference_river_cells: reference_cells,
         lake_river_cells: lake_cells,

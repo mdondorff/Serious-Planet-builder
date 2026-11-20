@@ -594,9 +594,11 @@ fn the_ridge_lowering_is_measured_against_s_kh_when_the_stages_hold_kh_and_again
 
 // spec: TEST-137, BUILD-060
 #[test]
-fn the_closed_basin_bar_counts_river_length_outside_the_kept_lake_interiors() {
-    // owner's option C (2026-11-20): a kept basin is a lake, not a closed basin; the bar counts river cells outside the kept-lake interiors, beside every closed basin and
-    // the kept lakes' share. A 12 x 12 window of 100 m cells: the ground falls to a centre row and west to a sea column; a 6 m pit of 5 x 5 cells on the river
+fn kept_lakes_get_their_own_bars_beside_the_raw_closed_basin_share_and_a_spill_mismatch_is_a_violation() {
+    // owner's option C (2026-11-20): BUILD-055's raw closed-basin share stays; on a row with a graph the ponds (closed basins outside the kept lakes, over the river length
+    // outside them) and the kept river length each have a bar, and a kept basin whose depression level lies over 0.5 m under its recorded spill is a graph violation. A
+    // 12 x 12 window of 100 m cells: the ground falls to a centre row and west to a sea column; a 6 m pit of 5 x 5 cells on the river
+    use planet_cache::river_gate::{KEPT_RIVER_MAX_PCT, KEPT_RIVER_MAX_PCT_MOUNTAIN, PONDS_MAX_PCT};
     let grid = Grid::new(12, 12, DX);
     let cell = |x: usize, y: usize| y * 12 + x;
     let mut z: Vec<f64> = (0..144).map(|c| 30.0 + 0.5 * (c % 12) as f64 + 0.5 * ((c / 12) as f64 - 6.0).abs()).collect();
@@ -612,8 +614,7 @@ fn the_closed_basin_bar_counts_river_length_outside_the_kept_lake_interiors() {
     let outlet = grid.outlets(&z, 0.0);
     let all = vec![true; 144];
     let p = GateParams { channel_area_m2: 6.0 * DX * DX, ..GateParams::default() };
-    let run = |g: &Graph| {
-        let input = G2Input { window: W, graph: Some(g), stages: None, residual_records: None, partition: None, kc_patches: None };
+    let gate = |g2: Option<&G2Input>, p: &GateParams| {
         measure(
             &GateInput {
                 grid: &grid,
@@ -627,68 +628,81 @@ fn the_closed_basin_bar_counts_river_length_outside_the_kept_lake_interiors() {
                 sea_level_m: 0.0,
                 outside_drains: false,
                 trunks: &[],
-                g2: Some(&input),
+                g2,
             },
-            &p,
+            p,
         )
     };
+    let run = |g: &Graph, p: &GateParams| {
+        let x = G2Input { window: W, graph: Some(g), stages: None, residual_records: None, partition: None, kc_patches: None };
+        gate(Some(&x), p)
+    };
+    let bar = |r: &planet_cache::river_gate::GateReport, name: &str| r.bars().into_iter().find(|b| b.name == name).expect(name);
     let mut g = graph();
     g.basins.clear();
-    let open = run(&g);
+    let open = run(&g, &p);
     assert!(open.basins >= 1 && open.basin_river_cells > 0, "the river runs through the pit: {open:?}");
-    assert_eq!(open.basin_bar_river_cells, Some(open.basin_river_cells), "no kept lake: the bar is every closed basin");
-    assert_eq!((open.kept_lake_river_cells, open.kept_lake_cells), (Some(0), Some(0)));
-    g.basins = vec![Basin {
+    assert_eq!(
+        (open.ponds_river_cells, open.kept_river_cells, open.kept_lake_cells, open.spill_mismatch),
+        (Some(open.basin_river_cells), Some(0), Some(0), Some(0))
+    );
+    assert_eq!(open.ponds_pct(), Some(open.basin_share()), "no kept lake: the ponds are every closed basin");
+    let kept_basin = |spill_m: f64| Basin {
         id: 7,
         level: Level::L,
         parent: None,
         floor_cell: gid(100 + floor.0 as u64, 200 + floor.1 as u64),
         floor_m: z[cell(floor.0, floor.1)],
         spill_cell: gid(103, 206),
-        spill_m: 31.0,
+        spill_m,
         spill_node: g.nodes[0].id,
         outlet: Outlet::Active,
         represented: Represented::ProtectedSurface,
         owner: Domain::Landmass,
-    }];
-    let kept = run(&g);
-    assert_eq!(kept.basin_river_cells, open.basin_river_cells, "basin_cells is every closed basin on every row");
-    assert_eq!(kept.basin_bar_river_cells, Some(0), "the pit's river cells lie in the kept lake: {kept:?}");
-    assert_eq!(kept.kept_lake_river_cells, Some(open.basin_river_cells), "they move to the kept lakes' share");
+    };
+    // the recorded spill at the pit's floor: no mismatch
+    g.basins = vec![kept_basin(z[cell(floor.0, floor.1)])];
+    let kept = run(&g, &p);
+    assert_eq!(kept.basin_river_cells, open.basin_river_cells, "BUILD-055's raw share is untouched");
+    assert_eq!(
+        (kept.ponds_river_cells, kept.kept_river_cells),
+        (Some(0), Some(open.basin_river_cells)),
+        "the pit's river cells are the kept lake's: {kept:?}"
+    );
     assert!(kept.kept_lake_cells.is_some_and(|k| k >= 16), "the interior is the pit: {:?}", kept.kept_lake_cells);
+    assert_eq!(kept.spill_mismatch, Some(0));
+    let kept_pct = 100.0 * open.basin_river_cells as f64 / open.river_cells as f64;
+    let (ponds, kr) = (bar(&kept, "bar_ponds"), bar(&kept, "bar_kept_river"));
+    assert_eq!((ponds.value, ponds.limit, ponds.at_most), (0.0, PONDS_MAX_PCT, true));
+    assert!((kr.value - kept_pct).abs() < 1e-9 && kr.limit == KEPT_RIVER_MAX_PCT && kr.at_most, "{kr:?}");
+    let mountain = run(&g, &GateParams { kept_river_max_pct: KEPT_RIVER_MAX_PCT_MOUNTAIN, ..p });
+    assert_eq!(bar(&mountain, "bar_kept_river").limit, 10.0);
     let line = kept.fields_line();
-    let pct = 100.0 * open.basin_river_cells as f64 / open.river_cells as f64;
     assert!(
-        line.contains(" basin_bar_cells=0 ")
-            && line.contains(" basin_bar_pct=0.00 ")
-            && line.contains(&format!(" basin_pct={pct:.2} "))
-            && line.contains(&format!(" kept_lake_river_pct={pct:.2} "))
-            && line.contains(&format!(" kept_lake_km2={:.2} ", kept.kept_lake_cells.unwrap() as f64 * DX * DX / 1.0e6)),
+        line.contains(&format!(" basin_pct={kept_pct:.2} "))
+            && line.contains(" ponds_cells=0 ")
+            && line.contains(" ponds_pct=0.00 ")
+            && line.contains(&format!(" kept_river_pct={kept_pct:.2} "))
+            && line.contains(&format!(" kept_lake_km2={:.2} ", kept.kept_lake_cells.unwrap() as f64 * DX * DX / 1.0e6))
+            && line.contains(" g_spill_mismatch=0 ")
+            && line.contains(" bar_ponds=PASS:0.00"),
         "{line}"
     );
-    assert!(kept.lines().iter().any(|l| l.contains("outside the kept-lake interiors") && l.contains("kept lakes:")), "{:?}", kept.lines());
-    // without a graph the bar is every closed basin and the kept columns are "-"
-    let plain = measure(
-        &GateInput {
-            grid: &grid,
-            start: &z,
-            surface: &z,
-            outlet: &outlet,
-            inside: &all,
-            region: &all,
-            h1: &[],
-            seed: 7,
-            sea_level_m: 0.0,
-            outside_drains: false,
-            trunks: &[],
-            g2: None,
-        },
-        &p,
+    assert!(kept.lines().iter().any(|l| l.starts_with("RIVER-GATE kept lakes (BUILD-060, option C): ponds 0.00 %")), "{:?}", kept.lines());
+    // a recorded spill 5 m above the pit's level: a spill mismatch, counted in bar_violations
+    let level = z[cell(floor.0, floor.1)] + 6.0;
+    g.basins = vec![kept_basin(level + 5.0)];
+    let mis = run(&g, &p);
+    assert_eq!(mis.spill_mismatch, Some(1), "{mis:?}");
+    assert_eq!(bar(&mis, "bar_violations").value, bar(&kept, "bar_violations").value + 1.0, "the mismatch is a graph violation");
+    assert!(!bar(&mis, "bar_violations").pass());
+    // without a graph: the kept columns are "-", no new bar, the raw share as ever
+    let plain = gate(None, &p);
+    assert_eq!(
+        (plain.basin_river_cells, plain.ponds_river_cells, plain.kept_river_cells, plain.spill_mismatch),
+        (open.basin_river_cells, None, None, None)
     );
-    assert_eq!((plain.basin_river_cells, plain.basin_bar_river_cells, plain.kept_lake_river_cells), (open.basin_river_cells, None, None));
-    assert!(
-        plain.fields_line().contains(" kept_lake_river_cells=- ") && plain.fields_line().contains(" basin_bar_pct=- "),
-        "{}",
-        plain.fields_line()
-    );
+    let pl = plain.fields_line();
+    assert!(pl.contains(" ponds_pct=- ") && pl.contains(" kept_river_pct=- ") && pl.contains(" g_spill_mismatch=- "), "{pl}");
+    assert!(plain.bars().is_empty());
 }

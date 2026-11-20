@@ -1,1 +1,1 @@
-- 2026-11-20 gate-kept-lakes (BUILD-060): with a graph the closed-basin bar counts river length outside the kept-lake interiors; columns basin_bar_cells/pct (the bar), kept_lake_river_*, kept_lake_cells/km2 (owner's option C, reading 37).
+- 2026-11-20 gate-kept-lakes (BUILD-060): on a row with a graph, ponds and kept river length with their own bars (bar_ponds <= 10 %, bar_kept_river <= 5 %, 10 % on M1) and the spill mismatch in bar_violations; BUILD-055's basin_pct untouched (owner's option C and its conditions, 2026-11-20).

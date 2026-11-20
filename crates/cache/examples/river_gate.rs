@@ -17,7 +17,8 @@ use planet_cache::pack::TileStore;
 use planet_cache::region_bake::{lattice_direction, region_front, RegionSpec, LOCAL_PER_REGIONAL};
 use planet_cache::river_gate::{
     border_inside, commit_differences, key_note, lay_store_ground, measure, raw_grid_arg, raw_grid_heights, Crossing, GateInput,
-    GateParams, LWindow, RawGrid, WindowIdentity, CREST_P95_MAX_M, CREST_P95_MAX_M_MOUNTAIN, GRID_BORDER, GRID_CELL_M,
+    GateParams, LWindow, RawGrid, WindowIdentity, CREST_P95_MAX_M, CREST_P95_MAX_M_MOUNTAIN, GRID_BORDER, GRID_CELL_M, KEPT_RIVER_MAX_PCT,
+    KEPT_RIVER_MAX_PCT_MOUNTAIN,
 };
 use planet_cache::river_gate_graph::{
     h1_trunks, read_graph, read_kc_patches, read_stages, read_surface, G2Input, Window, CORRIDOR_MIN_PCT, CORRIDOR_MIN_PCT_MOUNTAIN,
@@ -191,6 +192,8 @@ fn main() -> Result<(), String> {
         // lead #168: the corridor bar is 95 % on the mountain window M1, 97.5 % elsewhere
         corridor_min_pct: parsed(&args, "--corridor-bar", if win[..] == M1 { CORRIDOR_MIN_PCT_MOUNTAIN } else { CORRIDOR_MIN_PCT })?,
         crest_max_m: if win[..] == M1 { CREST_P95_MAX_M_MOUNTAIN } else { CREST_P95_MAX_M },
+        // owner 2026-11-20 (option C): the kept-river bar, 10 % on the mountain window
+        kept_river_max_pct: if win[..] == M1 { KEPT_RIVER_MAX_PCT_MOUNTAIN } else { KEPT_RIVER_MAX_PCT },
         ..GateParams::default()
     };
     if let Some(g) = value(&args, "--grid") {
