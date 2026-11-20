@@ -1,0 +1,25 @@
+"""#154: K5's edge dams per window and edge mode. A field (z_s at 814 m, or S0 at L) is flooded (main's priority_flood_with, outlets the window edge and the sea); a closed
+depression (one flood level, deeper than 0.5 m) over 1 km2 that has a cell within the edge band (2 H1 cells, 16 L cells) is an edge lake. Prints count, area, depth, and the lakes over
+50 m deep, per field. Usage: edge_survey.py <dir> <flood exe> <tag>..."""
+import sys, os, subprocess, numpy as np
+from scipy import ndimage
+d, exe, tags = sys.argv[1], sys.argv[2], sys.argv[3:]
+for tag in tags:
+    for name, n, cell, band in (('zs', 1020, 814.416, 2), ('s0', 8160, 101.802, 16)):
+        src = f'{d}/{tag}-zs-1020x1020.f32' if name == 'zs' else f'{d}/{tag}-s0.f32'
+        if name == 's0' and not os.path.exists(src):
+            np.fromfile(f'{d}/{tag}-s0-8160x8160.f64', '<f8').astype('<f4').tofile(src)
+        fl = f'{d}/{tag}-{name}-filled.f32'
+        if not os.path.exists(fl):
+            subprocess.run([exe, src, str(n), str(n), str(cell), '0', fl], check=True, capture_output=True)
+        z = np.fromfile(src, '<f4').reshape(n, n).astype(np.float64); f = np.fromfile(fl, '<f4').reshape(n, n).astype(np.float64)
+        wet = (f - z) > 0.5
+        lab, k = ndimage.label(wet, structure=np.ones((3, 3)))
+        edge = np.zeros((n, n), bool); edge[:band] = edge[-band:] = True; edge[:, :band] = edge[:, -band:] = True
+        ids = np.arange(1, k + 1)
+        area = ndimage.sum(np.ones_like(z), lab, ids) * cell * cell / 1e6
+        touch = ndimage.maximum(edge.astype(float), lab, ids) > 0
+        depth = ndimage.maximum(f - z, lab, ids)
+        m = (area > 1.0) & touch
+        allbig = area > 1.0
+        print(f'{tag} {name}: edge lakes over 1 km2: {int(m.sum())}, {area[m].sum():.0f} km2, depth max {depth[m].max() if m.any() else 0:.0f} m, over 50 m deep {int((m & (depth > 50)).sum())} ({area[m & (depth > 50)].sum():.0f} km2); all closed over 1 km2: {int(allbig.sum())}, {area[allbig].sum():.0f} km2')
