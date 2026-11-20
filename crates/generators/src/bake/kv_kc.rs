@@ -44,6 +44,14 @@ pub struct KvParams {
     /// Lead #166 (source fix 3, KC breach misses): KC's breach first searches a path within one cell of a graph vertex (or inside the depression), so the drained depression's outlet runs
     /// along the graph's line; only without one the free least-cost breach of reading 22; `false`: the free breach alone.
     pub breach_along_line: bool,
+    /// Lead #169 item 3 (R3a: on flat floors the routing runs parallel to a lower line): after the lowering, every floor cell stands below each floor neighbour farther from the line by at
+    /// least this grade (m per m) times the distance gained (at most `s_floor`: a larger grade lowers the whole floor below its cone, numerics review), so the floor falls toward the line from any channel on it; lowering only, never below the nearest vertex's bed, within the budget
+    /// left. 0: off (the cone alone).
+    pub cross_grade: f64,
+    /// DEC crusader-19 (lead, 2026-11-19; a switch, default off): the cross rule also holds on side cells within this distance (m) of a vertex that stand at most
+    /// `cross_side_grade` a metre above the vertex (a flat side, where the tributaries' floor is under a cell wide); 0: the floor alone.
+    pub cross_side_m: f64,
+    pub cross_side_grade: f64,
 }
 
 impl KvParams {
@@ -59,6 +67,9 @@ impl KvParams {
             cap_at_incision: true,
             s_floor: 1.0e-3,
             breach_along_line: true,
+            cross_grade: 0.0,
+            cross_side_m: 0.0,
+            cross_side_grade: 0.0,
         }
     }
 }
@@ -93,7 +104,18 @@ pub struct KvKc {
     pub kc_wanted: Vec<f64>,
     /// The nearest L reach of each cell KV reached, as an index into the graph's L reaches sorted by id (`u32::MAX`: none; order #161's memory cut).
     pub nearest: Vec<u32>,
+    /// The cross-slope pass (lead #169 item 3): cells it lowered, and its volume (m3).
+    pub cross_cells: usize,
+    pub cross_volume: f64,
+    /// The cells where the budget left stopped the pass above its target, and their shortfall summed (m): the parallel channel may stay there (numerics review of 8630f2a8).
+    pub cross_short: usize,
+    pub cross_short_m: f64,
+    /// The pass's cut per cell (m; empty when the pass is off), for the sheet of DEC crusader-19.
+    pub cross_cut: Vec<f32>,
 }
+
+/// The least fall (m per m) the cross-slope pass keeps toward the line where it reaches the vertex's height: the gate's flood grade (1e-5; `s_floor` is 100 times it).
+const CROSS_MIN_GRADE: f64 = 1.0e-5;
 
 /// The bed level (m) of a code (GEN-170: 0.5 m codes).
 fn bed_m(code: i32) -> f64 {
@@ -314,6 +336,64 @@ pub fn run_with(
         }
     }
     drop(carry);
+    // lead #169 item 3: the floor falls toward the line; floor cells farthest first (ties by cell), each at most its farther floor neighbours' height less the grade's drop
+    let (mut cross_cells, mut cross_volume, mut cross_short, mut cross_short_m) = (0usize, 0.0f64, 0usize, 0.0f64);
+    let mut cross_cut: Vec<f32> = Vec::new();
+    if p.cross_grade > 0.0 && kv_on {
+        let mut in_floor = vec![false; n];
+        let mut order: Vec<u32> = Vec::new();
+        // the floor, and with DEC crusader-19 the flat side near a vertex (its height above the vertex's measured on KV's output, before this pass)
+        let side = |c: usize| {
+            p.cross_side_m > 0.0 && dist[c] <= p.cross_side_m && {
+                let v = src[c] as usize;
+                let (ri, k) = vtx[&v];
+                kv[c] - bed_m(reaches[ri].attrs.bed[k]).max(kv[v]) <= p.cross_side_grade * dist[c]
+            }
+        };
+        for c in 0..n {
+            if matches!(wants(c), Some(w) if w.1 || side(c)) {
+                in_floor[c] = true;
+                order.push(c as u32);
+            }
+        }
+        cross_cut = vec![0.0f32; n];
+        // the keys are unique (cell last), so an unstable sort gives the same order
+        order.sort_unstable_by(|&a, &b| dist[b as usize].total_cmp(&dist[a as usize]).then(a.cmp(&b)));
+        for &c in &order {
+            let c = c as usize;
+            let mut z = kv[c];
+            for k in 0..8 {
+                let Some(q) = grid.neighbour(c, k) else { continue };
+                // only the same vertex's farther cells: across the line's own strip, never along the valley (a farther cell of the next vertex downstream stands lower by the
+                // valley's own fall, and following it would cut the whole side down; found by the side rule's test)
+                // and only a farther cell that stands lower (a channel or a cell already lowered for one): a flat or rising side is never cut, so the pass makes no strip
+                // beside a line where no channel runs (DEC crusader-19: no visible strips)
+                if !in_floor[q] || dist[q] <= dist[c] || src[q] != src[c] || kv[q] >= kv[c] {
+                    continue;
+                }
+                // the drop counts the distance gained toward the line, not the step (a diagonal step gains less than its length; a cone at the grade is left as it is)
+                z = z.min(kv[q] - p.cross_grade * (dist[q] - dist[c]));
+            }
+            // the floor never sinks to or below its vertex (numerics review of 8630f2a8): the higher of the vertex's bed and the vertex cell's own height (held above the bed where
+            // its budget ran out), plus the flood grade per metre, so the inner floor still falls to the line; the vertex itself is never lowered by this pass
+            let v = src[c] as usize;
+            let (ri, k) = vtx[&v];
+            let lo = bed_m(reaches[ri].attrs.bed[k]).max(kv[v]) + CROSS_MIN_GRADE * dist[c];
+            let lo_budget = s0[c] - left_at(c);
+            if z < lo_budget && lo_budget > lo {
+                cross_short += 1;
+                cross_short_m += lo_budget - z.max(lo);
+            }
+            let z = z.max(lo).max(lo_budget);
+            if z < kv[c] {
+                cross_cells += 1;
+                cross_volume += (kv[c] - z) * p.cell_m * p.cell_m;
+                cross_cut[c] = (kv[c] - z) as f32;
+                kv_wanted[c] = kv_wanted[c].max(s0[c] - z);
+                kv[c] = z;
+            }
+        }
+    }
     // the cells within one cell of a graph vertex (KC's breach along the line, lead #166)
     let near_line: Vec<bool> = if p.breach_along_line && switch != Switch::KvOnly {
         let mut m = vec![false; n];
@@ -432,7 +512,25 @@ pub fn run_with(
             patches.push((cells.len(), vol));
         }
     }
-    KvKc { kv, kc, kv_wanted, residuals, divide, divide_exempt, near_divide, patches, breaches, breach_volume, kc_wanted, nearest }
+    KvKc {
+        kv,
+        kc,
+        kv_wanted,
+        residuals,
+        divide,
+        divide_exempt,
+        near_divide,
+        patches,
+        breaches,
+        breach_volume,
+        kc_wanted,
+        nearest,
+        cross_cells,
+        cross_volume,
+        cross_short,
+        cross_short_m,
+        cross_cut,
+    }
 }
 
 /// What [`flag_residuals`] did.
