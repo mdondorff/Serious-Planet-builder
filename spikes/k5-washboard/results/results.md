@@ -160,7 +160,7 @@ Gate rows: the full chain, `dam` against `free`, same build, the river gate agai
 
 | Field | R1h dam | R1h free | M1 dam | M1 free |
 |---|---|---|---|---|
-| basin_pct (bar <= 10 %) | 11.40 | 11.40 | 10.50 FAIL | 4.07 PASS |
+| basin_pct (bar <= 10 %; not in the bars list) | 11.40 over | 11.40 over | 10.50 over | 4.07 under |
 | bar_uphill (<= 1 %) | 1.25 FAIL | 1.25 FAIL | 0.93 | 0.92 |
 | bar_agree_1km2 (>= 90 %) | 91.64 | 91.64 | 89.66 FAIL | 90.11 PASS |
 | bar_agree_75km2 | 97.63 | 97.62 | 92.90 | 93.84 |
@@ -171,7 +171,7 @@ Gate rows: the full chain, `dam` against `free`, same build, the river gate agai
 | closed over 1 km2 inside the box | 832 km2 | 832 km2 | 7,715 km2 | 1,493 km2 |
 
 - R1h: the west lake is gone (686 km2 in the final surface with `dam`, none with `free`). The box's bars are unchanged; the graph changes only in the margin (basins 10,464 to 3,465).
-- M1 has no sea, so every K5 catchment is window-cut. With `dam`, the edge lakes reach into the box: the largest is 22,113 km2 and 1,523 m deep, with 3,167 km2 inside the box. With `free`, M1 passes the basin and 1 km2 agreement bars.
+- M1 has no sea, so every K5 catchment is window-cut. With `dam`, the edge lakes reach into the box: the largest is 22,113 km2 and 1,523 m deep, with 3,167 km2 inside the box. With `free`, M1 passes the 1 km2 agreement bar and its basin share falls under 10 %.
 - `bar_spectrum_steep` fails on M1 in both rows (-4.19).
 
 Production (G3 port item, region seams): main's region bake has the same rule.
