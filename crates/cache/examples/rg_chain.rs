@@ -1754,6 +1754,9 @@ fn build_graph(
     (g, notes)
 }
 
+/// crusader #172 (owner, 2026-11-20): `--exception-lakes on` keeps the hollows of over-budget rises as lakes.
+static EXCEPTION_LAKES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// crusader #171 (DEC crusader-20): `--kept-drained drop` drains a kept basin whose rim an L line crosses below its spill.
 static KEPT_DRAINED_DROP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -1964,6 +1967,12 @@ fn main() -> Result<(), String> {
     };
     // crusader #171 (DEC crusader-20, reading 35): --kept-drained drop (default since the R1h row, lead #171a) | off (every kept basin protected, the form before)
     let kept_drained = value(&args, "--kept-drained").unwrap_or("drop");
+    // crusader #172 (owner, 2026-11-20: measure it): --exception-lakes off (default) | on
+    let exception_lakes = value(&args, "--exception-lakes").unwrap_or("off");
+    if !["off", "on"].contains(&exception_lakes) {
+        return Err(format!("--exception-lakes off | on, not '{exception_lakes}'"));
+    }
+    EXCEPTION_LAKES.store(exception_lakes == "on", std::sync::atomic::Ordering::Relaxed);
     if !["off", "drop"].contains(&kept_drained) {
         return Err(format!("--kept-drained off | drop, not '{kept_drained}'"));
     }
@@ -3178,7 +3187,7 @@ fn main() -> Result<(), String> {
         // the basins again, on the KS output with every L reach as spill receivers and inlets (reading 5: the L kept rule reads KS1; crusader's G1d order: the first pass on KS0 gave
         // KG-trib its kept set); the graph takes this pass's basins and nodes; its kept basins and H1's lake water are KV's and KC's protected cells
         if on("basins") && on("kg-trib") {
-            use planet_generators::bake::basins_rg::{produce_drain_avoiding, BasinParams, CellIds};
+            use planet_generators::bake::basins_rg::{produce_drain_avoiding_forced, BasinParams, CellIds};
             use planet_generators::bake::river_graph::Represented;
             let t2 = Instant::now();
             let all: Vec<GReach> = gd.reaches.iter().filter(|r| r.level == Level::L).cloned().collect();
@@ -3192,8 +3201,39 @@ fn main() -> Result<(), String> {
             }
             // crusader #161, reading 22: a kept-size depression drains unless neither its fill nor a bounded breach fits the budget KS left against S_KH (reading 21)
             let remaining: Vec<f64> = (0..n_l).map(|p| (budget_l[p] - (ks_base[p] - ks_d[p]).max(0.0)).max(0.0)).collect();
-            let mut pb =
-                produce_drain_avoiding(&grid_d, &ks_d, &outlet_d, &all, &tile_l, &BasinParams::l(BODY), &ids, &remaining, &marker_cells);
+            // crusader #172 (owner, 2026-11-20; --exception-lakes on): the hollow each over-budget rise of an L reach crosses is a kept lake; the cell the bed rises from and the
+            // bed it rises to
+            let forced: Vec<(usize, f64)> = if EXCEPTION_LAKES.load(std::sync::atomic::Ordering::Relaxed) {
+                all.iter()
+                    .filter(|r| r.has_exception(planet_generators::bake::river_graph::Reason::RiseOverBudget))
+                    .flat_map(|r| {
+                        (1..r.vertices.len())
+                            .filter(|&k| r.attrs.bed[k] > r.attrs.bed[k - 1])
+                            .filter_map(move |k| to_local(r.vertices[k - 1]).map(|c| (c, f64::from(r.attrs.bed[k]) * 0.5)))
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            let mut pb = produce_drain_avoiding_forced(
+                &grid_d,
+                &ks_d,
+                &outlet_d,
+                &all,
+                &tile_l,
+                &BasinParams::l(BODY),
+                &ids,
+                &remaining,
+                &marker_cells,
+                &forced,
+            );
+            if !forced.is_empty() {
+                println!(
+                    "RG domain {d} exception lakes (crusader #172): {} over-budget rises, {} hollows kept as lakes",
+                    forced.len(),
+                    pb.forced
+                );
+            }
             drop(remaining);
             // crusader #171 (DEC crusader-20, reading 35; --kept-drained drop): a kept basin whose rim an L line crosses with a bed more than 0.5 m below its spill is drained
             // by that line (the graph's line is the authority; KV carves it): the basin is not protected
@@ -3447,6 +3487,7 @@ fn main() -> Result<(), String> {
             ("margin", margin.to_string()),
             ("turned-noise", planet_generators::height::turned_noise().to_string()),
             ("kv-cross", format!("{}", KV_CROSS_MICRO.load(std::sync::atomic::Ordering::Relaxed) as f64 * 1.0e-6)),
+            ("exception-lakes", if EXCEPTION_LAKES.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kept-drained", if KEPT_DRAINED_DROP.load(std::sync::atomic::Ordering::Relaxed) { "drop" } else { "off" }.to_string()),
             ("kv-cross-side", format!("{},{}", kv_cross_side.0, kv_cross_side.1)),
             ("trunk-bed", if TRUNK_BED_SHARED.load(std::sync::atomic::Ordering::Relaxed) { "shared" } else { "lift" }.to_string()),

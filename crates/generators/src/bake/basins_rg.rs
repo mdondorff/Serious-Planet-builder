@@ -213,6 +213,8 @@ pub struct Produced {
     pub unresolved: Vec<u64>,
     /// Kept-size depressions that drain under reading 22 (reported, not protected); 0 without a budget.
     pub drained: usize,
+    /// Depressions kept as lakes because a reach's over-budget rise crosses them (crusader #172); 0 without forced cells.
+    pub forced: usize,
 }
 
 /// A grid's cells against global cell ids: `gid` the global id of a grid cell, `local` the grid cell of a global id (`None` outside the grid).
@@ -247,7 +249,7 @@ pub fn produce_ids(
     p: &BasinParams,
     ids: &CellIds,
 ) -> Produced {
-    produce_core(grid, z, outlet, reaches, owner, p, ids, None, &std::collections::BTreeSet::new())
+    produce_core(grid, z, outlet, reaches, owner, p, ids, None, &std::collections::BTreeSet::new(), &[])
 }
 
 /// [`produce_ids`] with the grid cells of markers already on the reaches (spikes #142, spike only): a reach's `lake_inlet` goes on its first vertex inside the kept basin that holds no
@@ -263,7 +265,7 @@ pub fn produce_ids_avoiding(
     ids: &CellIds,
     markers: &std::collections::BTreeSet<usize>,
 ) -> Produced {
-    produce_core(grid, z, outlet, reaches, owner, p, ids, None, markers)
+    produce_core(grid, z, outlet, reaches, owner, p, ids, None, markers, &[])
 }
 
 /// [`produce_drain`] with the markers of [`produce_ids_avoiding`] (explorer, the rg-chain merge of spikes #142 and crusader #161; spike only).
@@ -279,7 +281,26 @@ pub fn produce_drain_avoiding(
     remaining: &[f64],
     markers: &std::collections::BTreeSet<usize>,
 ) -> Produced {
-    produce_core(grid, z, outlet, reaches, owner, p, ids, Some(remaining), markers)
+    produce_core(grid, z, outlet, reaches, owner, p, ids, Some(remaining), markers, &[])
+}
+
+/// [`produce_drain_avoiding`] with forced lakes (crusader #172, owner 2026-11-20, spike only): each `(cell, level)` names the hollow a reach's over-budget rise crosses, the
+/// cell its bed rises from and the bed it rises to; the smallest depression holding the cell whose spill reaches `level - 0.5 m` is kept (a lake, its water at its spill),
+/// whatever its size or whether reading 22 would drain it. A cell in no depression forces nothing.
+#[allow(clippy::too_many_arguments)]
+pub fn produce_drain_avoiding_forced(
+    grid: &Grid,
+    z: &[f64],
+    outlet: &[bool],
+    reaches: &[Reach],
+    owner: &dyn Fn(usize) -> Domain,
+    p: &BasinParams,
+    ids: &CellIds,
+    remaining: &[f64],
+    markers: &std::collections::BTreeSet<usize>,
+    forced: &[(usize, f64)],
+) -> Produced {
+    produce_core(grid, z, outlet, reaches, owner, p, ids, Some(remaining), markers, forced)
 }
 
 /// The bound of reading 22's breach test: settled cells per depression.
@@ -298,7 +319,7 @@ pub fn produce_drain(
     ids: &CellIds,
     remaining: &[f64],
 ) -> Produced {
-    produce_core(grid, z, outlet, reaches, owner, p, ids, Some(remaining), &std::collections::BTreeSet::new())
+    produce_core(grid, z, outlet, reaches, owner, p, ids, Some(remaining), &std::collections::BTreeSet::new(), &[])
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -312,10 +333,24 @@ fn produce_core(
     ids: &CellIds,
     remaining: Option<&[f64]>,
     markers: &std::collections::BTreeSet<usize>,
+    forced: &[(usize, f64)],
 ) -> Produced {
     let gid = ids.gid;
     let hy = hierarchy(grid, z, outlet);
     let nn = hy.nodes.len();
+    // crusader #172: the forced nodes, each the smallest depression holding its cell whose spill reaches the rise's level less one bed code
+    let mut force = vec![false; nn];
+    for &(c, level) in forced {
+        let mut k = hy.node_of[c];
+        while k != DRAINED && k != UNSEEN {
+            let nd = &hy.nodes[k as usize];
+            if nd.spill.is_none_or(|sp| sp.1 >= level - 0.5) {
+                force[k as usize] = true;
+                break;
+            }
+            k = nd.parent;
+        }
+    }
     // subtrees as ranges of one flat array (order #159: no per-subtree copies): sizes children first (a node's id is larger than its children's), then the starts parents first,
     // a node's own cells first and its children after them in id order
     let mut size = vec![0usize; nn];
@@ -386,7 +421,7 @@ fn produce_core(
                 }
             });
         drained += usize::from(drains);
-        keep.push(if kept && !drains {
+        keep.push(if (kept && !drains) || force[k] {
             Keep::Kept
         } else if depth(k) >= p.report_depth_m && size[k] >= p.report_cells {
             Keep::Reported
@@ -465,6 +500,7 @@ fn produce_core(
         cells: Cells::default(),
         unresolved: Vec::new(),
         drained,
+        forced: force.iter().filter(|&&f| f).count(),
     };
     for k in 0..nn {
         if keep[k] == Keep::No {

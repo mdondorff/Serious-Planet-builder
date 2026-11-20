@@ -527,3 +527,33 @@ fn a_depression_is_protected_only_when_neither_fill_nor_breach_fits() {
     assert_eq!(at(&tight), Represented::ProtectedSurface, "neither a fill nor a breach fits 1 m: protected");
     assert_eq!(tight.drained, 0);
 }
+
+// SPIKE-130 (spike prototype; not a spec requirement)
+#[test]
+fn a_hollow_an_over_budget_rise_crosses_is_kept_as_a_lake() {
+    // crusader #172 (owner, 2026-11-20): a 10 m hollow drains under reading 22 with 20 m of budget left; forced by a rise across it (the cell the bed rises from, the bed it
+    // rises to), it is kept whatever its size or budget; a forced cell on open ground forces nothing
+    use planet_generators::bake::basins_rg::{produce_drain_avoiding_forced, CellIds};
+    let mut z = base(false);
+    cone(&mut z, 12.0, 12.0, 5.0, 10.0);
+    let g = Grid::cube(N, R);
+    let outlet = g.outlets(&z, 0.0);
+    let ids = CellIds { gid: &|c| c as u64, local: &|id| Some(id as usize) };
+    let markers = std::collections::BTreeSet::new();
+    let roomy = vec![20.0; z.len()];
+    let holds = |p: &Produced| kept(p).iter().any(|b| p.cells[&b.id].contains(&cell(12, 12)));
+    let plain = produce_drain_avoiding_forced(&g, &z, &outlet, &[], &tile_of, &params(), &ids, &roomy, &markers, &[]);
+    assert!(!holds(&plain) && plain.forced == 0, "the hollow drains under reading 22 on its own");
+    let level = z[cell(12, 12)] + 5.0;
+    let forced = produce_drain_avoiding_forced(&g, &z, &outlet, &[], &tile_of, &params(), &ids, &roomy, &markers, &[(cell(12, 12), level)]);
+    assert!(holds(&forced) && forced.forced == 1, "forced by the rise, it is a kept lake");
+    let b = basin_at(&forced, cell(12, 12));
+    assert!(b.spill_m >= level - 0.5 && b.floor_m <= z[cell(12, 12)], "the lake's spill reaches the rise: {} against {level}", b.spill_m);
+    let open = produce_drain_avoiding_forced(&g, &z, &outlet, &[], &tile_of, &params(), &ids, &roomy, &markers, &[(cell(3, 3), 40.0)]);
+    assert_eq!((open.forced, kept(&open).len()), (0, kept(&plain).len()), "a cell in no depression forces nothing");
+    assert_eq!(
+        forced.basins,
+        produce_drain_avoiding_forced(&g, &z, &outlet, &[], &tile_of, &params(), &ids, &roomy, &markers, &[(cell(12, 12), level)]).basins,
+        "deterministic"
+    );
+}
