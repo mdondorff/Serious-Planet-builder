@@ -52,6 +52,12 @@ pub struct KvParams {
     /// `cross_side_grade` a metre above the vertex (a flat side, where the tributaries' floor is under a cell wide); 0: the floor alone.
     pub cross_side_m: f64,
     pub cross_side_grade: f64,
+    /// Lead #173 (spikes #152, R3a: rises of one bed code on coastal flats): KV never cuts a vertex's target below this height (m; the sea level with --kv-sea-floor), so a
+    /// bed coded under the sea makes no pit beside it that KC fills back; `-inf`: the bed as coded.
+    pub bed_floor_m: f64,
+    /// Lead #173 (R1h: KC refills the cells KV cut beside a kept lake up to its tree's spill): KC's depressions take the protected cells as outlets, so a cut that drains into
+    /// a kept lake is no pit; `false`: the protected cells only stay unfilled.
+    pub kc_lake_outlets: bool,
 }
 
 impl KvParams {
@@ -70,6 +76,8 @@ impl KvParams {
             cross_grade: 0.0,
             cross_side_m: 0.0,
             cross_side_grade: 0.0,
+            bed_floor_m: f64::NEG_INFINITY,
+            kc_lake_outlets: false,
         }
     }
 }
@@ -304,7 +312,7 @@ pub fn run_with(
         let (ri, k) = vtx[&(src[c] as usize)];
         let r = reaches[ri];
         let half = 0.5 * p.w_floor_factor * law.width_m(r.attrs.q_w[k]);
-        let bed = bed_m(r.attrs.bed[k]);
+        let bed = bed_m(r.attrs.bed[k]).max(p.bed_floor_m);
         let v = bed + p.s_floor * dist[c].min(half) + p.s_wall * (dist[c] - half).max(0.0);
         let cone = (s0[c] - v).max(0.0);
         let floor = dist[c] <= half;
@@ -475,7 +483,15 @@ pub fn run_with(
         // than its fill would raise; then the remaining pits filled within the budget, as before
         let patches_of = |z: &[f64]| -> (Vec<f64>, Vec<u32>, Vec<Vec<usize>>) {
             // each cell's fill level (its tree's spill; -inf for a drained or protected cell) and the connected patches the fill raises
-            let hy = super::basins_rg::hierarchy(grid, z, outlet);
+            // lead #173: with kc_lake_outlets the kept lakes are outlets too (a cut draining into a lake is no pit)
+            let lake_outlet: Vec<bool>;
+            let outs: &[bool] = if p.kc_lake_outlets {
+                lake_outlet = (0..n).map(|c| outlet[c] || protected[c]).collect();
+                &lake_outlet
+            } else {
+                outlet
+            };
+            let hy = super::basins_rg::hierarchy(grid, z, outs);
             let level: Vec<f64> = (0..n)
                 .map(|c| {
                     let mut k = hy.node_of[c];

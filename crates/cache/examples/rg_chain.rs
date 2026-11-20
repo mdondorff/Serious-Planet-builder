@@ -1754,6 +1754,10 @@ fn build_graph(
     (g, notes)
 }
 
+/// lead #173: `--kv-sea-floor on` (KV cuts no target below the sea level) and `--kc-lake-outlets on` (KC's depressions drain into the kept lakes).
+static KV_SEA_FLOOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static KC_LAKE_OUTLETS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// crusader #172 (owner, 2026-11-20): `--exception-lakes on` keeps the hollows of over-budget rises as lakes.
 static EXCEPTION_LAKES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -1970,6 +1974,14 @@ fn main() -> Result<(), String> {
     };
     // crusader #171 (DEC crusader-20, reading 35): --kept-drained drop (default since the R1h row, lead #171a) | off (every kept basin protected, the form before)
     let kept_drained = value(&args, "--kept-drained").unwrap_or("drop");
+    // lead #173: --kv-sea-floor off | on, --kc-lake-outlets off | on (both off by default until the rows)
+    for (opt, flag) in [("--kv-sea-floor", &KV_SEA_FLOOR), ("--kc-lake-outlets", &KC_LAKE_OUTLETS)] {
+        let v = value(&args, opt).unwrap_or("off");
+        if !["off", "on"].contains(&v) {
+            return Err(format!("{opt} off | on, not '{v}'"));
+        }
+        flag.store(v == "on", std::sync::atomic::Ordering::Relaxed);
+    }
     // crusader #172 (owner, 2026-11-20: measure it): --exception-lakes off (default) | on
     let exception_lakes = value(&args, "--exception-lakes").unwrap_or("off");
     if !["off", "on"].contains(&exception_lakes) {
@@ -3352,6 +3364,8 @@ fn main() -> Result<(), String> {
                 &KvParams {
                     cross_grade: KV_CROSS_MICRO.load(std::sync::atomic::Ordering::Relaxed) as f64 * 1.0e-6,
                     cross_side_m: kv_cross_side.0,
+                    bed_floor_m: if KV_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { sea } else { f64::NEG_INFINITY },
+                    kc_lake_outlets: KC_LAKE_OUTLETS.load(std::sync::atomic::Ordering::Relaxed),
                     cross_side_grade: kv_cross_side.1,
                     ..KvParams::plan(dx_l)
                 },
@@ -3521,6 +3535,8 @@ fn main() -> Result<(), String> {
             ("margin", margin.to_string()),
             ("turned-noise", planet_generators::height::turned_noise().to_string()),
             ("kv-cross", format!("{}", KV_CROSS_MICRO.load(std::sync::atomic::Ordering::Relaxed) as f64 * 1.0e-6)),
+            ("kv-sea-floor", if KV_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("kc-lake-outlets", if KC_LAKE_OUTLETS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("exception-lakes", if EXCEPTION_LAKES.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             (
                 "kept-drained",
