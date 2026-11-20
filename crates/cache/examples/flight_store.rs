@@ -23,6 +23,8 @@ const R: f64 = 6_371_000.0;
 const LATTICE: usize = 16_384;
 const REGIONAL: usize = 12_288;
 const MARGIN: usize = 200;
+/// A kept basin is a lake when its floor holds at least this much water on the final surface (metres).
+const LAKE_MIN_DEPTH_M: f64 = 0.5;
 
 /// The gate's windows (BUILD-055): `face,i0,i1,j0,j1,seed` in regional cells.
 const WINDOWS: [(&str, [usize; 6]); 5] = [
@@ -166,6 +168,7 @@ fn main() -> Result<(), String> {
         return Err(format!("{}: cell ({}, {}) is not finite", surface_file.display(), c % w, c / w));
     }
     let inputs_id = spec.effective_inputs_id() ^ fnv(bytes.iter().copied(), 0xcbf2_9ce4_8422_2325) ^ 0x464c_4947_4854_0001;
+    let graph = opt(&args, "--graph").map(planet_cache::river_gate_graph::read_graph).transpose()?;
     drop(bytes);
     let world = GlobalWorld::from_definition(&def).map_err(|e| format!("{e:?}"))?;
     let basin = BasinSpec {
@@ -182,8 +185,17 @@ fn main() -> Result<(), String> {
     tiles.sort_unstable_by_key(|id| (id.face.0, id.ti, id.tj));
     std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
     let mut writer = PackWriter::open(&out, world.params(), DEFAULT_MAX_PACK_BYTES).map_err(|e| e.to_string())?;
+    // lead #176a: the graph's kept L basins (`protected_surface`) as lakes at their spill level, their water flooded on the final surface from the floor cell
+    let (lakes, lake_of) = match (&graph, args.iter().any(|a| a == "--no-lakes")) {
+        (Some(g), false) => {
+            kept_lakes(g, &surface, w, h, x0, y0, spec.radius_m * std::f64::consts::FRAC_PI_2 / spec.local() as f64, face, t)?
+        }
+        _ => (Vec::new(), Vec::new()),
+    };
     let mut tables = [CacheKey::NONE; 6];
-    for (f, r) in basin_table_records(&world, spec.res, &basin, &[], &|_| face).iter().enumerate() {
+    let mut by_id = lakes.clone();
+    by_id.sort_by_key(|l| l.id);
+    for (f, r) in basin_table_records(&world, spec.res, &basin, &by_id, &|_| face).iter().enumerate() {
         tables[f] = r.key;
         writer.append(r).map_err(|e| e.to_string())?;
     }
@@ -236,15 +248,28 @@ fn main() -> Result<(), String> {
         }
         land += tile_land;
         let stats = LTileStats { land_cells: tile_land, burned_cells: 0, pit_cells: 0, pit_p50_m: 0.0, pit_p99_m: 0.0, pit_max_m: 0.0 };
-        let r = l_tile_record(&world, spec.res, &l_spec, id, &core, &stats, &[]).map_err(|e| e.to_string())?;
+        let water = if lake_of.is_empty() {
+            Vec::new()
+        } else {
+            let labels: Vec<u64> = (0..t * t)
+                .map(|p| {
+                    let (x, y) = (i64::from(id.ti) * t as i64 + (p % t) as i64 - x0, i64::from(id.tj) * t as i64 + (p / t) as i64 - y0);
+                    match lake_of[y as usize * w + x as usize] {
+                        u32::MAX => planet_generators::bake::water_mask::NO_LAKE,
+                        k => lakes[k as usize].id,
+                    }
+                })
+                .collect();
+            planet_generators::bake::water_mask::encode(&labels, t).map_err(|e| format!("tile {}/{}/{}: {e}", id.face.0, id.ti, id.tj))?
+        };
+        let r = l_tile_record(&world, spec.res, &l_spec, id, &core, &stats, &water).map_err(|e| e.to_string())?;
         keys.insert((id.face.0, id.ti, id.tj), r.key);
         writer.append(&r).map_err(|e| e.to_string())?;
     }
     // the run's graph (GEN-189 canonical form) as the store's channel graph, cut into chains of 8-neighbour cells inside the window: `--graph-level l` (default; lead #176) the L reaches on the
     // window's L grid (one stored cell per L cell), `h1` the H1 reaches on the H1 grid
     let (mut graph_cells, mut graph_keys) = (0u32, BTreeMap::new());
-    if let Some(gpath) = opt(&args, "--graph") {
-        let g = planet_cache::river_gate_graph::read_graph(gpath)?;
+    if let (Some(gpath), Some(g)) = (opt(&args, "--graph"), &graph) {
         let level_name = opt(&args, "--graph-level").unwrap_or("l");
         let (level, per_edge, gx0, gy0, rw, rh) = match level_name {
             "l" => (planet_generators::bake::river_graph::Level::L, spec.local(), x0 as usize, y0 as usize, w, h),
@@ -307,6 +332,7 @@ fn main() -> Result<(), String> {
     let commit = Commit::new(CommitSpec::of(&l_spec, spec.res)?, tables, keys, graph_cells, graph_keys);
     commit.write(&out)?;
     write_readme(&out, wname, &win, &surface_file, commit.id, tiles.len(), inputs_id, noise)?;
+    println!("FLIGHT-STORE lakes: {} kept L basins, {} wet cells", lakes.len(), lake_of.iter().filter(|&&k| k != u32::MAX).count());
     println!(
         "FLIGHT-STORE {wname}: {} tiles from {} into {} (commit {:016x}, inputs identity {inputs_id:016x}); {land} land cells; L from {lowest:.1} to {highest:.1} m; {:.0} s",
         tiles.len(),
@@ -337,4 +363,89 @@ fn write_readme(
         ),
     )
     .map_err(|e| e.to_string())
+}
+
+/// The kept L basins of `g` (`protected_surface`) as lakes on the final surface `z`: the depression of `z` (its priority flood with the window's edge and the sea as outlets) that holds a basin's floor
+/// cell is its water, at the depression's level (at most the graph's spill: later stages may have lowered the rim); a basin whose floor holds less than [`LAKE_MIN_DEPTH_M`] of water is dry, and two kept
+/// basins in one depression share it (the first by id names it). Returns the lakes and, per window cell, the index of its lake (`u32::MAX` for dry).
+#[allow(clippy::too_many_arguments)]
+fn kept_lakes(
+    g: &planet_generators::bake::river_graph::Graph,
+    z: &[f64],
+    w: usize,
+    h: usize,
+    x0: i64,
+    y0: i64,
+    cell_m: f64,
+    face: Face,
+    tile: usize,
+) -> Result<(Vec<planet_generators::bake::lakes::Lake>, Vec<u32>), String> {
+    use planet_generators::bake::river_graph::{Level, Outlet, Represented};
+    let grid = planet_generators::bake::Grid::new(w, h, cell_m);
+    let filled = planet_generators::bake::flood::priority_flood_with(&grid, z, &grid.outlets(z, 0.0), 1.0e-7, false);
+    let mut kept: Vec<_> = g.basins.iter().filter(|b| b.level == Level::L && b.represented == Represented::ProtectedSurface).collect();
+    kept.sort_by_key(|b| b.id);
+    let mut label = vec![u32::MAX; w * h];
+    let mut lakes = Vec::new();
+    let mut stack = Vec::new();
+    for b in kept {
+        if b.id == planet_generators::bake::water_mask::NO_LAKE {
+            return Err(format!("basin {:016x}: the id of the dry label", b.id));
+        }
+        let (fx, fy) = ((b.floor_cell & 0xffff_ffff) as i64 - x0, (b.floor_cell >> 32) as i64 - y0);
+        if fx < 0 || fy < 0 || fx >= w as i64 || fy >= h as i64 {
+            continue;
+        }
+        let start = fy as usize * w + fx as usize;
+        if label[start] != u32::MAX || filled[start] - z[start] < LAKE_MIN_DEPTH_M {
+            continue;
+        }
+        let level = filled[start];
+        let k = lakes.len() as u32;
+        let (mut cells, mut tiles) = (0u32, std::collections::BTreeSet::new());
+        label[start] = k;
+        stack.push(start);
+        while let Some(c) = stack.pop() {
+            cells += 1;
+            let (x, y) = ((c % w) as i64, (c / w) as i64);
+            tiles.insert((((x + x0) as usize / tile) as u32, ((y + y0) as usize / tile) as u32));
+            for dy in -1..=1i64 {
+                for dx in -1..=1i64 {
+                    let (u, v) = (x + dx, y + dy);
+                    if u < 0 || v < 0 || u >= w as i64 || v >= h as i64 {
+                        continue;
+                    }
+                    let q = v as usize * w + u as usize;
+                    // the same depression: water stands there, its flood within 1 mm of this level (the flood grades its flats at 1e-7 m a cell)
+                    if label[q] == u32::MAX && filled[q] - z[q] > 1.0e-4 && (filled[q] - level).abs() < 1.0e-3 {
+                        label[q] = k;
+                        stack.push(q);
+                    }
+                }
+            }
+        }
+        let active = b.outlet == Outlet::Active;
+        lakes.push(planet_generators::bake::lakes::Lake {
+            id: b.id,
+            floor_id: b.floor_cell,
+            spill_id: b.spill_cell,
+            floor_m: b.floor_m,
+            spill_m: b.spill_m,
+            level_m: level,
+            class: if active {
+                planet_generators::bake::hydro::BasinClass::Lake
+            } else {
+                planet_generators::bake::hydro::BasinClass::Endorheic
+            },
+            overflows: active,
+            wet: cells > 0,
+            area_m2: f64::from(cells) * cell_m * cell_m,
+            cells,
+            q_in: 0.0,
+            q_out: 0.0,
+            tiles: tiles.into_iter().map(|(ti, tj)| planet_generators::bake::lakes::TileRef { face: face.0, ti, tj }).collect(),
+        });
+    }
+    // the labels index this list in flooding order; the basin tables take a copy sorted by id
+    Ok((lakes, label))
 }
