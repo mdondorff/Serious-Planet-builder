@@ -156,7 +156,7 @@ Survey (`raw/edge-survey.txt`). Each field is flooded with the window edge and t
 - With `dam`, every closed depression over 1 km2 in z_s is an edge lake. With `free`, z_s has none (M1 keeps 3, 389 km2, inside).
 - The S0 edge lakes left with `free` are S0's own pits near the edge (KH and C1 at L).
 
-Gate rows: the full chain, `dam` against `free`, same build, the river gate against each run's own S0 (`raw/edge-gate.txt`):
+Gate rows: the full chain, `dam` against `free`, same build, the river gate against each run's own S0 (`raw/edge-gate.txt`; final-surface lakes `raw/edge-final-lakes.txt`):
 
 | Field | R1h dam | R1h free | M1 dam | M1 free |
 |---|---|---|---|---|
