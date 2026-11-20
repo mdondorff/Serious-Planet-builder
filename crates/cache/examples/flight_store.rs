@@ -2,8 +2,8 @@
 //! over the window's L grid, margin included) written as the L layer of a store the viewer flies: each L tile's core is the surface minus the store's base `B` (no K7, no lake, an empty water
 //! section), with the basin tables of no lake and a commit naming them.
 //!
-//! Usage: `flight_store --window W --surface FILE --out DIR [--noise turned|axis] [--threads T]`. W is one of the gate's windows (r1h, r3a, r3b, m1, f1). DIR must not exist.
-//! Version 1 stores no channel graph (the store format holds H1 lines only; the graph's channels follow in a second step).
+//! Usage: `flight_store --window W --surface FILE --out DIR [--graph FILE [--graph-level l|h1] [--graph-min-km2 A]] [--noise turned|axis] [--threads T]`. W is one of the gate's windows (r1h, r3a, r3b, m1, f1). DIR must not exist.
+//! With `--graph` the run's graph is the store's channel graph: its L reaches (default) on the window's L grid, or its H1 reaches, where the drained area is at least A km2 (default 5).
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -240,8 +240,71 @@ fn main() -> Result<(), String> {
         keys.insert((id.face.0, id.ti, id.tj), r.key);
         writer.append(&r).map_err(|e| e.to_string())?;
     }
+    // the run's graph (GEN-189 canonical form) as the store's channel graph, cut into chains of 8-neighbour cells inside the window: `--graph-level l` (default; lead #176) the L reaches on the
+    // window's L grid (one stored cell per L cell), `h1` the H1 reaches on the H1 grid
+    let (mut graph_cells, mut graph_keys) = (0u32, BTreeMap::new());
+    if let Some(gpath) = opt(&args, "--graph") {
+        let g = planet_cache::river_gate_graph::read_graph(gpath)?;
+        let level_name = opt(&args, "--graph-level").unwrap_or("l");
+        let (level, per_edge, gx0, gy0, rw, rh) = match level_name {
+            "l" => (planet_generators::bake::river_graph::Level::L, spec.local(), x0 as usize, y0 as usize, w, h),
+            "h1" => (planet_generators::bake::river_graph::Level::H1, spec.regional, ri0, rj0, ri1 - ri0 + 1, rj1 - rj0 + 1),
+            o => return Err(format!("--graph-level l|h1, not '{o}'")),
+        };
+        // lead #176: a vertex is stored only where its drained area is at least `--graph-min-km2` (default 5 km2; the drawing has a width floor of about one stored cell)
+        let min_m2: f64 = opt(&args, "--graph-min-km2").map_or(Ok(5.0), str::parse::<f64>).map_err(|_| "--graph-min-km2 KM2")? * 1.0e6;
+        let h1 = planet_generators::bake::Grid::new(rw, rh, spec.radius_m * std::f64::consts::FRAC_PI_2 / per_edge as f64);
+        let index = |id: u64| -> Option<u32> {
+            let (gx, gy) = ((id & 0xffff_ffff) as usize, (id >> 32) as usize);
+            (gx >= gx0 && gy >= gy0 && gx < gx0 + rw && gy < gy0 + rh).then(|| ((gy - gy0) * rw + (gx - gx0)) as u32)
+        };
+        let mut chains: Vec<(Vec<u32>, Vec<f64>, Vec<i32>)> = Vec::new();
+        let mut ids: Vec<u64> = Vec::new();
+        for r in g.reaches.iter().filter(|r| r.level == level) {
+            let mut cur: (Vec<u32>, Vec<f64>, Vec<i32>) = (Vec::new(), Vec::new(), Vec::new());
+            let mut part = 0u64;
+            let mut flush = |cur: &mut (Vec<u32>, Vec<f64>, Vec<i32>), part: &mut u64| {
+                if cur.0.len() >= 2 {
+                    chains.push(std::mem::take(cur));
+                    ids.push(r.id ^ part.wrapping_mul(0x9e37_79b9_7f4a_7c15));
+                    *part += 1;
+                }
+                cur.0.clear();
+                cur.1.clear();
+                cur.2.clear();
+            };
+            for (v, &id) in r.vertices.iter().enumerate() {
+                let Some(c) = index(id).filter(|_| r.attrs.a_geo[v] >= min_m2) else {
+                    flush(&mut cur, &mut part);
+                    continue;
+                };
+                let adjacent = cur.0.last().is_none_or(|&p| (0..8).any(|d| h1.neighbour(p as usize, d) == Some(c as usize)));
+                if !adjacent {
+                    flush(&mut cur, &mut part);
+                }
+                cur.0.push(c);
+                cur.1.push(r.attrs.q_w[v]);
+                cur.2.push(r.attrs.bed[v]);
+            }
+            flush(&mut cur, &mut part);
+        }
+        let chains_n = chains.len();
+        let verts_n: usize = chains.iter().map(|c| c.0.len()).sum();
+        let cg = planet_generators::bake::channel_graph::ChannelGraph::from_chains(&h1, &chains)?;
+        let gspec = planet_cache::graph_store::GraphSpec { basin, h1_cells: per_edge as u32, margin_h1: 0 };
+        let gspec = planet_cache::graph_store::GraphSpec { margin_h1: gspec.required_margin(spec.halo as u32), ..gspec };
+        let cell_xy = |c: u32| (face.0, (gx0 + c as usize % rw) as i64, (gy0 + c as usize / rw) as i64);
+        for r in planet_cache::graph_store::graph_block_records(&world, spec.res, &gspec, &cg, &ids, &h1, &cell_xy) {
+            let (f, bi, bj) = planet_cache::graph_store::block_of(&gspec, &r)?;
+            graph_keys.insert((f, bi, bj), r.key);
+            writer.append(&r).map_err(|e| e.to_string())?;
+        }
+        graph_cells = per_edge as u32;
+        println!("FLIGHT-STORE graph {gpath} ({level_name}, drained area >= {} km2): {chains_n} chains,", min_m2 / 1.0e6);
+        println!("FLIGHT-STORE graph detail: {verts_n} vertices, {} blocks", graph_keys.len());
+    }
     writer.finish().map_err(|e| e.to_string())?;
-    let commit = Commit::new(CommitSpec::of(&l_spec, spec.res)?, tables, keys, 0, BTreeMap::new());
+    let commit = Commit::new(CommitSpec::of(&l_spec, spec.res)?, tables, keys, graph_cells, graph_keys);
     commit.write(&out)?;
     write_readme(&out, wname, &win, &surface_file, commit.id, tiles.len(), inputs_id, noise)?;
     println!(
@@ -269,7 +332,7 @@ fn write_readme(
     std::fs::write(
         out.join("README.txt"),
         format!(
-            "SPIKE FLIGHT STORE, not the world bake (lead #175 item 3, step C): window {wname} {win:?} (face, i0, i1, j0, j1, seed); L = the prototype's final surface {} minus the store's base B (no K7, no lake, no channel graph yet). Commit {commit:016x}, {tiles} tiles, inputs identity {inputs_id:016x}, base noise {noise}. Branch spike/rg-prototype (flight_store).\n",
+            "SPIKE FLIGHT STORE, not the world bake (lead #175 item 3, step C): window {wname} {win:?} (face, i0, i1, j0, j1, seed); L = the prototype's final surface {} minus the store's base B (no K7, no lake; the channel graph as the store's commit names it). Commit {commit:016x}, {tiles} tiles, inputs identity {inputs_id:016x}, base noise {noise}. Branch spike/rg-prototype (flight_store).\n",
             surface.display()
         ),
     )
