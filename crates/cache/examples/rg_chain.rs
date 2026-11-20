@@ -3023,23 +3023,37 @@ fn main() -> Result<(), String> {
             let (mut z, mut res) = (ks_d, res_d);
             let mut want = vec![f64::INFINITY; n_l];
             let mut steps = 0usize;
+            // the steps: consecutive vertices of the L reaches KS1 rasterised, and every channel cell's step to its receiver on KG-trib's routing KS1 cut along (the
+            // second KG-trib pass, --trib-on post, draws its tributaries later on the band6 output, so KS1's slots follow this routing, not those reaches)
+            let mut pairs: Vec<(usize, usize)> = Vec::new();
             for r in gd.reaches.iter().filter(|r| r.level == Level::L) {
                 let cells: Vec<Option<usize>> = r.vertices.iter().map(|&c| to_local(c)).collect();
                 for k in 1..cells.len() {
-                    let (Some(a), Some(b)) = (cells[k - 1], cells[k]) else { continue };
-                    let (ax, ay, bx, by) = (a % w, a / w, b % w, b / w);
-                    if ax.abs_diff(bx) != 1 || ay.abs_diff(by) != 1 {
-                        continue;
+                    if let (Some(a), Some(b)) = (cells[k - 1], cells[k]) {
+                        pairs.push((a, b));
                     }
-                    steps += 1;
-                    let (e1, e2) = (ay * w + bx, by * w + ax);
-                    let t = 0.5 * (z[a] + z[b]);
-                    if z[e1].min(z[e2]) <= t + 1e-9 {
-                        continue;
-                    }
-                    let e = if z[e1] < z[e2] || (z[e1] == z[e2] && e1 < e2) { e1 } else { e2 };
-                    want[e] = want[e].min(t);
                 }
+            }
+            if let Some((receiver, channel)) = &fine {
+                for c in 0..n_l {
+                    if channel[c] && receiver[c] != NONE {
+                        pairs.push((c, receiver[c] as usize));
+                    }
+                }
+            }
+            for (a, b) in pairs {
+                let (ax, ay, bx, by) = (a % w, a / w, b % w, b / w);
+                if ax.abs_diff(bx) != 1 || ay.abs_diff(by) != 1 {
+                    continue;
+                }
+                steps += 1;
+                let (e1, e2) = (ay * w + bx, by * w + ax);
+                let t = 0.5 * (z[a] + z[b]);
+                if z[e1].min(z[e2]) <= t + 1e-9 {
+                    continue;
+                }
+                let e = if z[e1] < z[e2] || (z[e1] == z[e2] && e1 < e2) { e1 } else { e2 };
+                want[e] = want[e].min(t);
             }
             let (mut cut, mut short) = (0usize, 0usize);
             for e in 0..n_l {
@@ -3058,7 +3072,7 @@ fn main() -> Result<(), String> {
                     res.push((e, need, avail));
                 }
             }
-            println!("RG domain {d} KS connect 4 (lead #158): {steps} diagonal steps on L reaches, {cut} edge cells lowered, {short} short at the budget (residuals)");
+            println!("RG domain {d} KS connect 4 (lead #158): {steps} diagonal steps (L reaches and KG-trib's channel routing), {cut} edge cells lowered, {short} short at the budget (residuals)");
             (z, res)
         } else {
             (ks_d, res_d)
