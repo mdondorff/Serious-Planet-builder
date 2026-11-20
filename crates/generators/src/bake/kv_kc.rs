@@ -112,6 +112,9 @@ pub struct KvKc {
     pub cross_short_m: f64,
     /// The pass's cut per cell (m; empty when the pass is off), for the sheet of DEC crusader-19.
     pub cross_cut: Vec<f32>,
+    /// Lead #173 (spikes #152: trunk-image vertices left uncut mid-reach): every L vertex cell above its bed by more than 0.25 m before KV, by why KV did or did not cut it:
+    /// (label, trunk-image vertices, other vertices). A cell is counted once, under its first claiming reach.
+    pub census: Vec<(&'static str, usize, usize)>,
 }
 
 /// The least fall (m per m) the cross-slope pass keeps toward the line where it reaches the vertex's height: the gate's flood grade (1e-5; `s_floor` is 100 times it).
@@ -336,6 +339,56 @@ pub fn run_with(
         }
     }
     drop(carry);
+    // lead #173: the census of the vertex cells KV should cut to their bed
+    let census = {
+        let labels = [
+            "cut to the bed (within 0.25 m)",
+            "cut short by the budget left (a residual)",
+            "sea or window outlet",
+            "protected (a kept basin or H1 lake cell)",
+            "divide buffer",
+            "no budget left after KS",
+            "claimed by a reach with a higher bed (another reach's bed is lower here by > 0.25 m)",
+            "other",
+        ];
+        let mut low_bed: BTreeMap<usize, f64> = BTreeMap::new();
+        for r in &reaches {
+            for (k, &c) in r.vertices.iter().enumerate() {
+                let e = low_bed.entry(c as usize).or_insert(f64::INFINITY);
+                *e = e.min(bed_m(r.attrs.bed[k]));
+            }
+        }
+        let mut count = vec![(0usize, 0usize); labels.len()];
+        for (&c, &(ri, k)) in &vtx {
+            let bed = bed_m(reaches[ri].attrs.bed[k]);
+            if s0[c] - bed <= 0.25 {
+                continue;
+            }
+            let class = if kv[c] - bed <= 0.25 {
+                0
+            } else if outlet[c] {
+                2
+            } else if protected[c] {
+                3
+            } else if near_divide[c] {
+                4
+            } else if left_at(c) <= 1e-9 {
+                5
+            } else if kv_wanted[c] > s0[c] - kv[c] + BUDGET_EPS_M {
+                1
+            } else if low_bed[&c] < bed - 0.25 {
+                6
+            } else {
+                7
+            };
+            if reaches[ri].parent.is_some() {
+                count[class].0 += 1;
+            } else {
+                count[class].1 += 1;
+            }
+        }
+        labels.iter().zip(count).map(|(&l, (a, b))| (l, a, b)).collect::<Vec<_>>()
+    };
     // lead #169 item 3: the floor falls toward the line; floor cells farthest first (ties by cell), each at most its farther floor neighbours' height less the grade's drop
     let (mut cross_cells, mut cross_volume, mut cross_short, mut cross_short_m) = (0usize, 0.0f64, 0usize, 0.0f64);
     let mut cross_cut: Vec<f32> = Vec::new();
@@ -530,6 +583,7 @@ pub fn run_with(
         cross_short,
         cross_short_m,
         cross_cut,
+        census,
     }
 }
 

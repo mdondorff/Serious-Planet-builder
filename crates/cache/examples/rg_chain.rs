@@ -3376,6 +3376,10 @@ fn main() -> Result<(), String> {
                 r.cross_short,
                 r.cross_short_m
             );
+            // lead #173: why KV did or did not cut the L vertex cells above their bed
+            for (label, trunk, other) in &r.census {
+                println!("RG domain {d} KV vertex census (lead #173): {label}: {trunk} trunk-image, {other} other");
+            }
             if !r.cross_cut.is_empty() {
                 // DEC crusader-19's report: how deep the pass cut (p50, p95, max over the cells it lowered)
                 let mut cuts: Vec<f32> = r.cross_cut.iter().copied().filter(|&x| x > 0.0).collect();
