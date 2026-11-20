@@ -33,6 +33,30 @@ pub enum Stage {
 }
 
 impl Stage {
+    /// One representative of every [`Stage`] variant in execution order (`BUILD-063`).
+    pub const ALL_KINDS: [Stage; 7] = [
+        Stage::Landmass,
+        Stage::Round(0),
+        Stage::H1,
+        Stage::Thermal,
+        Stage::Deposition,
+        Stage::PitSpreading,
+        Stage::K7 { face: 0, ti: 0, tj: 0 },
+    ];
+
+    /// Canonical stage-family stem matching `docs/stages/manifest.txt` (`round` for `round-NN`, `k7` for `k7-fF-tI-J`).
+    pub fn kind_id(self) -> &'static str {
+        match self {
+            Stage::Landmass => "landmass",
+            Stage::Round(_) => "round",
+            Stage::H1 => "h1",
+            Stage::Thermal => "thermal",
+            Stage::Deposition => "deposition",
+            Stage::PitSpreading => "pit-spreading",
+            Stage::K7 { .. } => "k7",
+        }
+    }
+
     /// The name in file names and in the numbers file.
     pub fn label(self) -> String {
         match self {

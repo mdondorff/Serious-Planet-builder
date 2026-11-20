@@ -1,0 +1,1 @@
+- 2026-11-19 ag2-companion-bootstrap (BUILD-062, proposed ADR 0128): added in-repo companion setup (`GEMINI.md`, `.agents/`), pure-Rust `xtask agent-guard` and `next-id`, `.agents/**` docs-CI parity, and companion lane routing entry.

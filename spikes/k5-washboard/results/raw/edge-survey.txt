@@ -1,0 +1,30 @@
+r1h-dam zs: edge lakes over 1 km2: 32, 13619 km2, depth max 981 m, over 50 m deep 32 (13619 km2); all closed over 1 km2: 32, 13619 km2
+r1h-dam s0: edge lakes over 1 km2: 100, 10506 km2, depth max 1201 m, over 50 m deep 42 (10094 km2); all closed over 1 km2: 4246, 48795 km2
+r1h-free zs: edge lakes over 1 km2: 0, 0 km2, depth max 0 m, over 50 m deep 0 (0 km2); all closed over 1 km2: 0, 0 km2
+r1h-free s0: edge lakes over 1 km2: 89, 876 km2, depth max 230 m, over 50 m deep 25 (516 km2); all closed over 1 km2: 4375, 42103 km2
+r3a-dam zs: edge lakes over 1 km2: 2, 2718 km2, depth max 141 m, over 50 m deep 2 (2718 km2); all closed over 1 km2: 2, 2718 km2
+r3a-dam s0: edge lakes over 1 km2: 25, 892 km2, depth max 102 m, over 50 m deep 1 (746 km2); all closed over 1 km2: 2907, 10395 km2
+r3a-free zs: edge lakes over 1 km2: 0, 0 km2, depth max 0 m, over 50 m deep 0 (0 km2); all closed over 1 km2: 0, 0 km2
+r3a-free s0: edge lakes over 1 km2: 18, 64 km2, depth max 23 m, over 50 m deep 0 (0 km2); all closed over 1 km2: 2999, 9872 km2
+r3b-dam zs: edge lakes over 1 km2: 9, 17110 km2, depth max 369 m, over 50 m deep 9 (17110 km2); all closed over 1 km2: 9, 17110 km2
+r3b-dam s0: edge lakes over 1 km2: 24, 5092 km2, depth max 211 m, over 50 m deep 6 (5018 km2); all closed over 1 km2: 5405, 24281 km2
+r3b-free zs: edge lakes over 1 km2: 0, 0 km2, depth max 0 m, over 50 m deep 0 (0 km2); all closed over 1 km2: 0, 0 km2
+r3b-free s0: edge lakes over 1 km2: 18, 61 km2, depth max 52 m, over 50 m deep 1 (2 km2); all closed over 1 km2: 5776, 21033 km2
+m1-dam zs: edge lakes over 1 km2: 89, 106027 km2, depth max 1773 m, over 50 m deep 89 (106027 km2); all closed over 1 km2: 89, 106027 km2
+m1-dam s0: edge lakes over 1 km2: 150, 96499 km2, depth max 2025 m, over 50 m deep 117 (96394 km2); all closed over 1 km2: 3075, 205058 km2
+m1-free zs: edge lakes over 1 km2: 0, 0 km2, depth max 0 m, over 50 m deep 0 (0 km2); all closed over 1 km2: 3, 389 km2
+m1-free s0: edge lakes over 1 km2: 153, 4714 km2, depth max 629 m, over 50 m deep 106 (4450 km2); all closed over 1 km2: 3741, 157287 km2
+f1-dam zs: edge lakes over 1 km2: 8, 8214 km2, depth max 220 m, over 50 m deep 8 (8214 km2); all closed over 1 km2: 8, 8214 km2
+f1-dam s0: edge lakes over 1 km2: 54, 4248 km2, depth max 152 m, over 50 m deep 7 (3854 km2); all closed over 1 km2: 9816, 33789 km2
+f1-free zs: edge lakes over 1 km2: 0, 0 km2, depth max 0 m, over 50 m deep 0 (0 km2); all closed over 1 km2: 0, 0 km2
+f1-free s0: edge lakes over 1 km2: 36, 156 km2, depth max 39 m, over 50 m deep 0 (0 km2); all closed over 1 km2: 10183, 31054 km2
+r1h zs: dam: edge-lake cells in the box 0 km2 (0.00 % of the box land); all closed in the box 0.00 % | free: edge-lake cells in the box 0 km2 (0.00 % of the box land); all closed in the box 0.00 %
+r1h s0: dam: edge-lake cells in the box 0 km2 (0.00 % of the box land); all closed in the box 6.52 % | free: edge-lake cells in the box 0 km2 (0.00 % of the box land); all closed in the box 6.52 %
+r3a zs: dam: edge-lake cells in the box 0 km2 (0.00 % of the box land); all closed in the box 0.00 % | free: edge-lake cells in the box 0 km2 (0.00 % of the box land); all closed in the box 0.00 %
+r3a s0: dam: edge-lake cells in the box 0 km2 (0.00 % of the box land); all closed in the box 2.66 % | free: edge-lake cells in the box 0 km2 (0.00 % of the box land); all closed in the box 2.66 %
+r3b zs: dam: edge-lake cells in the box 477 km2 (0.21 % of the box land); all closed in the box 0.21 % | free: edge-lake cells in the box 0 km2 (0.00 % of the box land); all closed in the box 0.00 %
+r3b s0: dam: edge-lake cells in the box 0 km2 (0.00 % of the box land); all closed in the box 4.84 % | free: edge-lake cells in the box 0 km2 (0.00 % of the box land); all closed in the box 4.84 %
+m1 zs: dam: edge-lake cells in the box 6562 km2 (2.57 % of the box land); all closed in the box 2.57 % | free: edge-lake cells in the box 0 km2 (0.00 % of the box land); all closed in the box 0.00 %
+m1 s0: dam: edge-lake cells in the box 5588 km2 (2.19 % of the box land); all closed in the box 25.31 % | free: edge-lake cells in the box 0 km2 (0.00 % of the box land); all closed in the box 24.28 %
+f1 zs: dam: edge-lake cells in the box 0 km2 (0.00 % of the box land); all closed in the box 0.00 % | free: edge-lake cells in the box 0 km2 (0.00 % of the box land); all closed in the box 0.00 %
+f1 s0: dam: edge-lake cells in the box 0 km2 (0.00 % of the box land); all closed in the box 7.39 % | free: edge-lake cells in the box 0 km2 (0.00 % of the box land); all closed in the box 7.39 %

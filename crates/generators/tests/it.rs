@@ -144,6 +144,8 @@ mod ocean;
 mod orography;
 #[path = "pipeline.rs"]
 mod pipeline;
+#[path = "pipeline_catalog.rs"]
+mod pipeline_catalog;
 #[path = "reads_contract.rs"]
 mod reads_contract;
 #[path = "region_mask.rs"]

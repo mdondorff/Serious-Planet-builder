@@ -99,7 +99,7 @@ impl Req {
 }
 
 /// The holder notes present, in slot order.
-fn holder_notes(dir: &Path) -> Vec<String> {
+pub fn holder_notes(dir: &Path) -> Vec<String> {
     (0..MAX_SLOTS).filter_map(|k| std::fs::read_to_string(holder_path(dir, k)).ok()).filter(|n| !n.trim().is_empty()).collect()
 }
 

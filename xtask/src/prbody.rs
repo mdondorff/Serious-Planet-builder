@@ -7,7 +7,8 @@ use std::path::Path;
 
 /// The paths `ci.yml` ignores (`paths-ignore`); a PR whose every changed path matches one is docs-only. A test keeps this list equal to the workflow's.
 #[cfg(test)]
-pub const DOCS_PATTERNS: [&str; 6] = ["docs/**", "openspec/**", ".claude/**", "*.md", "spikes/**/results/**", "spikes/README.md"];
+pub const DOCS_PATTERNS: [&str; 7] =
+    ["docs/**", "openspec/**", ".claude/**", ".agents/**", "*.md", "spikes/**/results/**", "spikes/README.md"];
 
 /// True when `path` matches one of [`DOCS_PATTERNS`].
 pub fn is_docs_path(path: &str) -> bool {
@@ -15,6 +16,7 @@ pub fn is_docs_path(path: &str) -> bool {
     p.starts_with("docs/")
         || p.starts_with("openspec/")
         || p.starts_with(".claude/")
+        || p.starts_with(".agents/")
         || (!p.contains('/') && p.ends_with(".md"))
         || (p.starts_with("spikes/") && p.contains("/results/"))
         || p == "spikes/README.md"
@@ -87,9 +89,16 @@ mod tests {
     // spec: BUILD-044
     #[test]
     fn docs_paths_are_those_the_ci_workflow_ignores() {
-        for p in
-            ["docs/status.md", "openspec/specs/x/spec.md", ".claude/agents/a.md", "CLAUDE.md", "spikes/s/results/r.txt", "spikes/README.md"]
-        {
+        for p in [
+            "docs/status.md",
+            "openspec/specs/x/spec.md",
+            ".claude/agents/a.md",
+            ".agents/hooks.json",
+            "CLAUDE.md",
+            "GEMINI.md",
+            "spikes/s/results/r.txt",
+            "spikes/README.md",
+        ] {
             assert!(is_docs_path(p), "{p}");
         }
         for p in ["crates/a/src/lib.rs", "xtask/src/main.rs", "Cargo.toml", ".github/workflows/ci.yml", "spikes/s/run.rs", "sub/README.md"]

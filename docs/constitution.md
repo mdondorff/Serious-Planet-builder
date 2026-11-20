@@ -6,7 +6,7 @@ This file holds the project's non-negotiable rules. Every rule has an ID and a v
 
 **Precedence:** this constitution > accepted ADRs (`docs/adr/`) > OpenSpec specs (`openspec/specs/`) > background docs (`docs/background/`, frozen, non-normative). When two sources conflict, the higher one wins and the lower one is corrected (background docs are never corrected; they are history).
 
-**Amendments:** only by the owner. Claude may propose an amendment (as an ADR with status "proposed" that names the rule) but never edits this file on its own.
+**Amendments:** only by the owner. Agents may propose an amendment (as an ADR with status "proposed" that names the rule) but never edit this file themselves.
 
 ## 1. Architecture and layering
 
