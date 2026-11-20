@@ -1903,6 +1903,12 @@ fn main() -> Result<(), String> {
         return Err(format!("--k5-diffuse-stencil 5 | 9, not '{k5_stencil}'"));
     }
     planet_generators::bake::round::K5_DIFFUSE_NINE.store(k5_stencil == "9", std::sync::atomic::Ordering::Relaxed);
+    // spikes #154, lead #156 (reading 36): `--k5-edge free` (default: a window-cut catchment's edge outlet is breached like any receiver, a free outflow edge; round::K5_EDGE_FREE) or `dam` (the edge outlet keeps its height, the former rule and main's; spike only)
+    let k5_edge = value(&args, "--k5-edge").unwrap_or("free");
+    if !["dam", "free"].contains(&k5_edge) {
+        return Err(format!("--k5-edge dam | free, not '{k5_edge}'"));
+    }
+    planet_generators::bake::round::K5_EDGE_FREE.store(k5_edge == "free", std::sync::atomic::Ordering::Relaxed);
     // SPIKE-139 (lead #149b): `--k5-uok-scale X` (default 1): K5's uplift ratio u_over_k times X, k_dt kept (region_bake::K5_UOK_SCALE; spike only)
     let k5_uok_scale: f64 = value(&args, "--k5-uok-scale").map_or(Ok(1.0), str::parse).map_err(|_| "--k5-uok-scale X")?;
     if !(k5_uok_scale > 0.0 && k5_uok_scale <= 8.0) {
@@ -3544,6 +3550,7 @@ fn main() -> Result<(), String> {
             ("k5-diffuse-stencil", k5_stencil.to_string()),
             ("edit", value(&args, "--edit").unwrap_or("-").to_string()),
             ("k5-uok-scale", k5_uok_scale.to_string()),
+            ("k5-edge", k5_edge.to_string()),
             ("k5-diffuse-amax", k5_diffuse_amax.to_string()),
             ("k5-parity", k5_parity.to_string()),
             ("ks", ks_mode.to_string()),

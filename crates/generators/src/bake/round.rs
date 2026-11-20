@@ -47,6 +47,9 @@ pub struct Drivers<'a> {
     pub runoff: Option<&'a [f32]>,
 }
 
+/// spikes #154 (spike branch only): the window edge as a free outflow boundary in K5's breach (see [`catchment_round`]); off by default (the edge outlet keeps its height).
+pub static K5_EDGE_FREE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// The breach and `steps` sweeps of one catchment of the round (the loops of `carve_rock` without layers), on the inputs alone.
 pub fn catchment_round(inp: &mut CatchmentInputs, p: &CarveParams, steps: usize) {
     let window_cut = inp.exit_window_cut;
@@ -58,9 +61,12 @@ pub fn catchment_round(inp: &mut CatchmentInputs, p: &CarveParams, steps: usize)
         super::carve::exit_base(p.sea_level, 0..z.len(), &inp.receiver, z, &|_| window_cut)
     };
     let mut round_start: std::collections::HashMap<usize, f64> = std::collections::HashMap::new();
+    // spikes #154 (spike only): with K5_EDGE_FREE, a window-cut catchment's edge outlet is breached like any receiver (a free outflow edge), so it does not stay as a dam above
+    // the cut that drains to it; the catchment's other outlets (the sea) keep their height
+    let edge_free = window_cut && K5_EDGE_FREE.load(std::sync::atomic::Ordering::Relaxed);
     for c in (0..z.len()).rev() {
         let rec = inp.receiver[c];
-        if rec == NONE || inp.receiver_is_outlet[c] {
+        if rec == NONE || (inp.receiver_is_outlet[c] && !edge_free) {
             continue;
         }
         let rec = rec as usize;
