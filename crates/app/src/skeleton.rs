@@ -186,6 +186,12 @@ pub fn generate(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         std::fs::write(path, &text).map_err(|e| format!("writing {}: {e}", path.display()))?;
         return writeln!(out, "wrote {} ({} lines)", path.display(), text.lines().count()).map_err(err);
     }
+    if o.pipeline_json.is_some() {
+        return generate_pipeline_json(o, out);
+    }
+    if o.commit.is_some() {
+        return crate::check_commit_options(o);
+    }
     if (o.class_source || o.legacy_source)
         && o.global_dir.is_none()
         && o.verify_global.is_none()
@@ -280,6 +286,102 @@ pub fn generate(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     if let Some(path) = &o.face_net {
         planet_generators::dump::face_net(&TangentWarp, 128, 2).write_png(path).map_err(|e| format!("writing {}: {e}", path.display()))?;
         writeln!(out, "wrote {}", path.display()).map_err(err)?;
+    }
+    Ok(())
+}
+
+/// `generate --pipeline-json OUT [--seed N | --world F] [--erosion on|off] [--channels on|off]` (BUILD-063): resolves the definition's
+/// live `HeightField` chain via [`planet_generators::chain::field_chain_erosion`] over zero-IO handles, walks `upstream()`, and writes JSON.
+fn generate_pipeline_json(o: &Options, out: &mut dyn Write) -> Result<(), String> {
+    crate::check_commit_options(o)?;
+    let path = o.pipeline_json.as_ref().expect("the option is given");
+    const CLASH: [&str; 37] = [
+        "--tile",
+        "--out",
+        "--face-net",
+        "--manifest",
+        "--smoke",
+        "--cache-dir",
+        "--verify-cache",
+        "--compact-cache",
+        "--cap-bytes",
+        "--region",
+        "--res",
+        "--global-dir",
+        "--verify-global",
+        "--global-products",
+        "--coupled-run",
+        "--coarse-horizon",
+        "--plan-check",
+        "--prefill-dir",
+        "--prefill-levels",
+        "--lithology-preview",
+        "--uplift-preview",
+        "--climate-preview",
+        "--arid-preview",
+        "--shelf-preview",
+        "--ice-preview",
+        "--fine-lattice",
+        "--km",
+        "--global-res",
+        "--threads",
+        "--sample",
+        "--allow-stale",
+        "--class-source",
+        "--legacy-source",
+        "--erosion-store",
+        "--erosion-face-res",
+        "--erosion-res",
+        "--erosion-unchecked",
+    ];
+    let clash: Vec<&str> = CLASH.iter().copied().filter(|f| o.given.contains(*f)).collect();
+    if !clash.is_empty() {
+        return Err(format!("--pipeline-json excludes {}", clash.join(", ")));
+    }
+    if o.given.contains("--world") && o.given.contains("--seed") {
+        return Err("--world and --seed both name the definition: give one".into());
+    }
+    let def = std::sync::Arc::new(match &o.world {
+        Some(p) => {
+            let text = std::fs::read_to_string(p).map_err(|e| format!("reading {}: {e}", p.display()))?;
+            planet_world_def::toml_io::parse_definition(&text).map_err(|e| format!("{}: {e}", p.display()))?
+        }
+        None => planet_world_def::WorldDefinition::single_planet(RADIUS_M, o.seed),
+    });
+    let ctx = planet_world_def::GenContext::new(&def);
+    let radius_m = ctx.body_radius_m(planet_world_def::BodyId::PLANET).map_err(|e| format!("the body of the definition: {e}"))?;
+    let sea_level_m = def.sea(planet_world_def::BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
+    let (kind, erosion, switches) = if o.commit.is_some() {
+        let kind = planet_generators::height_fields::HeightFieldKind::ErodedC1;
+        let sw = planet_generators::pipeline_catalog::metadata_erosion_switch(radius_m, sea_level_m, false, false)?;
+        let switches = planet_generators::pipeline_catalog::switches_for_commit(&def, true)?;
+        (kind, Some(sw), switches)
+    } else {
+        let kind = planet_generators::height_fields::resolve(&def).map_err(|e| e.to_string())?;
+        let erosion = if o.erosion {
+            Some(planet_generators::pipeline_catalog::metadata_erosion_switch(radius_m, sea_level_m, true, o.channels)?)
+        } else {
+            None
+        };
+        let switches = planet_generators::pipeline_catalog::switches_for_definition(&def, true, erosion.as_ref())?;
+        (kind, erosion, switches)
+    };
+    let field =
+        planet_generators::chain::field_chain_erosion(kind, &def, &planet_generators::chain::NoBake, [0u8; 16], true, erosion.as_ref())?;
+    let expected = planet_generators::pipeline_catalog::resolve_runtime_chain(&switches)?;
+    let walked = planet_generators::pipeline_catalog::walk_height_field(field.as_ref());
+    if walked != expected {
+        return Err("internal mismatch: walked height-field chain differed from pipeline_catalog resolution".into());
+    }
+    let json = planet_generators::pipeline_catalog::resolved_world_json(&def, &switches, &walked);
+    if path == Path::new("-") {
+        out.write_all(json.as_bytes()).map_err(err)?;
+    } else {
+        if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+            std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
+        }
+        std::fs::write(path, &json).map_err(|e| format!("writing {}: {e}", path.display()))?;
+        writeln!(out, "wrote {} ({} lines)", path.display(), json.lines().count()).map_err(err)?;
     }
     Ok(())
 }
