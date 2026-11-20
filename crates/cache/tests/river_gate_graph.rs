@@ -591,3 +591,92 @@ fn the_ridge_lowering_is_measured_against_s_kh_when_the_stages_hold_kh_and_again
     assert!(!b.ridge_vs_kh && b.ridge == b.ridge_s0 && b.ridge.lowered == 12);
     assert!(b.lines().iter().any(|l| l.starts_with("RIVER-GATE ridges: 12 ridge cells")));
 }
+
+// spec: TEST-137, BUILD-060
+#[test]
+fn the_closed_basin_bar_counts_river_length_outside_the_kept_lake_interiors() {
+    // owner's option C (2026-11-20): a kept basin is a lake, not a closed basin; the bar counts river cells outside the kept-lake interiors, beside every closed basin and
+    // the kept lakes' share. A 12 x 12 window of 100 m cells: the ground falls to a centre row and west to a sea column; a 6 m pit of 5 x 5 cells on the river
+    let grid = Grid::new(12, 12, DX);
+    let cell = |x: usize, y: usize| y * 12 + x;
+    let mut z: Vec<f64> = (0..144).map(|c| 30.0 + 0.5 * (c % 12) as f64 + 0.5 * ((c / 12) as f64 - 6.0).abs()).collect();
+    for y in 0..12 {
+        z[cell(0, y)] = -1.0;
+    }
+    for y in 4..=8 {
+        for x in 4..=8 {
+            z[cell(x, y)] -= 6.0;
+        }
+    }
+    let floor = (4..=8).flat_map(|y| (4..=8).map(move |x| (x, y))).min_by(|a, b| z[cell(a.0, a.1)].total_cmp(&z[cell(b.0, b.1)])).unwrap();
+    let outlet = grid.outlets(&z, 0.0);
+    let all = vec![true; 144];
+    let p = GateParams { channel_area_m2: 6.0 * DX * DX, ..GateParams::default() };
+    let run = |g: &Graph| {
+        let input = G2Input { window: W, graph: Some(g), stages: None, residual_records: None, partition: None, kc_patches: None };
+        measure(
+            &GateInput {
+                grid: &grid,
+                start: &z,
+                surface: &z,
+                outlet: &outlet,
+                inside: &all,
+                region: &all,
+                h1: &[],
+                seed: 7,
+                sea_level_m: 0.0,
+                outside_drains: false,
+                trunks: &[],
+                g2: Some(&input),
+            },
+            &p,
+        )
+    };
+    let mut g = graph();
+    g.basins.clear();
+    let open = run(&g);
+    assert!(open.basins >= 1 && open.basin_river_cells > 0, "the river runs through the pit: {open:?}");
+    assert_eq!(open.basin_river_cells, open.basin_all_river_cells, "no kept lake: the bar is every closed basin");
+    assert_eq!((open.kept_lake_river_cells, open.kept_lake_cells), (Some(0), Some(0)));
+    g.basins = vec![Basin {
+        id: 7,
+        level: Level::L,
+        parent: None,
+        floor_cell: gid(100 + floor.0 as u64, 200 + floor.1 as u64),
+        floor_m: z[cell(floor.0, floor.1)],
+        spill_cell: gid(103, 206),
+        spill_m: 31.0,
+        spill_node: g.nodes[0].id,
+        outlet: Outlet::Active,
+        represented: Represented::ProtectedSurface,
+        owner: Domain::Landmass,
+    }];
+    let kept = run(&g);
+    assert_eq!(kept.basin_all_river_cells, open.basin_all_river_cells, "every closed basin is the same");
+    assert_eq!(kept.basin_river_cells, 0, "the pit's river cells lie in the kept lake: {kept:?}");
+    assert_eq!(kept.kept_lake_river_cells, Some(open.basin_river_cells), "they move to the kept lakes' share");
+    assert!(kept.kept_lake_cells.is_some_and(|k| k >= 16), "the interior is the pit: {:?}", kept.kept_lake_cells);
+    let line = kept.fields_line();
+    assert!(line.contains(" basin_cells=0 ") && line.contains(" kept_lake_river_pct=") && line.contains(" kept_lake_km2="), "{line}");
+    assert!(kept.lines().iter().any(|l| l.contains("outside the kept-lake interiors") && l.contains("kept lakes:")), "{:?}", kept.lines());
+    // without a graph the bar is every closed basin and the kept columns are "-"
+    let plain = measure(
+        &GateInput {
+            grid: &grid,
+            start: &z,
+            surface: &z,
+            outlet: &outlet,
+            inside: &all,
+            region: &all,
+            h1: &[],
+            seed: 7,
+            sea_level_m: 0.0,
+            outside_drains: false,
+            trunks: &[],
+            g2: None,
+        },
+        &p,
+    );
+    assert_eq!((plain.basin_river_cells, plain.kept_lake_river_cells), (open.basin_all_river_cells, None));
+    assert!(plain.fields_line().contains(" kept_lake_river_cells=- "), "{}", plain.fields_line());
+}

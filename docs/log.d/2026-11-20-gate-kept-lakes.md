@@ -1,0 +1,1 @@
+- 2026-11-20 gate-kept-lakes (BUILD-060): with a graph the closed-basin bar counts river length outside the kept-lake interiors; columns basin_all_*, kept_lake_river_*, kept_lake_cells/km2 (owner's option C, reading 37).

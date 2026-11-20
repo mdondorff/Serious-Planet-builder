@@ -212,9 +212,16 @@ pub struct GateReport {
     pub params: GateParams,
     /// River cells inside the region.
     pub river_cells: usize,
-    /// Closed basins in the window, and the river cells inside that lie in one.
+    /// Closed basins in the window, and the river cells inside that lie in one; with a graph (BUILD-060, owner's option C 2026-11-20) only those outside the kept-lake
+    /// interiors (the closed-basin bar), every one in `basin_all_river_cells`.
     pub basins: usize,
     pub basin_river_cells: usize,
+    pub basin_all_river_cells: usize,
+    /// With a graph: the river cells inside in a kept-lake interior, and the interiors' cells inside (BUILD-060's kept-basin interior); `None` without one.
+    pub kept_lake_river_cells: Option<usize>,
+    pub kept_lake_cells: Option<usize>,
+    /// The area of an L cell (m2), for the kept lakes' area.
+    pub cell_area_m2: f64,
     /// SPIKE-114's reference count: river cells inside in any pit of 5 cm.
     pub reference_river_cells: usize,
     /// River cells inside that lie in a basin deeper than D (lakes).
@@ -305,6 +312,12 @@ impl GateReport {
             ("basins", c(self.basins)),
             ("basin_cells", c(self.basin_river_cells)),
             ("basin_pct", pct(self.basin_river_cells, n)),
+            ("basin_all_cells", c(self.basin_all_river_cells)),
+            ("basin_all_pct", pct(self.basin_all_river_cells, n)),
+            ("kept_lake_river_cells", self.kept_lake_river_cells.map_or("-".to_string(), c)),
+            ("kept_lake_river_pct", self.kept_lake_river_cells.map_or("-".to_string(), |k| pct(k, n))),
+            ("kept_lake_cells", self.kept_lake_cells.map_or("-".to_string(), c)),
+            ("kept_lake_km2", self.kept_lake_cells.map_or("-".to_string(), |k| format!("{:.2}", k as f64 * self.cell_area_m2 / 1.0e6))),
             ("reference_cells", c(self.reference_river_cells)),
             ("reference_pct", pct(self.reference_river_cells, n)),
             ("valley_over_cells", c(self.valley.count_over)),
@@ -515,14 +528,24 @@ impl GateReport {
         vec![
             format!("RIVER-GATE rivers: {} river cells inside (drainage area >= {:.0} km2, land)", self.river_cells, p.channel_area_m2 / 1.0e6),
             format!(
-                "RIVER-GATE basins: {:.2} % of river length in closed basins ({} of {} cells; {} basins of >= {} m depth and >= {} cells, fill epsilon {BASIN_EPSILON_M:e} m; bar <= 10 %); SPIKE-114 reference (any pit of {REFERENCE_WET_M} m): {:.2} %",
+                "RIVER-GATE basins: {:.2} % of river length in closed basins{} ({} of {} cells; {} basins of >= {} m depth and >= {} cells, fill epsilon {BASIN_EPSILON_M:e} m; bar <= 10 %); SPIKE-114 reference (any pit of {REFERENCE_WET_M} m): {:.2} %{}",
                 self.basin_share(),
+                if self.kept_lake_river_cells.is_some() { " outside the kept-lake interiors" } else { "" },
                 self.basin_river_cells,
                 self.river_cells,
                 self.basins,
                 p.basin_depth_m,
                 p.basin_cells,
-                share(self.reference_river_cells, self.river_cells)
+                share(self.reference_river_cells, self.river_cells),
+                match (self.kept_lake_river_cells, self.kept_lake_cells) {
+                    (Some(k), Some(a)) => format!(
+                        "; every closed basin {:.2} %; kept lakes: {:.2} % of river length ({k} cells), {a} cells inside ({:.2} km2)",
+                        share(self.basin_all_river_cells, self.river_cells),
+                        share(k, self.river_cells),
+                        a as f64 * self.cell_area_m2 / 1.0e6
+                    ),
+                    _ => String::new(),
+                }
             ),
             format!(
                 "RIVER-GATE valley depth: {:.2} % of river cells over {} m below the p50 of the surface {n0} to {n1} cells out (the canyon a viewer sees; {} cells, p50 {:.2} m, p99 {:.2} m, max {:.2} m); bar: at most the share of a GLO-30 tile with 1 to 2 x this window's relief at 10 x 10 cells ({:.2} m; the review table gives the reference)",
@@ -956,12 +979,17 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
     drop(route_filled);
     let filled = priority_flood_with(g, z, &outlet, BASIN_EPSILON_M, false);
     let (label, pits) = pits(g, z, &filled, BASIN_WET_M);
+    // BUILD-060 (owner's option C, 2026-11-20): with a graph, the kept-lake interiors (the depressions of this flood that hold a kept basin's floor) are lakes, not closed
+    // basins; the closed-basin bar counts river cells outside them
+    let kept_lakes: Option<Vec<bool>> = input.g2.as_ref().and_then(|x| x.graph.map(|gr| kept_interiors(gr, &x.window, &label).0));
+    let in_kept = |c: usize| kept_lakes.as_ref().is_some_and(|k| k[c]);
     let is_basin = |&(d, k): &(f64, usize)| d >= params.basin_depth_m && k >= params.basin_cells;
     let basin = |c: usize| label[c] != u32::MAX && is_basin(&pits[label[c] as usize]);
     let lake = |c: usize| basin(c) && pits[label[c] as usize].0 > params.lake_depth_m;
     let breached = levels(&routing, &river, |c| z[c]);
     let with_lakes = levels(&routing, &river, |c| if lake(c) { filled[c] } else { z[c] });
     let (mut river_cells, mut basin_cells, mut reference_cells, mut lake_cells) = (0usize, 0usize, 0usize, 0usize);
+    let (mut basin_all_cells, mut kept_lake_river) = (0usize, 0usize);
     let (mut canyon, mut canyon_b, mut erosion) = (Vec::new(), Vec::new(), Vec::new());
     let (mut valley, mut burn, mut burn_b) = (Vec::new(), Vec::new(), Vec::new());
     let (mut near_depth, mut ring_depth) = (Vec::new(), Vec::new());
@@ -970,7 +998,9 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
             continue;
         }
         river_cells += 1;
-        basin_cells += usize::from(basin(c));
+        basin_all_cells += usize::from(basin(c));
+        basin_cells += usize::from(basin(c) && !in_kept(c));
+        kept_lake_river += usize::from(in_kept(c));
         reference_cells += usize::from(reference[c] != u32::MAX);
         lake_cells += usize::from(lake(c));
         let here = input.surface[c];
@@ -1046,6 +1076,10 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         river_cells,
         basins: pits.iter().filter(|p| is_basin(p)).count(),
         basin_river_cells: basin_cells,
+        basin_all_river_cells: basin_all_cells,
+        kept_lake_river_cells: kept_lakes.as_ref().map(|_| kept_lake_river),
+        kept_lake_cells: kept_lakes.as_ref().map(|k| (0..n).filter(|&c| k[c] && input.inside[c]).count()),
+        cell_area_m2: g.dx() * g.dx(),
         reference_river_cells: reference_cells,
         lake_river_cells: lake_cells,
         valley: tail(valley, params.cut_m),
