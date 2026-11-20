@@ -1,0 +1,16 @@
+{
+  "entries": [
+    {
+      "path": ".claude/skills",
+      "include_only": [
+        "adr",
+        "spike",
+        "learning",
+        "openspec-explore",
+        "openspec-propose",
+        "openspec-apply-change",
+        "openspec-archive-change"
+      ]
+    }
+  ]
+}

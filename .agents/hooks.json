@@ -1,0 +1,17 @@
+{
+  "ag2-companion-guardrails": {
+    "enabled": true,
+    "PreToolUse": [
+      {
+        "matcher": "write_file|edit_file|write_to_file|replace_file_content|multi_replace_file_content|code_action|run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if exist target\\tools\\xtask-guard.exe (target\\tools\\xtask-guard.exe agent-guard) else if exist ..\\target\\tools\\xtask-guard.exe (..\\target\\tools\\xtask-guard.exe agent-guard) else (echo {\"decision\":\"allow\"})",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

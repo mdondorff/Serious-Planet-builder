@@ -1586,7 +1586,7 @@ mod tests {
             &["docs/status.md"][..],
             &["openspec/specs/viewer/spec.md", "docs/log.d/2026-10-19-x.md"],
             &["spikes/spike-15/results/summary.md"],
-            &[".claude/skills/golden-review/SKILL.md", "CLAUDE.md", "README.md"],
+            &[".claude/skills/golden-review/SKILL.md", ".agents/hooks.json", "CLAUDE.md", "GEMINI.md", "README.md"],
             &["rustfmt.toml", ".gitignore", "openspec/specs/viewer/spec.md"],
         ] {
             assert!(packages_for_changes(&s(paths)).is_empty(), "{paths:?}");

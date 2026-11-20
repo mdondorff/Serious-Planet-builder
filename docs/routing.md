@@ -12,6 +12,7 @@ To message a role, send to its session name in this table. When a session is rec
 | production lane | `sonnet-explorer` | Sonnet | engine and production PRs |
 | production lane | `sonnet-crusader` | Sonnet | production PRs when the milestone has independent work; idle otherwise |
 | exploration lane | `sonnet-spikes` | Sonnet unless the brief says otherwise | spikes and look experiments as spike code with picture sheets; one at a time |
+| companion lane | `ag2-antigravity` | Antigravity | isolated cold-zone UI/editor, ahead-of-milestone prep, and OpenSpec/analysis PRs (proposed ADR 0128) |
 
 ## Communication (owner, 2026-11-14)
 Three levels; level 1 is the default, level 3 the exception.
