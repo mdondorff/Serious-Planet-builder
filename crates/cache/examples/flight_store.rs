@@ -27,6 +27,8 @@ const MARGIN: usize = 200;
 const LAKE_MIN_DEPTH_M: f64 = 0.5;
 /// A kept basin's recorded spill is valid while the final surface's depression level at its floor lies at most this below it (the gate's spill_mismatch rule, lead #176b).
 const SPILL_MISMATCH_M: f64 = 0.5;
+/// Water stands this far under a rim that lies below the recorded spill: the flood's graded level sits a hair above the rim cell (1e-7 m a cell), so a level at it would cross the rim.
+const RIM_MARGIN_M: f64 = 1.0e-3;
 
 /// The gate's windows (BUILD-055): `face,i0,i1,j0,j1,seed` in regional cells.
 const WINDOWS: [(&str, [usize; 6]); 5] = [
@@ -402,7 +404,7 @@ fn kept_lakes(
     } else {
         kept.sort_by_key(|b| b.id);
     }
-    let (mut invalid, mut leaks) = (0usize, 0usize);
+    let (mut invalid, mut leaks, mut no_depression) = (0usize, 0usize, 0usize);
     let mut label = vec![u32::MAX; w * h];
     let mut lakes = Vec::new();
     let mut stack = Vec::new();
@@ -420,10 +422,16 @@ fn kept_lakes(
             invalid += 1;
             continue;
         }
+        // spill: a floor the final surface no longer holds water at (filled to its level, no depression) has no lake
+        if spill && filled[start] - z[start] < 1.0e-3 {
+            no_depression += 1;
+            continue;
+        }
         if !spill && (label[start] != u32::MAX || filled[start] - z[start] < LAKE_MIN_DEPTH_M) {
             continue;
         }
-        let level = if spill { b.spill_m } else { filled[start] };
+        // spill: the recorded spill, or the floor's depression level where a rim lies up to SPILL_MISMATCH_M lower (crusader and explorer, #171a: the water stays inside)
+        let level = if spill { b.spill_m.min(filled[start] - RIM_MARGIN_M) } else { filled[start] };
         let k = lakes.len() as u32;
         let (mut cells, mut tiles) = (0u32, std::collections::BTreeSet::new());
         // the cells this lake takes with the label each had, so a lake that leaks over a lowered rim gives them back
@@ -492,5 +500,6 @@ fn kept_lakes(
         });
     }
     // the labels index this list in flooding order; the basin tables take a copy sorted by id
-    Ok((lakes, label, invalid + leaks))
+    println!("FLIGHT-STORE lakes check: {invalid} kept basins whose floor's depression lies more than {SPILL_MISMATCH_M} m under the spill (or whose floor stands at or above it), {leaks} whose water reaches a cell more than that under the spill, {no_depression} whose floor holds no water on the final surface (filled to its level)");
+    Ok((lakes, label, invalid + leaks + no_depression))
 }
