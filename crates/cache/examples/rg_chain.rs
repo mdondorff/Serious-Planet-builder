@@ -1754,6 +1754,9 @@ fn build_graph(
     (g, notes)
 }
 
+/// crusader #171 (DEC crusader-20): `--kept-drained drop` drains a kept basin whose rim an L line crosses below its spill.
+static KEPT_DRAINED_DROP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// crusader #169 item 3: `--kv-cross`'s grade in micro (m per m), 0 off.
 static KV_CROSS_MICRO: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -1959,6 +1962,12 @@ fn main() -> Result<(), String> {
             (a, b)
         }
     };
+    // crusader #171 (DEC crusader-20, reading 35): --kept-drained drop (default since the R1h row, lead #171a) | off (every kept basin protected, the form before)
+    let kept_drained = value(&args, "--kept-drained").unwrap_or("drop");
+    if !["off", "drop"].contains(&kept_drained) {
+        return Err(format!("--kept-drained off | drop, not '{kept_drained}'"));
+    }
+    KEPT_DRAINED_DROP.store(kept_drained == "drop", std::sync::atomic::Ordering::Relaxed);
     let trunk_bed = value(&args, "--trunk-bed").unwrap_or("shared");
     if !["shared", "lift"].contains(&trunk_bed) {
         return Err(format!("--trunk-bed shared | lift, not '{trunk_bed}'"));
@@ -3183,9 +3192,39 @@ fn main() -> Result<(), String> {
             }
             // crusader #161, reading 22: a kept-size depression drains unless neither its fill nor a bounded breach fits the budget KS left against S_KH (reading 21)
             let remaining: Vec<f64> = (0..n_l).map(|p| (budget_l[p] - (ks_base[p] - ks_d[p]).max(0.0)).max(0.0)).collect();
-            let pb =
+            let mut pb =
                 produce_drain_avoiding(&grid_d, &ks_d, &outlet_d, &all, &tile_l, &BasinParams::l(BODY), &ids, &remaining, &marker_cells);
             drop(remaining);
+            // crusader #171 (DEC crusader-20, reading 35; --kept-drained drop): a kept basin whose rim an L line crosses with a bed more than 0.5 m below its spill is drained
+            // by that line (the graph's line is the authority; KV carves it): the basin is not protected
+            if KEPT_DRAINED_DROP.load(std::sync::atomic::Ordering::Relaxed) {
+                let mut low_bed: HashMap<usize, f64> = HashMap::new();
+                for r in &all {
+                    for (k, &v) in r.vertices.iter().enumerate() {
+                        if let Some(c) = to_local(v) {
+                            let b = f64::from(r.attrs.bed[k]) * 0.5;
+                            let e = low_bed.entry(c).or_insert(b);
+                            *e = e.min(b);
+                        }
+                    }
+                }
+                let (mut dropped, mut checked) = (0usize, 0usize);
+                for b in pb.basins.iter_mut().filter(|b| b.represented == Represented::ProtectedSurface) {
+                    checked += 1;
+                    let cells = &pb.cells[&b.id];
+                    let inside: HashSet<usize> = cells.iter().copied().collect();
+                    let drains = cells.iter().any(|&c| {
+                        (0..8)
+                            .filter_map(|k| grid_d.neighbour(c, k))
+                            .any(|q| !inside.contains(&q) && low_bed.get(&q).is_some_and(|&bed| bed < b.spill_m - 0.5))
+                    });
+                    if drains {
+                        b.represented = Represented::None;
+                        dropped += 1;
+                    }
+                }
+                println!("RG domain {d} kept-drained (crusader #171): {dropped} of {checked} kept L basins drained by an L line crossing the rim below spill - 0.5 m, no longer protected");
+            }
             println!("RG domain {d} second pass, reading 22: {} kept-size depressions drained", pb.drained);
             {
                 let (pk, nw) = memory_mib();
@@ -3408,6 +3447,7 @@ fn main() -> Result<(), String> {
             ("margin", margin.to_string()),
             ("turned-noise", planet_generators::height::turned_noise().to_string()),
             ("kv-cross", format!("{}", KV_CROSS_MICRO.load(std::sync::atomic::Ordering::Relaxed) as f64 * 1.0e-6)),
+            ("kept-drained", if KEPT_DRAINED_DROP.load(std::sync::atomic::Ordering::Relaxed) { "drop" } else { "off" }.to_string()),
             ("kv-cross-side", format!("{},{}", kv_cross_side.0, kv_cross_side.1)),
             ("trunk-bed", if TRUNK_BED_SHARED.load(std::sync::atomic::Ordering::Relaxed) { "shared" } else { "lift" }.to_string()),
             ("trib-on", trib_on.to_string()),
