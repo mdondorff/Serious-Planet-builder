@@ -1,11 +1,13 @@
 //! Code-generated descriptor of the real terrain and hydrology pipeline (`BUILD-063`, `TEST-142`).
 //!
 //! Pure, read-only introspection metadata (`CON-02`, `CON-06`, `CON-07`): references live version constants directly from
-//! `planet-world-def` and `planet-generators`, describes every pipeline stage and preview output without touching any key or sample
-//! formula, and validates runtime [`HeightField::upstream`] chains against [`field_chain_erosion`](crate::chain::field_chain_erosion).
+//! `planet-world-def` and `planet-generators`, binds bake stages to [`crate::bake::probe::Stage`] hooks (`GEN-161`),
+//! separates M9 layer passes from the K5-K7 regional/local chain, and validates [`HeightField::upstream`] against
+//! [`field_chain_erosion`](crate::chain::field_chain_erosion).
 
 use crate::arid::ARID_RULES_VERSION;
 use crate::bake::lakes::LAKES_VERSION;
+use crate::bake::probe::Stage;
 use crate::bake::tile::TileGrid;
 use crate::bake::{BAKE_KERNEL_VERSION, PASS2_KERNEL_VERSION};
 use crate::channels::ChannelSource;
@@ -42,25 +44,23 @@ use planet_world_def::{BodyId, GenContext, WorldDefinition, CHAIN_ORDER_ERA, LAY
 use std::fmt::Write as _;
 use std::sync::Arc;
 
-/// Schema version of the serialized `pipeline.json` document itself.
-pub const SCHEMA_FORMAT_VERSION: u32 = 1;
+/// Schema version of the serialized pipeline JSON document itself.
+pub const SCHEMA_FORMAT_VERSION: u32 = 2;
 
-/// Granularity / lifecycle band a pipeline stage belongs to.
+/// Re-run and spatial invalidation scope of a pipeline stage (`BUILD-063`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum StageScale {
-    GlobalInput,
-    GlobalBake,
-    RegionBake,
-    TileRuntime,
+pub enum StageScope {
+    Global,
+    Region,
+    Tile,
 }
 
-impl StageScale {
+impl StageScope {
     pub fn as_str(self) -> &'static str {
         match self {
-            StageScale::GlobalInput => "global-input",
-            StageScale::GlobalBake => "global-bake",
-            StageScale::RegionBake => "region-bake",
-            StageScale::TileRuntime => "tile-runtime",
+            StageScope::Global => "global",
+            StageScope::Region => "region",
+            StageScope::Tile => "tile",
         }
     }
 }
@@ -73,6 +73,13 @@ pub struct PreviewSpec {
     pub optional_files: &'static [&'static str],
 }
 
+/// Binding between a catalog stage and [`crate::bake::probe::Stage`] outputs in `docs/stages/manifest.txt`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProbeHook {
+    pub stage: Stage,
+    pub fields: &'static [&'static str],
+}
+
 /// One live `*_VERSION` or behavioral default constant pinned from the Rust source.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct VersionPin {
@@ -82,26 +89,47 @@ pub struct VersionPin {
     pub spec_ids: &'static [&'static str],
 }
 
-/// Curated node of the terrain and hydrology authoring pipeline.
+/// Curated node of the terrain and hydrology authoring pipeline (`K1`..`K11`, `M9-P1`/`M9-P2`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StageDef {
     pub id: &'static str,
     pub title: &'static str,
-    pub scale: StageScale,
+    pub k_label: &'static str,
+    pub scope: StageScope,
     pub summary: &'static str,
     pub reads: &'static [&'static str],
     pub outputs: &'static [&'static str],
     pub version_pins: &'static [&'static str],
+    pub probe_hooks: &'static [ProbeHook],
     pub active_when: &'static str,
     pub edit_preview_level: Option<&'static str>,
     pub spec_ids: &'static [&'static str],
     pub preview: Option<PreviewSpec>,
 }
 
+/// Active erosion layer generation for a resolved runtime configuration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ErosionBakeMode {
+    None,
+    M9Layer,
+    K5ToK7Commit,
+}
+
+impl ErosionBakeMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ErosionBakeMode::None => "none",
+            ErosionBakeMode::M9Layer => "m9-layer",
+            ErosionBakeMode::K5ToK7Commit => "k5-k7-commit",
+        }
+    }
+}
+
 /// Runtime switches describing one concrete assembled [`HeightField`] stack.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PipelineSwitches {
     pub height_field: HeightFieldKind,
+    pub erosion_mode: ErosionBakeMode,
     pub erosion_layer: bool,
     pub relief_lattice: bool,
     pub channels: bool,
@@ -125,6 +153,17 @@ pub struct ResolvedChain {
     pub water_cull_level_m: Option<f64>,
     pub has_driver_channels: bool,
     pub turned_noise: bool,
+}
+
+/// Maps every [`Stage`] variant in `crate::bake::probe` exhaustively to its catalog stage ID (`BUILD-063`).
+pub fn stage_id_for_probe(stage: Stage) -> &'static str {
+    match stage {
+        Stage::Landmass => "k5-landmass-and-window-cut",
+        Stage::Round(_) => "k5-regional-rounds",
+        Stage::H1 => "k6-h1-hydrology-and-lakes",
+        Stage::Thermal | Stage::Deposition | Stage::PitSpreading => "k6-regional-sediment",
+        Stage::K7 { .. } => "k7-local-refinement",
+    }
 }
 
 /// Live version and toggle constants pinned straight from `planet-world-def` and `planet-generators`.
@@ -164,7 +203,7 @@ pub fn version_pins() -> Vec<VersionPin> {
             key: "class_list",
             value: CLASS_LIST_VERSION,
             const_path: "planet_generators::classes::CLASS_LIST_VERSION",
-            spec_ids: &["GEN-093"],
+            spec_ids: &["GEN-094", "GEN-095"],
         },
         VersionPin {
             key: "class_source",
@@ -213,7 +252,7 @@ pub fn version_pins() -> Vec<VersionPin> {
             key: "reader_c1",
             value: READER_C1_VERSION,
             const_path: "planet_generators::global::READER_C1_VERSION",
-            spec_ids: &["GEN-107"],
+            spec_ids: &["GEN-013", "GEN-148"],
         },
         VersionPin {
             key: "climate",
@@ -261,7 +300,7 @@ pub fn version_pins() -> Vec<VersionPin> {
             key: "bake_kernel",
             value: BAKE_KERNEL_VERSION,
             const_path: "planet_generators::bake::BAKE_KERNEL_VERSION",
-            spec_ids: &["GEN-100", "GEN-173", "GEN-174"],
+            spec_ids: &["GEN-100", "GEN-173"],
         },
         VersionPin {
             key: "pass2_kernel",
@@ -273,7 +312,7 @@ pub fn version_pins() -> Vec<VersionPin> {
             key: "lakes",
             value: LAKES_VERSION,
             const_path: "planet_generators::bake::lakes::LAKES_VERSION",
-            spec_ids: &["GEN-177"],
+            spec_ids: &["GEN-163"],
         },
         VersionPin {
             key: "erosion_layer_read",
@@ -303,7 +342,7 @@ pub fn version_pins() -> Vec<VersionPin> {
             key: "erosion_field_c1_v2",
             value: EROSION_C1_VERSION,
             const_path: "planet_generators::erosion::EROSION_C1_VERSION",
-            spec_ids: &["GEN-107", "GEN-140"],
+            spec_ids: &["GEN-017", "GEN-140", "GEN-148"],
         },
         VersionPin {
             key: "crease_band",
@@ -375,17 +414,29 @@ pub fn version_pins() -> Vec<VersionPin> {
     ]
 }
 
-/// Ordered stages and products of the real terrain and hydrology pipeline.
+const HOOKS_LANDMASS: [ProbeHook; 1] = [ProbeHook { stage: Stage::Landmass, fields: &["z"] }];
+const HOOKS_ROUND: [ProbeHook; 1] = [ProbeHook { stage: Stage::Round(0), fields: &["z", "area (log10 m2)"] }];
+const HOOKS_H1: [ProbeHook; 1] = [ProbeHook { stage: Stage::H1, fields: &["q (log10 m2)", "channel"] }];
+const HOOKS_SEDIMENT: [ProbeHook; 3] = [
+    ProbeHook { stage: Stage::Thermal, fields: &["z", "delta"] },
+    ProbeHook { stage: Stage::Deposition, fields: &["z", "delta"] },
+    ProbeHook { stage: Stage::PitSpreading, fields: &["z", "delta"] },
+];
+const HOOKS_K7: [ProbeHook; 1] = [ProbeHook { stage: Stage::K7 { face: 0, ti: 0, tj: 0 }, fields: &["z"] }];
+
+/// Ordered stages and products of the real terrain and hydrology pipeline (`K1`..`K11`, `M9-P1`/`M9-P2`).
 pub fn stages() -> Vec<StageDef> {
     vec![
         StageDef {
             id: "world-definition",
             title: "World Definition & Authored Layers",
-            scale: StageScale::GlobalInput,
+            k_label: "K1",
+            scope: StageScope::Global,
             summary: "Seed, body radius, sea params, `world.height_field`, and spatial-indexed authored items ordered by ADR 0007 layer stack.",
             reads: &[],
             outputs: &["WorldDefinition node hashes", "GenContext read records", "per-layer ItemSpec footprint index"],
             version_pins: &["world_def_schema", "world_def_item_schema", "world_def_chain_order_era"],
+            probe_hooks: &[],
             active_when: "always",
             edit_preview_level: Some("L0"),
             spec_ids: &["WDEF-002", "WDEF-004", "AUTH-001"],
@@ -394,14 +445,16 @@ pub fn stages() -> Vec<StageDef> {
         StageDef {
             id: "continents-and-plates",
             title: "Continents, Plate Mask & Relief Classes",
-            scale: StageScale::GlobalInput,
+            k_label: "K2",
+            scope: StageScope::Global,
             summary: "Default `ClassSource` continents, active/passive plate margins, base elevation `e0`, 8-class weights, and untapered relief driver `k`.",
             reads: &["world-definition"],
             outputs: &["ClassSource (e0, land_depth, plate terms)", "ClassLattice (256 cells/face, weights, k)"],
             version_pins: &["class_list", "class_source", "preview_world"],
+            probe_hooks: &[],
             active_when: "height_field != cpu-ref-height-v2 && global bake source == class",
             edit_preview_level: Some("L0"),
-            spec_ids: &["GEN-093", "GEN-094", "GEN-095", "GEN-103", "GEN-104"],
+            spec_ids: &["GEN-094", "GEN-095", "GEN-103", "GEN-104"],
             preview: Some(PreviewSpec {
                 command_template: "cargo xtask preview world --seed {seed} --out {out_dir}",
                 files: &[
@@ -422,11 +475,13 @@ pub fn stages() -> Vec<StageDef> {
         StageDef {
             id: "shelf-bathymetry",
             title: "Continental Shelf & Ocean Bathymetry",
-            scale: StageScale::GlobalInput,
+            k_label: "K2",
+            scope: StageScope::Global,
             summary: "Coast-distance lattice and smooth passive/active margin shelf-slope-abyssal profile merged into `ClassSource` sea floor.",
             reads: &["world-definition", "continents-and-plates"],
             outputs: &["CoastLattice distance-to-coast", "ShelfProfile ocean-floor elevation"],
             version_pins: &["class_source", "global_bake"],
+            probe_hooks: &[],
             active_when: "height_field != cpu-ref-height-v2 && global bake source == class",
             edit_preview_level: Some("L0"),
             spec_ids: &["GEN-118", "GEN-136"],
@@ -444,14 +499,16 @@ pub fn stages() -> Vec<StageDef> {
         StageDef {
             id: "lithology",
             title: "Analytic Lithology & Rock Strata",
-            scale: StageScale::GlobalInput,
+            k_label: "K2",
+            scope: StageScope::Global,
             summary: "Unstored `H(d)` hardness, tilted/folded stratigraphic bands `K(d, z)`, caprock flags, and soluble carbonate gates for the erosion carve.",
             reads: &["world-definition", "continents-and-plates"],
             outputs: &["ProvinceLattice", "Column::at(z) erodibility K, caprock, soluble"],
             version_pins: &["lithology"],
+            probe_hooks: &[],
             active_when: "regional/global erosion bake",
             edit_preview_level: Some("L0"),
-            spec_ids: &["GEN-116"],
+            spec_ids: &["GEN-116", "GEN-122"],
             preview: Some(PreviewSpec {
                 command_template: "cargo run --release -p planet -- generate --lithology-preview {out_dir} --seed {seed}",
                 files: &["hardness.png", "strata_surface.png", "strata_200m_below.png", "soluble.png", "section.png", "lithology.txt"],
@@ -461,11 +518,13 @@ pub fn stages() -> Vec<StageDef> {
         StageDef {
             id: "tectonic-uplift",
             title: "Analytic Tectonic Uplift",
-            scale: StageScale::GlobalInput,
+            k_label: "K2",
+            scope: StageScope::Global,
             summary: "Unstored `U(d)` uplift field driven by craton, belt/arc coast, back-arc, and rift province terms.",
             reads: &["world-definition", "lithology"],
             outputs: &["Uplift::at(provinces, d)"],
             version_pins: &["uplift"],
+            probe_hooks: &[],
             active_when: "regional/global erosion bake",
             edit_preview_level: Some("L0"),
             spec_ids: &["GEN-123", "GEN-125"],
@@ -478,14 +537,16 @@ pub fn stages() -> Vec<StageDef> {
         StageDef {
             id: "orographic-climate",
             title: "Two-Season Orographic Climate",
-            scale: StageScale::GlobalInput,
+            k_label: "K2",
+            scope: StageScope::Global,
             summary: "Jacobi vapour/cloud advection over `e0` for northern summer and winter winds giving precipitation, temperature, aridity, and runoff.",
             reads: &["world-definition", "continents-and-plates", "lithology"],
             outputs: &["Orography 512x512 lattice (precipitation, temperature, aridity, seasonality)"],
             version_pins: &["orography", "runoff"],
+            probe_hooks: &[],
             active_when: "height_field != cpu-ref-height-v2 && global bake source == class",
             edit_preview_level: Some("L0"),
-            spec_ids: &["GEN-117", "GEN-130"],
+            spec_ids: &["GEN-117", "GEN-129", "GEN-130"],
             preview: Some(PreviewSpec {
                 command_template: "cargo run --release -p planet -- generate --climate-preview {out_dir} --seed {seed}",
                 files: &[
@@ -505,11 +566,13 @@ pub fn stages() -> Vec<StageDef> {
         StageDef {
             id: "arid-class-rules",
             title: "Arid Class Rules (Badlands & Sand Sea)",
-            scale: StageScale::GlobalInput,
+            k_label: "K2",
+            scope: StageScope::Global,
             summary: "Read-time class weight remix for badlands and sand seas from aridity, lithology hardness, base elevation, and sediment supply.",
             reads: &["continents-and-plates", "lithology", "orographic-climate"],
             outputs: &["AridRules blended class weights", "tapered/blended k"],
             version_pins: &["arid_rules", "relief_channels"],
+            probe_hooks: &[],
             active_when: "height_field != cpu-ref-height-v2 && global bake source == class",
             edit_preview_level: Some("L0"),
             spec_ids: &["GEN-128"],
@@ -522,11 +585,13 @@ pub fn stages() -> Vec<StageDef> {
         StageDef {
             id: "ice-history",
             title: "Glacial Maximum Ice History",
-            scale: StageScale::GlobalInput,
+            k_label: "K2",
+            scope: StageScope::Global,
             summary: "LGM equilibrium line altitude (ELA) and glaciated cover mask derived analytically from the two-season climate lattice.",
             reads: &["orographic-climate"],
             outputs: &["IceHistory (ela_m, cover)"],
             version_pins: &["ice_history"],
+            probe_hooks: &[],
             active_when: "regional/global ice and fjord stages",
             edit_preview_level: Some("L0"),
             spec_ids: &["GEN-134"],
@@ -539,52 +604,164 @@ pub fn stages() -> Vec<StageDef> {
         StageDef {
             id: "global-bake-lattice",
             title: "Global-Coarse Bake Lattice & Channels",
-            scale: StageScale::GlobalBake,
+            k_label: "K3",
+            scope: StageScope::Global,
             summary: "Block-stored cube-sphere lattice (production 16,384 cells/face): `elevation_m`, `continent`, climate, ocean mask, water summary, relief `k`/`m`.",
             reads: &["world-definition", "continents-and-plates", "shelf-bathymetry", "orographic-climate", "arid-class-rules"],
             outputs: &["GlobalGrid (cpu-global-coarse-v1)", "OceanLattice", "WaterSummary", "ReliefChannels (k, m)"],
             version_pins: &["global_bake", "reader_bilinear", "reader_c1", "climate", "relief_channels", "stage_key"],
+            probe_hooks: &[],
             active_when: "height_field != cpu-ref-height-v2",
             edit_preview_level: Some("L1"),
-            spec_ids: &["GEN-013", "GEN-099", "GEN-115", "STRM-012", "STRM-073"],
+            spec_ids: &["GEN-013", "GEN-099", "STRM-012"],
             preview: None,
         },
         StageDef {
             id: "coupled-h0",
             title: "Coupled H0 Drainage & Lake Graph",
-            scale: StageScale::GlobalBake,
+            k_label: "K4",
+            scope: StageScope::Global,
             summary: "Single-thread global D8 priority flood, drainage area accumulation, implicit stream-power step, lake basins, and coarse horizon.",
             reads: &["global-bake-lattice", "lithology", "tectonic-uplift"],
             outputs: &["CoupledMaps (H0 drainage, lakes)", "CoarseHorizon", "CoupledLens debug climate view"],
             version_pins: &["coupled_h0", "coupled_lens", "coarse_horizon"],
+            probe_hooks: &[],
             active_when: "coupled run or coarse horizon enabled on stored bake",
             edit_preview_level: Some("L1"),
-            spec_ids: &["GEN-040", "GEN-043", "STRM-045", "STRM-051"],
+            spec_ids: &["GEN-040", "GEN-043", "GEN-164", "STRM-045", "STRM-051"],
             preview: None,
         },
         StageDef {
-            id: "erosion-bake-chain",
-            title: "Erosion & River-Graph Bake Chain (H1..K7)",
-            scale: StageScale::RegionBake,
-            summary: "Pass-1 routing/carve and pass-2 fine tile carve (thermal, deposition, pit-spreading, K7 river burn) writing kind-13 delta tiles and driver channels.",
-            reads: &["global-bake-lattice", "coupled-h0", "lithology", "tectonic-uplift", "orographic-climate", "ice-history"],
-            outputs: &["ErosionLayer kind-13 delta tiles (B + L)", "ChannelSource (soil_m, area_log2_cells, fill_m, erosion_m)", "docs/stages/manifest.txt"],
-            version_pins: &["bake_kernel", "pass2_kernel", "lakes", "erosion_layer_read", "pinned_detail", "bake_preview"],
-            active_when: "erosion_layer == true (--erosion on)",
+            id: "m9-pass1-face-carve",
+            title: "M9 Layer Pass 1: Face Routing & Carve",
+            k_label: "M9-P1",
+            scope: StageScope::Region,
+            summary: "Per-cube-face stream-power carve (`bake_pass1`, 12,288 cells/face default) emitting regional delta and MFD drainage area (`--erosion on`).",
+            reads: &["global-bake-lattice", "lithology", "tectonic-uplift", "orographic-climate"],
+            outputs: &["FaceChange delta", "Pass-1 drainage area"],
+            version_pins: &["bake_kernel", "bake_preview"],
+            probe_hooks: &[],
+            active_when: "erosion_mode == m9-layer (--erosion on)",
             edit_preview_level: Some("L2"),
-            spec_ids: &["GEN-100", "GEN-101", "GEN-112", "GEN-126", "GEN-187", "BUILD-047", "BUILD-060", "BUILD-061"],
+            spec_ids: &["GEN-100", "GEN-110", "GEN-120", "GEN-127", "GEN-129"],
+            preview: None,
+        },
+        StageDef {
+            id: "m9-pass2-tile-layer",
+            title: "M9 Layer Pass 2: Tile Carve & Channels",
+            k_label: "M9-P2",
+            scope: StageScope::Tile,
+            summary: "Local tile carve (`bake_layer`, 98,304 cells/face default) with thermal diffusion, deposition sweep, pit spreading, kind-13 deltas, and driver channels.",
+            reads: &["m9-pass1-face-carve", "global-bake-lattice"],
+            outputs: &["ErosionLayer kind-13 delta tiles", "ChannelSource (soil_m, area_log2_cells, fill_m, erosion_m)"],
+            version_pins: &["pass2_kernel", "erosion_layer_read", "driver_map", "channel_block"],
+            probe_hooks: &[],
+            active_when: "erosion_mode == m9-layer (--erosion on)",
+            edit_preview_level: Some("L2"),
+            spec_ids: &["GEN-099", "GEN-101", "GEN-111", "GEN-112", "GEN-121", "STRM-072", "STRM-076"],
+            preview: None,
+        },
+        StageDef {
+            id: "k5-landmass-and-window-cut",
+            title: "K5 Landmass Extraction & Window Cut Boundary",
+            k_label: "K5",
+            scope: StageScope::Region,
+            summary: "Extracts the regional landmass grid on B and classifies border outlets as `CarveParams::window_cut` exits so breaches get no false floor (`GEN-172`).",
+            reads: &["global-bake-lattice"],
+            outputs: &["Compact landmass Grid z0", "window_cut / exit_window_cut flags", "stage probe: landmass/z"],
+            version_pins: &["bake_kernel"],
+            probe_hooks: &HOOKS_LANDMASS,
+            active_when: "erosion_mode == k5-k7-commit (--commit DIR)",
+            edit_preview_level: Some("L2"),
+            spec_ids: &["GEN-161", "GEN-162", "GEN-172"],
+            preview: None,
+        },
+        StageDef {
+            id: "k5-regional-rounds",
+            title: "K5 Regional Catchment Rounds",
+            k_label: "K5",
+            scope: StageScope::Region,
+            summary: "Catchment-parallel round solver (`round::solve_rounds`) with graded flats (`GEN-173`), f32/f64 precision (`GEN-175`), and memo cache (`GEN-153`).",
+            reads: &["k5-landmass-and-window-cut", "lithology", "tectonic-uplift", "orographic-climate"],
+            outputs: &["Regional f32 surface S0", "stage probe: round/{z, area (log10 m2)}"],
+            version_pins: &["bake_kernel", "bake_preview"],
+            probe_hooks: &HOOKS_ROUND,
+            active_when: "erosion_mode == k5-k7-commit (--commit DIR)",
+            edit_preview_level: Some("L2"),
+            spec_ids: &["GEN-153", "GEN-166", "GEN-173", "GEN-178", "BUILD-046", "BUILD-047"],
+            preview: None,
+        },
+        StageDef {
+            id: "k6-h1-hydrology-and-lakes",
+            title: "K6 H1 Channel Graph, Basins & Lakes",
+            k_label: "K6",
+            scope: StageScope::Region,
+            summary: "Computes canonical D8/MFD H1 hydrology, channel segments with routed discharge `Q_w`, kept lake basins (`lakes_from_hydro`), and cut river pieces (`GEN-163`).",
+            reads: &["k5-regional-rounds", "orographic-climate"],
+            outputs: &["Hydro channel graph (H1)", "BasinTable / Lakes (GEN-163)", "stage probe: h1/{q, channel}"],
+            version_pins: &["lakes", "runoff"],
+            probe_hooks: &HOOKS_H1,
+            active_when: "erosion_mode == k5-k7-commit (--commit DIR)",
+            edit_preview_level: Some("L2"),
+            spec_ids: &["GEN-145", "GEN-163", "GEN-170", "GEN-189", "STRM-080", "STRM-084"],
+            preview: None,
+        },
+        StageDef {
+            id: "k6-regional-sediment",
+            title: "K6 Regional Sediment Pass (Thermal, Deposition, Pits)",
+            k_label: "K6",
+            scope: StageScope::Region,
+            summary: "Applies cross-divide thermal diffusion, fluvial deposition sweeps, and one-cell pit spreading (`bake::sediment::sediment_pass`) after the regional rounds.",
+            reads: &["k5-regional-rounds", "k6-h1-hydrology-and-lakes"],
+            outputs: &["Settled regional height delta", "stage probes: thermal/{z,delta}, deposition/{z,delta}, pit-spreading/{z,delta}"],
+            version_pins: &["pass2_kernel"],
+            probe_hooks: &HOOKS_SEDIMENT,
+            active_when: "erosion_mode == k5-k7-commit (--commit DIR)",
+            edit_preview_level: Some("L2"),
+            spec_ids: &["GEN-155", "GEN-178"],
+            preview: None,
+        },
+        StageDef {
+            id: "k7-local-refinement",
+            title: "K7 Local Tile Refinement & Commit Writer",
+            k_label: "K7",
+            scope: StageScope::Tile,
+            summary: "Starts each L tile from `B + C1(dR)`, burns width-law K6 channels (`w = a Q_w^b`), breaches, carves, runs K7 sediment, and writes `L` + basin tables (`GEN-177`).",
+            reads: &["global-bake-lattice", "k5-regional-rounds", "k6-h1-hydrology-and-lakes", "k6-regional-sediment"],
+            outputs: &["Kind-13 L delta tiles", "Commit tables & channel graph", "docs/stages/manifest.txt", "stage probe: k7/z"],
+            version_pins: &["pass2_kernel", "lakes", "erosion_layer_read", "pinned_detail"],
+            probe_hooks: &HOOKS_K7,
+            active_when: "erosion_mode == k5-k7-commit (--commit DIR)",
+            edit_preview_level: Some("L2"),
+            spec_ids: &[
+                "GEN-148",
+                "GEN-154",
+                "GEN-156",
+                "GEN-165",
+                "GEN-167",
+                "GEN-168",
+                "GEN-169",
+                "GEN-176",
+                "GEN-177",
+                "STRM-081",
+                "STRM-082",
+                "BUILD-047",
+                "BUILD-060",
+                "BUILD-061",
+            ],
             preview: Some(PreviewSpec {
                 command_template: "cargo xtask stages",
-                files: &["docs/stages/manifest.txt", "docs/stages/pipeline.json"],
-                optional_files: &["target/review/stages/ci/r1h.png", "target/review/stages/ci/m1.png"],
+                files: &["docs/stages/manifest.txt"],
+                optional_files: &["target/review/stages/pipeline.json", "target/review/stages/ci/r1h.png", "target/review/stages/ci/m1.png"],
             }),
         },
         StageDef {
             id: "runtime-base-field",
             title: "Runtime Base HeightField Selection",
-            scale: StageScale::TileRuntime,
-            summary: "Resolves `world.height_field` plus `--erosion` / `--channels` runtime switches into `ErosionField`, `TerrainField`, or `Reference`.",
-            reads: &["world-definition", "global-bake-lattice", "erosion-bake-chain"],
+            k_label: "K8",
+            scope: StageScope::Tile,
+            summary: "Composes `B + L + C` from `world.height_field` plus M9 `--erosion` or K5-K7 `--commit` into `ErosionField`, `TerrainField`, or `Reference`.",
+            reads: &["world-definition", "global-bake-lattice", "m9-pass2-tile-layer", "k7-local-refinement"],
             outputs: &["Base HeightField (height, height_bounds, climate, optional driver_channels)"],
             version_pins: &[
                 "erosion_field_v1",
@@ -595,19 +772,22 @@ pub fn stages() -> Vec<StageDef> {
                 "terrain_field",
                 "reference_generator",
             ],
+            probe_hooks: &[],
             active_when: "always",
             edit_preview_level: Some("L3"),
-            spec_ids: &["GEN-016", "GEN-017", "GEN-018", "GEN-107", "GEN-109", "GEN-112", "GEN-140"],
+            spec_ids: &["GEN-016", "GEN-017", "GEN-018", "GEN-109", "GEN-112", "GEN-113", "GEN-140", "GEN-148", "GEN-187", "GEN-188", "STRM-083", "VIEW-069"],
             preview: None,
         },
         StageDef {
             id: "authored-stamp-stages",
             title: "Authored Stamp Stage Stack",
-            scale: StageScale::TileRuntime,
-            summary: "Stacks one `StampStage` per populated layer in ADR 0007 order over the base field, passing untouched tiles through (`STRM-029`).",
+            k_label: "K8",
+            scope: StageScope::Tile,
+            summary: "Stacks one `StampStage` per populated layer in ADR 0007 order over the base field (`+ A`), passing untouched tiles through (`STRM-029`).",
             reads: &["world-definition", "runtime-base-field"],
             outputs: &["Chained HeightField (upstream() -> below, stage_params() -> (layer, stack_index))"],
             version_pins: &["stamp_stage", "world_def_chain_order_era"],
+            probe_hooks: &[],
             active_when: "def.stamp_layers(PLANET) is non-empty",
             edit_preview_level: Some("L3"),
             spec_ids: &["GEN-026", "GEN-027", "GEN-028", "GEN-030", "STRM-027", "STRM-029"],
@@ -615,15 +795,17 @@ pub fn stages() -> Vec<StageDef> {
         },
         StageDef {
             id: "water-cull-and-tile-plan",
-            title: "Water Bound, Drivers & Tile Plan",
-            scale: StageScale::TileRuntime,
-            summary: "Optional `WaterBounded` frustum cull wrapper, `WaterField` producers, driver/channel block encoding, and compact tile mesh output.",
-            reads: &["authored-stamp-stages", "global-bake-lattice", "erosion-bake-chain"],
+            title: "Water Bound, Drivers, Rivers & Tile Plan",
+            k_label: "K11",
+            scope: StageScope::Tile,
+            summary: "Optional `WaterBounded` frustum cull wrapper, `WaterField` (sea + commit lakes), river plans, driver/channel block encoding, and compact tile meshes.",
+            reads: &["authored-stamp-stages", "global-bake-lattice", "k6-h1-hydrology-and-lakes", "m9-pass2-tile-layer"],
             outputs: &["WaterBounded::water_cull_level", "WaterField", "CompactTile (heights, normals, driver, channel, mesh)"],
             version_pins: &["water_surface", "driver_map", "channel_block", "mesh", "key_format"],
+            probe_hooks: &[],
             active_when: "always (water_cull_level active when bound_water == true)",
             edit_preview_level: Some("L3"),
-            spec_ids: &["GEN-023", "GEN-025", "GEN-074", "GEN-119", "STRM-003"],
+            spec_ids: &["GEN-023", "GEN-025", "GEN-074", "GEN-119", "GEN-163", "STRM-003", "STRM-085", "STRM-086"],
             preview: None,
         },
     ]
@@ -643,7 +825,7 @@ fn stack_indices_for_layers(layers: &[String]) -> Vec<(String, u32)> {
         .collect()
 }
 
-/// Derives [`PipelineSwitches`] from a [`WorldDefinition`], water-bound flag, and optional [`ErosionSwitch`].
+/// Derives [`PipelineSwitches`] from a [`WorldDefinition`], water-bound flag, and optional M9 [`ErosionSwitch`].
 pub fn switches_for_definition(
     def: &WorldDefinition,
     bound_water: bool,
@@ -655,9 +837,26 @@ pub fn switches_for_definition(
         if bound_water { Some(def.sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m) } else { None };
     Ok(PipelineSwitches {
         height_field,
+        erosion_mode: if erosion.is_some() { ErosionBakeMode::M9Layer } else { ErosionBakeMode::None },
         erosion_layer: erosion.is_some(),
         relief_lattice: erosion.is_some_and(|e| e.relief.is_some()),
         channels: erosion.is_some_and(|e| e.channels.is_some()),
+        stamp_layers,
+        bound_water_level_m,
+    })
+}
+
+/// Derives [`PipelineSwitches`] for opening a K5-K7 regional commit (`--commit DIR`, C1 base + layer without relief channels).
+pub fn switches_for_commit(def: &WorldDefinition, bound_water: bool) -> Result<PipelineSwitches, String> {
+    let stamp_layers = stack_indices_for_layers(&def.stamp_layers(BodyId::PLANET));
+    let bound_water_level_m =
+        if bound_water { Some(def.sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m) } else { None };
+    Ok(PipelineSwitches {
+        height_field: HeightFieldKind::ErodedC1,
+        erosion_mode: ErosionBakeMode::K5ToK7Commit,
+        erosion_layer: true,
+        relief_lattice: false,
+        channels: false,
         stamp_layers,
         bound_water_level_m,
     })
@@ -826,93 +1025,114 @@ fn write_resolved_chain_json(out: &mut String, indent: &str, chain: &ResolvedCha
     let _ = write!(out, "{indent}}}");
 }
 
-/// Deterministic formatted JSON catalog committed at `docs/stages/pipeline.json`.
-pub fn to_canonical_json() -> String {
-    let mut out = String::from("{\n");
-    let _ = writeln!(out, "  \"schema_format_version\": {SCHEMA_FORMAT_VERSION},");
-    out.push_str("  \"default_height_field\": ");
-    push_json_str(&mut out, DEFAULT_HEIGHT_FIELD.id());
+fn write_catalog_fields(out: &mut String, indent: &str) {
+    let _ = writeln!(out, "{indent}\"schema_format_version\": {SCHEMA_FORMAT_VERSION},");
+    let _ = write!(out, "{indent}\"default_height_field\": ");
+    push_json_str(out, DEFAULT_HEIGHT_FIELD.id());
     out.push_str(",\n");
-    out.push_str("  \"known_height_fields\": ");
-    push_str_array(&mut out, &known_ids());
+    let _ = write!(out, "{indent}\"known_height_fields\": ");
+    push_str_array(out, &known_ids());
     out.push_str(",\n");
-    out.push_str("  \"layer_stack\": ");
-    push_str_array(&mut out, &LAYER_STACK);
+    let _ = write!(out, "{indent}\"layer_stack\": ");
+    push_str_array(out, &LAYER_STACK);
     out.push_str(",\n");
-    out.push_str("  \"turned_noise_default\": ");
-    let _ = writeln!(out, "{},", turned_noise());
+    let _ = writeln!(out, "{indent}\"turned_noise_default\": {},", turned_noise());
+
+    let probe_kinds: Vec<&str> = Stage::ALL_KINDS.iter().map(|s| s.kind_id()).collect();
+    let _ = write!(out, "{indent}\"probe_stage_kinds\": ");
+    push_str_array(out, &probe_kinds);
+    out.push_str(",\n");
 
     let pins = version_pins();
-    out.push_str("  \"version_pins\": [\n");
+    let _ = writeln!(out, "{indent}\"version_pins\": [");
     for (i, p) in pins.iter().enumerate() {
-        out.push_str("    {\"key\": ");
-        push_json_str(&mut out, p.key);
+        let _ = write!(out, "{indent}  {{\"key\": ");
+        push_json_str(out, p.key);
         let _ = write!(out, ", \"value\": {}, \"const_path\": ", p.value);
-        push_json_str(&mut out, p.const_path);
+        push_json_str(out, p.const_path);
         out.push_str(", \"spec_ids\": ");
-        push_str_array(&mut out, p.spec_ids);
+        push_str_array(out, p.spec_ids);
         let comma = if i + 1 < pins.len() { "," } else { "" };
         let _ = writeln!(out, "}}{comma}");
     }
-    out.push_str("  ],\n");
+    let _ = writeln!(out, "{indent}],");
 
     let stage_list = stages();
-    out.push_str("  \"stages\": [\n");
+    let _ = writeln!(out, "{indent}\"stages\": [");
     for (i, s) in stage_list.iter().enumerate() {
-        out.push_str("    {\n");
-        out.push_str("      \"id\": ");
-        push_json_str(&mut out, s.id);
-        out.push_str(",\n      \"title\": ");
-        push_json_str(&mut out, s.title);
-        out.push_str(",\n      \"scale\": ");
-        push_json_str(&mut out, s.scale.as_str());
-        out.push_str(",\n      \"summary\": ");
-        push_json_str(&mut out, s.summary);
-        out.push_str(",\n      \"reads\": ");
-        push_str_array(&mut out, s.reads);
-        out.push_str(",\n      \"outputs\": ");
-        push_str_array(&mut out, s.outputs);
-        out.push_str(",\n      \"version_pins\": ");
-        push_str_array(&mut out, s.version_pins);
-        out.push_str(",\n      \"active_when\": ");
-        push_json_str(&mut out, s.active_when);
-        out.push_str(",\n      \"edit_preview_level\": ");
+        let _ = writeln!(out, "{indent}  {{");
+        let _ = write!(out, "{indent}    \"id\": ");
+        push_json_str(out, s.id);
+        let _ = write!(out, ",\n{indent}    \"title\": ");
+        push_json_str(out, s.title);
+        let _ = write!(out, ",\n{indent}    \"k_label\": ");
+        push_json_str(out, s.k_label);
+        let _ = write!(out, ",\n{indent}    \"scope\": ");
+        push_json_str(out, s.scope.as_str());
+        let _ = write!(out, ",\n{indent}    \"summary\": ");
+        push_json_str(out, s.summary);
+        let _ = write!(out, ",\n{indent}    \"reads\": ");
+        push_str_array(out, s.reads);
+        let _ = write!(out, ",\n{indent}    \"outputs\": ");
+        push_str_array(out, s.outputs);
+        let _ = write!(out, ",\n{indent}    \"version_pins\": ");
+        push_str_array(out, s.version_pins);
+        let _ = write!(out, ",\n{indent}    \"probe_hooks\": [");
+        for (h_idx, hook) in s.probe_hooks.iter().enumerate() {
+            if h_idx > 0 {
+                out.push_str(", ");
+            }
+            out.push_str("{\"kind_id\": ");
+            push_json_str(out, hook.stage.kind_id());
+            out.push_str(", \"fields\": ");
+            push_str_array(out, hook.fields);
+            out.push('}');
+        }
+        let _ = write!(out, "],\n{indent}    \"active_when\": ");
+        push_json_str(out, s.active_when);
+        let _ = write!(out, ",\n{indent}    \"edit_preview_level\": ");
         match s.edit_preview_level {
-            Some(lvl) => push_json_str(&mut out, lvl),
+            Some(lvl) => push_json_str(out, lvl),
             None => out.push_str("null"),
         }
-        out.push_str(",\n      \"spec_ids\": ");
-        push_str_array(&mut out, s.spec_ids);
-        out.push_str(",\n      \"preview\": ");
+        let _ = write!(out, ",\n{indent}    \"spec_ids\": ");
+        push_str_array(out, s.spec_ids);
+        let _ = write!(out, ",\n{indent}    \"preview\": ");
         match s.preview {
             Some(p) => {
                 out.push_str("{\"command_template\": ");
-                push_json_str(&mut out, p.command_template);
+                push_json_str(out, p.command_template);
                 out.push_str(", \"files\": ");
-                push_str_array(&mut out, p.files);
+                push_str_array(out, p.files);
                 out.push_str(", \"optional_files\": ");
-                push_str_array(&mut out, p.optional_files);
+                push_str_array(out, p.optional_files);
                 out.push('}');
             }
             None => out.push_str("null"),
         }
         out.push('\n');
         let comma = if i + 1 < stage_list.len() { "," } else { "" };
-        let _ = writeln!(out, "    }}{comma}");
+        let _ = writeln!(out, "{indent}  }}{comma}");
     }
-    out.push_str("  ],\n");
+    let _ = writeln!(out, "{indent}],");
 
     let matrix = switch_matrix_rows();
-    out.push_str("  \"switch_matrix\": [\n");
+    let _ = writeln!(out, "{indent}\"switch_matrix\": [");
     for (i, (hf, er, rel, ch, impl_id, ver, needs_bake)) in matrix.iter().enumerate() {
-        out.push_str("    {\"height_field\": ");
-        push_json_str(&mut out, hf);
+        let _ = write!(out, "{indent}  {{\"height_field\": ");
+        push_json_str(out, hf);
         let _ = write!(out, ", \"erosion_layer\": {er}, \"relief_lattice\": {rel}, \"channels\": {ch}, \"implementation_id\": ");
-        push_json_str(&mut out, impl_id);
+        push_json_str(out, impl_id);
         let comma = if i + 1 < matrix.len() { "," } else { "" };
         let _ = writeln!(out, ", \"version\": {ver}, \"needs_bake\": {needs_bake}}}{comma}");
     }
-    out.push_str("  ]\n");
+    let _ = writeln!(out, "{indent}]");
+}
+
+/// Deterministic formatted JSON catalog generated in `target/review/stages/pipeline.json` during tier-A checks.
+pub fn to_canonical_json() -> String {
+    let mut out = String::from("{\n");
+    write_catalog_fields(&mut out, "  ");
     out.push_str("}\n");
     out
 }
@@ -929,6 +1149,7 @@ pub fn resolved_world_json(def: &WorldDefinition, switches: &PipelineSwitches, w
     let _ = writeln!(out, "  \"schema_format_version\": {SCHEMA_FORMAT_VERSION},");
     let _ = writeln!(out, "  \"world\": {{");
     let _ = writeln!(out, "    \"seed\": {seed},");
+    let _ = writeln!(out, "    \"base_node_hash\": \"{:016x}\",", def.base_hash());
     let _ = writeln!(out, "    \"definition_hash\": \"{:016x}\",", def.hash());
     let _ = writeln!(out, "    \"radius_m\": {radius_m:?},");
     let _ = writeln!(out, "    \"sea_level_m\": {sea_level_m:?},");
@@ -936,7 +1157,9 @@ pub fn resolved_world_json(def: &WorldDefinition, switches: &PipelineSwitches, w
     push_json_str(&mut out, switches.height_field.id());
     out.push_str(",\n    \"needs_bake\": ");
     let _ = writeln!(out, "{},", switches.height_field.needs_bake());
-    let _ = writeln!(out, "    \"erosion_layer\": {},", switches.erosion_layer);
+    out.push_str("    \"erosion_mode\": ");
+    push_json_str(&mut out, switches.erosion_mode.as_str());
+    let _ = writeln!(out, ",\n    \"erosion_layer\": {},", switches.erosion_layer);
     let _ = writeln!(out, "    \"relief_lattice\": {},", switches.relief_lattice);
     let _ = writeln!(out, "    \"channels\": {},", switches.channels);
     let _ = write!(out, "    \"stamp_layers\": [");
@@ -953,7 +1176,9 @@ pub fn resolved_world_json(def: &WorldDefinition, switches: &PipelineSwitches, w
     push_str_array(&mut out, &active_stages);
     out.push_str(",\n  \"walked_chain\": ");
     write_resolved_chain_json(&mut out, "  ", walked);
-    out.push_str("\n}\n");
+    out.push_str(",\n  \"catalog\": {\n");
+    write_catalog_fields(&mut out, "    ");
+    out.push_str("  }\n}\n");
     out
 }
 
@@ -972,8 +1197,20 @@ fn active_stage_ids(switches: &PipelineSwitches) -> Vec<&'static str> {
             "coupled-h0",
         ]);
     }
-    if switches.erosion_layer {
-        ids.push("erosion-bake-chain");
+    match switches.erosion_mode {
+        ErosionBakeMode::None => {}
+        ErosionBakeMode::M9Layer => {
+            ids.extend(["m9-pass1-face-carve", "m9-pass2-tile-layer"]);
+        }
+        ErosionBakeMode::K5ToK7Commit => {
+            ids.extend([
+                "k5-landmass-and-window-cut",
+                "k5-regional-rounds",
+                "k6-h1-hydrology-and-lakes",
+                "k6-regional-sediment",
+                "k7-local-refinement",
+            ]);
+        }
     }
     ids.push("runtime-base-field");
     if !switches.stamp_layers.is_empty() {

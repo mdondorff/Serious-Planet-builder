@@ -189,6 +189,9 @@ pub fn generate(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     if o.pipeline_json.is_some() {
         return generate_pipeline_json(o, out);
     }
+    if o.commit.is_some() {
+        return crate::check_commit_options(o);
+    }
     if (o.class_source || o.legacy_source)
         && o.global_dir.is_none()
         && o.verify_global.is_none()
@@ -290,6 +293,7 @@ pub fn generate(o: &Options, out: &mut dyn Write) -> Result<(), String> {
 /// `generate --pipeline-json OUT [--seed N | --world F] [--erosion on|off] [--channels on|off]` (BUILD-063): resolves the definition's
 /// live `HeightField` chain via [`planet_generators::chain::field_chain_erosion`] over zero-IO handles, walks `upstream()`, and writes JSON.
 fn generate_pipeline_json(o: &Options, out: &mut dyn Write) -> Result<(), String> {
+    crate::check_commit_options(o)?;
     let path = o.pipeline_json.as_ref().expect("the option is given");
     const CLASH: [&str; 37] = [
         "--tile",
@@ -344,18 +348,26 @@ fn generate_pipeline_json(o: &Options, out: &mut dyn Write) -> Result<(), String
         }
         None => planet_world_def::WorldDefinition::single_planet(RADIUS_M, o.seed),
     });
-    let kind = planet_generators::height_fields::resolve(&def).map_err(|e| e.to_string())?;
-    let erosion = if o.erosion {
-        let ctx = planet_world_def::GenContext::new(&def);
-        let radius_m = ctx.body_radius_m(planet_world_def::BodyId::PLANET).map_err(|e| format!("the body of the definition: {e}"))?;
-        let sea_level_m = def.sea(planet_world_def::BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
-        Some(planet_generators::pipeline_catalog::metadata_erosion_switch(radius_m, sea_level_m, true, o.channels)?)
+    let ctx = planet_world_def::GenContext::new(&def);
+    let radius_m = ctx.body_radius_m(planet_world_def::BodyId::PLANET).map_err(|e| format!("the body of the definition: {e}"))?;
+    let sea_level_m = def.sea(planet_world_def::BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
+    let (kind, erosion, switches) = if o.commit.is_some() {
+        let kind = planet_generators::height_fields::HeightFieldKind::ErodedC1;
+        let sw = planet_generators::pipeline_catalog::metadata_erosion_switch(radius_m, sea_level_m, false, false)?;
+        let switches = planet_generators::pipeline_catalog::switches_for_commit(&def, true)?;
+        (kind, Some(sw), switches)
     } else {
-        None
+        let kind = planet_generators::height_fields::resolve(&def).map_err(|e| e.to_string())?;
+        let erosion = if o.erosion {
+            Some(planet_generators::pipeline_catalog::metadata_erosion_switch(radius_m, sea_level_m, true, o.channels)?)
+        } else {
+            None
+        };
+        let switches = planet_generators::pipeline_catalog::switches_for_definition(&def, true, erosion.as_ref())?;
+        (kind, erosion, switches)
     };
     let field =
         planet_generators::chain::field_chain_erosion(kind, &def, &planet_generators::chain::NoBake, [0u8; 16], true, erosion.as_ref())?;
-    let switches = planet_generators::pipeline_catalog::switches_for_definition(&def, true, erosion.as_ref())?;
     let expected = planet_generators::pipeline_catalog::resolve_runtime_chain(&switches)?;
     let walked = planet_generators::pipeline_catalog::walk_height_field(field.as_ref());
     if walked != expected {

@@ -2046,12 +2046,12 @@ Source: Lead 2026-11-19 (spikes #150, #150a), BUILD-061
 Detail: a V valley of 10 m a cell on 100 m cells, crossed over 56 L cells: 113 samples from -2,800 to 2,800 m, river level 0 at `d = 0`, depth 280 m, widths 200 m and 1,000 m, not stale at a stored relief of 300 m; a profile flat on one side has an open 10 m width and depth 0, stale at 300 m, and no verdict without `S0`; with a stored pick depth of 20 m a depth of 3 m is not stale and 0 m is, and a pick depth of 0 m gives no verdict; a GLO-30 profile of five samples (40, 20, 0, 5, 30 m) has depth 30 m and a 10 m width of 170 m; the sheet and table are written for the one transect inside face 3's window, the final surface's river 5 m lower, and the label's space written as `-`; a flat `S0` makes the transect stale in the table and a missing `final.f32` is tabled as missing; no face line without `--face` is refused, a face holding no transect is refused naming it, an `s0.f32` of 12 bytes is refused naming it, and a csv without a column or with a non-number names it; the command passes `--chain`, `--face` and `--out` to the example and refuses an unknown option, a missing value, a second `--chain` and no `--chain`.
 
 ### Requirement: TEST-142 The runtime height-field chain matches its declared catalog
-A tier-A contract test SHALL instantiate `field_chain_erosion` across every `HeightFieldKind`, `ErosionSwitch` option, ADR 0007 stamp stack, and `WaterBounded` combination and SHALL assert that walking `HeightField::upstream()` matches `pipeline_catalog::resolve_runtime_chain`, while unsupported `--erosion` combinations are refused by both paths. A tier-A check SHALL also fail whenever `docs/stages/pipeline.json` drifts from code constants or preview renderers.
+Tier-A contract tests SHALL instantiate `field_chain_erosion` across every `HeightFieldKind`, `ErosionSwitch` option (both M9 layer and K5-K7 commit), ADR 0007 stamp stack, and `WaterBounded` combination and SHALL assert that walking `HeightField::upstream()` equals `pipeline_catalog::resolve_runtime_chain`, while unsupported `--erosion` combinations fail on both paths. Tier-A checks SHALL also verify live `openspec/specs/` resolution of every catalog `spec_ids`, 1-to-1 `probe::Stage` and `docs/stages/manifest.txt` hook parity, preview filename parity, deterministic emission to `target/review/stages/pipeline.json`, and absence of a committed `docs/stages/pipeline.json`.
 
 Verify: A
 Status: active
 Source: ADR 0021 point 7, BUILD-063, owner (2026-11-20)
 
-#### Scenario: Walked chain equivalence and drift detection
-- **WHEN** `field_chain_erosion` builds a stack over any `HeightFieldKind`, `ErosionSwitch`, ADR 0007 stamps, and `WaterBounded` setting
-- **THEN** `walk_height_field` equals `resolve_runtime_chain`, unsupported erosion switches fail on both paths, and any drift in `docs/stages/pipeline.json` or preview outputs fails tier A
+#### Scenario: Walked chain equivalence and catalog contracts
+- **WHEN** `field_chain_erosion` builds a stack or `pipeline_catalog` exports its schema, probe hooks, and cited spec IDs
+- **THEN** `walk_height_field` equals `resolve_runtime_chain`, every `probe::Stage` and cited `spec_id` resolves cleanly, `target/review/stages/pipeline.json` is written deterministically, and no committed JSON copy exists
