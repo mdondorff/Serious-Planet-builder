@@ -1,0 +1,13 @@
+zs: floor (1,278) 874.5 m; level 1270.9 m; depth max 396.4 p50 295.8 m; area 676 km2; lake x 1-39 y 232-287 (inside the window); inside the box (x >= 200): 0 % of its cells
+   spill candidate (0,279) z 1270.94 m: window edge
+base: floor (29,2219) 1351.3 m is not in a depression (filled 1351.3 m)
+s0: floor (33,2218) 822.7 m; level 1286.1 m; depth max 467.2 p50 304.4 m; area 691 km2; lake x 1-323 y 1866-2301 (inside the window); inside the box (x >= 1600): 0 % of its cells
+   spill candidate (273,1905) z 1286.12 m: margin
+   spill candidate (161,1931) z 1286.12 m: margin
+   spill candidate (60,1950) z 1286.11 m: margin
+   spill candidate (272,2009) z 1286.11 m: margin
+final: floor (32,2219) 831.2 m; level 1277.0 m; depth max 445.8 p50 296.4 m; area 686 km2; lake x 3-322 y 1852-2301 (inside the window); inside the box (x >= 1600): 0 % of its cells
+   spill candidate (204,1861) z 1276.95 m: margin
+   spill candidate (206,1861) z 1276.95 m: margin
+   spill candidate (205,1862) z 1276.95 m: margin
+   spill candidate (207,1862) z 1276.95 m: margin

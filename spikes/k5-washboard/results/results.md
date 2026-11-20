@@ -128,6 +128,58 @@ What a G3 form would need:
 - relief kept by calibration of K and diffusivity together against GLO-30 (relief and spectrum), not by k_dt alone;
 - the base's stage-1 breach trenches made wider than one cell, since they seed the comb on F1.
 
+## Addendum 2026-11-20: K5's window-edge dam (lead #153, #154, #156)
+Finding (#153): R1h's 691 km2 west lake in the margin is a K5 dam at the window edge.
+- In z_s, a pit at 875 m lies beside an edge cell at 1,271 m. The lake is closed in z_s, S0 and the final surface, but not in the base B (`raw/edge-west-lake.txt`).
+- With the window shifted 200 L cells west, the lake shrinks to 191 km2.
+
+Cause, in `round.rs`:
+- A window-cut catchment's edge outlet has no base: `exit_base` gives it -infinity. So the pre-step breach cuts the catchment up to `breach_max_m` below the edge.
+- `catchment_round` skips the cells whose receiver is an outlet, so the edge cell keeps its height and becomes a dam.
+
+Switch `rg_chain --k5-edge dam | free` (`round::K5_EDGE_FREE`, spike only):
+- `free` breaches the edge outlet of a window-cut catchment like any receiver; sea outlets keep their height.
+- CON-14: R1h's z_s and S0 are bit-equal on 1 and 8 threads.
+- The rule acts per catchment, before any region split.
+- Lead #156 (reading 36): `free` is the default on `spike/rg-prototype`.
+
+Survey (`raw/edge-survey.txt`). Each field is flooded with the window edge and the sea as outlets. An edge lake is a closed depression over 1 km2 and 0.5 m with a cell within 2 H1 (16 L) cells of the edge:
+
+| Window | z_s edge lakes: dam | z_s: free | S0 edge lakes: dam | S0: free | in the box (z_s / S0, dam) |
+|---|---|---|---|---|---|
+| R1h | 32, 13,619 km2, max 981 m | 0 | 100, 10,506 km2, max 1,201 m | 89, 876 km2, max 230 m | 0 / 0 % |
+| R3a | 2, 2,718 km2, max 141 m | 0 | 25, 892 km2 | 18, 64 km2 | 0 / 0 % |
+| R3b | 9, 17,110 km2, max 369 m | 0 | 24, 5,092 km2 | 18, 61 km2 | 0.21 / 0 % |
+| M1 | 89, 106,027 km2, max 1,773 m | 0 | 150, 96,499 km2, max 2,025 m | 153, 4,714 km2, max 629 m | 2.57 / 2.19 % |
+| F1 | 8, 8,214 km2, max 220 m | 0 | 54, 4,248 km2 | 36, 156 km2 | 0 / 0 % |
+
+- With `dam`, every closed depression over 1 km2 in z_s is an edge lake. With `free`, z_s has none (M1 keeps 3, 389 km2, inside).
+- The S0 edge lakes left with `free` are S0's own pits near the edge (KH and C1 at L).
+
+Gate rows: the full chain, `dam` against `free`, same build, the river gate against each run's own S0 (`raw/edge-gate.txt`):
+
+| Field | R1h dam | R1h free | M1 dam | M1 free |
+|---|---|---|---|---|
+| basin_pct (bar <= 10 %) | 11.40 | 11.40 | 10.50 FAIL | 4.07 PASS |
+| bar_uphill (<= 1 %) | 1.25 FAIL | 1.25 FAIL | 0.93 | 0.92 |
+| bar_agree_1km2 (>= 90 %) | 91.64 | 91.64 | 89.66 FAIL | 90.11 PASS |
+| bar_agree_75km2 | 97.63 | 97.62 | 92.90 | 93.84 |
+| bar_corridor | 99.93 | 99.93 | 97.85 | 98.75 |
+| river steps rising over 0.25 m | 2.34 % | 2.34 % | 4.36 % (max 398 m) | 1.81 % (max 80 m) |
+| kept basins inside | 1,999 | 1,189 | 15,558 (778,208 cells) | 4,920 (176,559 cells) |
+| final-surface edge lakes over 1 km2 | 35, 12,396 km2 | 5, 118 km2 | 98, 102,062 km2 | 41, 2,567 km2 |
+| closed over 1 km2 inside the box | 832 km2 | 832 km2 | 7,715 km2 | 1,493 km2 |
+
+- R1h: the west lake is gone (686 km2 in the final surface with `dam`, none with `free`). The box's bars are unchanged; the graph changes only in the margin (basins 10,464 to 3,465).
+- M1 has no sea, so every K5 catchment is window-cut. With `dam`, the edge lakes reach into the box: the largest is 22,113 km2 and 1,523 m deep, with 3,167 km2 inside the box. With `free`, M1 passes the basin and 1 km2 agreement bars.
+- `bar_spectrum_steep` fails on M1 in both rows (-4.19).
+
+Production (G3 port item, region seams): main's region bake has the same rule.
+- `crates/cache/src/region_bake.rs:221` and `crates/cache/src/layer_store.rs:297` set `CarveParams { window_cut: true }`.
+- `crates/generators/src/bake/round.rs:57` skips the edge outlet (GEN-172's window-cut breach).
+- So a region's edge is a dam in production too: it makes lakes along region seams, and inside a region without sea.
+- The port needs a free outflow edge, or a halo, in GEN-177's region bake, with CON-14 and partition identity tested.
+
 ## Visuals
 All panels: C1 reads at L (102 m), 52 km crops, hillshade with the sun at 10 deg from the NW, no vertical exaggeration, CPU analysis render (not the production path).
 
@@ -154,3 +206,9 @@ R1h: today, k_dt x 1.5 without diffusion (blocks and the comb), diffuse 0.02, di
 
 ![R1h, diffusion strength](images/s139-r1h-weaker.jpg)
 R1h: today, diffuse 0.005, 0.01 and 0.02: the comb weakens as the relief falls.
+
+![R1h, the west-edge lake of #153](images/s153-west-lake.jpg)
+R1h's S0 before the switch: left, the window as run, with the 691 km2 lake (level 1,286 m) against the west edge; right, the same ground in a window 200 L cells further west, largest piece 191 km2. 52 km crops, sun 10 deg from the NW; CPU analysis render (not the production path).
+
+![M1, final surface with dam and free edges](images/s154-m1-dam-free.jpg)
+M1, final surface at H1 resolution (8 x 8 L cells averaged), closed depressions over 0.5 m in blue, the box in yellow; left `--k5-edge dam`, right `free`; CPU analysis render (not the production path).
