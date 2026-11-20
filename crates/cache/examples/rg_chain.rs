@@ -1978,8 +1978,9 @@ fn main() -> Result<(), String> {
             (a, b)
         }
     };
-    // crusader #171 (DEC crusader-20, reading 35): --kept-drained drop (default since the R1h row, lead #171a) | off (every kept basin protected, the form before)
-    let kept_drained = value(&args, "--kept-drained").unwrap_or("drop");
+    // crusader #171 (DEC crusader-20, reading 35): --kept-drained exit (default, owner's option C, reading 37: only a line leaving a kept basin below its spill drains it) | drop
+    // (every crossing below the spill, the default before) | off (every kept basin protected)
+    let kept_drained = value(&args, "--kept-drained").unwrap_or("exit");
     // lead #173: --kv-sea-floor off | on, --kc-lake-outlets off | on (both off by default until the rows)
     for (opt, flag) in [("--kv-sea-floor", &KV_SEA_FLOOR), ("--kc-lake-outlets", &KC_LAKE_OUTLETS)] {
         let v = value(&args, opt).unwrap_or("off");
