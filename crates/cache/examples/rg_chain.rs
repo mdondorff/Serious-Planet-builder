@@ -1764,6 +1764,8 @@ static KC_LAKE_OUTLETS: std::sync::atomic::AtomicBool = std::sync::atomic::Atomi
 static KV_RIMS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 /// lead #177: `--kv-connect on` (default, DEC crusader-23) lowers one edge cell on each diagonal step of an L reach to the step's mean bed; `off` the vertices alone.
 static KV_CONNECT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+/// lead #178 item 1: `--sea17 on` holds reading 17 (no land cell lowered to the sea + 0.5 m or below) in KV, KC's breach and band6's breach, as KS; `off` (default until the rows) the form before.
+static SEA17: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// crusader #172 (owner, 2026-11-20): `--exception-lakes on` keeps the hollows of over-budget rises as lakes.
 static EXCEPTION_LAKES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -2015,6 +2017,7 @@ fn main() -> Result<(), String> {
         ("--kc-lake-outlets", &KC_LAKE_OUTLETS, "off"),
         ("--kv-rims", &KV_RIMS, "on"),
         ("--kv-connect", &KV_CONNECT, "on"),
+        ("--sea17", &SEA17, "off"),
     ] {
         let v = value(&args, opt).unwrap_or(default);
         if !["off", "on"].contains(&v) {
@@ -3175,7 +3178,7 @@ fn main() -> Result<(), String> {
             };
             planet_generators::bake::drain::HUMP_LIMIT_MICRO
                 .store((band6_hump * 1.0e6).round() as u64, std::sync::atomic::Ordering::Relaxed);
-            let (d6, st, deep6) = planet_generators::bake::drain::drain_selective_report(
+            let (mut d6, st, deep6) = planet_generators::bake::drain::drain_selective_report(
                 &ks_d,
                 w,
                 h,
@@ -3188,6 +3191,22 @@ fn main() -> Result<(), String> {
                 &|p| budget_l[p],
             );
             planet_generators::bake::drain::HUMP_LIMIT_MICRO.store(0, std::sync::atomic::Ordering::Relaxed);
+            // lead #178 item 1: reading 17 in band6's breach: no land cell lowered to the sea + 0.5 m or below (a cell already there keeps its height); each stopped cell a residual
+            if SEA17.load(std::sync::atomic::Ordering::Relaxed) {
+                let (mut stopped, mut short_m) = (0usize, 0.0f64);
+                for p in 0..n_l {
+                    if is_sea(p) || d6[p] >= ks_d[p] {
+                        continue;
+                    }
+                    let lo = ks_d[p].min(sea + 0.5);
+                    if d6[p] < lo {
+                        stopped += 1;
+                        short_m += lo - d6[p];
+                        d6[p] = lo;
+                    }
+                }
+                println!("RG domain {d} reading 17 in band6 (lead #178): {stopped} breach cells held at the sea + 0.5 m ({short_m:.1} m short in all; residuals)");
+            }
             let (mut lo, mut hi) = (0.0f64, 0.0f64);
             for p in (0..n_l).filter(|&p| core[p]) {
                 let dz = (d6[p] - ks_d[p]) * dx_l * dx_l / 1e9;
@@ -3584,6 +3603,7 @@ fn main() -> Result<(), String> {
                     bed_floor_m: if KV_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { sea } else { f64::NEG_INFINITY },
                     kc_lake_outlets: KC_LAKE_OUTLETS.load(std::sync::atomic::Ordering::Relaxed),
                     connect4: KV_CONNECT.load(std::sync::atomic::Ordering::Relaxed),
+                    sea_clamp_m: if SEA17.load(std::sync::atomic::Ordering::Relaxed) { sea + 0.5 } else { f64::NEG_INFINITY },
                     cross_side_grade: kv_cross_side.1,
                     ..KvParams::plan(dx_l)
                 },
@@ -3603,6 +3623,7 @@ fn main() -> Result<(), String> {
             let kc = if on("kc") { r.kc } else { kv.clone() };
             println!("RG domain {d} KV/KC ({sw:?}): {} residuals, {} KC patches", r.residuals.len(), r.patches.len());
             println!("RG domain {d} KV 4-connected rule (lead #177): {} edge cells lowered", r.connect_cells);
+            println!("RG domain {d} reading 17 in KV (lead #178): {} cuts stopped at the sea + 0.5 m (residuals)", r.sea_clamped);
             println!(
                 "RG domain {d} KV cross-slope (crusader #169): {} cells lowered, {:.6} km3; {} cells short at the budget, {:.1} m in all",
                 r.cross_cells,
@@ -3779,6 +3800,7 @@ fn main() -> Result<(), String> {
             ("margin", margin.to_string()),
             ("turned-noise", planet_generators::height::turned_noise().to_string()),
             ("kv-cross", format!("{}", KV_CROSS_MICRO.load(std::sync::atomic::Ordering::Relaxed) as f64 * 1.0e-6)),
+            ("sea17", if SEA17.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-connect", if KV_CONNECT.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-rims", if KV_RIMS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-sea-floor", if KV_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),

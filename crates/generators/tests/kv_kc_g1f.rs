@@ -660,3 +660,54 @@ fn the_4_connected_rule_lowers_one_edge_cell_on_each_diagonal_step() {
     let on_line: std::collections::BTreeSet<usize> = cells.iter().map(|&c| c as usize).collect();
     assert!(on_line.iter().all(|&c| a.kv[c] == b.kv[c]), "the vertices are KV's as before");
 }
+
+// SPIKE-132 (spike prototype; not a spec requirement)
+#[test]
+fn reading_17_holds_kvs_cut_on_land_above_the_sea_plus_half_a_metre_as_a_residual() {
+    // lead #178 item 1: a straight line on a 1 m coastal plain with its bed at 0 m (code 0); with the clamp at 0.5 m no land cell goes under 0.5 m, a cell already under it keeps
+    // its height, every stopped cut is a residual of stage kv, and without the clamp the cut reaches the bed
+    let (w, h, dx) = (12usize, 12usize, 30.0);
+    let gl = Grid::new(w, h, dx);
+    let n = w * h;
+    let mut s0 = vec![1.0; n];
+    s0[6 * w + 3] = 0.2;
+    let outlet: Vec<bool> = (0..n).map(|c| c % w == 0).collect();
+    let cells: Vec<u64> = (1..=10).rev().map(|i| (6 * w + i) as u64).collect();
+    let k = cells.len();
+    let reach = Reach {
+        id: 4,
+        level: Level::L,
+        up: 40,
+        down: 41,
+        vertices: cells.clone(),
+        parent: None,
+        owner: Domain::Tile { face: 0, ti: 0, tj: 0 },
+        attrs: Attrs {
+            a_geo: vec![1.0e6; k],
+            a_ext: vec![0.0; k],
+            a_run: vec![1.0e6; k],
+            a_run_no_ext: vec![1.0e6; k],
+            q: vec![0.01; k],
+            q_w: vec![0.01; k],
+            strahler: vec![1; k],
+            bed: vec![0; k],
+        },
+        exceptions: Vec::new(),
+    };
+    let g = Graph { body: BODY, nodes: Vec::new(), reaches: vec![reach], basins: Vec::new() };
+    let (protected, budget) = (vec![false; n], vec![100.0; n]);
+    let plain = KvParams { cap_at_incision: false, ..KvParams::plan(dx) };
+    let a = run(&gl, &s0, &outlet, &g, &protected, &budget, &plain, Switch::KvOnly);
+    let b = run(&gl, &s0, &outlet, &g, &protected, &budget, &KvParams { sea_clamp_m: 0.5, ..plain }, Switch::KvOnly);
+    assert!(cells.iter().any(|&c| a.kv[c as usize] < 0.1), "without the clamp the cut reaches the bed");
+    for c in (0..n).filter(|&c| !outlet[c]) {
+        assert!(b.kv[c] >= s0[c].min(0.5) - 1e-12, "cell {c}: {} under the clamp (s0 {})", b.kv[c], s0[c]);
+    }
+    assert_eq!(b.kv[6 * w + 3], 0.2, "a cell already under the clamp is not lowered");
+    assert!(
+        b.sea_clamped > 0 && b.residuals.iter().filter(|r| r.stage == "kv").count() >= b.sea_clamped,
+        "{} clamped, {} residuals",
+        b.sea_clamped,
+        b.residuals.len()
+    );
+}
