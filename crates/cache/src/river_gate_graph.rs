@@ -938,13 +938,17 @@ pub fn read_kc_patches(dir: &Path) -> Result<Option<(usize, f64)>, String> {
 }
 
 /// The f64 budget validator's records of a stage directory (lead 2026-11-21): `budget-violations.csv`, a header `cell,stage,used_m,budget_m` and one line per overrun or raise;
-/// none when the file is missing. A line that is not four fields is refused naming the file and the line.
+/// none when the file is missing. Another header, or a line that is not four fields, is refused naming the file and the line.
 pub fn read_validator(dir: &Path) -> Result<Option<usize>, String> {
     let p = dir.join("budget-violations.csv");
     if !p.exists() {
         return Ok(None);
     }
     let text = std::fs::read_to_string(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+    // the header is checked: a file without it would hide its first record
+    if text.lines().next().map(str::trim) != Some("cell,stage,used_m,budget_m") {
+        return Err(format!("{}: line 1: not the header `cell,stage,used_m,budget_m`", p.display()));
+    }
     let mut count = 0usize;
     for (k, line) in text.lines().enumerate().skip(1).filter(|(_, l)| !l.trim().is_empty()) {
         let f: Vec<&str> = line.split(',').collect();

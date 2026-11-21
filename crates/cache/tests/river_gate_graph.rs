@@ -571,6 +571,13 @@ fn each_stages_deep_lowering_kc_patches_and_the_spectrum_bars_are_reported() {
     )
     .unwrap();
     assert!(read_validator(&dir).unwrap_err().contains("budget-violations.csv"));
+    std::fs::write(
+        dir.join("budget-violations.csv"),
+        "12,ks,30.5000,30.0000
+",
+    )
+    .unwrap();
+    assert!(read_validator(&dir).unwrap_err().contains("line 1"), "a file without its header is refused, not read one record short");
     let _ = std::fs::remove_dir_all(&dir);
     let with = |v: Option<usize>| G2Report {
         graph: Some(GraphReport::default()),
