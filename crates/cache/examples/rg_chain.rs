@@ -2824,7 +2824,7 @@ fn main() -> Result<(), String> {
         ti: ((x0 as u64 + (c % w) as u64) / TILE) as u32,
         tj: ((y0 as u64 + (c / w) as u64) / TILE) as u32,
     };
-    let sea_l: Vec<bool> = (0..n_l).map(|c| is_sea(c)).collect();
+    let sea_l: Vec<bool> = (0..n_l).map(is_sea).collect();
     println!(
         "RG sea mask ({sea_mask}): {} sea cells of {} at or below the sea level",
         sea_l.iter().filter(|&&s| s).count(),
