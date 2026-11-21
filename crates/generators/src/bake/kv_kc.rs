@@ -257,6 +257,7 @@ pub fn run_with_rims(
 ) -> KvKc {
     let rim = |c: usize| rim_floor.map_or(f64::NEG_INFINITY, |f| f[c]);
     // lead #178 item 1: reading 17's floor of a land cell at height z (the clamp, or z itself where z is at or under it); -inf on an outlet
+    debug_assert!(!p.sea_clamp_m.is_nan(), "sea_clamp_m is NaN");
     let sea_lo = |c: usize, z: f64| if outlet[c] { f64::NEG_INFINITY } else { p.sea_clamp_m.min(z) };
     let mut sea_clamped = 0usize;
     let n = s0.len();
@@ -383,7 +384,8 @@ pub fn run_with_rims(
         let avail = left.min(s0[c] - sea_lo(c, s0[c]));
         sea_clamped += usize::from(want > avail + BUDGET_EPS_M && avail < left);
         let low = want.min(avail);
-        kv[c] = s0[c] - low;
+        // exact at the clamp (numerics review: s0 - (s0 - clamp) can land an ulp under it)
+        kv[c] = (s0[c] - low).max(sea_lo(c, s0[c]));
         if want > low + BUDGET_EPS_M {
             residuals.push(Residual { cell: c, stage: "kv", needed_m: want, available_m: avail, feature: r.id });
         }
@@ -427,8 +429,9 @@ pub fn run_with_rims(
             let left = left_at(c);
             let avail = left.min(s0[c] - sea_lo(c, s0[c]));
             let low = want.min(avail);
-            if s0[c] - low < kv[c] {
-                kv[c] = s0[c] - low;
+            let to = (s0[c] - low).max(sea_lo(c, s0[c]));
+            if to < kv[c] {
+                kv[c] = to;
                 kv_wanted[c] = kv_wanted[c].max(want);
                 connect_cells += 1;
                 if want > low + BUDGET_EPS_M {

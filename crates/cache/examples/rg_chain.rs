@@ -1766,6 +1766,8 @@ static KV_RIMS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 static KV_CONNECT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 /// lead #178 item 1: `--sea17 on` holds reading 17 (no land cell lowered to the sea + 0.5 m or below) in KV, KC's breach and band6's breach, as KS; `off` (default until the rows) the form before.
 static SEA17: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// lead #178 item 3: `--band6-floors on` holds band6's breach within each path cell's budget left after KS; `off` (default until the rows) only the floor cell's budget caps the cut.
+static BAND6_FLOORS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// crusader #172 (owner, 2026-11-20): `--exception-lakes on` keeps the hollows of over-budget rises as lakes.
 static EXCEPTION_LAKES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -2022,6 +2024,7 @@ fn main() -> Result<(), String> {
         ("--kv-rims", &KV_RIMS, "on"),
         ("--kv-connect", &KV_CONNECT, "on"),
         ("--sea17", &SEA17, "off"),
+        ("--band6-floors", &BAND6_FLOORS, "off"),
     ] {
         let v = value(&args, opt).unwrap_or(default);
         if !["off", "on"].contains(&v) {
@@ -3182,7 +3185,15 @@ fn main() -> Result<(), String> {
             };
             planet_generators::bake::drain::HUMP_LIMIT_MICRO
                 .store((band6_hump * 1.0e6).round() as u64, std::sync::atomic::Ordering::Relaxed);
-            let (mut d6, st, deep6) = planet_generators::bake::drain::drain_selective_report(
+            // lead #178 items 1 and 3 (`--band6-floors on`): band6's breach holds each cell's budget left after KS (not only the floor cell's) and, with --sea17, reading 17
+            let band6_floors = BAND6_FLOORS.load(std::sync::atomic::Ordering::Relaxed);
+            let sea17 = SEA17.load(std::sync::atomic::Ordering::Relaxed);
+            let cell_lo = |p: usize| {
+                let budget_lo = if band6_floors { ks_base[p] - budget_l[p] } else { f64::NEG_INFINITY };
+                let sea_lo = if sea17 && !is_sea(p) { ks_d[p].min(sea + 0.5) } else { f64::NEG_INFINITY };
+                budget_lo.max(sea_lo)
+            };
+            let (d6, st, deep6) = planet_generators::bake::drain::drain_selective_floors(
                 &ks_d,
                 w,
                 h,
@@ -3193,24 +3204,9 @@ fn main() -> Result<(), String> {
                 4096,
                 &|p| budget_l[p],
                 &|p| budget_l[p],
+                &cell_lo,
             );
             planet_generators::bake::drain::HUMP_LIMIT_MICRO.store(0, std::sync::atomic::Ordering::Relaxed);
-            // lead #178 item 1: reading 17 in band6's breach: no land cell lowered to the sea + 0.5 m or below (a cell already there keeps its height); each stopped cell a residual
-            if SEA17.load(std::sync::atomic::Ordering::Relaxed) {
-                let (mut stopped, mut short_m) = (0usize, 0.0f64);
-                for p in 0..n_l {
-                    if is_sea(p) || d6[p] >= ks_d[p] {
-                        continue;
-                    }
-                    let lo = ks_d[p].min(sea + 0.5);
-                    if d6[p] < lo {
-                        stopped += 1;
-                        short_m += lo - d6[p];
-                        d6[p] = lo;
-                    }
-                }
-                println!("RG domain {d} reading 17 in band6 (lead #178): {stopped} breach cells held at the sea + 0.5 m ({short_m:.1} m short in all; residuals)");
-            }
             let (mut lo, mut hi) = (0.0f64, 0.0f64);
             for p in (0..n_l).filter(|&p| core[p]) {
                 let dz = (d6[p] - ks_d[p]) * dx_l * dx_l / 1e9;
@@ -3804,6 +3800,7 @@ fn main() -> Result<(), String> {
             ("margin", margin.to_string()),
             ("turned-noise", planet_generators::height::turned_noise().to_string()),
             ("kv-cross", format!("{}", KV_CROSS_MICRO.load(std::sync::atomic::Ordering::Relaxed) as f64 * 1.0e-6)),
+            ("band6-floors", if BAND6_FLOORS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("sea17", if SEA17.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-connect", if KV_CONNECT.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-rims", if KV_RIMS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),

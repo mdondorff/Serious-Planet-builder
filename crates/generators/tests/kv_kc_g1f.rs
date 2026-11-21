@@ -711,3 +711,37 @@ fn reading_17_holds_kvs_cut_on_land_above_the_sea_plus_half_a_metre_as_a_residua
         b.residuals.len()
     );
 }
+
+// SPIKE-132 (spike prototype; not a spec requirement)
+#[test]
+fn reading_17_keeps_kcs_breach_off_land_it_would_cut_under_the_clamp() {
+    // lead #178 item 1: a 5 x 5 pit at 0.2 m behind a one-cell 1 m rim at x = 1 from the sea column: KC breaches the rim to 0.2 m without the clamp; with the clamp at 0.5 m the
+    // breach would lower a land cell under it, so the pit is filled instead and no land cell goes under min(s0, 0.5)
+    let (w, h, dx) = (10usize, 9usize, 30.0);
+    let gl = Grid::new(w, h, dx);
+    let n = w * h;
+    let mut s0 = vec![1.0; n];
+    for y in 0..h {
+        s0[y * w] = -1.0;
+        for x in 2..7 {
+            if (2..7).contains(&y) {
+                s0[y * w + x] = 0.2;
+            }
+        }
+    }
+    let outlet: Vec<bool> = (0..n).map(|c| c % w == 0).collect();
+    let g = Graph { body: BODY, nodes: Vec::new(), reaches: Vec::new(), basins: Vec::new() };
+    let (protected, budget) = (vec![false; n], vec![100.0; n]);
+    let plain = KvParams::plan(dx);
+    let a = run(&gl, &s0, &outlet, &g, &protected, &budget, &plain, Switch::KcOnly);
+    let b = run(&gl, &s0, &outlet, &g, &protected, &budget, &KvParams { sea_clamp_m: 0.5, ..plain }, Switch::KcOnly);
+    assert!(
+        a.breaches >= 1 && (0..n).any(|c| !outlet[c] && s0[c] > 0.5 && a.kc[c] < 0.5),
+        "without the clamp the rim is breached: {} breaches",
+        a.breaches
+    );
+    assert_eq!(b.breaches, 0);
+    for c in (0..n).filter(|&c| !outlet[c]) {
+        assert!(b.kc[c] >= s0[c].min(0.5), "cell {c}: {} (s0 {})", b.kc[c], s0[c]);
+    }
+}
