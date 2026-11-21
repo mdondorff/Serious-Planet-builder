@@ -591,7 +591,7 @@ fn an_inflowing_lines_bed_is_floored_at_the_spill_from_the_kept_rim_inward() {
         exceptions: Vec::new(),
     }];
     let before = reaches[0].attrs.bed.clone();
-    let (raised, rises) = floor_inlet_beds(&g, &p.basins, &p.cells, &mut reaches, &|id| Some(id as usize));
+    let fl = floor_inlet_beds(&g, &p.basins, &p.cells, &mut reaches, &|id| Some(id as usize));
     let inside: std::collections::BTreeSet<usize> = p.cells[&b.id].iter().copied().collect();
     let held = |c: usize| inside.contains(&c) || (0..8).filter_map(|d| g.neighbour(c, d)).any(|q| inside.contains(&q));
     let code = (2.0 * spill).ceil() as i32;
@@ -609,8 +609,25 @@ fn an_inflowing_lines_bed_is_floored_at_the_spill_from_the_kept_rim_inward() {
         }
     }
     let changed = (0..k).filter(|&i| after[i] != before[i]).count();
-    assert!(held_n >= 3 && changed >= 3 && raised == changed, "{raised} raised, {changed} changed, {held_n} on or inside the rim");
+    assert!(held_n >= 3 && fl.raised == changed, "{} raised, {changed} changed, {held_n} on or inside the rim", fl.raised);
+    let metres: f64 = (0..k).map(|i| 0.5 * f64::from(after[i] - before[i])).sum();
+    assert!((fl.raised_m - metres).abs() < 1e-9 && fl.raised_m > 0.0, "the raised metres are recorded: {} against {metres}", fl.raised_m);
     assert_eq!(after[0], before[0], "the source, 10 m above the spill, keeps its bed");
-    assert_eq!(rises, 0, "the line rises nowhere");
-    assert!(after.windows(2).all(|x| x[1] <= x[0]), "{after:?}");
+    // lead #179a: the carry only crosses the depression's cells; a lower vertex outside it stays and is a residual, so a rise is left only where one is recorded
+    for (i, &c) in cells.iter().enumerate() {
+        if after[i] != before[i] && !held(c as usize) {
+            panic!("vertex {i} outside the rim and the depression was raised");
+        }
+    }
+    assert_eq!(fl.rises, fl.residuals.len(), "every rise left is a recorded residual: {fl:?}");
+    assert!(fl.residuals.iter().all(|x| x.0 == 9 && x.2 > 0.0), "{fl:?}");
+    // a line coded 0 m all along: the rim and the depression rise to the spill; the vertex upstream of the rim, outside the depression, keeps 0 m and is one residual on the reach
+    let mut low = reaches.clone();
+    low[0].attrs.bed = vec![0; k];
+    let fz = floor_inlet_beds(&g, &p.basins, &p.cells, &mut low, &|id| Some(id as usize));
+    let first = (0..k).find(|&i| held(cells[i] as usize)).expect("the line reaches the rim");
+    assert!(first >= 1 && (0..first).all(|i| low[0].attrs.bed[i] == 0), "upstream of the rim stays as coded: {:?}", low[0].attrs.bed);
+    assert_eq!(fz.residuals.len(), 1, "{fz:?}");
+    assert_eq!((fz.residuals[0].0, fz.residuals[0].1), (9, first - 1));
+    assert!((fz.residuals[0].2 - 0.5 * f64::from(low[0].attrs.bed[first])).abs() < 1e-9 && fz.rises == 1, "{fz:?}");
 }

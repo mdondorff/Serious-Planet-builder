@@ -2867,6 +2867,8 @@ fn main() -> Result<(), String> {
     // lead #179 (numerics review): the trunks' floored beds per domain (the highest where domains meet), applied after the trunks take their attributes back, so the written
     // graph carries the beds KV cut to
     let mut floored_trunks: HashMap<u64, Vec<i32>> = HashMap::new();
+    // lead #179a: the inlet floor's stopped carries (cell, metres still wanted, reach), written with the residual records (stage `inlet`)
+    let mut res_inlet: Vec<(usize, f64, u64)> = Vec::new();
     let mut res_ks: Vec<(usize, f64, f64)> = Vec::new();
     let mut res_kvkc: Vec<planet_generators::bake::river_graph::Residual> = Vec::new();
     // KC's patches, (cells, volume m3), for `kc-patches.csv` (lead #172; with two regions a halo's patch is counted in each domain)
@@ -3568,11 +3570,24 @@ fn main() -> Result<(), String> {
             // lead #179 (A3, owner decision 2, 2026-11-21): `--inlet-floor on` floors every L vertex's graph bed on a kept basin's rim or inside it at the basin's spill (the
             // highest spill where basins meet), so the graph agrees with the rim KV holds (reading 35 test (a)); KV cuts to these beds
             if INLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) {
-                let (raised, rises) =
-                    planet_generators::bake::basins_rg::floor_inlet_beds(&grid_d, &pb.basins, &pb.cells, &mut gd.reaches, &|id| {
-                        to_local(id)
-                    });
-                println!("RG domain {d} inlet floor (lead #179): {raised} L vertices raised to a kept rim's spill (on or inside the rim, or upstream of one); {rises} bed rises left along L reaches");
+                let fl = planet_generators::bake::basins_rg::floor_inlet_beds(&grid_d, &pb.basins, &pb.cells, &mut gd.reaches, &|id| {
+                    to_local(id)
+                });
+                println!(
+                    "RG domain {d} inlet floor (lead #179a): {} L vertices raised ({:.1} m in all, wanted fill), {} carries stopped at a depression's edge (residuals, {:.1} m), {} bed rises left along L reaches",
+                    fl.raised,
+                    fl.raised_m,
+                    fl.residuals.len(),
+                    fl.residuals.iter().map(|x| x.2).sum::<f64>(),
+                    fl.rises
+                );
+                for &(rid, k, need) in &fl.residuals {
+                    if let Some(rch) = gd.reaches.iter().find(|x| x.id == rid) {
+                        if let Some(c) = to_local(rch.vertices[k]).filter(|&c| core[c]) {
+                            res_inlet.push((c, need, rid));
+                        }
+                    }
+                }
                 let trunk_ids: HashSet<u64> = l_trunks.iter().map(|r| r.id).collect();
                 for rch in gd.reaches.iter().filter(|x| trunk_ids.contains(&x.id)) {
                     let e = floored_trunks.entry(rch.id).or_insert_with(|| rch.attrs.bed.clone());
@@ -3975,6 +3990,9 @@ fn main() -> Result<(), String> {
         writeln!(f, "cell,stage,needed_m,available_m,feature").map_err(|e| e.to_string())?;
         for &(p, need, avail) in &res_ks {
             writeln!(f, "{p},ks,{need:.4},{avail:.4},-").map_err(|e| e.to_string())?;
+        }
+        for &(c, need, rid) in &res_inlet {
+            writeln!(f, "{c},inlet,{need:.4},0.0000,{rid:016x}").map_err(|e| e.to_string())?;
         }
         for r in &res_kvkc {
             writeln!(f, "{},{},{:.4},{:.4},{:016x}", r.cell, r.stage, r.needed_m, r.available_m, r.feature).map_err(|e| e.to_string())?;

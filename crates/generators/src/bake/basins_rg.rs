@@ -744,48 +744,69 @@ pub fn breach_path(
     None
 }
 
-/// Lead #179 (A3, owner decision 2, 2026-11-21; spike): every L vertex's graph bed on a kept basin's rim (the cells beside its cells, 8-connected) or inside it is floored at the
-/// basin's spill (the highest spill where basins meet; bed codes of 0.5 m, rounded up), so no line inside or on a kept rim lies under the spill (reading 35 test (a)).
-/// The floor is carried upstream along each reach while the bed above stands lower (numerics review: a rise where a line meets the rim needs no exception then), so the line
-/// stays non-rising. `local` maps a vertex id to its grid cell (`None` outside). Returns the vertices raised (on or inside a rim, and upstream of one) and the bed rises left
-/// along the L reaches afterwards.
+/// What [`floor_inlet_beds`] did (lead #179a): the vertices raised and the metres raised over them (reading 9's wanted fill, recorded), the carries stopped at a depression's
+/// edge (a residual each: the reach, its vertex, the metres still wanted there), and the bed rises left along the L reaches.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct InletFloor {
+    pub raised: usize,
+    pub raised_m: f64,
+    pub residuals: Vec<(u64, usize, f64)>,
+    pub rises: usize,
+}
+
+/// Lead #179 and #179a (A3, owner decision 2, 2026-11-21; spike): every L vertex's graph bed on a kept basin's rim (the cells beside its cells, 8-connected) or inside it is
+/// floored at the basin's spill (the highest spill where basins meet; bed codes of 0.5 m, rounded up), so no line inside or on a kept rim lies under the spill (reading 35 test
+/// (a)). The floor is carried upstream along a reach only over vertices inside a kept basin's depression (its cells); it stops at the first vertex at or above it, and where the
+/// next vertex upstream lies outside the depression and stands lower, the carry stops with a residual on that reach. `local` maps a vertex id to its grid cell (`None` outside).
 pub fn floor_inlet_beds(
     grid: &Grid,
     basins: &[Basin],
     cells: &Cells,
     reaches: &mut [Reach],
     local: &dyn Fn(u64) -> Option<usize>,
-) -> (usize, usize) {
-    let mut floor: BTreeMap<usize, f64> = BTreeMap::new();
+) -> InletFloor {
+    let (mut floor, mut inside): (BTreeMap<usize, f64>, BTreeMap<usize, f64>) = (BTreeMap::new(), BTreeMap::new());
     for b in basins.iter().filter(|b| b.represented == Represented::ProtectedSurface && b.spill_m.is_finite()) {
         for &c in &cells[&b.id] {
+            let f = inside.entry(c).or_insert(f64::NEG_INFINITY);
+            *f = f.max(b.spill_m);
             for q in std::iter::once(c).chain((0..8).filter_map(|k| grid.neighbour(c, k))) {
                 let f = floor.entry(q).or_insert(f64::NEG_INFINITY);
                 *f = f.max(b.spill_m);
             }
         }
     }
-    let (mut raised, mut rises) = (0usize, 0usize);
+    let mut out = InletFloor::default();
     for r in reaches.iter_mut().filter(|r| r.level == Level::L) {
         let n = r.vertices.len();
+        let before = r.attrs.bed.clone();
         let mut lifted = vec![false; n];
         for k in 0..n {
             let Some(&fl) = local(r.vertices[k]).and_then(|c| floor.get(&c)) else { continue };
             if 0.5 * f64::from(r.attrs.bed[k]) < fl {
                 r.attrs.bed[k] = (2.0 * fl).ceil() as i32;
                 lifted[k] = true;
-                raised += 1;
             }
         }
-        // upstream of a lifted vertex, a lower bed takes the one below it
+        // the carry: upstream of a lifted vertex, a lower bed inside a kept depression takes the one below it; outside the depression it stops with a residual
         for k in (0..n.saturating_sub(1)).rev() {
-            if lifted[k + 1] && r.attrs.bed[k] < r.attrs.bed[k + 1] {
+            if !lifted[k + 1] || r.attrs.bed[k] >= r.attrs.bed[k + 1] {
+                continue;
+            }
+            if local(r.vertices[k]).is_some_and(|c| inside.contains_key(&c)) {
                 r.attrs.bed[k] = r.attrs.bed[k + 1];
                 lifted[k] = true;
-                raised += 1;
+            } else if !lifted[k] {
+                out.residuals.push((r.id, k, 0.5 * f64::from(r.attrs.bed[k + 1] - r.attrs.bed[k])));
             }
         }
-        rises += r.attrs.bed.windows(2).filter(|x| x[1] > x[0]).count();
+        for k in 0..n {
+            if r.attrs.bed[k] != before[k] {
+                out.raised += 1;
+                out.raised_m += 0.5 * f64::from(r.attrs.bed[k] - before[k]);
+            }
+        }
+        out.rises += r.attrs.bed.windows(2).filter(|x| x[1] > x[0]).count();
     }
-    (raised, rises)
+    out
 }
