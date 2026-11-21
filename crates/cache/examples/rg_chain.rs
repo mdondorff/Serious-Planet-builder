@@ -1762,8 +1762,8 @@ static KC_LAKE_OUTLETS: std::sync::atomic::AtomicBool = std::sync::atomic::Atomi
 
 /// lead #176a: `--kv-rims on` (default) holds the kept basins' rims at their spill against KV's cut and KC's breach; `off` the form before.
 static KV_RIMS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
-/// lead #177: `--kv-connect on` lowers one edge cell on each diagonal step of an L reach to the step's mean bed (default off until the rows).
-static KV_CONNECT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// lead #177: `--kv-connect on` (default, DEC crusader-23) lowers one edge cell on each diagonal step of an L reach to the step's mean bed; `off` the vertices alone.
+static KV_CONNECT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 /// crusader #172 (owner, 2026-11-20): `--exception-lakes on` keeps the hollows of over-budget rises as lakes.
 static EXCEPTION_LAKES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -2018,7 +2018,7 @@ fn main() -> Result<(), String> {
         ("--kv-sea-floor", &KV_SEA_FLOOR, "off"),
         ("--kc-lake-outlets", &KC_LAKE_OUTLETS, "off"),
         ("--kv-rims", &KV_RIMS, "on"),
-        ("--kv-connect", &KV_CONNECT, "off"),
+        ("--kv-connect", &KV_CONNECT, "on"),
     ] {
         let v = value(&args, opt).unwrap_or(default);
         if !["off", "on"].contains(&v) {
