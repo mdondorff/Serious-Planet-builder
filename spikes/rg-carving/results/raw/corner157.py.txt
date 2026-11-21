@@ -1,0 +1,15 @@
+"""#157: corner-only links in a surface: a cell c and its diagonal neighbour d both lower, by > T m, than both cells that share an edge with them (the two orthogonal cells of the 2 x 2 block).
+Such a link draws as a bead of separate pits. Counted on each stage surface, inside the box (1600-cell margin), with the KS-lowered share."""
+import sys, numpy as np
+D = sys.argv[1]; St = sys.argv[2]; n = 8160; m = 1600
+ks = np.fromfile(f'{St}/ks-lower.u16', '<u2').reshape(n, n)[m:n-m, m:n-m] > 0
+for name in ('base', 's0', 'kh', 'ks', 'kv', 'final'):
+    z = np.fromfile(f'{D}/{name}.f32', '<f4').reshape(n, n)[m:n-m, m:n-m].astype(np.float64)
+    a, b, c, d = z[:-1, :-1], z[:-1, 1:], z[1:, :-1], z[1:, 1:]  # a b / c d
+    out = {}
+    for T in (2.0, 5.0, 10.0):
+        main = (np.minimum(b, c) - np.maximum(a, d)) > T   # a-d diagonal low, b and c high
+        anti = (np.minimum(a, d) - np.maximum(b, c)) > T   # b-c diagonal low
+        out[T] = (main | anti)
+    k5 = out[5.0]; kscell = (ks[:-1, :-1] | ks[1:, 1:] | ks[:-1, 1:] | ks[1:, :-1])
+    print(f'{name:5s}: corner-only 2x2 blocks over 2 / 5 / 10 m: {int(out[2.0].sum()):7d} / {int(k5.sum()):7d} / {int(out[10.0].sum()):6d}; of the 5 m ones touching a KS-lowered cell {100*np.mean(kscell[k5]) if k5.any() else 0:.0f} %')
