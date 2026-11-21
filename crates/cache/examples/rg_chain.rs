@@ -424,13 +424,25 @@ fn h1_from(
     evap: &[f32],
     budget: Option<&[f64]>,
 ) -> H1 {
-    let mut hydro = hydrology(grid, z, filled, &routing, outlet, Some(runoff), Some(evap), &HydroParams::default());
+    // lead #163 (B3, result-preserving): with `budget` every basin is crossed (reading 24) and the second call only zeroed the open-water loss of the basins' cells,
+    // the one input `hydrology` reads it through (each basin's e_open); one call with a zero evaporation gives the same Hydro
+    let zeros: Vec<f32> = if budget.is_some() { vec![0.0; evap.len()] } else { Vec::new() };
+    let mut hydro = hydrology(
+        grid,
+        z,
+        filled,
+        &routing,
+        outlet,
+        Some(runoff),
+        Some(if budget.is_some() { &zeros } else { evap }),
+        &HydroParams::default(),
+    );
     // spikes #142, reading 16: a kept basin deeper than the budget at its floor is crossed (reading 13), not a lake: no open-water loss there, so q_w = q through it.
     // The basins are the same (the loss enters only the balance); the rerun changes q_w and the balance only.
     // reading 24 (lead, 2026-11-17; owner decision 6 c): no H1 basin is a lake in the prototype, every one is crossed (q_w = q); `budget` only switches the rule on
     if budget.is_some() {
         let crossed: Vec<bool> = vec![true; hydro.basins.len()];
-        if crossed.iter().any(|&x| x) {
+        if HYDRO_TWICE.load(std::sync::atomic::Ordering::Relaxed) && crossed.iter().any(|&x| x) {
             let ev2: Vec<f32> =
                 (0..evap.len()).map(|c| if hydro.label[c] != NONE && crossed[hydro.label[c] as usize] { 0.0 } else { evap[c] }).collect();
             let again = hydrology(grid, z, filled, &routing, outlet, Some(runoff), Some(&ev2), &HydroParams::default());
@@ -1778,6 +1790,8 @@ static KEPT_DRAINED_EXIT: std::sync::atomic::AtomicBool = std::sync::atomic::Ato
 static KV_CROSS_MICRO: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// lead #158 (spikes #157), default since reading 38 (#158a): `--ks-connect 4`: KS, band6 and KH's h5 carve diagonal lines 4-connected; `8`: the former rule.
 static KS_CONNECT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// lead #163 (B3): `--hydro-twice` keeps reading 24's second hydrology call (the bit-equality check of its removal); off: one call.
+static HYDRO_TWICE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// crusader #168b (reading 32): `--trunk-bed shared` (default) keeps a two-vertex trunk image's first vertex at its up node's bed when it rises over the budget, the rise at its down end
 /// excused by its rise_over_budget exception; `lift` raises its first vertex (spikes #142's form).
@@ -1921,6 +1935,11 @@ fn main() -> Result<(), String> {
     KS_CONNECT.store(ks_connect == "4", std::sync::atomic::Ordering::Relaxed);
     // lead #159: `--dump-ks-steps` writes KS's steps into the chain directory (ks0, ks1, ks1c after KS's connect, band6, band6c after its connect; one region only)
     let dump_ks_steps = args.iter().any(|a| a == "--dump-ks-steps");
+    // lead #163 (B3, result-preserving): `--kh-self-check` reads KH three times (threads, two regions, serial) and prints the differences; off: one read
+    let kh_self_check = args.iter().any(|a| a == "--kh-self-check");
+    // lead #163 (B3): `--kv-vertices` writes <tag>-kv-vertices.csv (lead #175's census per vertex); off: not written
+    let kv_vertices = args.iter().any(|a| a == "--kv-vertices");
+    HYDRO_TWICE.store(args.iter().any(|a| a == "--hydro-twice"), std::sync::atomic::Ordering::Relaxed);
     // lead #160 (RGv0 section 25, reading 12 in every stage): `--sea-mask connected`: KS, KG-trib, the basin passes, band6, KV and KC take KG-trunk's ocean (cells at or below
     // the sea connected to an H1 sea outlet or the window's edge) as the sea; an inland cell below the sea level is land; the default since reading 39 (#160). `level`: every cell at or below it (spike only)
     let sea_mask = value(&args, "--sea-mask").unwrap_or("connected");
@@ -2513,8 +2532,8 @@ fn main() -> Result<(), String> {
         return Err(format!("--trib-on pre | post, not '{trib_on}'"));
     }
     for s in &skip {
-        if !["kg-trunk", "basins", "kg-trib", "kv", "kc"].contains(s) {
-            return Err(format!("--skip: kg-trunk, basins, kg-trib, kv, kc; not '{s}'"));
+        if !["kg-trunk", "basins", "kg-trib", "band6", "kv", "kc"].contains(s) {
+            return Err(format!("--skip: kg-trunk, basins, kg-trib, band6, kv, kc; not '{s}'"));
         }
     }
     let on = |s: &str| !skip.contains(&s);
@@ -2686,21 +2705,27 @@ fn main() -> Result<(), String> {
         // the run's read on `threads` threads; tile-locality: the same read over two regions cut at a tile column, and on one thread
         let mut one = vec![0f64; n_l];
         par_fill(&mut one, w, threads, &at);
-        let two: Vec<f64> = {
-            let mut out = vec![0f64; n_l];
-            for r in 0..2 {
-                for p in (0..n_l).filter(|&p| usize::from(p % w >= half) == r) {
-                    out[p] = at(p);
+        let (differ2, differ1) = if kh_self_check {
+            let two: Vec<f64> = {
+                let mut out = vec![0f64; n_l];
+                for r in 0..2 {
+                    for p in (0..n_l).filter(|&p| usize::from(p % w >= half) == r) {
+                        out[p] = at(p);
+                    }
                 }
+                out
+            };
+            let mut serial = vec![0f64; n_l];
+            for p in 0..n_l {
+                serial[p] = at(p);
             }
-            out
+            (
+                (0..n_l).filter(|&p| one[p].to_bits() != two[p].to_bits()).count().to_string(),
+                (0..n_l).filter(|&p| one[p].to_bits() != serial[p].to_bits()).count().to_string(),
+            )
+        } else {
+            ("not checked (--kh-self-check)".to_string(), "not checked".to_string())
         };
-        let mut serial = vec![0f64; n_l];
-        for p in 0..n_l {
-            serial[p] = at(p);
-        }
-        let differ2 = (0..n_l).filter(|&p| one[p].to_bits() != two[p].to_bits()).count();
-        let differ1 = (0..n_l).filter(|&p| one[p].to_bits() != serial[p].to_bits()).count();
         let land = (0..n_l).filter(|&p| start[p] > sea).count();
         let (mut lo10, mut hi10) = (0usize, 0usize);
         for p in (0..n_l).filter(|&p| start[p] > sea) {
@@ -2750,7 +2775,8 @@ fn main() -> Result<(), String> {
     // budgets and the L stages' deltas are against S_KH = KH(z_s) + r' (ks_base), not S0; S0 stays the reference of the ocean and the sea tests; KH against S0 is its own field.
     let t = Instant::now();
     // reading 28 (lead #170 item 7): the budget's size field relief10 on S0; the lowering it limits is measured against S_KH (reading 21)
-    let budget_l = planet_cache::river_gate_graph::budget_field(&start, w, h, L, dx_l, 25_000.0);
+    // lead #163 (B3, result-preserving): the budget field on `threads` threads (each block's value is computed alone, so the bits are the serial ones)
+    let budget_l = planet_cache::river_gate_graph::budget_field_threads(&start, w, h, L, dx_l, 25_000.0, threads);
     let budget: Vec<f64> = (0..cells).map(|c| budget_l[((c / rw) * L) * w + (c % rw) * L]).collect();
     if args.iter().any(|a| a == "--dump-s0") {
         let b: Vec<u8> = ks_base.iter().flat_map(|v| v.to_le_bytes()).collect();
@@ -3173,7 +3199,8 @@ fn main() -> Result<(), String> {
             res_d.iter().filter(|r| core[r.0]).count()
         );
         // stage 6 (spikes #146, reading 23 post): the band drain after KS1, capped by the budget at the floor; the domain's outlets and the cells outside it are its outlets
-        let ks_d = if (base_form == "aplus" || census) && ks_mode != "off" {
+        // lead #163 (B5): `--skip band6` leaves KS1's output undrained (no band drain, so no post-band6 connect pass either)
+        let ks_d = if (base_form == "aplus" || census) && ks_mode != "off" && on("band6") {
             let t6 = Instant::now();
             let outl: Vec<bool> = (0..n_l).map(|p| outlet_d[p] || !active[p]).collect();
             // spikes #147a: the drain switches (--breach-cost, --drain-rule, --breach-max-len) are the base stages' (1 and 3, at 814 m); band6 keeps SPIKE-138's rule
@@ -3658,7 +3685,7 @@ fn main() -> Result<(), String> {
                 println!("RG domain {d} KV vertex census (lead #173): {label}: {trunk} trunk-image, {other} other");
             }
             // lead #175: the census per vertex (window cell x, y; class index as printed above, 0 first; trunk image; bed, height before and after KV)
-            if regions <= 1 {
+            if regions <= 1 && kv_vertices {
                 let mut f = String::from(
                     "x,y,class,trunk,bed_m,before_m,after_kv_m,sea,window_edge
 ",
