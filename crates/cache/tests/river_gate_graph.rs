@@ -696,6 +696,19 @@ fn kept_lakes_get_their_own_bars_beside_the_raw_closed_basin_share_and_a_spill_m
     assert_eq!(mis.spill_mismatch, Some(1), "{mis:?}");
     assert_eq!(bar(&mis, "bar_violations").value, bar(&kept, "bar_violations").value + 1.0, "the mismatch is a graph violation");
     assert!(!bar(&mis, "bar_violations").pass());
+    // test (a) (lead 2026-11-21): the hand graph's beds at the pit's rim (row 203, at most 9 m) lie far under the 26 m spill: the line leaves the lake below its spill, one basin, a
+    // violation beside test (b); the same beds lifted to the spill: none
+    assert_eq!((open.spill_rim_mismatch, kept.spill_rim_mismatch, mis.spill_rim_mismatch), (Some(0), Some(1), Some(1)), "{kept:?}");
+    let mut lifted = g.clone();
+    lifted.basins = vec![kept_basin(z[cell(floor.0, floor.1)])];
+    for r in &mut lifted.reaches {
+        r.attrs.bed.iter_mut().for_each(|b| *b = (2.0 * z[cell(floor.0, floor.1)]).ceil() as i32);
+    }
+    let lifted = run(&lifted, &p);
+    assert_eq!((lifted.spill_mismatch, lifted.spill_rim_mismatch), (Some(0), Some(0)), "{lifted:?}");
+    assert_eq!(bar(&kept, "bar_violations").value, bar(&lifted, "bar_violations").value + 1.0, "the rim mismatch is a graph violation");
+    assert!(kept.fields_line().contains(" g_spill_rim=1 ") && lifted.fields_line().contains(" g_spill_rim=0 "));
+    assert!(kept.lines().iter().any(|l| l.contains("1 with a rim vertex bed under the spill by more (test a)")), "{:?}", kept.lines());
     // without a graph: the kept columns are "-", no new bar, the raw share as ever
     let plain = gate(None, &p);
     assert_eq!(
@@ -703,6 +716,12 @@ fn kept_lakes_get_their_own_bars_beside_the_raw_closed_basin_share_and_a_spill_m
         (open.basin_river_cells, None, None, None)
     );
     let pl = plain.fields_line();
-    assert!(pl.contains(" ponds_pct=- ") && pl.contains(" kept_river_pct=- ") && pl.contains(" g_spill_mismatch=- "), "{pl}");
+    assert!(
+        pl.contains(" ponds_pct=- ")
+            && pl.contains(" kept_river_pct=- ")
+            && pl.contains(" g_spill_mismatch=- ")
+            && pl.contains(" g_spill_rim=- "),
+        "{pl}"
+    );
     assert!(plain.bars().is_empty());
 }

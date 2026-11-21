@@ -423,6 +423,39 @@ pub fn kept_interiors(g: &Graph, window: &Window, label: &[u32]) -> (Vec<bool>, 
     (label.iter().map(|l| *l != u32::MAX && held.contains(l)).collect(), basins)
 }
 
+/// Spill mismatch test (a) (BUILD-060, lead 2026-11-21): the kept basins with their floor in the window whose rim (the cells outside the floor's depression in `label` that touch
+/// it, 8-connected) holds an L vertex whose bed lies more than `margin_m` under the basin's recorded spill: a line that leaves the lake below its spill.
+pub fn rim_mismatch(g: &Graph, window: &Window, label: &[u32], margin_m: f64) -> usize {
+    let mut spills: BTreeMap<u32, Vec<(u64, f64)>> = BTreeMap::new();
+    for b in g.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface) {
+        if let Some(f) = window.cell(b.floor_cell).filter(|&f| label[f] != u32::MAX) {
+            spills.entry(label[f]).or_default().push((b.id, b.spill_m));
+        }
+    }
+    let (w, h) = (window.w as i64, window.h as i64);
+    let mut hit = BTreeSet::new();
+    for r in g.reaches.iter().filter(|r| r.level == Level::L) {
+        for (k, &v) in r.vertices.iter().enumerate() {
+            let Some(c) = window.cell(v) else { continue };
+            if spills.contains_key(&label[c]) {
+                continue;
+            }
+            let bed = 0.5 * r.attrs.bed[k] as f64;
+            let (x, y) = ((c % window.w) as i64, (c / window.w) as i64);
+            for (dx, dy) in [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
+                let (qx, qy) = (x + dx, y + dy);
+                if qx < 0 || qy < 0 || qx >= w || qy >= h {
+                    continue;
+                }
+                if let Some(bs) = spills.get(&label[(qy * w + qx) as usize]) {
+                    hit.extend(bs.iter().filter(|&&(_, sp)| bed < sp - margin_m).map(|&(id, _)| id));
+                }
+            }
+        }
+    }
+    hit.len()
+}
+
 /// The river steps of BUILD-057 (a river cell inside to its river receiver; uphill above [`UPHILL_M`] on `surface`) with either end in `kept`.
 pub fn kept_steps(kept: &[bool], basins: usize, receiver: &[u32], river: &[bool], inside: &[bool], surface: &[f64]) -> KeptReport {
     let mut k = KeptReport { basins, cells: (0..kept.len()).filter(|&c| kept[c] && inside[c]).count(), ..KeptReport::default() };
