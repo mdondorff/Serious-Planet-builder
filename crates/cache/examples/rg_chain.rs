@@ -1920,8 +1920,8 @@ fn main() -> Result<(), String> {
     // lead #159: `--dump-ks-steps` writes KS's steps into the chain directory (ks0, ks1, ks1c after KS's connect, band6, band6c after its connect; one region only)
     let dump_ks_steps = args.iter().any(|a| a == "--dump-ks-steps");
     // lead #160 (RGv0 section 25, reading 12 in every stage): `--sea-mask connected`: KS, KG-trib, the basin passes, band6, KV and KC take KG-trunk's ocean (cells at or below
-    // the sea connected to an H1 sea outlet or the window's edge) as the sea; an inland cell below the sea level is land. `level` (default): every cell at or below it (spike only)
-    let sea_mask = value(&args, "--sea-mask").unwrap_or("level");
+    // the sea connected to an H1 sea outlet or the window's edge) as the sea; an inland cell below the sea level is land; the default since reading 39 (#160). `level`: every cell at or below it (spike only)
+    let sea_mask = value(&args, "--sea-mask").unwrap_or("connected");
     // lead #161: `--band6-hump M` (m; 0 off, the default): band6 takes no breach whose deepest cut exceeds M; it fills the depression within the budget, else leaves it (spike only)
     // lead #161: `--kh-lower-only`: KH's h5 blend lowers only (KH = C1 + w min(0, h4c - C1)); default off (spike only)
     let kh_lower_only = args.iter().any(|a| a == "--kh-lower-only");
