@@ -1,0 +1,1 @@
+- 2026-11-21 gate-spill-rim (BUILD-060): the spill mismatch's test (a), `g_spill_rim`: kept basins with an L vertex on their rim more than 0.5 m under the recorded spill, a graph violation beside test (b) (lead, 2026-11-21).

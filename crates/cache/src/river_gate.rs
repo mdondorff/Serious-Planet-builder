@@ -6,8 +6,8 @@ use planet_generators::bake::route::{route_rules_filled, RoundRules, Routing, NO
 use planet_generators::bake::Grid;
 
 use crate::river_gate_graph::{
-    agreement, bars_line, budget_field, budget_report, g2_bars, graph_report, kept_interiors, kept_steps, partition_report, Bar,
-    BudgetReport, G2Input, G2Report, CORRIDOR_MIN_PCT,
+    agreement, bars_line, budget_field, budget_report, g2_bars, graph_report, kept_interiors, kept_steps, partition_report, rim_mismatch,
+    Bar, BudgetReport, G2Input, G2Report, CORRIDOR_MIN_PCT,
 };
 use crate::river_suite::{
     corridor_bar_m, measure_suite, network, ridge_cells, ridge_report, trunk_burn, trunk_corridor, Network, RidgeReport, Snap, SuiteInput,
@@ -232,6 +232,8 @@ pub struct GateReport {
     pub kept_river_cells: Option<usize>,
     pub kept_lake_cells: Option<usize>,
     pub spill_mismatch: Option<usize>,
+    /// With a graph: test (a), the kept basins whose rim holds an L vertex with its bed more than `SPILL_MISMATCH_M` under the recorded spill ([`rim_mismatch`]).
+    pub spill_rim_mismatch: Option<usize>,
     /// The area of an L cell (m2), for the kept lakes' area.
     pub cell_area_m2: f64,
     /// SPIKE-114's reference count: river cells inside in any pit of 5 cm.
@@ -336,6 +338,7 @@ impl GateReport {
             ("kept_lake_cells", self.kept_lake_cells.map_or("-".to_string(), c)),
             ("kept_lake_km2", self.kept_lake_cells.map_or("-".to_string(), |k| format!("{:.2}", k as f64 * self.cell_area_m2 / 1.0e6))),
             ("g_spill_mismatch", self.spill_mismatch.map_or("-".to_string(), c)),
+            ("g_spill_rim", self.spill_rim_mismatch.map_or("-".to_string(), c)),
             ("reference_cells", c(self.reference_river_cells)),
             ("reference_pct", pct(self.reference_river_cells, n)),
             ("valley_over_cells", c(self.valley.count_over)),
@@ -557,11 +560,12 @@ impl GateReport {
             ),
             match (self.ponds_river_cells, self.kept_river_cells, self.kept_lake_cells, self.spill_mismatch) {
                 (Some(pd), Some(k), Some(a), Some(sm)) => format!(
-                    "RIVER-GATE kept lakes (BUILD-060, option C): ponds {:.2} % of the river length outside the kept lakes ({pd} cells; bar <= {PONDS_MAX_PCT} %); kept lakes {:.2} % of river length ({k} cells; bar <= {} %), {a} cells inside ({:.2} km2); {sm} kept basins with a spill mismatch over {SPILL_MISMATCH_M} m",
+                    "RIVER-GATE kept lakes (BUILD-060, option C): ponds {:.2} % of the river length outside the kept lakes ({pd} cells; bar <= {PONDS_MAX_PCT} %); kept lakes {:.2} % of river length ({k} cells; bar <= {} %), {a} cells inside ({:.2} km2); {sm} kept basins with a spill mismatch over {SPILL_MISMATCH_M} m (depression level, test b), {} with a rim vertex bed under the spill by more (test a)",
                     self.ponds_pct().unwrap_or(0.0),
                     share(k, self.river_cells),
                     p.kept_river_max_pct,
-                    a as f64 * self.cell_area_m2 / 1.0e6
+                    a as f64 * self.cell_area_m2 / 1.0e6,
+                    self.spill_rim_mismatch.unwrap_or(0)
                 ),
                 _ => "RIVER-GATE kept lakes: no graph, not measured".to_string(),
             },
@@ -649,7 +653,8 @@ impl GateReport {
         let mut out =
             g2_bars(g2, share(self.suite.uphill_steps - k.uphill, self.suite.steps - k.steps), corridor, self.params.corridor_min_pct);
         // owner 2026-11-20 (option C): a kept basin's spill mismatch is a graph violation; the ponds and the kept river length each have a bar
-        if let Some(sm) = self.spill_mismatch {
+        let sm = self.spill_mismatch.unwrap_or(0) + self.spill_rim_mismatch.unwrap_or(0);
+        if sm > 0 {
             if let Some(v) = out.iter_mut().find(|b| b.name == "bar_violations") {
                 v.value += sm as f64;
             }
@@ -1125,6 +1130,7 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
                     .count()
             })
         }),
+        spill_rim_mismatch: input.g2.as_ref().and_then(|x| x.graph.map(|gr| rim_mismatch(gr, &x.window, &label, SPILL_MISMATCH_M))),
         cell_area_m2: g.dx() * g.dx(),
         reference_river_cells: reference_cells,
         lake_river_cells: lake_cells,
