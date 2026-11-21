@@ -2864,6 +2864,9 @@ fn main() -> Result<(), String> {
     let mut cross_out: Vec<f32> = Vec::new();
     // reading 18: one region's accumulated L trunk attributes, written into the stitched graph
     let mut acc_trunks: HashMap<u64, planet_generators::bake::river_graph::Attrs> = HashMap::new();
+    // lead #179 (numerics review): the trunks' floored beds per domain (the highest where domains meet), applied after the trunks take their attributes back, so the written
+    // graph carries the beds KV cut to
+    let mut floored_trunks: HashMap<u64, Vec<i32>> = HashMap::new();
     let mut res_ks: Vec<(usize, f64, f64)> = Vec::new();
     let mut res_kvkc: Vec<planet_generators::bake::river_graph::Residual> = Vec::new();
     // KC's patches, (cells, volume m3), for `kc-patches.csv` (lead #172; with two regions a halo's patch is counted in each domain)
@@ -3569,7 +3572,14 @@ fn main() -> Result<(), String> {
                     planet_generators::bake::basins_rg::floor_inlet_beds(&grid_d, &pb.basins, &pb.cells, &mut gd.reaches, &|id| {
                         to_local(id)
                     });
-                println!("RG domain {d} inlet floor (lead #179): {raised} L vertices on or inside a kept rim raised to the spill; {rises} bed rises along L reaches after it");
+                println!("RG domain {d} inlet floor (lead #179): {raised} L vertices raised to a kept rim's spill (on or inside the rim, or upstream of one); {rises} bed rises left along L reaches");
+                let trunk_ids: HashSet<u64> = l_trunks.iter().map(|r| r.id).collect();
+                for rch in gd.reaches.iter().filter(|x| trunk_ids.contains(&x.id)) {
+                    let e = floored_trunks.entry(rch.id).or_insert_with(|| rch.attrs.bed.clone());
+                    for (a, &b) in e.iter_mut().zip(&rch.attrs.bed) {
+                        *a = (*a).max(b);
+                    }
+                }
             }
             gd.basins = pb.basins.clone();
             gd.nodes.extend(pb.nodes.iter().cloned());
@@ -3787,7 +3797,13 @@ fn main() -> Result<(), String> {
         if let Some(a) = acc_trunks.remove(&r.id) {
             r.attrs = a;
         }
+        if let Some(fb) = floored_trunks.get(&r.id).filter(|fb| fb.len() == r.attrs.bed.len()) {
+            for (a, &b) in r.attrs.bed.iter_mut().zip(fb) {
+                *a = (*a).max(b);
+            }
+        }
     }
+    drop(floored_trunks);
     println!("RG domains: {} nodes, {} reaches, {} basins after the stitch; landmass items with different contents in two domains: {landmass_conflicts}", g.nodes.len(), g.reaches.len(), g.basins.len());
     for (name, secs) in [("basins", t_basins), ("KG-trib", t_trib), ("KS1", t_ks1), ("KV and KC", t_kvkc)] {
         stamp(name, secs);

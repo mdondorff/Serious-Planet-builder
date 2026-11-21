@@ -561,8 +561,8 @@ fn a_hollow_an_over_budget_rise_crosses_is_kept_as_a_lake() {
 // SPIKE-130 (spike prototype; not a spec requirement)
 #[test]
 fn an_inflowing_lines_bed_is_floored_at_the_spill_from_the_kept_rim_inward() {
-    // lead #179 (A3): an 8 m cone basin on the eastward slope; an L line runs along its row into the floor with every bed coded 0 m. On the rim and inside, each vertex's bed
-    // rises to the spill (rounded up to a 0.5 m code); upstream of the rim the beds stay as coded, so the line rises once where it meets the rim
+    // lead #179 (A3): an 8 m cone basin on the eastward slope; an L line runs along its row into the floor, its beds falling 3 m a vertex from 10 m above the spill. On the rim
+    // and inside, each bed rises to the spill (rounded up to a 0.5 m code); upstream a bed under the one below takes it, so the line rises nowhere
     let mut z = base(false);
     cone(&mut z, 12.0, 12.0, 5.0, 8.0);
     let (g, p) = run(&z, &[]);
@@ -586,28 +586,31 @@ fn an_inflowing_lines_bed_is_floored_at_the_spill_from_the_kept_rim_inward() {
             q: vec![0.01; k],
             q_w: vec![0.01; k],
             strahler: vec![1; k],
-            bed: vec![0; k],
+            bed: (0..k).map(|n| (2.0 * (spill + 10.0 - 3.0 * n as f64)).floor() as i32).collect(),
         },
         exceptions: Vec::new(),
     }];
+    let before = reaches[0].attrs.bed.clone();
     let (raised, rises) = floor_inlet_beds(&g, &p.basins, &p.cells, &mut reaches, &|id| Some(id as usize));
     let inside: std::collections::BTreeSet<usize> = p.cells[&b.id].iter().copied().collect();
     let held = |c: usize| inside.contains(&c) || (0..8).filter_map(|d| g.neighbour(c, d)).any(|q| inside.contains(&q));
     let code = (2.0 * spill).ceil() as i32;
-    assert!(spill > 0.5, "the basin spills above the coded beds: {spill}");
-    let mut expect = 0usize;
+    let after = &reaches[0].attrs.bed;
+    let mut held_n = 0usize;
     for (i, &c) in cells.iter().enumerate() {
-        let bed = reaches[0].attrs.bed[i];
+        assert!(after[i] >= before[i], "vertex {i}: a bed is only raised");
         if held(c as usize) {
-            expect += 1;
+            held_n += 1;
             assert!(
-                bed == code && 0.5 * f64::from(bed) >= spill,
-                "vertex {i} on or inside the rim at the spill: code {bed}, spill {spill}"
+                0.5 * f64::from(after[i]) >= spill && after[i] <= code.max(before[i]),
+                "vertex {i} on or inside the rim at the spill: code {}, spill {spill}",
+                after[i]
             );
-        } else {
-            assert_eq!(bed, 0, "vertex {i} upstream of the rim keeps its bed");
         }
     }
-    assert!(expect >= 3 && raised == expect, "{raised} raised, {expect} on or inside the rim");
-    assert_eq!(rises, 1, "the line rises once, where it meets the rim");
+    let changed = (0..k).filter(|&i| after[i] != before[i]).count();
+    assert!(held_n >= 3 && changed >= 3 && raised == changed, "{raised} raised, {changed} changed, {held_n} on or inside the rim");
+    assert_eq!(after[0], before[0], "the source, 10 m above the spill, keeps its bed");
+    assert_eq!(rises, 0, "the line rises nowhere");
+    assert!(after.windows(2).all(|x| x[1] <= x[0]), "{after:?}");
 }

@@ -746,7 +746,9 @@ pub fn breach_path(
 
 /// Lead #179 (A3, owner decision 2, 2026-11-21; spike): every L vertex's graph bed on a kept basin's rim (the cells beside its cells, 8-connected) or inside it is floored at the
 /// basin's spill (the highest spill where basins meet; bed codes of 0.5 m, rounded up), so no line inside or on a kept rim lies under the spill (reading 35 test (a)).
-/// `local` maps a vertex id to its grid cell (`None` outside). Returns the vertices raised and the bed rises along the L reaches afterwards.
+/// The floor is carried upstream along each reach while the bed above stands lower (numerics review: a rise where a line meets the rim needs no exception then), so the line
+/// stays non-rising. `local` maps a vertex id to its grid cell (`None` outside). Returns the vertices raised (on or inside a rim, and upstream of one) and the bed rises left
+/// along the L reaches afterwards.
 pub fn floor_inlet_beds(
     grid: &Grid,
     basins: &[Basin],
@@ -765,10 +767,21 @@ pub fn floor_inlet_beds(
     }
     let (mut raised, mut rises) = (0usize, 0usize);
     for r in reaches.iter_mut().filter(|r| r.level == Level::L) {
-        for k in 0..r.vertices.len() {
+        let n = r.vertices.len();
+        let mut lifted = vec![false; n];
+        for k in 0..n {
             let Some(&fl) = local(r.vertices[k]).and_then(|c| floor.get(&c)) else { continue };
             if 0.5 * f64::from(r.attrs.bed[k]) < fl {
                 r.attrs.bed[k] = (2.0 * fl).ceil() as i32;
+                lifted[k] = true;
+                raised += 1;
+            }
+        }
+        // upstream of a lifted vertex, a lower bed takes the one below it
+        for k in (0..n.saturating_sub(1)).rev() {
+            if lifted[k + 1] && r.attrs.bed[k] < r.attrs.bed[k + 1] {
+                r.attrs.bed[k] = r.attrs.bed[k + 1];
+                lifted[k] = true;
                 raised += 1;
             }
         }
