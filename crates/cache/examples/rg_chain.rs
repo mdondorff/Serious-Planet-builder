@@ -1923,6 +1923,8 @@ fn main() -> Result<(), String> {
     // the sea connected to an H1 sea outlet or the window's edge) as the sea; an inland cell below the sea level is land. `level` (default): every cell at or below it (spike only)
     let sea_mask = value(&args, "--sea-mask").unwrap_or("level");
     // lead #161: `--band6-hump M` (m; 0 off, the default): band6 takes no breach whose deepest cut exceeds M; it fills the depression within the budget, else leaves it (spike only)
+    // lead #161: `--kh-lower-only`: KH's h5 blend lowers only (KH = C1 + w min(0, h4c - C1)); default off (spike only)
+    let kh_lower_only = args.iter().any(|a| a == "--kh-lower-only");
     let band6_hump: f64 =
         value(&args, "--band6-hump").map_or(Ok(0.0), |v| v.parse().map_err(|_| format!("--band6-hump <m>, not '{v}'")))?;
     if !["level", "connected"].contains(&sea_mask) {
@@ -2649,7 +2651,12 @@ fn main() -> Result<(), String> {
                     if let Some(s) = &dams {
                         wgt = wgt.max(kh::dam_weight(s, rw, rh, fx, fy, lr, 2.0, 4.0));
                     }
-                    c1 + wgt * (h4c - c1)
+                    // lead #161: `--kh-lower-only`: h5 only lowers C1 toward h4c (never raises it), as h3 never raises
+                    if kh_lower_only {
+                        c1 + wgt * (h4c - c1).min(0.0)
+                    } else {
+                        c1 + wgt * (h4c - c1)
+                    }
                 }
                 _ => kh::read_ct_clamped(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0,
             }
@@ -3758,6 +3765,7 @@ fn main() -> Result<(), String> {
             ("ks-connect", ks_connect.to_string()),
             ("sea-mask", sea_mask.to_string()),
             ("band6-hump", band6_hump.to_string()),
+            ("kh-lower-only", if kh_lower_only { "on" } else { "off" }.to_string()),
             ("k5-diffuse-amax", k5_diffuse_amax.to_string()),
             ("k5-parity", k5_parity.to_string()),
             ("ks", ks_mode.to_string()),
