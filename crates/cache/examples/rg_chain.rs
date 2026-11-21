@@ -1769,7 +1769,7 @@ static KEPT_DRAINED_EXIT: std::sync::atomic::AtomicBool = std::sync::atomic::Ato
 
 /// crusader #169 item 3: `--kv-cross`'s grade in micro (m per m), 0 off.
 static KV_CROSS_MICRO: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-/// lead #158 (spikes #157): `--ks-connect 4`: KS (and KH's h5) carve diagonal lines 4-connected; `8` (default): as before.
+/// lead #158 (spikes #157), default since reading 38 (#158a): `--ks-connect 4`: KS, band6 and KH's h5 carve diagonal lines 4-connected; `8`: the former rule.
 static KS_CONNECT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// crusader #168b (reading 32): `--trunk-bed shared` (default) keeps a two-vertex trunk image's first vertex at its up node's bed when it rises over the budget, the rise at its down end
@@ -1906,8 +1906,8 @@ fn main() -> Result<(), String> {
     }
     planet_generators::bake::round::K5_DIFFUSE_NINE.store(k5_stencil == "9", std::sync::atomic::Ordering::Relaxed);
     // spikes #154, lead #156 (reading 36): `--k5-edge free` (default: a window-cut catchment's edge outlet is breached like any receiver, a free outflow edge; round::K5_EDGE_FREE) or `dam` (the edge outlet keeps its height, the former rule and main's; spike only)
-    // lead #158: `--ks-connect 8` (default) or `4` (KS and KH h5 lower one shared edge cell on each diagonal step; spike only)
-    let ks_connect = value(&args, "--ks-connect").unwrap_or("8");
+    // lead #158, #158a (reading 38): `--ks-connect 4` (default: KS, band6 and KH h5 lower one shared edge cell on each diagonal step) or `8` (the former rule; spike only)
+    let ks_connect = value(&args, "--ks-connect").unwrap_or("4");
     if !["4", "8"].contains(&ks_connect) {
         return Err(format!("--ks-connect 4 | 8, not '{ks_connect}'"));
     }
