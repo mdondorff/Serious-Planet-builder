@@ -1,0 +1,7 @@
+band6 inside the box: 8813 breach paths (39192 cells, 0.870 km3), 3597 fills (315636 cells, 25.862 km3)
+  paths: length p50 3 cells, p90 8; max cut p50 1.7 m, p90 6.5 m, max 20.8 m; 7 without a degree-1 end
+  through a hump over    2 m: on S_KH   1938 (22.0 %), cut p50   5.7 m, length p50    7; on S0   1944 (22.1 %)
+  through a hump over    5 m: on S_KH    560 ( 6.4 %), cut p50   7.7 m, length p50    9; on S0    791 ( 9.0 %)
+  through a hump over   10 m: on S_KH     50 ( 0.6 %), cut p50   8.1 m, length p50   11; on S0    314 ( 3.6 %)
+  through a hump over   20 m: on S_KH      4 ( 0.0 %), cut p50   8.3 m, length p50   10; on S0    129 ( 1.5 %)
+  cut over 10 m through a S_KH hump over 10 m: 5 paths, 52 cells; cut p50 13.1, max 20.8 m
