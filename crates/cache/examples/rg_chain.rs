@@ -1917,6 +1917,8 @@ fn main() -> Result<(), String> {
         return Err(format!("--ks-connect 4 | 8, not '{ks_connect}'"));
     }
     KS_CONNECT.store(ks_connect == "4", std::sync::atomic::Ordering::Relaxed);
+    // lead #159: `--dump-ks-steps` writes KS's steps into the chain directory (ks0, ks1, ks1c after KS's connect, band6, band6c after its connect; one region only)
+    let dump_ks_steps = args.iter().any(|a| a == "--dump-ks-steps");
     let k5_edge = value(&args, "--k5-edge").unwrap_or("free");
     if !["dam", "free"].contains(&k5_edge) {
         return Err(format!("--k5-edge dam | free, not '{k5_edge}'"));
@@ -3028,6 +3030,10 @@ fn main() -> Result<(), String> {
             ("ks1", None) => return Err("--ks ks1 needs KG-trib's routing: do not skip kg-trib".into()),
             _ => (ks0.clone(), res0.iter().filter(|r| core[r.0]).cloned().collect()),
         };
+        if dump_ks_steps {
+            chain_f32("ks0.f32", &ks0)?;
+            chain_f32("ks1.f32", &ks_d)?;
+        }
         // lead #158 (spikes #157): `--ks-connect 4`: on each D8 diagonal step of an L reach, KS also lowers the lower of the two cells sharing an edge with both line cells to the
         // step's mean height, so the carved line is 4-connected (continuous at the mesh, no bead of corner-joined pits); within the budget left, a shortfall is a residual.
         // Claims are read from KS1's output and applied as a minimum, so the order of reaches changes nothing.
@@ -3089,6 +3095,9 @@ fn main() -> Result<(), String> {
         } else {
             (ks_d, res_d)
         };
+        if dump_ks_steps {
+            chain_f32("ks1c.f32", &ks_d)?;
+        }
         println!(
             "RG domain {d} KS: {} core cells lowered, {} core residuals",
             (0..n_l).filter(|&p| core[p] && ks_d[p] < start[p]).count(),
@@ -3225,6 +3234,9 @@ fn main() -> Result<(), String> {
         } else {
             ks_d
         };
+        if dump_ks_steps {
+            chain_f32("band6.f32", &ks_d)?;
+        }
         // lead #158 (spikes #157: the frame-44376 slot is a band6 breach path, flat at its spill level): with `--ks-connect 4`, after band6 every corner-only link of two
         // cells KS or band6 lowered (each more than 1 m under S_KH, the pair more than 1 m under both edge cells of its 2 x 2 block) gets the lower edge cell lowered to the
         // pair's mean, within the budget left; claims read from the unchanged surface, applied as a minimum
@@ -3264,6 +3276,9 @@ fn main() -> Result<(), String> {
         } else {
             ks_d
         };
+        if dump_ks_steps {
+            chain_f32("band6c.f32", &ks_d)?;
+        }
         t_ks1 += t.elapsed().as_secs_f64();
         // crusader #168 (DEC crusader-17, --trib-on post): KG-trib again on the band6 output; the first pass's tributaries and nodes leave the graph, the trunks take their KG-trunk
         // attributes back before reading 18 accumulates them again
