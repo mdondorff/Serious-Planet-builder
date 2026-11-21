@@ -1919,6 +1919,12 @@ fn main() -> Result<(), String> {
     KS_CONNECT.store(ks_connect == "4", std::sync::atomic::Ordering::Relaxed);
     // lead #159: `--dump-ks-steps` writes KS's steps into the chain directory (ks0, ks1, ks1c after KS's connect, band6, band6c after its connect; one region only)
     let dump_ks_steps = args.iter().any(|a| a == "--dump-ks-steps");
+    // lead #160 (RGv0 section 25, reading 12 in every stage): `--sea-mask connected`: KS, KG-trib, the basin passes, band6, KV and KC take KG-trunk's ocean (cells at or below
+    // the sea connected to an H1 sea outlet or the window's edge) as the sea; an inland cell below the sea level is land. `level` (default): every cell at or below it (spike only)
+    let sea_mask = value(&args, "--sea-mask").unwrap_or("level");
+    if !["level", "connected"].contains(&sea_mask) {
+        return Err(format!("--sea-mask level | connected, not '{sea_mask}'"));
+    }
     let k5_edge = value(&args, "--k5-edge").unwrap_or("free");
     if !["dam", "free"].contains(&k5_edge) {
         return Err(format!("--k5-edge dam | free, not '{k5_edge}'"));
@@ -2226,6 +2232,8 @@ fn main() -> Result<(), String> {
         println!("KG sea at L: {at_sea} cells of S0 at or below the sea level, {inland} of them inland (not connected to an H1 sea outlet or the window's edge; {:.3} % of the window)", 100.0 * inland as f64 / (w * h) as f64);
     }
 
+    // lead #160: the sea of the stages after KG-trunk (`--sea-mask`)
+    let is_sea = |c: usize| if sea_mask == "connected" { ocean[c] } else { start[c] <= sea };
     // reading 24: H1 reads no budget (every H1 basin is crossed); the budget is S_KH's, after KH (reading 21, lead #168)
     let budget: Vec<f64> = Vec::new();
 
@@ -2758,7 +2766,7 @@ fn main() -> Result<(), String> {
         let mut z = ks_base.clone();
         let mut res = Vec::new();
         for p in 0..n_l {
-            if start[p] <= sea || protected_h1[parent(p)] {
+            if is_sea(p) || protected_h1[parent(p)] {
                 continue;
             }
             let want = (rl[p] - band[p]).max(0.0);
@@ -2801,7 +2809,12 @@ fn main() -> Result<(), String> {
         ti: ((x0 as u64 + (c % w) as u64) / TILE) as u32,
         tj: ((y0 as u64 + (c / w) as u64) / TILE) as u32,
     };
-    let sea_l: Vec<bool> = (0..n_l).map(|c| start[c] <= sea).collect();
+    let sea_l: Vec<bool> = (0..n_l).map(|c| is_sea(c)).collect();
+    println!(
+        "RG sea mask ({sea_mask}): {} sea cells of {} at or below the sea level",
+        sea_l.iter().filter(|&&s| s).count(),
+        (0..n_l).filter(|&c| start[c] <= sea).count()
+    );
     let land_h1: Vec<f64> = (0..cells).filter(|&c| solve.zs[c] > 0.0).map(|c| f64::from(runoff[c])).collect();
     let runoff_mean = land_h1.iter().sum::<f64>() / land_h1.len().max(1) as f64;
     let to_local = |id: u64| -> Option<usize> {
@@ -3075,7 +3088,7 @@ fn main() -> Result<(), String> {
             }
             let (mut cut, mut short) = (0usize, 0usize);
             for e in 0..n_l {
-                if !want[e].is_finite() || !active[e] || start[e] <= sea || protected_h1[parent(e)] {
+                if !want[e].is_finite() || !active[e] || is_sea(e) || protected_h1[parent(e)] {
                     continue;
                 }
                 let need = z[e] - want[e];
@@ -3257,7 +3270,7 @@ fn main() -> Result<(), String> {
             }
             let (mut cut, mut short) = (0usize, 0usize);
             for k in 0..n_l {
-                if !want[k].is_finite() || !active[k] || start[k] <= sea || protected_h1[parent(k)] {
+                if !want[k].is_finite() || !active[k] || is_sea(k) || protected_h1[parent(k)] {
                     continue;
                 }
                 let need = z[k] - want[k];
@@ -3737,6 +3750,7 @@ fn main() -> Result<(), String> {
             ("k5-uok-scale", k5_uok_scale.to_string()),
             ("k5-edge", k5_edge.to_string()),
             ("ks-connect", ks_connect.to_string()),
+            ("sea-mask", sea_mask.to_string()),
             ("k5-diffuse-amax", k5_diffuse_amax.to_string()),
             ("k5-parity", k5_parity.to_string()),
             ("ks", ks_mode.to_string()),
