@@ -58,6 +58,10 @@ pub struct KvParams {
     /// Lead #173 (R1h: KC refills the cells KV cut beside a kept lake up to its tree's spill): KC's depressions take the protected cells as outlets, so a cut that drains into
     /// a kept lake is no pit; `false`: the protected cells only stay unfilled.
     pub kc_lake_outlets: bool,
+    /// Lead #177 (reading 38, spikes' c4c in KS): on each diagonal step of an L reach, one of the two cells sharing an edge with both vertices is lowered to the step's mean bed
+    /// (the lower of the two on KV's input, ties by cell), within the budget left and above a rim floor, so the line's water passes through an edge and the mesh draws no corner
+    /// link; `false`: the vertices alone.
+    pub connect4: bool,
 }
 
 impl KvParams {
@@ -78,6 +82,7 @@ impl KvParams {
             cross_side_grade: 0.0,
             bed_floor_m: f64::NEG_INFINITY,
             kc_lake_outlets: false,
+            connect4: false,
         }
     }
 }
@@ -125,6 +130,8 @@ pub struct KvKc {
     pub census: Vec<(&'static str, usize, usize)>,
     /// Lead #175: the census per vertex cell: (cell, class index into `census`, trunk image, bed m, height before KV, after KV).
     pub vertex_class: Vec<(usize, u8, bool, f64, f64, f64)>,
+    /// Lead #177: the edge cells the 4-connected rule lowered.
+    pub connect_cells: usize,
 }
 
 /// The least fall (m per m) the cross-slope pass keeps toward the line where it reaches the vertex's height: the gate's flood grade (1e-5; `s_floor` is 100 times it).
@@ -370,6 +377,53 @@ pub fn run_with_rims(
         }
     }
     drop(carry);
+    // lead #177: the 4-connected rule on KV's diagonal steps; the claims are taken from KV's input and the lowest one per cell applied, so the order changes nothing
+    let mut connect_cells = 0usize;
+    if p.connect4 && kv_on {
+        let orth = |c: usize| -> Vec<usize> { (0..4).filter_map(|k| grid.neighbour(c, k)).collect() };
+        let mut claim: BTreeMap<usize, (f64, u64)> = BTreeMap::new();
+        for r in &reaches {
+            for k in 0..r.vertices.len().saturating_sub(1) {
+                let (a, b) = (r.vertices[k] as usize, r.vertices[k + 1] as usize);
+                let oa = orth(a);
+                if oa.contains(&b) || !(4..8).any(|d| grid.neighbour(a, d) == Some(b)) {
+                    continue;
+                }
+                let ob = orth(b);
+                let mut shared: Vec<usize> = oa.into_iter().filter(|c| ob.contains(c)).collect();
+                if shared.is_empty() {
+                    continue;
+                }
+                shared.sort_by(|&x, &y| s0[x].total_cmp(&s0[y]).then(x.cmp(&y)));
+                let c = shared[0];
+                if protected[c] || outlet[c] {
+                    continue;
+                }
+                let mean = 0.5 * (bed_m(r.attrs.bed[k]) + bed_m(r.attrs.bed[k + 1]));
+                let e = claim.entry(c).or_insert((f64::INFINITY, r.id));
+                if mean < e.0 || (mean == e.0 && r.id < e.1) {
+                    *e = (mean, r.id);
+                }
+            }
+        }
+        for (&c, &(mean, feature)) in &claim {
+            let target = mean.max(rim(c));
+            let want = s0[c] - target;
+            if want <= 0.0 || kv[c] <= target {
+                continue;
+            }
+            let left = left_at(c);
+            let low = want.min(left);
+            if s0[c] - low < kv[c] {
+                kv[c] = s0[c] - low;
+                kv_wanted[c] = kv_wanted[c].max(want);
+                connect_cells += 1;
+                if want > low + BUDGET_EPS_M {
+                    residuals.push(Residual { cell: c, stage: "kv", needed_m: want, available_m: left, feature });
+                }
+            }
+        }
+    }
     // lead #173: the census of the vertex cells KV should cut to their bed
     let census = {
         let labels = [
@@ -627,6 +681,7 @@ pub fn run_with_rims(
         cross_cut,
         census,
         vertex_class,
+        connect_cells,
     }
 }
 

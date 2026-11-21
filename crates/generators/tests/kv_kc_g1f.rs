@@ -610,3 +610,53 @@ fn a_rim_floor_holds_a_kept_basins_rim_against_kvs_cut_without_a_residual() {
         "no floor: the bits of run"
     );
 }
+
+// SPIKE-132 (spike prototype; not a spec requirement)
+#[test]
+fn the_4_connected_rule_lowers_one_edge_cell_on_each_diagonal_step() {
+    // lead #177 (reading 38): a diagonal line on a 10 m plain, bed 5 m (codes 10) and 30 m cells: KV's cone leaves the cells beside each diagonal step at 10 m, so the line's cells
+    // meet only at corners; with connect4 one of the two cells sharing an edge with both vertices is cut to the step's mean bed, and nothing else changes
+    let (w, h, dx) = (12usize, 12usize, 30.0);
+    let gl = Grid::new(w, h, dx);
+    let n = w * h;
+    let s0 = vec![10.0; n];
+    let outlet: Vec<bool> = (0..n).map(|c| c % w == 0 || c / w == 0).collect();
+    let cells: Vec<u64> = (1..=10).rev().map(|i| (i * w + i) as u64).collect();
+    let k = cells.len();
+    let reach = Reach {
+        id: 3,
+        level: Level::L,
+        up: 30,
+        down: 31,
+        vertices: cells.clone(),
+        parent: None,
+        owner: Domain::Tile { face: 0, ti: 0, tj: 0 },
+        attrs: Attrs {
+            a_geo: vec![1.0e6; k],
+            a_ext: vec![0.0; k],
+            a_run: vec![1.0e6; k],
+            a_run_no_ext: vec![1.0e6; k],
+            q: vec![0.01; k],
+            q_w: vec![0.01; k],
+            strahler: vec![1; k],
+            bed: vec![10; k],
+        },
+        exceptions: Vec::new(),
+    };
+    let g = Graph { body: BODY, nodes: Vec::new(), reaches: vec![reach], basins: Vec::new() };
+    let (protected, budget) = (vec![false; n], vec![100.0; n]);
+    let plain = KvParams { cap_at_incision: false, ..KvParams::plan(dx) };
+    let a = run(&gl, &s0, &outlet, &g, &protected, &budget, &plain, Switch::KvOnly);
+    let b = run(&gl, &s0, &outlet, &g, &protected, &budget, &KvParams { connect4: true, ..plain }, Switch::KvOnly);
+    let at = |z: &[f64], x: usize, y: usize| z[y * w + x];
+    for i in 2..=10 {
+        // the step from (i, i) to (i - 1, i - 1): its edge cells (i - 1, i) and (i, i - 1)
+        assert!(at(&a.kv, i - 1, i) > 9.0 && at(&a.kv, i, i - 1) > 9.0, "without the rule both edge cells stay high at step {i}");
+        let low = at(&b.kv, i - 1, i).min(at(&b.kv, i, i - 1));
+        assert!((low - 5.0).abs() < 1e-9, "step {i}: one edge cell at the mean bed, {low}");
+    }
+    assert_eq!(b.connect_cells, 9);
+    assert!(b.residuals.is_empty());
+    let on_line: std::collections::BTreeSet<usize> = cells.iter().map(|&c| c as usize).collect();
+    assert!(on_line.iter().all(|&c| a.kv[c] == b.kv[c]), "the vertices are KV's as before");
+}

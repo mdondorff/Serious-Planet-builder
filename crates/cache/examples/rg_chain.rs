@@ -1760,6 +1760,8 @@ static KC_LAKE_OUTLETS: std::sync::atomic::AtomicBool = std::sync::atomic::Atomi
 
 /// lead #176a: `--kv-rims on` (default) holds the kept basins' rims at their spill against KV's cut and KC's breach; `off` the form before.
 static KV_RIMS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+/// lead #177: `--kv-connect on` lowers one edge cell on each diagonal step of an L reach to the step's mean bed (default off until the rows).
+static KV_CONNECT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// crusader #172 (owner, 2026-11-20): `--exception-lakes on` keeps the hollows of over-budget rises as lakes.
 static EXCEPTION_LAKES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -1993,9 +1995,12 @@ fn main() -> Result<(), String> {
     // (every crossing below the spill, the default before) | off (every kept basin protected)
     let kept_drained = value(&args, "--kept-drained").unwrap_or("exit");
     // lead #173: --kv-sea-floor off | on, --kc-lake-outlets off | on (both off by default until the rows)
-    for (opt, flag, default) in
-        [("--kv-sea-floor", &KV_SEA_FLOOR, "off"), ("--kc-lake-outlets", &KC_LAKE_OUTLETS, "off"), ("--kv-rims", &KV_RIMS, "on")]
-    {
+    for (opt, flag, default) in [
+        ("--kv-sea-floor", &KV_SEA_FLOOR, "off"),
+        ("--kc-lake-outlets", &KC_LAKE_OUTLETS, "off"),
+        ("--kv-rims", &KV_RIMS, "on"),
+        ("--kv-connect", &KV_CONNECT, "off"),
+    ] {
         let v = value(&args, opt).unwrap_or(default);
         if !["off", "on"].contains(&v) {
             return Err(format!("{opt} off | on, not '{v}'"));
@@ -3534,6 +3539,7 @@ fn main() -> Result<(), String> {
                     cross_side_m: kv_cross_side.0,
                     bed_floor_m: if KV_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { sea } else { f64::NEG_INFINITY },
                     kc_lake_outlets: KC_LAKE_OUTLETS.load(std::sync::atomic::Ordering::Relaxed),
+                    connect4: KV_CONNECT.load(std::sync::atomic::Ordering::Relaxed),
                     cross_side_grade: kv_cross_side.1,
                     ..KvParams::plan(dx_l)
                 },
@@ -3552,6 +3558,7 @@ fn main() -> Result<(), String> {
             let kv = if on("kv") { r.kv } else { ks_d.clone() };
             let kc = if on("kc") { r.kc } else { kv.clone() };
             println!("RG domain {d} KV/KC ({sw:?}): {} residuals, {} KC patches", r.residuals.len(), r.patches.len());
+            println!("RG domain {d} KV 4-connected rule (lead #177): {} edge cells lowered", r.connect_cells);
             println!(
                 "RG domain {d} KV cross-slope (crusader #169): {} cells lowered, {:.6} km3; {} cells short at the budget, {:.1} m in all",
                 r.cross_cells,
@@ -3725,6 +3732,7 @@ fn main() -> Result<(), String> {
             ("margin", margin.to_string()),
             ("turned-noise", planet_generators::height::turned_noise().to_string()),
             ("kv-cross", format!("{}", KV_CROSS_MICRO.load(std::sync::atomic::Ordering::Relaxed) as f64 * 1.0e-6)),
+            ("kv-connect", if KV_CONNECT.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-rims", if KV_RIMS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-sea-floor", if KV_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kc-lake-outlets", if KC_LAKE_OUTLETS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
