@@ -355,7 +355,15 @@ fn the_gate_prints_g2_columns_with_their_classes_only_when_given_g2_inputs() {
     // B's row: no G2 input, no G2 column, no classes line
     let b = run(None);
     assert!(b.g2.is_none() && b.classes_line().is_none() && !b.fields_line().contains("g_nodes="));
-    let input = G2Input { window: W, graph: Some(&g), stages: None, residual_records: None, partition: Some((&g, &g)), kc_patches: None };
+    let input = G2Input {
+        window: W,
+        graph: Some(&g),
+        stages: None,
+        residual_records: None,
+        partition: Some((&g, &g)),
+        kc_patches: None,
+        validator: None,
+    };
     let rg = run(Some(&input));
     let line = rg.fields_line();
     assert!(line.contains(" g_nodes=6 ") && line.contains(" part_first=identical") && line.contains(" agree1_km2=1 "), "{line}");
@@ -388,7 +396,8 @@ fn the_gate_prints_g2_columns_with_their_classes_only_when_given_g2_inputs() {
         represented: Represented::ProtectedSurface,
         owner: Domain::Landmass,
     }];
-    let input_k = G2Input { window: W, graph: Some(&gk), stages: None, residual_records: None, partition: None, kc_patches: None };
+    let input_k =
+        G2Input { window: W, graph: Some(&gk), stages: None, residual_records: None, partition: None, kc_patches: None, validator: None };
     let outlet_p = grid.outlets(&zp, 0.0);
     let rk = measure(
         &GateInput {
@@ -540,7 +549,39 @@ fn each_stages_deep_lowering_kc_patches_and_the_spectrum_bars_are_reported() {
     assert_eq!(read_kc_patches(&dir).unwrap(), Some((2, 1020.5)));
     std::fs::write(dir.join("kc-patches.csv"), "cells,volume_m3\n12\n").unwrap();
     assert!(read_kc_patches(&dir).unwrap_err().contains("kc-patches.csv"));
+    // lead 2026-11-21: the chain's f64 validator records, one line per overrun or raise; a missing file is none, a bad line refused naming the file; the count is a correctness
+    // column and adds to bar_violations
+    use planet_cache::river_gate_graph::{g2_bars, read_validator, GraphReport};
+    assert_eq!(read_validator(&dir).unwrap(), None);
+    std::fs::write(
+        dir.join("budget-violations.csv"),
+        "cell,stage,used_m,budget_m
+12,ks,30.5000,30.0000
+40,kc,NaN,NaN
+
+",
+    )
+    .unwrap();
+    assert_eq!(read_validator(&dir).unwrap(), Some(2));
+    std::fs::write(
+        dir.join("budget-violations.csv"),
+        "cell,stage,used_m,budget_m
+12,ks
+",
+    )
+    .unwrap();
+    assert!(read_validator(&dir).unwrap_err().contains("budget-violations.csv"));
     let _ = std::fs::remove_dir_all(&dir);
+    let with = |v: Option<usize>| G2Report {
+        graph: Some(GraphReport::default()),
+        budget: Some(BudgetReport { validator_overrun: v, ..BudgetReport::default() }),
+        ..G2Report::default()
+    };
+    let violations = |r: &G2Report| g2_bars(r, 0.0, 100.0, 97.5).into_iter().find(|b| b.name == "bar_violations").unwrap();
+    assert_eq!((violations(&with(Some(2))).value, violations(&with(None)).value), (2.0, 0.0));
+    assert!(!violations(&with(Some(2))).pass());
+    let col = |r: &G2Report| r.columns().into_iter().find(|c| c.0 == "b_validator_overrun").map(|c| c.1);
+    assert_eq!((col(&with(Some(2))), col(&with(None))), (Some("2".into()), Some("-".into())));
     // the spectrum's benchmark range: inside passes both bars; steeper than the range fails the first; rougher fails the second
     let pass = |beta: f64| spectrum_bars(beta).iter().map(|b| b.pass()).collect::<Vec<_>>();
     assert_eq!((pass(-3.5), pass(BETA_MIN - 0.01), pass(BETA_MAX + 0.01)), (vec![true, true], vec![false, true], vec![true, false]));
@@ -558,7 +599,15 @@ fn the_ridge_lowering_is_measured_against_s_kh_when_the_stages_hold_kh_and_again
     let outlet = grid.outlets(&surface, 0.0);
     let kh = StageField { name: "kh".into(), lower: (0..144).map(|c| if c % 12 == 5 { 300 } else { 0 }).collect(), fill: None };
     let stages = [kh];
-    let input = G2Input { window: W, graph: None, stages: Some(&stages), residual_records: None, partition: None, kc_patches: None };
+    let input = G2Input {
+        window: W,
+        graph: None,
+        stages: Some(&stages),
+        residual_records: None,
+        partition: None,
+        kc_patches: None,
+        validator: None,
+    };
     let run = |g2: Option<&G2Input>| {
         measure(
             &GateInput {
@@ -634,7 +683,8 @@ fn kept_lakes_get_their_own_bars_beside_the_raw_closed_basin_share_and_a_spill_m
         )
     };
     let run = |g: &Graph, p: &GateParams| {
-        let x = G2Input { window: W, graph: Some(g), stages: None, residual_records: None, partition: None, kc_patches: None };
+        let x =
+            G2Input { window: W, graph: Some(g), stages: None, residual_records: None, partition: None, kc_patches: None, validator: None };
         gate(Some(&x), p)
     };
     let bar = |r: &planet_cache::river_gate::GateReport, name: &str| r.bars().into_iter().find(|b| b.name == name).expect(name);
