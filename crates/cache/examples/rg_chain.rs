@@ -3213,6 +3213,45 @@ fn main() -> Result<(), String> {
         } else {
             ks_d
         };
+        // lead #158 (spikes #157: the frame-44376 slot is a band6 breach path, flat at its spill level): with `--ks-connect 4`, after band6 every corner-only link of two
+        // cells KS or band6 lowered (each more than 1 m under S_KH, the pair more than 1 m under both edge cells of its 2 x 2 block) gets the lower edge cell lowered to the
+        // pair's mean, within the budget left; claims read from the unchanged surface, applied as a minimum
+        let ks_d = if KS_CONNECT.load(std::sync::atomic::Ordering::Relaxed) {
+            let mut z = ks_d;
+            let mut want = vec![f64::INFINITY; n_l];
+            let low = |p: usize, z: &[f64]| z[p] < ks_base[p] - 1.0;
+            for y in 0..h - 1 {
+                for x in 0..w - 1 {
+                    let (a, b, c, e) = (y * w + x, y * w + x + 1, (y + 1) * w + x, (y + 1) * w + x + 1);
+                    for (p, q, e1, e2) in [(a, e, b, c), (b, c, a, e)] {
+                        if low(p, &z) && low(q, &z) && z[e1].min(z[e2]) - z[p].max(z[q]) > 1.0 {
+                            let k = if z[e1] < z[e2] || (z[e1] == z[e2] && e1 < e2) { e1 } else { e2 };
+                            want[k] = want[k].min(0.5 * (z[p] + z[q]));
+                        }
+                    }
+                }
+            }
+            let (mut cut, mut short) = (0usize, 0usize);
+            for k in 0..n_l {
+                if !want[k].is_finite() || !active[k] || start[k] <= sea || protected_h1[parent(k)] {
+                    continue;
+                }
+                let need = z[k] - want[k];
+                let avail = (budget_l[k] - (ks_base[k] - z[k]).max(0.0)).max(0.0).min((z[k] - (sea + 0.5)).max(0.0));
+                let u = need.min(avail);
+                if u > 0.0 {
+                    z[k] -= u;
+                    cut += 1;
+                }
+                if need > avail + 1e-9 {
+                    short += 1;
+                }
+            }
+            println!("RG domain {d} band6 connect 4 (lead #158): {cut} edge cells lowered at corner-only links of lowered cells, {short} short at the budget");
+            z
+        } else {
+            ks_d
+        };
         t_ks1 += t.elapsed().as_secs_f64();
         // crusader #168 (DEC crusader-17, --trib-on post): KG-trib again on the band6 output; the first pass's tributaries and nodes leave the graph, the trunks take their KG-trunk
         // attributes back before reading 18 accumulates them again
