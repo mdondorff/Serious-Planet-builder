@@ -1922,6 +1922,9 @@ fn main() -> Result<(), String> {
     // lead #160 (RGv0 section 25, reading 12 in every stage): `--sea-mask connected`: KS, KG-trib, the basin passes, band6, KV and KC take KG-trunk's ocean (cells at or below
     // the sea connected to an H1 sea outlet or the window's edge) as the sea; an inland cell below the sea level is land. `level` (default): every cell at or below it (spike only)
     let sea_mask = value(&args, "--sea-mask").unwrap_or("level");
+    // lead #161: `--band6-hump M` (m; 0 off, the default): band6 takes no breach whose deepest cut exceeds M; it fills the depression within the budget, else leaves it (spike only)
+    let band6_hump: f64 =
+        value(&args, "--band6-hump").map_or(Ok(0.0), |v| v.parse().map_err(|_| format!("--band6-hump <m>, not '{v}'")))?;
     if !["level", "connected"].contains(&sea_mask) {
         return Err(format!("--sea-mask level | connected, not '{sea_mask}'"));
     }
@@ -3160,6 +3163,8 @@ fn main() -> Result<(), String> {
             } else {
                 Vec::new()
             };
+            planet_generators::bake::drain::HUMP_LIMIT_MICRO
+                .store((band6_hump * 1.0e6).round() as u64, std::sync::atomic::Ordering::Relaxed);
             let (d6, st, deep6) = planet_generators::bake::drain::drain_selective_report(
                 &ks_d,
                 w,
@@ -3172,6 +3177,7 @@ fn main() -> Result<(), String> {
                 &|p| budget_l[p],
                 &|p| budget_l[p],
             );
+            planet_generators::bake::drain::HUMP_LIMIT_MICRO.store(0, std::sync::atomic::Ordering::Relaxed);
             let (mut lo, mut hi) = (0.0f64, 0.0f64);
             for p in (0..n_l).filter(|&p| core[p]) {
                 let dz = (d6[p] - ks_d[p]) * dx_l * dx_l / 1e9;
@@ -3751,6 +3757,7 @@ fn main() -> Result<(), String> {
             ("k5-edge", k5_edge.to_string()),
             ("ks-connect", ks_connect.to_string()),
             ("sea-mask", sea_mask.to_string()),
+            ("band6-hump", band6_hump.to_string()),
             ("k5-diffuse-amax", k5_diffuse_amax.to_string()),
             ("k5-parity", k5_parity.to_string()),
             ("ks", ks_mode.to_string()),
