@@ -3738,6 +3738,34 @@ fn main() -> Result<(), String> {
     println!("RG residual flags: {flagged:?}");
     drop(ks0);
     let (ks_out, kv_out, kc_out) = outs.expect("at least one domain");
+    // lead #178 item 3: the f64 budget validator's overruns and raises per stage against S_KH (reading 21), no residuals passed (the clamp records are the gate's; here only the
+    // use is checked); a ks overrun is band6's or the connect pass's, KS itself holds the budget
+    let budget_violations: Vec<(usize, &'static str, f64, f64)> = {
+        use planet_generators::bake::river_graph::{validate_budget, Stage, Violation};
+        let stages = [
+            Stage { name: "ks", out: &ks_out, wanted_lowering: None, wanted_fill: None, fills: false },
+            Stage { name: "kv", out: &kv_out, wanted_lowering: None, wanted_fill: None, fills: true },
+            Stage { name: "kc", out: &kc_out, wanted_lowering: None, wanted_fill: None, fills: true },
+        ];
+        validate_budget(&ks_base, &budget_l, &stages, &[], &g)
+            .into_iter()
+            .filter_map(|v| match v {
+                Violation::BudgetOverrun { cell, stage, used_m, budget_m } => Some((cell, stage, used_m, budget_m)),
+                Violation::RaiseInLoweringStage { cell, stage } => Some((cell, stage, f64::NAN, f64::NAN)),
+                _ => None,
+            })
+            .collect()
+    };
+    for st in ["ks", "kv", "kc"] {
+        let over: Vec<f64> = budget_violations.iter().filter(|v| v.1 == st && v.2.is_finite()).map(|v| v.2 - v.3).collect();
+        let raises = budget_violations.iter().filter(|v| v.1 == st && !v.2.is_finite()).count();
+        let big = over.iter().filter(|&&o| o > 0.1).count();
+        println!(
+            "RG budget validator (lead #178): {st}: {} overruns ({big} over 0.1 m, largest {:.2} m), {raises} raises in a lowering stage",
+            over.len(),
+            over.iter().copied().fold(0.0, f64::max)
+        );
+    }
     for r in g.reaches.iter_mut() {
         if let Some(a) = acc_trunks.remove(&r.id) {
             r.attrs = a;
@@ -3900,6 +3928,13 @@ fn main() -> Result<(), String> {
     if on("kc") {
         write("kc-lower.u16", field(&|p| kv_out[p] - kc_out[p]))?;
         write("kc-fill.u16", field(&|p| kc_out[p] - kv_out[p]))?;
+    }
+    {
+        let mut f = std::fs::File::create(stages_dir.join("budget-violations.csv")).map_err(|e| e.to_string())?;
+        writeln!(f, "cell,stage,used_m,budget_m").map_err(|e| e.to_string())?;
+        for &(c, st, u, b) in &budget_violations {
+            writeln!(f, "{c},{st},{u:.4},{b:.4}").map_err(|e| e.to_string())?;
+        }
     }
     {
         let mut f = std::fs::File::create(stages_dir.join("residuals.csv")).map_err(|e| e.to_string())?;
