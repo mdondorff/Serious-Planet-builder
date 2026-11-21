@@ -1926,6 +1926,10 @@ fn main() -> Result<(), String> {
     let sea_mask = value(&args, "--sea-mask").unwrap_or("connected");
     // lead #161: `--band6-hump M` (m; 0 off, the default): band6 takes no breach whose deepest cut exceeds M; it fills the depression within the budget, else leaves it (spike only)
     // lead #161, #161a (reading 40): `--kh-lower-only on` (default): KH's h5 blend lowers only (KH = C1 + w min(0, h4c - C1)); `off`: the former blend, which also raises (spike only)
+    // lead #162 (review-fable-rgv0 section 1, candidate 1): `--trib-once`: no basins pass 1 and no KG-trib pass 1; KS1 clips along a routing of KS0 itself (KG-trib's rules:
+    // route_rules_filled, eps 1e-3, seed 1, D8 area with the H1 inflow, channels from 1 km2 and downstream; a channel cell without a trunk bed takes the running minimum
+    // down its channel), and KG-trib runs once, after band6 (--trib-on post). Default off (spike only)
+    let trib_once = args.iter().any(|a| a == "--trib-once");
     let kh_lower_only = match value(&args, "--kh-lower-only").unwrap_or("on") {
         "on" => true,
         "off" => false,
@@ -2942,7 +2946,7 @@ fn main() -> Result<(), String> {
         let mut first_nodes: Vec<Node> = Vec::new();
         // basins (crusader's G1e) on KS0, the L trunk reaches as spill receivers
         let t = Instant::now();
-        if on("basins") {
+        if on("basins") && !trib_once {
             use planet_generators::bake::basins_rg::BasinParams;
             use planet_generators::bake::river_graph::Represented;
             // crusader's produce_ids (spike/g1d c75c8641): reach vertices read and every anchor and id written as global ids; Produced.cells in grid cells
@@ -2978,7 +2982,40 @@ fn main() -> Result<(), String> {
         let mut fine: Option<(Vec<u32>, Vec<bool>)> = None;
         // the first pass's tributary reaches and nodes (crusader #168: --trib-on post replaces them)
         let mut trib_first: (BTreeSet<u64>, BTreeSet<u64>) = (BTreeSet::new(), BTreeSet::new());
-        if on("kg-trib") {
+        // lead #162: --trib-once's routing of KS0 for KS1, and the running-minimum bed of its channels
+        let mut bed_min: Option<Vec<f64>> = None;
+        if trib_once && trib_on == "post" {
+            use planet_generators::bake::route::route_rules_filled;
+            let outlet: Vec<bool> = (0..n_l).map(|c| active[c] && (sea_l[c] || exit[c] || on_trunk.contains(&c))).collect();
+            let (r, _filled) = route_rules_filled(&grid_d, &ks0[..], &outlet, 1.0e-3, 1, 0.0, None, RoundRules::ROUND);
+            let mut a: Vec<f64> = (0..n_l).map(|c| if active[c] && !outlet[c] { dx_l * dx_l + seed[c] } else { 0.0 }).collect();
+            let mut channel = vec![false; n_l];
+            let mut bm: Vec<f64> = ks0.clone();
+            for &c in r.order.iter().rev() {
+                let c = c as usize;
+                let to = r.receiver[c];
+                if active[c] && !outlet[c] && !protected_h1[parent(c)] && a[c] >= 1.0e6 {
+                    channel[c] = true;
+                }
+                if to != NONE {
+                    let to = to as usize;
+                    a[to] += a[c];
+                    if channel[c] {
+                        if active[to] && !outlet[to] && !protected_h1[parent(to)] {
+                            channel[to] = true;
+                        }
+                        bm[to] = bm[to].min(bm[c]);
+                    }
+                }
+            }
+            println!(
+                "RG domain {d} trib-once (lead #162): KS1 on a routing of KS0, {} channel cells; no basins pass 1, no KG-trib pass 1",
+                channel.iter().filter(|&&x| x).count()
+            );
+            bed_min = Some(bm);
+            fine = Some((r.receiver, channel));
+        }
+        if on("kg-trib") && !(trib_once && trib_on == "post") {
             use planet_generators::bake::kg_trib::{accumulate_trunks, extract, Input, Params, Trunk};
             let trunks: Vec<Trunk> = l_trunks
                 .iter()
@@ -3047,6 +3084,8 @@ fn main() -> Result<(), String> {
                     tgt[c] = if channel[c] || r == NONE {
                         if bed[c].is_finite() {
                             bed[c]
+                        } else if let Some(bm) = &bed_min {
+                            bm[c]
                         } else {
                             ks0[c]
                         }
@@ -3773,6 +3812,7 @@ fn main() -> Result<(), String> {
             ("sea-mask", sea_mask.to_string()),
             ("band6-hump", band6_hump.to_string()),
             ("kh-lower-only", if kh_lower_only { "on" } else { "off" }.to_string()),
+            ("trib-once", if trib_once { "on" } else { "off" }.to_string()),
             ("k5-diffuse-amax", k5_diffuse_amax.to_string()),
             ("k5-parity", k5_parity.to_string()),
             ("ks", ks_mode.to_string()),
