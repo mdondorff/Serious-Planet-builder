@@ -21,7 +21,8 @@ use planet_cache::river_gate::{
     KEPT_RIVER_MAX_PCT_MOUNTAIN,
 };
 use planet_cache::river_gate_graph::{
-    h1_trunks, read_graph, read_kc_patches, read_stages, read_surface, G2Input, Window, CORRIDOR_MIN_PCT, CORRIDOR_MIN_PCT_MOUNTAIN,
+    h1_trunks, read_graph, read_kc_patches, read_stages, read_surface, read_validator, G2Input, Window, CORRIDOR_MIN_PCT,
+    CORRIDOR_MIN_PCT_MOUNTAIN,
 };
 use planet_core::{Face, TangentWarp, Vec3};
 use planet_generators::global::{read_elevation_c1, GlobalSample, LatticeSource, ReadError};
@@ -394,6 +395,11 @@ fn main() -> Result<(), String> {
         Some(dir) => read_kc_patches(Path::new(dir))?,
         None => None,
     };
+    // lead 2026-11-21: the chain's f64 budget validator records beside the stage fields
+    let validator = match value(&args, "--stages") {
+        Some(dir) => read_validator(Path::new(dir))?,
+        None => None,
+    };
     let g2_input = (graph.is_some() || partition.is_some() || stages.is_some()).then(|| G2Input {
         window: Window { x0: x0 as u64, y0: y0 as u64, w, h },
         graph: graph.as_ref(),
@@ -401,6 +407,7 @@ fn main() -> Result<(), String> {
         residual_records,
         partition: partition.as_ref().map(|(a, b)| (a, b)),
         kc_patches,
+        validator,
     });
     let report = measure(
         &GateInput {

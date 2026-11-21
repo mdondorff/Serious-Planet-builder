@@ -1190,6 +1190,7 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
                 kept: kept.as_ref().map(|(k, b)| kept_steps(k, *b, &routing.receiver, &river, input.inside, input.surface)),
                 budget: x.stages.zip(budget.as_ref()).map(|(st, b)| BudgetReport {
                     kc_patches: x.kc_patches,
+                    validator_overrun: x.validator,
                     ..budget_report(st, b, &land, input.inside, x.residual_records, x.graph)
                 }),
                 partition: x.partition.map(|(a, b)| partition_report(a, b)),
