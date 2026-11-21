@@ -1436,6 +1436,7 @@ fn build_graph(
     threads: usize,
     low_centre: bool,
     ocean: &[bool],
+    runoff_mean: f64,
 ) -> (Graph, Vec<String>) {
     let (x0, y0, w, h, rw) = window;
     let h1_gid = |c: u32| grid.global_id(c as usize);
@@ -1466,8 +1467,9 @@ fn build_graph(
         let attrs = Attrs {
             a_geo: r.cells.iter().map(|&c| h1.d8[c as usize]).collect(),
             a_ext: vec![0.0; n],
-            a_run: r.cells.iter().map(|&c| h1.hydro.q[c as usize]).collect(),
-            a_run_no_ext: r.cells.iter().map(|&c| h1.hydro.q[c as usize]).collect(),
+            // lead #180: a runoff-weighted area (m2), the discharge over KG-trib's uniform runoff; it held q (m3/s) before
+            a_run: r.cells.iter().map(|&c| h1.hydro.q[c as usize] / runoff_mean).collect(),
+            a_run_no_ext: r.cells.iter().map(|&c| h1.hydro.q[c as usize] / runoff_mean).collect(),
             q: r.cells.iter().map(|&c| h1.hydro.q[c as usize]).collect(),
             q_w: r.cells.iter().map(|&c| h1.hydro.qw[c as usize]).collect(),
             strahler: vec![order[r.seg]; n],
@@ -1717,8 +1719,8 @@ fn build_graph(
         let attrs = Attrs {
             a_geo: (0..n).map(|v| h1.d8[at(v)]).collect(),
             a_ext: vec![0.0; n],
-            a_run: (0..n).map(|v| h1.hydro.q[at(v)]).collect(),
-            a_run_no_ext: (0..n).map(|v| h1.hydro.q[at(v)]).collect(),
+            a_run: (0..n).map(|v| h1.hydro.q[at(v)] / runoff_mean).collect(),
+            a_run_no_ext: (0..n).map(|v| h1.hydro.q[at(v)] / runoff_mean).collect(),
             q: (0..n).map(|v| h1.hydro.q[at(v)]).collect(),
             q_w: (0..n).map(|v| h1.hydro.qw[at(v)]).collect(),
             strahler: vec![order[hr.seg]; n],
@@ -2801,9 +2803,12 @@ fn main() -> Result<(), String> {
 
     // ---- KG-trunk (spikes' code, G1c) on KS0
     let t = Instant::now();
+    // KG-trib's uniform runoff (m/s), q = a_run r; lead #180: the H1 reaches' a_run is a runoff-weighted area q / r, as KG-trib's L reaches carry it
+    let land_h1: Vec<f64> = (0..cells).filter(|&c| solve.zs[c] > 0.0).map(|c| f64::from(runoff[c])).collect();
+    let runoff_mean = land_h1.iter().sum::<f64>() / land_h1.len().max(1) as f64;
     let window = (x0 as u64, y0 as u64, w, h, rw);
     let mut g = if on("kg-trunk") {
-        build_graph(&h1, &reaches, grid, &start, &ks_base, &ks0, &budget, window, sea, bar, &order, threads, low, &ocean).0
+        build_graph(&h1, &reaches, grid, &start, &ks_base, &ks0, &budget, window, sea, bar, &order, threads, low, &ocean, runoff_mean).0
     } else {
         Graph { body: BODY, nodes: Vec::new(), reaches: Vec::new(), basins: Vec::new() }
     };
@@ -2825,8 +2830,6 @@ fn main() -> Result<(), String> {
         sea_l.iter().filter(|&&s| s).count(),
         (0..n_l).filter(|&c| start[c] <= sea).count()
     );
-    let land_h1: Vec<f64> = (0..cells).filter(|&c| solve.zs[c] > 0.0).map(|c| f64::from(runoff[c])).collect();
-    let runoff_mean = land_h1.iter().sum::<f64>() / land_h1.len().max(1) as f64;
     let to_local = |id: u64| -> Option<usize> {
         let (x, y) = gxy(id);
         let (lx, ly) = (x as i64 - x0, y as i64 - y0);
@@ -3795,6 +3798,18 @@ fn main() -> Result<(), String> {
             ("kv-cross-side", format!("{},{}", kv_cross_side.0, kv_cross_side.1)),
             ("trunk-bed", if TRUNK_BED_SHARED.load(std::sync::atomic::Ordering::Relaxed) { "shared" } else { "lift" }.to_string()),
             ("trib-on", trib_on.to_string()),
+            // lead #180 (RGv0 section 25): every switch, so a chain is fully traceable
+            ("base-stages", base_stages.to_string()),
+            ("drain-rule", drain_rule.to_string()),
+            ("breach-cost", breach_cost.to_string()),
+            ("breach-max-len", breach_max_len.to_string()),
+            ("centre", if low { "low" } else { "maximin" }.to_string()),
+            ("threads", threads.to_string()),
+            ("census", args.iter().any(|a| a == "--census").to_string()),
+            ("probe-base", args.iter().any(|a| a == "--probe-base").to_string()),
+            ("stop-after-kh", args.iter().any(|a| a == "--stop-after-kh").to_string()),
+            ("dump-s0", args.iter().any(|a| a == "--dump-s0").to_string()),
+            ("dump-c1", args.iter().any(|a| a == "--dump-c1").to_string()),
         ] {
             t += &format!("switch {k} {v}\n");
         }
