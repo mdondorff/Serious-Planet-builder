@@ -1766,6 +1766,8 @@ static KV_RIMS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 static KV_CONNECT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 /// lead #178 item 1: `--sea17 on` holds reading 17 (no land cell lowered to the sea + 0.5 m or below) in KV, KC's breach and band6's breach, as KS; `off` (default until the rows) the form before.
 static SEA17: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// lead #179: `--inlet-floor on` floors the graph bed of every L vertex on or inside a kept basin's rim at its spill; `off` (default) the beds as coded.
+static INLET_FLOOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// lead #178 item 3: `--band6-floors on` holds band6's breach within each path cell's budget left after KS; `off` (default until the rows) only the floor cell's budget caps the cut.
 static BAND6_FLOORS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -2025,6 +2027,7 @@ fn main() -> Result<(), String> {
         ("--kv-connect", &KV_CONNECT, "on"),
         ("--sea17", &SEA17, "off"),
         ("--band6-floors", &BAND6_FLOORS, "off"),
+        ("--inlet-floor", &INLET_FLOOR, "off"),
     ] {
         let v = value(&args, opt).unwrap_or(default);
         if !["off", "on"].contains(&v) {
@@ -2855,7 +2858,8 @@ fn main() -> Result<(), String> {
     let l_trunks: Vec<GReach> = g.reaches.iter().filter(|r| r.level == Level::L).cloned().collect();
     let on_trunk: HashSet<usize> = l_trunks.iter().flat_map(|r| r.vertices.iter().filter_map(|&c| to_local(c))).collect();
     // the stitched KS, KV and KC outputs (lead #168 item 2, memory): made after the first domain's KV/KC, not before; with one region the domain's own fields are moved in
-    let mut outs: Option<(Vec<f64>, Vec<f64>, Vec<f64>)> = None;
+    // ks (KS1, before band6), band6 (KS's output after band6 and its connect), kv, kc: the validator's stages (lead #178: band6 fills, KS only lowers)
+    let mut outs: Option<(Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>)> = None;
     // the cross-slope pass's cut per window cell (DEC crusader-19's sheet; empty when off)
     let mut cross_out: Vec<f32> = Vec::new();
     // reading 18: one region's accumulated L trunk attributes, written into the stitched graph
@@ -3140,6 +3144,8 @@ fn main() -> Result<(), String> {
             res_d.iter().filter(|r| core[r.0]).count()
         );
         // stage 6 (spikes #146, reading 23 post): the band drain after KS1, capped by the budget at the floor; the domain's outlets and the cells outside it are its outlets
+        // lead #178: KS1's surface before band6, the validator's ks stage
+        let ks1_d = ks_d.clone();
         let ks_d = if (base_form == "aplus" || census) && ks_mode != "off" {
             let t6 = Instant::now();
             let outl: Vec<bool> = (0..n_l).map(|p| outlet_d[p] || !active[p]).collect();
@@ -3556,6 +3562,15 @@ fn main() -> Result<(), String> {
                 }
                 println!("RG domain {d} kept rims (lead #176a): {rims} rim cells held at their basin's spill against KV and KC");
             }
+            // lead #179 (A3, owner decision 2, 2026-11-21): `--inlet-floor on` floors every L vertex's graph bed on a kept basin's rim or inside it at the basin's spill (the
+            // highest spill where basins meet), so the graph agrees with the rim KV holds (reading 35 test (a)); KV cuts to these beds
+            if INLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) {
+                let (raised, rises) =
+                    planet_generators::bake::basins_rg::floor_inlet_beds(&grid_d, &pb.basins, &pb.cells, &mut gd.reaches, &|id| {
+                        to_local(id)
+                    });
+                println!("RG domain {d} inlet floor (lead #179): {raised} L vertices on or inside a kept rim raised to the spill; {rises} bed rises along L reaches after it");
+            }
             gd.basins = pb.basins.clone();
             gd.nodes.extend(pb.nodes.iter().cloned());
             first_nodes.clear();
@@ -3681,15 +3696,15 @@ fn main() -> Result<(), String> {
         t_kvkc += t.elapsed().as_secs_f64();
         // the domain's share: its core's cells and residuals, the items its core's tiles own
         if regions <= 1 && outs.is_none() {
-            let (mut a, mut b, mut c) = (ks_d, kv_d, kc_d);
+            let (mut a0, mut a, mut b, mut c) = (ks1_d, ks_d, kv_d, kc_d);
             for p in (0..n_l).filter(|&p| !core[p]) {
-                (a[p], b[p], c[p]) = (ks0[p], ks0[p], ks0[p]);
+                (a0[p], a[p], b[p], c[p]) = (ks0[p], ks0[p], ks0[p], ks0[p]);
             }
-            outs = Some((a, b, c));
+            outs = Some((a0, a, b, c));
         } else {
-            let (ks_out, kv_out, kc_out) = outs.get_or_insert_with(|| (ks0.clone(), ks0.clone(), ks0.clone()));
+            let (ks1_out, ks_out, kv_out, kc_out) = outs.get_or_insert_with(|| (ks0.clone(), ks0.clone(), ks0.clone(), ks0.clone()));
             for p in (0..n_l).filter(|&p| core[p]) {
-                (ks_out[p], kv_out[p], kc_out[p]) = (ks_d[p], kv_d[p], kc_d[p]);
+                (ks1_out[p], ks_out[p], kv_out[p], kc_out[p]) = (ks1_d[p], ks_d[p], kv_d[p], kc_d[p]);
             }
         }
         res_ks.extend(res_d.into_iter().filter(|r| core[r.0]));
@@ -3737,13 +3752,14 @@ fn main() -> Result<(), String> {
     let flagged = planet_generators::bake::kv_kc::flag_residuals(&mut g, &res_kvkc);
     println!("RG residual flags: {flagged:?}");
     drop(ks0);
-    let (ks_out, kv_out, kc_out) = outs.expect("at least one domain");
+    let (ks1_out, ks_out, kv_out, kc_out) = outs.expect("at least one domain");
     // lead #178 item 3: the f64 budget validator's overruns and raises per stage against S_KH (reading 21), no residuals passed (the clamp records are the gate's; here only the
-    // use is checked); a ks overrun is band6's or the connect pass's, KS itself holds the budget
+    // use is checked); ks is KS1 (a lowering stage), band6 its drain and connect pass (it fills too)
     let budget_violations: Vec<(usize, &'static str, f64, f64)> = {
         use planet_generators::bake::river_graph::{validate_budget, Stage, Violation};
         let stages = [
-            Stage { name: "ks", out: &ks_out, wanted_lowering: None, wanted_fill: None, fills: false },
+            Stage { name: "ks", out: &ks1_out, wanted_lowering: None, wanted_fill: None, fills: false },
+            Stage { name: "band6", out: &ks_out, wanted_lowering: None, wanted_fill: None, fills: true },
             Stage { name: "kv", out: &kv_out, wanted_lowering: None, wanted_fill: None, fills: true },
             Stage { name: "kc", out: &kc_out, wanted_lowering: None, wanted_fill: None, fills: true },
         ];
@@ -3756,7 +3772,8 @@ fn main() -> Result<(), String> {
             })
             .collect()
     };
-    for st in ["ks", "kv", "kc"] {
+    drop(ks1_out);
+    for st in ["ks", "band6", "kv", "kc"] {
         let over: Vec<f64> = budget_violations.iter().filter(|v| v.1 == st && v.2.is_finite()).map(|v| v.2 - v.3).collect();
         let raises = budget_violations.iter().filter(|v| v.1 == st && !v.2.is_finite()).count();
         let big = over.iter().filter(|&&o| o > 0.1).count();
@@ -3828,6 +3845,7 @@ fn main() -> Result<(), String> {
             ("margin", margin.to_string()),
             ("turned-noise", planet_generators::height::turned_noise().to_string()),
             ("kv-cross", format!("{}", KV_CROSS_MICRO.load(std::sync::atomic::Ordering::Relaxed) as f64 * 1.0e-6)),
+            ("inlet-floor", if INLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-floors", if BAND6_FLOORS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("sea17", if SEA17.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-connect", if KV_CONNECT.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),

@@ -743,3 +743,36 @@ pub fn breach_path(
     }
     None
 }
+
+/// Lead #179 (A3, owner decision 2, 2026-11-21; spike): every L vertex's graph bed on a kept basin's rim (the cells beside its cells, 8-connected) or inside it is floored at the
+/// basin's spill (the highest spill where basins meet; bed codes of 0.5 m, rounded up), so no line inside or on a kept rim lies under the spill (reading 35 test (a)).
+/// `local` maps a vertex id to its grid cell (`None` outside). Returns the vertices raised and the bed rises along the L reaches afterwards.
+pub fn floor_inlet_beds(
+    grid: &Grid,
+    basins: &[Basin],
+    cells: &Cells,
+    reaches: &mut [Reach],
+    local: &dyn Fn(u64) -> Option<usize>,
+) -> (usize, usize) {
+    let mut floor: BTreeMap<usize, f64> = BTreeMap::new();
+    for b in basins.iter().filter(|b| b.represented == Represented::ProtectedSurface && b.spill_m.is_finite()) {
+        for &c in &cells[&b.id] {
+            for q in std::iter::once(c).chain((0..8).filter_map(|k| grid.neighbour(c, k))) {
+                let f = floor.entry(q).or_insert(f64::NEG_INFINITY);
+                *f = f.max(b.spill_m);
+            }
+        }
+    }
+    let (mut raised, mut rises) = (0usize, 0usize);
+    for r in reaches.iter_mut().filter(|r| r.level == Level::L) {
+        for k in 0..r.vertices.len() {
+            let Some(&fl) = local(r.vertices[k]).and_then(|c| floor.get(&c)) else { continue };
+            if 0.5 * f64::from(r.attrs.bed[k]) < fl {
+                r.attrs.bed[k] = (2.0 * fl).ceil() as i32;
+                raised += 1;
+            }
+        }
+        rises += r.attrs.bed.windows(2).filter(|x| x[1] > x[0]).count();
+    }
+    (raised, rises)
+}
