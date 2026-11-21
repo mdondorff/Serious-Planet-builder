@@ -26,6 +26,9 @@ pub static PREFER_FILL: std::sync::atomic::AtomicBool = std::sync::atomic::Atomi
 /// lead #161 (spike only): a breach whose deepest cut exceeds this many micrometres is not taken: the depression is filled when the fill is allowed, else it stays
 /// (an over-budget deep depression); 0: off. rg_chain sets it around band6's drain only.
 pub static HUMP_LIMIT_MICRO: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// lead #161a, option (c) (spike only): with [`HUMP_LIMIT_MICRO`] set, a depression whose breach would cut deeper than the limit is neither breached nor filled: it stays
+/// (a lake behind the hump for the basin pass that follows); `false`: it is filled when the fill is allowed.
+pub static HUMP_LAKE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// spikes #147 (spike only): a breach only along a path of at most this many cells (Lindsay's hybrid breach-fill); 0: no limit.
 pub static BREACH_MAX_LEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 /// spikes #147a (spike only): the breach path's cost per cell is the square of the cut (`max(0, z - z_floor)`^2, m^2), so a path of many shallow cuts beats one of a few
@@ -307,8 +310,12 @@ pub fn drain_selective_report(
             };
             let prefer_fill = PREFER_FILL.load(std::sync::atomic::Ordering::Relaxed);
             let hump = HUMP_LIMIT_MICRO.load(std::sync::atomic::Ordering::Relaxed);
-            let breach_ok = breach_ok && (hump == 0 || cut <= hump as f64 * 1.0e-6);
-            if breach_ok && (!fill_ok || (!prefer_fill && breach_v <= fill_v)) {
+            let over_hump = hump != 0 && breach_ok && cut > hump as f64 * 1.0e-6;
+            let breach_ok = breach_ok && !over_hump;
+            if over_hump && HUMP_LAKE.load(std::sync::atomic::Ordering::Relaxed) {
+                deep += 1;
+                deeps.push(Deep { floor: *floor, cells: cells.len(), depth: lv - zf, cut });
+            } else if breach_ok && (!fill_ok || (!prefer_fill && breach_v <= fill_v)) {
                 for (i, &c) in path.iter().enumerate() {
                     cuts.push((c, zf - DELTA * i as f64));
                 }

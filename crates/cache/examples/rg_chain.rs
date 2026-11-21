@@ -1931,6 +1931,9 @@ fn main() -> Result<(), String> {
         "off" => false,
         v => return Err(format!("--kh-lower-only on | off, not '{v}'")),
     };
+    // lead #161a option (c): `--band6-hump-lake M`: as --band6-hump M, but the depression behind the hump is left standing (a lake), not filled (spike only)
+    let band6_hump_lake: f64 =
+        value(&args, "--band6-hump-lake").map_or(Ok(0.0), |v| v.parse().map_err(|_| format!("--band6-hump-lake <m>, not '{v}'")))?;
     let band6_hump: f64 =
         value(&args, "--band6-hump").map_or(Ok(0.0), |v| v.parse().map_err(|_| format!("--band6-hump <m>, not '{v}'")))?;
     if !["level", "connected"].contains(&sea_mask) {
@@ -3177,8 +3180,9 @@ fn main() -> Result<(), String> {
             } else {
                 Vec::new()
             };
-            planet_generators::bake::drain::HUMP_LIMIT_MICRO
-                .store((band6_hump * 1.0e6).round() as u64, std::sync::atomic::Ordering::Relaxed);
+            let hump_m = if band6_hump_lake > 0.0 { band6_hump_lake } else { band6_hump };
+            planet_generators::bake::drain::HUMP_LIMIT_MICRO.store((hump_m * 1.0e6).round() as u64, std::sync::atomic::Ordering::Relaxed);
+            planet_generators::bake::drain::HUMP_LAKE.store(band6_hump_lake > 0.0, std::sync::atomic::Ordering::Relaxed);
             let (d6, st, deep6) = planet_generators::bake::drain::drain_selective_report(
                 &ks_d,
                 w,
@@ -3192,6 +3196,7 @@ fn main() -> Result<(), String> {
                 &|p| budget_l[p],
             );
             planet_generators::bake::drain::HUMP_LIMIT_MICRO.store(0, std::sync::atomic::Ordering::Relaxed);
+            planet_generators::bake::drain::HUMP_LAKE.store(false, std::sync::atomic::Ordering::Relaxed);
             let (mut lo, mut hi) = (0.0f64, 0.0f64);
             for p in (0..n_l).filter(|&p| core[p]) {
                 let dz = (d6[p] - ks_d[p]) * dx_l * dx_l / 1e9;
@@ -3772,6 +3777,7 @@ fn main() -> Result<(), String> {
             ("ks-connect", ks_connect.to_string()),
             ("sea-mask", sea_mask.to_string()),
             ("band6-hump", band6_hump.to_string()),
+            ("band6-hump-lake", band6_hump_lake.to_string()),
             ("kh-lower-only", if kh_lower_only { "on" } else { "off" }.to_string()),
             ("k5-diffuse-amax", k5_diffuse_amax.to_string()),
             ("k5-parity", k5_parity.to_string()),
