@@ -1758,6 +1758,11 @@ fn build_graph(
 static KV_SEA_FLOOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static KC_LAKE_OUTLETS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// lead #176a: `--kv-rims on` (default) holds the kept basins' rims at their spill against KV's cut and KC's breach; `off` the form before.
+static KV_RIMS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+/// lead #177: `--kv-connect on` lowers one edge cell on each diagonal step of an L reach to the step's mean bed (default off until the rows).
+static KV_CONNECT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// crusader #172 (owner, 2026-11-20): `--exception-lakes on` keeps the hollows of over-budget rises as lakes.
 static EXCEPTION_LAKES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -1769,6 +1774,8 @@ static KEPT_DRAINED_EXIT: std::sync::atomic::AtomicBool = std::sync::atomic::Ato
 
 /// crusader #169 item 3: `--kv-cross`'s grade in micro (m per m), 0 off.
 static KV_CROSS_MICRO: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// lead #158 (spikes #157), default since reading 38 (#158a): `--ks-connect 4`: KS, band6 and KH's h5 carve diagonal lines 4-connected; `8`: the former rule.
+static KS_CONNECT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// crusader #168b (reading 32): `--trunk-bed shared` (default) keeps a two-vertex trunk image's first vertex at its up node's bed when it rises over the budget, the rise at its down end
 /// excused by its rise_over_budget exception; `lift` raises its first vertex (spikes #142's form).
@@ -1904,6 +1911,12 @@ fn main() -> Result<(), String> {
     }
     planet_generators::bake::round::K5_DIFFUSE_NINE.store(k5_stencil == "9", std::sync::atomic::Ordering::Relaxed);
     // spikes #154, lead #156 (reading 36): `--k5-edge free` (default: a window-cut catchment's edge outlet is breached like any receiver, a free outflow edge; round::K5_EDGE_FREE) or `dam` (the edge outlet keeps its height, the former rule and main's; spike only)
+    // lead #158, #158a (reading 38): `--ks-connect 4` (default: KS, band6 and KH h5 lower one shared edge cell on each diagonal step) or `8` (the former rule; spike only)
+    let ks_connect = value(&args, "--ks-connect").unwrap_or("4");
+    if !["4", "8"].contains(&ks_connect) {
+        return Err(format!("--ks-connect 4 | 8, not '{ks_connect}'"));
+    }
+    KS_CONNECT.store(ks_connect == "4", std::sync::atomic::Ordering::Relaxed);
     let k5_edge = value(&args, "--k5-edge").unwrap_or("free");
     if !["dam", "free"].contains(&k5_edge) {
         return Err(format!("--k5-edge dam | free, not '{k5_edge}'"));
@@ -1978,11 +1991,17 @@ fn main() -> Result<(), String> {
             (a, b)
         }
     };
-    // crusader #171 (DEC crusader-20, reading 35): --kept-drained drop (default since the R1h row, lead #171a) | off (every kept basin protected, the form before)
-    let kept_drained = value(&args, "--kept-drained").unwrap_or("drop");
+    // crusader #171 (DEC crusader-20, reading 35): --kept-drained exit (default, owner's option C, reading 37: only a line leaving a kept basin below its spill drains it) | drop
+    // (every crossing below the spill, the default before) | off (every kept basin protected)
+    let kept_drained = value(&args, "--kept-drained").unwrap_or("exit");
     // lead #173: --kv-sea-floor off | on, --kc-lake-outlets off | on (both off by default until the rows)
-    for (opt, flag) in [("--kv-sea-floor", &KV_SEA_FLOOR), ("--kc-lake-outlets", &KC_LAKE_OUTLETS)] {
-        let v = value(&args, opt).unwrap_or("off");
+    for (opt, flag, default) in [
+        ("--kv-sea-floor", &KV_SEA_FLOOR, "off"),
+        ("--kc-lake-outlets", &KC_LAKE_OUTLETS, "off"),
+        ("--kv-rims", &KV_RIMS, "on"),
+        ("--kv-connect", &KV_CONNECT, "off"),
+    ] {
+        let v = value(&args, opt).unwrap_or(default);
         if !["off", "on"].contains(&v) {
             return Err(format!("{opt} off | on, not '{v}'"));
         }
@@ -2664,6 +2683,33 @@ fn main() -> Result<(), String> {
         );
         let b: Vec<u8> = split.clone();
         std::fs::write(out_dir.join(format!("{tag}-kh-split-{rw}x{rh}.u8")), b).map_err(|e| e.to_string())?;
+        // lead #158 (spikes #157): with `--ks-connect 4`, KH's h5 closes its own corner-only links in the channel zone: a 2 x 2 block whose diagonal pair lies more than 1 m
+        // below both edge cells gets the lower edge cell lowered to the pair's mean. Claims are read from the unchanged read and applied as a minimum (order-free, CON-14).
+        if KS_CONNECT.load(std::sync::atomic::Ordering::Relaxed) {
+            if let Some(zr) = &zone {
+                let mut want = vec![f64::INFINITY; n_l];
+                for y in 0..h - 1 {
+                    for x in 0..w - 1 {
+                        let (a, b, c, d) = (y * w + x, y * w + x + 1, (y + 1) * w + x, (y + 1) * w + x + 1);
+                        if !(zr[parent(a)] || zr[parent(d)]) {
+                            continue;
+                        }
+                        // a-d diagonal low against b and c, or b-c low against a and d
+                        for (p, q, e1, e2) in [(a, d, b, c), (b, c, a, d)] {
+                            if one[e1].min(one[e2]) - one[p].max(one[q]) > 1.0 {
+                                let e = if one[e1] < one[e2] || (one[e1] == one[e2] && e1 < e2) { e1 } else { e2 };
+                                want[e] = want[e].min(0.5 * (one[p] + one[q]));
+                            }
+                        }
+                    }
+                }
+                let cut = (0..n_l).filter(|&e| want[e] < one[e]).count();
+                for e in 0..n_l {
+                    one[e] = one[e].min(want[e]);
+                }
+                println!("RG KH h5 connect 4 (lead #158): {cut} edge cells lowered in the channel zone");
+            }
+        }
         one
     } else {
         start.clone()
@@ -2855,6 +2901,8 @@ fn main() -> Result<(), String> {
         let outlet_d: Vec<bool> = (0..n_l).map(|p| active[p] && (sea_l[p] || exit[p])).collect();
         let grid_d = Grid::new(w, h, dx_l).with_active(active.clone());
         let mut kept = vec![false; n_l];
+        // lead #176a: each kept basin's rim (the cells beside its cells) at its recorded spill, a floor KV's cut and KC's breach keep (empty: no floor)
+        let mut rim_floor: Vec<f64> = Vec::new();
         for p in 0..n_l {
             kept[p] = protected_h1[parent(p)];
         }
@@ -2979,6 +3027,67 @@ fn main() -> Result<(), String> {
             }
             ("ks1", None) => return Err("--ks ks1 needs KG-trib's routing: do not skip kg-trib".into()),
             _ => (ks0.clone(), res0.iter().filter(|r| core[r.0]).cloned().collect()),
+        };
+        // lead #158 (spikes #157): `--ks-connect 4`: on each D8 diagonal step of an L reach, KS also lowers the lower of the two cells sharing an edge with both line cells to the
+        // step's mean height, so the carved line is 4-connected (continuous at the mesh, no bead of corner-joined pits); within the budget left, a shortfall is a residual.
+        // Claims are read from KS1's output and applied as a minimum, so the order of reaches changes nothing.
+        let (ks_d, res_d) = if KS_CONNECT.load(std::sync::atomic::Ordering::Relaxed) {
+            let (mut z, mut res) = (ks_d, res_d);
+            let mut want = vec![f64::INFINITY; n_l];
+            let mut steps = 0usize;
+            // the steps: consecutive vertices of the L reaches KS1 rasterised, and every channel cell's step to its receiver on KG-trib's routing KS1 cut along (the
+            // second KG-trib pass, --trib-on post, draws its tributaries later on the band6 output, so KS1's slots follow this routing, not those reaches)
+            let mut pairs: Vec<(usize, usize)> = Vec::new();
+            for r in gd.reaches.iter().filter(|r| r.level == Level::L) {
+                let cells: Vec<Option<usize>> = r.vertices.iter().map(|&c| to_local(c)).collect();
+                for k in 1..cells.len() {
+                    if let (Some(a), Some(b)) = (cells[k - 1], cells[k]) {
+                        pairs.push((a, b));
+                    }
+                }
+            }
+            if let Some((receiver, channel)) = &fine {
+                for c in 0..n_l {
+                    if channel[c] && receiver[c] != NONE {
+                        pairs.push((c, receiver[c] as usize));
+                    }
+                }
+            }
+            for (a, b) in pairs {
+                let (ax, ay, bx, by) = (a % w, a / w, b % w, b / w);
+                if ax.abs_diff(bx) != 1 || ay.abs_diff(by) != 1 {
+                    continue;
+                }
+                steps += 1;
+                let (e1, e2) = (ay * w + bx, by * w + ax);
+                let t = 0.5 * (z[a] + z[b]);
+                if z[e1].min(z[e2]) <= t + 1e-9 {
+                    continue;
+                }
+                let e = if z[e1] < z[e2] || (z[e1] == z[e2] && e1 < e2) { e1 } else { e2 };
+                want[e] = want[e].min(t);
+            }
+            let (mut cut, mut short) = (0usize, 0usize);
+            for e in 0..n_l {
+                if !want[e].is_finite() || !active[e] || start[e] <= sea || protected_h1[parent(e)] {
+                    continue;
+                }
+                let need = z[e] - want[e];
+                let avail = (budget_l[e] - (ks_base[e] - z[e])).max(0.0).min((z[e] - (sea + 0.5)).max(0.0));
+                let u = need.min(avail);
+                if u > 0.0 {
+                    z[e] -= u;
+                    cut += 1;
+                }
+                if need > avail + 1e-9 {
+                    short += 1;
+                    res.push((e, need, avail));
+                }
+            }
+            println!("RG domain {d} KS connect 4 (lead #158): {steps} diagonal steps (L reaches and KG-trib's channel routing), {cut} edge cells lowered, {short} short at the budget (residuals)");
+            (z, res)
+        } else {
+            (ks_d, res_d)
         };
         println!(
             "RG domain {d} KS: {} core cells lowered, {} core residuals",
@@ -3113,6 +3222,45 @@ fn main() -> Result<(), String> {
             } else {
                 ks_d
             }
+        } else {
+            ks_d
+        };
+        // lead #158 (spikes #157: the frame-44376 slot is a band6 breach path, flat at its spill level): with `--ks-connect 4`, after band6 every corner-only link of two
+        // cells KS or band6 lowered (each more than 1 m under S_KH, the pair more than 1 m under both edge cells of its 2 x 2 block) gets the lower edge cell lowered to the
+        // pair's mean, within the budget left; claims read from the unchanged surface, applied as a minimum
+        let ks_d = if KS_CONNECT.load(std::sync::atomic::Ordering::Relaxed) {
+            let mut z = ks_d;
+            let mut want = vec![f64::INFINITY; n_l];
+            let low = |p: usize, z: &[f64]| z[p] < ks_base[p] - 1.0;
+            for y in 0..h - 1 {
+                for x in 0..w - 1 {
+                    let (a, b, c, e) = (y * w + x, y * w + x + 1, (y + 1) * w + x, (y + 1) * w + x + 1);
+                    for (p, q, e1, e2) in [(a, e, b, c), (b, c, a, e)] {
+                        if low(p, &z) && low(q, &z) && z[e1].min(z[e2]) - z[p].max(z[q]) > 1.0 {
+                            let k = if z[e1] < z[e2] || (z[e1] == z[e2] && e1 < e2) { e1 } else { e2 };
+                            want[k] = want[k].min(0.5 * (z[p] + z[q]));
+                        }
+                    }
+                }
+            }
+            let (mut cut, mut short) = (0usize, 0usize);
+            for k in 0..n_l {
+                if !want[k].is_finite() || !active[k] || start[k] <= sea || protected_h1[parent(k)] {
+                    continue;
+                }
+                let need = z[k] - want[k];
+                let avail = (budget_l[k] - (ks_base[k] - z[k]).max(0.0)).max(0.0).min((z[k] - (sea + 0.5)).max(0.0));
+                let u = need.min(avail);
+                if u > 0.0 {
+                    z[k] -= u;
+                    cut += 1;
+                }
+                if need > avail + 1e-9 {
+                    short += 1;
+                }
+            }
+            println!("RG domain {d} band6 connect 4 (lead #158): {cut} edge cells lowered at corner-only links of lowered cells, {short} short at the budget");
+            z
         } else {
             ks_d
         };
@@ -3326,6 +3474,25 @@ fn main() -> Result<(), String> {
                     kept[c] = true;
                 }
             }
+            if KV_RIMS.load(std::sync::atomic::Ordering::Relaxed) {
+                rim_floor = vec![f64::NEG_INFINITY; n_l];
+                let mut rims = 0usize;
+                for b in pb.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface && b.spill_m.is_finite()) {
+                    let cells = &pb.cells[&b.id];
+                    let inside: HashSet<usize> = cells.iter().copied().collect();
+                    for &c in cells {
+                        for q in (0..8).filter_map(|k| grid_d.neighbour(c, k)) {
+                            if !inside.contains(&q) && b.spill_m > rim_floor[q] {
+                                if rim_floor[q] == f64::NEG_INFINITY {
+                                    rims += 1;
+                                }
+                                rim_floor[q] = b.spill_m;
+                            }
+                        }
+                    }
+                }
+                println!("RG domain {d} kept rims (lead #176a): {rims} rim cells held at their basin's spill against KV and KC");
+            }
             gd.basins = pb.basins.clone();
             gd.nodes.extend(pb.nodes.iter().cloned());
             first_nodes.clear();
@@ -3340,7 +3507,7 @@ fn main() -> Result<(), String> {
         // KV and KC (crusader's G1f) on the domain's KS output, within the budget KS left; the domain's L reaches in window cells (the module reads vertices as grid cells)
         let t = Instant::now();
         let (kv_d, kc_d, rkc) = if on("kv") || on("kc") {
-            use planet_generators::bake::kv_kc::{run_with, KvParams, Switch};
+            use planet_generators::bake::kv_kc::{run_with_rims, KvParams, Switch};
             let sw = match (on("kv"), on("kc")) {
                 (true, true) => Switch::Both,
                 (true, false) => Switch::KvOnly,
@@ -3359,7 +3526,7 @@ fn main() -> Result<(), String> {
             // crusader #161: the budget left is budget - max(0, S_KH - KS's output) inside run_with (reading 21); KC breaches before it fills (reading 22)
             // KV/KC's outlets: the sea, and the window's edge (as H1's; a window without sea, M1, has no other: the flood needs one)
             let outlet_kv: Vec<bool> = (0..n_l).map(|p| sea_l[p] || p % w == 0 || p % w == w - 1 || p / w == 0 || p / w == h - 1).collect();
-            let r = run_with(
+            let r = run_with_rims(
                 &gl,
                 &ks_d,
                 &outlet_kv,
@@ -3372,10 +3539,12 @@ fn main() -> Result<(), String> {
                     cross_side_m: kv_cross_side.0,
                     bed_floor_m: if KV_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { sea } else { f64::NEG_INFINITY },
                     kc_lake_outlets: KC_LAKE_OUTLETS.load(std::sync::atomic::Ordering::Relaxed),
+                    connect4: KV_CONNECT.load(std::sync::atomic::Ordering::Relaxed),
                     cross_side_grade: kv_cross_side.1,
                     ..KvParams::plan(dx_l)
                 },
                 sw,
+                (!rim_floor.is_empty()).then_some(&rim_floor[..]),
             );
             drop(outlet_kv);
             println!("RG domain {d} KC breaches: {} ({:.4} km3)", r.breaches, r.breach_volume / 1.0e9);
@@ -3389,6 +3558,7 @@ fn main() -> Result<(), String> {
             let kv = if on("kv") { r.kv } else { ks_d.clone() };
             let kc = if on("kc") { r.kc } else { kv.clone() };
             println!("RG domain {d} KV/KC ({sw:?}): {} residuals, {} KC patches", r.residuals.len(), r.patches.len());
+            println!("RG domain {d} KV 4-connected rule (lead #177): {} edge cells lowered", r.connect_cells);
             println!(
                 "RG domain {d} KV cross-slope (crusader #169): {} cells lowered, {:.6} km3; {} cells short at the budget, {:.1} m in all",
                 r.cross_cells,
@@ -3399,6 +3569,25 @@ fn main() -> Result<(), String> {
             // lead #173: why KV did or did not cut the L vertex cells above their bed
             for (label, trunk, other) in &r.census {
                 println!("RG domain {d} KV vertex census (lead #173): {label}: {trunk} trunk-image, {other} other");
+            }
+            // lead #175: the census per vertex (window cell x, y; class index as printed above, 0 first; trunk image; bed, height before and after KV)
+            if regions <= 1 {
+                let mut f = String::from(
+                    "x,y,class,trunk,bed_m,before_m,after_kv_m,sea,window_edge
+",
+                );
+                for &(c, class, trunk, bed, before, after) in &r.vertex_class {
+                    f += &format!(
+                        "{},{},{class},{},{bed:.2},{before:.3},{after:.3},{},{}
+",
+                        c % w,
+                        c / w,
+                        u8::from(trunk),
+                        u8::from(sea_l[c]),
+                        u8::from(c % w == 0 || c % w == w - 1 || c / w == 0 || c / w == h - 1)
+                    );
+                }
+                std::fs::write(out_dir.join(format!("{tag}-kv-vertices.csv")), f).map_err(|e| e.to_string())?;
             }
             if !r.cross_cut.is_empty() {
                 // DEC crusader-19's report: how deep the pass cut (p50, p95, max over the cells it lowered)
@@ -3532,6 +3721,7 @@ fn main() -> Result<(), String> {
             ("edit", value(&args, "--edit").unwrap_or("-").to_string()),
             ("k5-uok-scale", k5_uok_scale.to_string()),
             ("k5-edge", k5_edge.to_string()),
+            ("ks-connect", ks_connect.to_string()),
             ("k5-diffuse-amax", k5_diffuse_amax.to_string()),
             ("k5-parity", k5_parity.to_string()),
             ("ks", ks_mode.to_string()),
@@ -3542,6 +3732,8 @@ fn main() -> Result<(), String> {
             ("margin", margin.to_string()),
             ("turned-noise", planet_generators::height::turned_noise().to_string()),
             ("kv-cross", format!("{}", KV_CROSS_MICRO.load(std::sync::atomic::Ordering::Relaxed) as f64 * 1.0e-6)),
+            ("kv-connect", if KV_CONNECT.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("kv-rims", if KV_RIMS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-sea-floor", if KV_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kc-lake-outlets", if KC_LAKE_OUTLETS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("exception-lakes", if EXCEPTION_LAKES.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),

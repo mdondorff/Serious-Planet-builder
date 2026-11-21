@@ -58,6 +58,10 @@ pub struct KvParams {
     /// Lead #173 (R1h: KC refills the cells KV cut beside a kept lake up to its tree's spill): KC's depressions take the protected cells as outlets, so a cut that drains into
     /// a kept lake is no pit; `false`: the protected cells only stay unfilled.
     pub kc_lake_outlets: bool,
+    /// Lead #177 (reading 38, spikes' c4c in KS): on each diagonal step of an L reach, one of the two cells sharing an edge with both vertices is lowered to the step's mean bed
+    /// (the lower of the two on KV's input, ties by cell), within the budget left and above a rim floor, so the line's water passes through an edge and the mesh draws no corner
+    /// link; `false`: the vertices alone.
+    pub connect4: bool,
 }
 
 impl KvParams {
@@ -78,6 +82,7 @@ impl KvParams {
             cross_side_grade: 0.0,
             bed_floor_m: f64::NEG_INFINITY,
             kc_lake_outlets: false,
+            connect4: false,
         }
     }
 }
@@ -123,6 +128,10 @@ pub struct KvKc {
     /// Lead #173 (spikes #152: trunk-image vertices left uncut mid-reach): every L vertex cell above its bed by more than 0.25 m before KV, by why KV did or did not cut it:
     /// (label, trunk-image vertices, other vertices). A cell is counted once, under its first claiming reach.
     pub census: Vec<(&'static str, usize, usize)>,
+    /// Lead #175: the census per vertex cell: (cell, class index into `census`, trunk image, bed m, height before KV, after KV).
+    pub vertex_class: Vec<(usize, u8, bool, f64, f64, f64)>,
+    /// Lead #177: the edge cells the 4-connected rule lowered.
+    pub connect_cells: usize,
 }
 
 /// The least fall (m per m) the cross-slope pass keeps toward the line where it reaches the vertex's height: the gate's flood grade (1e-5; `s_floor` is 100 times it).
@@ -222,6 +231,25 @@ pub fn run_with(
     p: &KvParams,
     switch: Switch,
 ) -> KvKc {
+    run_with_rims(grid, s0, outlet, g, protected, budget, reference, p, switch, None)
+}
+
+/// [`run_with`] with a rim floor (lead #176a, the owner's condition on option C): no cell is lowered below `rim_floor` (by KV's cut or KC's breach), so a kept basin's rim stays at its
+/// recorded spill; `-inf` (or `None`) where no rim is.
+#[allow(clippy::too_many_arguments)]
+pub fn run_with_rims(
+    grid: &Grid,
+    s0: &[f64],
+    outlet: &[bool],
+    g: &Graph,
+    protected: &[bool],
+    budget: &[f64],
+    reference: Option<&[f64]>,
+    p: &KvParams,
+    switch: Switch,
+    rim_floor: Option<&[f64]>,
+) -> KvKc {
+    let rim = |c: usize| rim_floor.map_or(f64::NEG_INFINITY, |f| f[c]);
     let n = s0.len();
     // the lowering budget left before KV (reading 21)
     let left_at = |c: usize| (budget[c] - reference.map_or(0.0, |r| (r[c] - s0[c]).max(0.0))).max(0.0);
@@ -338,6 +366,8 @@ pub fn run_with(
         if want <= 0.0 {
             continue;
         }
+        // lead #176a: a kept basin's rim is not lowered below its spill (the want itself stops there, so only the budget makes a residual)
+        let want = want.min((s0[c] - rim(c)).max(0.0));
         kv_wanted[c] = want;
         let left = left_at(c);
         let low = want.min(left);
@@ -347,6 +377,53 @@ pub fn run_with(
         }
     }
     drop(carry);
+    // lead #177: the 4-connected rule on KV's diagonal steps; the claims are taken from KV's input and the lowest one per cell applied, so the order changes nothing
+    let mut connect_cells = 0usize;
+    if p.connect4 && kv_on {
+        let orth = |c: usize| -> Vec<usize> { (0..4).filter_map(|k| grid.neighbour(c, k)).collect() };
+        let mut claim: BTreeMap<usize, (f64, u64)> = BTreeMap::new();
+        for r in &reaches {
+            for k in 0..r.vertices.len().saturating_sub(1) {
+                let (a, b) = (r.vertices[k] as usize, r.vertices[k + 1] as usize);
+                let oa = orth(a);
+                if oa.contains(&b) || !(4..8).any(|d| grid.neighbour(a, d) == Some(b)) {
+                    continue;
+                }
+                let ob = orth(b);
+                let mut shared: Vec<usize> = oa.into_iter().filter(|c| ob.contains(c)).collect();
+                if shared.is_empty() {
+                    continue;
+                }
+                shared.sort_by(|&x, &y| s0[x].total_cmp(&s0[y]).then(x.cmp(&y)));
+                let c = shared[0];
+                if protected[c] || outlet[c] {
+                    continue;
+                }
+                let mean = 0.5 * (bed_m(r.attrs.bed[k]) + bed_m(r.attrs.bed[k + 1]));
+                let e = claim.entry(c).or_insert((f64::INFINITY, r.id));
+                if mean < e.0 || (mean == e.0 && r.id < e.1) {
+                    *e = (mean, r.id);
+                }
+            }
+        }
+        for (&c, &(mean, feature)) in &claim {
+            let target = mean.max(rim(c));
+            let want = s0[c] - target;
+            if want <= 0.0 || kv[c] <= target {
+                continue;
+            }
+            let left = left_at(c);
+            let low = want.min(left);
+            if s0[c] - low < kv[c] {
+                kv[c] = s0[c] - low;
+                kv_wanted[c] = kv_wanted[c].max(want);
+                connect_cells += 1;
+                if want > low + BUDGET_EPS_M {
+                    residuals.push(Residual { cell: c, stage: "kv", needed_m: want, available_m: left, feature });
+                }
+            }
+        }
+    }
     // lead #173: the census of the vertex cells KV should cut to their bed
     let census = {
         let labels = [
@@ -367,6 +444,7 @@ pub fn run_with(
             }
         }
         let mut count = vec![(0usize, 0usize); labels.len()];
+        let mut per: Vec<(usize, u8, bool, f64, f64, f64)> = Vec::new();
         for (&c, &(ri, k)) in &vtx {
             let bed = bed_m(reaches[ri].attrs.bed[k]);
             if s0[c] - bed <= 0.25 {
@@ -389,14 +467,16 @@ pub fn run_with(
             } else {
                 7
             };
+            per.push((c, class as u8, reaches[ri].parent.is_some(), bed, s0[c], kv[c]));
             if reaches[ri].parent.is_some() {
                 count[class].0 += 1;
             } else {
                 count[class].1 += 1;
             }
         }
-        labels.iter().zip(count).map(|(&l, (a, b))| (l, a, b)).collect::<Vec<_>>()
+        (labels.iter().zip(count).map(|(&l, (a, b))| (l, a, b)).collect::<Vec<_>>(), per)
     };
+    let (census, vertex_class) = census;
     // lead #169 item 3: the floor falls toward the line; floor cells farthest first (ties by cell), each at most its farther floor neighbours' height less the grade's drop
     let (mut cross_cells, mut cross_volume, mut cross_short, mut cross_short_m) = (0usize, 0.0f64, 0usize, 0.0f64);
     let mut cross_cut: Vec<f32> = Vec::new();
@@ -540,12 +620,12 @@ pub fn run_with(
                 let breach = |blocked: &dyn Fn(usize) -> bool| {
                     super::basins_rg::breach_path(grid, &kv, outlet, pit, floor, &remaining, &inside, blocked, BREACH_CAP)
                 };
-                let along = || breach(&|c| protected[c] || !(near_line[c] || inside(c)));
+                let along = || breach(&|c| protected[c] || rim(c) > floor || !(near_line[c] || inside(c)));
                 // the along path is taken when it beats the fill (or the fill does not fit); otherwise the free breach of reading 22 decides
                 let found = if p.breach_along_line {
-                    along().filter(|(vol, _)| *vol < fill_vol || !fill_ok).or_else(|| breach(&|c| protected[c]))
+                    along().filter(|(vol, _)| *vol < fill_vol || !fill_ok).or_else(|| breach(&|c| protected[c] || rim(c) > floor))
                 } else {
-                    breach(&|c| protected[c])
+                    breach(&|c| protected[c] || rim(c) > floor)
                 };
                 if let Some((vol, path)) = found {
                     if vol < fill_vol || !fill_ok {
@@ -600,6 +680,8 @@ pub fn run_with(
         cross_short_m,
         cross_cut,
         census,
+        vertex_class,
+        connect_cells,
     }
 }
 
