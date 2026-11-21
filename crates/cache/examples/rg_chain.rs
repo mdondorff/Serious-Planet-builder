@@ -1927,8 +1927,12 @@ fn main() -> Result<(), String> {
     // the sea connected to an H1 sea outlet or the window's edge) as the sea; an inland cell below the sea level is land; the default since reading 39 (#160). `level`: every cell at or below it (spike only)
     let sea_mask = value(&args, "--sea-mask").unwrap_or("connected");
     // lead #161: `--band6-hump M` (m; 0 off, the default): band6 takes no breach whose deepest cut exceeds M; it fills the depression within the budget, else leaves it (spike only)
-    // lead #161: `--kh-lower-only`: KH's h5 blend lowers only (KH = C1 + w min(0, h4c - C1)); default off (spike only)
-    let kh_lower_only = args.iter().any(|a| a == "--kh-lower-only");
+    // lead #161, #161a (reading 40): `--kh-lower-only on` (default): KH's h5 blend lowers only (KH = C1 + w min(0, h4c - C1)); `off`: the former blend, which also raises (spike only)
+    let kh_lower_only = match value(&args, "--kh-lower-only").unwrap_or("on") {
+        "on" => true,
+        "off" => false,
+        v => return Err(format!("--kh-lower-only on | off, not '{v}'")),
+    };
     let band6_hump: f64 =
         value(&args, "--band6-hump").map_or(Ok(0.0), |v| v.parse().map_err(|_| format!("--band6-hump <m>, not '{v}'")))?;
     if !["level", "connected"].contains(&sea_mask) {
