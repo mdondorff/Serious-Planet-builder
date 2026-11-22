@@ -22,6 +22,7 @@ pub mod preview_overlay;
 pub mod problems;
 pub mod relevance;
 pub mod repro_shelf;
+pub mod ruler;
 pub mod session;
 pub mod shape;
 pub mod slope;

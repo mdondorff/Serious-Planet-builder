@@ -58,7 +58,8 @@ fn normalize_yaw_deg(mut yaw_deg: f64) -> f64 {
     }
 }
 
-fn format_deg(v: f64, pos: char, neg: char) -> String {
+/// Formats an unsigned geographic coordinate component in degrees with a cardinal suffix (`N`/`S` or `E`/`W`).
+pub fn format_deg(v: f64, pos: char, neg: char) -> String {
     let text = format!("{:.5}", v.abs());
     let side = if v < 0.0 && text.chars().any(|c| matches!(c, '1'..='9')) { neg } else { pos };
     format!("{text}° {side}")
