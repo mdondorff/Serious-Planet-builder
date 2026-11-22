@@ -723,6 +723,25 @@ pub struct Checks<'a> {
     pub open: bool,
 }
 
+/// Reading 41 (lead, 2026-11-22): a bed rise at vertex `k` of `r` into the reach's own down node (its last vertex) is excused when the reach carries `budget_residual`
+/// with a value (metres) of at least the rise (the codes' difference times 0.5 m, compared exactly up to 1e-9 m: the residual records the coded rise): the residual records
+/// the need not done, and a down node has no place for a marker. `Some(rise in metres)` when excused.
+fn down_rise_m(r: &Reach, k: usize) -> Option<f64> {
+    let n = r.vertices.len();
+    if k + 1 != n || k == 0 {
+        return None;
+    }
+    let rise_m = 0.5 * (i64::from(r.attrs.bed[k]) - i64::from(r.attrs.bed[k - 1])) as f64;
+    (rise_m > 0.0 && r.exceptions.iter().any(|e| e.reason == Reason::BudgetResidual && e.value.is_finite() && e.value + 1e-9 >= rise_m))
+        .then_some(rise_m)
+}
+
+/// The bed rises reading 41 excuses, from [`validate_excused`]: their count and metres, for the gate's own column beside the violations.
+pub fn excused_down_rises(g: &Graph, checks: &Checks) -> (usize, f64) {
+    let (_, ex) = validate_excused(g, checks);
+    (ex.len(), ex.iter().map(|x| x.2).sum())
+}
+
 /// Whether `b` lies below `a` beyond the relative tolerance.
 fn falls(a: f64, b: f64) -> bool {
     b < a - CONSERVATION_REL * a.abs().max(b.abs())
@@ -733,10 +752,17 @@ const CONSERVED: [(&str, usize); 4] = [("a_geo", 0), ("a_run", 2), ("q", 4), ("q
 
 /// Validates a graph (contract section 8, with the readings of its section 12). Works on a sorted copy, so the violations come in a fixed order whatever the input order.
 pub fn validate(graph: &Graph, checks: &Checks) -> Vec<Violation> {
+    validate_excused(graph, checks).0
+}
+
+/// [`validate`], and the bed rises reading 41 excused on the way: `(reach, vertex, metres)` for each rise into a reach's own down node held by its `budget_residual`, on
+/// whole reaches only and not where a marker already excuses it (numerics review: the gate counts exactly what the validator accepted).
+pub fn validate_excused(graph: &Graph, checks: &Checks) -> (Vec<Violation>, Vec<(u64, usize, f64)>) {
     let mut g = graph.clone();
     g.sort();
     let (adjacent, open) = (checks.adjacent, checks.open);
     let mut v = Vec::new();
+    let mut excused: Vec<(u64, usize, f64)> = Vec::new();
     // duplicate ids, and ids that are not the hash of their fields
     let mut seen = BTreeSet::new();
     for id in g.nodes.iter().map(|n| n.id).chain(g.reaches.iter().map(|r| r.id)).chain(g.basins.iter().map(|b| b.id)) {
@@ -906,11 +932,16 @@ pub fn validate(graph: &Graph, checks: &Checks) -> Vec<Violation> {
                 v.push(Violation::TributaryLeavesTile { reach: r.id });
             }
         }
-        // bed: non-increasing on codes, except at an exception marker's vertex on this reach
+        // bed: non-increasing on codes, except at an exception marker's vertex on this reach, and (reading 41) a rise into the reach's own down node no larger than its
+        // budget_residual value (a down node takes no marker)
         let ex = excepted.get(&r.id);
         for k in 1..n {
-            if a.bed[k] > a.bed[k - 1] && !ex.is_some_and(|e| e.contains(&(k as u32))) {
-                v.push(Violation::BedRise { reach: r.id, vertex: k });
+            if a.bed[k] <= a.bed[k - 1] || ex.is_some_and(|e| e.contains(&(k as u32))) {
+                continue;
+            }
+            match down_rise_m(r, k) {
+                Some(m) => excused.push((r.id, k, m)),
+                None => v.push(Violation::BedRise { reach: r.id, vertex: k }),
             }
         }
         // conservation along the reach
@@ -1005,7 +1036,7 @@ pub fn validate(graph: &Graph, checks: &Checks) -> Vec<Violation> {
     }
     v.sort_by(|a, b| format!("{a:?}").cmp(&format!("{b:?}")));
     v.dedup();
-    v
+    (v, excused)
 }
 
 /// The endpoints and markers' reaches an open slice names but does not hold: `missing owner` (a store fact, contract section 1), as (the item that names it, the id it names).

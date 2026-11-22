@@ -782,3 +782,27 @@ fn kept_lakes_get_their_own_bars_beside_the_raw_closed_basin_share_and_a_spill_m
     );
     assert!(plain.bars().is_empty());
 }
+
+// spec: BUILD-060, GEN-189
+#[test]
+fn a_rise_into_a_down_node_excused_by_its_residual_is_printed_beside_the_violations() {
+    // reading 41 (lead, 2026-11-22): the trunk C -> O rising 0.5 m into its outlet node is a violation without a record; with budget_residual 0.5 on the reach it is excused,
+    // and the gate prints it in its own columns and on the graph line
+    use planet_cache::river_gate_graph::G2Report;
+    use planet_generators::bake::river_graph::{Exception, Reason};
+    let all = vec![true; 144];
+    let mut g = graph();
+    let r3 = g.reaches.iter_mut().find(|r| r.vertices.len() == 4).expect("the trunk C -> O");
+    r3.attrs.bed = vec![18, 17, 16, 17];
+    let bare = graph_report(&g, &W, &all, &all, DX);
+    assert_eq!((bare.violations.get("bed_rise").copied(), bare.excused_rises), (Some(1), 0));
+    let r3 = g.reaches.iter_mut().find(|r| r.vertices.len() == 4).unwrap();
+    r3.exceptions = vec![Exception { reason: Reason::BudgetResidual, value: 0.5 }];
+    let rep = graph_report(&g, &W, &all, &all, DX);
+    assert_eq!((rep.violations.get("bed_rise").copied(), rep.excused_rises, rep.excused_rise_m), (None, 1, 0.5));
+    let cols = G2Report { graph: Some(rep.clone()), ..G2Report::default() }.columns();
+    let get = |n: &str| cols.iter().find(|c| c.0 == n).map(|c| c.1.clone());
+    assert_eq!((get("g_excused_rises"), get("g_excused_rise_m")), (Some("1".into()), Some("0.5".into())));
+    let lines = G2Report { graph: Some(rep), ..G2Report::default() }.lines();
+    assert!(lines.iter().any(|l| l.contains("1 bed rises into a down node excused by budget_residual (0.5 m, reading 41)")), "{lines:?}");
+}
