@@ -1778,10 +1778,10 @@ static KV_RIMS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 static KV_CONNECT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 /// lead #178 item 1: `--sea17 on` holds reading 17 (no land cell lowered to the sea + 0.5 m or below) in KV, KC's breach and band6's breach, as KS; `off` (default until the rows) the form before.
 static SEA17: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-/// lead #179: `--inlet-floor on` floors the graph bed of every L vertex on or inside a kept basin's rim at its spill; `off` (default) the beds as coded.
-static INLET_FLOOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-/// lead #178 item 3: `--band6-floors on` holds band6's breach within each path cell's budget left after KS; `off` (default until the rows) only the floor cell's budget caps the cut.
-static BAND6_FLOORS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// lead #179: `--inlet-floor on` floors the graph bed of every L vertex on or inside a kept basin's rim at its spill; `off` the beds as coded; on by default since #180a (reading 42).
+static INLET_FLOOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+/// lead #178 item 3: `--band6-floors on` holds band6's breach within each path cell's budget left after KS; `off` only the floor cell's budget caps the cut; on by default since #180a (reading 42).
+static BAND6_FLOORS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 /// crusader #172 (owner, 2026-11-20): `--exception-lakes on` keeps the hollows of over-budget rises as lakes.
 static EXCEPTION_LAKES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -1965,7 +1965,8 @@ fn main() -> Result<(), String> {
     // lead #164 (step 3c, review-carbon-rgv0 S1.8): `--order carbon`: one reading-22 basins pass (basins-2's rules) on ks_d before KG-trib, the L trunks as its reaches; its kept
     // set feeds KG-trib post (in place of the trunk-only pass) and KV/KC take the same result; no basin pass after KG-trib. Implies --trib-once (spike only)
     let order_carbon = stage_order == "carbon";
-    let trib_once = args.iter().any(|a| a == "--trib-once") || order_fable || order_carbon;
+    // lead #180a (reading 42, DEC crusader-31): --trib-once is the default; `--trib-once off` the former two passes (a bare `--trib-once` stays on)
+    let trib_once = !matches!(value(&args, "--trib-once"), Some("off")) || order_fable || order_carbon;
     let kh_lower_only = match value(&args, "--kh-lower-only").unwrap_or("on") {
         "on" => true,
         "off" => false,
@@ -2060,8 +2061,8 @@ fn main() -> Result<(), String> {
         ("--kv-rims", &KV_RIMS, "on"),
         ("--kv-connect", &KV_CONNECT, "on"),
         ("--sea17", &SEA17, "off"),
-        ("--band6-floors", &BAND6_FLOORS, "off"),
-        ("--inlet-floor", &INLET_FLOOR, "off"),
+        ("--band6-floors", &BAND6_FLOORS, "on"),
+        ("--inlet-floor", &INLET_FLOOR, "on"),
     ] {
         let v = value(&args, opt).unwrap_or(default);
         if !["off", "on"].contains(&v) {
