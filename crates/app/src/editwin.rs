@@ -12,9 +12,11 @@ use planet_editor::layout::Layout;
 use planet_editor::lists::{LayerGroup, Row};
 use planet_editor::overlay::{self, BrushOverlay, DraftOverlay, OverlayItem};
 use planet_editor::params::{kind_title, Inspector, STAMP_KINDS};
+use planet_editor::polyline::GeoPoint;
 use planet_editor::preview_overlay::{self, PreviewData, PreviewOverlay, PreviewState};
 use planet_editor::relevance::ViewState;
 use planet_editor::repro_shelf::ReproShelf;
+use planet_editor::ruler::{self, CursorReadout, RulerOverlay, RulerState, TransectProfile};
 use planet_editor::session::{Session, SessionError, Tool, LINE_KINDS};
 use planet_editor::shape::{self, Handle};
 use planet_frame::freecam::FreePose;
@@ -210,6 +212,16 @@ pub struct EditRuntime {
     last_altitude_m: f64,
     pending_jump: Option<PendingJump>,
     capture_repro: bool,
+    /// Off-thread or on-spot live cursor terrain readout (VIEW-076).
+    cursor_readout: Option<CursorReadout>,
+    /// Interactive two-point surface ruler state (VIEW-076).
+    ruler: RulerState,
+    /// Cached transect profile keyed by `(item_revision, start, end)`.
+    ruler_profile: Option<(u64, GeoPoint, GeoPoint, TransectProfile)>,
+    /// Live rubber-band preview profile while point A is anchored.
+    ruler_rubber_profile: Option<TransectProfile>,
+    /// Projected 3D ruler overlay drawn over the viewport.
+    ruler_overlay: RulerOverlay,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -345,6 +357,11 @@ impl EditRuntime {
             last_altitude_m: MIN_ALTITUDE_M,
             pending_jump: None,
             capture_repro: false,
+            cursor_readout: None,
+            ruler: RulerState::Idle,
+            ruler_profile: None,
+            ruler_rubber_profile: None,
+            ruler_overlay: RulerOverlay::default(),
         };
         rt.rebuild_sites_view();
         Ok(rt)
@@ -611,6 +628,7 @@ impl EditRuntime {
         }
         crate::panels::draw_draft(ui, &self.draft, to_points);
         crate::panels::draw_brush(ui, &self.brush, to_points);
+        crate::panels::draw_ruler(ui, &self.ruler_overlay, to_points);
         // The panels read the lists and write their own state: take the state out for the call.
         let mut panels = std::mem::replace(&mut self.panels, PanelState::new(&self.layout));
         let events = crate::panels::show(ui, &mut panels, &self.panel_data(view_status));
@@ -816,18 +834,26 @@ impl EditRuntime {
         self.draft = overlay::draft(&self.session, &view, &|d| field.height(d), (!over_ui).then_some(cursor));
         // The hover pick finds the ground along the whole ray: its first read of a bake block nobody has touched decodes it, so with a source it runs on its own
         // thread and the frame takes the last pick that finished (VIEW-059, CON-22).
-        let hit = match (over_ui, self.hover.as_mut()) {
+        let (hit, readout) = match (over_ui, self.hover.as_mut()) {
             (true, Some(h)) => {
                 h.clear();
-                None
+                (None, None)
             }
-            (true, None) => None,
+            (true, None) => (None, None),
             (false, Some(h)) => {
                 let ray = cursor_ray(camera, cursor[0], cursor[1], viewport.width_px, viewport.height_px);
-                h.poll((ray, *limits))
+                match h.poll_sample((ray, *limits)) {
+                    Some(sample) => (Some(sample.hit), Some(sample.readout)),
+                    None => (None, None),
+                }
             }
-            (false, None) => Self::hit_at(camera, viewport, cursor, limits, field),
+            (false, None) => {
+                let hit = Self::hit_at(camera, viewport, cursor, limits, field);
+                let readout = hit.map(|h| ruler::cursor_readout(h.dir, h.height_m, self.radius_m, &|d| field.height(d)));
+                (hit, readout)
+            }
         };
+        self.cursor_readout = readout;
         self.brush = overlay::brush(&self.session, &view, &|d| field.height(d), hit.map(|h| h.dir));
         if !over_ui {
             let mpp = self.height_mpp(camera, viewport);
@@ -863,12 +889,18 @@ impl EditRuntime {
         };
         let alt = self.camera_altitude_m.unwrap_or_else(|| (cam.length() - (self.radius_m + ground(pose.up()))).max(MIN_ALTITUDE_M));
         self.last_altitude_m = if alt.is_finite() { alt.max(MIN_ALTITUDE_M) } else { MIN_ALTITUDE_M };
+        self.update_ruler(&view, hit, field);
         self.rebuild_sites_view();
     }
 
     /// Run the hover pick on a thread of its own: `source` makes the field and picks against it.
     pub fn set_hover_source(&mut self, source: crate::hoverpick::PickSource) {
         self.hover = Some(crate::hoverpick::HoverPicker::new(source));
+    }
+
+    /// Run the hover pick on a thread of its own, including off-thread local slope estimation (VIEW-076).
+    pub fn set_hover_sample_source(&mut self, source: crate::hoverpick::SampleSource) {
+        self.hover = Some(crate::hoverpick::HoverPicker::with_samples(source));
     }
 
     /// Metres one pixel spans at the selected edit's height handle.
@@ -912,6 +944,65 @@ impl EditRuntime {
             keys: &self.keys,
             store: Some(s.editor().store_watch()),
             sites: &self.sites_view,
+            cursor: self.cursor_readout,
+            ruler: self.ruler_profile.as_ref().map(|(_, _, _, p)| p).or(self.ruler_rubber_profile.as_ref()),
+            ruler_rubber: self.ruler_rubber_profile.is_some(),
+        }
+    }
+
+    fn clear_ruler(&mut self) {
+        self.ruler.clear();
+        self.ruler_profile = None;
+        self.ruler_rubber_profile = None;
+        self.ruler_overlay = RulerOverlay::default();
+        self.panels.ruler_scrub = None;
+    }
+
+    fn update_ruler(&mut self, view: &ViewState, hit: Option<SurfaceHit>, field: &dyn HeightField) {
+        match self.ruler {
+            RulerState::Idle => {
+                self.ruler_profile = None;
+                self.ruler_rubber_profile = None;
+                self.ruler_overlay = RulerOverlay::default();
+            }
+            RulerState::Anchored { start, start_height_m } => {
+                self.ruler_profile = None;
+                if let Some(h) = hit {
+                    let end = GeoPoint::of_dir(h.dir).canonical();
+                    let p = TransectProfile::rubber_band(
+                        start,
+                        start_height_m,
+                        end,
+                        h.height_m,
+                        self.radius_m,
+                        ruler::HEIGHTFIELD_SLOPE_LIMIT_DEG,
+                    );
+                    self.ruler_overlay = ruler::build_overlay(&p, view, true, None);
+                    self.ruler_rubber_profile = Some(p);
+                } else {
+                    self.ruler_rubber_profile = None;
+                    self.ruler_overlay = RulerOverlay::default();
+                }
+            }
+            RulerState::Measured { start, end } => {
+                self.ruler_rubber_profile = None;
+                let rev = field.item_revision();
+                let stale = !matches!(&self.ruler_profile, Some((r, s, e, _)) if *r == rev && *s == start && *e == end);
+                if stale {
+                    let profile = TransectProfile::sample(
+                        start,
+                        end,
+                        self.radius_m,
+                        ruler::DEFAULT_TRANSECT_SAMPLES,
+                        ruler::HEIGHTFIELD_SLOPE_LIMIT_DEG,
+                        &|d| field.height(d),
+                    );
+                    self.ruler_profile = Some((rev, start, end, profile));
+                }
+                if let Some((_, _, _, profile)) = &self.ruler_profile {
+                    self.ruler_overlay = ruler::build_overlay(profile, view, false, self.panels.ruler_scrub);
+                }
+            }
         }
     }
 
@@ -972,6 +1063,35 @@ impl EditRuntime {
                 self.affected.extend(affected);
             }
             Ok((Pressed::Selected(_), _)) => self.stats.selected += 1,
+            Ok((Pressed::RulerPoint, _)) => {
+                if let Some(h) = hit {
+                    if self.ruler.click(h.dir, h.height_m) {
+                        match self.ruler {
+                            RulerState::Anchored { .. } => {
+                                self.ruler_profile = None;
+                                self.panels.ruler_scrub = None;
+                                self.session.set_status("Point A anchored — click point B to measure");
+                            }
+                            RulerState::Measured { start, end } => {
+                                self.ruler_rubber_profile = None;
+                                let profile = TransectProfile::sample(
+                                    start,
+                                    end,
+                                    self.radius_m,
+                                    ruler::DEFAULT_TRANSECT_SAMPLES,
+                                    ruler::HEIGHTFIELD_SLOPE_LIMIT_DEG,
+                                    &|d| field.height(d),
+                                );
+                                self.session.set_status(profile.callout_label());
+                                self.ruler_profile = Some((field.item_revision(), start, end, profile));
+                            }
+                            RulerState::Idle => {}
+                        }
+                    } else {
+                        self.session.set_status("click a distinct second point for the transect");
+                    }
+                }
+            }
             Ok(_) => {}
             Err(e) => self.note(Err(e)),
         }
@@ -1040,6 +1160,9 @@ impl EditRuntime {
                     self.cancel_drag();
                 } else if !self.session.draft().is_empty() {
                     self.session.cancel_draft();
+                } else if !self.ruler.is_idle() {
+                    self.clear_ruler();
+                    self.session.set_status("ruler cleared");
                 } else if self.session.tool() != &Tool::Select {
                     self.session.set_tool(Tool::Select);
                 } else {
@@ -1247,6 +1370,17 @@ impl EditRuntime {
                         self.session.set_status("repro entry no longer available");
                     }
                 },
+                Event::SwapRuler => {
+                    if self.ruler.swap() {
+                        self.ruler_profile = None;
+                        self.panels.ruler_scrub = None;
+                        self.session.set_status("ruler A and B swapped");
+                    }
+                }
+                Event::ClearRuler => {
+                    self.clear_ruler();
+                    self.session.set_status("ruler cleared");
+                }
             }
         }
     }
@@ -1441,6 +1575,7 @@ pub fn mode_status(e: &EditRuntime) -> String {
         Tool::Line(k) => format!("Draw {}", kind_title(k)),
         Tool::Region => "Draw region".to_string(),
         Tool::Brush(k) => format!("Brush: {}", k.name()),
+        Tool::Ruler => "Ruler".to_string(),
     }
 }
 
@@ -2612,5 +2747,73 @@ mod tests {
         assert!(!e.take_capture_repro());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: VIEW-076
+    #[test]
+    fn ruler_tool_measures_two_point_transect_updates_panel_data_and_preserves_world_hash() {
+        // Sloped test heightfield raising along -z (screen +x under nadir above()) exceeding 45°.
+        struct SteepSlope;
+        impl HeightField for SteepSlope {
+            fn height(&self, dir: Vec3) -> f64 {
+                (-1.3 * R * dir.z).clamp(-8_000.0, 8_000.0)
+            }
+            fn seed(&self) -> u64 {
+                7
+            }
+            fn implementation_id(&self) -> &'static str {
+                "steep-slope-test"
+            }
+            fn version(&self) -> u32 {
+                1
+            }
+            fn max_abs_height_m(&self) -> f64 {
+                8_000.0
+            }
+        }
+
+        let dir = unit(0.0, 0.0);
+        let cam = above(dir, 10_000.0);
+        let mut e = runtime(None);
+        let hash_before = e.session.editor().definition().hash();
+        e.toggle();
+        e.apply(vec![Event::Tool(Tool::Ruler)]);
+        assert_eq!(mode_status(&e), "Ruler");
+
+        // Update feeds live cursor readout without modifying WorldDefinition.
+        e.update(&cam, VIEWPORT, &[], &SteepSlope, &limits(), Pointer { cursor: CENTRE, over_ui: false });
+        let pd0 = e.panel_data("");
+        let readout = pd0.cursor.expect("cursor readout present");
+        assert!(readout.slope_deg > 45.0 && readout.over_limit, "{readout:?}");
+        assert!(pd0.ruler.is_none());
+
+        // Click A on left half of viewport, verify rubber-band preview during hover, click B on right half.
+        e.press(&cam, VIEWPORT, [350.0, 500.0], &limits(), &SteepSlope);
+        e.update(&cam, VIEWPORT, &[], &SteepSlope, &limits(), Pointer { cursor: [650.0, 500.0], over_ui: false });
+        {
+            let pd1 = e.panel_data("");
+            assert!(pd1.ruler.is_some() && pd1.ruler_rubber, "anchored shows rubber-band preview");
+        }
+        e.press(&cam, VIEWPORT, [650.0, 500.0], &limits(), &SteepSlope);
+        e.update(&cam, VIEWPORT, &[], &SteepSlope, &limits(), Pointer { cursor: [650.0, 500.0], over_ui: false });
+
+        let pd2 = e.panel_data("");
+        let transect = pd2.ruler.expect("measured transect profile present");
+        assert!(!pd2.ruler_rubber);
+        assert!(transect.arc_distance_m > 1_000.0 && transect.delta_height_m > 1_000.0 && transect.max_slope_deg > 45.0);
+
+        // Swapping reverses elevation delta cleanly.
+        e.apply(vec![Event::SwapRuler]);
+        e.update(&cam, VIEWPORT, &[], &SteepSlope, &limits(), Pointer { cursor: [650.0, 500.0], over_ui: false });
+        assert!(e.panel_data("").ruler.unwrap().delta_height_m < -1_000.0);
+
+        // First Escape clears active measurement while keeping Ruler tool; second Escape returns to Select.
+        e.key(EditKey::Escape);
+        e.update(&cam, VIEWPORT, &[], &SteepSlope, &limits(), Pointer { cursor: CENTRE, over_ui: false });
+        assert!(e.panel_data("").ruler.is_none());
+        assert_eq!(e.session.tool(), &Tool::Ruler);
+        e.key(EditKey::Escape);
+        assert_eq!(e.session.tool(), &Tool::Select);
+        assert_eq!(e.session.editor().definition().hash(), hash_before);
     }
 }

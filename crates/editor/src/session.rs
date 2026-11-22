@@ -41,6 +41,8 @@ pub enum Tool {
     Region,
     /// Dragging over the planet paints a brush stroke of this kind (raise, lower, smooth, flatten); the release puts it (VIEW-035).
     Brush(BrushKind),
+    /// Clicks anchor A and pin B to measure surface distance, elevation delta, and slope transect (VIEW-076).
+    Ruler,
 }
 
 /// The brush the tool paints with: the radius and the strength in metres, typed by the user, and the height a flatten levels towards
@@ -258,6 +260,9 @@ impl<S: ItemStore> Session<S> {
             }
             if let Tool::Brush(kind) = tool {
                 self.status = brush_hint(kind);
+            }
+            if matches!(tool, Tool::Ruler) {
+                self.status = crate::ruler::RULER_HINT.to_string();
             }
         }
         self.tool = tool;
