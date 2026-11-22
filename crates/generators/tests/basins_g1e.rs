@@ -676,4 +676,10 @@ fn an_inflowing_lines_bed_is_floored_at_the_spill_from_the_kept_rim_inward() {
     let f2 = floor_inlet_beds(&g, &p.basins, &p.cells, &mut low2, &|id| Some(id as usize));
     assert_eq!(mark_inlet_residuals(BODY, &mut crowded, &mut low2, &f2.residuals), (0, 1));
     assert!(!crowded.iter().any(|n| n.kind == NodeKind::Exception));
+    // #180: the reach carries its record even where no marker could stand
+    assert!(
+        low2[0].exceptions.iter().any(|e| e.reason == Reason::BudgetResidual && (e.value - f2.residuals[0].2).abs() < 1e-12),
+        "{:?}",
+        low2[0].exceptions
+    );
 }

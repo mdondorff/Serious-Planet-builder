@@ -3765,6 +3765,8 @@ fn main() -> Result<(), String> {
             }
             // lead #179 (A3, owner decision 2, 2026-11-21): `--inlet-floor on` floors every L vertex's graph bed on a kept basin's rim or inside it at the basin's spill (the
             // highest spill where basins meet), so the graph agrees with the rim KV holds (reading 35 test (a)); KV cuts to these beds
+            // the pass's nodes join the graph before the inlet markers, so a marker never lands on a cell one of them holds (R1h #180: 2 two_nodes_one_anchor)
+            gd.nodes.extend(pb.nodes.iter().cloned());
             if INLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) {
                 let fl = planet_generators::bake::basins_rg::floor_inlet_beds(&grid_d, &pb.basins, &pb.cells, &mut gd.reaches, &|id| {
                     to_local(id)
@@ -3817,7 +3819,6 @@ fn main() -> Result<(), String> {
                 }
             }
             gd.basins = pb.basins.clone();
-            gd.nodes.extend(pb.nodes.iter().cloned());
             first_nodes.clear();
             let kept_land = (0..n_l).filter(|&p| core[p] && kept[p] && start[p] > sea).count();
             println!("RG domain {d} basins on the KS output (second pass): {} L basins ({} kept, {kept_land} protected core land cells), {} unresolved spills; {:.1} s", pb.basins.len(), pb.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface).count(), pb.unresolved.len(), t2.elapsed().as_secs_f64());

@@ -813,7 +813,8 @@ pub fn floor_inlet_beds(
 
 /// Lead #179b (DEC crusader-28): each stopped carry of [`floor_inlet_beds`] is recorded as the contract's residual (section 6): an `exception` marker node at the vertex where
 /// the bed rises (the stopped vertex's downstream neighbour), so the validator accepts exactly that rise, and `exception(budget_residual)` on the reach carrying the metres
-/// wanted (the largest where a reach has several). A rise at a reach's last vertex, or on a cell holding another node, has no place for a marker: it is left unflagged. Returns the rises
+/// wanted (the largest where a reach has several), on every stopped carry's reach. A rise at a reach's last vertex, or on a cell holding another node, has no place for a
+/// marker: it is left unmarked (reading 41 excuses the first by the residual; the second stays a bed rise). Returns the rises
 /// flagged and those left.
 pub fn mark_inlet_residuals(body: u64, nodes: &mut Vec<Node>, reaches: &mut [Reach], residuals: &[(u64, usize, f64)]) -> (usize, usize) {
     let have: std::collections::BTreeSet<u64> = nodes.iter().map(|n| n.id).collect();
@@ -827,6 +828,11 @@ pub fn mark_inlet_residuals(body: u64, nodes: &mut Vec<Node>, reaches: &mut [Rea
             left += 1;
             continue;
         };
+        // the reach's record first, in every case: reading 41 excuses a rise into the down node by it alone
+        match r.exceptions.iter_mut().find(|e| e.reason == Reason::BudgetResidual) {
+            Some(e) => e.value = e.value.max(need),
+            None => r.exceptions.push(Exception { reason: Reason::BudgetResidual, value: need }),
+        }
         let v = k + 1;
         if v + 1 >= r.vertices.len() {
             left += 1;
@@ -848,10 +854,6 @@ pub fn mark_inlet_residuals(body: u64, nodes: &mut Vec<Node>, reaches: &mut [Rea
                 owner: r.owner,
                 marker: Some(Marker { on_reach: rid, at_vertex: v as u32 }),
             });
-        }
-        match r.exceptions.iter_mut().find(|e| e.reason == Reason::BudgetResidual) {
-            Some(e) => e.value = e.value.max(need),
-            None => r.exceptions.push(Exception { reason: Reason::BudgetResidual, value: need }),
         }
         flagged += 1;
     }
