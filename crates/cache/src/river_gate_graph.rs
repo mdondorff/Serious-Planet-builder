@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 
 use planet_generators::bake::river_graph::{
-    diff, rasterise, validate, Change, Checks, Graph, Level, NodeKind, Reason, Represented, Violation,
+    diff, rasterise, validate_excused, Change, Checks, Graph, Level, NodeKind, Reason, Represented, Violation,
 };
 use planet_generators::bake::route::NONE;
 
@@ -254,11 +254,12 @@ pub fn graph_report(g: &Graph, window: &Window, inside: &[bool], land: &[bool], 
     r.reaches_h1 = g.reaches.iter().filter(|x| x.level == Level::H1).count();
     r.reaches_l = g.reaches.len() - r.reaches_h1;
     let checks = Checks { adjacent: &adjacent, tile_of: None, open: true };
-    for v in validate(g, &checks) {
+    let (violations, excused) = validate_excused(g, &checks);
+    for v in violations {
         *r.violations.entry(violation_kind(&v)).or_default() += 1;
     }
+    (r.excused_rises, r.excused_rise_m) = (excused.len(), excused.iter().map(|x| x.2).sum());
     r.bed_rises = r.violations.get("bed_rise").copied().unwrap_or(0);
-    (r.excused_rises, r.excused_rise_m) = planet_generators::bake::river_graph::excused_down_rises(g);
     r.missing_owner = planet_generators::bake::river_graph::missing_owners(g).len();
     let kind: HashMap<u64, NodeKind> = g.nodes.iter().map(|n| (n.id, n.kind)).collect();
     // the reach leaving each node (the lowest id when a broken graph has two)

@@ -435,23 +435,44 @@ fn each_injected_bed_and_conservation_failure_is_found() {
     // reading 41: a rise into a reach's own down node is excused only within the reach's budget_residual; a rise without the record, a larger one, or one at another
     // vertex stays a violation
     let rises = |g: &Graph| check(g).into_iter().filter(|v| matches!(v, Violation::BedRise { .. })).count();
+    let adj = adjacency();
+    let excused = |g: &Graph| excused_down_rises(g, &Checks { adjacent: &adj, tile_of: None, open: false });
     let mut g = base();
     reach_mut(&mut g, cell(1, 1)).attrs.bed = vec![18, 16, 17];
     assert!(found(&g, &|v| matches!(v, Violation::BedRise { vertex: 2, .. })), "a rise into the down node without the record");
-    assert_eq!(excused_down_rises(&g), (0, 0.0));
+    assert_eq!(excused(&g), (0, 0.0));
     reach_mut(&mut g, cell(1, 1)).exceptions = vec![Exception { reason: Reason::BudgetResidual, value: 0.5 }];
     assert_eq!(rises(&g), 0, "the residual records the 0.5 m rise into the down node");
-    assert_eq!(excused_down_rises(&g), (1, 0.5));
+    assert_eq!(excused(&g), (1, 0.5));
     reach_mut(&mut g, cell(1, 1)).exceptions = vec![Exception { reason: Reason::BudgetResidual, value: 0.4 }];
     assert!(found(&g, &|v| matches!(v, Violation::BedRise { vertex: 2, .. })), "a rise larger than the residual");
-    assert_eq!(excused_down_rises(&g), (0, 0.0));
+    assert_eq!(excused(&g), (0, 0.0));
     reach_mut(&mut g, cell(1, 1)).exceptions = vec![Exception { reason: Reason::RiseOverBudget, value: 5.0 }];
     assert!(found(&g, &|v| matches!(v, Violation::BedRise { vertex: 2, .. })), "another reason is no residual record");
     let mut g = base();
     reach_mut(&mut g, cell(1, 1)).attrs.bed = vec![18, 19, 0];
     reach_mut(&mut g, cell(1, 1)).exceptions = vec![Exception { reason: Reason::BudgetResidual, value: 5.0 }];
     assert!(found(&g, &|v| matches!(v, Violation::BedRise { vertex: 1, .. })), "a rise at another vertex stays a violation");
-    assert_eq!(excused_down_rises(&g), (0, 0.0));
+    assert_eq!(excused(&g), (0, 0.0));
+    // numerics review: a rise a marker already excuses is not counted again; a malformed reach (InvalidEdge) is not bed-checked, so nothing is excused there; codes at the
+    // i32 ends do not overflow (a rise, never excused by a small residual)
+    let mut g = base();
+    reach_mut(&mut g, cell(1, 1)).attrs.bed = vec![18, 16, 17];
+    let r3 = reach_mut(&mut g, cell(1, 1)).id;
+    reach_mut(&mut g, cell(1, 1)).exceptions = vec![Exception { reason: Reason::BudgetResidual, value: 0.5 }];
+    let mut mk = node(NodeKind::Exception, cell(3, 1));
+    mk.marker = Some(Marker { on_reach: r3, at_vertex: 2 });
+    g.nodes.push(mk);
+    assert_eq!(excused(&g), (0, 0.0), "the marker excuses it, not the residual");
+    let mut g = base();
+    reach_mut(&mut g, cell(1, 1)).attrs.bed = vec![18, 16, 17];
+    reach_mut(&mut g, cell(1, 1)).exceptions = vec![Exception { reason: Reason::BudgetResidual, value: 0.5 }];
+    reach_mut(&mut g, cell(1, 1)).attrs.q.pop();
+    assert_eq!(excused(&g), (0, 0.0), "a malformed reach is not bed-checked");
+    let mut g = base();
+    reach_mut(&mut g, cell(1, 1)).attrs.bed = vec![18, i32::MIN, i32::MAX];
+    reach_mut(&mut g, cell(1, 1)).exceptions = vec![Exception { reason: Reason::BudgetResidual, value: 0.0 }];
+    assert!(found(&g, &|v| matches!(v, Violation::BedRise { vertex: 2, .. })), "no overflow excuses the rise");
     // a node's bed is shared by its reaches
     let mut g = base();
     reach_mut(&mut g, cell(0, 0)).attrs.bed = vec![20, 19];
