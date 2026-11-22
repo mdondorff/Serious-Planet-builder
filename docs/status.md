@@ -3,7 +3,8 @@
 Forward state only (owner, 2026-10-16): open owner items, the current queue's open items, the current unanswered stop report, tracked items and quarantines. History goes to the log (`cargo xtask log`). When a change is archived the coder deletes its queue item's text (the log line is the record); when the architect answers a stop report it deletes it. A Tracked entry has at most 3 lines; a finished one is deleted (ADR 0075). Cap: 15 KB. Earlier states: `docs/archive/M4/status-at-m4-acceptance.md`, `docs/archive/M6/status-at-m6-close.md`. M8 closed 2026-10-30: `docs/milestones/M8-report.md`. New requirement IDs, ADR and SPIKE numbers are reserved through the lead (ADR 0120).
 
 ## Waiting for the owner
-- **G2 flights and verdict** (P3 E6): fly R1h, R3b, F1 (then R3a) on g1f15's flight stores against B; M1's record store stays g1f14's (explorer outbox 2026-11-22 19:00, editor commands there). The external review is Carbon's (owner, 2026-11-22).
+- **G3: the flight G2 did not have** (P3 E6; owner, 2026-11-22): fly R1h, R3b, F1 on g1f15's stores against B (M1: `flight-m1-g1f14`) before any port PR that changes the look; findings become G3 requirements. Commands: explorer outbox 2026-11-22 19:00.
+- **G3: the breach bound** (seam decision D1-3): cell caps or a physical cap (<= 10 km proposed by both reviews); measured on the five windows together with the cube-face metric (D9) before an ADR. The first G3 decision.
 - **/bless: `water_class_lake_mask_stripes`** (TEST-133, #1459): the first lake golden, a class view; escalated as the first of its class and for a WARP driver difference. Nothing waits on it.
 - **A new global store for the default world, seed 14**: every store on disk is refused by its keys; E1 runs on the in-memory production base (VIEW-069). Lead's recommendation: bake it after the flight, with ADR 0117's format.
 - **For later planning**: owner test 2026-10-27 groups F and G scope, the 1 m / 500 m exception (`docs/milestones/M8/owner-test-2026-10-27/README.md`). Group E (where edits sit) is settled by ADR 0113.
@@ -17,15 +18,12 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 
 Dormant items moved to `docs/parking.md` (2026-11-12).
 
-## Queue (2026-11-21, milestone P3: `docs/milestones/P3.md`; E6 river graphs, owner 2026-11-16)
-G2 decides whether the river-graph chain (RG, `spike/rg-prototype` e3eed5fb) is the candidate over B; plan: lanes digest `river-graph/roadmap-g2-g3.md`, `river-graph/review-response-2026-11-21.md` (the reviews' response; stage ablations before the G2 verdict, owner 2026-11-21).
+## Queue (2026-11-22, milestone P3: `docs/milestones/P3.md`; E6 river graphs, owner 2026-11-16)
+G2 closed (owner, 2026-11-22): the river-graph chain (RG, `spike/rg-prototype` faa923f0) is the candidate over B; the owner's flight is a known gap carried to G3. Report: lanes digest `river-graph/g2-report-2026-11-22.md`. G3 plan: `river-graph/g3-seam-execution-brief-2026-11-22.md` (merged port order) and `g3-cube-face-execution-brief-2026-11-22.md`.
 | Exit | Step | Lane |
 |---|---|---|
-| E6 | Done: G0 (#1561-#1575); G1 stages built and integrated on the spike branch (contract readings 1-40); gate bars in BUILD-060 (#1617, #1618, #1620); CON-30 partition check (fails: region-border exits move heights, trunk accumulation only for one region; a G3 port blocker) | - |
-| E6 | Done: G2 record g1f14 on main's gate (five windows, `S0` beside `S_KH`, hump, width and corner counts, five flight stores); violations fail on four windows from the rim test and the budget validator, fixes switched off: inlet floor, `--band6-floors` | - |
-| E6 | Done: stage ablations under the owner's rule (2026-11-21). band6 stays; Fable's and Carbon's stage orders fail R1h (G3 port-order item); `--sea17` stays off. `--trib-once` + `--band6-floors` + `--inlet-floor` pass on R3a, R1h and F1 (violations R1h 1,014 -> 113, F1 310 -> 0) and become the spike branch's defaults; GEN-189 reading 41 (#1625) | - |
-| E6 | Done: g1f15, the G2 record on the new defaults (main's gate, five flight stores). R1h, R3a, R3b and F1 pass the ablation rule against g1f14 (a failing bar may worsen by up to 1 % of its value: F1's beta change 0.979 -> 0.983; owner, 2026-11-22); M1 regresses (kept river +1.00, basin +0.94 points, relief lost 0.11 -> 0.16) and keeps g1f14's defaults; its cause is `--band6-floors` (without it M1 is within the floors but has 1,360 budget overruns). Rim test and budget overruns 0 on all five; cost down 18-45 % on four windows | - |
-| E6 | G2 report: after the owner's flights and the F1 item; the external review is Carbon's (owner, 2026-11-22) | lead |
+| E6 | G3: the seam and cube-face overlap reconciled into the port order; the G3 decision brief for the owner (breach bound first) | lead |
+| E6 | Housekeeping coder pass (P3 closure): stale references in specs and comments to the readings and switches of 2026-11-21/22; the 43 open OpenSpec changes listed as done, superseded or still wanted | crusader |
 | E4 | ADRs 0125, 0126 proposed (review v4); G3 decides their fate | lead |
 | E5 | ADR 0127 proposed; G1e builds the basin topology; G3 decides | lead |
 
