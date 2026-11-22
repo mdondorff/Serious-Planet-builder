@@ -660,9 +660,16 @@ pub fn budget_field_threads(s0: &[f64], w: usize, h: usize, block: usize, dx: f6
             })
             .collect();
         let k = v.len() / 2;
-        (0.5 * *v.select_nth_unstable_by(k, f64::total_cmp).1).clamp(10.0, 50.0)
+        (0.5 * *v.select_nth_unstable_by(k, f64::total_cmp).1).clamp(budget_floor_m(), 50.0)
     });
     (0..w * h).map(|c| budget[(c / w / block) * bw + (c % w) / block]).collect()
+}
+
+/// spikes #170 (spike only): the budget field's minimum in millimetres; 10 m is the contract's floor (the gate keeps it), a chain may set a lower one with `--budget-floor`
+pub static BUDGET_FLOOR_MM: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(10_000);
+
+fn budget_floor_m() -> f64 {
+    BUDGET_FLOOR_MM.load(std::sync::atomic::Ordering::Relaxed) as f64 / 1000.0
 }
 
 /// The budget report: per stage the lowering and the fill from the diagnostic fields, over land inside, against `budget`.

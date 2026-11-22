@@ -1972,6 +1972,13 @@ fn main() -> Result<(), String> {
     let order_carbon = stage_order == "carbon";
     // lead #180a (reading 42, DEC crusader-31): --trib-once is the default; `--trib-once off` the former two passes (a bare `--trib-once` stays on)
     let trib_once = !matches!(value(&args, "--trib-once"), Some("off")) || order_fable || order_carbon;
+    // spikes #170 (lead #170, spike only): `--budget-floor <m>` lowers the budget field's 10 m minimum (the clamp [10, 50] m) for every stage of the chain; the gate keeps 10 m
+    let budget_floor =
+        value(&args, "--budget-floor").map_or(Ok(10.0), |v| v.parse::<f64>().map_err(|e| format!("--budget-floor <m>: {e}")))?;
+    if !(0.0..=50.0).contains(&budget_floor) {
+        return Err(format!("--budget-floor 0 to 50 m, not {budget_floor}"));
+    }
+    planet_cache::river_gate_graph::BUDGET_FLOOR_MM.store((budget_floor * 1000.0).round() as u64, std::sync::atomic::Ordering::Relaxed);
     let kh_lower_only = match value(&args, "--kh-lower-only").unwrap_or("on") {
         "on" => true,
         "off" => false,
@@ -4351,6 +4358,7 @@ fn main() -> Result<(), String> {
             ("kh-lower-only", if kh_lower_only { "on" } else { "off" }.to_string()),
             ("trib-once", if trib_once { "on" } else { "off" }.to_string()),
             ("order", stage_order.to_string()),
+            ("budget-floor", format!("{budget_floor}")),
             ("k5-diffuse-amax", k5_diffuse_amax.to_string()),
             ("k5-parity", k5_parity.to_string()),
             ("ks", ks_mode.to_string()),
