@@ -806,16 +806,19 @@ fn the_layout_has_defaults_and_a_file_changes_only_the_keys_it_names() {
     let d = Layout::default();
     assert_eq!((d.rail_width, d.left_width, d.inspector_width), (56.0, 300.0, 320.0));
     assert_eq!((d.inspector_side, d.status_bar, d.handle_hit_px), (Side::Right, true, 10.0));
-    assert_eq!(d.tabs, [Tab::Near, Tab::Layers, Tab::Graph, Tab::Problems, Tab::Keys]);
+    assert_eq!(d.tabs, [Tab::Near, Tab::Layers, Tab::Graph, Tab::Problems, Tab::Sites, Tab::Keys]);
     assert_eq!(Layout::from_toml("").unwrap(), d);
     let l = Layout::from_toml(
-        "left_width = 360\ninspector_side = \"left\"\ntabs = [\"graph\", \"near\"]\nstatus_bar = false\nhandle_hit_px = 14.5\nrail_width = 0\n",
+        "left_width = 360\ninspector_side = \"left\"\ntabs = [\"graph\", \"sites\", \"near\"]\nstatus_bar = false\nhandle_hit_px = 14.5\nrail_width = 0\n",
     )
     .unwrap();
     assert_eq!((l.left_width, l.inspector_width, l.rail_width), (360.0, 320.0, 0.0));
     assert_eq!((l.inspector_side, l.status_bar, l.handle_hit_px), (Side::Left, false, 14.5));
-    assert_eq!(l.tabs, [Tab::Graph, Tab::Near]);
-    assert_eq!((Tab::Near.title(), Tab::Layers.key(), Tab::Graph.title()), ("Near", "layers", "Graph"));
+    assert_eq!(l.tabs, [Tab::Graph, Tab::Sites, Tab::Near]);
+    assert_eq!(
+        (Tab::Near.title(), Tab::Layers.key(), Tab::Graph.title(), Tab::Sites.key(), Tab::Sites.title()),
+        ("Near", "layers", "Graph", "sites", "Sites")
+    );
 }
 
 // spec: VIEW-018

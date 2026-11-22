@@ -53,7 +53,7 @@ use planet_render::{AdapterPolicy, GpuContext};
 
 pub const USAGE: &str = "usage: planet <mode> [options]
 modes:
-  editor        the viewer window (VIEW-001..VIEW-007): the scripted orbit-to-1 m flight on the pipelined loop; keys P/Space pause, R restart, L lit (with the atmosphere) or debug path, V debug view, T vsync, C flight or free camera (WASD move, Q/E down/up, arrows look, Shift boost), Esc quit; the window opens on the lit path with the atmosphere, the look file drawn (sun, adaptive exposure); the title shows frame rate, CPU and GPU time, the path (or the debug view), on the lit path the exposure, and the readiness report; runs on a discrete GPU only (an integrated GPU, a software adapter or an adapter missing a feature or limit is refused with the reason); [--world F --global-res N | --store DIR | --commit DIR] (--commit: a commit of the new chain over the production base computed in memory for --seed or --world, VIEW-069; no --store, --erosion or --global-res beside it; the window starts held still 25 km over the commit's region, 20 km south of the centre of its tiles or of --site, and the title says inside the region or outside the region: coarse base) [--look F] [--size WxH] [--view NAME] [--cells N --tau PX --finest-level N] [--no-vsync] [--erosion on|off] (draw the erosion layer of a bake over the stored world, off by default, VIEW-062: --store holds the world, the layer is read from --erosion-store DIR, the bake's output folder, or the same store; the layer's manifest gives the bake's shape, versions, field source and change range, and --erosion-face-res N and --erosion-res N replace its pass-1 and pass-2 cells (12288 and 98304 for a layer without a manifest); the run refuses a store that holds the legacy generator's bake unless --erosion-unchecked, and a manifest of another version or field source; the title and the log say what is on and name the field source, VIEW-065) [--channels on|off] (fill the tiles' driver block, the soil depth and the moisture of the ground materials, from the layer's baked channels, the deposited depth and the drainage area; off by default, needs --erosion on, and the run refuses a layer that holds no channels, VIEW-066) [--class-source | --legacy-source] (which bake to open when the store holds both, STRM-073; the store's recorded source otherwise) [--no-shadow-march] (turn the clipmap shadow off: the march shades the terrain and the water by default, REND-051; J shows its visibility; --shadow-march is accepted and does nothing) [--no-ui] (the editor UI, an egui layer drawn after the tone map, VIEW-011) [--edit] (start in the editor mode, VIEW-022; with --site it turns on where the scripted descent over the site ends: Tab toggles it; the panels, stamps by 2-4 and a click, handles on the planet, Ctrl+Z / Ctrl+Y) [--items DIR] (the edits as one TOML file each in DIR, loaded at the start) [--editor-layout F] (the panel layout, VIEW-018) [--marker LAT,LON[,RADIUS_M]]... (item markers of the globe overview, G, VIEW-013) [--site LAT,LON] (the scripted flight descends over this point; without it the world definition's `[world] site = [lat, lon]`, else 20,30 where that is land, else the first shore of the walk from there, GEN-108); --smoke opens the window, drives the keys for a few dozen frames and closes it (test mode: PLANET_ADAPTER or --adapter, software by default; exits with `no display` where there is none); --no-window starts and exits without a window; --offscreen runs the skeleton without a window
+  editor        the viewer window (VIEW-001..VIEW-007): the scripted orbit-to-1 m flight on the pipelined loop; keys P/Space pause, R restart, L lit (with the atmosphere) or debug path, V debug view, T vsync, C flight or free camera (WASD move, Q/E down/up, arrows look, Shift boost), Esc quit; the window opens on the lit path with the atmosphere, the look file drawn (sun, adaptive exposure); the title shows frame rate, CPU and GPU time, the path (or the debug view), on the lit path the exposure, and the readiness report; runs on a discrete GPU only (an integrated GPU, a software adapter or an adapter missing a feature or limit is refused with the reason); [--world F --global-res N | --store DIR | --commit DIR] (--commit: a commit of the new chain over the production base computed in memory for --seed or --world, VIEW-069; no --store, --erosion or --global-res beside it; the window starts held still 25 km over the commit's region, 20 km south of the centre of its tiles or of --site, and the title says inside the region or outside the region: coarse base) [--look F] [--size WxH] [--view NAME] [--cells N --tau PX --finest-level N] [--no-vsync] [--erosion on|off] (draw the erosion layer of a bake over the stored world, off by default, VIEW-062: --store holds the world, the layer is read from --erosion-store DIR, the bake's output folder, or the same store; the layer's manifest gives the bake's shape, versions, field source and change range, and --erosion-face-res N and --erosion-res N replace its pass-1 and pass-2 cells (12288 and 98304 for a layer without a manifest); the run refuses a store that holds the legacy generator's bake unless --erosion-unchecked, and a manifest of another version or field source; the title and the log say what is on and name the field source, VIEW-065) [--channels on|off] (fill the tiles' driver block, the soil depth and the moisture of the ground materials, from the layer's baked channels, the deposited depth and the drainage area; off by default, needs --erosion on, and the run refuses a layer that holds no channels, VIEW-066) [--class-source | --legacy-source] (which bake to open when the store holds both, STRM-073; the store's recorded source otherwise) [--no-shadow-march] (turn the clipmap shadow off: the march shades the terrain and the water by default, REND-051; J shows its visibility; --shadow-march is accepted and does nothing) [--no-ui] (the editor UI, an egui layer drawn after the tone map, VIEW-011) [--edit] (start in the editor mode, VIEW-022; with --site it turns on where the scripted descent over the site ends: Tab toggles it; the panels, stamps by 2-4 and a click, handles on the planet, Ctrl+Z / Ctrl+Y) [--items DIR] (the edits as one TOML file each in DIR, loaded at the start) [--bookmarks FILE] (saved site bookmarks TOML outside any WorldDefinition, VIEW-073, VIEW-075) [--editor-layout F] (the panel layout, VIEW-018) [--marker LAT,LON[,RADIUS_M]]... (item markers of the globe overview, G, VIEW-013) [--site LAT,LON] (the scripted flight descends over this point; without it the world definition's `[world] site = [lat, lon]`, else 20,30 where that is land, else the first shore of the walk from there, GEN-108); --smoke opens the window, drives the keys for a few dozen frames and closes it (test mode: PLANET_ADAPTER or --adapter, software by default; exits with `no display` where there is none); --no-window starts and exits without a window; --offscreen runs the skeleton without a window
   generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --pipeline-json <file|-> [--seed N | --world F] [--erosion on|off [--channels on|off] | --commit DIR] dumps the resolved pipeline JSON (BUILD-063); --cache-dir <dir> --region F,L [--res N] writes a tile face region into a tile store; --verify-cache <dir> [--sample N] regenerates stored tiles and compares (both take --world <definition.toml> or --seed N; --verify-cache fails when nothing could be compared, --allow-stale accepts that); --global-dir <dir> [--global-res N, default 256] bakes the global-coarse field (continents, elevation, climate) of N cells per face edge into a tile store as blocks in the canonical layout (blocks of min(N, 1024) cells) together with its ocean-connectivity channel (one bit per vertex; the area threshold is the definition's `body.0.sea.min_area_fraction`) and prints the time per sample and the channel's cost; --class-source (with --global-dir or --verify-global) samples the class source's surface instead of the legacy generator's and keys the store by it (GEN-115, STRM-073); --verify-global <dir> [--sample N] regenerates stored blocks and compares; --global-products <dir> [--global-res N] writes cube nets and maps of an in-memory bake (these take --world or --seed and --threads N); --coupled-run <dir> --global-res N (required) makes the coupled run of the bake stored in <dir> (or finds it there) and stores it, with a progress line at most every 10 s during the reduction of the bake and the wall time (STRM-051); --coarse-horizon <dir> --global-res N (required) [--threads N] makes the coarse horizon (far-field shadows, STRM-045) from the coupled run stored beside the bake in <dir> and stores it there, with a progress line and the wall time (the coupled run is made and stored by the viewer or `test-render --scene coupled`); --plan-check <dir> --global-res N (required) plans the standard flight at cells 32 and viewport / tau 240 over the stored bake with the terrain and the eroded field and fails if a view is rejected (M3 acceptance); --prefill-dir <dir> --global-res N [--prefill-levels L] [--floor-level F] writes the coarse tiles of levels F..=L (F the render floor, default 3; L default 4; an L below F writes nothing and says so; the tiles of cells 32, finest level 22, compact form, as the streamer generates them) of the stored bake into its tile pack, skipping what is there; --global-dir pre-fills the same way after the bake (--prefill-levels 0 disables; --floor-level takes both); --smoke starts and exits
   test-render   headless render harness
     --scene hello-triangle|tiles|terrain   render a scene (default hello-triangle)
@@ -263,6 +263,8 @@ pub struct Options {
     pub edit: bool,
     /// `editor --items DIR`: the directory the edits are written to and loaded from (one TOML file per edit, AUTH-001); without it they live in memory.
     pub items: Option<PathBuf>,
+    /// `editor --bookmarks FILE`: saved camera site bookmarks TOML (outside `WorldDefinition`, VIEW-073, VIEW-075).
+    pub bookmarks: Option<PathBuf>,
     /// `editor --editor-layout F`: the panel layout file (VIEW-018).
     pub editor_layout: Option<PathBuf>,
     /// `--marker LAT,LON[,RADIUS_M]` (repeatable): an item marker for the globe overview (VIEW-013).
@@ -460,6 +462,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         no_ui: false,
         edit: false,
         items: None,
+        bookmarks: None,
         editor_layout: None,
         markers: Vec::new(),
         site: None,
@@ -552,6 +555,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--no-ui" => o.no_ui = true,
             "--edit" => o.edit = true,
             "--items" => o.items = Some(PathBuf::from(it.next().ok_or("--items needs a directory")?)),
+            "--bookmarks" => o.bookmarks = Some(PathBuf::from(it.next().ok_or("--bookmarks needs a file")?)),
             "--editor-layout" => o.editor_layout = Some(PathBuf::from(it.next().ok_or("--editor-layout needs a file")?)),
             "--site" => {
                 let v = it.next().ok_or("--site needs LAT,LON")?;
@@ -954,6 +958,9 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
     if o.preview_l1.is_some() && !matches!(o.mode, Mode::Editor) {
         return Err("--preview-l1 and --preview-grid only apply to `editor` (the level-1 preview is drawn over the editor's planet)".into());
     }
+    if o.bookmarks.is_some() && !matches!(o.mode, Mode::Editor) {
+        return Err("--bookmarks only applies to `editor`".into());
+    }
     let capture_stills = matches!(o.mode, Mode::TestRender) && o.scene == "capture-stills";
     let pipeline_json = matches!(o.mode, Mode::Generate) && o.pipeline_json.is_some();
     if o.given.contains("--erosion") && o.erosion && !matches!(o.mode, Mode::Editor) && !capture_stills && !pipeline_json {
@@ -996,6 +1003,29 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
 
 pub(crate) fn err(e: std::io::Error) -> String {
     e.to_string()
+}
+
+/// Resolves where camera site bookmarks live outside `WorldDefinition` (`VIEW-075`):
+/// `--bookmarks FILE` > `PLANET_BOOKMARKS_FILE` > `None` in `--smoke` > `<items>/bookmarks.toml` > `target/review/bookmarks.toml`.
+pub fn resolve_bookmarks_path(
+    cli: Option<&PathBuf>,
+    env_file: Option<&std::ffi::OsStr>,
+    items: Option<&PathBuf>,
+    smoke: bool,
+) -> Option<PathBuf> {
+    if let Some(p) = cli {
+        return Some(p.clone());
+    }
+    if let Some(v) = env_file.filter(|v| !v.is_empty()) {
+        return Some(PathBuf::from(v));
+    }
+    if smoke {
+        return None;
+    }
+    if let Some(dir) = items {
+        return Some(dir.join("bookmarks.toml"));
+    }
+    Some(PathBuf::from("target/review/bookmarks.toml"))
 }
 
 /// ADR 0020: measure the machine and refuse (listing every failed condition with its measured value) unless it is ready.
@@ -2908,5 +2938,24 @@ mod tests {
         assert!(run_str(&["generate", "--pipeline-json", "-", "--manifest", "m.txt"]).unwrap_err().contains("--pipeline-json"));
         assert!(run_str(&["generate", "--pipeline-json", "-", "--channels", "on"]).unwrap_err().contains("--erosion on"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: VIEW-075
+    #[test]
+    fn bookmarks_cli_and_path_resolution_follow_precedence_and_stay_in_memory_under_smoke() {
+        use std::ffi::OsStr;
+        let opts = parse_args(&["editor".into(), "--bookmarks".into(), "my/sites.toml".into()]).unwrap();
+        assert_eq!(opts.bookmarks, Some(PathBuf::from("my/sites.toml")));
+        assert!(run(&["generate".into(), "--bookmarks".into(), "x.toml".into()], &mut std::io::sink())
+            .unwrap_err()
+            .contains("--bookmarks"));
+
+        let cli = PathBuf::from("cli.toml");
+        let items = PathBuf::from("edits");
+        assert_eq!(resolve_bookmarks_path(Some(&cli), Some(OsStr::new("env.toml")), Some(&items), true), Some(cli));
+        assert_eq!(resolve_bookmarks_path(None, Some(OsStr::new("env.toml")), Some(&items), true), Some(PathBuf::from("env.toml")));
+        assert_eq!(resolve_bookmarks_path(None, Some(OsStr::new("")), Some(&items), true), None);
+        assert_eq!(resolve_bookmarks_path(None, None, Some(&items), false), Some(items.join("bookmarks.toml")));
+        assert_eq!(resolve_bookmarks_path(None, None, None, false), Some(PathBuf::from("target/review/bookmarks.toml")));
     }
 }

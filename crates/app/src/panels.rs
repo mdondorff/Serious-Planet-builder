@@ -62,6 +62,29 @@ pub enum Event {
         inside: bool,
         layer: Option<String>,
     },
+    /// Save current camera view as a bookmark (VIEW-073, VIEW-075).
+    SaveBookmark {
+        name: String,
+    },
+    /// Fly camera to a saved bookmark by id.
+    JumpBookmark(u64),
+    /// Rename an existing bookmark.
+    RenameBookmark {
+        id: u64,
+        name: String,
+    },
+    /// Delete a saved bookmark by id.
+    DeleteBookmark(u64),
+    /// Jump camera to typed `LAT,LON[,ALT]` coordinates.
+    JumpCoords(String),
+    /// Trigger an F9 repro bundle capture from the Sites tab (VIEW-074, VIEW-075).
+    CaptureRepro,
+    /// Re-scan the repro directory for `.bundle` captures.
+    RefreshRepros,
+    /// Jump camera to the exact pose of repro entry `index`.
+    JumpRepro(usize),
+    /// Promote repro entry `index` into a persistent bookmark.
+    BookmarkRepro(usize),
 }
 
 /// The keys of the editor mode as the help window lists them: the key, what it does.
@@ -103,6 +126,12 @@ pub struct PanelState {
     pub help: bool,
     /// The text of the brush fields while they are edited, by field name.
     brush_text: BTreeMap<&'static str, String>,
+    /// Draft label for creating a new site bookmark.
+    pub bookmark_name: String,
+    /// Draft coordinate jump string (`LAT,LON[,ALT]`).
+    pub jump_text: String,
+    /// Active inline rename buffer for an existing bookmark `(id, text)`.
+    bookmark_rename: Option<(u64, String)>,
 }
 
 impl PanelState {
@@ -117,6 +146,9 @@ impl PanelState {
             covered: Vec::new(),
             help: false,
             brush_text: BTreeMap::new(),
+            bookmark_name: String::new(),
+            jump_text: String::new(),
+            bookmark_rename: None,
         }
     }
 
@@ -129,6 +161,40 @@ impl PanelState {
     pub fn covers(&self, p: egui::Pos2) -> bool {
         self.covered.iter().any(|r| r.contains(p))
     }
+}
+
+/// One saved bookmark row shown in the Sites tab (VIEW-075).
+#[derive(Clone, Debug, PartialEq)]
+pub struct BookmarkRow {
+    pub id: u64,
+    pub name: String,
+    pub summary: String,
+    pub site_arg: String,
+    pub distance_m: f64,
+}
+
+/// One scanned F9 repro entry shown in the Sites tab (VIEW-074, VIEW-075).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReproRow {
+    pub index: usize,
+    pub stem: String,
+    pub summary: String,
+    pub compatibility: planet_editor::repro_shelf::ReproCompatibility,
+    pub has_path: bool,
+    pub path_samples: Option<usize>,
+    pub has_png: bool,
+    pub replay_cmd: String,
+}
+
+/// Plain data backing the Sites & Repros tab (`Tab::Sites`, VIEW-075).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SitesView {
+    pub readout: Option<planet_editor::bookmarks::CameraReadout>,
+    pub bookmarks: Vec<BookmarkRow>,
+    pub bookmarks_where: String,
+    pub repros: Vec<ReproRow>,
+    pub repros_dir: String,
+    pub broken_repros: usize,
 }
 
 /// What the panels show.
@@ -161,6 +227,8 @@ pub struct PanelData<'a> {
     pub keys: &'a [planet_frame::keytable::KeyRow],
     /// The item store's count and load time against the revisit trigger of ADR 0066 point 6 (AUTH-006); `None` where there is no editor.
     pub store: Option<&'a planet_editor::store_watch::StoreWatch>,
+    /// Live camera readout, site bookmarks, and F9 repro captures for the Sites tab (VIEW-075).
+    pub sites: &'a SitesView,
 }
 
 fn kind_color(kind: &str) -> egui::Color32 {
@@ -342,7 +410,7 @@ fn brush_section(ui: &mut egui::Ui, st: &mut PanelState, b: &planet_editor::sess
 }
 
 fn left_panel(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec<Event>) {
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         for tab in &d.layout.tabs {
             let title = if *tab == Tab::Problems && !d.problems.is_empty() {
                 format!("{} ({})", tab.title(), d.problems.len())
@@ -410,6 +478,7 @@ fn left_panel(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Ve
             ui.weak("Procedural base: locked, generator pinned");
         }
         Tab::Problems => problems_tab(ui, st, d, ev),
+        Tab::Sites => sites_tab(ui, st, d, ev),
         Tab::Keys => keys_tab(ui, st, d),
         Tab::Graph => {
             ui.label(egui::RichText::new("Chain, top applies first").small().weak());
@@ -426,6 +495,154 @@ fn left_panel(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Ve
             });
         }
     });
+}
+
+/// The Sites tab (VIEW-075): live camera coordinates, `LAT,LON[,ALT]` jump box, saved site bookmarks, and F9 repro shelf.
+fn sites_tab(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec<Event>) {
+    use planet_editor::repro_shelf::ReproCompatibility;
+
+    ui.strong("Camera");
+    if let Some(readout) = &d.sites.readout {
+        let r = ui.label(readout.summary());
+        st.marks.push(("site:readout".to_string(), r.rect));
+        ui.monospace(readout.site_flag());
+    } else {
+        let r = ui.weak("No camera pose yet.");
+        st.marks.push(("site:readout".to_string(), r.rect));
+    }
+
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        let jr = ui.add(egui::TextEdit::singleline(&mut st.jump_text).hint_text("LAT, LON[, ALT]").desired_width(180.0));
+        st.marks.push(("site:jump-input".to_string(), jr.rect));
+        let enter = jr.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        let go = ui.button("Go");
+        st.marks.push(("site:jump-go".to_string(), go.rect));
+        if enter || go.clicked() {
+            ev.push(Event::JumpCoords(st.jump_text.trim().to_string()));
+        }
+    });
+
+    ui.separator();
+    ui.strong("Bookmarks");
+    if !d.sites.bookmarks_where.is_empty() {
+        ui.label(egui::RichText::new(&d.sites.bookmarks_where).small().weak());
+    }
+    ui.horizontal(|ui| {
+        let nr = ui.add(egui::TextEdit::singleline(&mut st.bookmark_name).hint_text("Site name (optional)").desired_width(165.0));
+        st.marks.push(("site:new-name".to_string(), nr.rect));
+        let enter = nr.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        let save = ui.button("Save view");
+        st.marks.push(("site:save".to_string(), save.rect));
+        if enter || save.clicked() {
+            ev.push(Event::SaveBookmark { name: std::mem::take(&mut st.bookmark_name) });
+        }
+    });
+
+    if d.sites.bookmarks.is_empty() {
+        ui.weak("No saved sites yet.");
+    }
+    for b in &d.sites.bookmarks {
+        ui.push_id(b.id, |ui| {
+            ui.group(|ui| {
+                ui.horizontal(|ui| {
+                    let current =
+                        st.bookmark_rename.as_ref().filter(|(id, _)| *id == b.id).map(|(_, s)| s.clone()).unwrap_or_else(|| b.name.clone());
+                    let mut edited = current;
+                    let r = ui.add(egui::TextEdit::singleline(&mut edited).desired_width(145.0));
+                    st.marks.push((format!("bookmark:name:{}", b.id), r.rect));
+                    if r.has_focus() || r.lost_focus() {
+                        st.bookmark_rename = Some((b.id, edited.clone()));
+                    }
+                    if r.lost_focus() {
+                        let trimmed = edited.trim().to_string();
+                        if !trimmed.is_empty() && trimmed != b.name {
+                            ev.push(Event::RenameBookmark { id: b.id, name: trimmed });
+                        }
+                        st.bookmark_rename = None;
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.weak(format_metres(b.distance_m));
+                    });
+                });
+                ui.label(egui::RichText::new(&b.summary).small().weak());
+                ui.horizontal(|ui| {
+                    let jump = ui.button("Jump");
+                    st.marks.push((format!("bookmark:jump:{}", b.id), jump.rect));
+                    if jump.clicked() {
+                        ev.push(Event::JumpBookmark(b.id));
+                    }
+                    let del = ui.add(egui::Button::new(egui::RichText::new("Delete").color(egui::Color32::from_rgb(242, 179, 179))));
+                    st.marks.push((format!("bookmark:delete:{}", b.id), del.rect));
+                    if del.clicked() {
+                        ev.push(Event::DeleteBookmark(b.id));
+                    }
+                    ui.monospace(format!("--site {}", b.site_arg));
+                });
+            });
+        });
+    }
+
+    ui.separator();
+    ui.horizontal(|ui| {
+        ui.strong("F9 Repro Shelf");
+        let cap = ui.button("Capture F9");
+        st.marks.push(("repro:capture".to_string(), cap.rect));
+        if cap.clicked() {
+            ev.push(Event::CaptureRepro);
+        }
+        let ref_btn = ui.button("Refresh");
+        st.marks.push(("repro:refresh".to_string(), ref_btn.rect));
+        if ref_btn.clicked() {
+            ev.push(Event::RefreshRepros);
+        }
+    });
+    if !d.sites.repros_dir.is_empty() {
+        ui.label(egui::RichText::new(&d.sites.repros_dir).small().weak());
+    }
+    if d.sites.broken_repros > 0 {
+        ui.colored_label(ORANGE, format!("⚠ {} unreadable .bundle file(s) skipped", d.sites.broken_repros));
+    }
+    if d.sites.repros.is_empty() {
+        ui.weak("No F9 repro bundles found yet.");
+    }
+    for r in &d.sites.repros {
+        ui.push_id(&r.stem, |ui| {
+            ui.group(|ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.strong(&r.stem);
+                    let (badge, color) = match r.compatibility {
+                        ReproCompatibility::MatchesWorld => ("match", GREEN),
+                        ReproCompatibility::DifferentDefinition => ("diff world", AMBER),
+                        ReproCompatibility::DifferentSeed => ("seed !=", ORANGE),
+                    };
+                    ui.colored_label(color, badge);
+                    if let Some(samples) = r.path_samples {
+                        ui.weak(format!("path ({samples})"));
+                    } else if r.has_path {
+                        ui.weak("path");
+                    }
+                    if r.has_png {
+                        ui.weak("png");
+                    }
+                });
+                ui.label(egui::RichText::new(&r.summary).small().weak());
+                ui.horizontal(|ui| {
+                    let jump = ui.button("Jump");
+                    st.marks.push((format!("repro:jump:{}", r.stem), jump.rect));
+                    if jump.clicked() {
+                        ev.push(Event::JumpRepro(r.index));
+                    }
+                    let bm = ui.button("Bookmark");
+                    st.marks.push((format!("repro:bookmark:{}", r.stem), bm.rect));
+                    if bm.clicked() {
+                        ev.push(Event::BookmarkRepro(r.index));
+                    }
+                });
+                ui.label(egui::RichText::new(&r.replay_cmd).monospace().small());
+            });
+        });
+    }
 }
 
 /// The Keys tab (VIEW-057): the keys the window accepts, by group, each with what it does and the state it is in.
@@ -970,6 +1187,7 @@ mod tests {
         selected: Option<ItemId>,
         can_undo: bool,
         brush: Option<planet_editor::session::BrushSettings>,
+        sites: SitesView,
     }
 
     fn held(f: &Fixture, layout: Layout) -> Held {
@@ -985,6 +1203,7 @@ mod tests {
             selected: f.s.selected(),
             can_undo: true,
             brush: None,
+            sites: SitesView::default(),
         }
     }
 
@@ -1010,6 +1229,7 @@ mod tests {
             view_status: "",
             keys: &[],
             store: None,
+            sites: &h.sites,
         }
     }
 
@@ -1698,5 +1918,76 @@ mod tests {
         pass(vec![], &mut buf, &mut id, &mut commits);
         assert_eq!(commits.last().map(String::as_str), Some("500"), "{commits:?}");
         assert!(ctx.memory(|m| m.has_focus(id.unwrap())), "Enter leaves the focus in the field");
+    }
+
+    // spec: VIEW-075
+    #[test]
+    fn the_sites_tab_drives_coordinate_jumps_bookmarks_and_repro_shelf_events() {
+        use planet_editor::bookmarks::CameraReadout;
+        use planet_editor::repro_shelf::ReproCompatibility;
+
+        let f = fixture();
+        let layout = Layout::default();
+        assert!(layout.tabs.contains(&Tab::Sites), "Sites tab is in default layout");
+        assert_eq!(layout.tabs.last(), Some(&Tab::Keys), "Keys tab stays last (VIEW-057)");
+
+        let mut h = held(&f, layout.clone());
+        h.sites = SitesView {
+            readout: Some(CameraReadout { lat_deg: 47.2, lon_deg: 8.55, altitude_m: 1_500.0, yaw_deg: 45.0, pitch_deg: -35.0 }),
+            bookmarks: vec![BookmarkRow {
+                id: 1,
+                name: "Ridge Overlook".into(),
+                summary: "47.20000° N, 8.55000° E · alt 1.5 km · hdg 045.0° · pitch -35.0°".into(),
+                site_arg: "47.20000,8.55000".into(),
+                distance_m: 2_400.0,
+            }],
+            bookmarks_where: "saved in bookmarks.toml".into(),
+            repros: vec![ReproRow {
+                index: 0,
+                stem: "frame-42".into(),
+                summary: "seed 7 · relief · 20.00000° N, 30.00000° E · alt 2 km · hdg 000.0° · pitch -25.0°".into(),
+                compatibility: ReproCompatibility::MatchesWorld,
+                has_path: true,
+                path_samples: Some(12),
+                has_png: true,
+                replay_cmd: "cargo xtask repro target/review/frame-42-path.txt --window".into(),
+            }],
+            repros_dir: "target/review".into(),
+            broken_repros: 1,
+        };
+
+        let mut rig = Rig::new(&layout);
+        rig.settle(&data(&h));
+        rig.click(&data(&h), rig.mark("tab:sites"));
+        assert_eq!(rig.st.tab, Tab::Sites);
+        assert!(rig.st.mark("site:readout").is_some());
+
+        // Type coordinate jump and click Go.
+        rig.click(&data(&h), rig.mark("site:jump-input"));
+        rig.pass(&data(&h), vec![Raw::Text("-12.5, 40.0, 2 km".into())]);
+        let ev = rig.click(&data(&h), rig.mark("site:jump-go"));
+        assert!(ev.contains(&Event::JumpCoords("-12.5, 40.0, 2 km".into())), "{ev:?}");
+
+        // Type optional bookmark name and click Save view.
+        rig.click(&data(&h), rig.mark("site:new-name"));
+        rig.pass(&data(&h), vec![Raw::Text("Basin Rim".into())]);
+        let ev = rig.click(&data(&h), rig.mark("site:save"));
+        assert!(ev.contains(&Event::SaveBookmark { name: "Basin Rim".into() }), "{ev:?}");
+
+        // Jump and delete on existing bookmark row.
+        let p = rig.mark("bookmark:jump:1");
+        assert_eq!(rig.click(&data(&h), p), vec![Event::JumpBookmark(1)]);
+        let p = rig.mark("bookmark:delete:1");
+        assert_eq!(rig.click(&data(&h), p), vec![Event::DeleteBookmark(1)]);
+
+        // Repro shelf capture, refresh, jump, and bookmark promotion.
+        let p = rig.mark("repro:capture");
+        assert_eq!(rig.click(&data(&h), p), vec![Event::CaptureRepro]);
+        let p = rig.mark("repro:refresh");
+        assert_eq!(rig.click(&data(&h), p), vec![Event::RefreshRepros]);
+        let p = rig.mark("repro:jump:frame-42");
+        assert_eq!(rig.click(&data(&h), p), vec![Event::JumpRepro(0)]);
+        let p = rig.mark("repro:bookmark:frame-42");
+        assert_eq!(rig.click(&data(&h), p), vec![Event::BookmarkRepro(0)]);
     }
 }
