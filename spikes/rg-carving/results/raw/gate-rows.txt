@@ -1,0 +1,44 @@
+== s160/r1h-level
+RIVER-GATE basins: 11.18 % of river length in closed basins (13227 of 118280 cells; 1175 basins of >= 0.5 m depth and >= 16 cells, fill epsilon 1e-7 m; bar <= 10 %); SPIKE-114 reference (any pit of 0.05 m): 15.52 %
+RIVER-GATE gradient: 2778 of 118171 river steps rise by more than 0.25 m (2.35 %; largest 84.64 m)
+RIVER-GATE bars [owner decision 1]: bar_corridor PASS 99.93 (>= 97.5); bar_uphill FAIL 1.27 (<= 1); bar_agree_1km2 PASS 91.71 (>= 90); bar_agree_75km2 PASS 97.66 (>= 90); bar_violations PASS 0.00 (<= 0); bar_spill_missing PASS 0.00 (<= 0); bar_spectrum_steep PASS -3.84 (>= -4.13); bar_spectrum_rough PASS -3.84 (<= -2.05); bar_crest PASS 0.09 (<= 15); 8 of 9 pass
+== s160/r1h-connected
+RIVER-GATE basins: 3.46 % of river length in closed basins (4052 of 117191 cells; 953 basins of >= 0.5 m depth and >= 16 cells, fill epsilon 1e-7 m; bar <= 10 %); SPIKE-114 reference (any pit of 0.05 m): 13.33 %
+RIVER-GATE gradient: 1832 of 117083 river steps rise by more than 0.25 m (1.56 %; largest 84.64 m)
+RIVER-GATE bars [owner decision 1]: bar_corridor PASS 99.75 (>= 97.5); bar_uphill PASS 0.45 (<= 1); bar_agree_1km2 PASS 92.18 (>= 90); bar_agree_75km2 PASS 98.13 (>= 90); bar_violations PASS 0.00 (<= 0); bar_spill_missing PASS 0.00 (<= 0); bar_spectrum_steep PASS -3.81 (>= -4.13); bar_spectrum_rough PASS -3.81 (<= -2.05); bar_crest PASS 0.09 (<= 15); 9 of 9 pass
+== s160/f1-level
+RIVER-GATE basins: 9.65 % of river length in closed basins (19784 of 204969 cells; 600 basins of >= 0.5 m depth and >= 16 cells, fill epsilon 1e-7 m; bar <= 10 %); SPIKE-114 reference (any pit of 0.05 m): 20.30 %
+RIVER-GATE gradient: 1588 of 204938 river steps rise by more than 0.25 m (0.77 %; largest 17.24 m)
+RIVER-GATE bars [owner decision 1]: bar_corridor PASS 99.87 (>= 97.5); bar_uphill PASS 0.49 (<= 1); bar_agree_1km2 PASS 96.46 (>= 90); bar_agree_75km2 PASS 99.01 (>= 90); bar_violations PASS 0.00 (<= 0); bar_spill_missing PASS 0.00 (<= 0); bar_spectrum_steep PASS -3.52 (>= -4.13); bar_spectrum_rough PASS -3.52 (<= -2.05); bar_crest PASS 0.37 (<= 15); 9 of 9 pass
+== s160/f1-connected
+RIVER-GATE basins: 0.62 % of river length in closed basins (1275 of 204661 cells; 478 basins of >= 0.5 m depth and >= 16 cells, fill epsilon 1e-7 m; bar <= 10 %); SPIKE-114 reference (any pit of 0.05 m): 20.35 %
+RIVER-GATE gradient: 1135 of 204626 river steps rise by more than 0.25 m (0.55 %; largest 17.24 m)
+RIVER-GATE bars [owner decision 1]: bar_corridor PASS 99.87 (>= 97.5); bar_uphill PASS 0.27 (<= 1); bar_agree_1km2 PASS 96.44 (>= 90); bar_agree_75km2 PASS 99.11 (>= 90); bar_violations PASS 0.00 (<= 0); bar_spill_missing PASS 0.00 (<= 0); bar_spectrum_steep PASS -3.51 (>= -4.13); bar_spectrum_rough PASS -3.51 (<= -2.05); bar_crest PASS 0.30 (<= 15); 9 of 9 pass
+== s160/r3a-level
+RIVER-GATE basins: 1.80 % of river length in closed basins (1507 of 83777 cells; 25 basins of >= 0.5 m depth and >= 16 cells, fill epsilon 1e-7 m; bar <= 10 %); SPIKE-114 reference (any pit of 0.05 m): 29.79 %
+RIVER-GATE gradient: 1067 of 83419 river steps rise by more than 0.25 m (1.28 %; largest 2.86 m)
+RIVER-GATE bars [owner decision 1]: bar_corridor PASS 100.00 (>= 97.5); bar_uphill FAIL 1.28 (<= 1); bar_agree_1km2 FAIL 83.85 (>= 90); bar_agree_75km2 PASS 94.79 (>= 90); bar_violations PASS 0.00 (<= 0); bar_spill_missing PASS 0.00 (<= 0); bar_spectrum_steep PASS -3.63 (>= -4.13); bar_spectrum_rough PASS -3.63 (<= -2.05); bar_crest PASS 0.09 (<= 15); 7 of 9 pass
+== s160/r3a-connected
+RIVER-GATE basins: 0.00 % of river length in closed basins (0 of 75360 cells; 2 basins of >= 0.5 m depth and >= 16 cells, fill epsilon 1e-7 m; bar <= 10 %); SPIKE-114 reference (any pit of 0.05 m): 21.88 %
+RIVER-GATE gradient: 18 of 75023 river steps rise by more than 0.25 m (0.02 %; largest 0.96 m)
+RIVER-GATE bars [owner decision 1]: bar_corridor PASS 100.00 (>= 97.5); bar_uphill PASS 0.02 (<= 1); bar_agree_1km2 FAIL 87.53 (>= 90); bar_agree_75km2 PASS 99.30 (>= 90); bar_violations PASS 0.00 (<= 0); bar_spill_missing PASS 0.00 (<= 0); bar_spectrum_steep PASS -3.55 (>= -4.13); bar_spectrum_rough PASS -3.55 (<= -2.05); bar_crest PASS 0.09 (<= 15); 8 of 9 pass
+== s161/r1h-lo
+RIVER-GATE basins: 3.21 % of river length in closed basins (3763 of 117335 cells; 947 basins of >= 0.5 m depth and >= 16 cells, fill epsilon 1e-7 m; bar <= 10 %); SPIKE-114 reference (any pit of 0.05 m): 13.25 %
+RIVER-GATE gradient: 1694 of 117227 river steps rise by more than 0.25 m (1.45 %; largest 84.64 m)
+RIVER-GATE bars [owner decision 1]: bar_corridor PASS 99.86 (>= 97.5); bar_uphill PASS 0.32 (<= 1); bar_agree_1km2 PASS 92.34 (>= 90); bar_agree_75km2 PASS 98.13 (>= 90); bar_violations PASS 0.00 (<= 0); bar_spill_missing PASS 0.00 (<= 0); bar_spectrum_steep PASS -3.81 (>= -4.13); bar_spectrum_rough PASS -3.81 (<= -2.05); bar_crest PASS 0.09 (<= 15); 9 of 9 pass
+== s161/r1h-h10
+RIVER-GATE basins: 3.77 % of river length in closed basins (4409 of 116963 cells; 994 basins of >= 0.5 m depth and >= 16 cells, fill epsilon 1e-7 m; bar <= 10 %); SPIKE-114 reference (any pit of 0.05 m): 14.24 %
+RIVER-GATE gradient: 1991 of 116856 river steps rise by more than 0.25 m (1.70 %; largest 84.64 m)
+RIVER-GATE bars [owner decision 1]: bar_corridor PASS 99.68 (>= 97.5); bar_uphill PASS 0.45 (<= 1); bar_agree_1km2 PASS 92.06 (>= 90); bar_agree_75km2 PASS 98.15 (>= 90); bar_violations PASS 0.00 (<= 0); bar_spill_missing PASS 0.00 (<= 0); bar_spectrum_steep PASS -3.81 (>= -4.13); bar_spectrum_rough PASS -3.81 (<= -2.05); bar_crest PASS 0.09 (<= 15); 9 of 9 pass
+== s161/r1h-lo-h10
+RIVER-GATE basins: 3.52 % of river length in closed basins (4120 of 116990 cells; 986 basins of >= 0.5 m depth and >= 16 cells, fill epsilon 1e-7 m; bar <= 10 %); SPIKE-114 reference (any pit of 0.05 m): 14.21 %
+RIVER-GATE gradient: 1855 of 116883 river steps rise by more than 0.25 m (1.59 %; largest 84.64 m)
+RIVER-GATE bars [owner decision 1]: bar_corridor PASS 99.78 (>= 97.5); bar_uphill PASS 0.32 (<= 1); bar_agree_1km2 PASS 92.22 (>= 90); bar_agree_75km2 PASS 98.19 (>= 90); bar_violations PASS 0.00 (<= 0); bar_spill_missing PASS 0.00 (<= 0); bar_spectrum_steep PASS -3.81 (>= -4.13); bar_spectrum_rough PASS -3.81 (<= -2.05); bar_crest PASS 0.09 (<= 15); 9 of 9 pass
+== s161/r1h-lake10
+RIVER-GATE basins: 3.51 % of river length in closed basins (4112 of 117228 cells; 997 basins of >= 0.5 m depth and >= 16 cells, fill epsilon 1e-7 m; bar <= 10 %); SPIKE-114 reference (any pit of 0.05 m): 14.03 %
+RIVER-GATE gradient: 1855 of 117121 river steps rise by more than 0.25 m (1.58 %; largest 84.64 m)
+RIVER-GATE bars [owner decision 1]: bar_corridor PASS 99.78 (>= 97.5); bar_uphill PASS 0.33 (<= 1); bar_agree_1km2 PASS 90.19 (>= 90); bar_agree_75km2 PASS 95.05 (>= 90); bar_violations PASS 0.00 (<= 0); bar_spill_missing PASS 0.00 (<= 0); bar_spectrum_steep PASS -3.81 (>= -4.13); bar_spectrum_rough PASS -3.81 (<= -2.05); bar_crest PASS 0.09 (<= 15); 9 of 9 pass
+== s161/f1-h10
+RIVER-GATE basins: 0.65 % of river length in closed basins (1333 of 204669 cells; 498 basins of >= 0.5 m depth and >= 16 cells, fill epsilon 1e-7 m; bar <= 10 %); SPIKE-114 reference (any pit of 0.05 m): 20.37 %
+RIVER-GATE gradient: 1166 of 204634 river steps rise by more than 0.25 m (0.57 %; largest 17.24 m)
+RIVER-GATE bars [owner decision 1]: bar_corridor PASS 99.87 (>= 97.5); bar_uphill PASS 0.27 (<= 1); bar_agree_1km2 PASS 96.44 (>= 90); bar_agree_75km2 PASS 99.11 (>= 90); bar_violations PASS 0.00 (<= 0); bar_spill_missing PASS 0.00 (<= 0); bar_spectrum_steep PASS -3.51 (>= -4.13); bar_spectrum_rough PASS -3.51 (<= -2.05); bar_crest PASS 0.29 (<= 15); 9 of 9 pass

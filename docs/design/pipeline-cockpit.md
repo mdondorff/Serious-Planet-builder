@@ -1,5 +1,5 @@
 # Pipeline Cockpit: Global Authoring Companion & Step Inspector
-Status: design note, non-normative (ag2-antigravity, 2026-11-20); companion to BUILD-063, TEST-142, and planned BUILD-064.
+Status: design note, non-normative (ag2-antigravity, 2026-11-20); companion to BUILD-063, TEST-142, and BUILD-064.
 
 ## 1. Intent & Why Two PRs
 Before an in-app Global Authoring UI lands inside the runtime viewer (A3 section 11 / `driver-regions.md`), authoring parameters and pipeline steps are inspected across scattered headless commands (`preview world`, `generate --*-preview`, `stages`, `transects`). A durable local HTML cockpit gives an immediate offline companion for:
@@ -10,8 +10,8 @@ Scraping `docs/design/terrain-target.md` drifts from live code as flags and `*_V
 
 | PR | Branch / IDs | Scope | Gate |
 |---|---|---|---|
-| **PR 1** | `change/pipeline-descriptor` (`BUILD-063`, `TEST-142`) | Code-generated `pipeline_catalog`, runtime `planet generate --pipeline-json OUT` (embedding `catalog` + `--commit DIR`), `target/review/stages/pipeline.json` in Tier A, `probe::Stage` + `manifest.txt` hook parity, live `spec_ids` check, `HeightField::upstream()` contract test | Tier-2 Draft PR (`opus-architect` + owner review before merge) |
-| **PR 2** | `change/xtask-pipeline-cockpit` (`BUILD-064`, after PR 1 merge) | `std`-only `cargo xtask cockpit` HTML assembler (`<1 s` offline report) invoking `planet generate --pipeline-json` and `--run <world\|drivers\|stages\|all>` batch orchestrator over existing preview CLIs | Tier-1 (`xtask` companion tooling) |
+| **PR 1** | `change/pipeline-descriptor` (`BUILD-063`, `TEST-142`) | Code-generated `pipeline_catalog`, runtime `planet generate --pipeline-json OUT` (embedding `catalog` + `--commit DIR`), `target/review/stages/pipeline.json` in Tier A, `probe::Stage` + `manifest.txt` hook parity, live `spec_ids` check, `HeightField::upstream()` contract test | Merged into `main` (`acf57959`, PR #1615) |
+| **PR 2** | `change/xtask-pipeline-cockpit` (`BUILD-064`, current) | `std`-only `cargo xtask cockpit` HTML assembler (`xtask/src/cockpit/`) invoking `planet generate --pipeline-json` and `--run <world\|drivers\|stages\|all>` batch orchestrator over existing preview CLIs + `Stage::ALL_KINDS` variant-coverage check | Tier-1 (`xtask` companion tooling) |
 
 **Scope trim:** No repo-admin/meta context drawer belongs in `cargo xtask cockpit`. It focuses solely on the pipeline graph, active chains, version/key pins, and step outputs.
 
@@ -25,10 +25,10 @@ Scraping `docs/design/terrain-target.md` drifts from live code as flags and `*_V
   - `every_spec_id_in_catalog_resolves_to_a_live_requirement_in_openspec_specs` fails if any cited ID disappears from `openspec/specs/*/spec.md`.
   - `the_declared_runtime_chain_matches_the_walked_height_field_upstream_chain` instantiates `field_chain_erosion` across all valid M9 layer, K5-K7 commit, stamp, and water-cull configurations and asserts exact equality between `resolve_runtime_chain` and walking `HeightField::upstream()`.
 
-## 3. Planned Consumer in PR 2 (`BUILD-064`, Non-Normative Preview)
-After PR 1 review and merge, `cargo xtask cockpit` will invoke `planet generate --pipeline-json` (reading the embedded `catalog` + resolved world/commit chain into `target/review/cockpit/`) and assemble a self-contained single-file HTML report purely with `std` Rust (no `serde` added to `xtask`), offering three focused tabs:
+## 3. Consumer in PR 2 (`BUILD-064`, `cargo xtask cockpit`)
+`cargo xtask cockpit` prints self-tested living CLI documentation via `-h`/`--help` (and embeds the same guide inside the `CLI Help` modal of `index.html`), invokes `planet generate --pipeline-json` (or reads `--pipeline-json FILE` offline without taking a heavy slot when `--run` is unset), parses `docs/stages/manifest.txt`, indexes PNG `IHDR` dimensions and `.txt` metric files across `target/review/cockpit/previews/`, `target/preview/`, `target/review/stages/`, `docs/stages/sheets/`, and `--chain DIR`, and writes a self-contained single-file HTML report (`target/review/cockpit/index.html`) purely with `std` Rust (no `serde` or external network assets), offering three focused tabs:
 1. **Pipeline DAG & Switch Matrix**: Renders the catalog stages by `K1`..`K11` / `M9-P1`..`M9-P2` and `global`/`region`/`tile` scope, highlights active paths per `HeightFieldKind` and `--erosion`/`--channels`/`--commit`/stamp switches, and visualizes `base_node_hash` + `definition_hash`.
-2. **Global Authoring & Step Inspector**: Indexes existing `target/preview/` and `target/review/` outputs (and triggers `preview world`, `--{shelf,lithology,uplift,climate,arid,ice}-preview`, `stages`, `transects` under `--run`), pairing generated PNGs with their `.txt` metrics and seeded side-by-side comparison.
+2. **Global Authoring & Step Inspector**: Indexes existing preview outputs (and triggers `preview world`, `--{shelf,lithology,uplift,climate,arid,ice}-preview`, `stages`, `transect_sheet` under `--run`), pairing generated PNGs with their `.txt` metrics and side-by-side comparison.
 3. **Version & Cache-Key Pin Ledger**: Displays all 42 live `*_VERSION` constants alongside `docs/stages/manifest.txt` probe hashes.
 
 ## 4. Constitutional & Layering Guarantees

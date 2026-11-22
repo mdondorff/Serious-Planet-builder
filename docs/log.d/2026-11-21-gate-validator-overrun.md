@@ -1,0 +1,1 @@
+- 2026-11-21 gate-validator-overrun (BUILD-060): `b_validator_overrun`, the chain's f64 budget validator records (`budget-violations.csv`), a correctness column in bar_violations (lead, 2026-11-21).
