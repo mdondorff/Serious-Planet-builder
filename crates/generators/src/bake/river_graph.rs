@@ -723,6 +723,30 @@ pub struct Checks<'a> {
     pub open: bool,
 }
 
+/// Reading 41 (lead, 2026-11-22): a bed rise at vertex `k` of `r` is excused when it rises into the reach's own down node (its last vertex) and the reach carries
+/// `budget_residual` with a value of at least the rise (metres, codes of 0.5 m): the residual records the need not done, and a down node has no place for a marker.
+fn down_rise_excused(r: &Reach, k: usize) -> bool {
+    let n = r.vertices.len();
+    if k + 1 != n || k == 0 {
+        return false;
+    }
+    let rise_m = 0.5 * f64::from(r.attrs.bed[k] - r.attrs.bed[k - 1]);
+    r.exceptions.iter().any(|e| e.reason == Reason::BudgetResidual && e.value.is_finite() && e.value + 1e-9 >= rise_m)
+}
+
+/// The bed rises reading 41 excuses (into a reach's own down node, within its `budget_residual`): their count and metres, for the gate's own column beside the violations.
+pub fn excused_down_rises(g: &Graph) -> (usize, f64) {
+    let (mut count, mut metres) = (0usize, 0.0f64);
+    for r in &g.reaches {
+        let k = r.vertices.len().saturating_sub(1);
+        if k >= 1 && r.attrs.bed.len() == r.vertices.len() && r.attrs.bed[k] > r.attrs.bed[k - 1] && down_rise_excused(r, k) {
+            count += 1;
+            metres += 0.5 * f64::from(r.attrs.bed[k] - r.attrs.bed[k - 1]);
+        }
+    }
+    (count, metres)
+}
+
 /// Whether `b` lies below `a` beyond the relative tolerance.
 fn falls(a: f64, b: f64) -> bool {
     b < a - CONSERVATION_REL * a.abs().max(b.abs())
@@ -906,10 +930,11 @@ pub fn validate(graph: &Graph, checks: &Checks) -> Vec<Violation> {
                 v.push(Violation::TributaryLeavesTile { reach: r.id });
             }
         }
-        // bed: non-increasing on codes, except at an exception marker's vertex on this reach
+        // bed: non-increasing on codes, except at an exception marker's vertex on this reach, and (reading 41) a rise into the reach's own down node no larger than its
+        // budget_residual value (a down node takes no marker)
         let ex = excepted.get(&r.id);
         for k in 1..n {
-            if a.bed[k] > a.bed[k - 1] && !ex.is_some_and(|e| e.contains(&(k as u32))) {
+            if a.bed[k] > a.bed[k - 1] && !ex.is_some_and(|e| e.contains(&(k as u32))) && !down_rise_excused(r, k) {
                 v.push(Violation::BedRise { reach: r.id, vertex: k });
             }
         }

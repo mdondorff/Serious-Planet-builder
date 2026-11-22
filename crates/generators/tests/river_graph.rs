@@ -432,6 +432,26 @@ fn each_injected_bed_and_conservation_failure_is_found() {
         found(&g, &|v| matches!(v, Violation::BedNotShared { node } if *node == j)),
         "a tributary carries the trunk's bed at its junction"
     );
+    // reading 41: a rise into a reach's own down node is excused only within the reach's budget_residual; a rise without the record, a larger one, or one at another
+    // vertex stays a violation
+    let rises = |g: &Graph| check(g).into_iter().filter(|v| matches!(v, Violation::BedRise { .. })).count();
+    let mut g = base();
+    reach_mut(&mut g, cell(1, 1)).attrs.bed = vec![18, 16, 17];
+    assert!(found(&g, &|v| matches!(v, Violation::BedRise { vertex: 2, .. })), "a rise into the down node without the record");
+    assert_eq!(excused_down_rises(&g), (0, 0.0));
+    reach_mut(&mut g, cell(1, 1)).exceptions = vec![Exception { reason: Reason::BudgetResidual, value: 0.5 }];
+    assert_eq!(rises(&g), 0, "the residual records the 0.5 m rise into the down node");
+    assert_eq!(excused_down_rises(&g), (1, 0.5));
+    reach_mut(&mut g, cell(1, 1)).exceptions = vec![Exception { reason: Reason::BudgetResidual, value: 0.4 }];
+    assert!(found(&g, &|v| matches!(v, Violation::BedRise { vertex: 2, .. })), "a rise larger than the residual");
+    assert_eq!(excused_down_rises(&g), (0, 0.0));
+    reach_mut(&mut g, cell(1, 1)).exceptions = vec![Exception { reason: Reason::RiseOverBudget, value: 5.0 }];
+    assert!(found(&g, &|v| matches!(v, Violation::BedRise { vertex: 2, .. })), "another reason is no residual record");
+    let mut g = base();
+    reach_mut(&mut g, cell(1, 1)).attrs.bed = vec![18, 19, 0];
+    reach_mut(&mut g, cell(1, 1)).exceptions = vec![Exception { reason: Reason::BudgetResidual, value: 5.0 }];
+    assert!(found(&g, &|v| matches!(v, Violation::BedRise { vertex: 1, .. })), "a rise at another vertex stays a violation");
+    assert_eq!(excused_down_rises(&g), (0, 0.0));
     // a node's bed is shared by its reaches
     let mut g = base();
     reach_mut(&mut g, cell(0, 0)).attrs.bed = vec![20, 19];

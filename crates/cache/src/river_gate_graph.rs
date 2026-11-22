@@ -96,6 +96,10 @@ pub struct GraphReport {
     pub basins: usize,
     /// The validators' violations (GEN-189; an open slice: endpoints owned elsewhere are not violations), by kind, and the endpoints owned elsewhere.
     pub violations: BTreeMap<&'static str, usize>,
+    /// Reading 41 (lead, 2026-11-22): the bed rises into a reach's own down node GEN-189 excuses by the reach's `budget_residual`, count and metres; printed beside the
+    /// violations so nothing excused is hidden.
+    pub excused_rises: usize,
+    pub excused_rise_m: f64,
     pub missing_owner: usize,
     /// Sources; those whose chain (followed through outgoing reaches) ends at an outlet of the graph; those that end at a node the slice does not hold.
     pub sources: usize,
@@ -254,6 +258,7 @@ pub fn graph_report(g: &Graph, window: &Window, inside: &[bool], land: &[bool], 
         *r.violations.entry(violation_kind(&v)).or_default() += 1;
     }
     r.bed_rises = r.violations.get("bed_rise").copied().unwrap_or(0);
+    (r.excused_rises, r.excused_rise_m) = planet_generators::bake::river_graph::excused_down_rises(g);
     r.missing_owner = planet_generators::bake::river_graph::missing_owners(g).len();
     let kind: HashMap<u64, NodeKind> = g.nodes.iter().map(|n| (n.id, n.kind)).collect();
     // the reach leaving each node (the lowest id when a broken graph has two)
@@ -683,6 +688,8 @@ impl G2Report {
             push("g_reaches_h1", g.reaches_h1.to_string(), Correctness);
             push("g_reaches_l", g.reaches_l.to_string(), Correctness);
             push("g_violations", viol.to_string(), Correctness);
+            push("g_excused_rises", g.excused_rises.to_string(), Correctness);
+            push("g_excused_rise_m", format!("{:.1}", g.excused_rise_m), Correctness);
             push(
                 "g_violations_by_kind",
                 if g.violations.is_empty() {
@@ -782,12 +789,14 @@ impl G2Report {
         if let Some(g) = &self.graph {
             let viol: usize = g.violations.values().sum();
             out.push(format!(
-                "RIVER-GATE graph [correctness]: {} nodes, {} H1 and {} L reaches, {} basins; {viol} violations ({}); {} endpoints owned elsewhere; {} of {} sources reach an outlet ({} end open); {} of {} trunk reaches break; {} conservation breaks; bed: {} rises outside exceptions, {} reaches rise above their running minimum (largest {:.1} m); exceptions: {} rise_over_budget, {} unresolved_endpoint, {} budget_residual; {} of {} tributaries attached; basins: {} protected, {} endorheic, {} parents and {} spill nodes missing ({} more outside the counted cells), {} out of order",
+                "RIVER-GATE graph [correctness]: {} nodes, {} H1 and {} L reaches, {} basins; {viol} violations ({}); {} bed rises into a down node excused by budget_residual ({:.1} m, reading 41); {} endpoints owned elsewhere; {} of {} sources reach an outlet ({} end open); {} of {} trunk reaches break; {} conservation breaks; bed: {} rises outside exceptions, {} reaches rise above their running minimum (largest {:.1} m); exceptions: {} rise_over_budget, {} unresolved_endpoint, {} budget_residual; {} of {} tributaries attached; basins: {} protected, {} endorheic, {} parents and {} spill nodes missing ({} more outside the counted cells), {} out of order",
                 g.nodes,
                 g.reaches_h1,
                 g.reaches_l,
                 g.basins,
                 if g.violations.is_empty() { "none".to_string() } else { g.violations.iter().map(|(k, v)| format!("{k} {v}")).collect::<Vec<_>>().join(", ") },
+                g.excused_rises,
+                g.excused_rise_m,
                 g.missing_owner,
                 g.sources_to_outlet,
                 g.sources,
