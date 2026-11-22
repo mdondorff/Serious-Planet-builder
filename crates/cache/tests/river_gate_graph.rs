@@ -355,7 +355,15 @@ fn the_gate_prints_g2_columns_with_their_classes_only_when_given_g2_inputs() {
     // B's row: no G2 input, no G2 column, no classes line
     let b = run(None);
     assert!(b.g2.is_none() && b.classes_line().is_none() && !b.fields_line().contains("g_nodes="));
-    let input = G2Input { window: W, graph: Some(&g), stages: None, residual_records: None, partition: Some((&g, &g)), kc_patches: None };
+    let input = G2Input {
+        window: W,
+        graph: Some(&g),
+        stages: None,
+        residual_records: None,
+        partition: Some((&g, &g)),
+        kc_patches: None,
+        validator: None,
+    };
     let rg = run(Some(&input));
     let line = rg.fields_line();
     assert!(line.contains(" g_nodes=6 ") && line.contains(" part_first=identical") && line.contains(" agree1_km2=1 "), "{line}");
@@ -388,7 +396,8 @@ fn the_gate_prints_g2_columns_with_their_classes_only_when_given_g2_inputs() {
         represented: Represented::ProtectedSurface,
         owner: Domain::Landmass,
     }];
-    let input_k = G2Input { window: W, graph: Some(&gk), stages: None, residual_records: None, partition: None, kc_patches: None };
+    let input_k =
+        G2Input { window: W, graph: Some(&gk), stages: None, residual_records: None, partition: None, kc_patches: None, validator: None };
     let outlet_p = grid.outlets(&zp, 0.0);
     let rk = measure(
         &GateInput {
@@ -540,7 +549,46 @@ fn each_stages_deep_lowering_kc_patches_and_the_spectrum_bars_are_reported() {
     assert_eq!(read_kc_patches(&dir).unwrap(), Some((2, 1020.5)));
     std::fs::write(dir.join("kc-patches.csv"), "cells,volume_m3\n12\n").unwrap();
     assert!(read_kc_patches(&dir).unwrap_err().contains("kc-patches.csv"));
+    // lead 2026-11-21: the chain's f64 validator records, one line per overrun or raise; a missing file is none, a bad line refused naming the file; the count is a correctness
+    // column and adds to bar_violations
+    use planet_cache::river_gate_graph::{g2_bars, read_validator, GraphReport};
+    assert_eq!(read_validator(&dir).unwrap(), None);
+    std::fs::write(
+        dir.join("budget-violations.csv"),
+        "cell,stage,used_m,budget_m
+12,ks,30.5000,30.0000
+40,kc,NaN,NaN
+
+",
+    )
+    .unwrap();
+    assert_eq!(read_validator(&dir).unwrap(), Some(2));
+    std::fs::write(
+        dir.join("budget-violations.csv"),
+        "cell,stage,used_m,budget_m
+12,ks
+",
+    )
+    .unwrap();
+    assert!(read_validator(&dir).unwrap_err().contains("budget-violations.csv"));
+    std::fs::write(
+        dir.join("budget-violations.csv"),
+        "12,ks,30.5000,30.0000
+",
+    )
+    .unwrap();
+    assert!(read_validator(&dir).unwrap_err().contains("line 1"), "a file without its header is refused, not read one record short");
     let _ = std::fs::remove_dir_all(&dir);
+    let with = |v: Option<usize>| G2Report {
+        graph: Some(GraphReport::default()),
+        budget: Some(BudgetReport { validator_overrun: v, ..BudgetReport::default() }),
+        ..G2Report::default()
+    };
+    let violations = |r: &G2Report| g2_bars(r, 0.0, 100.0, 97.5).into_iter().find(|b| b.name == "bar_violations").unwrap();
+    assert_eq!((violations(&with(Some(2))).value, violations(&with(None)).value), (2.0, 0.0));
+    assert!(!violations(&with(Some(2))).pass());
+    let col = |r: &G2Report| r.columns().into_iter().find(|c| c.0 == "b_validator_overrun").map(|c| c.1);
+    assert_eq!((col(&with(Some(2))), col(&with(None))), (Some("2".into()), Some("-".into())));
     // the spectrum's benchmark range: inside passes both bars; steeper than the range fails the first; rougher fails the second
     let pass = |beta: f64| spectrum_bars(beta).iter().map(|b| b.pass()).collect::<Vec<_>>();
     assert_eq!((pass(-3.5), pass(BETA_MIN - 0.01), pass(BETA_MAX + 0.01)), (vec![true, true], vec![false, true], vec![true, false]));
@@ -558,7 +606,15 @@ fn the_ridge_lowering_is_measured_against_s_kh_when_the_stages_hold_kh_and_again
     let outlet = grid.outlets(&surface, 0.0);
     let kh = StageField { name: "kh".into(), lower: (0..144).map(|c| if c % 12 == 5 { 300 } else { 0 }).collect(), fill: None };
     let stages = [kh];
-    let input = G2Input { window: W, graph: None, stages: Some(&stages), residual_records: None, partition: None, kc_patches: None };
+    let input = G2Input {
+        window: W,
+        graph: None,
+        stages: Some(&stages),
+        residual_records: None,
+        partition: None,
+        kc_patches: None,
+        validator: None,
+    };
     let run = |g2: Option<&G2Input>| {
         measure(
             &GateInput {
@@ -634,7 +690,8 @@ fn kept_lakes_get_their_own_bars_beside_the_raw_closed_basin_share_and_a_spill_m
         )
     };
     let run = |g: &Graph, p: &GateParams| {
-        let x = G2Input { window: W, graph: Some(g), stages: None, residual_records: None, partition: None, kc_patches: None };
+        let x =
+            G2Input { window: W, graph: Some(g), stages: None, residual_records: None, partition: None, kc_patches: None, validator: None };
         gate(Some(&x), p)
     };
     let bar = |r: &planet_cache::river_gate::GateReport, name: &str| r.bars().into_iter().find(|b| b.name == name).expect(name);
@@ -696,6 +753,19 @@ fn kept_lakes_get_their_own_bars_beside_the_raw_closed_basin_share_and_a_spill_m
     assert_eq!(mis.spill_mismatch, Some(1), "{mis:?}");
     assert_eq!(bar(&mis, "bar_violations").value, bar(&kept, "bar_violations").value + 1.0, "the mismatch is a graph violation");
     assert!(!bar(&mis, "bar_violations").pass());
+    // test (a) (lead 2026-11-21): the hand graph's beds at the pit's rim (row 203, at most 9 m) lie far under the 26 m spill: the line leaves the lake below its spill, one basin, a
+    // violation beside test (b); the same beds lifted to the spill: none
+    assert_eq!((open.spill_rim_mismatch, kept.spill_rim_mismatch, mis.spill_rim_mismatch), (Some(0), Some(1), Some(1)), "{kept:?}");
+    let mut lifted = g.clone();
+    lifted.basins = vec![kept_basin(z[cell(floor.0, floor.1)])];
+    for r in &mut lifted.reaches {
+        r.attrs.bed.iter_mut().for_each(|b| *b = (2.0 * z[cell(floor.0, floor.1)]).ceil() as i32);
+    }
+    let lifted = run(&lifted, &p);
+    assert_eq!((lifted.spill_mismatch, lifted.spill_rim_mismatch), (Some(0), Some(0)), "{lifted:?}");
+    assert_eq!(bar(&kept, "bar_violations").value, bar(&lifted, "bar_violations").value + 1.0, "the rim mismatch is a graph violation");
+    assert!(kept.fields_line().contains(" g_spill_rim=1 ") && lifted.fields_line().contains(" g_spill_rim=0 "));
+    assert!(kept.lines().iter().any(|l| l.contains("1 with a rim vertex bed under the spill by more (test a)")), "{:?}", kept.lines());
     // without a graph: the kept columns are "-", no new bar, the raw share as ever
     let plain = gate(None, &p);
     assert_eq!(
@@ -703,6 +773,36 @@ fn kept_lakes_get_their_own_bars_beside_the_raw_closed_basin_share_and_a_spill_m
         (open.basin_river_cells, None, None, None)
     );
     let pl = plain.fields_line();
-    assert!(pl.contains(" ponds_pct=- ") && pl.contains(" kept_river_pct=- ") && pl.contains(" g_spill_mismatch=- "), "{pl}");
+    assert!(
+        pl.contains(" ponds_pct=- ")
+            && pl.contains(" kept_river_pct=- ")
+            && pl.contains(" g_spill_mismatch=- ")
+            && pl.contains(" g_spill_rim=- "),
+        "{pl}"
+    );
     assert!(plain.bars().is_empty());
+}
+
+// spec: BUILD-060, GEN-189
+#[test]
+fn a_rise_into_a_down_node_excused_by_its_residual_is_printed_beside_the_violations() {
+    // reading 41 (lead, 2026-11-22): the trunk C -> O rising 0.5 m into its outlet node is a violation without a record; with budget_residual 0.5 on the reach it is excused,
+    // and the gate prints it in its own columns and on the graph line
+    use planet_cache::river_gate_graph::G2Report;
+    use planet_generators::bake::river_graph::{Exception, Reason};
+    let all = vec![true; 144];
+    let mut g = graph();
+    let r3 = g.reaches.iter_mut().find(|r| r.vertices.len() == 4).expect("the trunk C -> O");
+    r3.attrs.bed = vec![18, 17, 16, 17];
+    let bare = graph_report(&g, &W, &all, &all, DX);
+    assert_eq!((bare.violations.get("bed_rise").copied(), bare.excused_rises), (Some(1), 0));
+    let r3 = g.reaches.iter_mut().find(|r| r.vertices.len() == 4).unwrap();
+    r3.exceptions = vec![Exception { reason: Reason::BudgetResidual, value: 0.5 }];
+    let rep = graph_report(&g, &W, &all, &all, DX);
+    assert_eq!((rep.violations.get("bed_rise").copied(), rep.excused_rises, rep.excused_rise_m), (None, 1, 0.5));
+    let cols = G2Report { graph: Some(rep.clone()), ..G2Report::default() }.columns();
+    let get = |n: &str| cols.iter().find(|c| c.0 == n).map(|c| c.1.clone());
+    assert_eq!((get("g_excused_rises"), get("g_excused_rise_m")), (Some("1".into()), Some("0.5".into())));
+    let lines = G2Report { graph: Some(rep), ..G2Report::default() }.lines();
+    assert!(lines.iter().any(|l| l.contains("1 bed rises into a down node excused by budget_residual (0.5 m, reading 41)")), "{lines:?}");
 }

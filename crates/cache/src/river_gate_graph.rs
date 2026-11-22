@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 
 use planet_generators::bake::river_graph::{
-    diff, rasterise, validate, Change, Checks, Graph, Level, NodeKind, Reason, Represented, Violation,
+    diff, rasterise, validate_excused, Change, Checks, Graph, Level, NodeKind, Reason, Represented, Violation,
 };
 use planet_generators::bake::route::NONE;
 
@@ -83,6 +83,8 @@ pub struct G2Input<'a> {
     pub partition: Option<(&'a Graph, &'a Graph)>,
     /// KC's patches written with the stages (`kc-patches.csv`, lead #172): their count and total volume (m3), when given.
     pub kc_patches: Option<(usize, f64)>,
+    /// The f64 budget validator's overruns and raises written with the stages (`budget-violations.csv`, lead 2026-11-21), when given.
+    pub validator: Option<usize>,
 }
 
 /// The graph report (BUILD-060 item 1).
@@ -94,6 +96,10 @@ pub struct GraphReport {
     pub basins: usize,
     /// The validators' violations (GEN-189; an open slice: endpoints owned elsewhere are not violations), by kind, and the endpoints owned elsewhere.
     pub violations: BTreeMap<&'static str, usize>,
+    /// Reading 41 (lead, 2026-11-22): the bed rises into a reach's own down node GEN-189 excuses by the reach's `budget_residual`, count and metres; printed beside the
+    /// violations so nothing excused is hidden.
+    pub excused_rises: usize,
+    pub excused_rise_m: f64,
     pub missing_owner: usize,
     /// Sources; those whose chain (followed through outgoing reaches) ends at an outlet of the graph; those that end at a node the slice does not hold.
     pub sources: usize,
@@ -189,6 +195,8 @@ pub struct BudgetReport {
     pub residual_reaches: Option<usize>,
     /// KC's patches: count and total volume (m3), when the stages carry `kc-patches.csv`.
     pub kc_patches: Option<(usize, f64)>,
+    /// The f64 validator's overruns and raises (`budget-violations.csv`), when the stages carry it: a correctness count, in `bar_violations`.
+    pub validator_overrun: Option<usize>,
 }
 
 /// The partition diff (BUILD-060 item 4): the changes between the canonical graphs of one and of two regions, the topology changes among them, and the first change.
@@ -246,9 +254,11 @@ pub fn graph_report(g: &Graph, window: &Window, inside: &[bool], land: &[bool], 
     r.reaches_h1 = g.reaches.iter().filter(|x| x.level == Level::H1).count();
     r.reaches_l = g.reaches.len() - r.reaches_h1;
     let checks = Checks { adjacent: &adjacent, tile_of: None, open: true };
-    for v in validate(g, &checks) {
+    let (violations, excused) = validate_excused(g, &checks);
+    for v in violations {
         *r.violations.entry(violation_kind(&v)).or_default() += 1;
     }
+    (r.excused_rises, r.excused_rise_m) = (excused.len(), excused.iter().map(|x| x.2).sum());
     r.bed_rises = r.violations.get("bed_rise").copied().unwrap_or(0);
     r.missing_owner = planet_generators::bake::river_graph::missing_owners(g).len();
     let kind: HashMap<u64, NodeKind> = g.nodes.iter().map(|n| (n.id, n.kind)).collect();
@@ -421,6 +431,39 @@ pub fn kept_interiors(g: &Graph, window: &Window, label: &[u32]) -> (Vec<bool>, 
         }
     }
     (label.iter().map(|l| *l != u32::MAX && held.contains(l)).collect(), basins)
+}
+
+/// Spill mismatch test (a) (BUILD-060, lead 2026-11-21): the kept basins with their floor in the window whose rim (the cells outside the floor's depression in `label` that touch
+/// it, 8-connected) holds an L vertex whose bed lies more than `margin_m` under the basin's recorded spill: a line that leaves the lake below its spill.
+pub fn rim_mismatch(g: &Graph, window: &Window, label: &[u32], margin_m: f64) -> usize {
+    let mut spills: BTreeMap<u32, Vec<(u64, f64)>> = BTreeMap::new();
+    for b in g.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface) {
+        if let Some(f) = window.cell(b.floor_cell).filter(|&f| label[f] != u32::MAX) {
+            spills.entry(label[f]).or_default().push((b.id, b.spill_m));
+        }
+    }
+    let (w, h) = (window.w as i64, window.h as i64);
+    let mut hit = BTreeSet::new();
+    for r in g.reaches.iter().filter(|r| r.level == Level::L) {
+        for (k, &v) in r.vertices.iter().enumerate() {
+            let Some(c) = window.cell(v) else { continue };
+            if spills.contains_key(&label[c]) {
+                continue;
+            }
+            let bed = 0.5 * r.attrs.bed[k] as f64;
+            let (x, y) = ((c % window.w) as i64, (c / window.w) as i64);
+            for (dx, dy) in [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
+                let (qx, qy) = (x + dx, y + dy);
+                if qx < 0 || qy < 0 || qx >= w || qy >= h {
+                    continue;
+                }
+                if let Some(bs) = spills.get(&label[(qy * w + qx) as usize]) {
+                    hit.extend(bs.iter().filter(|&&(_, sp)| bed < sp - margin_m).map(|&(id, _)| id));
+                }
+            }
+        }
+    }
+    hit.len()
 }
 
 /// The river steps of BUILD-057 (a river cell inside to its river receiver; uphill above [`UPHILL_M`] on `surface`) with either end in `kept`.
@@ -662,6 +705,8 @@ impl G2Report {
             push("g_reaches_h1", g.reaches_h1.to_string(), Correctness);
             push("g_reaches_l", g.reaches_l.to_string(), Correctness);
             push("g_violations", viol.to_string(), Correctness);
+            push("g_excused_rises", g.excused_rises.to_string(), Correctness);
+            push("g_excused_rise_m", format!("{:.1}", g.excused_rise_m), Correctness);
             push(
                 "g_violations_by_kind",
                 if g.violations.is_empty() {
@@ -741,6 +786,7 @@ impl G2Report {
             push("b_at_95_s0", b.at_95_s0.to_string(), Preservation);
             push("b_residual_records", b.residual_records.map_or("-".into(), |v| v.to_string()), Correctness);
             push("b_residual_reaches", b.residual_reaches.map_or("-".into(), |v| v.to_string()), Correctness);
+            push("b_validator_overrun", b.validator_overrun.map_or("-".into(), |v| v.to_string()), Correctness);
             if let Some((count, volume)) = b.kc_patches {
                 push("b_kc_patches", count.to_string(), Preservation);
                 push("b_kc_patch_km3", format!("{:.4}", volume / 1.0e9), Preservation);
@@ -760,12 +806,14 @@ impl G2Report {
         if let Some(g) = &self.graph {
             let viol: usize = g.violations.values().sum();
             out.push(format!(
-                "RIVER-GATE graph [correctness]: {} nodes, {} H1 and {} L reaches, {} basins; {viol} violations ({}); {} endpoints owned elsewhere; {} of {} sources reach an outlet ({} end open); {} of {} trunk reaches break; {} conservation breaks; bed: {} rises outside exceptions, {} reaches rise above their running minimum (largest {:.1} m); exceptions: {} rise_over_budget, {} unresolved_endpoint, {} budget_residual; {} of {} tributaries attached; basins: {} protected, {} endorheic, {} parents and {} spill nodes missing ({} more outside the counted cells), {} out of order",
+                "RIVER-GATE graph [correctness]: {} nodes, {} H1 and {} L reaches, {} basins; {viol} violations ({}); {} bed rises into a down node excused by budget_residual ({:.1} m, reading 41); {} endpoints owned elsewhere; {} of {} sources reach an outlet ({} end open); {} of {} trunk reaches break; {} conservation breaks; bed: {} rises outside exceptions, {} reaches rise above their running minimum (largest {:.1} m); exceptions: {} rise_over_budget, {} unresolved_endpoint, {} budget_residual; {} of {} tributaries attached; basins: {} protected, {} endorheic, {} parents and {} spill nodes missing ({} more outside the counted cells), {} out of order",
                 g.nodes,
                 g.reaches_h1,
                 g.reaches_l,
                 g.basins,
                 if g.violations.is_empty() { "none".to_string() } else { g.violations.iter().map(|(k, v)| format!("{k} {v}")).collect::<Vec<_>>().join(", ") },
+                g.excused_rises,
+                g.excused_rise_m,
                 g.missing_owner,
                 g.sources_to_outlet,
                 g.sources,
@@ -828,7 +876,7 @@ impl G2Report {
                 })
                 .collect();
             out.push(format!(
-                "RIVER-GATE budget [preservation; diagnostic fields, the f64 validator is the correctness gate]: over {} land cells inside, the budget from S0's relief: {}; vs S_KH (ks, kv, kc) {} cells over the budget, {} at 95 % of it or more; vs S0 (kh added) {} over, {} at 95 % or more; residual records {}, residual reaches {}",
+                "RIVER-GATE budget [preservation; diagnostic fields, the f64 validator is the correctness gate]: over {} land cells inside, the budget from S0's relief: {}; vs S_KH (ks, kv, kc) {} cells over the budget, {} at 95 % of it or more; vs S0 (kh added) {} over, {} at 95 % or more; residual records {}, residual reaches {}; f64 validator: {}",
                 b.land,
                 st.join("; "),
                 b.overrun,
@@ -836,7 +884,8 @@ impl G2Report {
                 b.overrun_s0,
                 b.at_95_s0,
                 b.residual_records.map_or("not given".into(), |v| v.to_string()),
-                b.residual_reaches.map_or("no graph".into(), |v| v.to_string())
+                b.residual_reaches.map_or("no graph".into(), |v| v.to_string()),
+                b.validator_overrun.map_or("not given".into(), |v| format!("{v} overruns or raises (bar_violations)"))
             ));
         }
         if let Some(p) = &self.partition {
@@ -912,6 +961,29 @@ pub fn read_kc_patches(dir: &Path) -> Result<Option<(usize, f64)>, String> {
         volume += v;
     }
     Ok(Some((count, volume)))
+}
+
+/// The f64 budget validator's records of a stage directory (lead 2026-11-21): `budget-violations.csv`, a header `cell,stage,used_m,budget_m` and one line per overrun or raise;
+/// none when the file is missing. Another header, or a line that is not four fields, is refused naming the file and the line.
+pub fn read_validator(dir: &Path) -> Result<Option<usize>, String> {
+    let p = dir.join("budget-violations.csv");
+    if !p.exists() {
+        return Ok(None);
+    }
+    let text = std::fs::read_to_string(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+    // the header is checked: a file without it would hide its first record
+    if text.lines().next().map(str::trim) != Some("cell,stage,used_m,budget_m") {
+        return Err(format!("{}: line 1: not the header `cell,stage,used_m,budget_m`", p.display()));
+    }
+    let mut count = 0usize;
+    for (k, line) in text.lines().enumerate().skip(1).filter(|(_, l)| !l.trim().is_empty()) {
+        let f: Vec<&str> = line.split(',').collect();
+        if f.len() != 4 || f[0].trim().parse::<usize>().is_err() {
+            return Err(format!("{}: line {}: not `cell,stage,used_m,budget_m`", p.display(), k + 1));
+        }
+        count += 1;
+    }
+    Ok(Some(count))
 }
 
 /// The spectrum bars (plan section 4.1, lead #172): the relief spectrum slope `beta` within the benchmark's range ([`BETA_MIN`] to [`BETA_MAX`], SPIKE-119's 25 GLO-30 and 3DEP
@@ -1012,7 +1084,9 @@ pub fn g2_bars(g2: &G2Report, uphill_pct: f64, corridor_pct: f64, corridor_min_p
         let pct = 100.0 * a.routed_agree as f64 / a.routed.max(1) as f64;
         out.push(bar(format!("bar_agree_{}km2", a.threshold_km2), pct, AGREE_MIN_PCT, false, Correctness));
     }
-    out.push(bar("bar_violations".into(), g.violations.values().sum::<usize>() as f64, 0.0, true, Correctness));
+    // lead 2026-11-21: the f64 validator's overruns and raises are graph-row violations too
+    let validator = g2.budget.as_ref().and_then(|b| b.validator_overrun).unwrap_or(0);
+    out.push(bar("bar_violations".into(), (g.violations.values().sum::<usize>() + validator) as f64, 0.0, true, Correctness));
     out.push(bar("bar_spill_missing".into(), g.basin_spill_missing as f64, 0.0, true, Correctness));
     out
 }

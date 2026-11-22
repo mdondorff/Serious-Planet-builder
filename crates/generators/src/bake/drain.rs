@@ -210,6 +210,26 @@ pub fn drain_selective_report(
     cut_cap: &dyn Fn(usize) -> f64,
     fill_cap: &dyn Fn(usize) -> f64,
 ) -> (Vec<f64>, DrainStats, Vec<Deep>) {
+    drain_selective_floors(z0, w, h, outlet, keep, area, max_rounds, search, cut_cap, fill_cap, &|_| f64::NEG_INFINITY)
+}
+
+/// [`drain_selective_report`] with a floor per cell (lead #178 items 1 and 3): a breach path never takes a cell under `cell_lo(c)` (the cell's budget left, reading 17's sea + 0.5 m);
+/// the search does not enter a cell the breach would cut under it, and a found path that would is not taken (the depression is filled within its cap, else left).
+/// `|_| -inf`: [`drain_selective_report`].
+#[allow(clippy::too_many_arguments)]
+pub fn drain_selective_floors(
+    z0: &[f64],
+    w: usize,
+    h: usize,
+    outlet: &[bool],
+    keep: &dyn Fn(usize) -> bool,
+    area: &dyn Fn(usize) -> f64,
+    max_rounds: usize,
+    search: usize,
+    cut_cap: &dyn Fn(usize) -> f64,
+    fill_cap: &dyn Fn(usize) -> f64,
+    cell_lo: &dyn Fn(usize) -> f64,
+) -> (Vec<f64>, DrainStats, Vec<Deep>) {
     let n = w * h;
     let mut z = z0.to_vec();
     let mut st = DrainStats::default();
@@ -262,6 +282,10 @@ pub fn drain_selective_report(
                 let by_length = BREACH_BY_LENGTH.load(std::sync::atomic::Ordering::Relaxed);
                 let square = BREACH_SQUARE.load(std::sync::atomic::Ordering::Relaxed);
                 for q in neighbours(w, h, c) {
+                    // lead #178: a cell the breach would cut under its floor is not entered (an outlet ends the path and is never cut)
+                    if !outlet[q] && z[q] > zf && zf < cell_lo(q) {
+                        continue;
+                    }
                     let nd = if square {
                         let cut = (z[q] - zf).max(0.0);
                         d + cut * cut
@@ -303,7 +327,12 @@ pub fn drain_selective_report(
                 let v: f64 = path.iter().enumerate().map(|(i, &c)| (z[c] - z[c].min(zf - DELTA * i as f64)).max(0.0) * area(c)).sum();
                 let cut: f64 = path.iter().enumerate().map(|(i, &c)| z[c] - z[c].min(zf - DELTA * i as f64)).fold(0.0, f64::max);
                 let max_len = BREACH_MAX_LEN.load(std::sync::atomic::Ordering::Relaxed);
-                (cut <= cut_cap(*floor) && (max_len == 0 || path.len() <= max_len), v, cut)
+                // lead #178: the path's descent of DELTA a cell stays above every cell's floor
+                let floors_ok = path
+                    .iter()
+                    .enumerate()
+                    .all(|(i, &c)| outlet[c] || z[c] <= zf - DELTA * i as f64 || zf - DELTA * i as f64 >= cell_lo(c));
+                (floors_ok && cut <= cut_cap(*floor) && (max_len == 0 || path.len() <= max_len), v, cut)
             };
             let prefer_fill = PREFER_FILL.load(std::sync::atomic::Ordering::Relaxed);
             let hump = HUMP_LIMIT_MICRO.load(std::sync::atomic::Ordering::Relaxed);
@@ -347,6 +376,34 @@ pub fn drain_selective_report(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // SPIKE-138 (spike only; not a spec requirement)
+    #[test]
+    fn a_breach_holds_each_cells_floor_and_the_pit_is_filled_instead() {
+        // lead #178: the strip below with the rim's floor at 3 m (its budget left): the breach would cut it to 0.5 m, so it is not taken and the pit is filled; without the floor it is
+        let (w, h) = (9usize, 3usize);
+        let mut z = vec![10.0f64; w * h];
+        for y in 0..h {
+            z[y * w] = 0.0;
+            for x in 1..w {
+                z[y * w + x] = 1.0 + 0.1 * x as f64;
+            }
+            z[y * w + 4] = 5.0;
+            for x in 5..w {
+                z[y * w + x] = 0.5;
+            }
+        }
+        let outlet: Vec<bool> = (0..w * h).map(|p| p % w == 0).collect();
+        let inf = |_: usize| f64::INFINITY;
+        let lo = |p: usize| if p % w == 4 { 3.0 } else { f64::NEG_INFINITY };
+        let (free, sf, _) = drain_selective_floors(&z, w, h, &outlet, &|_| false, &|_| 1.0, 10, 1000, &inf, &inf, &|_| f64::NEG_INFINITY);
+        let (held, sh, _) = drain_selective_floors(&z, w, h, &outlet, &|_| false, &|_| 1.0, 10, 1000, &inf, &inf, &lo);
+        assert!(sf.breached >= 1 && (0..h).any(|y| free[y * w + 4] < 3.0), "{sf:?}");
+        assert!((0..h).all(|y| held[y * w + 4] >= 3.0), "no rim cell under its floor");
+        assert!(sh.breached == 0 && sh.filled >= 1 && sh.left == 0, "{sh:?}");
+        let (rep, _, _) = drain_selective_report(&z, w, h, &outlet, &|_| false, &|_| 1.0, 10, 1000, &inf, &inf);
+        assert_eq!(rep, free, "no floor: the report's surface");
+    }
 
     // SPIKE-138 (spike only; not a spec requirement)
     #[test]

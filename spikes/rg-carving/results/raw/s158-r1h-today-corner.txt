@@ -1,0 +1,6 @@
+base : corner-only 2x2 blocks over 2 / 5 / 10 m:     168 /       2 /      0; of the 5 m ones touching a KS-lowered cell 0 %
+s0   : corner-only 2x2 blocks over 2 / 5 / 10 m:    1437 /     161 /      1; of the 5 m ones touching a KS-lowered cell 43 %
+kh   : corner-only 2x2 blocks over 2 / 5 / 10 m:   17472 /   10452 /   6083; of the 5 m ones touching a KS-lowered cell 53 %
+ks   : corner-only 2x2 blocks over 2 / 5 / 10 m:   44168 /   25246 /  13568; of the 5 m ones touching a KS-lowered cell 80 %
+kv   : corner-only 2x2 blocks over 2 / 5 / 10 m:   45545 /   25682 /  13567; of the 5 m ones touching a KS-lowered cell 75 %
+final: corner-only 2x2 blocks over 2 / 5 / 10 m:   45246 /   25506 /  13380; of the 5 m ones touching a KS-lowered cell 76 %

@@ -557,3 +557,123 @@ fn a_hollow_an_over_budget_rise_crosses_is_kept_as_a_lake() {
         "deterministic"
     );
 }
+
+// SPIKE-130 (spike prototype; not a spec requirement)
+#[test]
+fn an_inflowing_lines_bed_is_floored_at_the_spill_from_the_kept_rim_inward() {
+    // lead #179 (A3): an 8 m cone basin on the eastward slope; an L line runs along its row into the floor, its beds falling 3 m a vertex from 10 m above the spill. On the rim
+    // and inside, each bed rises to the spill (rounded up to a 0.5 m code); upstream a bed under the one below takes it, so the line rises nowhere
+    let mut z = base(false);
+    cone(&mut z, 12.0, 12.0, 5.0, 8.0);
+    let (g, p) = run(&z, &[]);
+    let b = basin_at(&p, cell(12, 12));
+    let spill = b.spill_m;
+    let cells: Vec<u64> = (4..=12).map(|i| cell(i, 12) as u64).collect();
+    let k = cells.len();
+    let mut reaches = vec![Reach {
+        id: 9,
+        level: Level::L,
+        up: 90,
+        down: 91,
+        vertices: cells.clone(),
+        parent: None,
+        owner: Domain::Tile { face: 0, ti: 0, tj: 0 },
+        attrs: Attrs {
+            a_geo: vec![1.0e6; k],
+            a_ext: vec![0.0; k],
+            a_run: vec![1.0e6; k],
+            a_run_no_ext: vec![1.0e6; k],
+            q: vec![0.01; k],
+            q_w: vec![0.01; k],
+            strahler: vec![1; k],
+            bed: (0..k).map(|n| (2.0 * (spill + 10.0 - 3.0 * n as f64)).floor() as i32).collect(),
+        },
+        exceptions: Vec::new(),
+    }];
+    let before = reaches[0].attrs.bed.clone();
+    let fl = floor_inlet_beds(&g, &p.basins, &p.cells, &mut reaches, &|id| Some(id as usize));
+    let inside: std::collections::BTreeSet<usize> = p.cells[&b.id].iter().copied().collect();
+    let held = |c: usize| inside.contains(&c) || (0..8).filter_map(|d| g.neighbour(c, d)).any(|q| inside.contains(&q));
+    let code = (2.0 * spill).ceil() as i32;
+    let after = &reaches[0].attrs.bed;
+    let mut held_n = 0usize;
+    for (i, &c) in cells.iter().enumerate() {
+        assert!(after[i] >= before[i], "vertex {i}: a bed is only raised");
+        if held(c as usize) {
+            held_n += 1;
+            assert!(
+                0.5 * f64::from(after[i]) >= spill && after[i] <= code.max(before[i]),
+                "vertex {i} on or inside the rim at the spill: code {}, spill {spill}",
+                after[i]
+            );
+        }
+    }
+    let changed = (0..k).filter(|&i| after[i] != before[i]).count();
+    assert!(held_n >= 3 && fl.raised == changed, "{} raised, {changed} changed, {held_n} on or inside the rim", fl.raised);
+    let metres: f64 = (0..k).map(|i| 0.5 * f64::from(after[i] - before[i])).sum();
+    assert!((fl.raised_m - metres).abs() < 1e-9 && fl.raised_m > 0.0, "the raised metres are recorded: {} against {metres}", fl.raised_m);
+    assert_eq!(after[0], before[0], "the source, 10 m above the spill, keeps its bed");
+    // lead #179a: the carry only crosses the depression's cells; a lower vertex outside it stays and is a residual, so a rise is left only where one is recorded
+    for (i, &c) in cells.iter().enumerate() {
+        if after[i] != before[i] && !held(c as usize) {
+            panic!("vertex {i} outside the rim and the depression was raised");
+        }
+    }
+    assert_eq!(fl.rises, fl.residuals.len(), "every rise left is a recorded residual: {fl:?}");
+    assert!(fl.residuals.iter().all(|x| x.0 == 9 && x.2 > 0.0), "{fl:?}");
+    // a line coded 0 m all along: the rim and the depression rise to the spill; the vertex upstream of the rim, outside the depression, keeps 0 m and is one residual on the reach
+    let mut low = reaches.clone();
+    low[0].attrs.bed = vec![0; k];
+    let fz = floor_inlet_beds(&g, &p.basins, &p.cells, &mut low, &|id| Some(id as usize));
+    let first = (0..k).find(|&i| held(cells[i] as usize)).expect("the line reaches the rim");
+    assert!(first >= 1 && (0..first).all(|i| low[0].attrs.bed[i] == 0), "upstream of the rim stays as coded: {:?}", low[0].attrs.bed);
+    assert_eq!(fz.residuals.len(), 1, "{fz:?}");
+    assert_eq!((fz.residuals[0].0, fz.residuals[0].1), (9, first - 1));
+    assert!((fz.residuals[0].2 - 0.5 * f64::from(low[0].attrs.bed[first])).abs() < 1e-9 && fz.rises == 1, "{fz:?}");
+    // lead #179b: the stopped carry is recorded as the contract's residual; the validator then accepts that rise, and only that one
+    let adj = |_: Level, a: u64, b: u64| (0..8).any(|d| g.neighbour(a as usize, d) == Some(b as usize));
+    let rises = |gr: &Graph| {
+        validate(gr, &Checks { adjacent: &adj, tile_of: None, open: true })
+            .into_iter()
+            .filter(|v| matches!(v, Violation::BedRise { .. }))
+            .count()
+    };
+    let bare = graph_of(&p, &low, &[]);
+    assert_eq!(rises(&bare), 1, "without the record the rise is a violation");
+    let mut nodes = p.nodes.clone();
+    let (flagged, left) = mark_inlet_residuals(BODY, &mut nodes, &mut low, &fz.residuals);
+    assert_eq!((flagged, left), (1, 0));
+    let mk: Vec<&Node> = nodes.iter().filter(|n| n.kind == NodeKind::Exception).collect();
+    assert!(
+        mk.len() == 1 && mk[0].marker == Some(Marker { on_reach: 9, at_vertex: first as u32 }) && mk[0].anchor == cells[first],
+        "{mk:?}"
+    );
+    let ex = low[0].exceptions.iter().find(|e| e.reason == Reason::BudgetResidual).expect("budget_residual on the reach");
+    assert!((ex.value - fz.residuals[0].2).abs() < 1e-12);
+    let mut recorded = graph_of(&p, &low, &[]);
+    recorded.nodes = nodes.clone();
+    recorded.sort();
+    assert_eq!(rises(&recorded), 0, "the marker excuses exactly that rise");
+    let mut second = low.clone();
+    second[0].attrs.bed[first + 1] = second[0].attrs.bed[first] + 2;
+    let mut other = graph_of(&p, &second, &[]);
+    other.nodes = nodes;
+    other.sort();
+    assert_eq!(rises(&other), 1, "a rise at another vertex stays a violation");
+    // a plain node already on the rise's cell: no marker there (two nodes on one anchor), the rise is left unflagged
+    let mut crowded = p.nodes.clone();
+    crowded.push(Node {
+        id: node_id(BODY, NodeKind::Confluence, Level::L, cells[first]),
+        kind: NodeKind::Confluence,
+        level: Level::L,
+        anchor: cells[first],
+        parent: None,
+        owner: Domain::Tile { face: 0, ti: 0, tj: 0 },
+        marker: None,
+    });
+    let mut low2 = reaches.clone();
+    low2[0].attrs.bed = vec![0; k];
+    let f2 = floor_inlet_beds(&g, &p.basins, &p.cells, &mut low2, &|id| Some(id as usize));
+    assert_eq!(mark_inlet_residuals(BODY, &mut crowded, &mut low2, &f2.residuals), (0, 1));
+    assert!(!crowded.iter().any(|n| n.kind == NodeKind::Exception));
+}

@@ -743,3 +743,117 @@ pub fn breach_path(
     }
     None
 }
+
+/// What [`floor_inlet_beds`] did (lead #179a): the vertices raised and the metres raised over them (reading 9's wanted fill, recorded), the carries stopped at a depression's
+/// edge (a residual each: the reach, its vertex, the metres still wanted there), and the bed rises left along the L reaches.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct InletFloor {
+    pub raised: usize,
+    pub raised_m: f64,
+    pub residuals: Vec<(u64, usize, f64)>,
+    pub rises: usize,
+}
+
+/// Lead #179 and #179a (A3, owner decision 2, 2026-11-21; spike): every L vertex's graph bed on a kept basin's rim (the cells beside its cells, 8-connected) or inside it is
+/// floored at the basin's spill (the highest spill where basins meet; bed codes of 0.5 m, rounded up), so no line inside or on a kept rim lies under the spill (reading 35 test
+/// (a)). The floor is carried upstream along a reach only over vertices inside a kept basin's depression (its cells); it stops at the first vertex at or above it, and where the
+/// next vertex upstream lies outside the depression and stands lower, the carry stops with a residual on that reach. `local` maps a vertex id to its grid cell (`None` outside).
+pub fn floor_inlet_beds(
+    grid: &Grid,
+    basins: &[Basin],
+    cells: &Cells,
+    reaches: &mut [Reach],
+    local: &dyn Fn(u64) -> Option<usize>,
+) -> InletFloor {
+    let (mut floor, mut inside): (BTreeMap<usize, f64>, BTreeMap<usize, f64>) = (BTreeMap::new(), BTreeMap::new());
+    for b in basins.iter().filter(|b| b.represented == Represented::ProtectedSurface && b.spill_m.is_finite()) {
+        for &c in &cells[&b.id] {
+            let f = inside.entry(c).or_insert(f64::NEG_INFINITY);
+            *f = f.max(b.spill_m);
+            for q in std::iter::once(c).chain((0..8).filter_map(|k| grid.neighbour(c, k))) {
+                let f = floor.entry(q).or_insert(f64::NEG_INFINITY);
+                *f = f.max(b.spill_m);
+            }
+        }
+    }
+    let mut out = InletFloor::default();
+    for r in reaches.iter_mut().filter(|r| r.level == Level::L) {
+        let n = r.vertices.len();
+        let before = r.attrs.bed.clone();
+        let mut lifted = vec![false; n];
+        for k in 0..n {
+            let Some(&fl) = local(r.vertices[k]).and_then(|c| floor.get(&c)) else { continue };
+            if 0.5 * f64::from(r.attrs.bed[k]) < fl {
+                r.attrs.bed[k] = (2.0 * fl).ceil() as i32;
+                lifted[k] = true;
+            }
+        }
+        // the carry: upstream of a lifted vertex, a lower bed inside a kept depression takes the one below it; outside the depression it stops with a residual
+        for k in (0..n.saturating_sub(1)).rev() {
+            if !lifted[k + 1] || r.attrs.bed[k] >= r.attrs.bed[k + 1] {
+                continue;
+            }
+            if local(r.vertices[k]).is_some_and(|c| inside.contains_key(&c)) {
+                r.attrs.bed[k] = r.attrs.bed[k + 1];
+                lifted[k] = true;
+            } else if !lifted[k] {
+                out.residuals.push((r.id, k, 0.5 * f64::from(r.attrs.bed[k + 1] - r.attrs.bed[k])));
+            }
+        }
+        for k in 0..n {
+            if r.attrs.bed[k] != before[k] {
+                out.raised += 1;
+                out.raised_m += 0.5 * f64::from(r.attrs.bed[k] - before[k]);
+            }
+        }
+        out.rises += r.attrs.bed.windows(2).filter(|x| x[1] > x[0]).count();
+    }
+    out
+}
+
+/// Lead #179b (DEC crusader-28): each stopped carry of [`floor_inlet_beds`] is recorded as the contract's residual (section 6): an `exception` marker node at the vertex where
+/// the bed rises (the stopped vertex's downstream neighbour), so the validator accepts exactly that rise, and `exception(budget_residual)` on the reach carrying the metres
+/// wanted (the largest where a reach has several). A rise at a reach's last vertex, or on a cell holding another node, has no place for a marker: it is left unflagged. Returns the rises
+/// flagged and those left.
+pub fn mark_inlet_residuals(body: u64, nodes: &mut Vec<Node>, reaches: &mut [Reach], residuals: &[(u64, usize, f64)]) -> (usize, usize) {
+    let have: std::collections::BTreeSet<u64> = nodes.iter().map(|n| n.id).collect();
+    // a cell holding a plain node takes no marker (section 2.1: only a reach's up node at vertex 0 may share its anchor); that rise is left unflagged
+    let plain: std::collections::BTreeSet<(Level, u64)> =
+        nodes.iter().filter(|n| !n.kind.is_marker()).map(|n| (n.level, n.anchor)).collect();
+    let mut added = std::collections::BTreeSet::new();
+    let (mut flagged, mut left) = (0usize, 0usize);
+    for &(rid, k, need) in residuals {
+        let Some(r) = reaches.iter_mut().find(|r| r.id == rid) else {
+            left += 1;
+            continue;
+        };
+        let v = k + 1;
+        if v + 1 >= r.vertices.len() {
+            left += 1;
+            continue;
+        }
+        let anchor = r.vertices[v];
+        if plain.contains(&(r.level, anchor)) {
+            left += 1;
+            continue;
+        }
+        let id = marker_id(body, NodeKind::Exception, r.level, anchor, rid);
+        if !have.contains(&id) && added.insert(id) {
+            nodes.push(Node {
+                id,
+                kind: NodeKind::Exception,
+                level: r.level,
+                anchor,
+                parent: None,
+                owner: r.owner,
+                marker: Some(Marker { on_reach: rid, at_vertex: v as u32 }),
+            });
+        }
+        match r.exceptions.iter_mut().find(|e| e.reason == Reason::BudgetResidual) {
+            Some(e) => e.value = e.value.max(need),
+            None => r.exceptions.push(Exception { reason: Reason::BudgetResidual, value: need }),
+        }
+        flagged += 1;
+    }
+    (flagged, left)
+}

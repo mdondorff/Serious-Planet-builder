@@ -1776,6 +1776,12 @@ static KC_LAKE_OUTLETS: std::sync::atomic::AtomicBool = std::sync::atomic::Atomi
 static KV_RIMS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 /// lead #177: `--kv-connect on` (default, DEC crusader-23) lowers one edge cell on each diagonal step of an L reach to the step's mean bed; `off` the vertices alone.
 static KV_CONNECT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+/// lead #178 item 1: `--sea17 on` holds reading 17 (no land cell lowered to the sea + 0.5 m or below) in KV, KC's breach and band6's breach, as KS; `off` (default until the rows) the form before.
+static SEA17: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// lead #179: `--inlet-floor on` floors the graph bed of every L vertex on or inside a kept basin's rim at its spill; `off` (default) the beds as coded.
+static INLET_FLOOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// lead #178 item 3: `--band6-floors on` holds band6's breach within each path cell's budget left after KS; `off` (default until the rows) only the floor cell's budget caps the cut.
+static BAND6_FLOORS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// crusader #172 (owner, 2026-11-20): `--exception-lakes on` keeps the hollows of over-budget rises as lakes.
 static EXCEPTION_LAKES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -2053,6 +2059,9 @@ fn main() -> Result<(), String> {
         ("--kc-lake-outlets", &KC_LAKE_OUTLETS, "off"),
         ("--kv-rims", &KV_RIMS, "on"),
         ("--kv-connect", &KV_CONNECT, "on"),
+        ("--sea17", &SEA17, "off"),
+        ("--band6-floors", &BAND6_FLOORS, "off"),
+        ("--inlet-floor", &INLET_FLOOR, "off"),
     ] {
         let v = value(&args, opt).unwrap_or(default);
         if !["off", "on"].contains(&v) {
@@ -2890,11 +2899,22 @@ fn main() -> Result<(), String> {
     let l_trunks: Vec<GReach> = g.reaches.iter().filter(|r| r.level == Level::L).cloned().collect();
     let on_trunk: HashSet<usize> = l_trunks.iter().flat_map(|r| r.vertices.iter().filter_map(|&c| to_local(c))).collect();
     // the stitched KS, KV and KC outputs (lead #168 item 2, memory): made after the first domain's KV/KC, not before; with one region the domain's own fields are moved in
-    let mut outs: Option<(Vec<f64>, Vec<f64>, Vec<f64>)> = None;
+    // ks (KS1, before band6), band6 (KS's output after band6 and its connect), kv, kc: the validator's stages (lead #178: band6 fills, KS only lowers)
+    let mut outs: Option<(Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>)> = None;
     // the cross-slope pass's cut per window cell (DEC crusader-19's sheet; empty when off)
     let mut cross_out: Vec<f32> = Vec::new();
     // reading 18: one region's accumulated L trunk attributes, written into the stitched graph
     let mut acc_trunks: HashMap<u64, planet_generators::bake::river_graph::Attrs> = HashMap::new();
+    // lead #179 (numerics review): the trunks' floored beds per domain (the highest where domains meet), applied after the trunks take their attributes back, so the written
+    // graph carries the beds KV cut to
+    let mut floored_trunks: HashMap<u64, Vec<i32>> = HashMap::new();
+    // lead #179b: the trunks' budget_residual from the inlet floor, carried past the write-back like their beds
+    let mut trunk_inlet_exc: HashMap<u64, f64> = HashMap::new();
+    // lead #179a: the inlet floor's stopped carries (cell, metres still wanted, reach), written with the residual records (stage `inlet`)
+    let mut res_inlet: Vec<(usize, f64, u64)> = Vec::new();
+    // lead #179b: the stopped carries, listed (reach, vertex, its cell id, metres wanted, where the vertex lies), and the rises flagged
+    let mut inlet_list: Vec<(u64, usize, u64, f64, &str)> = Vec::new();
+    let mut inlet_flagged = 0usize;
     let mut res_ks: Vec<(usize, f64, f64)> = Vec::new();
     let mut res_kvkc: Vec<planet_generators::bake::river_graph::Residual> = Vec::new();
     // KC's patches, (cells, volume m3), for `kc-patches.csv` (lead #172; with two regions a halo's patch is counted in each domain)
@@ -3211,6 +3231,8 @@ fn main() -> Result<(), String> {
         );
         // stage 6 (spikes #146, reading 23 post): the band drain after KS1, capped by the budget at the floor; the domain's outlets and the cells outside it are its outlets
         // lead #163 (B5): `--skip band6` leaves KS1's output undrained (no band drain, so no post-band6 connect pass either)
+        // lead #178: KS1's surface before band6, the validator's ks stage
+        let ks1_d = ks_d.clone();
         let ks_d = if (base_form == "aplus" || census) && ks_mode != "off" && on("band6") {
             let t6 = Instant::now();
             let outl: Vec<bool> = (0..n_l).map(|p| outlet_d[p] || !active[p]).collect();
@@ -3256,7 +3278,15 @@ fn main() -> Result<(), String> {
             };
             planet_generators::bake::drain::HUMP_LIMIT_MICRO
                 .store((band6_hump * 1.0e6).round() as u64, std::sync::atomic::Ordering::Relaxed);
-            let (d6, st, deep6) = planet_generators::bake::drain::drain_selective_report(
+            // lead #178 items 1 and 3 (`--band6-floors on`): band6's breach holds each cell's budget left after KS (not only the floor cell's) and, with --sea17, reading 17
+            let band6_floors = BAND6_FLOORS.load(std::sync::atomic::Ordering::Relaxed);
+            let sea17 = SEA17.load(std::sync::atomic::Ordering::Relaxed);
+            let cell_lo = |p: usize| {
+                let budget_lo = if band6_floors { ks_base[p] - budget_l[p] } else { f64::NEG_INFINITY };
+                let sea_lo = if sea17 && !is_sea(p) { ks_d[p].min(sea + 0.5) } else { f64::NEG_INFINITY };
+                budget_lo.max(sea_lo)
+            };
+            let (d6, st, deep6) = planet_generators::bake::drain::drain_selective_floors(
                 &ks_d,
                 w,
                 h,
@@ -3267,6 +3297,7 @@ fn main() -> Result<(), String> {
                 4096,
                 &|p| budget_l[p],
                 &|p| budget_l[p],
+                &cell_lo,
             );
             planet_generators::bake::drain::HUMP_LIMIT_MICRO.store(0, std::sync::atomic::Ordering::Relaxed);
             let (mut lo, mut hi) = (0.0f64, 0.0f64);
@@ -3732,6 +3763,59 @@ fn main() -> Result<(), String> {
                 }
                 println!("RG domain {d} kept rims (lead #176a): {rims} rim cells held at their basin's spill against KV and KC");
             }
+            // lead #179 (A3, owner decision 2, 2026-11-21): `--inlet-floor on` floors every L vertex's graph bed on a kept basin's rim or inside it at the basin's spill (the
+            // highest spill where basins meet), so the graph agrees with the rim KV holds (reading 35 test (a)); KV cuts to these beds
+            if INLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) {
+                let fl = planet_generators::bake::basins_rg::floor_inlet_beds(&grid_d, &pb.basins, &pb.cells, &mut gd.reaches, &|id| {
+                    to_local(id)
+                });
+                println!(
+                    "RG domain {d} inlet floor (lead #179a): {} L vertices raised ({:.1} m in all, wanted fill), {} carries stopped at a depression's edge (residuals, {:.1} m), {} bed rises left along L reaches",
+                    fl.raised,
+                    fl.raised_m,
+                    fl.residuals.len(),
+                    fl.residuals.iter().map(|x| x.2).sum::<f64>(),
+                    fl.rises
+                );
+                // lead #179b: where each stopped carry's upstream vertex lies (another depression, the window's edge, or open land), listed per window
+                let in_basin: HashSet<usize> = pb.basins.iter().flat_map(|b| pb.cells[&b.id].iter().copied()).collect();
+                let mut classes = [0usize; 3];
+                for &(rid, k, need) in &fl.residuals {
+                    if let Some(rch) = gd.reaches.iter().find(|x| x.id == rid) {
+                        let at = to_local(rch.vertices[k]);
+                        let class = match at {
+                            None => 1,
+                            Some(c) if c % w == 0 || c % w == w - 1 || c / w == 0 || c / w == h - 1 => 1,
+                            Some(c) if in_basin.contains(&c) => 0,
+                            Some(_) => 2,
+                        };
+                        classes[class] += 1;
+                        inlet_list.push((rid, k, rch.vertices[k], need, ["another depression", "window edge", "open land"][class]));
+                        if let Some(c) = at.filter(|&c| core[c]) {
+                            res_inlet.push((c, need, rid));
+                        }
+                    }
+                }
+                drop(in_basin);
+                let (flagged, left) =
+                    planet_generators::bake::basins_rg::mark_inlet_residuals(BODY, &mut gd.nodes, &mut gd.reaches, &fl.residuals);
+                inlet_flagged += flagged;
+                println!(
+                    "RG domain {d} inlet residuals (lead #179b): {flagged} rises flagged (exception marker and budget_residual), {left} left unflagged; upstream vertex in another depression {}, at the window edge {}, on open land {}",
+                    classes[0], classes[1], classes[2]
+                );
+                let trunk_ids: HashSet<u64> = l_trunks.iter().map(|r| r.id).collect();
+                for rch in gd.reaches.iter().filter(|x| trunk_ids.contains(&x.id)) {
+                    if let Some(x) = rch.exceptions.iter().find(|x| x.reason == Reason::BudgetResidual) {
+                        let e = trunk_inlet_exc.entry(rch.id).or_insert(0.0f64);
+                        *e = e.max(x.value);
+                    }
+                    let e = floored_trunks.entry(rch.id).or_insert_with(|| rch.attrs.bed.clone());
+                    for (a, &b) in e.iter_mut().zip(&rch.attrs.bed) {
+                        *a = (*a).max(b);
+                    }
+                }
+            }
             gd.basins = pb.basins.clone();
             gd.nodes.extend(pb.nodes.iter().cloned());
             first_nodes.clear();
@@ -3871,6 +3955,7 @@ fn main() -> Result<(), String> {
                     bed_floor_m: if KV_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { sea } else { f64::NEG_INFINITY },
                     kc_lake_outlets: KC_LAKE_OUTLETS.load(std::sync::atomic::Ordering::Relaxed),
                     connect4: KV_CONNECT.load(std::sync::atomic::Ordering::Relaxed),
+                    sea_clamp_m: if SEA17.load(std::sync::atomic::Ordering::Relaxed) { sea + 0.5 } else { f64::NEG_INFINITY },
                     cross_side_grade: kv_cross_side.1,
                     ..KvParams::plan(dx_l)
                 },
@@ -3890,6 +3975,7 @@ fn main() -> Result<(), String> {
             let kc = if on("kc") { r.kc } else { kv.clone() };
             println!("RG domain {d} KV/KC ({sw:?}): {} residuals, {} KC patches", r.residuals.len(), r.patches.len());
             println!("RG domain {d} KV 4-connected rule (lead #177): {} edge cells lowered", r.connect_cells);
+            println!("RG domain {d} reading 17 in KV (lead #178): {} cuts stopped at the sea + 0.5 m (residuals)", r.sea_clamped);
             println!(
                 "RG domain {d} KV cross-slope (crusader #169): {} cells lowered, {:.6} km3; {} cells short at the budget, {:.1} m in all",
                 r.cross_cells,
@@ -3947,15 +4033,15 @@ fn main() -> Result<(), String> {
         t_kvkc += t.elapsed().as_secs_f64();
         // the domain's share: its core's cells and residuals, the items its core's tiles own
         if regions <= 1 && outs.is_none() {
-            let (mut a, mut b, mut c) = (ks_d, kv_d, kc_d);
+            let (mut a0, mut a, mut b, mut c) = (ks1_d, ks_d, kv_d, kc_d);
             for p in (0..n_l).filter(|&p| !core[p]) {
-                (a[p], b[p], c[p]) = (ks0[p], ks0[p], ks0[p]);
+                (a0[p], a[p], b[p], c[p]) = (ks0[p], ks0[p], ks0[p], ks0[p]);
             }
-            outs = Some((a, b, c));
+            outs = Some((a0, a, b, c));
         } else {
-            let (ks_out, kv_out, kc_out) = outs.get_or_insert_with(|| (ks0.clone(), ks0.clone(), ks0.clone()));
+            let (ks1_out, ks_out, kv_out, kc_out) = outs.get_or_insert_with(|| (ks0.clone(), ks0.clone(), ks0.clone(), ks0.clone()));
             for p in (0..n_l).filter(|&p| core[p]) {
-                (ks_out[p], kv_out[p], kc_out[p]) = (ks_d[p], kv_d[p], kc_d[p]);
+                (ks1_out[p], ks_out[p], kv_out[p], kc_out[p]) = (ks1_d[p], ks_d[p], kv_d[p], kc_d[p]);
             }
         }
         res_ks.extend(res_d.into_iter().filter(|r| core[r.0]));
@@ -4003,12 +4089,55 @@ fn main() -> Result<(), String> {
     let flagged = planet_generators::bake::kv_kc::flag_residuals(&mut g, &res_kvkc);
     println!("RG residual flags: {flagged:?}");
     drop(ks0);
-    let (ks_out, kv_out, kc_out) = outs.expect("at least one domain");
+    let (ks1_out, ks_out, kv_out, kc_out) = outs.expect("at least one domain");
+    // lead #178 item 3: the f64 budget validator's overruns and raises per stage against S_KH (reading 21), no residuals passed (the clamp records are the gate's; here only the
+    // use is checked); ks is KS1 (a lowering stage), band6 its drain and connect pass (it fills too)
+    let budget_violations: Vec<(usize, &'static str, f64, f64)> = {
+        use planet_generators::bake::river_graph::{validate_budget, Stage, Violation};
+        let stages = [
+            Stage { name: "ks", out: &ks1_out, wanted_lowering: None, wanted_fill: None, fills: false },
+            Stage { name: "band6", out: &ks_out, wanted_lowering: None, wanted_fill: None, fills: true },
+            Stage { name: "kv", out: &kv_out, wanted_lowering: None, wanted_fill: None, fills: true },
+            Stage { name: "kc", out: &kc_out, wanted_lowering: None, wanted_fill: None, fills: true },
+        ];
+        validate_budget(&ks_base, &budget_l, &stages, &[], &g)
+            .into_iter()
+            .filter_map(|v| match v {
+                Violation::BudgetOverrun { cell, stage, used_m, budget_m } => Some((cell, stage, used_m, budget_m)),
+                Violation::RaiseInLoweringStage { cell, stage } => Some((cell, stage, f64::NAN, f64::NAN)),
+                _ => None,
+            })
+            .collect()
+    };
+    drop(ks1_out);
+    for st in ["ks", "band6", "kv", "kc"] {
+        let over: Vec<f64> = budget_violations.iter().filter(|v| v.1 == st && v.2.is_finite()).map(|v| v.2 - v.3).collect();
+        let raises = budget_violations.iter().filter(|v| v.1 == st && !v.2.is_finite()).count();
+        let big = over.iter().filter(|&&o| o > 0.1).count();
+        println!(
+            "RG budget validator (lead #178): {st}: {} overruns ({big} over 0.1 m, largest {:.2} m), {raises} raises in a lowering stage",
+            over.len(),
+            over.iter().copied().fold(0.0, f64::max)
+        );
+    }
     for r in g.reaches.iter_mut() {
         if let Some(a) = acc_trunks.remove(&r.id) {
             r.attrs = a;
         }
+        if let Some(fb) = floored_trunks.get(&r.id).filter(|fb| fb.len() == r.attrs.bed.len()) {
+            for (a, &b) in r.attrs.bed.iter_mut().zip(fb) {
+                *a = (*a).max(b);
+            }
+        }
+        if let Some(&need) = trunk_inlet_exc.get(&r.id) {
+            use planet_generators::bake::river_graph::Exception;
+            match r.exceptions.iter_mut().find(|e| e.reason == Reason::BudgetResidual) {
+                Some(e) => e.value = e.value.max(need),
+                None => r.exceptions.push(Exception { reason: Reason::BudgetResidual, value: need }),
+            }
+        }
     }
+    drop(floored_trunks);
     println!("RG domains: {} nodes, {} reaches, {} basins after the stitch; landmass items with different contents in two domains: {landmass_conflicts}", g.nodes.len(), g.reaches.len(), g.basins.len());
     for (name, secs) in [("basins", t_basins), ("KG-trib", t_trib), ("KS1", t_ks1), ("KV and KC", t_kvkc)] {
         stamp(name, secs);
@@ -4068,6 +4197,9 @@ fn main() -> Result<(), String> {
             ("margin", margin.to_string()),
             ("turned-noise", planet_generators::height::turned_noise().to_string()),
             ("kv-cross", format!("{}", KV_CROSS_MICRO.load(std::sync::atomic::Ordering::Relaxed) as f64 * 1.0e-6)),
+            ("inlet-floor", if INLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("band6-floors", if BAND6_FLOORS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("sea17", if SEA17.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-connect", if KV_CONNECT.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-rims", if KV_RIMS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-sea-floor", if KV_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
@@ -4168,10 +4300,27 @@ fn main() -> Result<(), String> {
         write("kc-fill.u16", field(&|p| kc_out[p] - kv_out[p]))?;
     }
     {
+        let mut f = std::fs::File::create(stages_dir.join("budget-violations.csv")).map_err(|e| e.to_string())?;
+        writeln!(f, "cell,stage,used_m,budget_m").map_err(|e| e.to_string())?;
+        for &(c, st, u, b) in &budget_violations {
+            writeln!(f, "{c},{st},{u:.4},{b:.4}").map_err(|e| e.to_string())?;
+        }
+    }
+    {
         let mut f = std::fs::File::create(stages_dir.join("residuals.csv")).map_err(|e| e.to_string())?;
         writeln!(f, "cell,stage,needed_m,available_m,feature").map_err(|e| e.to_string())?;
         for &(p, need, avail) in &res_ks {
             writeln!(f, "{p},ks,{need:.4},{avail:.4},-").map_err(|e| e.to_string())?;
+        }
+        // lead #179b: the stopped carries per window, and the rises the markers excuse (bar_violations without them is the gate's plus this count)
+        let mut li = std::fs::File::create(stages_dir.join("inlet-residuals.csv")).map_err(|e| e.to_string())?;
+        writeln!(li, "reach,vertex,cell,needed_m,upstream_lies").map_err(|e| e.to_string())?;
+        for &(rid, k, cell, need, class) in &inlet_list {
+            writeln!(li, "{rid:016x},{k},{cell},{need:.4},{class}").map_err(|e| e.to_string())?;
+        }
+        println!("RG inlet residuals (lead #179b): {} stopped carries listed in inlet-residuals.csv; {inlet_flagged} rises excused by an exception marker", inlet_list.len());
+        for &(c, need, rid) in &res_inlet {
+            writeln!(f, "{c},inlet,{need:.4},0.0000,{rid:016x}").map_err(|e| e.to_string())?;
         }
         for r in &res_kvkc {
             writeln!(f, "{},{},{:.4},{:.4},{:016x}", r.cell, r.stage, r.needed_m, r.available_m, r.feature).map_err(|e| e.to_string())?;

@@ -3,6 +3,7 @@
 Forward state only (owner, 2026-10-16): open owner items, the current queue's open items, the current unanswered stop report, tracked items and quarantines. History goes to the log (`cargo xtask log`). When a change is archived the coder deletes its queue item's text (the log line is the record); when the architect answers a stop report it deletes it. A Tracked entry has at most 3 lines; a finished one is deleted (ADR 0075). Cap: 15 KB. Earlier states: `docs/archive/M4/status-at-m4-acceptance.md`, `docs/archive/M6/status-at-m6-close.md`. M8 closed 2026-10-30: `docs/milestones/M8-report.md`. New requirement IDs, ADR and SPIKE numbers are reserved through the lead (ADR 0120).
 
 ## Waiting for the owner
+- **G2 flights and verdict** (P3 E6): fly R1h, R3b, F1 (then R3a, M1) on g1f14's flight stores against B, now; re-fly only windows whose stages change (owner, 2026-11-21). All five stores are ready (explorer outbox 2026-11-22 05:20). The external review is Carbon's (owner, 2026-11-22).
 - **/bless: `water_class_lake_mask_stripes`** (TEST-133, #1459): the first lake golden, a class view; escalated as the first of its class and for a WARP driver difference. Nothing waits on it.
 - **A new global store for the default world, seed 14**: every store on disk is refused by its keys; E1 runs on the in-memory production base (VIEW-069). Lead's recommendation: bake it after the flight, with ADR 0117's format.
 - **For later planning**: owner test 2026-10-27 groups F and G scope, the 1 m / 500 m exception (`docs/milestones/M8/owner-test-2026-10-27/README.md`). Group E (where edits sit) is settled by ADR 0113.
@@ -16,14 +17,16 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 
 Dormant items moved to `docs/parking.md` (2026-11-12).
 
-## Queue (2026-11-17, milestone P3: `docs/milestones/P3.md`; E6 river graphs, owner 2026-11-16)
+## Queue (2026-11-21, milestone P3: `docs/milestones/P3.md`; E6 river graphs, owner 2026-11-16)
+G2 decides whether the river-graph chain (RG, `spike/rg-prototype` e3eed5fb) is the candidate over B; plan: lanes digest `river-graph/roadmap-g2-g3.md`, `river-graph/review-response-2026-11-21.md` (the reviews' response; stage ablations before the G2 verdict, owner 2026-11-21).
 | Exit | Step | Lane |
 |---|---|---|
-| E6 | Done: G0 (contracts, fixture, harness, density bar: #1561-#1575), G1a sills (SPIKE-127), K5' rejected (SPIKE-131), G1e basins (SPIKE-130), KV/KC on the fixture (SPIKE-132), G1c trunk graph (SPIKE-129) | - |
-| E6 | G1b: band conditioning alone, with the budget (SPIKE-128) | explorer |
-| E6 | Deep H1 basins on trunks: census and lake-length bound for the owner's kept-lake decision (SPIKE-134) | spikes |
-| E6 | G1d: tributary extractor on the fixture, then five windows (SPIKE-133) | crusader |
-| E6 | Owner decisions 1-4 (criteria, KS, `S0` reference, K7 passes off) before G1f: `lanes/digest/river-graph/open-decisions-2026-11-17.md` | lead |
+| E6 | Done: G0 (#1561-#1575); G1 stages built and integrated on the spike branch (contract readings 1-40); gate bars in BUILD-060 (#1617, #1618, #1620); CON-30 partition check (fails: region-border exits move heights, trunk accumulation only for one region; a G3 port blocker) | - |
+| E6 | Done: G2 record g1f14 on main's gate (five windows, `S0` beside `S_KH`, hump, width and corner counts, five flight stores); violations fail on four windows from the rim test and the budget validator, fixes switched off: inlet floor, `--band6-floors` | - |
+| E6 | Ablation step 0: `--sea17`, `--band6-floors` on R1h and M1 under the ablation rule; the budget validator in the gate; A3 (inlet bed at the spill) built switched off | crusader |
+| E6 | Ablations: `--trib-once` (F1 left); `--skip band6` on R1h, F1, M1; two stage orders; the passing set combined and checked on R3a | spikes |
+| E6 | g1f15: the five windows on the combination, only if it passes | explorer |
+| E6 | G2 report: after the ablations and the owner's flights; the external review is Carbon's (owner, 2026-11-22) | lead |
 | E4 | ADRs 0125, 0126 proposed (review v4); G3 decides their fate | lead |
 | E5 | ADR 0127 proposed; G1e builds the basin topology; G3 decides | lead |
 

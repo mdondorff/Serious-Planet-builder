@@ -1,0 +1,40 @@
+"""#161: band6's breaches and fills (band6 against its input, ks1c), window-wide inside the box. A breach path is an 8-connected set of cells band6 lowered by more than
+0.25 m; its ends are the path cells with at most one path neighbour. It cuts through a hump when S_KH along the path rises above S_KH at every end by more than H m.
+Usage: humps.py <chain dir with --dump-ks-steps> [margin]"""
+import sys, numpy as np
+from scipy import ndimage
+D = sys.argv[1]; m = int(sys.argv[2]) if len(sys.argv) > 2 else 1600; n = 8160
+ld = lambda k: np.fromfile(f'{D}/{k}.f32', '<f4').reshape(n, n).astype(np.float64)
+pre, b6, kh, s0 = ld('ks1c'), ld('band6'), ld('kh'), ld('s0')
+cut = pre - b6
+box = np.zeros((n, n), bool); box[m:n-m, m:n-m] = True
+low = (cut > 0.25) & box
+fill = ((-cut) > 0.25) & box
+lab, k = ndimage.label(low, structure=np.ones((3, 3)))
+fl, kf = ndimage.label(fill, structure=np.ones((3, 3)))
+print(f'band6 inside the box: {k} breach paths ({int(low.sum())} cells, {cut[low].sum() * 101.8**2 / 1e9:.3f} km3), {kf} fills ({int(fill.sum())} cells, {(-cut[fill]).sum() * 101.8**2 / 1e9:.3f} km3)')
+nb = ndimage.convolve(low.astype(np.int32), np.ones((3, 3), np.int32), mode='constant') - low
+ends = low & (nb <= 1)
+idx = np.arange(1, k + 1)
+size = ndimage.sum(np.ones_like(cut), lab, idx)
+maxcut = ndimage.maximum(cut, lab, idx)
+khmax = ndimage.maximum(kh, lab, idx)
+s0max = ndimage.maximum(s0, lab, idx)
+# the highest end of each path (on S_KH and S0); a path without a degree-1 end (a loop or a blob) takes its lowest cell on band6 as both ends
+endkh = ndimage.maximum(np.where(ends, kh, -np.inf), lab, idx)
+ends0 = ndimage.maximum(np.where(ends, s0, -np.inf), lab, idx)
+noend = ~np.isfinite(endkh)
+endkh[noend] = ndimage.minimum(kh, lab, idx)[noend]; ends0[noend] = ndimage.minimum(s0, lab, idx)[noend]
+hump_kh, hump_s0 = khmax - endkh, s0max - ends0
+print(f'  paths: length p50 {np.median(size):.0f} cells, p90 {np.percentile(size, 90):.0f}; max cut p50 {np.median(maxcut):.1f} m, p90 {np.percentile(maxcut, 90):.1f} m, max {maxcut.max():.1f} m; {int(noend.sum())} without a degree-1 end')
+for H in (2.0, 5.0, 10.0, 20.0):
+    hk, hs = hump_kh > H, hump_s0 > H
+    print(f'  through a hump over {H:4.0f} m: on S_KH {int(hk.sum()):6d} ({100*hk.mean():4.1f} %), cut p50 {np.median(maxcut[hk]) if hk.any() else 0:5.1f} m, length p50 {np.median(size[hk]) if hk.any() else 0:4.0f}; on S0 {int(hs.sum()):6d} ({100*hs.mean():4.1f} %)')
+deep = (maxcut > 10) & (hump_kh > 10)
+print(f'  cut over 10 m through a S_KH hump over 10 m: {int(deep.sum())} paths, {int(size[deep].sum())} cells; cut p50 {np.median(maxcut[deep]) if deep.any() else 0:.1f}, max {maxcut[deep].max() if deep.any() else 0:.1f} m')
+# the frame-44376 spot's path
+p = lab[2600, 4968]
+if p:
+    i = p - 1
+    print(f'  frame-44376 path: {int(size[i])} cells, max cut {maxcut[i]:.1f} m, S_KH hump {hump_kh[i]:.1f} m, S0 hump {hump_s0[i]:.1f} m')
+np.savez_compressed(D.rstrip('/') + '-humps.npz', size=size, maxcut=maxcut, hump_kh=hump_kh, hump_s0=hump_s0)

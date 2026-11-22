@@ -62,6 +62,9 @@ pub struct KvParams {
     /// (the lower of the two on KV's input, ties by cell), within the budget left and above a rim floor, so the line's water passes through an edge and the mesh draws no corner
     /// link; `false`: the vertices alone.
     pub connect4: bool,
+    /// Lead #178 item 1 (reading 17 in KV and KC, as KS): no land cell (not an outlet) is lowered to this height or below, by KV's cut, its 4-connected rule, the cross pass or
+    /// KC's breach (the sea level + 0.5 m); a cell already there is not lowered. A KV cut the clamp stops is a residual; a breach that would cross such a cell is not taken. `-inf`: off.
+    pub sea_clamp_m: f64,
 }
 
 impl KvParams {
@@ -83,6 +86,7 @@ impl KvParams {
             bed_floor_m: f64::NEG_INFINITY,
             kc_lake_outlets: false,
             connect4: false,
+            sea_clamp_m: f64::NEG_INFINITY,
         }
     }
 }
@@ -132,6 +136,8 @@ pub struct KvKc {
     pub vertex_class: Vec<(usize, u8, bool, f64, f64, f64)>,
     /// Lead #177: the edge cells the 4-connected rule lowered.
     pub connect_cells: usize,
+    /// Lead #178 item 1: KV's cuts reading 17's clamp stopped (each a residual).
+    pub sea_clamped: usize,
 }
 
 /// The least fall (m per m) the cross-slope pass keeps toward the line where it reaches the vertex's height: the gate's flood grade (1e-5; `s_floor` is 100 times it).
@@ -250,6 +256,10 @@ pub fn run_with_rims(
     rim_floor: Option<&[f64]>,
 ) -> KvKc {
     let rim = |c: usize| rim_floor.map_or(f64::NEG_INFINITY, |f| f[c]);
+    // lead #178 item 1: reading 17's floor of a land cell at height z (the clamp, or z itself where z is at or under it); -inf on an outlet
+    debug_assert!(!p.sea_clamp_m.is_nan(), "sea_clamp_m is NaN");
+    let sea_lo = |c: usize, z: f64| if outlet[c] { f64::NEG_INFINITY } else { p.sea_clamp_m.min(z) };
+    let mut sea_clamped = 0usize;
     let n = s0.len();
     // the lowering budget left before KV (reading 21)
     let left_at = |c: usize| (budget[c] - reference.map_or(0.0, |r| (r[c] - s0[c]).max(0.0))).max(0.0);
@@ -370,10 +380,14 @@ pub fn run_with_rims(
         let want = want.min((s0[c] - rim(c)).max(0.0));
         kv_wanted[c] = want;
         let left = left_at(c);
-        let low = want.min(left);
-        kv[c] = s0[c] - low;
+        // lead #178 item 1: the clamp, a residual where it binds
+        let avail = left.min(s0[c] - sea_lo(c, s0[c]));
+        sea_clamped += usize::from(want > avail + BUDGET_EPS_M && avail < left);
+        let low = want.min(avail);
+        // exact at the clamp (numerics review: s0 - (s0 - clamp) can land an ulp under it)
+        kv[c] = (s0[c] - low).max(sea_lo(c, s0[c]));
         if want > low + BUDGET_EPS_M {
-            residuals.push(Residual { cell: c, stage: "kv", needed_m: want, available_m: left, feature: r.id });
+            residuals.push(Residual { cell: c, stage: "kv", needed_m: want, available_m: avail, feature: r.id });
         }
     }
     drop(carry);
@@ -413,13 +427,16 @@ pub fn run_with_rims(
                 continue;
             }
             let left = left_at(c);
-            let low = want.min(left);
-            if s0[c] - low < kv[c] {
-                kv[c] = s0[c] - low;
+            let avail = left.min(s0[c] - sea_lo(c, s0[c]));
+            let low = want.min(avail);
+            let to = (s0[c] - low).max(sea_lo(c, s0[c]));
+            if to < kv[c] {
+                kv[c] = to;
                 kv_wanted[c] = kv_wanted[c].max(want);
                 connect_cells += 1;
                 if want > low + BUDGET_EPS_M {
-                    residuals.push(Residual { cell: c, stage: "kv", needed_m: want, available_m: left, feature });
+                    sea_clamped += usize::from(avail < left);
+                    residuals.push(Residual { cell: c, stage: "kv", needed_m: want, available_m: avail, feature });
                 }
             }
         }
@@ -525,7 +542,7 @@ pub fn run_with_rims(
                 cross_short += 1;
                 cross_short_m += lo_budget - z.max(lo);
             }
-            let z = z.max(lo).max(lo_budget);
+            let z = z.max(lo).max(lo_budget).max(sea_lo(c, kv[c]));
             if z < kv[c] {
                 cross_cells += 1;
                 cross_volume += (kv[c] - z) * p.cell_m * p.cell_m;
@@ -620,12 +637,16 @@ pub fn run_with_rims(
                 let breach = |blocked: &dyn Fn(usize) -> bool| {
                     super::basins_rg::breach_path(grid, &kv, outlet, pit, floor, &remaining, &inside, blocked, BREACH_CAP)
                 };
-                let along = || breach(&|c| protected[c] || rim(c) > floor || !(near_line[c] || inside(c)));
+                // lead #178 item 1: a breach to a floor under the clamp crosses no land cell it would lower
+                let sea_block = |c: usize| floor < p.sea_clamp_m && !outlet[c] && kv[c] > floor;
+                let along = || breach(&|c| protected[c] || rim(c) > floor || sea_block(c) || !(near_line[c] || inside(c)));
                 // the along path is taken when it beats the fill (or the fill does not fit); otherwise the free breach of reading 22 decides
                 let found = if p.breach_along_line {
-                    along().filter(|(vol, _)| *vol < fill_vol || !fill_ok).or_else(|| breach(&|c| protected[c] || rim(c) > floor))
+                    along()
+                        .filter(|(vol, _)| *vol < fill_vol || !fill_ok)
+                        .or_else(|| breach(&|c| protected[c] || rim(c) > floor || sea_block(c)))
                 } else {
-                    breach(&|c| protected[c] || rim(c) > floor)
+                    breach(&|c| protected[c] || rim(c) > floor || sea_block(c))
                 };
                 if let Some((vol, path)) = found {
                     if vol < fill_vol || !fill_ok {
@@ -682,6 +703,7 @@ pub fn run_with_rims(
         census,
         vertex_class,
         connect_cells,
+        sea_clamped,
     }
 }
 
