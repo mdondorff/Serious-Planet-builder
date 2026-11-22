@@ -1782,6 +1782,9 @@ static SEA17: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new
 static INLET_FLOOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 /// lead #178 item 3: `--band6-floors on` holds band6's breach within each path cell's budget left after KS; `off` only the floor cell's budget caps the cut; on by default since #180a (reading 42).
 static BAND6_FLOORS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+/// lead #191: `--band6-outlet-floor on`: band6's breach does not cut an outlet at a path's end under that cell's floor (drain::OUTLET_FLOORS; #190: border exits cut past
+/// their budget, R1h 11, M1 17); `off` (default until the rows): the outlet is exempt from the floor but cut with the path.
+static BAND6_OUTLET_FLOOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// crusader #172 (owner, 2026-11-20): `--exception-lakes on` keeps the hollows of over-budget rises as lakes.
 static EXCEPTION_LAKES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -2062,6 +2065,7 @@ fn main() -> Result<(), String> {
         ("--kv-connect", &KV_CONNECT, "on"),
         ("--sea17", &SEA17, "off"),
         ("--band6-floors", &BAND6_FLOORS, "on"),
+        ("--band6-outlet-floor", &BAND6_OUTLET_FLOOR, "off"),
         ("--inlet-floor", &INLET_FLOOR, "on"),
     ] {
         let v = value(&args, opt).unwrap_or(default);
@@ -3287,6 +3291,8 @@ fn main() -> Result<(), String> {
                 let sea_lo = if sea17 && !is_sea(p) { ks_d[p].min(sea + 0.5) } else { f64::NEG_INFINITY };
                 budget_lo.max(sea_lo)
             };
+            planet_generators::bake::drain::OUTLET_FLOORS
+                .store(BAND6_OUTLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed), std::sync::atomic::Ordering::Relaxed);
             let (d6, st, deep6) = planet_generators::bake::drain::drain_selective_floors(
                 &ks_d,
                 w,
@@ -3301,6 +3307,7 @@ fn main() -> Result<(), String> {
                 &cell_lo,
             );
             planet_generators::bake::drain::HUMP_LIMIT_MICRO.store(0, std::sync::atomic::Ordering::Relaxed);
+            planet_generators::bake::drain::OUTLET_FLOORS.store(false, std::sync::atomic::Ordering::Relaxed);
             let (mut lo, mut hi) = (0.0f64, 0.0f64);
             for p in (0..n_l).filter(|&p| core[p]) {
                 let dz = (d6[p] - ks_d[p]) * dx_l * dx_l / 1e9;
@@ -4201,6 +4208,7 @@ fn main() -> Result<(), String> {
             ("kv-cross", format!("{}", KV_CROSS_MICRO.load(std::sync::atomic::Ordering::Relaxed) as f64 * 1.0e-6)),
             ("inlet-floor", if INLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-floors", if BAND6_FLOORS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("band6-outlet-floor", if BAND6_OUTLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("sea17", if SEA17.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-connect", if KV_CONNECT.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-rims", if KV_RIMS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
