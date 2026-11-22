@@ -2,8 +2,9 @@
 //! panels' data each frame, and the camera flight to an edit. The window (`window.rs`) is glue around this: it hands over the camera, the
 //! cursor and the events, and draws what comes back. Nothing here names a window or a GPU type, so the flows are tested without either.
 
-use crate::panels::{Event, PanelData, PanelState};
+use crate::panels::{BookmarkRow, Event, PanelData, PanelState, ReproRow, SitesView};
 use planet_core::{PlanetFixed, TileId, Vec3};
+use planet_editor::bookmarks::{parse_jump_target, Bookmark, BookmarkShelf, CameraReadout, MIN_ALTITUDE_M};
 use planet_editor::commands::{Affected, Editor};
 use planet_editor::ids::IdMaker;
 use planet_editor::interaction::{Interaction, PointerView, Pressed};
@@ -13,6 +14,7 @@ use planet_editor::overlay::{self, BrushOverlay, DraftOverlay, OverlayItem};
 use planet_editor::params::{kind_title, Inspector, STAMP_KINDS};
 use planet_editor::preview_overlay::{self, PreviewData, PreviewOverlay, PreviewState};
 use planet_editor::relevance::ViewState;
+use planet_editor::repro_shelf::ReproShelf;
 use planet_editor::session::{Session, SessionError, Tool, LINE_KINDS};
 use planet_editor::shape::{self, Handle};
 use planet_frame::freecam::FreePose;
@@ -196,6 +198,24 @@ pub struct EditRuntime {
     capped_under_edit: Vec<TileId>,
     /// The hover pick on a thread of its own (VIEW-059); none in the tests that pick on the spot.
     hover: Option<crate::hoverpick::HoverPicker>,
+    /// Saved camera bookmarks, stored outside `WorldDefinition` (VIEW-073, VIEW-075).
+    bookmarks: BookmarkShelf,
+    bookmarks_file: Option<PathBuf>,
+    /// Scanned F9 repro bundles in `PLANET_REPRO_DIR` (VIEW-074, VIEW-075).
+    repros: ReproShelf,
+    repros_dir: Option<PathBuf>,
+    sites_view: SitesView,
+    camera_pose: Option<FreePose>,
+    camera_altitude_m: Option<f64>,
+    last_altitude_m: f64,
+    pending_jump: Option<PendingJump>,
+    capture_repro: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum PendingJump {
+    Pose(FreePose),
+    Geo { lat_deg: f64, lon_deg: f64, altitude_m: f64, yaw_deg: f64, pitch_deg: f64 },
 }
 
 /// The footprint items of the whole body, layer by layer in stack order (the order the stamp stages are stacked in, ADR 0007): what the
@@ -278,7 +298,7 @@ impl EditRuntime {
             (n, 0) => format!("{n} edits loaded"),
             (n, k) => format!("{n} edits loaded, {k} re-keyed under the current stage version"),
         });
-        Ok(EditRuntime {
+        let mut rt = EditRuntime {
             interaction: Interaction::new(layout.handle_hit_px),
             panels: PanelState::new(&layout),
             session,
@@ -315,7 +335,154 @@ impl EditRuntime {
             gate: false,
             hover: None,
             capped_under_edit: Vec::new(),
+            bookmarks: BookmarkShelf::new(),
+            bookmarks_file: None,
+            repros: ReproShelf::default(),
+            repros_dir: None,
+            sites_view: SitesView::default(),
+            camera_pose: None,
+            camera_altitude_m: None,
+            last_altitude_m: MIN_ALTITUDE_M,
+            pending_jump: None,
+            capture_repro: false,
+        };
+        rt.rebuild_sites_view();
+        Ok(rt)
+    }
+
+    fn bookmarks_where_label(file: Option<&Path>) -> String {
+        match file {
+            Some(p) => format!("saved in {}", p.display()),
+            None => "in memory (start with --bookmarks FILE or --items DIR)".to_string(),
+        }
+    }
+
+    fn rebuild_sites_view(&mut self) {
+        let readout = self.camera_pose.map(|p| CameraReadout::from_pose(&p, self.last_altitude_m));
+        let bookmarks = self
+            .bookmarks
+            .list()
+            .iter()
+            .map(|b| BookmarkRow {
+                id: b.id,
+                name: b.name.clone(),
+                summary: b.summary(),
+                site_arg: b.site_arg(),
+                distance_m: b.distance_m(self.camera_position, self.radius_m),
+            })
+            .collect();
+        let def = self.session.editor().definition();
+        let world_seed = match def.get(WorldDefinition::SEED_PATH) {
+            Some(planet_world_def::NodeValue::U64(s)) => s,
+            _ => 0,
+        };
+        let world_hash = def.hash();
+        let repros = self
+            .repros
+            .entries
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| ReproRow {
+                index,
+                stem: entry.stem.clone(),
+                summary: entry.summary(),
+                compatibility: entry.compatibility(world_seed, world_hash),
+                has_path: entry.path_file.is_some(),
+                path_samples: entry.path_samples,
+                has_png: entry.png_path.is_some(),
+                replay_cmd: entry.replay_command(),
+            })
+            .collect();
+        self.sites_view = SitesView {
+            readout,
+            bookmarks,
+            bookmarks_where: Self::bookmarks_where_label(self.bookmarks_file.as_deref()),
+            repros,
+            repros_dir: self.repros_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
+            broken_repros: self.repros.broken.len(),
+        };
+    }
+
+    fn save_bookmarks(&mut self) -> bool {
+        if let Some(path) = &self.bookmarks_file {
+            if let Err(why) = self.bookmarks.save_file(path) {
+                self.stats.refused += 1;
+                self.session.set_status(why);
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Configures the persistent TOML path for site bookmarks outside `WorldDefinition` (VIEW-073, VIEW-075).
+    pub fn set_bookmarks_file(&mut self, path: Option<PathBuf>) -> Result<(), String> {
+        self.bookmarks = match &path {
+            Some(p) => BookmarkShelf::load_file(p)?,
+            None => BookmarkShelf::new(),
+        };
+        self.bookmarks_file = path;
+        self.rebuild_sites_view();
+        Ok(())
+    }
+
+    /// Sets the directory scanned by the F9 repro shelf without scanning immediately (VIEW-075).
+    pub fn set_repros_dir(&mut self, dir: PathBuf) {
+        self.repros_dir = Some(dir);
+        self.rebuild_sites_view();
+    }
+
+    /// Rescans the configured repro directory for F9 `.bundle` captures (VIEW-074, VIEW-075).
+    pub fn refresh_repros(&mut self) {
+        let Some(dir) = &self.repros_dir else {
+            self.session.set_status("repro directory is not configured");
+            return;
+        };
+        match ReproShelf::scan_dir(dir) {
+            Ok(shelf) => {
+                let count = shelf.entries.len();
+                let broken = shelf.broken.len();
+                self.repros = shelf;
+                self.rebuild_sites_view();
+                if broken > 0 {
+                    self.session.set_status(format!("{count} repro(s), {broken} unreadable skipped"));
+                }
+            }
+            Err(why) => {
+                self.stats.refused += 1;
+                self.session.set_status(why);
+            }
+        }
+    }
+
+    /// Passes the viewer's off-thread ground clearance altitude so bookmark readouts avoid extra terrain reads (VIEW-061).
+    pub fn set_camera_altitude(&mut self, altitude_m: f64) {
+        self.camera_altitude_m = Some(altitude_m);
+    }
+
+    /// Consumes a queued bookmark, coordinate, or repro camera jump once and resolves it to a roll-free pose.
+    pub fn take_jump_pose(&mut self, ground_m: &dyn Fn(Vec3) -> f64) -> Option<FreePose> {
+        let jump = self.pending_jump.take()?;
+        Some(match jump {
+            PendingJump::Pose(pose) => pose,
+            PendingJump::Geo { lat_deg, lon_deg, altitude_m, yaw_deg, pitch_deg } => {
+                let b = Bookmark { id: 1, name: "_".to_string(), lat_deg, lon_deg, altitude_m, yaw_deg, pitch_deg, notes: None };
+                let g = ground_m(b.direction());
+                b.pose(self.radius_m, g)
+            }
         })
+    }
+
+    /// Consumes a queued F9 capture request raised from the Sites tab.
+    pub fn take_capture_repro(&mut self) -> bool {
+        std::mem::take(&mut self.capture_repro)
+    }
+
+    pub fn bookmarks(&self) -> &BookmarkShelf {
+        &self.bookmarks
+    }
+
+    pub fn repros(&self) -> &ReproShelf {
+        &self.repros
     }
 
     /// The tiles the last plan holds back, for the problems list (VIEW-047); call before [`update`](EditRuntime::update).
@@ -621,6 +788,8 @@ impl EditRuntime {
         }
         self.stats.frames += 1;
         self.camera_position = camera.position.0;
+        let pose = FreePose::from_camera(camera);
+        self.camera_pose = Some(pose);
         let view = self.view(camera, viewport);
         self.shown = match self.session.shown(wanted, &view) {
             Ok(ids) => ids,
@@ -692,6 +861,9 @@ impl EditRuntime {
             hidden: s.editor().items().filter(|i| s.is_hidden(i.id)).map(|i| i.id).collect(),
             inspector: s.inspector(cam),
         };
+        let alt = self.camera_altitude_m.unwrap_or_else(|| (cam.length() - (self.radius_m + ground(pose.up()))).max(MIN_ALTITUDE_M));
+        self.last_altitude_m = if alt.is_finite() { alt.max(MIN_ALTITUDE_M) } else { MIN_ALTITUDE_M };
+        self.rebuild_sites_view();
     }
 
     /// Run the hover pick on a thread of its own: `source` makes the field and picks against it.
@@ -739,6 +911,7 @@ impl EditRuntime {
             view_status,
             keys: &self.keys,
             store: Some(s.editor().store_watch()),
+            sites: &self.sites_view,
         }
     }
 
@@ -966,6 +1139,113 @@ impl EditRuntime {
                 Event::Mask { inside, layer } => match self.session.set_mask(inside, layer.as_deref()) {
                     Ok(a) => self.affected.extend(a),
                     Err(e) => self.note(Err(e)),
+                },
+                Event::SaveBookmark { name } => match self.camera_pose {
+                    None => {
+                        self.stats.refused += 1;
+                        self.session.set_status("camera pose is not ready yet");
+                    }
+                    Some(pose) => match self.bookmarks.add_from_pose(&name, &pose, self.last_altitude_m, None) {
+                        Ok(id) => {
+                            let saved_name = self.bookmarks.get(id).map(|b| b.name.clone()).unwrap_or_default();
+                            if self.save_bookmarks() {
+                                self.session.set_status(format!("saved site '{saved_name}'"));
+                            }
+                            self.rebuild_sites_view();
+                        }
+                        Err(why) => {
+                            self.stats.refused += 1;
+                            self.session.set_status(why);
+                        }
+                    },
+                },
+                Event::JumpBookmark(id) => match self.bookmarks.get(id) {
+                    Some(b) => {
+                        self.pending_jump = Some(PendingJump::Geo {
+                            lat_deg: b.lat_deg,
+                            lon_deg: b.lon_deg,
+                            altitude_m: b.altitude_m,
+                            yaw_deg: b.yaw_deg,
+                            pitch_deg: b.pitch_deg,
+                        });
+                        self.session.set_status(format!("jumped to '{}'", b.name));
+                    }
+                    None => {
+                        self.stats.refused += 1;
+                        self.session.set_status(format!("bookmark {id} was not found"));
+                    }
+                },
+                Event::RenameBookmark { id, name } => match self.bookmarks.rename(id, &name) {
+                    Ok(()) => {
+                        let _ = self.save_bookmarks();
+                        self.rebuild_sites_view();
+                    }
+                    Err(why) => {
+                        self.stats.refused += 1;
+                        self.session.set_status(why);
+                    }
+                },
+                Event::DeleteBookmark(id) => {
+                    if self.bookmarks.remove(id) {
+                        if self.save_bookmarks() {
+                            self.session.set_status("deleted site bookmark");
+                        }
+                        self.rebuild_sites_view();
+                    }
+                }
+                Event::JumpCoords(text) => match parse_jump_target(&text) {
+                    Ok(t) => {
+                        self.pending_jump = Some(PendingJump::Geo {
+                            lat_deg: t.lat_deg,
+                            lon_deg: t.lon_deg,
+                            altitude_m: t.altitude_m,
+                            yaw_deg: t.yaw_deg,
+                            pitch_deg: t.pitch_deg,
+                        });
+                        self.session.set_status(format!("jumped to {}", t.site_arg()));
+                    }
+                    Err(why) => {
+                        self.stats.refused += 1;
+                        self.session.set_status(why);
+                    }
+                },
+                Event::CaptureRepro => {
+                    self.capture_repro = true;
+                }
+                Event::RefreshRepros => {
+                    self.refresh_repros();
+                }
+                Event::JumpRepro(index) => match self.repros.entries.get(index) {
+                    Some(entry) => {
+                        self.pending_jump = Some(PendingJump::Pose(entry.free_pose()));
+                        self.session.set_status(format!("jumped to {}.bundle", entry.stem));
+                    }
+                    None => {
+                        self.stats.refused += 1;
+                        self.session.set_status("repro entry no longer available");
+                    }
+                },
+                Event::BookmarkRepro(index) => match self.repros.entries.get(index).cloned() {
+                    Some(entry) => {
+                        let bm = entry.to_bookmark(0, 0.0);
+                        match self.bookmarks.insert(bm) {
+                            Ok(id) => {
+                                let name = self.bookmarks.get(id).map(|b| b.name.clone()).unwrap_or_default();
+                                if self.save_bookmarks() {
+                                    self.session.set_status(format!("bookmarked '{name}' from repro"));
+                                }
+                                self.rebuild_sites_view();
+                            }
+                            Err(why) => {
+                                self.stats.refused += 1;
+                                self.session.set_status(why);
+                            }
+                        }
+                    }
+                    None => {
+                        self.stats.refused += 1;
+                        self.session.set_status("repro entry no longer available");
+                    }
                 },
             }
         }
@@ -2234,5 +2514,103 @@ mod tests {
         e.toggle();
         assert!(!e.on);
         assert_eq!(e.globe_markers(&high, VIEWPORT, &tiles).len(), 2);
+    }
+
+    // spec: VIEW-075
+    #[test]
+    fn sites_tab_persists_bookmarks_outside_definition_jumps_coordinates_and_scans_repros() {
+        use planet_frame::plan::{DebugView, FramePlan, PlanRequest};
+        use planet_frame::ReproBundle;
+
+        let dir = temp_dir("sites");
+        std::fs::create_dir_all(&dir).unwrap();
+        let bm_file = dir.join("bookmarks.toml");
+        let repro_dir = dir.join("repros");
+        std::fs::create_dir_all(&repro_dir).unwrap();
+
+        let mut e = runtime(None);
+        let initial_def_hash = e.session.editor().definition().hash();
+        e.set_bookmarks_file(Some(bm_file.clone())).unwrap();
+        e.set_repros_dir(repro_dir.clone());
+        e.toggle();
+
+        let cam_dir = unit(47.2, 8.55);
+        let (north, east) = shape::tangent_frame(cam_dir);
+        let heading = (north * 0.8 + east * 0.6).normalized();
+        let cam_pose = FreePose::new(PlanetFixed(cam_dir * (R + 2_200.0)), heading, (-25.0_f64).to_radians());
+        let cam = cam_pose.camera(std::f64::consts::FRAC_PI_3, 1.5, 0.1);
+        e.set_camera_altitude(2_200.0);
+        frame(&mut e, &cam, false);
+
+        // Saving a bookmark persists to TOML without touching WorldDefinition::hash().
+        e.apply(vec![Event::SaveBookmark { name: "Pass Lookout".into() }]);
+        assert_eq!(e.bookmarks().len(), 1);
+        assert_eq!(e.session.editor().definition().hash(), initial_def_hash);
+        assert!(bm_file.is_file());
+        let saved_id = e.bookmarks().list()[0].id;
+
+        // Reload into a fresh runtime and jump over ground of elevation 350 m.
+        let mut reloaded = runtime(None);
+        reloaded.set_bookmarks_file(Some(bm_file.clone())).unwrap();
+        assert_eq!(reloaded.bookmarks().len(), 1);
+        reloaded.apply(vec![Event::JumpBookmark(saved_id)]);
+        let jumped = reloaded.take_jump_pose(&|_| 350.0).expect("bookmark jump queued");
+        assert!((jumped.position.0.length() - (R + 350.0 + 2_200.0)).abs() < 1e-3);
+
+        // Coordinate jump works and bad coordinates are refused & counted.
+        e.apply(vec![Event::JumpCoords("-10.0, 20.0, 3 km".into())]);
+        let coord_pose = e.take_jump_pose(&|_| 100.0).expect("coord jump queued");
+        assert!((coord_pose.position.0.length() - (R + 3_100.0)).abs() < 1e-3);
+        let refused_before = e.stats.refused;
+        e.apply(vec![Event::JumpCoords("not coords".into())]);
+        assert_eq!(e.stats.refused, refused_before + 1);
+        assert!(e.take_jump_pose(&|_| 0.0).is_none());
+
+        // Scanning a repro directory populates SitesView, supports exact pose jump and bookmark promotion.
+        let bundle_cam = PlanetFixed(unit(20.0, 30.0) * (R + 50_000.0));
+        let bundle = ReproBundle {
+            generator_version: 1,
+            implementation_id: "test".into(),
+            seed: 7,
+            res: 32,
+            definition_hash: initial_def_hash,
+            adapter: "test".into(),
+            request: PlanRequest {
+                tiles: vec![],
+                camera: bundle_cam,
+                size: (640, 480),
+                view: DebugView::Height,
+                radius_m: R,
+                face_mapping: "tangent-v1".into(),
+            },
+            plan: FramePlan {
+                size: (640, 480),
+                view: DebugView::Height,
+                camera: bundle_cam,
+                clear_color: [0, 0, 0, 255],
+                height_range: [-100.0, 100.0],
+                draws: vec![],
+            },
+        };
+        std::fs::write(repro_dir.join("frame-77.bundle"), bundle.to_text()).unwrap();
+        e.apply(vec![Event::RefreshRepros]);
+        assert_eq!(e.repros().entries.len(), 1);
+        let data = e.panel_data("");
+        assert_eq!(data.sites.repros.len(), 1);
+        assert_eq!(data.sites.repros[0].stem, "frame-77");
+
+        e.apply(vec![Event::JumpRepro(0)]);
+        let repro_pose = e.take_jump_pose(&|_| 0.0).expect("repro jump queued");
+        assert!((repro_pose.position.0 - bundle_cam.0).length() < 1e-6);
+
+        e.apply(vec![Event::BookmarkRepro(0)]);
+        assert_eq!(e.bookmarks().len(), 2);
+        assert_eq!(e.session.editor().definition().hash(), initial_def_hash);
+
+        e.apply(vec![Event::CaptureRepro]);
+        assert!(e.take_capture_repro());
+        assert!(!e.take_capture_repro());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
