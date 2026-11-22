@@ -1948,7 +1948,18 @@ fn main() -> Result<(), String> {
     // lead #162 (review-fable-rgv0 section 1, candidate 1): `--trib-once`: no basins pass 1 and no KG-trib pass 1; KS1 clips along a routing of KS0 itself (KG-trib's rules:
     // route_rules_filled, eps 1e-3, seed 1, D8 area with the H1 inflow, channels from 1 km2 and downstream; a channel cell without a trunk bed takes the running minimum
     // down its channel), and KG-trib runs once, after band6 (--trib-on post). Default off (spike only)
-    let trib_once = args.iter().any(|a| a == "--trib-once");
+    // lead #164, #164a: `--order fable` (step 3, review-fable-rgv0 section 1): KS0 -> band6 -> KG-trib once -> KS1 along that graph's routing and coded beds -> KS connect ->
+    // basins -> KV/KC. KS1 clips from S_KH within the budget, H_f measured on band6's output; ks_d = min(band6, KS1) except in cells band6 filled, which keep band6's fill
+    // level (reading 23). It implies --trib-once (no basins pass 1, no KG-trib pass 1). `default`: the order as built (spike only)
+    let stage_order = value(&args, "--order").unwrap_or("default");
+    if !["default", "fable", "carbon"].contains(&stage_order) {
+        return Err(format!("--order default | fable | carbon, not '{stage_order}'"));
+    }
+    let order_fable = stage_order == "fable";
+    // lead #164 (step 3c, review-carbon-rgv0 S1.8): `--order carbon`: one reading-22 basins pass (basins-2's rules) on ks_d before KG-trib, the L trunks as its reaches; its kept
+    // set feeds KG-trib post (in place of the trunk-only pass) and KV/KC take the same result; no basin pass after KG-trib. Implies --trib-once (spike only)
+    let order_carbon = stage_order == "carbon";
+    let trib_once = args.iter().any(|a| a == "--trib-once") || order_fable || order_carbon;
     let kh_lower_only = match value(&args, "--kh-lower-only").unwrap_or("on") {
         "on" => true,
         "off" => false,
@@ -3010,7 +3021,7 @@ fn main() -> Result<(), String> {
         let mut trib_first: (BTreeSet<u64>, BTreeSet<u64>) = (BTreeSet::new(), BTreeSet::new());
         // lead #162: --trib-once's routing of KS0 for KS1, and the running-minimum bed of its channels
         let mut bed_min: Option<Vec<f64>> = None;
-        if trib_once && trib_on == "post" {
+        if trib_once && trib_on == "post" && !order_fable {
             use planet_generators::bake::route::route_rules_filled;
             let outlet: Vec<bool> = (0..n_l).map(|c| active[c] && (sea_l[c] || exit[c] || on_trunk.contains(&c))).collect();
             let (r, _filled) = route_rules_filled(&grid_d, &ks0[..], &outlet, 1.0e-3, 1, 0.0, None, RoundRules::ROUND);
@@ -3093,7 +3104,7 @@ fn main() -> Result<(), String> {
         t_trib += t.elapsed().as_secs_f64();
         // KS1: H_f by flow path on the domain's KG-trib routing of KS0 (the rasterised reach's bed code; the cell's KS0 where no reach owns it)
         let t = Instant::now();
-        let (ks_d, res_d) = match (ks_mode, &fine) {
+        let (ks_d, res_d) = match (if order_fable { "fable" } else { ks_mode }, &fine) {
             ("ks1", Some((receiver, channel))) => {
                 let raster = rasterise(&gd);
                 let mut bed = vec![f64::NAN; n_l];
@@ -3132,7 +3143,7 @@ fn main() -> Result<(), String> {
         // lead #158 (spikes #157): `--ks-connect 4`: on each D8 diagonal step of an L reach, KS also lowers the lower of the two cells sharing an edge with both line cells to the
         // step's mean height, so the carved line is 4-connected (continuous at the mesh, no bead of corner-joined pits); within the budget left, a shortfall is a residual.
         // Claims are read from KS1's output and applied as a minimum, so the order of reaches changes nothing.
-        let (ks_d, res_d) = if KS_CONNECT.load(std::sync::atomic::Ordering::Relaxed) {
+        let (ks_d, res_d) = if KS_CONNECT.load(std::sync::atomic::Ordering::Relaxed) && !order_fable {
             let (mut z, mut res) = (ks_d, res_d);
             let mut want = vec![f64::INFINITY; n_l];
             let mut steps = 0usize;
@@ -3381,7 +3392,9 @@ fn main() -> Result<(), String> {
         t_ks1 += t.elapsed().as_secs_f64();
         // crusader #168 (DEC crusader-17, --trib-on post): KG-trib again on the band6 output; the first pass's tributaries and nodes leave the graph, the trunks take their KG-trunk
         // attributes back before reading 18 accumulates them again
-        if trib_on == "post" && on("kg-trib") {
+        // lead #164: the post pass's routing, for the fable order's KS1
+        let mut fine_post: Option<(Vec<u32>, Vec<bool>)> = None;
+        if trib_on == "post" && on("kg-trib") && !order_carbon {
             use planet_generators::bake::kg_trib::{accumulate_trunks, extract, Input, Params, Trunk};
             let t2 = Instant::now();
             gd.reaches.retain(|r| !trib_first.0.contains(&r.id));
@@ -3443,6 +3456,9 @@ fn main() -> Result<(), String> {
                 keep_fields: false,
             };
             let ex = extract(&inp, &Params { mfd_init: false, ..Params::plan(BODY, runoff_mean) });
+            if order_fable {
+                fine_post = Some((ex.receiver.clone(), ex.channel.clone()));
+            }
             gd.nodes.extend(ex.nodes.iter().cloned());
             gd.reaches.extend(ex.reaches.iter().cloned());
             let trunk_ids: BTreeSet<u64> = l_trunks.iter().map(|r| r.id).collect();
@@ -3468,6 +3484,115 @@ fn main() -> Result<(), String> {
             );
             t_trib += t2.elapsed().as_secs_f64();
         }
+        // lead #164, #164a, the fable order: KS1 along the one extraction's routing and coded beds, clipped from S_KH within the budget, H_f measured on band6's output;
+        // ks_d = min(band6, KS1), except in cells band6 filled (band6 above KS0), which keep band6's fill level (reading 23); then the KS connect pass on that graph's reaches
+        // and routing
+        let (ks_d, res_d) = if order_fable && ks_mode == "ks1" {
+            let (receiver, channel) = fine_post.as_ref().ok_or("--order fable needs KG-trib's post pass (--trib-on post)")?;
+            let raster = rasterise(&gd);
+            let mut bed = vec![f64::NAN; n_l];
+            let reach_at: HashMap<u64, &GReach> = gd.reaches.iter().map(|r| (r.id, r)).collect();
+            for (&cell, &(rid, k)) in &raster {
+                if let Some(c) = to_local(cell) {
+                    bed[c] = f64::from(reach_at[&rid].attrs.bed[k]) * 0.5;
+                }
+            }
+            let mut tgt = vec![f64::NAN; n_l];
+            for &c in &topological_order(receiver) {
+                let c = c as usize;
+                let r = receiver[c];
+                tgt[c] = if channel[c] || r == NONE {
+                    if bed[c].is_finite() {
+                        bed[c]
+                    } else {
+                        ks_d[c]
+                    }
+                } else {
+                    tgt[r as usize]
+                };
+            }
+            let hf: Vec<f64> = (0..n_l).map(|p| if active[p] { (ks_d[p] - tgt[p].max(sea)).max(0.0) } else { f64::INFINITY }).collect();
+            let (z1, res1) = ks(&hf);
+            let mut guarded = 0usize;
+            let mut z: Vec<f64> = (0..n_l)
+                .map(|p| {
+                    if ks_d[p] > ks0[p] {
+                        if z1[p] < ks_d[p] && core[p] {
+                            guarded += 1;
+                        }
+                        ks_d[p]
+                    } else {
+                        ks_d[p].min(z1[p])
+                    }
+                })
+                .collect();
+            let mut res = res1;
+            println!(
+                "RG domain {d} fable order (lead #164a): reading 23's guard holds {guarded} core cells band6 filled at its fill level (KS1 wanted them lower)"
+            );
+            if dump_ks_steps {
+                chain_f32("ks1.f32", &z)?;
+            }
+            if KS_CONNECT.load(std::sync::atomic::Ordering::Relaxed) {
+                let mut want = vec![f64::INFINITY; n_l];
+                let mut pairs: Vec<(usize, usize)> = Vec::new();
+                for r in gd.reaches.iter().filter(|r| r.level == Level::L) {
+                    let cells: Vec<Option<usize>> = r.vertices.iter().map(|&c| to_local(c)).collect();
+                    for k in 1..cells.len() {
+                        if let (Some(a), Some(b)) = (cells[k - 1], cells[k]) {
+                            pairs.push((a, b));
+                        }
+                    }
+                }
+                for c in 0..n_l {
+                    if channel[c] && receiver[c] != NONE {
+                        pairs.push((c, receiver[c] as usize));
+                    }
+                }
+                for (a, b) in pairs {
+                    let (ax, ay, bx, by) = (a % w, a / w, b % w, b / w);
+                    if ax.abs_diff(bx) != 1 || ay.abs_diff(by) != 1 {
+                        continue;
+                    }
+                    let (e1, e2) = (ay * w + bx, by * w + ax);
+                    let t = 0.5 * (z[a] + z[b]);
+                    if z[e1].min(z[e2]) <= t + 1e-9 {
+                        continue;
+                    }
+                    let e = if z[e1] < z[e2] || (z[e1] == z[e2] && e1 < e2) { e1 } else { e2 };
+                    want[e] = want[e].min(t);
+                }
+                let (mut cut, mut short) = (0usize, 0usize);
+                for e in 0..n_l {
+                    if !want[e].is_finite() || !active[e] || is_sea(e) || protected_h1[parent(e)] || ks_d[e] > ks0[e] {
+                        continue;
+                    }
+                    let need = z[e] - want[e];
+                    let avail = (budget_l[e] - (ks_base[e] - z[e]).max(0.0)).max(0.0).min((z[e] - (sea + 0.5)).max(0.0));
+                    let u = need.min(avail);
+                    if u > 0.0 {
+                        z[e] -= u;
+                        cut += 1;
+                    }
+                    if need > avail + 1e-9 {
+                        short += 1;
+                        res.push((e, need, avail));
+                    }
+                }
+                println!("RG domain {d} fable order, KS connect 4: {cut} edge cells lowered, {short} short at the budget");
+            }
+            if dump_ks_steps {
+                chain_f32("ks1c.f32", &z)?;
+            }
+            println!(
+                "RG domain {d} fable order (lead #164): KS1 after band6 and the one KG-trib pass; {} core cells under band6's surface, {} core residuals",
+                (0..n_l).filter(|&p| core[p] && z[p] < ks_d[p]).count(),
+                res.iter().filter(|r| core[r.0]).count()
+            );
+            (z, res)
+        } else {
+            (ks_d, res_d)
+        };
         // the basins again, on the KS output with every L reach as spill receivers and inlets (reading 5: the L kept rule reads KS1; crusader's G1d order: the first pass on KS0 gave
         // KG-trib its kept set); the graph takes this pass's basins and nodes; its kept basins and H1's lake water are KV's and KC's protected cells
         if on("basins") && on("kg-trib") {
@@ -3613,6 +3738,98 @@ fn main() -> Result<(), String> {
             let kept_land = (0..n_l).filter(|&p| core[p] && kept[p] && start[p] > sea).count();
             println!("RG domain {d} basins on the KS output (second pass): {} L basins ({} kept, {kept_land} protected core land cells), {} unresolved spills; {:.1} s", pb.basins.len(), pb.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface).count(), pb.unresolved.len(), t2.elapsed().as_secs_f64());
             t_basins += t2.elapsed().as_secs_f64();
+        }
+        // lead #164 (step 3c): KG-trib once, after the one basin pass; its kept set is that pass's
+        println!(
+            "RG domain {d} carbon order (lead #164): KG-trib post after the one basins pass, {} protected cells",
+            kept.iter().filter(|&&k| k).count()
+        );
+        if order_carbon && trib_on == "post" && on("kg-trib") {
+            use planet_generators::bake::kg_trib::{accumulate_trunks, extract, Input, Params, Trunk};
+            let t2 = Instant::now();
+            gd.reaches.retain(|r| !trib_first.0.contains(&r.id));
+            gd.nodes.retain(|x| !trib_first.1.contains(&x.id));
+            // the kept set on the band6 output (numerics review of f5adb6d8: basin pass 1's set is KS0's, and band6 may have drained those basins): H1's lake water and the kept
+            // basins of a trunk-only basin pass on ks_d, as pass 1 does on KS0
+            if on("basins") && !order_carbon {
+                use planet_generators::bake::basins_rg::BasinParams;
+                use planet_generators::bake::river_graph::Represented;
+                let ids = planet_generators::bake::basins_rg::CellIds { gid: &gid_l, local: &to_local };
+                let pk = planet_generators::bake::basins_rg::produce_ids(
+                    &grid_d,
+                    &ks_d,
+                    &outlet_d,
+                    &l_trunks,
+                    &tile_l,
+                    &BasinParams::l(BODY),
+                    &ids,
+                );
+                for p in 0..n_l {
+                    kept[p] = protected_h1[parent(p)];
+                }
+                for b in pk.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface) {
+                    for &c in &pk.cells[&b.id] {
+                        kept[c] = true;
+                    }
+                }
+                println!(
+                    "RG domain {d} KG-trib post: kept set on the band6 output, {} kept basins of {}",
+                    pk.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface).count(),
+                    pk.basins.len()
+                );
+            }
+            let first_attrs: HashMap<u64, planet_generators::bake::river_graph::Attrs> =
+                l_trunks.iter().map(|r| (r.id, r.attrs.clone())).collect();
+            for r in gd.reaches.iter_mut() {
+                if let Some(a) = first_attrs.get(&r.id) {
+                    r.attrs = a.clone();
+                }
+            }
+            let trunks: Vec<Trunk> = l_trunks
+                .iter()
+                .filter_map(|r| {
+                    let v: Option<Vec<usize>> = r.vertices.iter().map(|&c| to_local(c)).collect();
+                    let down = g.nodes.iter().find(|x| x.id == r.down)?.clone();
+                    v.map(|vertices| Trunk { id: r.id, vertices, attrs: r.attrs.clone(), down })
+                })
+                .collect();
+            let inp = Input {
+                grid: &grid_d,
+                z: &ks_d,
+                sea: &sea_l,
+                exit: &exit,
+                trunks: &trunks,
+                kept: &kept,
+                seed_ext: &seed,
+                tile: &tile_l,
+                gid: &gid_l,
+                keep_fields: false,
+            };
+            let ex = extract(&inp, &Params { mfd_init: false, ..Params::plan(BODY, runoff_mean) });
+            gd.nodes.extend(ex.nodes.iter().cloned());
+            gd.reaches.extend(ex.reaches.iter().cloned());
+            let trunk_ids: BTreeSet<u64> = l_trunks.iter().map(|r| r.id).collect();
+            let inflow = |id: u64| to_local(id).map_or((0.0, 0.0), |c| (dx_l * dx_l + ex.d8[c], dx_l * dx_l + ex.d8_no_ext[c]));
+            let acc = accumulate_trunks(&mut gd, &trunk_ids, &inflow, runoff_mean);
+            if regions <= 1 {
+                acc_trunks = gd.reaches.iter().filter(|r| trunk_ids.contains(&r.id)).map(|r| (r.id, r.attrs.clone())).collect();
+            }
+            // every reach's ends are held, and every KG-trunk node is still in the domain graph
+            let held: HashSet<u64> = gd.nodes.iter().map(|x| x.id).collect();
+            let dangling = gd.reaches.iter().filter(|r| r.level == Level::L && (!held.contains(&r.up) || !held.contains(&r.down))).count();
+            let lost = g.nodes.iter().filter(|x| !held.contains(&x.id)).count();
+            println!("RG domain {d} KG-trib post check: {dangling} L reaches with an end not held, {lost} KG-trunk nodes missing");
+            println!(
+                "RG domain {d} KG-trib post (crusader #168): {} reaches, {} nodes, {} open ends on the band6 output ({} first-pass reaches replaced); reading 18: {} trunk reaches, {} unordered; {:.1} s",
+                ex.reaches.len(),
+                ex.nodes.len(),
+                ex.open_ends,
+                trib_first.0.len(),
+                acc.reaches,
+                acc.unordered,
+                t2.elapsed().as_secs_f64()
+            );
+            t_trib += t2.elapsed().as_secs_f64();
         }
         gd.nodes.append(&mut first_nodes);
         let mut seen: HashSet<u64> = HashSet::new();
@@ -3840,6 +4057,7 @@ fn main() -> Result<(), String> {
             ("band6-hump", band6_hump.to_string()),
             ("kh-lower-only", if kh_lower_only { "on" } else { "off" }.to_string()),
             ("trib-once", if trib_once { "on" } else { "off" }.to_string()),
+            ("order", stage_order.to_string()),
             ("k5-diffuse-amax", k5_diffuse_amax.to_string()),
             ("k5-parity", k5_parity.to_string()),
             ("ks", ks_mode.to_string()),
