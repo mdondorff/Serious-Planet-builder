@@ -39,6 +39,7 @@ Owner, 2026-11-12 (ADR 0120). These items are outside the current milestone, one
 - River at a cube face edge, fix (B): overlapping runs, width in metres per face (store format; REND-063 reserved).
 - Audit batch C: sync specs from `spikes/audit-batch-c/results/open-changes-2026-11-12.md` (lead).
 - Audit batch E: waits on the owner's list.
+- Downstream (`M10`–`M13` and game Seam 1) producer invariants in `docs/design/hydrology-downstream-seams.md` (`kind 20` vector richness, no extra `G-STORE` rasters, `soil_m` source, unified commit query & mouth `coast_fade`). Trigger: `P3` `G3` production ADRs and `P4` move to production (owner, 2026-11-22).
 
 ## Perf and stores
 - Perf: REND-052 verdicts, ground-detail and channel-read cost; TEST-099 waits for a perf window; a current store first (MESH_VERSION 11).
