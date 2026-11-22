@@ -1224,26 +1224,26 @@ A frame that takes at least one second SHALL be a stall: the report `stall (the 
 - **THEN** its thread has the name it was given
 
 ### Requirement: VIEW-054 The shade view and the time of day of the lit viewer
-J SHALL cycle `ViewerState::shade_view` through normal (`ShadeView::Lit`), horizon, shadow and, since M8-6 (GEN-074), soil depth, moisture and insolation; the lit frames SHALL draw that view unless the coupled lens (K) is showing. `[` and `]` SHALL move `ViewerState::sun_offset_h` by `-SUN_STEP_H` and `+SUN_STEP_H` (0.5 hours, wrapping at 24) and Backslash SHALL set it to 0. A lit frame SHALL take `sun_with_offset(look_sun, sun_offset_h)` for `LitPlan::sun_dir`: the look's declination with the sub-solar longitude moved west 15 degrees an hour (the convention of `shading::sun_direction`), the look's sun itself at 0; the editing light (H) SHALL win over it. Both states start at the look's own (normal view, offset 0), so every golden stays.
+J SHALL cycle `ViewerState::shade_view` through normal (`ShadeView::Lit`), shadow (the march's visibility, REND-051) and, since M8-6 (GEN-074), soil depth, moisture and insolation; the lit frames SHALL draw that view unless the coupled lens (K) is showing. `[` and `]` SHALL move `ViewerState::sun_offset_h` by `-SUN_STEP_H` and `+SUN_STEP_H` (0.5 hours, wrapping at 24) and Backslash SHALL set it to 0. A lit frame SHALL take `sun_with_offset(look_sun, sun_offset_h)` for `LitPlan::sun_dir`: the look's declination with the sub-solar longitude moved west 15 degrees an hour (the convention of `shading::sun_direction`), the look's sun itself at 0; the editing light (H) SHALL win over it. Both states start at the look's own (normal view, offset 0), so every golden stays.
 
 Verify: A
 Status: active
-Source: opus-planner (2026-10-25), owner: horizon shadows cannot be seen in the viewer; REND-038, VIEW-042
+Source: opus-planner (2026-10-25), owner: horizon shadows cannot be seen in the viewer; VIEW-042, ADR 0085, REND-051
 
 #### Detail
-The title SHALL name a shade view other than normal, the local solar time at the camera of a moved sun (`local_solar_hours`: 12 when the sun is on the camera's meridian) while the editing light is off, and, on the lit path, a window without the horizon jobs with "no horizon shadows (open a store with a coupled run)". The usage and editor help texts SHALL name J, `[`, `]` and Backslash.
+The title SHALL name a shade view other than normal, and the local solar time at the camera of a moved sun (`local_solar_hours`: 12 when the sun is on the camera's meridian) while the editing light is off. The usage and editor help texts SHALL name J, `[`, `]` and Backslash.
 
 #### Scenario: Keys and sun
-- **WHEN** J is pressed seven times, then `]` twice and `[` once, then `[` twice more, then Backslash
-- **THEN** the shade view goes horizon, shadow, soil depth, moisture, insolation, normal, horizon; the offset is 0.5, then 23.5 hours, then 0
+- **WHEN** J is pressed six times, then `]` twice and `[` once, then `[` twice more, then Backslash
+- **THEN** the shade view goes shadow, soil depth, moisture, insolation, normal, shadow; the offset is 0.5, then 23.5 hours, then 0
 
 #### Scenario: A known pose
 - **WHEN** the look's sun is noon on the equator at longitude 0 and a camera is at longitude 0
 - **THEN** the camera reads 12:00; six hours later the sun is on the -y axis and the camera reads 18:00; a camera 90 degrees west of the first reads 12:00 for that sun; a sun of another declination keeps it
 
 #### Scenario: The title
-- **WHEN** the title is made at the start and with the horizon view and a sun six hours later
-- **THEN** it adds nothing, and adds "shade view horizon" and "sun 18:00 local solar time"; with the editing light on it does not claim the time
+- **WHEN** the title is made at the start, and with the shadow view and a sun six hours later
+- **THEN** it adds nothing, and adds "shade view shadow" and "sun 18:00 local solar time"; with the editing light on it does not claim the time
 
 ### Requirement: VIEW-060 F8 switches the ground look
 The lit window SHALL show the ground look `LookChoice` names: F8 cycles the defaults (the Earth curves at the strength F6 names) and the look file's `ground` table (LOOK-011; its curves, its patch break-up (LOOK-012), and its detail strength in place of the natural mode's, while full and off stay what F6 says); the window starts on the defaults. The window's title SHALL name the choice when it is not the default (`look look file`), the key table SHALL list F8 with its state (`default` or `look file`), and `LitPlan::with_ground_look` SHALL make the plan so that a test can read it. A look file without a ground table shows the same in both. Nothing is stored or keyed (ADR 0035).
@@ -1293,6 +1293,21 @@ Source: opus-planner (2026-10-27), owner test 2026-10-27 group A item 2, VIEW-05
 #### Scenario: A warmed block
 - **WHEN** a direction on a block nobody has read is warmed and the warm-up thread has read it
 - **THEN** the height read at that direction on the main thread decodes no block, where the same read on a cold block decodes one on the thread that reads it
+
+### Requirement: VIEW-065 The viewer shows the world a store records
+The viewer, `generate --plan-check` and `generate --coarse-horizon` SHALL open the world a store records (STRM-073): a class-source store as the class world, a legacy store as the legacy one, a store of both bakes only with `--class-source` or `--legacy-source` (refused naming both bakes otherwise). The viewer's title SHALL name the field source (`class source` or `legacy source`) and, with the erosion layer on, `erosion layer`; the log of the run SHALL print the world's description, which names the class source when it is one (a legacy world's description is what it was: the perf logs record it as the measured field, TEST-012).
+
+Verify: A
+Status: active
+Source: Owner 2026-11-04 (the integrated preview: the viewer must show the class-source world), STRM-073, STRM-074, inbox #59
+
+#### Scenario: The recorded world
+- **WHEN** a class-source store, then a store of both bakes, are opened by the viewer's terrain, by the plan check and by the coarse horizon, with and without the options
+- **THEN** the class store opens as the class world and says `class source`, the store of both is refused naming both bakes and opens with either option, the plan check and the horizon do not find "no bake" in a class store, and the title's world label names the source and the layer (the drawn title is tier D)
+
+#### Scenario: The layer by its manifest
+- **WHEN** a layer with a manifest is opened over the class store, with a manifest of another kernel version, with one of another field source, and with a replacement of the pass-1 cells
+- **THEN** the layer opens without a marker flag, says it came from its manifest and bounds by the manifest's range, the other two are refused naming the version and both sources (also with `--erosion-unchecked` on a legacy world), and the replaced cells are refused by the layer's keys
 
 ### Requirement: VIEW-066 --channels fills the driver block from the layer's channels
 The viewer and the stills SHALL take `--channels on|off` (off by default) which, with `--erosion on`, gives the layer's field the baked channels of the layer's store, the drainage area under pass 1's keys and the deposited depth under pass 2's, so the tiles' driver block holds them (GEN-119) and the `soil` and `moisture` views show them. It SHALL be refused without `--erosion on`, and refused naming the folder when the layer holds no drainage area; the title and the log SHALL say it is on. The default look's picture SHALL not change (GEN-073).
