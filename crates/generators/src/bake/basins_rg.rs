@@ -810,3 +810,43 @@ pub fn floor_inlet_beds(
     }
     out
 }
+
+/// Lead #179b (DEC crusader-28): each stopped carry of [`floor_inlet_beds`] is recorded as the contract's residual (section 6): an `exception` marker node at the vertex where
+/// the bed rises (the stopped vertex's downstream neighbour), so the validator accepts exactly that rise, and `exception(budget_residual)` on the reach carrying the metres
+/// wanted (the largest where a reach has several). A rise at a reach's last vertex sits at its down node, where no marker may stand: it is left unflagged. Returns the rises
+/// flagged and those left.
+pub fn mark_inlet_residuals(body: u64, nodes: &mut Vec<Node>, reaches: &mut [Reach], residuals: &[(u64, usize, f64)]) -> (usize, usize) {
+    let have: std::collections::BTreeSet<u64> = nodes.iter().map(|n| n.id).collect();
+    let mut added = std::collections::BTreeSet::new();
+    let (mut flagged, mut left) = (0usize, 0usize);
+    for &(rid, k, need) in residuals {
+        let Some(r) = reaches.iter_mut().find(|r| r.id == rid) else {
+            left += 1;
+            continue;
+        };
+        let v = k + 1;
+        if v + 1 >= r.vertices.len() {
+            left += 1;
+            continue;
+        }
+        let anchor = r.vertices[v];
+        let id = marker_id(body, NodeKind::Exception, r.level, anchor, rid);
+        if !have.contains(&id) && added.insert(id) {
+            nodes.push(Node {
+                id,
+                kind: NodeKind::Exception,
+                level: r.level,
+                anchor,
+                parent: None,
+                owner: r.owner,
+                marker: Some(Marker { on_reach: rid, at_vertex: v as u32 }),
+            });
+        }
+        match r.exceptions.iter_mut().find(|e| e.reason == Reason::BudgetResidual) {
+            Some(e) => e.value = e.value.max(need),
+            None => r.exceptions.push(Exception { reason: Reason::BudgetResidual, value: need }),
+        }
+        flagged += 1;
+    }
+    (flagged, left)
+}

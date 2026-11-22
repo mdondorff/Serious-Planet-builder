@@ -2867,8 +2867,13 @@ fn main() -> Result<(), String> {
     // lead #179 (numerics review): the trunks' floored beds per domain (the highest where domains meet), applied after the trunks take their attributes back, so the written
     // graph carries the beds KV cut to
     let mut floored_trunks: HashMap<u64, Vec<i32>> = HashMap::new();
+    // lead #179b: the trunks' budget_residual from the inlet floor, carried past the write-back like their beds
+    let mut trunk_inlet_exc: HashMap<u64, f64> = HashMap::new();
     // lead #179a: the inlet floor's stopped carries (cell, metres still wanted, reach), written with the residual records (stage `inlet`)
     let mut res_inlet: Vec<(usize, f64, u64)> = Vec::new();
+    // lead #179b: the stopped carries, listed (reach, vertex, its cell id, metres wanted, where the vertex lies), and the rises flagged
+    let mut inlet_list: Vec<(u64, usize, u64, f64, &str)> = Vec::new();
+    let mut inlet_flagged = 0usize;
     let mut res_ks: Vec<(usize, f64, f64)> = Vec::new();
     let mut res_kvkc: Vec<planet_generators::bake::river_graph::Residual> = Vec::new();
     // KC's patches, (cells, volume m3), for `kc-patches.csv` (lead #172; with two regions a halo's patch is counted in each domain)
@@ -3581,15 +3586,39 @@ fn main() -> Result<(), String> {
                     fl.residuals.iter().map(|x| x.2).sum::<f64>(),
                     fl.rises
                 );
+                // lead #179b: where each stopped carry's upstream vertex lies (another depression, the window's edge, or open land), listed per window
+                let in_basin: HashSet<usize> = pb.basins.iter().flat_map(|b| pb.cells[&b.id].iter().copied()).collect();
+                let mut classes = [0usize; 3];
                 for &(rid, k, need) in &fl.residuals {
                     if let Some(rch) = gd.reaches.iter().find(|x| x.id == rid) {
-                        if let Some(c) = to_local(rch.vertices[k]).filter(|&c| core[c]) {
+                        let at = to_local(rch.vertices[k]);
+                        let class = match at {
+                            None => 1,
+                            Some(c) if c % w == 0 || c % w == w - 1 || c / w == 0 || c / w == h - 1 => 1,
+                            Some(c) if in_basin.contains(&c) => 0,
+                            Some(_) => 2,
+                        };
+                        classes[class] += 1;
+                        inlet_list.push((rid, k, rch.vertices[k], need, ["another depression", "window edge", "open land"][class]));
+                        if let Some(c) = at.filter(|&c| core[c]) {
                             res_inlet.push((c, need, rid));
                         }
                     }
                 }
+                drop(in_basin);
+                let (flagged, left) =
+                    planet_generators::bake::basins_rg::mark_inlet_residuals(BODY, &mut gd.nodes, &mut gd.reaches, &fl.residuals);
+                inlet_flagged += flagged;
+                println!(
+                    "RG domain {d} inlet residuals (lead #179b): {flagged} rises flagged (exception marker and budget_residual), {left} left unflagged; upstream vertex in another depression {}, at the window edge {}, on open land {}",
+                    classes[0], classes[1], classes[2]
+                );
                 let trunk_ids: HashSet<u64> = l_trunks.iter().map(|r| r.id).collect();
                 for rch in gd.reaches.iter().filter(|x| trunk_ids.contains(&x.id)) {
+                    if let Some(x) = rch.exceptions.iter().find(|x| x.reason == Reason::BudgetResidual) {
+                        let e = trunk_inlet_exc.entry(rch.id).or_insert(0.0f64);
+                        *e = e.max(x.value);
+                    }
                     let e = floored_trunks.entry(rch.id).or_insert_with(|| rch.attrs.bed.clone());
                     for (a, &b) in e.iter_mut().zip(&rch.attrs.bed) {
                         *a = (*a).max(b);
@@ -3817,6 +3846,13 @@ fn main() -> Result<(), String> {
                 *a = (*a).max(b);
             }
         }
+        if let Some(&need) = trunk_inlet_exc.get(&r.id) {
+            use planet_generators::bake::river_graph::Exception;
+            match r.exceptions.iter_mut().find(|e| e.reason == Reason::BudgetResidual) {
+                Some(e) => e.value = e.value.max(need),
+                None => r.exceptions.push(Exception { reason: Reason::BudgetResidual, value: need }),
+            }
+        }
     }
     drop(floored_trunks);
     println!("RG domains: {} nodes, {} reaches, {} basins after the stitch; landmass items with different contents in two domains: {landmass_conflicts}", g.nodes.len(), g.reaches.len(), g.basins.len());
@@ -3991,6 +4027,13 @@ fn main() -> Result<(), String> {
         for &(p, need, avail) in &res_ks {
             writeln!(f, "{p},ks,{need:.4},{avail:.4},-").map_err(|e| e.to_string())?;
         }
+        // lead #179b: the stopped carries per window, and the rises the markers excuse (bar_violations without them is the gate's plus this count)
+        let mut li = std::fs::File::create(stages_dir.join("inlet-residuals.csv")).map_err(|e| e.to_string())?;
+        writeln!(li, "reach,vertex,cell,needed_m,upstream_lies").map_err(|e| e.to_string())?;
+        for &(rid, k, cell, need, class) in &inlet_list {
+            writeln!(li, "{rid:016x},{k},{cell},{need:.4},{class}").map_err(|e| e.to_string())?;
+        }
+        println!("RG inlet residuals (lead #179b): {} stopped carries listed in inlet-residuals.csv; {inlet_flagged} rises excused by an exception marker", inlet_list.len());
         for &(c, need, rid) in &res_inlet {
             writeln!(f, "{c},inlet,{need:.4},0.0000,{rid:016x}").map_err(|e| e.to_string())?;
         }

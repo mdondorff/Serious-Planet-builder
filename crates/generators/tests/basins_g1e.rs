@@ -630,4 +630,34 @@ fn an_inflowing_lines_bed_is_floored_at_the_spill_from_the_kept_rim_inward() {
     assert_eq!(fz.residuals.len(), 1, "{fz:?}");
     assert_eq!((fz.residuals[0].0, fz.residuals[0].1), (9, first - 1));
     assert!((fz.residuals[0].2 - 0.5 * f64::from(low[0].attrs.bed[first])).abs() < 1e-9 && fz.rises == 1, "{fz:?}");
+    // lead #179b: the stopped carry is recorded as the contract's residual; the validator then accepts that rise, and only that one
+    let adj = |_: Level, a: u64, b: u64| (0..8).any(|d| g.neighbour(a as usize, d) == Some(b as usize));
+    let rises = |gr: &Graph| {
+        validate(gr, &Checks { adjacent: &adj, tile_of: None, open: true })
+            .into_iter()
+            .filter(|v| matches!(v, Violation::BedRise { .. }))
+            .count()
+    };
+    let bare = graph_of(&p, &low, &[]);
+    assert_eq!(rises(&bare), 1, "without the record the rise is a violation");
+    let mut nodes = p.nodes.clone();
+    let (flagged, left) = mark_inlet_residuals(BODY, &mut nodes, &mut low, &fz.residuals);
+    assert_eq!((flagged, left), (1, 0));
+    let mk: Vec<&Node> = nodes.iter().filter(|n| n.kind == NodeKind::Exception).collect();
+    assert!(
+        mk.len() == 1 && mk[0].marker == Some(Marker { on_reach: 9, at_vertex: first as u32 }) && mk[0].anchor == cells[first],
+        "{mk:?}"
+    );
+    let ex = low[0].exceptions.iter().find(|e| e.reason == Reason::BudgetResidual).expect("budget_residual on the reach");
+    assert!((ex.value - fz.residuals[0].2).abs() < 1e-12);
+    let mut recorded = graph_of(&p, &low, &[]);
+    recorded.nodes = nodes.clone();
+    recorded.sort();
+    assert_eq!(rises(&recorded), 0, "the marker excuses exactly that rise");
+    let mut second = low.clone();
+    second[0].attrs.bed[first + 1] = second[0].attrs.bed[first] + 2;
+    let mut other = graph_of(&p, &second, &[]);
+    other.nodes = nodes;
+    other.sort();
+    assert_eq!(rises(&other), 1, "a rise at another vertex stays a violation");
 }
