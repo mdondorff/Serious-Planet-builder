@@ -660,4 +660,20 @@ fn an_inflowing_lines_bed_is_floored_at_the_spill_from_the_kept_rim_inward() {
     other.nodes = nodes;
     other.sort();
     assert_eq!(rises(&other), 1, "a rise at another vertex stays a violation");
+    // a plain node already on the rise's cell: no marker there (two nodes on one anchor), the rise is left unflagged
+    let mut crowded = p.nodes.clone();
+    crowded.push(Node {
+        id: node_id(BODY, NodeKind::Confluence, Level::L, cells[first]),
+        kind: NodeKind::Confluence,
+        level: Level::L,
+        anchor: cells[first],
+        parent: None,
+        owner: Domain::Tile { face: 0, ti: 0, tj: 0 },
+        marker: None,
+    });
+    let mut low2 = reaches.clone();
+    low2[0].attrs.bed = vec![0; k];
+    let f2 = floor_inlet_beds(&g, &p.basins, &p.cells, &mut low2, &|id| Some(id as usize));
+    assert_eq!(mark_inlet_residuals(BODY, &mut crowded, &mut low2, &f2.residuals), (0, 1));
+    assert!(!crowded.iter().any(|n| n.kind == NodeKind::Exception));
 }
