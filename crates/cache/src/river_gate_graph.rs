@@ -433,6 +433,31 @@ pub fn kept_interiors(g: &Graph, window: &Window, label: &[u32]) -> (Vec<bool>, 
     (label.iter().map(|l| *l != u32::MAX && held.contains(l)).collect(), basins)
 }
 
+/// Lead #182 (D5's remainder, spike only; count first): the `lake_inlet` nodes inside the window, and those whose anchor lies in no kept-basin depression of `label` (the
+/// depressions holding a kept basin's floor, [`kept_interiors`]), strictly and also not within one cell of one (8-connected): an inlet that enters no kept lake.
+pub fn inlets_without_basin(g: &Graph, window: &Window, label: &[u32]) -> (usize, usize, usize) {
+    let (kept, _) = kept_interiors(g, window, label);
+    let (w, h) = (window.w as i64, window.h as i64);
+    let (mut inside, mut strict, mut loose) = (0usize, 0usize, 0usize);
+    for n in g.nodes.iter().filter(|n| n.kind == NodeKind::LakeInlet && n.level == Level::L) {
+        let Some(c) = window.cell(n.anchor) else { continue };
+        inside += 1;
+        if kept[c] {
+            continue;
+        }
+        strict += 1;
+        let (x, y) = ((c % window.w) as i64, (c / window.w) as i64);
+        let near = (-1..=1).any(|dy| {
+            (-1..=1).any(|dx| {
+                let (qx, qy) = (x + dx, y + dy);
+                qx >= 0 && qy >= 0 && qx < w && qy < h && kept[(qy * w + qx) as usize]
+            })
+        });
+        loose += usize::from(!near);
+    }
+    (inside, strict, loose)
+}
+
 /// Spill mismatch test (a) (BUILD-060, lead 2026-11-21): the kept basins with their floor in the window whose rim (the cells outside the floor's depression in `label` that touch
 /// it, 8-connected) holds an L vertex whose bed lies more than `margin_m` under the basin's recorded spill: a line that leaves the lake below its spill.
 pub fn rim_mismatch(g: &Graph, window: &Window, label: &[u32], margin_m: f64) -> usize {

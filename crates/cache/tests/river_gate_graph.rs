@@ -806,3 +806,45 @@ fn a_rise_into_a_down_node_excused_by_its_residual_is_printed_beside_the_violati
     let lines = G2Report { graph: Some(rep), ..G2Report::default() }.lines();
     assert!(lines.iter().any(|l| l.contains("1 bed rises into a down node excused by budget_residual (0.5 m, reading 41)")), "{lines:?}");
 }
+
+// SPIKE-130 (lead #182, spike only; a count before the validator rule)
+#[test]
+fn a_lake_inlet_outside_every_kept_depression_is_counted() {
+    // a kept basin whose floor depression is the 3 x 3 block at (4..=6, 4..=6) of the window; inlets inside it, beside it and far from it
+    let mut label = vec![u32::MAX; 144];
+    for y in 4..=6 {
+        for x in 4..=6 {
+            label[y * 12 + x] = 0;
+        }
+    }
+    let basin = Basin {
+        id: 9,
+        level: Level::L,
+        parent: None,
+        floor_cell: gid(105, 205),
+        floor_m: 1.0,
+        spill_cell: gid(107, 205),
+        spill_m: 5.0,
+        spill_node: 0,
+        outlet: Outlet::Active,
+        represented: Represented::ProtectedSurface,
+        owner: Domain::Landmass,
+    };
+    let g = |inlets: &[(u64, u64)]| Graph {
+        body: BODY,
+        nodes: inlets.iter().map(|&(x, y)| node(NodeKind::LakeInlet, x, y)).collect(),
+        reaches: Vec::new(),
+        basins: vec![basin.clone()],
+    };
+    use planet_cache::river_gate_graph::inlets_without_basin;
+    assert_eq!(inlets_without_basin(&g(&[(104, 204), (106, 206)]), &W, &label), (2, 0, 0), "inside the kept depression");
+    assert_eq!(inlets_without_basin(&g(&[(107, 205)]), &W, &label), (1, 1, 0), "beside it: outside, but within one cell");
+    assert_eq!(
+        inlets_without_basin(&g(&[(110, 210), (500, 500)]), &W, &label),
+        (1, 1, 1),
+        "far from it (the second lies outside the window)"
+    );
+    let mut none = g(&[(104, 204)]);
+    none.basins[0].represented = Represented::None;
+    assert_eq!(inlets_without_basin(&none, &W, &label), (1, 1, 1), "a basin that is not kept holds no inlet");
+}

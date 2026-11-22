@@ -234,6 +234,8 @@ pub struct GateReport {
     pub spill_mismatch: Option<usize>,
     /// With a graph: test (a), the kept basins whose rim holds an L vertex with its bed more than `SPILL_MISMATCH_M` under the recorded spill ([`rim_mismatch`]).
     pub spill_rim_mismatch: Option<usize>,
+    /// Lead #182 (spike, a count first): lake_inlet nodes inside, those in no kept-basin depression, and those not within one cell of one.
+    pub inlets_without_basin: Option<(usize, usize, usize)>,
     /// The area of an L cell (m2), for the kept lakes' area.
     pub cell_area_m2: f64,
     /// SPIKE-114's reference count: river cells inside in any pit of 5 cm.
@@ -339,6 +341,9 @@ impl GateReport {
             ("kept_lake_km2", self.kept_lake_cells.map_or("-".to_string(), |k| format!("{:.2}", k as f64 * self.cell_area_m2 / 1.0e6))),
             ("g_spill_mismatch", self.spill_mismatch.map_or("-".to_string(), c)),
             ("g_spill_rim", self.spill_rim_mismatch.map_or("-".to_string(), c)),
+            ("g_lake_inlets", self.inlets_without_basin.map_or("-".to_string(), |x| x.0.to_string())),
+            ("g_inlet_no_basin", self.inlets_without_basin.map_or("-".to_string(), |x| x.1.to_string())),
+            ("g_inlet_no_basin_near", self.inlets_without_basin.map_or("-".to_string(), |x| x.2.to_string())),
             ("reference_cells", c(self.reference_river_cells)),
             ("reference_pct", pct(self.reference_river_cells, n)),
             ("valley_over_cells", c(self.valley.count_over)),
@@ -1131,6 +1136,10 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
             })
         }),
         spill_rim_mismatch: input.g2.as_ref().and_then(|x| x.graph.map(|gr| rim_mismatch(gr, &x.window, &label, SPILL_MISMATCH_M))),
+        inlets_without_basin: input
+            .g2
+            .as_ref()
+            .and_then(|x| x.graph.map(|gr| crate::river_gate_graph::inlets_without_basin(gr, &x.window, &label))),
         cell_area_m2: g.dx() * g.dx(),
         reference_river_cells: reference_cells,
         lake_river_cells: lake_cells,
