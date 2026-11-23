@@ -17,12 +17,10 @@ use planet_cache::pack::TileStore;
 use planet_cache::region_bake::{lattice_direction, region_front, RegionSpec, LOCAL_PER_REGIONAL};
 use planet_cache::river_gate::{
     border_inside, commit_differences, key_note, lay_store_ground, measure, raw_grid_arg, raw_grid_heights, Crossing, GateInput,
-    GateParams, LWindow, RawGrid, WindowIdentity, CREST_P95_MAX_M, CREST_P95_MAX_M_MOUNTAIN, GRID_BORDER, GRID_CELL_M, KEPT_RIVER_MAX_PCT,
-    KEPT_RIVER_MAX_PCT_MOUNTAIN,
+    GateParams, LWindow, RawGrid, WindowIdentity, GRID_BORDER, GRID_CELL_M,
 };
 use planet_cache::river_gate_graph::{
     h1_trunks, read_graph, read_kc_patches, read_stages, read_surface, read_validator, G2Input, Window, CORRIDOR_MIN_PCT,
-    CORRIDOR_MIN_PCT_MOUNTAIN,
 };
 use planet_core::{Face, TangentWarp, Vec3};
 use planet_generators::global::{read_elevation_c1, GlobalSample, LatticeSource, ReadError};
@@ -35,8 +33,6 @@ const REGIONAL: usize = 12_288;
 const SECONDS_PER_YEAR: f64 = 31_557_600.0;
 /// R1h: face 1, regional cells i 8,056 to 8,675, j 760 to 1,379, seed 14 (the E1 region stores' window: r3a-e1, r3a-p2, r3a-p2e).
 const R1H: [usize; 6] = [1, 8056, 8675, 760, 1379, 14];
-/// The mountain window (SPIKE-119), whose corridor bar is 95 % (lead #168).
-const M1: [usize; 6] = [4, 6600, 7219, 10200, 10819, 15];
 
 /// The base lattice's nodes over the region (the C1 read's footprint).
 struct Lattice {
@@ -190,11 +186,9 @@ fn main() -> Result<(), String> {
         basin_cells: parsed(&args, "--min-cells", GateParams::default().basin_cells)?,
         lake_depth_m: parsed(&args, "--d", 20.0)?,
         network_km2,
-        // lead #168: the corridor bar is 95 % on the mountain window M1, 97.5 % elsewhere
-        corridor_min_pct: parsed(&args, "--corridor-bar", if win[..] == M1 { CORRIDOR_MIN_PCT_MOUNTAIN } else { CORRIDOR_MIN_PCT })?,
-        crest_max_m: if win[..] == M1 { CREST_P95_MAX_M_MOUNTAIN } else { CREST_P95_MAX_M },
-        // owner 2026-11-20 (option C): the kept-river bar, 10 % on the mountain window
-        kept_river_max_pct: if win[..] == M1 { KEPT_RIVER_MAX_PCT_MOUNTAIN } else { KEPT_RIVER_MAX_PCT },
+        // G3-1 (lead #186, A5): the corridor, crest and kept-river bars are relief-indexed by the row's start relief (no window literal); `--corridor-bar` fixes the corridor bar by hand
+        corridor_min_pct: parsed(&args, "--corridor-bar", CORRIDOR_MIN_PCT)?,
+        corridor_fixed: value(&args, "--corridor-bar").is_some(),
         ..GateParams::default()
     };
     if let Some(g) = value(&args, "--grid") {

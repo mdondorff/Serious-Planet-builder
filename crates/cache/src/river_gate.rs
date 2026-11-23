@@ -7,7 +7,7 @@ use planet_generators::bake::Grid;
 
 use crate::river_gate_graph::{
     agreement, bars_line, budget_field, budget_report, g2_bars, graph_report, kept_interiors, kept_steps, partition_report, rim_mismatch,
-    Bar, BudgetReport, G2Input, G2Report, CORRIDOR_MIN_PCT,
+    Bar, BudgetReport, G2Input, G2Report, CORRIDOR_MIN_PCT, CORRIDOR_MIN_PCT_MOUNTAIN,
 };
 use crate::river_suite::{
     corridor_bar_m, measure_suite, network, ridge_cells, ridge_report, trunk_burn, trunk_corridor, Network, RidgeReport, Snap, SuiteInput,
@@ -106,6 +106,28 @@ pub const VALLEY_RING: (i64, i64) = (2, 4);
 /// The near ring of the valley depth (the canyon a viewer sees): the cells 1 to 2 cells out (102-204 m at L; lead, 2026-11-14, DEC crusader-4).
 pub const NEAR_RING: (i64, i64) = (1, 2);
 
+/// The relief index of the relief-indexed bars (G3-1, lead #186, A5; owner 2026-11-21): the window's start relief at 10 x 10 cells (`relief10_start_m`). A bar holds its lowland value
+/// up to `RELIEF_LOWLAND_M` and its mountain value from `RELIEF_MOUNTAIN_M`, linear in the logarithm of the relief between (both endpoints proposed by the lead for the owner, O10).
+pub const RELIEF_LOWLAND_M: f64 = 60.0;
+pub const RELIEF_MOUNTAIN_M: f64 = 300.0;
+
+/// The weight of the mountain value at start relief `relief_m` (0 at or under `RELIEF_LOWLAND_M`, 1 at or over `RELIEF_MOUNTAIN_M`).
+pub fn relief_weight(relief_m: f64) -> f64 {
+    if relief_m <= RELIEF_LOWLAND_M {
+        0.0
+    } else if relief_m >= RELIEF_MOUNTAIN_M {
+        1.0
+    } else {
+        libm::log(relief_m / RELIEF_LOWLAND_M) / libm::log(RELIEF_MOUNTAIN_M / RELIEF_LOWLAND_M)
+    }
+}
+
+/// A relief-indexed limit: `lowland` and `mountain` weighted by [`relief_weight`].
+pub fn relief_indexed(lowland: f64, mountain: f64, relief_m: f64) -> f64 {
+    let t = relief_weight(relief_m);
+    lowland + (mountain - lowland) * t
+}
+
 /// The gate's limits.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GateParams {
@@ -127,12 +149,16 @@ pub struct GateParams {
     pub h1_cell_m: f64,
     /// The channel thresholds of the network measure (BUILD-059), km2.
     pub network_km2: [f64; 2],
-    /// The corridor bar of the G2 bars (lead #168): the share of snapped k_c 2 trunk reaches passing, percent (95 on a mountain window).
+    /// The corridor bar of the G2 bars (lead #168): the share of snapped k_c 2 trunk reaches passing, percent; its lowland value (95 at mountain relief), unless `corridor_fixed`.
     pub corridor_min_pct: f64,
-    /// The crest rounding bar: the p95 of the ridge lowering, metres (35 on a mountain window).
+    /// The crest rounding bar: the p95 of the ridge lowering, metres; its lowland value (35 at mountain relief).
     pub crest_max_m: f64,
-    /// The kept-river bar (percent; 10 on a mountain window).
+    /// The kept-river bar (percent); its lowland value (10 at mountain relief).
     pub kept_river_max_pct: f64,
+    /// G3-1: the three limits above are relief-indexed ([`relief_indexed`]) by the row's start relief; off, each is the value given.
+    pub relief_indexed: bool,
+    /// The corridor bar given by hand (`--corridor-bar`): `corridor_min_pct` as it is, not relief-indexed.
+    pub corridor_fixed: bool,
 }
 
 impl Default for GateParams {
@@ -150,6 +176,8 @@ impl Default for GateParams {
             corridor_min_pct: CORRIDOR_MIN_PCT,
             crest_max_m: CREST_P95_MAX_M,
             kept_river_max_pct: KEPT_RIVER_MAX_PCT,
+            relief_indexed: true,
+            corridor_fixed: false,
         }
     }
 }
@@ -657,7 +685,7 @@ impl GateReport {
                     "RIVER-GATE kept lakes (BUILD-060, option C): ponds {:.2} % of the river length outside the kept lakes ({pd} cells; bar <= {PONDS_MAX_PCT} %); kept lakes {:.2} % of river length ({k} cells; bar <= {} %), {a} cells inside ({:.2} km2); {sm} kept basins with a spill mismatch over {SPILL_MISMATCH_M} m (depression level, test b), {} with a rim vertex bed under the spill by more (test a)",
                     self.ponds_pct().unwrap_or(0.0),
                     share(k, self.river_cells),
-                    p.kept_river_max_pct,
+                    self.limits().2,
                     a as f64 * self.cell_area_m2 / 1.0e6,
                     self.spill_rim_mismatch.unwrap_or(0)
                 ),
@@ -736,6 +764,15 @@ impl GateReport {
         .collect()
     }
 
+    /// The G3-1 relief-indexed limits of the corridor, crest and kept-river bars at this row's start relief: (corridor percent, crest metres, kept river percent).
+    pub fn limits(&self) -> (f64, f64, f64) {
+        let p = &self.params;
+        let r = self.relief_10_start_m;
+        let ix = |given: f64, mountain: f64| if p.relief_indexed { relief_indexed(given, mountain, r) } else { given };
+        let corridor = if p.corridor_fixed { p.corridor_min_pct } else { ix(p.corridor_min_pct, CORRIDOR_MIN_PCT_MOUNTAIN) };
+        (corridor, ix(p.crest_max_m, CREST_P95_MAX_M_MOUNTAIN), ix(p.kept_river_max_pct, KEPT_RIVER_MAX_PCT_MOUNTAIN))
+    }
+
     /// The G2 bars of a row with a graph (lead #168; none without): the snapped k_c 2 corridor share against `corridor_min_pct`, the uphill river steps, the graph/raster
     /// agreement, the graph's violations and missing spill nodes.
     pub fn bars(&self) -> Vec<Bar> {
@@ -744,8 +781,7 @@ impl GateReport {
         let corridor = self.trunk_corridors_snapped.get(k2).map_or(0.0, |t| share(t.reaches - t.reaches_over, t.reaches));
         // lead #166: the river steps in kept-basin interiors are counted apart from the uphill bar
         let k = g2.kept.clone().unwrap_or_default();
-        let mut out =
-            g2_bars(g2, share(self.suite.uphill_steps - k.uphill, self.suite.steps - k.steps), corridor, self.params.corridor_min_pct);
+        let mut out = g2_bars(g2, share(self.suite.uphill_steps - k.uphill, self.suite.steps - k.steps), corridor, self.limits().0);
         // owner 2026-11-20 (option C): a kept basin's spill mismatch is a graph violation; the ponds and the kept river length each have a bar
         let sm = self.spill_mismatch.unwrap_or(0) + self.spill_rim_mismatch.unwrap_or(0);
         if sm > 0 {
@@ -775,7 +811,7 @@ impl GateReport {
             out.push(Bar {
                 name: "bar_kept_river".into(),
                 value: share(k, self.river_cells),
-                limit: self.params.kept_river_max_pct,
+                limit: self.limits().2,
                 at_most: true,
                 class: Geomorphology,
             });
@@ -786,7 +822,7 @@ impl GateReport {
         out.push(Bar {
             name: "bar_crest".into(),
             value: self.ridge.lowering_p95_m,
-            limit: self.params.crest_max_m,
+            limit: self.limits().1,
             at_most: true,
             class: crate::river_gate_graph::GateClass::Preservation,
         });

@@ -1,6 +1,6 @@
 //! Tier A, TEST-137 and BUILD-060: the river gate's G2 columns on a hand graph in a 12 x 12 window at global L cell (100, 200). Sources S1 (101, 201) and S2 (101, 205) meet at the
 //! confluence C (103, 203), which runs to the sea outlet O (106, 203); a tributary T from S3 (104, 207) ends at a `trib_junction` J on C -> O's vertex (105, 203).
-use planet_cache::river_gate::{measure, GateInput, GateParams};
+use planet_cache::river_gate::{measure, GateInput, GateParams, GateReport};
 use planet_cache::river_gate_graph::{
     agreement, budget_field, budget_report, graph_report, partition_report, BudgetReport, G2Input, G2Report, GateClass, StageField, Window,
 };
@@ -1102,4 +1102,51 @@ fn uphill_and_ponds_are_counted_on_the_1_km2_network_beside_the_75_km2_one() {
     let line = report.fields_line();
     assert!(line.contains(&format!(" fine_ponds_cells={} ", f.ponds_cells)) && line.contains(" fine_uphill_pct="), "{line}");
     assert!(report.bars().is_empty(), "no graph, no bars");
+}
+
+// spec: BUILD-060
+#[test]
+fn the_corridor_crest_and_kept_river_bars_are_relief_indexed_not_keyed_on_a_window() {
+    // G3-1 (lead #186, A5): the lowland value up to 60 m of start relief, the mountain value from 300 m, linear in ln relief between; today's windows R3a 9.8, R3b 10.9, F1 13.4
+    // and R1h 54.0 m are lowland, M1 368.5 m mountain
+    use planet_cache::river_gate::{relief_indexed, relief_weight, RELIEF_LOWLAND_M, RELIEF_MOUNTAIN_M};
+    use planet_cache::river_gate_graph::{CORRIDOR_MIN_PCT, CORRIDOR_MIN_PCT_MOUNTAIN};
+    for r in [9.8, 54.0, RELIEF_LOWLAND_M] {
+        assert_eq!(relief_weight(r), 0.0, "{r} m is lowland");
+        assert_eq!(relief_indexed(CORRIDOR_MIN_PCT, CORRIDOR_MIN_PCT_MOUNTAIN, r), 97.5);
+    }
+    for r in [RELIEF_MOUNTAIN_M, 368.5] {
+        assert_eq!(relief_indexed(CORRIDOR_MIN_PCT, CORRIDOR_MIN_PCT_MOUNTAIN, r), 95.0, "{r} m is mountain");
+    }
+    let mid = libm::sqrt(RELIEF_LOWLAND_M * RELIEF_MOUNTAIN_M);
+    assert!((relief_weight(mid) - 0.5).abs() < 1e-12, "the geometric mean is half way");
+    assert!((relief_indexed(15.0, 35.0, mid) - 25.0).abs() < 1e-9, "the crest bar half way: 25 m");
+    // a row's limits follow its start relief; a corridor bar given by hand stays as given
+    let grid = Grid::new(12, 12, DX);
+    let z: Vec<f64> = (0..144).map(|c| 1.0 + (c % 12) as f64).collect();
+    let all = vec![true; 144];
+    let base = measure(
+        &GateInput {
+            grid: &grid,
+            start: &z,
+            surface: &z,
+            outlet: &grid.outlets(&z, 0.0),
+            inside: &all,
+            region: &all,
+            h1: &[],
+            seed: 7,
+            sea_level_m: 0.0,
+            outside_drains: false,
+            trunks: &[],
+            g2: None,
+        },
+        &GateParams::default(),
+    );
+    let flat = GateReport { relief_10_start_m: 10.0, ..base.clone() };
+    let steep = GateReport { relief_10_start_m: 400.0, ..base };
+    assert_eq!(flat.limits(), (97.5, 15.0, 5.0));
+    assert_eq!(steep.limits(), (95.0, 35.0, 10.0));
+    let fixed =
+        GateReport { params: GateParams { corridor_min_pct: 96.0, corridor_fixed: true, ..GateParams::default() }, ..steep.clone() };
+    assert_eq!(fixed.limits(), (96.0, 35.0, 10.0));
 }
