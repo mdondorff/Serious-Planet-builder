@@ -83,9 +83,10 @@ pub const PONDS_MAX_PCT: f64 = 10.0;
 pub const FINE_NETWORK_KM2: f64 = 1.0;
 /// The bars on the finer network (G3-1): uphill steps at most `UPHILL_MAX_PCT`, as on the 75 km2 network, and ponds at most this (percent; proposed for the owner, O10).
 pub const PONDS_FINE_MAX_PCT: f64 = 10.0;
-/// G3-1 (lead #186): hump cuts against `S0` ([`crate::river_suite::hump_cuts`]) per 10,000 km2 of counted land, at most this; and corner-only links over 5 m that the surface
-/// adds to `S0`'s ([`crate::river_suite::corner_links`]), per 10,000 km2, at most this (both proposed for the owner, O10).
-pub const HUMP_CUTS_MAX_PER_10K_KM2: f64 = 10.0;
+/// G3-1 (lead #186): hump cuts against `S0` ([`crate::river_suite::hump_cuts`]) per 10,000 km2 of counted land, at most this (B's row: 0.04 to 0.24 on the five windows,
+/// rounded up to 1); and corner-only links over 5 m that the surface adds to `S0`'s ([`crate::river_suite::corner_links`]), per 10,000 km2, at most this (both proposed for
+/// the owner, O10).
+pub const HUMP_CUTS_MAX_PER_10K_KM2: f64 = 1.0;
 pub const CORNER_LINKS_MAX_PER_10K_KM2: f64 = 10.0;
 /// The kept-river bar: river length in kept lakes, over all river length, at most this (percent) on a lowland window and `KEPT_RIVER_MAX_PCT_MOUNTAIN` on a mountain one.
 pub const KEPT_RIVER_MAX_PCT: f64 = 5.0;
