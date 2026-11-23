@@ -1,0 +1,42 @@
+=== r1h M1
+base    X6 +0.812  X8 +0.006  Xdiag +0.001  (mean kink energy 3.42 m2; 814 m profile 12.5 12.6 12.5 12.5 12.5 12.5 12.4 12.5)
+s0      X6 +0.237  X8 +0.736  Xdiag +0.003  (mean kink energy 10.04 m2; 814 m profile 5.6 8.2 14.5 21.7 21.7 14.5 8.2 5.6)
+kh      X6 +0.127  X8 +0.387  Xdiag +0.067  (mean kink energy 18.02 m2; 814 m profile 9.6 10.4 12.6 17.3 17.4 12.6 10.4 9.6)
+ks0     X6 +0.125  X8 +0.392  Xdiag +0.068  (mean kink energy 18.11 m2; 814 m profile 9.6 10.4 12.6 17.3 17.5 12.6 10.4 9.6)
+ks1c    X6 +0.117  X8 +0.341  Xdiag +0.071  (mean kink energy 19.97 m2; 814 m profile 10.1 10.7 12.5 16.7 16.8 12.5 10.7 10.0)
+band6c  X6 +0.097  X8 +0.273  Xdiag +0.066  (mean kink energy 22.65 m2; 814 m profile 10.7 11.0 12.3 15.8 16.0 12.4 11.1 10.7)
+kv      X6 +0.088  X8 +0.250  Xdiag +0.062  (mean kink energy 24.40 m2; 814 m profile 10.8 11.1 12.5 15.5 15.7 12.5 11.2 10.7)
+final   X6 +0.085  X8 +0.234  Xdiag +0.062  (mean kink energy 25.16 m2; 814 m profile 10.9 11.2 12.4 15.3 15.5 12.5 11.3 10.9)
+=== r1h M2/M3
+reaches 255967; vertex steps in the box 889832, diagonal 47.7 %
+KG-trunk image length in the box 13071 km, in straight runs over 2 km 34.8 %
+sinuosity of reaches over 2 km (13690): p50 1.117, length-weighted mean 1.144
+s0      saw-tooth (m): all p50  0.69 p90   4.98 mean  1.87 | diagonal-step vertices p50  0.98 p90   5.84 mean  2.23 | axis-step vertices p50  0.49 p90   4.07 mean  1.54
+kh      saw-tooth (m): all p50  0.71 p90   5.02 mean  1.91 | diagonal-step vertices p50  0.95 p90   5.69 mean  2.20 | axis-step vertices p50  0.53 p90   4.31 mean  1.64
+ks0     saw-tooth (m): all p50  0.71 p90   5.03 mean  1.91 | diagonal-step vertices p50  0.95 p90   5.70 mean  2.20 | axis-step vertices p50  0.53 p90   4.33 mean  1.64
+ks1c    saw-tooth (m): all p50  0.74 p90   5.10 mean  1.94 | diagonal-step vertices p50  0.96 p90   5.76 mean  2.22 | axis-step vertices p50  0.56 p90   4.43 mean  1.68
+band6c  saw-tooth (m): all p50  0.74 p90   5.15 mean  1.95 | diagonal-step vertices p50  0.96 p90   5.79 mean  2.23 | axis-step vertices p50  0.56 p90   4.50 mean  1.70
+kv      saw-tooth (m): all p50  0.76 p90   5.24 mean  2.00 | diagonal-step vertices p50  0.98 p90   5.85 mean  2.27 | axis-step vertices p50  0.59 p90   4.63 mean  1.75
+final   saw-tooth (m): all p50  0.76 p90   5.23 mean  2.00 | diagonal-step vertices p50  0.98 p90   5.85 mean  2.27 | axis-step vertices p50  0.59 p90   4.62 mean  1.75
+coincidence: high saw-tooth vertices in straight runs 5.8 % against all vertices 5.1 % (ratio 1.14); high saw-tooth on diagonal steps 55.9 % against all 47.9 %
+=== f1 M1
+base    X6 +0.890  X8 +0.005  Xdiag +0.000  (mean kink energy 0.04 m2; 814 m profile 12.5 12.4 12.5 12.5 12.5 12.5 12.5 12.5)
+s0      X6 +0.084  X8 +0.975  Xdiag +0.003  (mean kink energy 0.51 m2; 814 m profile 2.8 6.8 15.7 24.7 24.6 15.7 6.8 2.9)
+kh      X6 +0.033  X8 +0.261  Xdiag +0.089  (mean kink energy 1.34 m2; 814 m profile 10.5 11.1 12.6 15.7 15.8 12.6 11.2 10.5)
+ks0     X6 +0.033  X8 +0.264  Xdiag +0.089  (mean kink energy 1.34 m2; 814 m profile 10.5 11.1 12.6 15.8 15.8 12.6 11.2 10.5)
+ks1c    X6 +0.032  X8 +0.229  Xdiag +0.092  (mean kink energy 1.41 m2; 814 m profile 10.8 11.3 12.5 15.3 15.4 12.5 11.4 10.8)
+band6c  X6 +0.023  X8 +0.109  Xdiag +0.072  (mean kink energy 1.56 m2; 814 m profile 12.1 11.8 12.0 13.8 13.9 12.2 12.0 12.2)
+kv      X6 +0.020  X8 +0.071  Xdiag +0.079  (mean kink energy 2.18 m2; 814 m profile 12.4 12.0 11.9 13.4 13.4 12.1 12.3 12.5)
+final   X6 +0.020  X8 +0.071  Xdiag +0.079  (mean kink energy 2.10 m2; 814 m profile 12.5 12.0 11.9 13.4 13.4 12.1 12.3 12.5)
+=== f1 M2/M3
+reaches 333250; vertex steps in the box 1116968, diagonal 49.1 %
+KG-trunk image length in the box 19754 km, in straight runs over 2 km 52.2 %
+sinuosity of reaches over 2 km (13853): p50 1.118, length-weighted mean 1.160
+s0      saw-tooth (m): all p50  0.29 p90   1.48 mean  0.60 | diagonal-step vertices p50  0.42 p90   1.71 mean  0.73 | axis-step vertices p50  0.17 p90   1.21 mean  0.47
+kh      saw-tooth (m): all p50  0.30 p90   1.53 mean  0.62 | diagonal-step vertices p50  0.39 p90   1.69 mean  0.72 | axis-step vertices p50  0.20 p90   1.34 mean  0.53
+ks0     saw-tooth (m): all p50  0.30 p90   1.54 mean  0.62 | diagonal-step vertices p50  0.39 p90   1.69 mean  0.72 | axis-step vertices p50  0.20 p90   1.35 mean  0.53
+ks1c    saw-tooth (m): all p50  0.31 p90   1.55 mean  0.63 | diagonal-step vertices p50  0.40 p90   1.70 mean  0.73 | axis-step vertices p50  0.21 p90   1.36 mean  0.54
+band6c  saw-tooth (m): all p50  0.30 p90   1.54 mean  0.63 | diagonal-step vertices p50  0.39 p90   1.69 mean  0.72 | axis-step vertices p50  0.20 p90   1.35 mean  0.53
+kv      saw-tooth (m): all p50  0.32 p90   1.61 mean  0.66 | diagonal-step vertices p50  0.41 p90   1.76 mean  0.75 | axis-step vertices p50  0.24 p90   1.43 mean  0.57
+final   saw-tooth (m): all p50  0.32 p90   1.60 mean  0.66 | diagonal-step vertices p50  0.41 p90   1.75 mean  0.75 | axis-step vertices p50  0.24 p90   1.41 mean  0.56
+coincidence: high saw-tooth vertices in straight runs 12.6 % against all vertices 9.0 % (ratio 1.41); high saw-tooth on diagonal steps 57.3 % against all 49.8 %

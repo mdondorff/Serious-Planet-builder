@@ -1,0 +1,19 @@
+=== r1h
+zone cells inside the box: 18.7 % of land
+s0      in the zone: X6 +0.083 X8 +0.964 Xdiag +0.003 (kink 21.59 m2) | outside: X6 +0.339 X8 +0.584 Xdiag +0.004 (kink 7.37 m2)
+kh      in the zone: X6 +0.020 X8 +0.256 Xdiag +0.105 (kink 60.79 m2) | outside: X6 +0.307 X8 +0.620 Xdiag +0.012 (kink 8.17 m2)
+ks0     in the zone: X6 +0.018 X8 +0.264 Xdiag +0.105 (kink 61.25 m2) | outside: X6 +0.307 X8 +0.620 Xdiag +0.012 (kink 8.17 m2)
+ks1c    in the zone: X6 +0.019 X8 +0.231 Xdiag +0.106 (kink 64.21 m2) | outside: X6 +0.262 X8 +0.511 Xdiag +0.022 (kink 9.78 m2)
+band6c  in the zone: X6 +0.012 X8 +0.203 Xdiag +0.104 (kink 72.23 m2) | outside: X6 +0.224 X8 +0.381 Xdiag +0.013 (kink 11.23 m2)
+kv      in the zone: X6 +0.011 X8 +0.178 Xdiag +0.096 (kink 80.48 m2) | outside: X6 +0.219 X8 +0.368 Xdiag +0.013 (kink 11.48 m2)
+final   in the zone: X6 +0.010 X8 +0.161 Xdiag +0.096 (kink 82.93 m2) | outside: X6 +0.213 X8 +0.355 Xdiag +0.013 (kink 11.85 m2)
+=== f1
+zone cells inside the box: 21.3 % of land
+s0      in the zone: X6 +0.046 X8 +1.009 Xdiag +0.005 (kink 1.53 m2) | outside: X6 +0.148 X8 +0.916 Xdiag +0.003 (kink 0.24 m2)
+kh      in the zone: X6 +0.015 X8 +0.154 Xdiag +0.117 (kink 5.21 m2) | outside: X6 +0.122 X8 +0.793 Xdiag +0.035 (kink 0.29 m2)
+Traceback (most recent call last):
+  File "C:\DEV\Serious-Planet-Builder\.claude\worktrees\sonnet-spikes-36fc88\spikes\look-attribution\results\raw\m1_zone.py", line 22, in <module>
+    b = excess(z[sub], (land & ~zone)[sub], x0 + m - 2, y0 + m - 2)
+  File "C:\DEV\Serious-Planet-Builder\.claude\worktrees\sonnet-spikes-36fc88\spikes\look-attribution\results\raw\m1_facet.py", line 28, in excess
+    lx, sx = ls(dxx[ys, xs] ** 2, gx, P)
+numpy._core._exceptions._ArrayMemoryError: Unable to allocate 148. MiB for an array with shape (19350405,) and data type float64

@@ -1,0 +1,28 @@
+# SPIKE-143: the R1h river crop (L cells 3160..3280, 3640..3760 of the window; centre 36.4920 S 164.5125 W), low sun from the east and the west.
+[place]
+lat = -36.49203
+lon = -164.51248
+
+[[pose]]
+name = "r1h-river-east"
+altitude_m = 3500.0
+back_m = 3500.0
+heading_deg = 0.0
+pitch_deg = 45.0
+sun_local_hours = 6.85
+
+[[pose]]
+name = "r1h-river-west"
+altitude_m = 3500.0
+back_m = 3500.0
+heading_deg = 0.0
+pitch_deg = 45.0
+sun_local_hours = 17.15
+
+[[pose]]
+name = "r1h-river-low"
+altitude_m = 600.0
+back_m = 2500.0
+heading_deg = 45.0
+pitch_deg = 12.0
+sun_local_hours = 17.15
