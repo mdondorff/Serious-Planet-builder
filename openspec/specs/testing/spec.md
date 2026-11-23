@@ -2049,3 +2049,43 @@ Source: ADR 0021 point 7, BUILD-063, owner (2026-11-20)
 #### Scenario: Walked chain equivalence and catalog contracts
 - **WHEN** `field_chain_erosion` builds a stack or `pipeline_catalog` exports its schema, probe hooks, and cited spec IDs
 - **THEN** `walk_height_field` equals `resolve_runtime_chain`, every `probe::Stage` and cited `spec_id` resolves cleanly, `target/review/stages/pipeline.json` is written deterministically, and no committed JSON copy exists
+
+### Requirement: TEST-121 The basin breach tests
+The basin breach SHALL be tested at tier A: (a) a closed noise basin is drained by the cheapest path (the cells and the depth cut are stated), nothing is raised and a second pass changes nothing;
+
+Verify: A
+Status: active
+Source: GEN-174, architect 2026-11-12
+
+Detail: (b) a basin deeper than the breach limit stays a lake, untouched, and drains within a limit that covers it; (c) the path stays inside the halo with the basin (the same basin drains at halo 9 and stays a lake at halo 8) and a basin on the border ring stays a lake; (d) a closed bowl with no lower cell is unchanged; (e) the whole-region carve, the round solver on 1, 3 and 8 threads and the memoised solve on two tile sizes are the same bits with the breach on, and the breach moves the result; (f) more passes leave no more closed basins than fewer, raise no cell and repeat to the same bits; the fixed point is the result of N passes after which pass N+1 drains nothing, and a cap below N is reported; (g) the layer key changes with the parameters; (h) a sill breached by three donors in one round is lowered by at most the cap in the whole-region carve and the round solver (and the test fails without the cap).
+
+#### Scenario: Cases
+- **WHEN** the tests of `bake_breach` and the layer store run
+- **THEN** each of (a) to (g) has an assertion that cites GEN-174
+
+### Requirement: TEST-122 The world precision tests
+The per-world epsilon of the f32 rounds SHALL be tested at tier A: (a) Earth's span gives `epsilon_w = epsilon_profile` and f32; (b) a 60 km span stays f32 and a chain of `epsilon_w` steps at the top of R's exponent bin, from a grid value and from a rounding tie, above and below the sea, is strictly descending after the narrowing;
+
+Verify: A
+Status: active
+Source: GEN-175, architect 2026-11-12
+
+Detail: (c) the precision is a function of the bounds only; (d) above `epsilon_max`, and for bounds that do not fit an f32, the rounds are f64; (e) one round in f32 differs from the f64 round by at most 2 x the f32 spacing at R; (f) `s(R)` at 0, -0, 1, a power of two, just below it and a value that does not fit an f32; (g) the plan sets every epsilon that acts on an f32 surface (the carve, H1's fill, the sediment pass, and K7 through `apply_k7`), Earth's plan keeps today's values and the f64 choice keeps the profile epsilon; (h) a height outside the bounds, or a NaN, is refused naming the cell and `R`, an inactive cell is not checked, `build_resident` refuses the landmass before the rounds, and a narrowing with an epsilon under the spacing of its summit is refused; (i) H1's fill on a 60 km world descends strictly in f64, and a fill narrowed to f32 collapses at `epsilon_w`; (j) the surface gate refuses a filled surface and narrows a round surface, and the plan has no constructor without the bounds of its world.
+
+#### Scenario: Cases
+- **WHEN** the tests of `bake_world_precision` run
+- **THEN** each of (a) to (j) has an assertion that cites GEN-175
+
+### Requirement: TEST-127 The band rule tests
+The band rules SHALL be tested at tier A: (a) the capped noise with no cap, and with a cap that never binds, is the plain sum bit for bit; (b) every octave is held to its cap for any signals, and a base with no slope has no band;
+
+Verify: A
+Status: active
+Source: GEN-179, architect 2026-11-12
+
+Detail: (c) a larger `c` never lowers the band, and the weight of the 8 km octave scales its term; (d) with the rules off, and with a cap that never binds, `elevation_m` is the same bits on a spread of directions; (e) a cap and the weight lower the relief, a smaller `c` lowers it more, and the slope is finite and not negative; (f) the identity word is unchanged with both rules off and moves with each rule and value; (g) a negative `c` and a weight over 1 are refused.
+
+#### Scenario: Cases
+- **WHEN** the tests of `band_rules` run
+- **THEN** each of (a) to (g) has an assertion that cites GEN-179
+
