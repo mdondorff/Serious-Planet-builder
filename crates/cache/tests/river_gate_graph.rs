@@ -148,6 +148,11 @@ fn agreement_counts_kept_interiors_and_cells_above_a_graph_head_apart() {
     let big = agreement(&g, &W, &area.iter().map(|a| a * 2.0).collect::<Vec<_>>(), &all, &all, &kept, &recv, 3.0e6);
     assert_eq!((big.graph, big.graph_kept), (4, 0), "{big:?}");
     assert_eq!((big.routed, big.routed_agree), (a.routed, a.routed_agree), "{big:?}");
+    // G3-1 (diagnostic): with S1 head cell (101, 201) under the sea, it counts in the share and apart as a sea cell without a routed cell beside it
+    let mut land = all.clone();
+    land[cell(101, 201)] = false;
+    let sea = agreement(&g, &W, &area, &land, &all, &kept, &recv, 1.0e6);
+    assert_eq!((sea.graph_sea, sea.graph_sea_missed), (1, 1), "{sea:?}");
 }
 
 // spec: TEST-137, BUILD-060

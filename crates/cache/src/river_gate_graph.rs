@@ -151,6 +151,10 @@ pub struct Agreement {
     pub routed_kept: usize,
     pub routed_above_head: usize,
     pub graph_kept: usize,
+    /// G3-1 (diagnostic): the graph cells of the share (`graph`) that lie on no land of the measured surface (at or under the sea: a bed cut under the sea, a reach's mouth), and
+    /// those of them without a routed cell within 1 cell; the routed side counts land only.
+    pub graph_sea: usize,
+    pub graph_sea_missed: usize,
 }
 
 /// The river steps inside kept-basin interiors (lead #166): a kept basin (`protected_surface`) whose floor cell lies in a depression of the measured surface holds that depression. Its river steps (BUILD-057's, either end inside the interior) and their uphill ones are counted apart from the uphill bar.
@@ -624,6 +628,10 @@ pub fn agreement(
             } else {
                 a.graph += 1;
                 a.graph_agree += usize::from(rd[c]);
+                if !land[c] {
+                    a.graph_sea += 1;
+                    a.graph_sea_missed += usize::from(!rd[c]);
+                }
             }
         }
     }
@@ -816,6 +824,8 @@ impl G2Report {
             push(&format!("{p}_routed_kept"), a.routed_kept.to_string(), Correctness);
             push(&format!("{p}_routed_above_head"), a.routed_above_head.to_string(), Correctness);
             push(&format!("{p}_graph_kept"), a.graph_kept.to_string(), Correctness);
+            push(&format!("{p}_graph_sea"), a.graph_sea.to_string(), Correctness);
+            push(&format!("{p}_graph_sea_missed"), a.graph_sea_missed.to_string(), Correctness);
         }
         if let Some(k) = &self.kept {
             push("kept_basins", k.basins.to_string(), Correctness);
