@@ -1846,6 +1846,9 @@ static TRUNK_BED_SHARED: std::sync::atomic::AtomicBool = std::sync::atomic::Atom
 /// lead #174 (SPIKE-142): `--trunk-saddle-ortho on` routes KG-trunk's L image of a diagonal H1 step across a saddle block through the lower orthogonal H1 cell; `off`
 /// (default) along the H1 cell centres.
 static TRUNK_SADDLE_ORTHO: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// lead #180 (G3 R8, SPIKE-142's 22 %): `--band6-keep-rims on` keeps every depression of band6's input that basins-2's rule would keep (at least 0.25 km2 and 2 m deep,
+/// reading 22's thresholds): band6 neither breaches nor fills it, so it spills at its rim and stays for basins-2; `off` (default) band6 protects no L basin.
+static BAND6_KEEP_RIMS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// lead #171: `--bed-sea-floor on` codes KG-trunk's and KG-trib's land beds at the sea + 0.5 m or above (reading 17), over coastal flats too; `off` (default) the running minimum alone.
 static BED_SEA_FLOOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -2138,6 +2141,7 @@ fn main() -> Result<(), String> {
         ("--sea17", &SEA17, "off"),
         ("--bed-sea-floor", &BED_SEA_FLOOR, "off"),
         ("--trunk-saddle-ortho", &TRUNK_SADDLE_ORTHO, "off"),
+        ("--band6-keep-rims", &BAND6_KEEP_RIMS, "off"),
         ("--band6-floors", &BAND6_FLOORS, "on"),
         ("--band6-outlet-floor", &BAND6_OUTLET_FLOOR, "on"),
         ("--inlet-floor", &INLET_FLOOR, "on"),
@@ -3488,12 +3492,37 @@ fn main() -> Result<(), String> {
             };
             planet_generators::bake::drain::OUTLET_FLOORS
                 .store(BAND6_OUTLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed), std::sync::atomic::Ordering::Relaxed);
+            // lead #180: the depressions of band6's input that basins-2 would keep (>= 0.25 km2 and >= 2 m deep) are band6's intended cells
+            let keep6: Vec<bool> = if BAND6_KEEP_RIMS.load(std::sync::atomic::Ordering::Relaxed) {
+                let level = planet_generators::bake::drain::fill_level(&ks_d, w, h, &outl);
+                let (_, comps) = planet_generators::bake::drain::depressions(&ks_d, &level, w, h);
+                let mut k = vec![false; n_l];
+                let (mut kept, mut cells) = (0usize, 0usize);
+                for (cs, _) in &comps {
+                    let area = cs.len() as f64 * dx_l * dx_l;
+                    let depth = cs.iter().map(|&c| level[c as usize] - ks_d[c as usize]).fold(0.0f64, f64::max);
+                    if area >= 0.25e6 && depth >= 2.0 {
+                        kept += 1;
+                        cells += cs.len();
+                        for &c in cs {
+                            k[c as usize] = true;
+                        }
+                    }
+                }
+                println!(
+                    "RG domain {d} band6 keep rims (lead #180): {kept} of {} depressions kept (>= 0.25 km2, >= 2 m; {cells} cells)",
+                    comps.len()
+                );
+                k
+            } else {
+                Vec::new()
+            };
             let (d6, st, deep6) = planet_generators::bake::drain::drain_selective_floors(
                 &ks_d,
                 w,
                 h,
                 &outl,
-                &|_| false,
+                &|p| !keep6.is_empty() && keep6[p],
                 &|_| dx_l * dx_l,
                 8,
                 4096,
@@ -4555,6 +4584,7 @@ fn main() -> Result<(), String> {
             ("sea17", if SEA17.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("bed-sea-floor", if BED_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("trunk-saddle-ortho", if TRUNK_SADDLE_ORTHO.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("band6-keep-rims", if BAND6_KEEP_RIMS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kh-saddle-split", kh_saddle.to_string()),
             ("kh-zone", kh_zone.to_string()),
             ("kv-connect", if KV_CONNECT.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
