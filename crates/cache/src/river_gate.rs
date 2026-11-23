@@ -117,7 +117,8 @@ pub const RELIEF_MOUNTAIN_M: f64 = 300.0;
 
 /// The weight of the mountain value at start relief `relief_m` (0 at or under `RELIEF_LOWLAND_M`, 1 at or over `RELIEF_MOUNTAIN_M`).
 pub fn relief_weight(relief_m: f64) -> f64 {
-    if relief_m <= RELIEF_LOWLAND_M {
+    // a window without land samples (NaN relief) takes the lowland values
+    if relief_m.is_nan() || relief_m <= RELIEF_LOWLAND_M {
         0.0
     } else if relief_m >= RELIEF_MOUNTAIN_M {
         1.0
@@ -1228,7 +1229,7 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
     let (label, pits) = pits(g, z, &filled, BASIN_WET_M);
     // BUILD-060 (owner's option C, 2026-11-20): with a graph, the kept-lake interiors (the depressions of this flood that hold a kept basin's floor) are lakes, not closed
     // basins; the closed-basin bar counts river cells outside them
-    let kept_lakes: Option<Vec<bool>> = input.g2.as_ref().and_then(|x| x.graph.map(|gr| kept_interiors(gr, &x.window, z).0));
+    let kept_lakes: Option<Vec<bool>> = input.g2.as_ref().and_then(|x| x.graph.map(|gr| kept_interiors(gr, &x.window, z, &label).0));
     let in_kept = |c: usize| kept_lakes.as_ref().is_some_and(|k| k[c]);
     let is_basin = |&(d, k): &(f64, usize)| d >= params.basin_depth_m && k >= params.basin_cells;
     let basin = |c: usize| label[c] != u32::MAX && is_basin(&pits[label[c] as usize]);
@@ -1348,11 +1349,13 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         None => (ridge_s0.clone(), false),
     };
     // G3-1 (lead #186): hump cuts and corner-only links, S0 the one reference of B and RG; RG's count against S_KH beside
-    let hump_cuts = crate::river_suite::hump_cuts(g, input.start, input.surface, input.inside);
-    let hump_cuts_s_kh = s_kh.as_ref().map(|s_kh| crate::river_suite::hump_cuts(g, s_kh, input.surface, input.inside));
+    // counted over the land inside (the per-10,000 km2 rates divide by the land area)
+    let land_inside: Vec<bool> = (0..n).map(|c| input.inside[c] && input.surface[c] > input.sea_level_m).collect();
+    let hump_cuts = crate::river_suite::hump_cuts(g, input.start, input.surface, &land_inside);
+    let hump_cuts_s_kh = s_kh.as_ref().map(|s_kh| crate::river_suite::hump_cuts(g, s_kh, input.surface, &land_inside));
     drop(s_kh);
-    let corner_links = crate::river_suite::corner_links(g, input.surface, input.inside);
-    let corner_links_s0 = crate::river_suite::corner_links(g, input.start, input.inside);
+    let corner_links = crate::river_suite::corner_links(g, input.surface, &land_inside);
+    let corner_links_s0 = crate::river_suite::corner_links(g, input.start, &land_inside);
     GateReport {
         ridge: ridge_kh,
         ridge_s0,
@@ -1382,7 +1385,7 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
             })
         }),
         spill_rim_mismatch: input.g2.as_ref().and_then(|x| x.graph.map(|gr| rim_mismatch(gr, &x.window, &label, SPILL_MISMATCH_M))),
-        inlets: input.g2.as_ref().and_then(|x| x.graph.map(|gr| crate::river_gate_graph::inlets_without_basin(gr, &x.window, z))),
+        inlets: input.g2.as_ref().and_then(|x| x.graph.map(|gr| crate::river_gate_graph::inlets_without_basin(gr, &x.window, z, &label))),
         cell_area_m2: g.dx() * g.dx(),
         reference_river_cells: reference_cells,
         lake_river_cells: lake_cells,
@@ -1425,7 +1428,7 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
             let budget =
                 x.stages.map(|_| budget_field(input.start, g.w(), g.h(), (params.h1_cell_m / g.dx()).round() as usize, g.dx(), R_RELIEF_M));
             // lead #166: kept-basin interiors on the measured surface, counted apart from the uphill and agreement bars
-            let kept = x.graph.map(|gr| kept_interiors(gr, &x.window, z));
+            let kept = x.graph.map(|gr| kept_interiors(gr, &x.window, z, &label));
             G2Report {
                 graph: x.graph.map(|gr| graph_report(gr, &x.window, input.inside, &land, g.dx())),
                 agreement: x

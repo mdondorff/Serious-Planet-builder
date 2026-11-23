@@ -428,9 +428,10 @@ fn dilate(m: &[bool], w: usize, h: usize) -> Vec<bool> {
 }
 
 /// The kept-basin interiors on the window (lead #166, #186; G3-1, #182c; [`KeptReport`]): a kept basin's (`protected_surface`) lake is the cells of the measured surface `z`
-/// under its recorded spill (`spill_m`) joined (8-connected) to its floor cell; a floor at or above its spill holds no lake. Returns per cell whether it lies in one, and the number
-/// of kept basins whose floor lies in the window under its spill.
-pub fn kept_interiors(g: &Graph, window: &Window, z: &[f64]) -> (Vec<bool>, usize) {
+/// under its recorded spill (`spill_m`) joined (8-connected) to its floor cell inside the depression that holds the floor (`label`, the gate's basin flood; `u32::MAX` dry):
+/// a rim cut under the spill, or a drained or outlet cell, does not let the lake run on; a floor at or above its spill, or in no depression, holds no lake. Returns per cell
+/// whether it lies in one, and the number of kept basins whose floor lies in the window under its spill and in a depression.
+pub fn kept_interiors(g: &Graph, window: &Window, z: &[f64], label: &[u32]) -> (Vec<bool>, usize) {
     let (w, h) = (window.w, window.h);
     let mut kept = vec![false; z.len()];
     let mut basins = 0usize;
@@ -438,7 +439,8 @@ pub fn kept_interiors(g: &Graph, window: &Window, z: &[f64]) -> (Vec<bool>, usiz
     // the basin that last entered each cell: a cell another basin's lake already holds is entered again, so each basin's lake is its own region
     let mut stamp = vec![usize::MAX; z.len()];
     for (k, b) in g.basins.iter().enumerate().filter(|(_, b)| b.represented == Represented::ProtectedSurface) {
-        let Some(f) = window.cell(b.floor_cell).filter(|&f| z[f] < b.spill_m) else { continue };
+        let Some(f) = window.cell(b.floor_cell).filter(|&f| z[f] < b.spill_m && label[f] != u32::MAX) else { continue };
+        let depression = label[f];
         basins += 1;
         stamp[f] = k;
         stack.push(f);
@@ -451,7 +453,7 @@ pub fn kept_interiors(g: &Graph, window: &Window, z: &[f64]) -> (Vec<bool>, usiz
                     continue;
                 }
                 let q = ny as usize * w + nx as usize;
-                if z[q] < b.spill_m && stamp[q] != k {
+                if z[q] < b.spill_m && label[q] == depression && stamp[q] != k {
                     stamp[q] = k;
                     stack.push(q);
                 }
@@ -475,8 +477,8 @@ pub struct InletReport {
     pub line_end_no_basin_far: usize,
 }
 
-pub fn inlets_without_basin(g: &Graph, window: &Window, z: &[f64]) -> InletReport {
-    let (kept, _) = kept_interiors(g, window, z);
+pub fn inlets_without_basin(g: &Graph, window: &Window, z: &[f64], label: &[u32]) -> InletReport {
+    let (kept, _) = kept_interiors(g, window, z, label);
     let (w, h) = (window.w as i64, window.h as i64);
     let downs: BTreeSet<u64> = g.reaches.iter().map(|r| r.down).collect();
     let spills: BTreeSet<u64> = g.basins.iter().map(|b| b.spill_node).collect();

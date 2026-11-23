@@ -216,19 +216,40 @@ fn a_kept_basins_interior_is_the_surface_under_its_recorded_spill_joined_to_its_
         basin((102, 210), 30.0, Represented::None),
         basin((102, 209), 10.0, Represented::ProtectedSurface),
     ];
-    // G3-1 (#182c): the kept bowl's lake is the cells under its 6 m spill joined to its floor; the drained basin holds none, and the third's floor (20 m) stands above its 10 m spill
-    let (kept, basins) = kept_interiors(&g, &W, &z);
+    // the gate's depressions: the bowl (label 0); everything else dry
+    let mut label = vec![u32::MAX; 144];
+    for y in 207..=209 {
+        for x in 107..=109 {
+            label[cell(x, y)] = 0;
+        }
+    }
+    // G3-1 (#182c): the kept bowl's lake is the cells under its 6 m spill joined to its floor in its depression; the drained basin holds none, and the third's floor (20 m)
+    // stands above its 10 m spill
+    let (kept, basins) = kept_interiors(&g, &W, &z, &label);
     assert_eq!((basins, kept.iter().filter(|&&k| k).count()), (1, 9));
     assert!(kept[cell(107, 207)] && !kept[cell(106, 208)]);
     // a spill recorded at 3 m holds only the floor: the 5 m ring is above it, though the depression of the measured surface holds it
     let mut low = g.clone();
     low.basins[0].spill_m = 3.0;
-    let (k3, b3) = kept_interiors(&low, &W, &z);
+    let (k3, b3) = kept_interiors(&low, &W, &z, &label);
     assert_eq!((b3, k3.iter().filter(|&&k| k).count()), (1, 1));
     // a cell under the spill but not joined to the floor is no part of the lake
     let mut apart = z.clone();
     apart[cell(103, 203)] = 2.0;
-    assert!(!kept_interiors(&g, &W, &apart).0[cell(103, 203)]);
+    assert!(!kept_interiors(&g, &W, &apart, &label).0[cell(103, 203)]);
+    // numerics review: a rim cut under the spill (110, 208) at 3 m, with a valley under 6 m beyond it: the lake stays the bowl, its depression
+    let mut cut = z.clone();
+    cut[cell(110, 208)] = 3.0;
+    for x in 111..=111 {
+        for y in 200..=211 {
+            cut[cell(x, y)] = 2.0;
+        }
+    }
+    let (kc, _) = kept_interiors(&g, &W, &cut, &label);
+    assert_eq!(kc.iter().filter(|&&k| k).count(), 9, "the cut rim does not let the lake run on");
+    assert!(!kc[cell(111, 205)] && !kc[cell(110, 208)]);
+    // a floor in no depression (a drained basin) holds no lake
+    assert_eq!(kept_interiors(&g, &W, &z, &vec![u32::MAX; 144]).1, 0);
     // river steps: into the floor, out over the rim (rising 4 m), and one outside on the plain rising 1 m
     let mut river = vec![false; 144];
     let mut recv = vec![u32::MAX; 144];
@@ -242,6 +263,7 @@ fn a_kept_basins_interior_is_the_surface_under_its_recorded_spill_joined_to_its_
     z[cell(102, 204)] = 21.0;
     let all = vec![true; 144];
     let k = kept_steps(&kept, basins, &recv, &river, &all, &z);
+    let _ = &label;
     // four steps touch the interior; (108, 208) -> (109, 208) rises 4 m and (109, 208) -> (110, 208) 15 m: two uphill; the plain's step is not theirs
     assert_eq!((k.basins, k.cells, k.steps, k.uphill), (1, 9, 4, 2), "{k:?}");
 }
@@ -856,9 +878,11 @@ fn a_line_end_inlet_outside_every_kept_depression_is_counted_and_spill_targets_a
     // a kept basin whose lake (the cells under its 5 m spill joined to its floor) is the 3 x 3 block at (4..=6, 4..=6); reaches ending at inlets inside, beside and far from it; a
     // spill target far from it; an orphan inlet
     let mut z = vec![20.0; 144];
+    let mut label = vec![u32::MAX; 144];
     for y in 4..=6 {
         for x in 4..=6 {
             z[y * 12 + x] = 1.0;
+            label[y * 12 + x] = 0;
         }
     }
     let inlet = |x: u64, y: u64| node(NodeKind::LakeInlet, x, y);
@@ -887,14 +911,14 @@ fn a_line_end_inlet_outside_every_kept_depression_is_counted_and_spill_targets_a
     };
     use planet_cache::river_gate_graph::{inlets_without_basin, InletReport};
     assert_eq!(
-        inlets_without_basin(&g, &W, &z),
+        inlets_without_basin(&g, &W, &z, &label),
         InletReport { inside: 5, line_ends: 3, spill_targets: 1, orphans: 1, line_end_no_basin: 2, line_end_no_basin_far: 1 }
     );
     // numerics review: an inlet that a reach ends at and a basin spills to counts once, as a line end, and is held to a kept basin
     let mut both = g.clone();
     both.basins[1].spill_node = c.id;
     assert_eq!(
-        inlets_without_basin(&both, &W, &z),
+        inlets_without_basin(&both, &W, &z, &label),
         InletReport { inside: 5, line_ends: 3, spill_targets: 0, orphans: 2, line_end_no_basin: 2, line_end_no_basin_far: 1 },
         "the far line end, now also a spill target, is a line end once; the former spill target is an orphan"
     );
@@ -1213,6 +1237,25 @@ fn a_cut_through_a_reference_hump_is_a_hump_cut_and_a_corner_only_block_is_a_cor
         cut[cell(x, 4)] = 8.0;
     }
     assert_eq!(hump_cuts(&grid, &plain, &cut, &all), 0, "a cut on a plain rises over no end");
+    // numerics review: a downhill cut is no hump cut, whether it bends (an L-shaped 1-cell path) or is two cells wide; the reference falls 1 m a cell along it, cut 12 m
+    let mut slope = vec![0.0f64; w * h];
+    let mut down = vec![0.0f64; w * h];
+    let mut l_path: Vec<(usize, usize)> = (0..20).map(|x| (x + 2, 1)).collect();
+    l_path.extend((2..8).map(|y| (21, y)));
+    for (k, &(x, y)) in l_path.iter().enumerate() {
+        slope[cell(x, y)] = 40.0 - k as f64;
+        down[cell(x, y)] = slope[cell(x, y)] - 12.0;
+    }
+    assert_eq!(hump_cuts(&grid, &slope, &down, &all), 0, "an L-shaped downhill cut");
+    let mut wide = vec![50.0f64; w * h];
+    let mut wide_cut = wide.clone();
+    for x in 2..=27 {
+        for y in 3..=4 {
+            wide[cell(x, y)] = 40.0 - x as f64;
+            wide_cut[cell(x, y)] = wide[cell(x, y)] - 12.0;
+        }
+    }
+    assert_eq!(hump_cuts(&grid, &wide, &wide_cut, &all), 0, "a two-cell-wide downhill cut");
     // outside the counted cells nothing counts
     let none = vec![false; w * h];
     assert_eq!(hump_cuts(&grid, &reference, &surface, &none), 0);

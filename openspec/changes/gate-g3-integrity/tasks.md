@@ -14,5 +14,5 @@
 - [x] 2.2 Commit the drawn windows as `crates/cache/data/g3-windows.toml` before any run on them
 
 ## 3. Rows and values
-- [ ] 3.1 B and RG on the five windows; the new bars' values proposed in the PR body (O10)
+- [x] 3.1 B and RG on the five windows; the new bars' values proposed in the PR body (O10)
 - [ ] 3.2 numerics-reviewer, spec-guardian, verifier; archive, log fragment, PR (lead review)

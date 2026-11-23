@@ -1,5 +1,5 @@
 ## Why
-- G3-1 (gate integrity, D10) is the first row of the pre-production gate: the gate must judge B and RG by the same complete set of bars before any G3-B switch row is judged (lead #186, 2026-11-23; G3 gate §3, risk R2).
+- G3-1 (gate integrity) is the first row of the pre-production gate: the gate must judge B and RG by the same complete set of bars before any G3-B switch row is judged (lead #186, 2026-11-23; G3 gate §3, risk R2).
 - Blind spots named by the reviews (lead's synthesis A4-A6, N13-N16; Carbon M4.7; Fable F2 and F4):
   - only the routed share of the graph/raster agreement is barred; `routed_above_head` is unbounded;
   - uphill and ponds are barred on the 75 km2 raster network only;

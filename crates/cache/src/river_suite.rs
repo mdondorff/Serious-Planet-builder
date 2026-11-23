@@ -1059,9 +1059,10 @@ pub fn ridge_report(g: &Grid, reference: &[f64], surface: &[f64], ridge: &[bool]
     r
 }
 
-/// A hump cut (G3-1, lead #186; the hump-trench rule of lead #184's C8 count): a path of the cut is an 8-connected group of counted cells lowered by more than
-/// [`HUMP_LOWERED_M`] against `reference`; its ends are its cells with at most one lowered neighbour in the group (none: the group's lowest reference cell); the path cuts a
-/// hump when the reference along it rises more than [`HUMP_M`] above the highest of its ends and it is cut more than [`HUMP_M`] somewhere.
+/// A hump cut (G3-1, lead #186; after the hump-trench rule of lead #184's C8 count): a path of the cut is an 8-connected group of counted cells lowered by more than
+/// [`HUMP_LOWERED_M`] against `reference`; its two ends are the ends of its longest walk (a breadth-first search from its first cell finds the farthest cell, a second from
+/// there the other end; ties by cell index); the path cuts a hump when the reference along it rises more than [`HUMP_M`] above the higher of its ends and it is cut more
+/// than [`HUMP_M`] somewhere. (A neighbour count does not find the ends: a tip beside a bend has two lowered neighbours, and a channel two cells wide has none.)
 pub const HUMP_LOWERED_M: f64 = 0.25;
 pub const HUMP_M: f64 = 10.0;
 
@@ -1089,17 +1090,38 @@ pub fn hump_cuts(g: &Grid, reference: &[f64], surface: &[f64], inside: &[bool]) 
                 }
             }
         }
-        let (mut max_cut, mut ref_max, mut ref_min, mut end_max) = (f64::NEG_INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+        let (mut max_cut, mut ref_max) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
         for &c in &group {
             max_cut = max_cut.max(reference[c] - surface[c]);
             ref_max = ref_max.max(reference[c]);
-            ref_min = ref_min.min(reference[c]);
-            if neighbours8(w, h, c).filter(|&q| lowered[q]).count() <= 1 {
-                end_max = end_max.max(reference[c]);
-            }
         }
-        let ends = if end_max.is_finite() { end_max } else { ref_min };
-        count += usize::from(max_cut > HUMP_M && ref_max - ends > HUMP_M);
+        if max_cut <= HUMP_M {
+            continue;
+        }
+        group.sort_unstable();
+        let far = |from: usize, dist: &mut std::collections::HashMap<usize, usize>| {
+            dist.clear();
+            let mut queue = std::collections::VecDeque::from([from]);
+            dist.insert(from, 0);
+            let mut best = (0usize, from);
+            while let Some(c) = queue.pop_front() {
+                let d = dist[&c];
+                if d > best.0 || (d == best.0 && c < best.1) {
+                    best = (d, c);
+                }
+                for q in neighbours8(w, h, c) {
+                    if lowered[q] && !dist.contains_key(&q) {
+                        dist.insert(q, d + 1);
+                        queue.push_back(q);
+                    }
+                }
+            }
+            best.1
+        };
+        let mut dist = std::collections::HashMap::new();
+        let u = far(group[0], &mut dist);
+        let v = far(u, &mut dist);
+        count += usize::from(ref_max - reference[u].max(reference[v]) > HUMP_M);
     }
     count
 }
@@ -1113,7 +1135,7 @@ pub fn corner_links(g: &Grid, z: &[f64], inside: &[bool]) -> usize {
     let (w, h) = (g.w(), g.h());
     let mut count = 0usize;
     for y in 0..h.saturating_sub(1) {
-        for x in 0..w - 1 {
+        for x in 0..w.saturating_sub(1) {
             let (ia, ib, ic, id) = (y * w + x, y * w + x + 1, (y + 1) * w + x, (y + 1) * w + x + 1);
             if !(inside[ia] && inside[ib] && inside[ic] && inside[id]) {
                 continue;
