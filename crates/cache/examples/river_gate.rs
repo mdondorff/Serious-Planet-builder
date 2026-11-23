@@ -371,6 +371,21 @@ fn main() -> Result<(), String> {
         front.solve.zb[hc] <= sea_level_m && !front.solve.grid.is_edge(hc)
     };
     let outlet = planet_cache::river_gate::connected_sea_outlets(&grid, &start, &surface, sea_level_m, &h1_sea);
+    // lead #185b: the gate builds its own ocean (a candidate does not supply the gate's rule, CON-31); a chain's `ocean.u8` beside the stage fields is a cross-check only, both counts 0 on a chain row
+    let chain_ocean = match value(&args, "--stages") {
+        Some(dir) => planet_cache::river_gate_graph::read_chain_ocean(Path::new(dir), w * h)?,
+        None => None,
+    };
+    if let Some(ocean) = &chain_ocean {
+        let own_ocean = planet_cache::river_gate::connected_sea_outlets(&grid, &start, &start, sea_level_m, &h1_sea);
+        let chain_set: Vec<bool> = (0..w * h).map(|p| ocean[p] || (grid.is_edge(p) && start[p] <= sea_level_m)).collect();
+        let own_set: Vec<bool> = (0..w * h).map(|p| own_ocean[p] && start[p] <= sea_level_m).collect();
+        let (xc, xk) = planet_cache::river_gate::mask_difference(&grid, &chain_set, &own_set);
+        let (mc, mk) = planet_cache::river_gate::mask_difference(&grid, &own_set, &chain_set);
+        println!(
+            "RIVER-GATE ocean: the chain's (ocean.u8); g_ocean_extra={xc} g_ocean_extra_components={xk} g_ocean_missing={mc} g_ocean_missing_components={mk}"
+        );
+    }
     // The G2 inputs (BUILD-060): a canonical graph, the per-stage budget fields, a partition pair; global L ids against this window's origin.
     let graph = value(&args, "--graph").map(read_graph).transpose()?;
     if own_start.is_some() {

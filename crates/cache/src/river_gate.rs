@@ -49,6 +49,34 @@ pub fn connected_sea_outlets(
     out
 }
 
+/// The cells of `a` outside `b`, and their 8-connected components (lead #185b: `g_ocean_extra` is the chain's `ocean.u8` outside the gate's own ocean, `g_ocean_missing` the reverse; a cross-check, 0 on a chain row).
+pub fn mask_difference(grid: &Grid, a: &[bool], b: &[bool]) -> (usize, usize) {
+    let n = a.len();
+    let diff: Vec<bool> = (0..n).map(|p| a[p] && !b[p]).collect();
+    let mut seen = vec![false; n];
+    let (mut cells, mut comps) = (0usize, 0usize);
+    for s in 0..n {
+        if !diff[s] || seen[s] {
+            continue;
+        }
+        comps += 1;
+        seen[s] = true;
+        let mut stack = vec![s];
+        while let Some(c) = stack.pop() {
+            cells += 1;
+            for k in 0..8 {
+                if let Some(q) = grid.neighbour(c, k) {
+                    if diff[q] && !seen[q] {
+                        seen[q] = true;
+                        stack.push(q);
+                    }
+                }
+            }
+        }
+    }
+    (cells, comps)
+}
+
 /// The ponds bar (BUILD-060, owner 2026-11-20, option C): river length in closed basins outside the kept lakes, over the river length outside them, at most this (percent).
 pub const PONDS_MAX_PCT: f64 = 10.0;
 /// The kept-river bar: river length in kept lakes, over all river length, at most this (percent) on a lowland window and `KEPT_RIVER_MAX_PCT_MOUNTAIN` on a mountain one.

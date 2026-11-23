@@ -896,6 +896,28 @@ fn an_inland_pit_below_sea_level_is_land_to_the_gate_not_sea() {
     raised[cell(1, 6)] = 2.0;
     let cut = connected_sea_outlets(&grid, &joined, &raised, 0.0, &|_| false);
     assert!(!cut[cell(1, 6)] && cut[cell(6, 6)] && cut[cell(2, 6)], "the raised cell is land; the sea behind it stays sea");
+    // lead #185b: the cross-check of a chain's ocean against the gate's own, in cells and components
+    use planet_cache::river_gate::mask_difference;
+    let mut ocean = vec![false; 144];
+    for y in 0..12 {
+        ocean[cell(0, y)] = true;
+    }
+    ocean[cell(6, 6)] = true;
+    ocean[cell(8, 8)] = true;
+    let own: Vec<bool> = (0..144).map(|c| connected[c] && z[c] <= 0.0).collect();
+    assert_eq!(mask_difference(&grid, &ocean, &own), (2, 2), "two lone chain-ocean cells in the pit: two cells, two components");
+    let seeded_sea: Vec<bool> = (0..144).map(|c| seeded[c] && z[c] <= 0.0).collect();
+    assert_eq!(mask_difference(&grid, &seeded_sea, &own), (25, 1), "the seeded pit beyond the edge's sea: 25 cells, one component");
+    // the reader: one byte per cell, 0 to 3; another length or byte is refused
+    let dir = std::env::temp_dir().join(format!("river-gate-ocean-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    assert_eq!(planet_cache::river_gate_graph::read_chain_ocean(&dir, 4).unwrap(), None, "no file: no chain ocean");
+    std::fs::write(dir.join("ocean.u8"), [0u8, 1, 2, 3]).unwrap();
+    assert_eq!(planet_cache::river_gate_graph::read_chain_ocean(&dir, 4).unwrap(), Some(vec![false, true, true, true]));
+    assert!(planet_cache::river_gate_graph::read_chain_ocean(&dir, 5).is_err(), "a length other than the window's is refused");
+    std::fs::write(dir.join("ocean.u8"), [0u8, 4, 0, 0]).unwrap();
+    assert!(planet_cache::river_gate_graph::read_chain_ocean(&dir, 4).is_err(), "a byte above 3 is refused");
+    std::fs::remove_dir_all(&dir).unwrap();
     let all = vec![true; 144];
     let p = GateParams { channel_area_m2: 6.0 * DX * DX, ..GateParams::default() };
     let gate = |outlet: &[bool]| {
