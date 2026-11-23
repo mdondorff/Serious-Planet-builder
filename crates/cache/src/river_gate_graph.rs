@@ -1107,6 +1107,8 @@ pub fn read_stages(dir: &Path, n: usize) -> Result<(Vec<StageField>, Option<usiz
 /// missing basin spill nodes, each pass or fail.
 pub const UPHILL_MAX_PCT: f64 = 1.0;
 pub const AGREE_MIN_PCT: f64 = 90.0;
+/// The share of routed river cells above a graph head (`routed_above_head` over the routed cells with them), at most this (percent; G3-1, lead #186: proposed for the owner, O10).
+pub const ABOVE_HEAD_MAX_PCT: f64 = 10.0;
 /// The corridor bar outside mountain windows, and on a mountain window (M1).
 pub const CORRIDOR_MIN_PCT: f64 = 97.5;
 pub const CORRIDOR_MIN_PCT_MOUNTAIN: f64 = 95.0;
@@ -1146,8 +1148,12 @@ pub fn g2_bars(g2: &G2Report, uphill_pct: f64, corridor_pct: f64, corridor_min_p
         bar("bar_uphill".into(), uphill_pct, UPHILL_MAX_PCT, true, Correctness),
     ];
     for a in &g2.agreement {
-        let pct = 100.0 * a.routed_agree as f64 / a.routed.max(1) as f64;
+        // G3-1 (lead #186, A4): the lower of the routed and the graph share; a side with no cells has nothing to miss
+        let share = |hit: usize, all: usize| if all == 0 { 100.0 } else { 100.0 * hit as f64 / all as f64 };
+        let pct = share(a.routed_agree, a.routed).min(share(a.graph_agree, a.graph));
         out.push(bar(format!("bar_agree_{}km2", a.threshold_km2), pct, AGREE_MIN_PCT, false, Correctness));
+        let above = 100.0 * a.routed_above_head as f64 / (a.routed + a.routed_above_head).max(1) as f64;
+        out.push(bar(format!("bar_above_head_{}km2", a.threshold_km2), above, ABOVE_HEAD_MAX_PCT, true, Correctness));
     }
     // lead 2026-11-21: the f64 validator's overruns and raises are graph-row violations too
     let validator = g2.budget.as_ref().and_then(|b| b.validator_overrun).unwrap_or(0);

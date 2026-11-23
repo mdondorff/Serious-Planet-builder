@@ -294,20 +294,41 @@ fn the_g2_bars_pass_or_fail_against_the_owners_limits() {
     let g2 = G2Report {
         graph: Some(gr),
         agreement: vec![
-            Agreement { threshold_km2: 1.0, routed: 100, routed_agree: 90, ..Agreement::default() },
-            Agreement { threshold_km2: 75.0, routed: 100, routed_agree: 89, ..Agreement::default() },
+            Agreement {
+                threshold_km2: 1.0,
+                routed: 100,
+                routed_agree: 90,
+                graph: 50,
+                graph_agree: 48,
+                routed_above_head: 11,
+                ..Agreement::default()
+            },
+            Agreement {
+                threshold_km2: 75.0,
+                routed: 100,
+                routed_agree: 95,
+                graph: 100,
+                graph_agree: 89,
+                routed_above_head: 12,
+                ..Agreement::default()
+            },
         ],
         ..G2Report::default()
     };
     let bars = g2_bars(&g2, 1.0, 97.4, CORRIDOR_MIN_PCT);
     let pass = |n: &str| bars.iter().find(|b| b.name == n).map(|b| b.pass()).unwrap();
+    let value = |n: &str| bars.iter().find(|b| b.name == n).map(|b| b.value).unwrap();
     // at the limits: uphill 1.0 % and agreement 90 % pass; 89 % and a corridor of 97.4 % fail; no violations pass; 3 missing spill nodes fail
     assert!(pass("bar_uphill") && pass("bar_agree_1km2") && pass("bar_violations"));
     assert!(!pass("bar_agree_75km2") && !pass("bar_corridor") && !pass("bar_spill_missing"));
+    // G3-1 (A4): the agreement bar is the lower share, the routed 90 % at 1 km2 (graph 96 %) and the graph 89 % at 75 km2 (routed 95 %)
+    assert_eq!((value("bar_agree_1km2"), value("bar_agree_75km2")), (90.0, 89.0));
+    // routed cells above a graph head: 11 of 111 (9.91 %) passes the 10 % bar, 12 of 112 (10.71 %) fails
+    assert!(pass("bar_above_head_1km2") && !pass("bar_above_head_75km2"));
     assert!(g2_bars(&g2, 1.0, 97.4, CORRIDOR_MIN_PCT_MOUNTAIN).iter().find(|b| b.name == "bar_corridor").unwrap().pass(), "95 % on M1");
     assert_eq!(bars.iter().find(|b| b.name == "bar_spill_missing").unwrap().cell(), "FAIL:3.00");
     let line = bars_line(&bars).unwrap();
-    assert!(line.contains("bar_uphill PASS 1.00 (<= 1)") && line.ends_with("3 of 6 pass"), "{line}");
+    assert!(line.contains("bar_uphill PASS 1.00 (<= 1)") && line.ends_with("4 of 8 pass"), "{line}");
 }
 
 // spec: TEST-137, BUILD-060
