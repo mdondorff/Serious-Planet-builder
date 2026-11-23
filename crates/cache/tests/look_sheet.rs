@@ -190,7 +190,13 @@ fn a_sheets_layout_and_scales_are_fixed_and_the_pair_shows_the_difference() {
     let other = dir("other");
     let w = CropWriter::new(&other, W, H, K, &crops()[..2]).unwrap();
     w.manifest(&manifest("other").text()).unwrap();
-    assert!(write_sheets(&sw, Some(&other), &[315.0], &dir("x")).unwrap_err().contains("other crops"));
+    assert!(write_sheets(&sw, Some(&other), &[315.0], &dir("x")).unwrap_err().contains("other crops or windows"));
+    // and the same crops of another window
+    let moved = dir("moved");
+    let w = CropWriter::new(&moved, W, H, K, &crops()).unwrap();
+    w.manifest(&Manifest { x0: 5000, ..manifest("moved") }.text()).unwrap();
+    assert!(write_sheets(&sw, Some(&moved), &[315.0], &dir("y")).unwrap_err().contains("same window"));
+    let _ = std::fs::remove_dir_all(moved);
     for d in [def, sw, out, pair, other] {
         let _ = std::fs::remove_dir_all(d);
     }

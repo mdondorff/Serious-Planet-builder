@@ -1,6 +1,6 @@
 //! The look sheet (BUILD-067, `cargo xtask look-sheet RUN [--against DEFAULTS] [--az 315,135] [--out DIR]`): a switch row's crops at full resolution under a fixed low sun, beside
 //! the defaults row and their difference. It extends the chain sheet (BUILD-060) and reads only its layout: a crop is a small chain directory, so the chain sheet's shade and colours
-//! are the look sheet's, and `cargo xtask stages --chain` renders a crop directory as well.
+//! are the look sheet's, and `cargo xtask stages --chain` renders a crop directory's BUILD-060 panels as well.
 //!
 //! A crop store (the chain hook `--probe-crops`) is a directory holding:
 //! - `crops.txt`: `look-crops 1`, then one `crop NAME X Y SIZE BX BY` a crop, in the sheet's row order: the crop's `SIZE x SIZE` L cells from window cell `(X, Y)`, cut into a box
@@ -33,7 +33,8 @@ pub const SHEET_LIMIT: u64 = 1_000_000;
 pub const DIFF_M: f64 = 10.0;
 /// The default azimuths (degrees clockwise from north).
 pub const AZIMUTHS: [f64; 2] = [315.0, 135.0];
-/// The sheet's columns: the chain's surfaces in the chain's order (SPIKE-143's layout). A stage the run did not write stays grey, labelled `not dumped`, so every sheet has one layout.
+/// The sheet's columns: the chain's surfaces in the chain's order (SPIKE-143's layout). `ks0`, `ks1c` and `band6c` are surfaces the chain writes beyond BUILD-060's layout (the chain
+/// sheet does not draw them). A stage the run did not write stays grey, labelled `not dumped`, so every sheet has one layout.
 pub const STAGES: [(&str, &str); 8] = [
     ("base", "B"),
     ("s0", "S0"),
@@ -243,8 +244,11 @@ pub fn sheet_px(size: usize, rows: usize) -> (usize, usize) {
 fn compose(title: &[String], size: usize, rows: &[Row]) -> Vec<u8> {
     let (w, h) = sheet_px(size, rows.len());
     let mut img = Rgba { width: w as u32, height: h as u32, data: [24u8, 24, 28, 255].repeat(w * h) };
+    // a title longer than the sheet is cut at its width; the crops' places and the scale are also in `look.txt` and the store
+    let title_chars = (w - 2 * GAP) / TEXT_CELL_W;
     for (k, t) in title.iter().enumerate().take(2) {
-        put_text(&mut img, GAP, 4 + k * TEXT_ROW_H, t, if k == 0 { [240, 240, 240] } else { [170, 190, 220] });
+        let fit: String = t.chars().take(title_chars).collect();
+        put_text(&mut img, GAP, 4 + k * TEXT_ROW_H, &fit, if k == 0 { [240, 240, 240] } else { [170, 190, 220] });
     }
     let top = 2 * TEXT_ROW_H + GAP;
     let x0 = GAP + LABEL_CHARS * TEXT_CELL_W + GAP;
@@ -271,7 +275,7 @@ fn compose(title: &[String], size: usize, rows: &[Row]) -> Vec<u8> {
                 }
             }
             if p.is_none() {
-                put_text(&mut img, ox + 2, oy + 2, "NONE", [200, 200, 200]);
+                put_text(&mut img, ox + 2, oy + 2, "NOT DUMPED", [200, 200, 200]);
             }
         }
     }
@@ -324,9 +328,18 @@ pub fn write_sheets(run: &Path, against: Option<&Path>, azimuths: &[f64], out: &
     let crops = read_store(run)?;
     let base = against.map(read_store).transpose()?;
     if let (Some(b), Some(a)) = (&base, against) {
-        let names = |v: &[StoredCrop]| v.iter().map(|c| c.crop.clone()).collect::<Vec<_>>();
-        if names(b) != names(&crops) {
-            return Err(format!("{} and {} hold other crops: a pair needs the same crops", run.display(), a.display()));
+        // the same crops of the same window: the crops, and each box's place and grid
+        let key = |v: &[StoredCrop]| {
+            v.iter()
+                .map(|c| (c.crop.clone(), c.manifest.x0, c.manifest.y0, c.manifest.w, c.manifest.h, c.manifest.coarse))
+                .collect::<Vec<_>>()
+        };
+        if key(b) != key(&crops) {
+            return Err(format!(
+                "{} and {} hold other crops or windows: a pair needs the same crops of the same window",
+                run.display(),
+                a.display()
+            ));
         }
     }
     let size = crops[0].crop.size;

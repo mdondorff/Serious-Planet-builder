@@ -164,7 +164,7 @@ fn main() -> ExitCode {
         Some("plan") => plancmd::run(&root),
         Some("gates") => gates::run(&root),
         Some("stages") => heavy::with(&format!("stages {}", args[1..].join(" ")), || stages::run_cmd(&root, &args[1..])),
-        Some("look-sheet") => looksheet::run_cmd(&root, &args[1..]),
+        Some("look-sheet") => heavy::with(&format!("look-sheet {}", args[1..].join(" ")), || looksheet::run_cmd(&root, &args[1..])),
         Some("transects") => heavy::with(&format!("transects {}", args[1..].join(" ")), || transects::run_cmd(&root, &args[1..])),
         Some("windows-draw") => heavy::with(&format!("windows-draw {}", args[1..].join(" ")), || windowsdraw::run_cmd(&root, &args[1..])),
         Some("cockpit") if cockpit::needs_heavy_slot(&args[1..]) => {
