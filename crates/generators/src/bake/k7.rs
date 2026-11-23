@@ -43,6 +43,44 @@ pub enum RegionRead {
     /// The interpolating cubic B-spline: the cells prefiltered to B-spline coefficients (Unser's recursive filter, pole `sqrt 3 - 2`, mirror boundary), so the read passes
     /// through every cell's value and is C2; it may overshoot like the unclamped Catmull-Rom.
     BSplineInterp,
+    /// lead #196a: a C2 quasi-interpolant: the cubic B-spline of the cells corrected by the 3-tap filter 1/6 [-1, 8, -1] along each axis (the window's edge repeated),
+    /// which restores the B-spline's amplitude to fourth order without the full prefilter's ringing.
+    BSplineQuasi,
+    /// lead #196b: the cubic B-spline on the 5-tap truncation of the interpolating prefilter (taps `sqrt 3 z^|k|`, `z = sqrt 3 - 2`, `|k| <= 2`, normalised to sum 1:
+    /// 1.6457, -0.4410, 0.1182 at 0, 1 and 2 cells), ends repeated.
+    BSplineQuasi5,
+}
+
+/// The 5-tap truncated interpolating prefilter of one line in place (the ends repeated), [`RegionRead::BSplineQuasi5`].
+fn qi5_correct(s: &mut [f64]) {
+    let n = s.len();
+    if n < 2 {
+        return;
+    }
+    let r3 = libm::sqrt(3.0);
+    let z = r3 - 2.0;
+    let (t0, t1, t2) = (r3, r3 * z, r3 * z * z);
+    let sum = t0 + 2.0 * t1 + 2.0 * t2;
+    let (t0, t1, t2) = (t0 / sum, t1 / sum, t2 / sum);
+    let src = s.to_vec();
+    let at = |k: i64| src[k.clamp(0, n as i64 - 1) as usize];
+    for k in 0..n {
+        let i = k as i64;
+        s[k] = t0 * at(i) + t1 * (at(i - 1) + at(i + 1)) + t2 * (at(i - 2) + at(i + 2));
+    }
+}
+
+/// The 3-tap correction 1/6 [-1, 8, -1] of one line in place (the ends repeated): the coefficients of the cubic B-spline quasi-interpolant.
+fn qi_correct(s: &mut [f64]) {
+    let n = s.len();
+    if n < 2 {
+        return;
+    }
+    let src = s.to_vec();
+    for k in 0..n {
+        let (a, b) = (src[k.saturating_sub(1)], src[(k + 1).min(n - 1)]);
+        s[k] = (8.0 * src[k] - a - b) / 6.0;
+    }
 }
 
 /// The cubic B-spline coefficients of one line `s` in place (mirror boundary): the read of the coefficients with [`bspline`] passes through `s` at the samples.
@@ -73,10 +111,15 @@ fn bspline_prefilter(s: &mut [f64]) {
     }
 }
 
-/// The overshoot of the unclamped reads beyond the four cells around the point (lead #196): `[reads that left the range, the largest excursion in micrometres, reads]`.
+/// The overshoot of the unclamped reads beyond the four cells around the point (lead #196): `[reads that left the range, the largest excursion in micrometres, reads, reads over 1 cm, reads over 1 m]`.
 /// Report only; the values read never depend on it.
-pub static REGION_OVERSHOOT: [std::sync::atomic::AtomicU64; 3] =
-    [std::sync::atomic::AtomicU64::new(0), std::sync::atomic::AtomicU64::new(0), std::sync::atomic::AtomicU64::new(0)];
+pub static REGION_OVERSHOOT: [std::sync::atomic::AtomicU64; 5] = [
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+];
 
 /// The uniform cubic B-spline basis at `t` in `[0, 1]` between `p[1]` and `p[2]`.
 fn bspline(p: [f64; 4], t: f64) -> f64 {
@@ -95,18 +138,23 @@ impl RegionField {
     /// The same field read another way (lead #196).
     pub fn with_read(mut self, read: RegionRead) -> RegionField {
         self.read = read;
-        if read == RegionRead::BSplineInterp {
+        if matches!(read, RegionRead::BSplineInterp | RegionRead::BSplineQuasi | RegionRead::BSplineQuasi5) {
             let (w, h) = (self.w, self.h);
+            let filter: fn(&mut [f64]) = match read {
+                RegionRead::BSplineInterp => bspline_prefilter,
+                RegionRead::BSplineQuasi5 => qi5_correct,
+                _ => qi_correct,
+            };
             let mut c: Vec<f64> = self.data.iter().map(|&v| f64::from(v)).collect();
             for row in c.chunks_mut(w) {
-                bspline_prefilter(row);
+                filter(row);
             }
             let mut col = vec![0.0f64; h];
             for x in 0..w {
                 for y in 0..h {
                     col[y] = c[y * w + x];
                 }
-                bspline_prefilter(&mut col);
+                filter(&mut col);
                 for y in 0..h {
                     c[y * w + x] = col[y];
                 }
@@ -130,8 +178,25 @@ impl RegionField {
         let at =
             |a: i64, b: i64| f64::from(self.data[b.clamp(0, self.h as i64 - 1) as usize * self.w + a.clamp(0, self.w as i64 - 1) as usize]);
         let (ii, jj) = (i as i64, j as i64);
-        let coef = |a: i64, b: i64| self.coef[b.clamp(0, self.h as i64 - 1) as usize * self.w + a.clamp(0, self.w as i64 - 1) as usize];
-        let v = if self.read == RegionRead::BSplineInterp {
+        // the full prefilter's boundary is a mirror (c[-1] = c[1]); the quasi-interpolant's correction repeats the ends, as the clamp does (numerics review, lead #196)
+        let mirror = self.read == RegionRead::BSplineInterp;
+        let idx = |a: i64, n: usize| -> usize {
+            let last = n as i64 - 1;
+            if mirror {
+                let m = if a < 0 {
+                    -a
+                } else if a > last {
+                    2 * last - a
+                } else {
+                    a
+                };
+                m.clamp(0, last) as usize
+            } else {
+                a.clamp(0, last) as usize
+            }
+        };
+        let coef = |a: i64, b: i64| self.coef[idx(b, self.h) * self.w + idx(a, self.w)];
+        let v = if matches!(self.read, RegionRead::BSplineInterp | RegionRead::BSplineQuasi | RegionRead::BSplineQuasi5) {
             let row = |dj: i64| bspline([coef(ii - 1, jj + dj), coef(ii, jj + dj), coef(ii + 1, jj + dj), coef(ii + 2, jj + dj)], fx);
             bspline([row(-1), row(0), row(1), row(2)], fy)
         } else {
@@ -149,6 +214,12 @@ impl RegionField {
             use std::sync::atomic::Ordering::Relaxed;
             REGION_OVERSHOOT[0].fetch_add(1, Relaxed);
             REGION_OVERSHOOT[1].fetch_max((over * 1.0e6) as u64, Relaxed);
+            if over > 0.01 {
+                REGION_OVERSHOOT[3].fetch_add(1, Relaxed);
+            }
+            if over > 1.0 {
+                REGION_OVERSHOOT[4].fetch_add(1, Relaxed);
+            }
         }
         REGION_OVERSHOOT[2].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         v

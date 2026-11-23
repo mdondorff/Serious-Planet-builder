@@ -252,6 +252,22 @@ fn a_regional_field_reads_clamped_by_default_unclamped_or_as_a_b_spline() {
         assert!((bw.at(dir(a as f64, b as f64)) - f64::from(wavy[b * w + a])).abs() < 1e-3, "bsplinei at cell ({a}, {b})");
     }
     assert!((bs.at(dir(5.0, 4.0)) - 0.0).abs() > 1.0, "the plain B-spline smooths the step's cell");
+    // at the window's edge too (the mirror boundary of the prefilter, numerics review)
+    for (a, b) in [(0usize, 0usize), (11, 9), (0, 5), (11, 0)] {
+        assert!((bw.at(dir(a as f64, b as f64)) - f64::from(wavy[b * w + a])).abs() < 1e-3, "bsplinei at the edge cell ({a}, {b})");
+    }
+    // lead #196a, the quasi-interpolant: a constant stays the constant, and a one-cell peak keeps more of its height than under the plain B-spline
+    let flat = RegionField::new(Face(1), n, (100, 200), w, h, vec![7.0f32; w * h]).with_read(RegionRead::BSplineQuasi);
+    assert!((flat.at(dir(4.3, 5.6)) - 7.0).abs() < 1e-9);
+    let mut peak = vec![0.0f32; w * h];
+    peak[5 * w + 6] = 100.0;
+    let read = |r| RegionField::new(Face(1), n, (100, 200), w, h, peak.clone()).with_read(r).at(dir(6.0, 5.0));
+    let (qi, bsp, qi5) = (read(RegionRead::BSplineQuasi), read(RegionRead::BSpline), read(RegionRead::BSplineQuasi5));
+    assert!(qi > bsp + 10.0 && qi <= 100.0 + 1e-6, "qi keeps the peak's amplitude better than the B-spline: qi {qi}, bspline {bsp}");
+    // lead #196b: the 5-tap truncation keeps more of the peak than the 3-tap one and keeps a constant
+    assert!(qi5 > qi, "qi5 keeps more of the peak than qi: qi5 {qi5}, qi {qi}");
+    let flat5 = RegionField::new(Face(1), n, (100, 200), w, h, vec![7.0f32; w * h]).with_read(RegionRead::BSplineQuasi5);
+    assert!((flat5.at(dir(4.3, 5.6)) - 7.0).abs() < 1e-9);
 }
 
 // spec: GEN-154

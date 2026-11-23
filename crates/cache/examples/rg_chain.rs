@@ -2089,6 +2089,11 @@ fn main() -> Result<(), String> {
         },
         std::sync::atomic::Ordering::Relaxed,
     );
+    // lead #196a: --kh-zs-read clamped (default) | bspline | qi, KH's C1(z_s) outside the channel zone
+    let kh_zs_read = value(&args, "--kh-zs-read").unwrap_or("clamped");
+    if !["clamped", "bspline", "qi", "qi5"].contains(&kh_zs_read) {
+        return Err(format!("--kh-zs-read clamped | bspline | qi | qi5, not '{kh_zs_read}'"));
+    }
     // crusader #172 (owner, 2026-11-20: measure it): --exception-lakes off (default) | on
     let exception_lakes = value(&args, "--exception-lakes").unwrap_or("off");
     if !["off", "on"].contains(&exception_lakes) {
@@ -2271,10 +2276,15 @@ fn main() -> Result<(), String> {
         let (over, max_um, reads) = (o[0].load(Relaxed), o[1].load(Relaxed), o[2].load(Relaxed));
         if reads > 0 {
             println!(
-                "RG region read (lead #196): {over} of {reads} unclamped reads left the four cells' range ({:.3} %), largest overshoot {:.3} m (the front's reads and S0's)",
+                "RG region read (lead #196): {over} of {reads} unclamped reads left the four cells' range ({:.3} %; {} over 1 cm, {} over 1 m), largest overshoot {:.3} m (the front's reads and S0's)",
                 100.0 * over as f64 / reads as f64,
+                o[3].load(Relaxed),
+                o[4].load(Relaxed),
                 max_um as f64 / 1.0e6
             );
+        }
+        for c in o.iter() {
+            c.store(0, Relaxed);
         }
     }
     chain_f32("base.f32", &bl)?;
@@ -2683,15 +2693,18 @@ fn main() -> Result<(), String> {
             let mask: Vec<f64> = h1.hydro.channel.iter().map(|&c| if c { 1.0 } else { 0.0 }).collect();
             kh::channel_zone(&mask, rw, rh, 0.5)
         });
-        // lead #196: KH's C1(z_s) outside the zone takes the same --region-read as K7's read of K5's delta (SPIKE-143: S_KH re-reads z_s, so S0's read alone leaves the final's
-        // 814 m excess where it was)
-        let zs_field = RegionField::new(face, REGIONAL, (sri0 as i64, srj0 as i64), rw, rh, zs_l.iter().map(|&v| v as f32).collect())
-            .with_read(match region_read {
-                "cr" => planet_generators::bake::k7::RegionRead::CatmullRom,
-                "bspline" => planet_generators::bake::k7::RegionRead::BSpline,
-                "bsplinei" => planet_generators::bake::k7::RegionRead::BSplineInterp,
-                _ => planet_generators::bake::k7::RegionRead::Clamped,
-            });
+        let zs_field = RegionField::new(face, REGIONAL, (sri0 as i64, srj0 as i64), rw, rh, zs_l.iter().map(|&v| v as f32).collect());
+        // lead #196a (SPIKE-143): `--kh-zs-read bspline | qi` reads KH's C1(z_s) as a C2 spline outside the channel zone (the clamped read kept in the zone, the two
+        // blended by the zone's weight); the 814 m pyramid of RG's final surface comes through this read, not S0's
+        let zs_alt = match kh_zs_read {
+            "bspline" => Some(planet_generators::bake::k7::RegionRead::BSpline),
+            "qi" => Some(planet_generators::bake::k7::RegionRead::BSplineQuasi),
+            "qi5" => Some(planet_generators::bake::k7::RegionRead::BSplineQuasi5),
+            _ => None,
+        }
+        .map(|r| {
+            RegionField::new(face, REGIONAL, (sri0 as i64, srj0 as i64), rw, rh, zs_l.iter().map(|&v| v as f32).collect()).with_read(r)
+        });
         // h5d: the quads whose D8 diagonal step C1 dams (C1 at the quad's centre over the step line by more than 1 m); C1 at the centre is the mean of the four L cells there
         let dams = (kh_form == "h5d").then(|| {
             let rcv = |c: usize| (recv[c] != NONE).then(|| recv[c] as usize);
@@ -2734,9 +2747,12 @@ fn main() -> Result<(), String> {
                 "h2" => kh::read(&solve.zs, rw, rh, &split, fx, fy),
                 "h4" => kh::read_ct(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0,
                 "h5" | "h5d" => {
-                    let c1 = f64::from(zs_field.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
+                    let d = dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64);
+                    let c1_zone = f64::from(zs_field.at(d));
                     let h4c = kh::read_ct_clamped(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0;
                     let mut wgt = kh::zone_weight(zone.as_ref().expect("h5's zone"), rw, rh, fx, fy);
+                    // lead #196a: outside the zone (1 - its weight) the C2 read, in it the clamped C1 as before
+                    let c1 = zs_alt.as_ref().map_or(c1_zone, |f| c1_zone + (1.0 - wgt) * (f.at(d) - c1_zone));
                     if let Some(s) = &dams {
                         wgt = wgt.max(kh::dam_weight(s, rw, rh, fx, fy, lr, 2.0, 4.0));
                     }
@@ -2765,6 +2781,20 @@ fn main() -> Result<(), String> {
         // the run's read on `threads` threads; tile-locality: the same read over two regions cut at a tile column, and on one thread
         let mut one = vec![0f64; n_l];
         par_fill(&mut one, w, threads, &at);
+        if zs_alt.is_some() {
+            use std::sync::atomic::Ordering::Relaxed;
+            let o = &planet_generators::bake::k7::REGION_OVERSHOOT;
+            let reads = o[2].load(Relaxed).max(1);
+            println!(
+                "RG KH zs read (lead #196a, {kh_zs_read}): {} of {} reads left the four cells' range ({:.3} %; {} over 1 cm, {} over 1 m), largest overshoot {:.3} m (KH's census reads included when on)",
+                o[0].load(Relaxed),
+                o[2].load(Relaxed),
+                100.0 * o[0].load(Relaxed) as f64 / reads as f64,
+                o[3].load(Relaxed),
+                o[4].load(Relaxed),
+                o[1].load(Relaxed) as f64 / 1.0e6
+            );
+        }
         let (differ2, differ1) = if kh_self_check {
             let two: Vec<f64> = {
                 let mut out = vec![0f64; n_l];
@@ -4380,6 +4410,7 @@ fn main() -> Result<(), String> {
             ("band6-floors", if BAND6_FLOORS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-outlet-floor", if BAND6_OUTLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("region-read", region_read.to_string()),
+            ("kh-zs-read", kh_zs_read.to_string()),
             ("sea17", if SEA17.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-connect", if KV_CONNECT.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-rims", if KV_RIMS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
