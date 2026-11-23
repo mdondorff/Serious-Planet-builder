@@ -1,1 +1,1 @@
-- 2026-11-23 gate-connected-sea (BUILD-055): the gate's outlets are the edge and the sea joined to it, the chain's connected sea mask; an inland pit under the sea level is land (lead, 2026-11-23).
+- 2026-11-23 gate-connected-sea (BUILD-055): the gate's outlets are the edge and the ocean it builds itself (the chain's connected sea mask; a chain's ocean.u8 only cross-checked), an inland pit under the sea level fills, and the routing floods with GEN-173's flat grade at 1e-5 m a cell instead of 1 mm (lead, 2026-11-23).

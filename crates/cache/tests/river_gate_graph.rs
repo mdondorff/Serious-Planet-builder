@@ -948,7 +948,7 @@ fn an_inland_pit_below_sea_level_is_land_to_the_gate_not_sea() {
 fn a_long_flat_beside_a_gentle_ramp_drains_along_itself_not_uphill() {
     // lead #185c (R3a: 1,197 uphill steps, each within the 1 mm-a-cell routing grade's excess over the exact fill): a 400 x 5 window of 100 m cells, its west column the outlet;
     // row 1 a flat at 0 m, row 2 a ramp rising 0.75 mm a cell to 0.3 m, rows 0, 3 and 4 a 10 m wall. A grade of 1 mm a cell lifts the flat's far end above the ramp, so the flat
-    // would drain onto the ramp, 0.3 m uphill on the measured surface; GEN-173's grade at the basin grade drains it along itself
+    // would drain onto the ramp, 0.3 m uphill on the measured surface; GEN-173's grade at the gate's grade (1e-5 m) drains it along itself
     let (w, h) = (400usize, 5usize);
     let grid = Grid::new(w, h, DX);
     let outlet: Vec<bool> = (0..w * h).map(|c| c % w == 0).collect();
@@ -992,24 +992,39 @@ fn a_long_flat_beside_a_gentle_ramp_drains_along_itself_not_uphill() {
 
 // spec: BUILD-055
 #[test]
-fn the_gate_routes_a_regraded_flat_at_8000_m() {
-    // lead #185c: GEN-173 regrades a lifted flat narrower than its bound (127 cells) with each cell at least 1e-6 of the grade above its parent; at the gate's grade a flat of
-    // 30 x 30 cells at 8,000 m drains everywhere (a property check: B's R3a store, where the basin grade 1e-7 m left a cell with no lower neighbour, is not reproduced here)
+fn the_gate_routes_regraded_irregular_flats_at_600_and_8000_m() {
+    // lead #185c: GEN-173 regrades a lifted flat narrower than its bound (127 cells); where a cell's Euclidean distance does not grow over its parent's (round an island, a
+    // concave shore) it stands only 1e-6 of the grade above it, and at the basin grade (1e-7 m) that gap is under the f64 spacing of heights from 512 m (B's R3a store stopped on
+    // such a cell; seeds 3 to 6 here stop the same way at 1e-7). 64 random floors (a 20 x 20 pit, each cell floor or a 3 m wall) at 600 m and 8,000 m: at the gate's grade every
+    // cell drains to a lower one
     use planet_cache::river_gate::{ROUTE_EPSILON_M, ROUTE_RULES};
     use planet_generators::bake::route::route_rules_filled;
-    let n = 40usize;
+    let n = 24usize;
     let grid = Grid::new(n, n, DX);
-    let z: Vec<f64> = (0..n * n)
-        .map(|c| {
-            let (x, y) = (c % n, c / n);
-            let inner = (5..35).contains(&x) && (5..35).contains(&y);
-            8000.0 + if inner { 0.0 } else { 2.0 + 0.01 * x as f64 }
-        })
-        .collect();
     let outlet: Vec<bool> = (0..n * n).map(|c| c % n == 0).collect();
-    let (routing, filled) = route_rules_filled(&grid, &z, &outlet, ROUTE_EPSILON_M, 7, 0.0, None, ROUTE_RULES);
-    assert!(
-        (0..n * n).all(|c| outlet[c] || filled[routing.receiver[c] as usize] < filled[c]),
-        "every cell drains to a lower one on the graded surface"
-    );
+    for base in [600.0, 8000.0] {
+        for seed in 0u64..64 {
+            let mut st = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let mut rnd = || {
+                st ^= st << 13;
+                st ^= st >> 7;
+                st ^= st << 17;
+                st
+            };
+            let p = 0.15 + 0.5 * ((seed % 7) as f64 / 7.0);
+            let z: Vec<f64> = (0..n * n)
+                .map(|c| {
+                    let (x, y) = (c % n, c / n);
+                    let inner = (2..n - 2).contains(&x) && (2..n - 2).contains(&y);
+                    let r = (rnd() % 1000) as f64 / 1000.0;
+                    base + if inner && r > p { 0.0 } else { 3.0 + 0.01 * x as f64 }
+                })
+                .collect();
+            let (routing, filled) = route_rules_filled(&grid, &z, &outlet, ROUTE_EPSILON_M, 7, 0.0, None, ROUTE_RULES);
+            assert!(
+                (0..n * n).all(|c| outlet[c] || filled[routing.receiver[c] as usize] < filled[c]),
+                "every cell drains to a lower one on the graded surface at {base} m, seed {seed}"
+            );
+        }
+    }
 }
