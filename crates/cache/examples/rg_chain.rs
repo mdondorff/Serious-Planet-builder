@@ -2294,6 +2294,24 @@ fn main() -> Result<(), String> {
         println!("KG sea at L: {at_sea} cells of S0 at or below the sea level, {inland} of them inland (not connected to an H1 sea outlet or the window's edge; {:.3} % of the window)", 100.0 * inland as f64 / (w * h) as f64);
     }
 
+    // lead #185a: the ocean written beside the stage fields for the gate (ocean.u8, one byte per cell: 0 not ocean, 1 reached by the flood, 2 an H1 sea-cell seed,
+    // 3 a window-edge seed), so the gate takes the chain's own sea and checks it against its rebuilt one
+    let ocean_code: Vec<u8> = (0..w * h)
+        .map(|c| {
+            if !ocean[c] {
+                return 0;
+            }
+            let (x, y) = (c % w, c / w);
+            let hc = (y / L) * rw + x / L;
+            if x == 0 || y == 0 || x == w - 1 || y == h - 1 {
+                3
+            } else if solve.zb[hc] <= sea && !grid.is_edge(hc) {
+                2
+            } else {
+                1
+            }
+        })
+        .collect();
     // lead #160: the sea of the stages after KG-trunk (`--sea-mask`)
     let is_sea = |c: usize| if sea_mask == "connected" { ocean[c] } else { start[c] <= sea };
     // reading 24: H1 reads no budget (every H1 basin is crossed); the budget is S_KH's, after KH (reading 21, lead #168)
@@ -4455,6 +4473,10 @@ fn main() -> Result<(), String> {
         }
     }
     {
+        std::fs::write(stages_dir.join("ocean.u8"), &ocean_code).map_err(|e| e.to_string())?;
+        if let Some(dd) = &chain_dir {
+            std::fs::write(dd.join("stages").join("ocean.u8"), &ocean_code).map_err(|e| e.to_string())?;
+        }
         let mut f = std::fs::File::create(stages_dir.join("residuals.csv")).map_err(|e| e.to_string())?;
         writeln!(f, "cell,stage,needed_m,available_m,feature").map_err(|e| e.to_string())?;
         for &(p, need, avail) in &res_ks {
