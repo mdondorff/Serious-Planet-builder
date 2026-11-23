@@ -1,0 +1,1 @@
+- 2026-11-23 openspec-sync-golden-review-anchor (ag2 companion 3A-4): sync `TEST-016` anchor policy (`ADR 0096`), move rule list under `Detail:`, remove `TEST-016 158` from `xtask/src/long_statements.txt`, and archive `golden-review-anchor` (`ADR 0055`)
