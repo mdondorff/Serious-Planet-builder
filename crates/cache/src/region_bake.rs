@@ -215,10 +215,11 @@ pub static POST_HOOK: std::sync::OnceLock<PostHook> = std::sync::OnceLock::new()
 /// the fill level inside the basins left.
 pub fn install_s138(form: &str, cap: f64, tag: &str) -> Result<(), String> {
     use planet_generators::bake::drain;
-    if !["uncapped", "cap", "sel-post", "sel-clamp", "post-only"].contains(&form) {
-        return Err(format!("--base-form uncapped | cap | sel-post | sel-clamp | post-only, not '{form}'"));
+    if !["uncapped", "cap", "sel-post", "sel-clamp", "post-only", "sel-pre"].contains(&form) {
+        return Err(format!("--base-form uncapped | cap | sel-post | sel-clamp | post-only | sel-pre, not '{form}'"));
     }
-    // spikes #147: `post-only`, no drain before K5 (K5 drains z_b's pits as today), the selective drain on z_s after it
+    // spikes #147: `post-only`, no drain before K5 (K5 drains z_b's pits as today), the selective drain on z_s after it; lead #178 (R16): `sel-pre`, the
+    // selective drain before K5 only (no drain on z_s after K5, the sel-post stage ablated)
     let (form, tag) = (form.to_string(), tag.to_string());
     let selective = form.starts_with("sel");
     let post_only = form == "post-only";

@@ -33,11 +33,14 @@ pub struct Params {
     pub eps: f64,
     /// Initiation on the clipped-MFD area (the plan's extractor-1); false: on the D8 area (the comparison of the results note).
     pub mfd_init: bool,
+    /// Lead #171 (reading 17 in the bed coding; spike only): the lowest bed of a land channel cell (the sea + 0.5 m), also where the surface lies below it (a coastal flat,
+    /// an inland pit: the bed then stands above the surface, so KV and KC never cut there); `None` (default) codes the running minimum alone. Sea cells keep their own code.
+    pub bed_floor: Option<f64>,
 }
 
 impl Params {
     pub fn plan(body: u64, runoff: f64) -> Params {
-        Params { body, a_crit_m2: 1.0e6, runoff, seed: 1, eps: 1e-3, mfd_init: true }
+        Params { body, a_crit_m2: 1.0e6, runoff, seed: 1, eps: 1e-3, mfd_init: true, bed_floor: None }
     }
 }
 
@@ -182,6 +185,14 @@ pub fn extract(inp: &Input, p: &Params) -> Extracted {
     // Strahler and the bed, donors first: the bed the running minimum (one value at a confluence: the lowest inflow)
     let mut strahler = vec![0u8; n];
     let mut bed = vec![i32::MAX; n];
+    // lead #171: the floor term, a running minimum of code(bed_floor) on land and code(z) on sea, donors first; the bed is the running minimum raised to it, so both
+    // fall downstream and no bed rises
+    let floor_code = p.bed_floor.map(code);
+    let own_floor = |c: usize| match floor_code {
+        Some(f) if !inp.sea[c] => f,
+        _ => code(inp.z[c]),
+    };
+    let mut flo = vec![i32::MAX; n];
     for &c in r.order.iter().rev() {
         let c = c as usize;
         if !channel[c] {
@@ -197,6 +208,10 @@ pub fn extract(inp: &Input, p: &Params) -> Extracted {
             top
         };
         bed[c] = ins.iter().map(|&d| bed[d]).min().unwrap_or(i32::MAX).min(code(inp.z[c]));
+        if floor_code.is_some() {
+            flo[c] = ins.iter().map(|&d| flo[d]).min().unwrap_or(i32::MAX).min(own_floor(c));
+            bed[c] = bed[c].max(flo[c]);
+        }
     }
     // the end of each channel cell's chain and its bed: a trunk's bed at the junction lifts the chain above it (receivers first)
     let end_bed = |t: usize| -> Option<i32> { on_trunk.get(&t).map(|&(ti, k)| inp.trunks[ti].attrs.bed[k]) };
@@ -294,7 +309,22 @@ pub fn extract(inp: &Input, p: &Params) -> Extracted {
             q: cells.iter().map(|&c| d8[c] * p.runoff).collect(),
             q_w: cells.iter().map(|&c| d8[c] * p.runoff).collect(),
             strahler: vec![st; cells.len()],
-            bed: cells.iter().map(|&c| if channel[c] { bed_at(c) } else { code(inp.z[c]).min(bed_at(cells[cells.len() - 2])) }).collect(),
+            bed: cells
+                .iter()
+                .map(|&c| {
+                    if channel[c] {
+                        return bed_at(c);
+                    }
+                    let prev = cells[cells.len() - 2];
+                    let b = code(inp.z[c]).min(bed_at(prev));
+                    // lead #171: a land end (a lake inlet, a window exit) keeps the floor; a sea cell keeps its own code
+                    if floor_code.is_some() && !inp.sea[c] {
+                        b.max(flo[prev].min(own_floor(c)))
+                    } else {
+                        b
+                    }
+                })
+                .collect(),
         };
         // on a trunk the last vertex shares the trunk's bed; its areas and discharges stay the tributary's own (the D8 inflow there): the trunk's are the landmass pass's
         if let Some(&(ti, k)) = on_trunk.get(&last) {
@@ -340,6 +370,14 @@ pub fn extract(inp: &Input, p: &Params) -> Extracted {
     }
 }
 
+/// Lead #182 (G3 R6, Carbon D2.6 (1); spike only, off by default): a head trunk reach starts from its own L inflow only, not the larger of that and its H1 seed, so
+/// the area above an H1 head that reaches the trunk at L a few vertices further down is not counted twice. rg_chain sets it on by default since #182a (reading 45).
+pub static HEAD_ONCE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Lead #182 (G3 R6, Carbon D2.5; spike only, off by default): the trunks' Strahler orders updated at every `trib_junction` (contract section 3): a tributary of the
+/// trunk's order raises it by one, a higher one sets it; at a node the inflowing trunks combine by the same rule; a head keeps its H1 order.
+/// rg_chain sets it on by default since #182a (reading 46).
+pub static STRAHLER_JUNCTION: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// What the landmass pass changed.
 #[derive(Debug, Default)]
 pub struct Accumulated {
@@ -348,6 +386,8 @@ pub struct Accumulated {
     pub heads_over_seed: usize,
     /// Trunk reaches the pass could not order (a cycle through trunk nodes; left as they were).
     pub unordered: usize,
+    /// Lead #182: trunk reaches whose order rises along them at a trib_junction (with `STRAHLER_JUNCTION`).
+    pub strahler_raised: usize,
 }
 
 /// Reading 18: the landmass pass over the combined graph. Every L trunk reach in `trunks` gets `a_geo`, `a_run`, `a_run_no_ext`, `q`, `q_w` accumulated at L: a vertex carries the vertex
@@ -399,7 +439,11 @@ pub fn accumulate_trunks(
             if own0 > seed {
                 out.heads_over_seed += 1;
             }
-            (seed.max(own0), seed_no.max(own0_no))
+            if HEAD_ONCE.load(std::sync::atomic::Ordering::Relaxed) {
+                (own0, own0_no)
+            } else {
+                (seed.max(own0), seed_no.max(own0_no))
+            }
         } else {
             let pre = |r: &Reach, f: fn(&Attrs) -> &Vec<f64>| {
                 let x = f(&r.attrs);
@@ -432,6 +476,53 @@ pub fn accumulate_trunks(
             a.a_run_no_ext[k] = v_no;
             a.q[k] = v * runoff;
             a.q_w[k] = v * runoff;
+        }
+    }
+    if STRAHLER_JUNCTION.load(std::sync::atomic::Ordering::Relaxed) {
+        // the tributaries' orders at each trunk vertex: a reach whose down node is a trib_junction marked on a trunk reach
+        let node_at: BTreeMap<u64, &Node> = g.nodes.iter().map(|n| (n.id, n)).collect();
+        let mut at_vertex: BTreeMap<(u64, u32), Vec<u8>> = BTreeMap::new();
+        for r in g.reaches.iter().filter(|r| !trunks.contains(&r.id)) {
+            let Some(n) = node_at.get(&r.down) else { continue };
+            if n.kind != NodeKind::TribJunction {
+                continue;
+            }
+            if let (Some(m), Some(&s)) = (&n.marker, r.attrs.strahler.last()) {
+                at_vertex.entry((m.on_reach, m.at_vertex)).or_default().push(s);
+            }
+        }
+        let join = |cur: u8, t: u8| {
+            if t > cur {
+                t
+            } else if t == cur {
+                cur.saturating_add(1)
+            } else {
+                cur
+            }
+        };
+        let mut end: BTreeMap<usize, u8> = BTreeMap::new();
+        for &i in &order {
+            let up = g.reaches[i].up;
+            let ins: Vec<usize> = into.get(&up).cloned().unwrap_or_default();
+            let mut cur = if ins.is_empty() {
+                g.reaches[i].attrs.strahler.first().copied().unwrap_or(1)
+            } else {
+                let mut o: Vec<u8> = ins.iter().map(|j| end.get(j).copied().unwrap_or(1)).collect();
+                o.sort_unstable_by(|a, b| b.cmp(a));
+                o.iter().skip(1).fold(o[0], |c, &t| join(c, t))
+            };
+            let id = g.reaches[i].id;
+            let n = g.reaches[i].attrs.strahler.len();
+            for k in 0..n {
+                if let Some(ts) = at_vertex.get(&(id, k as u32)) {
+                    for &t in ts {
+                        cur = join(cur, t);
+                    }
+                }
+                g.reaches[i].attrs.strahler[k] = cur;
+            }
+            end.insert(i, cur);
+            out.strahler_raised += usize::from(cur > g.reaches[i].attrs.strahler.first().copied().unwrap_or(cur));
         }
     }
     out
