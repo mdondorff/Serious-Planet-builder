@@ -3,7 +3,8 @@
 Forward state only (owner, 2026-10-16): open owner items, the current queue's open items, the current unanswered stop report, tracked items and quarantines. History goes to the log (`cargo xtask log`). When a change is archived the coder deletes its queue item's text (the log line is the record); when the architect answers a stop report it deletes it. A Tracked entry has at most 3 lines; a finished one is deleted (ADR 0075). Cap: 15 KB. Earlier states: `docs/archive/M4/status-at-m4-acceptance.md`, `docs/archive/M6/status-at-m6-close.md`. M8 closed 2026-10-30: `docs/milestones/M8-report.md`. New requirement IDs, ADR and SPIKE numbers are reserved through the lead (ADR 0120).
 
 ## Waiting for the owner
-- **G3: the flight G2 did not have** (P3 E6; owner, 2026-11-22): fly R1h, R3b, F1 on g1f15's stores against B (M1: `flight-m1-g1f14`) before any port PR that changes the look; findings become G3 requirements. Commands: explorer outbox 2026-11-22 19:00.
+- **G3 gate, open decisions** (lanes digest `river-graph/g3-gate-2026-11-23.md` §7): O5 which parked look items join G3-9 (after the owner's flight, planned 2026-11-24); the lead's challenges O7 (GEN-098's pit control checked in G3 on a mountain window), O8 (the large-river planform in G3), O9 (the per-lake water level in the store contract at G3).
+- **G3: the owner's flight** (gate row G3-9): an exploratory flight on rebuilt stores (2026-11-24, feeds O5); the passing flight after the look fixes. Stores and commands: explorer #194.
 - **G3: the breach bound** (seam decision D1-3): cell caps or a physical cap (<= 10 km proposed by both reviews); measured on the five windows together with the cube-face metric (D9) before an ADR. The first G3 decision.
 - **/bless: `water_class_lake_mask_stripes`** (TEST-133, #1459): the first lake golden, a class view; escalated as the first of its class and for a WARP driver difference. Nothing waits on it.
 - **A new global store for the default world, seed 14**: every store on disk is refused by its keys; E1 runs on the in-memory production base (VIEW-069). Lead's recommendation: bake it after the flight, with ADR 0117's format.
@@ -18,11 +19,14 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 
 Dormant items moved to `docs/parking.md` (2026-11-12).
 
-## Queue (2026-11-22, milestone P3: `docs/milestones/P3.md`; E6 river graphs, owner 2026-11-16)
-G2 closed (owner, 2026-11-22): the river-graph chain (RG, `spike/rg-prototype` faa923f0) is the candidate over B; the owner's flight is a known gap carried to G3. Report: lanes digest `river-graph/g2-report-2026-11-22.md`. G3 plan: `river-graph/g3-seam-execution-brief-2026-11-22.md` (merged port order) and `g3-cube-face-execution-brief-2026-11-22.md`.
+## Queue (2026-11-23, milestone P3: `docs/milestones/P3.md`; E6 river graphs, owner 2026-11-16)
+G2 closed (owner, 2026-11-22): the river-graph chain (RG, `spike/rg-prototype`) is the candidate over B. G3 is the pre-production gate (owner, 2026-11-23): rows G3-1 to G3-9 and the risk register R1-R22 in the lanes digest `river-graph/g3-gate-2026-11-23.md`; no RG stage merges to main before G3 passes; main takes gate fixes, spike reports, docs and output-neutral planet primitives. The post-G3 port plan: `g3-seam-cube-reconciliation-2026-11-22.md` §5.
 | Exit | Step | Lane |
 |---|---|---|
-| E6 | G3: the seam and cube-face overlap reconciled into the port order; the G3 decision brief for the owner (breach bound first) | lead |
+| E6 | G3-A: the gate's own reading-39 ocean (#185b, R1), then the D10 gate PR with 10 out-of-sample windows pre-registered (G3-1) | crusader |
+| E6 | G3-B: look attribution (SPIKE-143, G3-9), then the single-window physics and look fixes (G3-2, G3-3), each judged by the ablation rule | spikes, explorer |
+| E6 | G3-C: planet memory measured (R13), D9 with the breach bound, three waves, cube faces, edits (G3-4 to G3-7) | after G3-B |
+| E6 | G3-D: the owner's flight, the 10 windows (G3-8), the verdict with the store contracts and ADR dispositions (R19, R20) | owner, lead |
 | E6 | Housekeeping coder pass (P3 closure): stale references in specs and comments to the readings and switches of 2026-11-21/22; the 43 open OpenSpec changes listed as done, superseded or still wanted | crusader |
 | E4 | ADRs 0125, 0126 proposed (review v4); G3 decides their fate | lead |
 | E5 | ADR 0127 proposed; G1e builds the basin topology; G3 decides | lead |
