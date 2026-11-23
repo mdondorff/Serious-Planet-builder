@@ -370,6 +370,13 @@ pub fn extract(inp: &Input, p: &Params) -> Extracted {
     }
 }
 
+/// Lead #182 (G3 R6, Carbon D2.6 (1); spike only, off by default): a head trunk reach starts from its own L inflow only, not the larger of that and its H1 seed, so
+/// the area above an H1 head that reaches the trunk at L a few vertices further down is not counted twice.
+pub static HEAD_ONCE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Lead #182 (G3 R6, Carbon D2.5; spike only, off by default): the trunks' Strahler orders updated at every `trib_junction` (contract section 3): a tributary of the
+/// trunk's order raises it by one, a higher one sets it; at a node the inflowing trunks combine by the same rule; a head keeps its H1 order.
+pub static STRAHLER_JUNCTION: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// What the landmass pass changed.
 #[derive(Debug, Default)]
 pub struct Accumulated {
@@ -378,6 +385,8 @@ pub struct Accumulated {
     pub heads_over_seed: usize,
     /// Trunk reaches the pass could not order (a cycle through trunk nodes; left as they were).
     pub unordered: usize,
+    /// Lead #182: trunk reaches whose order rises along them at a trib_junction (with `STRAHLER_JUNCTION`).
+    pub strahler_raised: usize,
 }
 
 /// Reading 18: the landmass pass over the combined graph. Every L trunk reach in `trunks` gets `a_geo`, `a_run`, `a_run_no_ext`, `q`, `q_w` accumulated at L: a vertex carries the vertex
@@ -429,7 +438,11 @@ pub fn accumulate_trunks(
             if own0 > seed {
                 out.heads_over_seed += 1;
             }
-            (seed.max(own0), seed_no.max(own0_no))
+            if HEAD_ONCE.load(std::sync::atomic::Ordering::Relaxed) {
+                (own0, own0_no)
+            } else {
+                (seed.max(own0), seed_no.max(own0_no))
+            }
         } else {
             let pre = |r: &Reach, f: fn(&Attrs) -> &Vec<f64>| {
                 let x = f(&r.attrs);
@@ -462,6 +475,53 @@ pub fn accumulate_trunks(
             a.a_run_no_ext[k] = v_no;
             a.q[k] = v * runoff;
             a.q_w[k] = v * runoff;
+        }
+    }
+    if STRAHLER_JUNCTION.load(std::sync::atomic::Ordering::Relaxed) {
+        // the tributaries' orders at each trunk vertex: a reach whose down node is a trib_junction marked on a trunk reach
+        let node_at: BTreeMap<u64, &Node> = g.nodes.iter().map(|n| (n.id, n)).collect();
+        let mut at_vertex: BTreeMap<(u64, u32), Vec<u8>> = BTreeMap::new();
+        for r in g.reaches.iter().filter(|r| !trunks.contains(&r.id)) {
+            let Some(n) = node_at.get(&r.down) else { continue };
+            if n.kind != NodeKind::TribJunction {
+                continue;
+            }
+            if let (Some(m), Some(&s)) = (&n.marker, r.attrs.strahler.last()) {
+                at_vertex.entry((m.on_reach, m.at_vertex)).or_default().push(s);
+            }
+        }
+        let join = |cur: u8, t: u8| {
+            if t > cur {
+                t
+            } else if t == cur {
+                cur.saturating_add(1)
+            } else {
+                cur
+            }
+        };
+        let mut end: BTreeMap<usize, u8> = BTreeMap::new();
+        for &i in &order {
+            let up = g.reaches[i].up;
+            let ins: Vec<usize> = into.get(&up).cloned().unwrap_or_default();
+            let mut cur = if ins.is_empty() {
+                g.reaches[i].attrs.strahler.first().copied().unwrap_or(1)
+            } else {
+                let mut o: Vec<u8> = ins.iter().map(|j| end.get(j).copied().unwrap_or(1)).collect();
+                o.sort_unstable_by(|a, b| b.cmp(a));
+                o.iter().skip(1).fold(o[0], |c, &t| join(c, t))
+            };
+            let id = g.reaches[i].id;
+            let n = g.reaches[i].attrs.strahler.len();
+            for k in 0..n {
+                if let Some(ts) = at_vertex.get(&(id, k as u32)) {
+                    for &t in ts {
+                        cur = join(cur, t);
+                    }
+                }
+                g.reaches[i].attrs.strahler[k] = cur;
+            }
+            end.insert(i, cur);
+            out.strahler_raised += usize::from(cur > g.reaches[i].attrs.strahler.first().copied().unwrap_or(cur));
         }
     }
     out

@@ -1849,6 +1849,10 @@ static TRUNK_SADDLE_ORTHO: std::sync::atomic::AtomicBool = std::sync::atomic::At
 /// lead #180 (G3 R8, SPIKE-142's 22 %): `--band6-keep-rims on` keeps every depression of band6's input that basins-2's rule would keep (at least 0.25 km2 and 2 m deep,
 /// reading 22's thresholds): band6 neither breaches nor fills it, so it spills at its rim and stays for basins-2; `off` (default) band6 protects no L basin.
 static BAND6_KEEP_RIMS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// lead #182 (G3 R6, Carbon D2.6 (2)): `--runoff-cell on` makes every L reach's `a_run` per-cell runoff weighted: `a_geo` times the catchment mean of the H1 runoff field
+/// (read at each L cell's H1 parent; there is no runoff field at L) over the window mean, by an L routing of the KS output; `q = q_w = a_run runoff_mean`; `off` (default)
+/// the window scalar alone.
+static RUNOFF_CELL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// lead #171: `--bed-sea-floor on` codes KG-trunk's and KG-trib's land beds at the sea + 0.5 m or above (reading 17), over coastal flats too; `off` (default) the running minimum alone.
 static BED_SEA_FLOOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -2142,6 +2146,9 @@ fn main() -> Result<(), String> {
         ("--bed-sea-floor", &BED_SEA_FLOOR, "off"),
         ("--trunk-saddle-ortho", &TRUNK_SADDLE_ORTHO, "off"),
         ("--band6-keep-rims", &BAND6_KEEP_RIMS, "off"),
+        ("--runoff-cell", &RUNOFF_CELL, "off"),
+        ("--trunk-head-once", &planet_generators::bake::kg_trib::HEAD_ONCE, "off"),
+        ("--strahler-junction", &planet_generators::bake::kg_trib::STRAHLER_JUNCTION, "off"),
         ("--band6-floors", &BAND6_FLOORS, "on"),
         ("--band6-outlet-floor", &BAND6_OUTLET_FLOOR, "on"),
         ("--inlet-floor", &INLET_FLOOR, "on"),
@@ -4298,6 +4305,44 @@ fn main() -> Result<(), String> {
         let mut seen: HashSet<u64> = HashSet::new();
         gd.nodes.retain(|x| seen.insert(x.id));
         gd.sort();
+        // lead #182 `--runoff-cell`: a_run per-cell runoff weighted (catchment mean of the H1 runoff over the window mean, along an L routing of the KS output)
+        if RUNOFF_CELL.load(std::sync::atomic::Ordering::Relaxed) {
+            use planet_generators::bake::route::route_rules_filled;
+            let outlet: Vec<bool> = (0..n_l).map(|c| active[c] && (sea_l[c] || exit[c])).collect();
+            let (r, _) = route_rules_filled(&grid_d, &ks_d[..], &outlet, 1.0e-3, 1, 0.0, None, RoundRules::ROUND);
+            let mut ag: Vec<f64> = (0..n_l).map(|c| if active[c] { 1.0 } else { 0.0 }).collect();
+            let mut aw: Vec<f64> = (0..n_l).map(|c| if active[c] { f64::from(runoff[parent(c)]) / runoff_mean } else { 0.0 }).collect();
+            for &c in r.order.iter().rev() {
+                let c = c as usize;
+                let to = r.receiver[c];
+                if to != NONE {
+                    ag[to as usize] += ag[c];
+                    aw[to as usize] += aw[c];
+                }
+            }
+            let mut fs: Vec<f64> = Vec::new();
+            for rc in gd.reaches.iter_mut().filter(|x| x.level == Level::L) {
+                for k in 0..rc.vertices.len() {
+                    let Some(c) = to_local(rc.vertices[k]) else { continue };
+                    let f = if ag[c] > 0.0 { aw[c] / ag[c] } else { 1.0 };
+                    fs.push(f);
+                    let a = &mut rc.attrs;
+                    a.a_run[k] = a.a_geo[k] * f;
+                    a.a_run_no_ext[k] *= f;
+                    a.q[k] = a.a_run[k] * runoff_mean;
+                    a.q_w[k] = a.q[k];
+                }
+            }
+            fs.sort_by(f64::total_cmp);
+            let pq = |q: f64| fs.get(((fs.len() as f64 - 1.0) * q) as usize).copied().unwrap_or(1.0);
+            println!(
+                "RG domain {d} runoff per cell (lead #182): {} L vertices; catchment runoff over the window mean p10 {:.3} p50 {:.3} p90 {:.3}",
+                fs.len(),
+                pq(0.1),
+                pq(0.5),
+                pq(0.9)
+            );
+        }
         // KV and KC (crusader's G1f) on the domain's KS output, within the budget KS left; the domain's L reaches in window cells (the module reads vertices as grid cells)
         let t = Instant::now();
         let (kv_d, kc_d, rkc) = if on("kv") || on("kc") {
@@ -4585,6 +4630,17 @@ fn main() -> Result<(), String> {
             ("bed-sea-floor", if BED_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("trunk-saddle-ortho", if TRUNK_SADDLE_ORTHO.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-keep-rims", if BAND6_KEEP_RIMS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("runoff-cell", if RUNOFF_CELL.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            (
+                "trunk-head-once",
+                if planet_generators::bake::kg_trib::HEAD_ONCE.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }
+                    .to_string(),
+            ),
+            (
+                "strahler-junction",
+                if planet_generators::bake::kg_trib::STRAHLER_JUNCTION.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }
+                    .to_string(),
+            ),
             ("kh-saddle-split", kh_saddle.to_string()),
             ("kh-zone", kh_zone.to_string()),
             ("kv-connect", if KV_CONNECT.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
