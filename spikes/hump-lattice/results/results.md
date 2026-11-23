@@ -7,7 +7,7 @@ Time box: 1 day of agent work.
 Success criteria: the crest histogram against the 611 m and 814 m lattices, the layer attribution, and the smooth-base row.
 Fallback if it fails: the trenches stay a known G3 item.
 Code location: `spikes/hump-lattice/results/raw/` (lattice173.py to lattice173d.py and plot173.py, on g1f15's R1h chain dumps); the chain is `spike/rg-prototype` faa923f0.
-Status: closed 2026-11-23.
+Status: closed 2026-11-23; addendum (#174, #174a) the same day: the three switch forms rejected.
 
 ## Answer
 - No base-lattice source. The trench crests show no 611 m phase (chi2 48.7, df 35), although S0's local maxima carry one (chi2 3,559).
@@ -62,6 +62,49 @@ Status: closed 2026-11-23.
 - No base smoothing and no K5 hillslope term for these trenches: neither layer has a lattice in the trench crests.
 - Source-stage fix for the 22 %: H1's diagonal D8 steps across saddle blocks, in the H1 routing or in KG-trunk's L image. Measure it on R1h before the port.
 - The 78 % are the chain breaching K5's real cols where the H1 graph crosses them. They belong to the breach and valley rules (#170 candidate b).
+
+## Addendum 2026-11-23: the 22 % as switches (lead #174, #174a)
+- Chain: `spike/rg-prototype` 7fe4e73d (readings 43 and 44) plus the lane's local switches, all off by default (spike/rg-prototype-spikes bc751b99, 81294152). Gate main cd84f36a.
+- Reference: a fresh R1h defaults row on that tip, with 2,369 hump trenches (SPIKE-142's g1f15 row had 2,373) and S0 corner crests at 21.9 %.
+
+### Where the corner crests are cut (R1h defaults, `raw/s174-r1h-def-corner-stages.txt`)
+| Stage (pre -> post) | trenches | S_KH crest at an H1 corner (uniform 6.25 %) |
+|---|---|---|
+| KS0 | 505 | 12.7 % |
+| KS1 | 720 | 6.5 % |
+| KS connect | 22 | 22.7 % |
+| band6 | 928 | **39.3 % (365)** |
+| band6 connect | 136 | **44.1 % (60)** |
+| KV | 535 | 4.5 % |
+| S_KH -> final | 2,369 | 15.0 % (355) |
+
+- Band6 makes the corner-crest trenches. An H1 diagonal step across a saddle block leaves an L col at the corner, the depression behind it closes at L, and band6 breaches it through the corner.
+- Band6's 365 corner blocks (`raw/s174-r1h-def-band6-corners.txt`): 353 on a z_s saddle block; 347 of those with a D8 step of z_s along the low pair; 63 with both low cells H1 channel cells.
+
+### Rejected forms
+| Switch | What it does | R1h result | Verdict |
+|---|---|---|---|
+| `--trunk-saddle-ortho` | KG-trunk's L image of a diagonal H1 trunk step across a saddle block gets the lower orthogonal H1 cell as a line point | fires on 14,541 of 19,268 diagonal trunk steps; 4,653 box cells change; trenches 2,369, corner crests 21.9 %, every bar equal | rejected: no effect; the trunk's lowest-path image already went round the cols |
+| `--kh-saddle-split trunk` | KH's h5 takes h4c (lower only) along diagonal trunk steps across a saddle block | all 14,519 such steps lie in KH's channel zone already; the row is identical | rejected: no-op |
+| `--kh-saddle-split all` | the same for every D8 diagonal step of KH's routing across a saddle block (37,966; 17,212 in the zone already) | see the table below | rejected: fails §3 and drains most kept lakes |
+
+| R1h (`raw/s174-*-gate.txt`, `raw/s174-analysis-kh-split.txt`) | defaults | `--kh-saddle-split all` |
+|---|---|---|
+| band6 trenches / corner crests | 928 / 365 | 527 / 113 (-69 %) |
+| trenches S_KH -> final | 2,369 | 2,092 |
+| S_KH trench crests at an H1 corner | 15.0 % | 7.5 % |
+| bars passing; bar_violations | 10/11; 102 | 10/11; 101 |
+| agreement 1 / 75 km2 | 92.73 / 98.26 | 92.85 / 98.32 |
+| corner-only links at 5 m | 260 | 414 (+154; floor 50) |
+| saddles1 against S_KH / S0 | 340 / 1,950 | 324 / 2,618 (+668; floor 195) |
+| KH lowered cells | 2,306,202 | 2,663,437 |
+| kept basins / kept lakes | 1,491 / 778 km2 | 155 / 97 km2 |
+| kept river / basin share | 3.01 / 3.68 | 0.24 / 0.90 |
+
+- The corner cols are also kept-basin rims. Opening them removes most of the trenches, but it also removes the kept lakes the rims hold, and it moves the cut from band6 into KH (saddles against S0 +668).
+- Not run: R3a and M1 (R1h fails), and 4-connected H1 routing (not ordered).
+- Finding: the corner cols are kept-basin rims. So the 22 % belongs with band6 respecting kept rims, not with KH or the trunk image (lead, 2026-11-23).
+- State: #174 closed on 2026-11-23; all three forms stay off. The 22 % stays a G3 item with the 78 %.
 
 ## Visuals
 ![Crest phase modulo 8 and 6 on R1h: trench crests against path cells and S0 local maxima](images/crest-phase.png)

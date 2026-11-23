@@ -1,0 +1,1 @@
+band6: 928 trenches, 365 with the S_KH crest at an H1 corner; their 2 x 2 H1 blocks: {'saddle': 353, 'saddle, low pair both channel': np.int64(63), 'saddle, D8 step on the low pair': np.int64(347), 'saddle, both': np.int64(62), 'no saddle': 12}
