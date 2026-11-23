@@ -942,3 +942,74 @@ fn an_inland_pit_below_sea_level_is_land_to_the_gate_not_sea() {
     assert!(gate(&connected).basins >= 1, "the pit is a closed basin to the connected mask");
     assert_eq!(gate(&level).basins, 0, "the level mask drains it as sea");
 }
+
+// spec: BUILD-055
+#[test]
+fn a_long_flat_beside_a_gentle_ramp_drains_along_itself_not_uphill() {
+    // lead #185c (R3a: 1,197 uphill steps, each within the 1 mm-a-cell routing grade's excess over the exact fill): a 400 x 5 window of 100 m cells, its west column the outlet;
+    // row 1 a flat at 0 m, row 2 a ramp rising 0.75 mm a cell to 0.3 m, rows 0, 3 and 4 a 10 m wall. A grade of 1 mm a cell lifts the flat's far end above the ramp, so the flat
+    // would drain onto the ramp, 0.3 m uphill on the measured surface; GEN-173's grade at the basin grade drains it along itself
+    let (w, h) = (400usize, 5usize);
+    let grid = Grid::new(w, h, DX);
+    let outlet: Vec<bool> = (0..w * h).map(|c| c % w == 0).collect();
+    let all = vec![true; w * h];
+    // the same at 8,000 m
+    for base in [0.0, 8000.0] {
+        let z: Vec<f64> = (0..w * h)
+            .map(|c| {
+                base + match c / w {
+                    1 => 0.0,
+                    2 => 0.3 * (c % w) as f64 / (w - 1) as f64,
+                    _ => 10.0,
+                }
+            })
+            .collect();
+        let report = measure(
+            &GateInput {
+                grid: &grid,
+                start: &z,
+                surface: &z,
+                outlet: &outlet,
+                inside: &all,
+                region: &all,
+                h1: &[],
+                seed: 7,
+                sea_level_m: base - 1.0,
+                outside_drains: false,
+                trunks: &[],
+                g2: None,
+            },
+            &GateParams { channel_area_m2: 6.0 * DX * DX, ..GateParams::default() },
+        );
+        assert!(report.suite.steps > 300, "the flat carries a river ({} steps)", report.suite.steps);
+        assert_eq!(
+            report.suite.uphill_steps, 0,
+            "no river step climbs from the flat onto the ramp at {base} m (largest {:.3} m)",
+            report.suite.uphill_max_m
+        );
+    }
+}
+
+// spec: BUILD-055
+#[test]
+fn the_gate_routes_a_regraded_flat_at_8000_m() {
+    // lead #185c: GEN-173 regrades a lifted flat narrower than its bound (127 cells) with each cell at least 1e-6 of the grade above its parent; at the gate's grade a flat of
+    // 30 x 30 cells at 8,000 m drains everywhere (a property check: B's R3a store, where the basin grade 1e-7 m left a cell with no lower neighbour, is not reproduced here)
+    use planet_cache::river_gate::{ROUTE_EPSILON_M, ROUTE_RULES};
+    use planet_generators::bake::route::route_rules_filled;
+    let n = 40usize;
+    let grid = Grid::new(n, n, DX);
+    let z: Vec<f64> = (0..n * n)
+        .map(|c| {
+            let (x, y) = (c % n, c / n);
+            let inner = (5..35).contains(&x) && (5..35).contains(&y);
+            8000.0 + if inner { 0.0 } else { 2.0 + 0.01 * x as f64 }
+        })
+        .collect();
+    let outlet: Vec<bool> = (0..n * n).map(|c| c % n == 0).collect();
+    let (routing, filled) = route_rules_filled(&grid, &z, &outlet, ROUTE_EPSILON_M, 7, 0.0, None, ROUTE_RULES);
+    assert!(
+        (0..n * n).all(|c| outlet[c] || filled[routing.receiver[c] as usize] < filled[c]),
+        "every cell drains to a lower one on the graded surface"
+    );
+}

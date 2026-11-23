@@ -11,6 +11,11 @@
   - The ocean is the cells at or under the sea level on the start surface, joined to the edge or to an H1 sea cell inside the region, as the chain decides it; an outlet is an ocean cell still at or under the sea on the measured surface.
   - An inland pit under the sea level is no outlet, and the floods fill it.
   - A first form that joined the sea on the measured surface took sea cut off by a raised coast for inland pits (R1h's kept-lake area 778 → 30,711 km2). A second form that kept every start-ocean cell an outlet ended rivers on a raised shelf (R3a uphill 0.02 → 1.20, agreement 88.89 / 99.21 → 79.07 / 82.59).
+- The gate builds the ocean itself for B and RG alike (lead #185b): a candidate does not supply its gate rule (CON-31).
+  - A chain's `ocean.u8` is a cross-check only: `g_ocean_extra` and `g_ocean_missing`, 0 and 0 on R3a.
+- The routing's flood grade (lead #185c): 1e-3 m a cell → GEN-173's canonical grade at 1e-5 m a cell.
+  - With the connected sea, R3a's coastal flats are land. At 1 mm a cell they rose above the land beside them, and they drained onto it: 1,197 uphill steps, each within the grade's excess over the exact fill (exact fill depth 0, excess p50 0.98 m).
+  - The basin grade (1e-7 m) left a cell with no lower neighbour on B's R3a store: GEN-173's step of 1e-6 of the grade fell under the spacing of f64 heights.
 - Land stays the cells above the sea level, unchanged: an inland cell under the sea fills as a pit and stays out of the land-only measures.
 - BUILD-059's raw-grid input names BUILD-055's outlets in place of the old rule.
 - Every flood-based column can move on a window with inland cells under the sea. The before/after rows on g1f15's five windows list each column that changes (crusader outbox).
@@ -21,6 +26,6 @@
 
 ## Impact
 - Spec deltas: BUILD-055 and BUILD-059.
-- Crate: cache (`river_gate.rs`, the `river_gate` example's two call sites).
-- Test (tier A): `an_inland_pit_below_sea_level_is_land_to_the_gate_not_sea`.
+- Crate: cache (`river_gate.rs`, `river_gate_graph.rs`'s `read_chain_ocean`, the `river_gate` example).
+- Tests (tier A): `an_inland_pit_below_sea_level_is_land_to_the_gate_not_sea`, `a_long_flat_beside_a_gentle_ramp_drains_along_itself_not_uphill`, `the_gate_routes_a_regraded_flat_at_8000_m`.
 - A contract rule of the gate changes, so the merge waits for the lead's review (routing, rule 4).

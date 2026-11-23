@@ -2,7 +2,7 @@
 //! (`rivers_at_l`, `erosion_at_l`) with the limits agreed by crusader and spikes for SPIKE-117 and SPIKE-118 (2026-11-14). The measure is a pure function of its input: the `river_gate` example of
 //! this crate builds the input from a window or a store, and `cargo xtask river-gate` runs it under the heavy lock.
 use planet_generators::bake::flood::priority_flood_with;
-use planet_generators::bake::route::{route_rules_filled, RoundRules, Routing, NONE};
+use planet_generators::bake::route::{route_rules_filled, MfdClip, RoundRules, Routing, NONE};
 use planet_generators::bake::Grid;
 
 use crate::river_gate_graph::{
@@ -85,10 +85,14 @@ pub const KEPT_RIVER_MAX_PCT_MOUNTAIN: f64 = 10.0;
 /// A kept basin whose depression level on the measured surface lies more than this under its recorded spill is a spill mismatch (metres): a graph violation.
 pub const SPILL_MISMATCH_M: f64 = 0.5;
 
-/// The routing's flood grade between cells (the spikes' 1e-3 m).
-pub const ROUTE_EPSILON_M: f64 = 1.0e-3;
 /// The basin flood's grade between cells (SPIKE-117/118's 1e-7 m): its graded flats stand far below [`BASIN_WET_M`].
 pub const BASIN_EPSILON_M: f64 = 1.0e-7;
+/// The routing's flood grade between cells (lead #185c): a flat drains by GEN-173's grade (distance to its exit), and a flat as wide as a window (8,160 cells) rises 8 cm, under the uphill
+/// step (`UPHILL_M`). The spikes' 1e-3 m lifted a flat 1 m over 1,000 cells, and R3a's coastal flats drained onto land up to 2.44 m higher. It is the smallest grade whose regrade step
+/// (1e-6 of the grade) stays above the f64 spacing of heights up to about 9 km; the basin grade (1e-7 m) left a cell with no lower neighbour on B's R3a store.
+pub const ROUTE_EPSILON_M: f64 = 1.0e-5;
+/// The routing's flood (lead #185c): the canonical flood with GEN-173's Euclidean grade of the flats.
+pub const ROUTE_RULES: RoundRules = RoundRules { clip_mfd: MfdClip::Off, canonical_flood: true };
 /// A cell lies in a basin when the basin flood stands more than this above it (a flat graded at 1e-7 m a cell reaches it only after 10,000 cells).
 pub const BASIN_WET_M: f64 = 1.0e-3;
 /// SPIKE-114's reference: a river cell in a pit of the routing's flood standing more than 5 cm above it, with no depth or cell limit.
@@ -1080,7 +1084,7 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         input.surface
     };
     let outlet: Vec<bool> = (0..n).map(|c| input.outlet[c] || drained(c)).collect();
-    let (routing, route_filled) = route_rules_filled(g, z, &outlet, ROUTE_EPSILON_M, input.seed, 0.0, None, RoundRules::default());
+    let (routing, route_filled) = route_rules_filled(g, z, &outlet, ROUTE_EPSILON_M, input.seed, 0.0, None, ROUTE_RULES);
     let area = areas(g, &routing);
     let river: Vec<bool> = (0..n).map(|c| area[c] >= params.channel_area_m2 && z[c] > input.sea_level_m).collect();
     let (reference, _) = pits(g, z, &route_filled, REFERENCE_WET_M);
@@ -1161,7 +1165,7 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
     let ridge = ridge_cells(g, input.start, input.inside, input.sea_level_m);
     let ref_area = |r: &[f64]| {
         let rz: Vec<f64> = (0..n).map(|c| if drained(c) { r[c].min(input.sea_level_m - 1.0) } else { r[c] }).collect();
-        areas(g, &route_rules_filled(g, &rz, &outlet, ROUTE_EPSILON_M, input.seed, 0.0, None, RoundRules::default()).0)
+        areas(g, &route_rules_filled(g, &rz, &outlet, ROUTE_EPSILON_M, input.seed, 0.0, None, ROUTE_RULES).0)
     };
     let area_s0 = ref_area(input.start);
     let ridge_s0 = ridge_report(g, input.start, input.surface, &ridge, &area, &area_s0);
