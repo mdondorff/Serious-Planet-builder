@@ -1,0 +1,12 @@
+r1h: a = r1h-strahler-graph.txt, b = r1h-head-graph.txt
+263665 reaches in a, 263665 in b, 263665 common, 7457 with different areas
+last vertex: 7457 reaches that differ; b/a p10 0.732 p50 0.870 p90 0.956; lower 100.0 %
+first vertex: 7457 reaches that differ; b/a p10 0.003 p50 0.817 p90 1.000; lower 86.6 %
+r3a: a = r3a-def-graph.txt, b = r3a-head-graph.txt
+291975 reaches in a, 291975 in b, 291975 common, 16574 with different areas
+last vertex: 16574 reaches that differ; b/a p10 0.698 p50 0.859 p90 0.959; lower 100.0 %
+first vertex: 16574 reaches that differ; b/a p10 0.004 p50 0.798 p90 1.000; lower 85.3 %
+m1: a = m1-def-graph.txt, b = m1-head-graph.txt
+389082 reaches in a, 389082 in b, 389082 common, 17246 with different areas
+last vertex: 17246 reaches that differ; b/a p10 0.746 p50 0.865 p90 0.958; lower 100.0 %
+first vertex: 17246 reaches that differ; b/a p10 0.004 p50 0.825 p90 1.000; lower 86.5 %

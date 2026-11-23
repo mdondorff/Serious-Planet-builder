@@ -1058,3 +1058,145 @@ pub fn ridge_report(g: &Grid, reference: &[f64], surface: &[f64], ridge: &[bool]
     }
     r
 }
+
+/// A hump cut (G3-1, lead #186; after the hump-trench rule of lead #184's C8 count): a path of the cut is an 8-connected group of counted cells lowered by more than
+/// [`HUMP_LOWERED_M`] against `reference`; its two ends are the ends of its longest walk (a breadth-first search from its first cell finds the farthest cell, a second from
+/// there the other end; ties by cell index); the path cuts a hump when the reference along it rises more than [`HUMP_M`] above the higher of its ends and it is cut more
+/// than [`HUMP_M`] somewhere. (A neighbour count does not find the ends: a tip beside a bend has two lowered neighbours, and a channel two cells wide has none.)
+pub const HUMP_LOWERED_M: f64 = 0.25;
+pub const HUMP_M: f64 = 10.0;
+
+/// The hump cuts of `surface` against `reference` over the counted cells `inside`.
+pub fn hump_cuts(g: &Grid, reference: &[f64], surface: &[f64], inside: &[bool]) -> usize {
+    let (w, h) = (g.w(), g.h());
+    let lowered: Vec<bool> = (0..w * h).map(|c| inside[c] && reference[c] - surface[c] > HUMP_LOWERED_M).collect();
+    let mut seen = vec![false; w * h];
+    let mut count = 0usize;
+    let mut stack = Vec::new();
+    let mut group = Vec::new();
+    for s in 0..w * h {
+        if !lowered[s] || seen[s] {
+            continue;
+        }
+        seen[s] = true;
+        stack.push(s);
+        group.clear();
+        while let Some(c) = stack.pop() {
+            group.push(c);
+            for q in neighbours8(w, h, c) {
+                if lowered[q] && !seen[q] {
+                    seen[q] = true;
+                    stack.push(q);
+                }
+            }
+        }
+        let (mut max_cut, mut ref_max) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for &c in &group {
+            max_cut = max_cut.max(reference[c] - surface[c]);
+            ref_max = ref_max.max(reference[c]);
+        }
+        if max_cut <= HUMP_M {
+            continue;
+        }
+        group.sort_unstable();
+        let far = |from: usize, dist: &mut std::collections::HashMap<usize, usize>| {
+            dist.clear();
+            let mut queue = std::collections::VecDeque::from([from]);
+            dist.insert(from, 0);
+            let mut best = (0usize, from);
+            while let Some(c) = queue.pop_front() {
+                let d = dist[&c];
+                if d > best.0 || (d == best.0 && c < best.1) {
+                    best = (d, c);
+                }
+                for q in neighbours8(w, h, c) {
+                    if lowered[q] && !dist.contains_key(&q) {
+                        dist.insert(q, d + 1);
+                        queue.push_back(q);
+                    }
+                }
+            }
+            best.1
+        };
+        let mut dist = std::collections::HashMap::new();
+        let u = far(group[0], &mut dist);
+        let v = far(u, &mut dist);
+        count += usize::from(ref_max - reference[u].max(reference[v]) > HUMP_M);
+    }
+    count
+}
+
+/// Corner-only links over [`CORNER_M`] (G3-1, lead #186; lead #184's C8 count): 2 x 2 blocks of counted cells in which one diagonal pair stands more than this above both cells of
+/// the other pair, so the lower pair meets only at a corner.
+pub const CORNER_M: f64 = 5.0;
+
+/// The corner-only links of `z` over the blocks whose four cells are counted.
+pub fn corner_links(g: &Grid, z: &[f64], inside: &[bool]) -> usize {
+    let (w, h) = (g.w(), g.h());
+    let mut count = 0usize;
+    for y in 0..h.saturating_sub(1) {
+        for x in 0..w.saturating_sub(1) {
+            let (ia, ib, ic, id) = (y * w + x, y * w + x + 1, (y + 1) * w + x, (y + 1) * w + x + 1);
+            if !(inside[ia] && inside[ib] && inside[ic] && inside[id]) {
+                continue;
+            }
+            let (a, b, c, d) = (z[ia], z[ib], z[ic], z[id]);
+            count += usize::from(b.min(c) - a.max(d) > CORNER_M || a.min(d) - b.max(c) > CORNER_M);
+        }
+    }
+    count
+}
+
+fn neighbours8(w: usize, h: usize, c: usize) -> impl Iterator<Item = usize> {
+    let (x, y) = ((c % w) as i64, (c / w) as i64);
+    [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)].into_iter().filter_map(move |(dx, dy)| {
+        let (nx, ny) = (x + dx, y + dy);
+        (nx >= 0 && ny >= 0 && nx < w as i64 && ny < h as i64).then(|| ny as usize * w + nx as usize)
+    })
+}
+
+/// The humps of a reference removed by a surface (G3-1, lead review of #1648; reported beside the hump cuts, not barred): a hump crest is a counted cell of the reference at
+/// least [`HUMP_M`] above both cells [`RIDGE_STEP`] away along a face axis or a diagonal; a hump is an 8-connected group of crest cells; it is removed when the surface lies more
+/// than [`HUMP_M`] under the reference at one of its crest cells. Returns (humps, removed). The trench measure ([`hump_cuts`]) sees a channel cut through a hump; this one also
+/// sees a hump lowered as a whole.
+pub fn humps_removed(g: &Grid, reference: &[f64], surface: &[f64], inside: &[bool]) -> (usize, usize) {
+    let (w, h) = (g.w(), g.h());
+    let (wi, hi) = (w as i64, h as i64);
+    let s = RIDGE_STEP;
+    let at = |x: i64, y: i64| (x >= 0 && y >= 0 && x < wi && y < hi).then(|| reference[(y * wi + x) as usize]);
+    let crest: Vec<bool> = (0..w * h)
+        .map(|c| {
+            if !inside[c] {
+                return false;
+            }
+            let (x, y, z) = ((c % w) as i64, (c / w) as i64, reference[c]);
+            [(1, 0), (0, 1), (1, 1), (1, -1)].iter().any(|&(dx, dy)| match (at(x - s * dx, y - s * dy), at(x + s * dx, y + s * dy)) {
+                (Some(a), Some(b)) => z - a >= HUMP_M && z - b >= HUMP_M,
+                _ => false,
+            })
+        })
+        .collect();
+    let mut seen = vec![false; w * h];
+    let (mut humps, mut removed) = (0usize, 0usize);
+    let mut stack = Vec::new();
+    for st in 0..w * h {
+        if !crest[st] || seen[st] {
+            continue;
+        }
+        humps += 1;
+        seen[st] = true;
+        stack.push(st);
+        let mut lowered = false;
+        while let Some(c) = stack.pop() {
+            lowered |= reference[c] - surface[c] > HUMP_M;
+            for q in neighbours8(w, h, c) {
+                if crest[q] && !seen[q] {
+                    seen[q] = true;
+                    stack.push(q);
+                }
+            }
+        }
+        removed += usize::from(lowered);
+    }
+    (humps, removed)
+}
