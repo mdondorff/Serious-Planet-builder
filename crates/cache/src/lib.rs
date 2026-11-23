@@ -19,6 +19,7 @@ pub mod layer_l;
 pub mod layer_manifest;
 pub mod layer_store;
 pub mod layer_tiles;
+pub mod look_sheet;
 pub mod meshpack;
 pub mod pack;
 pub mod region_bake;
