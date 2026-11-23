@@ -1,0 +1,1 @@
+final: corner-only 2x2 blocks over 2 / 5 / 10 m:    1172 /     260 /     63; of the 5 m ones touching a KS-lowered cell 55 %
