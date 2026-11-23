@@ -108,6 +108,8 @@ pub struct GraphReport {
     /// Trunk reaches (H1, or L with a parent) and those whose `down` node is held, neither an outlet nor left by a reach (a break).
     pub trunk_reaches: usize,
     pub trunk_breaks: usize,
+    /// G3-1 (lead #186, A6): trunk reaches flagged `rise_over_budget` or `budget_residual` (the trunk profile's exceptions).
+    pub trunk_exceptions: usize,
     /// Bed profile: reaches whose bed rises above its running minimum somewhere (exception vertices included), the largest such rise (m), and the validator's rises outside exceptions.
     pub bed_rise_reaches: usize,
     pub bed_residual_max_m: f64,
@@ -149,6 +151,10 @@ pub struct Agreement {
     pub routed_kept: usize,
     pub routed_above_head: usize,
     pub graph_kept: usize,
+    /// G3-1 (diagnostic): the graph cells of the share (`graph`) that lie on no land of the measured surface (at or under the sea: a bed cut under the sea, a reach's mouth), and
+    /// those of them without a routed cell within 1 cell; the routed side counts land only.
+    pub graph_sea: usize,
+    pub graph_sea_missed: usize,
 }
 
 /// The river steps inside kept-basin interiors (lead #166): a kept basin (`protected_surface`) whose floor cell lies in a depression of the measured surface holds that depression. Its river steps (BUILD-057's, either end inside the interior) and their uphill ones are counted apart from the uphill bar.
@@ -305,6 +311,7 @@ pub fn graph_report(g: &Graph, window: &Window, inside: &[bool], land: &[bool], 
     }
     for x in g.reaches.iter().filter(|x| x.level == Level::H1 || x.parent.is_some()) {
         r.trunk_reaches += 1;
+        r.trunk_exceptions += usize::from(x.has_exception(Reason::RiseOverBudget) || x.has_exception(Reason::BudgetResidual));
         if let Some(k) = kind.get(&x.down) {
             if !k.is_outlet() && !out.contains_key(&x.down) && !k.is_marker() {
                 r.trunk_breaks += 1;
@@ -420,22 +427,44 @@ fn dilate(m: &[bool], w: usize, h: usize) -> Vec<bool> {
     out
 }
 
-/// The kept-basin interiors on the window (lead #166; [`KeptReport`]): `label` the gate's depression of each cell on the measured surface (BUILD-057's basin flood, `u32::MAX` dry); an
-/// interior is every cell of a depression that holds a kept basin's floor cell. Returns per cell whether it lies in one, and the number of kept basins whose floor lies in a depression.
-pub fn kept_interiors(g: &Graph, window: &Window, label: &[u32]) -> (Vec<bool>, usize) {
-    let mut held = BTreeSet::new();
+/// The kept-basin interiors on the window (lead #166, #186; G3-1, #182c; [`KeptReport`]): a kept basin's (`protected_surface`) lake is the cells of the measured surface `z`
+/// under its recorded spill (`spill_m`) joined (8-connected) to its floor cell inside the depression that holds the floor (`label`, the gate's basin flood; `u32::MAX` dry):
+/// a rim cut under the spill, or a drained or outlet cell, does not let the lake run on; a floor at or above its spill, or in no depression, holds no lake. Returns per cell
+/// whether it lies in one, and the number of kept basins whose floor lies in the window under its spill and in a depression.
+pub fn kept_interiors(g: &Graph, window: &Window, z: &[f64], label: &[u32]) -> (Vec<bool>, usize) {
+    let (w, h) = (window.w, window.h);
+    let mut kept = vec![false; z.len()];
     let mut basins = 0usize;
-    for b in g.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface) {
-        if let Some(f) = window.cell(b.floor_cell).filter(|&f| label[f] != u32::MAX) {
-            held.insert(label[f]);
-            basins += 1;
+    let mut stack = Vec::new();
+    // the basin that last entered each cell: a cell another basin's lake already holds is entered again, so each basin's lake is its own region
+    let mut stamp = vec![usize::MAX; z.len()];
+    for (k, b) in g.basins.iter().enumerate().filter(|(_, b)| b.represented == Represented::ProtectedSurface) {
+        let Some(f) = window.cell(b.floor_cell).filter(|&f| z[f] < b.spill_m && label[f] != u32::MAX) else { continue };
+        let depression = label[f];
+        basins += 1;
+        stamp[f] = k;
+        stack.push(f);
+        while let Some(c) = stack.pop() {
+            kept[c] = true;
+            let (x, y) = ((c % w) as i64, (c / w) as i64);
+            for (dx, dy) in [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
+                let (nx, ny) = (x + dx, y + dy);
+                if nx < 0 || ny < 0 || nx >= w as i64 || ny >= h as i64 {
+                    continue;
+                }
+                let q = ny as usize * w + nx as usize;
+                if z[q] < b.spill_m && label[q] == depression && stamp[q] != k {
+                    stamp[q] = k;
+                    stack.push(q);
+                }
+            }
         }
     }
-    (label.iter().map(|l| *l != u32::MAX && held.contains(l)).collect(), basins)
+    (kept, basins)
 }
 
 /// BUILD-060 (lead #182a, 2026-11-23): the `lake_inlet` nodes inside the window by origin (a line's end, some reach's `down`; a basin's spill target, some basin's `spill_node`),
-/// and the ones the gate holds to a kept basin: a line-end inlet whose anchor lies in no kept-basin depression of `label` ([`kept_interiors`]). A spill target between
+/// and the ones the gate holds to a kept basin: a line-end inlet whose anchor lies in no kept-basin lake on `z` ([`kept_interiors`]). A spill target between
 /// reported basins is a hierarchy record and is not held to it; an inlet that is neither is an orphan (GEN-189's graph rule).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct InletReport {
@@ -448,8 +477,8 @@ pub struct InletReport {
     pub line_end_no_basin_far: usize,
 }
 
-pub fn inlets_without_basin(g: &Graph, window: &Window, label: &[u32]) -> InletReport {
-    let (kept, _) = kept_interiors(g, window, label);
+pub fn inlets_without_basin(g: &Graph, window: &Window, z: &[f64], label: &[u32]) -> InletReport {
+    let (kept, _) = kept_interiors(g, window, z, label);
     let (w, h) = (window.w as i64, window.h as i64);
     let downs: BTreeSet<u64> = g.reaches.iter().map(|r| r.down).collect();
     let spills: BTreeSet<u64> = g.basins.iter().map(|b| b.spill_node).collect();
@@ -538,10 +567,15 @@ pub fn agreement(
     threshold_m2: f64,
 ) -> Agreement {
     let n = window.w * window.h;
+    // every rasterised cell (the routed side's match), and those whose reach drains at least the threshold there (the graph side's cells, G3-1: a 75 km2 share counts
+    // the graph's 75 km2 network, not its 1 km2 tributaries)
+    let by_id: BTreeMap<u64, &planet_generators::bake::river_graph::Reach> = g.reaches.iter().map(|r| (r.id, r)).collect();
     let mut graph = vec![false; n];
-    for &cell in rasterise(g).keys() {
+    let mut graph_at = vec![false; n];
+    for (&cell, &(id, k)) in rasterise(g).iter() {
         if let Some(c) = window.cell(cell) {
             graph[c] = true;
+            graph_at[c] = by_id.get(&id).and_then(|r| r.attrs.a_geo.get(k)).is_some_and(|&a| a >= threshold_m2);
         }
     }
     let mut head = vec![false; n];
@@ -590,12 +624,16 @@ pub fn agreement(
                 }
             }
         }
-        if graph[c] {
+        if graph_at[c] {
             if kept[c] {
                 a.graph_kept += 1;
             } else {
                 a.graph += 1;
                 a.graph_agree += usize::from(rd[c]);
+                if !land[c] {
+                    a.graph_sea += 1;
+                    a.graph_sea_missed += usize::from(!rd[c]);
+                }
             }
         }
     }
@@ -767,6 +805,7 @@ impl G2Report {
             push("g_sources_open", g.sources_open.to_string(), Correctness);
             push("g_trunk_reaches", g.trunk_reaches.to_string(), Correctness);
             push("g_trunk_breaks", g.trunk_breaks.to_string(), Correctness);
+            push("g_trunk_exceptions", g.trunk_exceptions.to_string(), Correctness);
             push("g_conservation_breaks", g.violations.get("conservation_break").copied().unwrap_or(0).to_string(), Correctness);
             push("g_bed_rises", g.bed_rises.to_string(), Correctness);
             push("g_bed_rise_reaches", g.bed_rise_reaches.to_string(), Correctness);
@@ -803,6 +842,8 @@ impl G2Report {
             push(&format!("{p}_routed_kept"), a.routed_kept.to_string(), Correctness);
             push(&format!("{p}_routed_above_head"), a.routed_above_head.to_string(), Correctness);
             push(&format!("{p}_graph_kept"), a.graph_kept.to_string(), Correctness);
+            push(&format!("{p}_graph_sea"), a.graph_sea.to_string(), Correctness);
+            push(&format!("{p}_graph_sea_missed"), a.graph_sea_missed.to_string(), Correctness);
         }
         if let Some(k) = &self.kept {
             push("kept_basins", k.basins.to_string(), Correctness);
@@ -1103,6 +1144,10 @@ pub fn read_stages(dir: &Path, n: usize) -> Result<(Vec<StageField>, Option<usiz
 /// missing basin spill nodes, each pass or fail.
 pub const UPHILL_MAX_PCT: f64 = 1.0;
 pub const AGREE_MIN_PCT: f64 = 90.0;
+/// The share of trunk reaches flagged `rise_over_budget` or `budget_residual`, at most this (percent; G3-1, lead #186, A6: proposed for the owner, O10).
+pub const TRUNK_EXCEPTIONS_MAX_PCT: f64 = 1.0;
+/// The share of routed river cells above a graph head (`routed_above_head` over the routed cells with them), at most this (percent; G3-1, lead #186: proposed for the owner, O10).
+pub const ABOVE_HEAD_MAX_PCT: f64 = 10.0;
 /// The corridor bar outside mountain windows, and on a mountain window (M1).
 pub const CORRIDOR_MIN_PCT: f64 = 97.5;
 pub const CORRIDOR_MIN_PCT_MOUNTAIN: f64 = 95.0;
@@ -1142,13 +1187,20 @@ pub fn g2_bars(g2: &G2Report, uphill_pct: f64, corridor_pct: f64, corridor_min_p
         bar("bar_uphill".into(), uphill_pct, UPHILL_MAX_PCT, true, Correctness),
     ];
     for a in &g2.agreement {
-        let pct = 100.0 * a.routed_agree as f64 / a.routed.max(1) as f64;
+        // G3-1 (lead #186, A4): the lower of the routed and the graph share; a side with no cells has nothing to miss
+        let share = |hit: usize, all: usize| if all == 0 { 100.0 } else { 100.0 * hit as f64 / all as f64 };
+        let pct = share(a.routed_agree, a.routed).min(share(a.graph_agree, a.graph));
         out.push(bar(format!("bar_agree_{}km2", a.threshold_km2), pct, AGREE_MIN_PCT, false, Correctness));
+        let above = 100.0 * a.routed_above_head as f64 / (a.routed + a.routed_above_head).max(1) as f64;
+        out.push(bar(format!("bar_above_head_{}km2", a.threshold_km2), above, ABOVE_HEAD_MAX_PCT, true, Correctness));
     }
     // lead 2026-11-21: the f64 validator's overruns and raises are graph-row violations too
     let validator = g2.budget.as_ref().and_then(|b| b.validator_overrun).unwrap_or(0);
     out.push(bar("bar_violations".into(), (g.violations.values().sum::<usize>() + validator) as f64, 0.0, true, Correctness));
     out.push(bar("bar_spill_missing".into(), g.basin_spill_missing as f64, 0.0, true, Correctness));
+    // G3-1 (A6): the trunk profile's exceptions as a share of the trunk reaches, beside the corridor
+    let exc = 100.0 * g.trunk_exceptions as f64 / g.trunk_reaches.max(1) as f64;
+    out.push(bar("bar_trunk_exceptions".into(), exc, TRUNK_EXCEPTIONS_MAX_PCT, true, Correctness));
     out
 }
 
