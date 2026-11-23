@@ -505,13 +505,250 @@ fn data_paths_all_writable(norm_cmd: &str, occs: &[usize]) -> bool {
     })
 }
 
+/// Split a command line into segments on unquoted command separators (`;`, `\n`, `\r`, `|`, `&`, `(`, `)`, `` ` ``).
+/// Keeps `'...'` and `"..."` literals intact (honoring `\"` and `\\` inside double quotes on Windows paths).
+fn split_shell_segments(cmd: &str) -> Vec<&str> {
+    let bytes = cmd.as_bytes();
+    let mut out = Vec::new();
+    let mut start = 0usize;
+    let mut i = 0usize;
+    let mut in_single = false;
+    let mut in_double = false;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if in_single {
+            if b == b'\'' {
+                in_single = false;
+            }
+            i += 1;
+            continue;
+        }
+        if in_double {
+            if b == b'\\' && matches!(bytes.get(i + 1), Some(b'"' | b'\\')) {
+                i += 2;
+                continue;
+            }
+            if b == b'"' {
+                in_double = false;
+            }
+            i += 1;
+            continue;
+        }
+        match b {
+            b'\'' => {
+                in_single = true;
+                i += 1;
+            }
+            b'"' => {
+                in_double = true;
+                i += 1;
+            }
+            b';' | b'\n' | b'\r' | b'|' | b'&' | b'(' | b')' | b'`' => {
+                let seg = cmd[start..i].trim();
+                if !seg.is_empty() {
+                    out.push(seg);
+                }
+                i += 1;
+                start = i;
+            }
+            _ => i += 1,
+        }
+    }
+    let tail = cmd[start..].trim();
+    if !tail.is_empty() {
+        out.push(tail);
+    }
+    out
+}
+
+/// Tokenize one shell segment into unquoted arguments, collapsing surrounding quotes within each argument.
+fn shell_tokens(seg: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut has_token = false;
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut chars = seg.chars().peekable();
+    while let Some(c) = chars.next() {
+        if in_single {
+            if c == '\'' {
+                in_single = false;
+            } else {
+                cur.push(c);
+            }
+            continue;
+        }
+        if in_double {
+            if c == '\\' && matches!(chars.peek(), Some('"' | '\\')) {
+                if let Some(escaped) = chars.next() {
+                    cur.push(escaped);
+                }
+            } else if c == '"' {
+                in_double = false;
+            } else {
+                cur.push(c);
+            }
+            continue;
+        }
+        if c.is_ascii_whitespace() {
+            if has_token {
+                out.push(std::mem::take(&mut cur));
+                has_token = false;
+            }
+            continue;
+        }
+        has_token = true;
+        match c {
+            '\'' => in_single = true,
+            '"' => in_double = true,
+            _ => cur.push(c),
+        }
+    }
+    if has_token {
+        out.push(cur);
+    }
+    out
+}
+
+fn normalized_bin_name(tok: &str) -> String {
+    let slash = tok.replace('\\', "/");
+    let base = slash.rsplit_once('/').map_or(slash.as_str(), |(_, r)| r);
+    let low = base.to_ascii_lowercase();
+    low.strip_suffix(".exe").unwrap_or(&low).to_string()
+}
+
+fn git_push_deny_reason(tokens: &[String]) -> Option<Decision> {
+    let mut positionals: Vec<String> = Vec::new();
+    let mut end_of_opts = false;
+    let mut i = 0usize;
+    while i < tokens.len() {
+        let low = tokens[i].to_ascii_lowercase();
+        if !end_of_opts && low == "--" {
+            end_of_opts = true;
+            i += 1;
+            continue;
+        }
+        if !end_of_opts && low.starts_with('-') {
+            let short_force = !low.starts_with("--") && !low.starts_with("-o") && low.as_bytes()[1..].contains(&b'f');
+            if short_force
+                || matches!(low.as_str(), "-f" | "--force" | "--force-with-lease" | "--force-if-includes" | "--mirror" | "--all" | "--tags")
+                || low.starts_with("--force-with-lease=")
+                || low.starts_with("--force-if-includes=")
+            {
+                return Some(Decision::deny("Guardrail: force-push, --all, --mirror, and --tags are forbidden (CLAUDE.md / GEMINI.md)."));
+            }
+            if matches!(low.as_str(), "-o" | "--push-option" | "--repo" | "--receive-pack" | "--exec" | "--upload-pack") {
+                i += 2;
+                continue;
+            }
+            i += 1;
+            continue;
+        }
+        positionals.push(low);
+        i += 1;
+    }
+
+    if positionals.len() < 2 {
+        return Some(Decision::deny(
+            "Guardrail: bare 'git push' without an explicit feature-branch refspec is blocked; use 'git push -u origin change/<id>'.",
+        ));
+    }
+
+    for refspec in &positionals[1..] {
+        if refspec.starts_with('+') {
+            return Some(Decision::deny("Guardrail: force-push refspec ('+...') is forbidden (CLAUDE.md / GEMINI.md)."));
+        }
+        let dst = refspec.rsplit_once(':').map_or(refspec.as_str(), |(_, d)| d);
+        let branch = dst.strip_prefix("refs/heads/").or_else(|| dst.strip_prefix("refs/remotes/origin/")).unwrap_or(dst);
+        if branch.is_empty() || matches!(branch, "main" | "master" | "head") {
+            return Some(Decision::deny(
+                "Guardrail: direct 'git push' to 'main' (or 'master') is forbidden; push to a feature branch (e.g. 'change/<id>') and merge via 'gh pr merge --squash'.",
+            ));
+        }
+    }
+    None
+}
+
+fn check_git_or_gh_segment(tokens: &[String]) -> Option<Decision> {
+    let mut i = 0usize;
+    while let Some(tok) = tokens.get(i) {
+        let low = tok.to_ascii_lowercase();
+        if low == "env" || low == "command" || (!low.starts_with('-') && low.contains('=')) {
+            i += 1;
+            continue;
+        }
+        break;
+    }
+    let bin_tok = tokens.get(i)?;
+    let bin = normalized_bin_name(bin_tok);
+    i += 1;
+
+    if bin == "gh" {
+        let mut subcmd: Option<String> = None;
+        while let Some(tok) = tokens.get(i) {
+            let low = tok.to_ascii_lowercase();
+            if low.starts_with('-') {
+                if matches!(low.as_str(), "-r" | "--repo" | "--hostname") {
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+                continue;
+            }
+            subcmd = Some(low);
+            i += 1;
+            break;
+        }
+        if subcmd.as_deref() == Some("repo") {
+            while let Some(tok) = tokens.get(i) {
+                let low = tok.to_ascii_lowercase();
+                if low.starts_with('-') {
+                    i += 1;
+                    continue;
+                }
+                if matches!(low.as_str(), "delete" | "archive") {
+                    return Some(Decision::deny("Guardrail: repo deletion/archiving via gh is forbidden (CLAUDE.md / GEMINI.md)."));
+                }
+                break;
+            }
+        }
+        return None;
+    }
+
+    if bin == "git" {
+        let mut subcmd: Option<String> = None;
+        while let Some(tok) = tokens.get(i) {
+            let low = tok.to_ascii_lowercase();
+            if low.starts_with('-') {
+                if matches!(low.as_str(), "-c" | "--git-dir" | "--work-tree" | "--namespace" | "--super-prefix" | "--config-env") {
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+                continue;
+            }
+            subcmd = Some(low);
+            i += 1;
+            break;
+        }
+        if subcmd.as_deref() == Some("push") {
+            return git_push_deny_reason(&tokens[i..]);
+        }
+    }
+    None
+}
+
 fn evaluate_command(raw_cmd: &str, ctx: &GuardContext) -> Decision {
+    for seg in split_shell_segments(raw_cmd) {
+        let tokens = shell_tokens(seg);
+        if let Some(decision) = check_git_or_gh_segment(&tokens) {
+            return decision;
+        }
+    }
+
     let norm = raw_cmd.replace('\\', "/").to_ascii_lowercase();
     let compact = norm.split_whitespace().collect::<Vec<_>>().join(" ");
 
-    if compact.contains("git push --force") || compact.contains("git push -f") || compact.contains("gh repo delete") {
-        return Decision::deny("Guardrail: force-push and repo deletion are forbidden (CLAUDE.md / GEMINI.md).");
-    }
     if compact.contains("cargo xtask perf") || (compact.contains("xtask") && has_word(&compact, "perf")) {
         return Decision::deny("Guardrail: cargo xtask perf on Rasierklinge requires a coordinated perf window (ADR 0020).");
     }
@@ -717,5 +954,52 @@ mod tests {
         let d = Decision::deny("quote \"here\" and \\slash\nline2");
         let j = d.to_json();
         assert!(j.contains(r#"quote \"here\" and \\slash\nline2"#), "{j}");
+    }
+
+    // spec: BUILD-062
+    #[test]
+    fn git_push_blocks_direct_main_bare_and_force_while_allowing_feature_branches_and_commit_messages() {
+        let ctx = GuardContext::default();
+        for allowed in [
+            r"git push -u origin change/xtask-guard",
+            r"git push origin change/main-stem-fix",
+            r"git push origin main-stem-fix",
+            r"git push origin HEAD:change/feature",
+            r"git push origin --delete change/old-branch",
+            r"git -C c:/dev/ag2_serious-planet-builder push -u origin change/ok",
+            r#"git commit -m "guard: block git push origin main and git push --force""#,
+            r"gh pr merge 1622 --squash --delete-branch",
+        ] {
+            let d = evaluate(&hook("run_command", "CommandLine", allowed), &ctx);
+            assert_eq!(d, Decision::allow(), "expected allow for {allowed}: {d:?}");
+        }
+
+        for denied in [
+            r"git push",
+            r"git push origin",
+            r"git push origin main",
+            r"git push -u origin main",
+            r"git push origin HEAD",
+            r"git push origin HEAD:main",
+            r"git push origin HEAD:refs/heads/main",
+            r"git push origin change/foo:main",
+            r"git push origin :main",
+            r"git push origin --delete main",
+            r"git push --force origin change/foo",
+            r"git push -f origin change/foo",
+            r"git push -uf origin change/foo",
+            r"git push --force-with-lease origin change/foo",
+            r"git push --all origin",
+            r"git push --tags origin",
+            r"git push origin +change/foo",
+            r"git -C c:/dev/ag2_serious-planet-builder push origin main",
+            r"git status; git push origin main",
+            r"& git push origin main",
+            r"gh repo delete mdondorff/Serious-Planet-builder",
+            r"gh repo archive mdondorff/Serious-Planet-builder",
+        ] {
+            let d = evaluate(&hook("run_command", "CommandLine", denied), &ctx);
+            assert_eq!(d.kind, DecisionKind::Deny, "expected deny for {denied}: {d:?}");
+        }
     }
 }

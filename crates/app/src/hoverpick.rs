@@ -2,19 +2,29 @@
 //! block nobody has touched decodes the block (30 to 120 ms), and a frame that waited for it was a stall. One thread of its own runs the pick against a
 //! field it makes itself; the frame takes the last pick that finished and asks for the next, so the hover lags by a pick, never waits for one.
 
+use planet_editor::ruler::CursorReadout;
 use planet_frame::pick::{PickLimits, Ray, SurfaceHit};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
 
-/// What a pick needs to run: the ray and the limits; it makes the field it picks against.
+/// Surface pick result plus off-thread local slope and coordinate readout (VIEW-059, VIEW-076).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HoverSample {
+    pub hit: SurfaceHit,
+    pub readout: CursorReadout,
+}
+
+/// Legacy hit-only pick callback.
 pub type PickSource = Arc<dyn Fn(Ray, PickLimits) -> Option<SurfaceHit> + Send + Sync>;
+/// Pick callback returning both surface hit and finite-difference local slope readout off the main thread.
+pub type SampleSource = Arc<dyn Fn(Ray, PickLimits) -> Option<HoverSample> + Send + Sync>;
 
 type Request = (Ray, PickLimits);
 /// A finished pick: the epoch it started in and what it found.
-type Finished = Option<(u64, Option<SurfaceHit>)>;
+type Finished = Option<(u64, Option<HoverSample>)>;
 
-/// A pick thread and the last hit it found.
+/// A pick thread and the last hit/sample it found.
 pub struct HoverPicker {
     tx: Sender<(u64, Request)>,
     /// The last finished pick, with the epoch it started in.
@@ -22,12 +32,22 @@ pub struct HoverPicker {
     busy: Arc<AtomicBool>,
     /// Counts the clears: a pick that started before one is dropped.
     epoch: Arc<AtomicU64>,
-    last: Option<SurfaceHit>,
+    last: Option<HoverSample>,
 }
 
 impl HoverPicker {
-    /// The thread ends when the picker is dropped.
+    /// Starts a hover picker from a hit-only callback (zero extra reads; slope reported as 0).
     pub fn new(source: PickSource) -> HoverPicker {
+        Self::with_samples(Arc::new(move |ray, limits| {
+            let hit = source(ray, limits)?;
+            let point = planet_editor::polyline::GeoPoint::of_dir(hit.dir).canonical();
+            let readout = CursorReadout { point, height_m: hit.height_m, gradient: 0.0, slope_deg: 0.0, over_limit: false };
+            Some(HoverSample { hit, readout })
+        }))
+    }
+
+    /// Starts a hover picker from a callback yielding full [`HoverSample`] data off the main thread.
+    pub fn with_samples(source: SampleSource) -> HoverPicker {
         let (tx, rx) = channel::<(u64, Request)>();
         let done: Arc<Mutex<Finished>> = Arc::new(Mutex::new(None));
         let busy = Arc::new(AtomicBool::new(false));
@@ -46,8 +66,8 @@ impl HoverPicker {
         HoverPicker { tx, done, busy, epoch, last: None }
     }
 
-    /// One frame: the last pick that finished is the hit; when none is running, `request` (this frame's ray) starts the next.
-    pub fn poll(&mut self, request: Request) -> Option<SurfaceHit> {
+    /// One frame: the last pick that finished is the sample; when none is running, `request` (this frame's ray) starts the next.
+    pub fn poll_sample(&mut self, request: Request) -> Option<HoverSample> {
         if let Some((started, hit)) = self.done.lock().expect("hover pick slot").take() {
             if started == self.epoch.load(Ordering::Acquire) {
                 self.last = hit;
@@ -57,6 +77,11 @@ impl HoverPicker {
             self.busy.store(false, Ordering::Release);
         }
         self.last
+    }
+
+    /// One frame: the last hit that finished (backwards-compatible wrapper around [`HoverPicker::poll_sample`]).
+    pub fn poll(&mut self, request: Request) -> Option<SurfaceHit> {
+        self.poll_sample(request).map(|s| s.hit)
     }
 
     /// The pointer is not over the world: no hit, and a pick that started before this is dropped when it finishes.
@@ -131,5 +156,32 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
         assert_eq!(picker.poll(request()), None, "the pick that started before the clear is not the hit");
+    }
+
+    // spec: VIEW-076
+    #[test]
+    fn with_samples_delivers_surface_hit_and_slope_readout_off_thread() {
+        let source: SampleSource = Arc::new(move |_, _| {
+            let hit = hit(12.0);
+            let readout = CursorReadout {
+                point: planet_editor::polyline::GeoPoint::new(10.0, 20.0),
+                height_m: 450.0,
+                gradient: 1.25,
+                slope_deg: 51.3,
+                over_limit: true,
+            };
+            Some(HoverSample { hit, readout })
+        });
+        let mut picker = HoverPicker::with_samples(source);
+        let start = std::time::Instant::now();
+        let got = loop {
+            if let Some(s) = picker.poll_sample(request()) {
+                break s;
+            }
+            assert!(start.elapsed() < std::time::Duration::from_secs(5), "sample never arrived");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        };
+        assert_eq!(got.hit.distance_m, 12.0);
+        assert!(got.readout.over_limit && got.readout.slope_deg > 50.0);
     }
 }

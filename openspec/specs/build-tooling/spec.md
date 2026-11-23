@@ -811,6 +811,17 @@ Source: Architect 2026-11-10 (the `look-2km` smoke took 248 s beside nine heavy 
 - **WHEN** `.config/nextest.toml` is read
 - **THEN** one override with `platform = 'cfg(windows)'` names those tests, sets `test-group = "warp-heavy"` and sets no slow-timeout
 
+### Requirement: BUILD-050 The build environment is pinned
+`rust-toolchain.toml` SHALL name one exact Rust release (X.Y.Z, never a channel name), and every `dtolnay/rust-toolchain` step of `.github/workflows/ci.yml` SHALL install that release. `Cargo.lock` SHALL be committed and not ignored. No build file (`.cargo/config.toml`, a `Cargo.toml`, the CI workflow) SHALL set a target CPU, a target feature, a fast-math style flag or `RUSTFLAGS`; the build profile stays as `Cargo.toml` defines it.
+
+Verify: A
+Status: active
+Source: Architect 2026-11-11 (ADR 0114 point 6; external review condition 2), owner 2026-11-12 (audit lists: every approved list a queue row), BUILD-005
+
+#### Scenario: The pin
+- **WHEN** the repository files are read
+- **THEN** the toolchain is one exact release, every CI toolchain step names it, `Cargo.lock` is committed, and no file sets a target CPU, feature or fast-math flag; a moving `stable` in CI, a missing `Cargo.lock` or a `target-cpu` line fails the test naming the file and the line
+
 ### Requirement: BUILD-052 K7 changes report their difference from an alternate tile layout
 `cargo xtask k7-layout` SHALL run K7 on the region bake fixture under the canonical layout and the alternate layout (twice the tile side, same halo), unquantised, and SHALL print: cells differing in bits and their share, p50, p99 and maximum height difference in metres, and the cells over 0.25 m and over 1 m, in total, on and off the channel lines, and for all cells by distance to the nearest alternate seam (0 to 7, 8 to 31, 32 to 127, 128 or more cells). `cargo xtask prepush` SHALL run it when the diff touches K7, print the committed baseline beside it, and `REVIEW` above twice the baseline p99 or maximum. The exit code SHALL be 0.
 
@@ -1108,15 +1119,15 @@ Detail:
 - **THEN** the table's `s0` line ends `stale`, the 10 m width is open, the final profile is tabled as missing, and without `--face` the command is refused naming `--face F` (TEST-141)
 
 ### Requirement: BUILD-062 Companion agent guardrails and unified ID allocator
-`cargo xtask agent-guard` SHALL read a `PreToolUse` JSON payload on stdin and emit a JSON decision (`allow`, `deny`, or `force_ask`) enforcing read-only sibling workspaces, zoned writes under `SeriousPlanetData` (`tmp/heavy/**`, `tmp/ag2/**`, `lanes/ag2-*.md`), protected repository files, zero script files (`BUILD-002`), and yielding cargo runs while `quiet` or an exclusive machine lock is active. `cargo xtask next-id <PREFIX|ADR|SPIKE>` SHALL scan `openspec/`, `docs/`, and optional lane files to print the next contiguous `max + 1` identifier. `.agents/**` SHALL match `.claude/**` in `DOCS_PATTERNS` across both GitHub workflows and `prbody`.
+`cargo xtask agent-guard` SHALL read a `PreToolUse` JSON payload on stdin and emit a JSON decision (`allow`, `deny`, or `force_ask`) enforcing read-only sibling workspaces, zoned writes under `SeriousPlanetData` (`tmp/heavy/**`, `tmp/ag2/**`, `lanes/ag2-*.md`), protected repository files, zero script files (`BUILD-002`), yielding cargo runs while `quiet` or an exclusive machine lock is active, and blocking direct `git push` to `main`/`master`, bare `git push`, force-pushes, and repository deletion while allowing explicit feature-branch pushes and commit messages. `cargo xtask next-id <PREFIX|ADR|SPIKE>` SHALL scan `openspec/`, `docs/`, and optional lane files to print the next contiguous `max + 1` identifier. `.agents/**` SHALL match `.claude/**` in `DOCS_PATTERNS` across both GitHub workflows and `prbody`.
 
 Verify: A
 Status: active
 Source: ADR 0128 (proposed), CON-25, BUILD-002, BUILD-026, BUILD-044
 
 #### Scenario: Companion guardrails and sequential ID allocation
-- **WHEN** `agent-guard` receives writes targeting a read-only sibling repo, an unapproved `SeriousPlanetData` path, or `cargo xtask check` while `quiet` is active, and `next-id` scans specs, lanes, and open PRs
-- **THEN** read-only paths, unapproved data paths, and `cargo` under `quiet` or `exclusive` are denied, owned paths allow, and `next-id` prints `max + 1`
+- **WHEN** `agent-guard` receives writes targeting a read-only sibling repo, an unapproved `SeriousPlanetData` path, `cargo xtask check` while `quiet` is active, a direct `git push` to `main`/`master`, a bare `git push`, or a force-push, and `next-id` scans specs, lanes, and open PRs
+- **THEN** read-only paths, unapproved data paths, direct/bare/force pushes, and `cargo` under `quiet` or `exclusive` are denied, explicit feature-branch pushes, commit messages, and owned paths allow, and `next-id` prints `max + 1`
 
 ### Requirement: BUILD-063 The code-generated pipeline catalog
 `planet_generators::pipeline_catalog` SHALL publish version pins, K-labelled scoped (`global`, `region`, `tile`) pipeline stages, separated M9 layer and K5-K7 commit erosion stages (including K5 `window_cut`), exhaustive `bake::probe::Stage` bindings (`probe_hooks`), preview command contracts, and runtime switch predictions as pure, non-authoritative metadata (`CON-06`, `CON-07`). All cited `spec_ids` SHALL resolve live in `openspec/specs/`, without committing a derived JSON file or changing `cargo xtask stages`. `planet generate --pipeline-json OUT` SHALL resolve a `--seed` or `--world` definition (with `--erosion`, `--channels`, or `--commit DIR`) into its live `HeightField` stack and emit JSON holding `base_node_hash`, `definition_hash`, `active_stages`, `walked_chain`, and the embedded catalog.

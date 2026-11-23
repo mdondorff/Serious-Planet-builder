@@ -377,11 +377,14 @@ Source: CON-11, CON-13, ADR 0003, ADR 0006, ADR 0014, ADR 0016, M2 report (SPIKE
 - **THEN** its content hash equals the known answer recorded for its version
 
 ### Requirement: TEST-016 Golden review policy
-Golden tests SHALL check every golden of a test before failing and write every candidate of the run. `cargo xtask golden-review [--proposal <file>] [--extra <dir>]... [--tests <junit.xml>]... [--apply]` SHALL compare every candidate with its golden on every adapter, write a golden | candidate | diff triptych and `report.md` to `target/review/golden-review/`, and classify each candidate under ADR 0017: auto-bless rounding noise (a debug or shaded view, at most 32 changed pixels, max delta 1) and declared changes (listed under `Expected golden changes:` in the change's proposal; judged per adapter, each adapter's candidate against its own golden: ADR 0061), and escalate everything else (a changed driver, lit, sky and water views, first goldens of any class, new adapters, a size change, undeclared changes, unclassified goldens) with a reason (TEST-022). `--apply` SHALL copy only the auto verdicts and never touch `driver.txt`. The test's own oracles, open review findings and earlier owner reverts are checked by the agent applying the `golden-review` skill.
+Golden tests SHALL check every golden of a test before failing and write every candidate of the run. `cargo xtask golden-review [--proposal <file>] [--extra <dir>]... [--tests <junit.xml>]... [--apply]` SHALL compare every candidate with its golden on every adapter, write a golden | candidate | diff triptych and `report.md` to `target/review/golden-review/`, and classify each candidate under ADR 0017:
 
 Verify: A
 Status: active
-Source: CON-18, ADR 0009, ADR 0017, ADR 0061
+Source: CON-18, ADR 0009, ADR 0017, ADR 0061, ADR 0096
+
+Detail: - auto-bless rounding noise (any class, at most 32 changed pixels, max delta 1 on that adapter; a lit, sky or water view only if its candidate is also within rounding of its anchor: the golden's file at the latest commit with an `Owner-approved:` trailer, else at its first commit, ADR 0096) and declared changes (listed under `Expected golden changes:` in the change's proposal; judged per adapter, each adapter's candidate against its own golden: ADR 0061), and escalate everything else (a changed driver, a lit, sky or water view that drifted beyond rounding from its anchor or has none, first goldens of any class, new adapters, a size change, undeclared changes, unclassified goldens) with a reason (TEST-022);
+- `--apply` SHALL copy only the auto verdicts and never touch `driver.txt`. The test's own oracles, open review findings and earlier owner reverts are checked by the agent applying the `golden-review` skill.
 
 #### Scenario: Owner decisions reproduced
 - **WHEN** the policy runs on the PR #43 candidates (WARP, llvmpipe, NVIDIA) with the change's declarations
@@ -390,6 +393,10 @@ Source: CON-18, ADR 0009, ADR 0017, ADR 0061
 #### Scenario: Every mismatch of a run
 - **WHEN** a test checks three goldens and two mismatch
 - **THEN** it fails once, naming both, and writes both candidates
+
+#### Scenario: A slow walk reaches the owner
+- **WHEN** a lit candidate is 5 pixels from its golden (an earlier auto-bless) but 40 pixels from the golden's file at the last `Owner-approved:` commit
+- **THEN** it escalates as drift from the owner's bless, and one within 32 pixels and delta 1 of both is `AUTO-R`
 
 ### Requirement: TEST-017 Flight legibility
 Every frame of a flight in its default view SHALL show structure: at least 10 % of its terrain pixels sit next to a clearly different pixel (a channel differs by at least 12). The check SHALL be shown to fail on the flat-colour `tile-id` flight, so that it cannot pass vacuously.
@@ -1020,32 +1027,26 @@ Source: opus-planner (2026-10-22, SPIKE-29: the owner asked how far authored edi
 - **THEN** the values are those of the field and the counts and times of each kind of call are reported
 
 ### Requirement: TEST-048 Pose stills
-`test-render --scene capture-stills --poses FILE --out-dir DIR` (a world source as in TEST-027; `--size WxH` default 2560x1440; `--views A,B` selects poses by name) SHALL draw each pose on the lit path over the base terrain of the world, with the horizon maps of the chunks near the eye baked first (REND-038), and write `DIR/<pose>.png` and `DIR/stills.txt` (pose, size, eye latitude, longitude and height, heading, pitch, sun hours, horizon maps waited for, seconds waited). A bad file or call SHALL be refused before it draws. The tool is not a measurement: no gate, no timestamp query, no perf log. The eye SHALL be `altitude_m` over the ground of the world's field.
+`test-render --scene capture-stills --poses FILE --out-dir DIR` (a world source as in TEST-027; `--size WxH` default 2560x1440; `--views A,B` selects poses by name) SHALL draw each pose on the lit path over the base terrain of the world and write `DIR/<pose>.png` and `DIR/stills.txt` (pose, size, eye latitude, longitude and height, heading, pitch, sun hours, plan nodes, capped nodes). A bad file or call SHALL be refused before it draws. The tool is not a measurement: no gate, no timestamp query, no perf log. The eye SHALL be `altitude_m` over the ground of the world's field.
 
 Verify: A, C
 Status: active
-Source: opus-planner (2026-10-24), M8-4 and M8-8 look reviews, TEST-027, ADR 0086
+Source: opus-planner (2026-10-24), M8-4 and M8-8 look reviews, TEST-027, ADR 0086, ADR 0085
 
 #### Scenario: Two poses
 - **WHEN** the scene runs on the software adapter over a small store with two poses on the ground
-- **THEN** it writes one PNG of the requested size per pose and `stills.txt` with at least one horizon map per pose, and the two images differ in their sun
+- **THEN** it writes one PNG of the requested size per pose and `stills.txt` with a line per pose, and the two images differ in their sun
 
 #### Scenario: A bad call
 - **WHEN** `--poses` is missing, `--views` names no pose, or `--poses` is given to another scene
 - **THEN** the run is refused before it draws
 
-#### Scenario: Maps that do not bake
-- **WHEN** the horizon maps of a pose are not baked within `chunk_timeout_s`
-- **THEN** the run fails naming the pose, the number of chunks without a map and the first of them
-
 ### Requirement: TEST-050 Poses file
-The poses file (TOML) SHALL hold the keys of the table; a bad value SHALL be refused naming the key and the value.
+The poses file (TOML) SHALL hold the keys of the table; a bad value SHALL be refused naming the key and the value. A key the table does not list (`chunk_timeout_s`, `horizon_cell_m` and `coarse_horizon` of older files) SHALL be ignored.
 
 | Key | Meaning | Default |
 |---|---|---|
 | `[place]` `anchor = "largest-river"` | largest river, at least `min_height_m` high (0) | or `lat`, `lon` |
-| `chunk_timeout_s` | wait per pose, seconds | 900 |
-| `horizon_cell_m` | horizon chunk cell, metres | 8 |
 | `[[pose]]` `name` | names the PNG | required |
 | `altitude_m`, `back_m` | eye over the ground; behind the anchor | required |
 | `heading_deg`, `pitch_deg` | clockwise from north; down | required |
@@ -2055,3 +2056,43 @@ Source: ADR 0021 point 7, BUILD-063, owner (2026-11-20)
 #### Scenario: Walked chain equivalence and catalog contracts
 - **WHEN** `field_chain_erosion` builds a stack or `pipeline_catalog` exports its schema, probe hooks, and cited spec IDs
 - **THEN** `walk_height_field` equals `resolve_runtime_chain`, every `probe::Stage` and cited `spec_id` resolves cleanly, `target/review/stages/pipeline.json` is written deterministically, and no committed JSON copy exists
+
+### Requirement: TEST-121 The basin breach tests
+The basin breach SHALL be tested at tier A: (a) a closed noise basin is drained by the cheapest path (the cells and the depth cut are stated), nothing is raised and a second pass changes nothing;
+
+Verify: A
+Status: active
+Source: GEN-174, architect 2026-11-12
+
+Detail: (b) a basin deeper than the breach limit stays a lake, untouched, and drains within a limit that covers it; (c) the path stays inside the halo with the basin (the same basin drains at halo 9 and stays a lake at halo 8) and a basin on the border ring stays a lake; (d) a closed bowl with no lower cell is unchanged; (e) the whole-region carve, the round solver on 1, 3 and 8 threads and the memoised solve on two tile sizes are the same bits with the breach on, and the breach moves the result; (f) more passes leave no more closed basins than fewer, raise no cell and repeat to the same bits; the fixed point is the result of N passes after which pass N+1 drains nothing, and a cap below N is reported; (g) the layer key changes with the parameters; (h) a sill breached by three donors in one round is lowered by at most the cap in the whole-region carve and the round solver (and the test fails without the cap).
+
+#### Scenario: Cases
+- **WHEN** the tests of `bake_breach` and the layer store run
+- **THEN** each of (a) to (g) has an assertion that cites GEN-174
+
+### Requirement: TEST-122 The world precision tests
+The per-world epsilon of the f32 rounds SHALL be tested at tier A: (a) Earth's span gives `epsilon_w = epsilon_profile` and f32; (b) a 60 km span stays f32 and a chain of `epsilon_w` steps at the top of R's exponent bin, from a grid value and from a rounding tie, above and below the sea, is strictly descending after the narrowing;
+
+Verify: A
+Status: active
+Source: GEN-175, architect 2026-11-12
+
+Detail: (c) the precision is a function of the bounds only; (d) above `epsilon_max`, and for bounds that do not fit an f32, the rounds are f64; (e) one round in f32 differs from the f64 round by at most 2 x the f32 spacing at R; (f) `s(R)` at 0, -0, 1, a power of two, just below it and a value that does not fit an f32; (g) the plan sets every epsilon that acts on an f32 surface (the carve, H1's fill, the sediment pass, and K7 through `apply_k7`), Earth's plan keeps today's values and the f64 choice keeps the profile epsilon; (h) a height outside the bounds, or a NaN, is refused naming the cell and `R`, an inactive cell is not checked, `build_resident` refuses the landmass before the rounds, and a narrowing with an epsilon under the spacing of its summit is refused; (i) H1's fill on a 60 km world descends strictly in f64, and a fill narrowed to f32 collapses at `epsilon_w`; (j) the surface gate refuses a filled surface and narrows a round surface, and the plan has no constructor without the bounds of its world.
+
+#### Scenario: Cases
+- **WHEN** the tests of `bake_world_precision` run
+- **THEN** each of (a) to (j) has an assertion that cites GEN-175
+
+### Requirement: TEST-127 The band rule tests
+The band rules SHALL be tested at tier A: (a) the capped noise with no cap, and with a cap that never binds, is the plain sum bit for bit; (b) every octave is held to its cap for any signals, and a base with no slope has no band;
+
+Verify: A
+Status: active
+Source: GEN-179, architect 2026-11-12
+
+Detail: (c) a larger `c` never lowers the band, and the weight of the 8 km octave scales its term; (d) with the rules off, and with a cap that never binds, `elevation_m` is the same bits on a spread of directions; (e) a cap and the weight lower the relief, a smaller `c` lowers it more, and the slope is finite and not negative; (f) the identity word is unchanged with both rules off and moves with each rule and value; (g) a negative `c` and a weight over 1 are refused.
+
+#### Scenario: Cases
+- **WHEN** the tests of `band_rules` run
+- **THEN** each of (a) to (g) has an assertion that cites GEN-179
+

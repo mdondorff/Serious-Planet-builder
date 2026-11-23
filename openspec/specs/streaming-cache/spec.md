@@ -1439,6 +1439,60 @@ The size of the channels for a planet SHALL be reported with the run that makes 
 - **WHEN** the depth is read at the centre of a core cell and the area at the same direction
 - **THEN** the depth equals the cell's stored depth within 1 mm and the area is between 0 and 32 in log2 cells (at least one cell)
 
+### Requirement: STRM-073 A store records the field source it was baked from
+A bake from the class source (GEN-115) SHALL be another bake than the legacy one:
+
+Verify: A
+Status: active
+Source: owner 2026-11-04 (planner inbox, change `field-bake-class-source`); STRM-065, ADR 0006
+
+Detail: - the class source's identity (`BakeInputs::id()`, covering the class source's and class list's versions, the lattice size and the class tables) and the seed enter the bake's read set as a query entry (kind 6; its parameters are the identity then the seed, little-endian, its result zero; a read-set entry that is not a node of the definition, STRM-011), so the stage key and every key sourced from it differ from the legacy world's and from another seed's;
+- a world that does not ask for the class source keeps every key it had;
+- `GlobalWorld::check_source(store, res)` SHALL report `Ok(true)` when the store holds the first block of the bake under this world's key, `Ok(false)` when it holds no block of that tile, and an error naming the expected key, the key found and the source this world samples when it holds the tile under another key (another source, seed or version): refused, never mixed (ADR 0006);
+- an offline reader (`generate --prefill-dir | --coupled-run`, `bake_layer`, `bake_pass1` with `--global-dir`) SHALL build the world from what the store records: `GlobalWorld::for_store` returns the class world when the store holds the class bake, the legacy world when it holds that, refuses a store that holds both unless `--class-source` or `--legacy-source` says which, and refuses a choice the store does not hold and a store that holds neither (another seed, version or resolution), naming the keys;
+- a stored result made from a bake (the coupled run, the coarse horizon, the layer) is keyed through a world that carries the bake's source (`LatticeSource::class_source`), so it is never read as the other source's.
+
+#### Scenario: Keys
+- **WHEN** the legacy world, the class world and another seed's class world are asked for their stage and block keys
+- **THEN** the three differ, the same world asked twice gives the same key, and the legacy world's stage key is the pinned value it has always had
+
+#### Scenario: Stores
+- **WHEN** a class store is built on 1 and 4 threads and read with the legacy world and with another seed's class world, and a store with no blocks is read
+- **THEN** the packs are equal on both thread counts, the stored block is the class field's, the readers of another source or seed get an error naming both keys, and the empty store reads as absent
+
+#### Scenario: The offline reader
+- **WHEN** `for_store` opens a class store, a legacy store, a store of both bakes (without and with a choice), a store for another seed and one of another resolution
+- **THEN** it returns the class world, the legacy world, an error naming the two sources, the chosen world, and errors, and the pre-fill after a class bake reads the class store
+
+#### Scenario: The command
+- **WHEN** `generate --global-dir --class-source` is run twice and `--verify-global` with and without `--class-source`
+- **THEN** the second run writes no block, the verify with it matches every entry, and the verify without it compares nothing
+
+### Requirement: STRM-074 The layer has a manifest
+The erosion layer's store directory SHALL hold a manifest, one plain text file (`layer-manifest.txt`), from which a reader rebuilds the keys of the layer's records and bounds its pyramid without options:
+
+Verify: A
+Status: active
+Source: owner 2026-11-04 (planner inbox, change `layer-manifest`); STRM-065, STRM-066, STRM-072, STRM-073
+
+Detail: - the first line is `layer-manifest 1`; then one `key value` line each for the seed, the radius, pass 1's and pass 2's cells a face edge, the tile and the halo (both resolved), the versions of the kernels and records (`bake_kernel_version`, `pass2_kernel_version`, `tile_layer_version`, `layer_version`, `channels_version`), the quantisation step of the change, the field source (`legacy`, or `class` and the class source's identity, STRM-073), the pyramid's block size (cells a side of a block of level 0) and the range of the change (`change_min_m`, `change_max_m`; absent while no tile is recorded);
+- an `f64` is written as its decimal value then its bits in hex and read back from the bits, so every value round-trips exactly; a manifest that is not of this layout, repeats a key, lacks one or holds one end of the range is an error naming the file and what is wrong (the key, or the line that is not `key value`);
+- it is written atomically: a temporary file in the directory, then a rename over the manifest, so a killed run or two runs leave no half manifest (a temporary file of a process killed between the write and the rename may remain and is never read; runs are not locked against each other, so two simultaneous runs can lose a widening: runs of one layer are sequential);
+- a run adds to the manifest that is there: the shape, the versions and the source must be equal, else an error naming both texts (another layer's run is never mixed), and the range only widens, so after a planet run it is exactly the range of the layer's tiles;
+- a reader compares the versions with its build's (`check_current`): each version that differs, and a quantisation step or a pyramid block size that differs, is named, and a layer of another version, step or block is refused, never read;
+- the layer's command (`bake layer`) writes it after each run, over the tiles of the run, and its default pass-2 grid is the production one (98,304 cells a face edge) the viewer expects; `--tile-dir` writes the tile records and the manifest into a chosen directory, such as the field store's own, where the viewer reads the layer when it is given no other.
+
+#### Scenario: The manifest round-trips
+- **WHEN** a manifest of the production shape is made for a legacy and for a class world, with and without a range, written as text and parsed
+- **THEN** the tile and the halo are resolved (3,072 and 128), the versions are this build's, the pyramid block size is the pyramid's, and every value (including a range that is not a short decimal) comes back equal to the bit
+
+#### Scenario: Runs merge
+- **WHEN** three runs with ranges [-100, 50], [-20, 400] and [-30, 40] are merged into one directory
+- **THEN** the manifest says [-100, 400] after the second and the third, and the directory holds the manifest and no temporary file
+
+#### Scenario: Another layer is refused
+- **WHEN** a run of another pass-2 grid, another pass-2 kernel version or the other field source is merged, and a manifest with another bake kernel version and channels version is checked, and damaged manifests are read
+- **THEN** each merge is an error naming both texts and writes nothing, the check names each version that differs, and each damaged manifest is an error naming the file and what is wrong
 
 ### Requirement: STRM-078 The store of a landmass build is measured from real pack records
 The G-STORE measurement SHALL encode a build's state as pack records in tiles of 208 km and report, per item of A3 section 10, the records, the payload bytes and the bytes on disk with record headers and index entries, per land cell.
@@ -1454,6 +1508,24 @@ Source: A3 section 10 (G-STORE)
 #### Scenario: the prototype landmass at two resolutions
 - **WHEN** `landmass_scale 1 8 dump` and `landmass_scale 2 8 dump` are followed by `store_measure 1` and `store_measure 2`
 - **THEN** the report lists every item with bytes on disk per land cell, and the written pack and index sizes match the sum of the records and index entries
+
+### Requirement: STRM-079 The field bake, the space of a replacement and a compaction, and the edit items are measured on real records
+The G-STORE remainder measurement SHALL report the field bake of the new chain, the space of replacement versions and the authored edit items, each from real bytes.
+
+Verify: D
+Review: the measurement tables of the g-store-2 change (its design notes in PR #1294, removed at the archive), judged by the architect (the gate is a numeric gate, A3 section 12.1)
+Status: planned
+Source: A3 section 10 (G-STORE), briefing item 14
+
+Detail: - The field bake SHALL be the four channels of the production sample (`global::class_sample`) on the vertices of tiles of 208 km, encoded as the production block and as a narrow-channel variant with stated steps, reported in bytes a vertex by the land share of the tile, and in GB at the Earth case.
+- A replacement SHALL be measured on the real packs of the build: new records of the footprint of an edit written beside the version 1, then `pack::compact`; the bytes on disk at rest, beside, at the peak during the compaction and after SHALL be reported for a median edit, the largest sampled edit and a full re-bake.
+- The authored edit items SHALL be reported as the bytes of their canonical file text.
+- Steady state and peak temporary space SHALL be reported as separate figures.
+- The measurement SHALL NOT decide a store format and SHALL NOT close G-STORE.
+
+#### Scenario: the prototype landmass
+- **WHEN** `landmass_scale 1 8 dump`, `store_measure 1` and `store_space 1` have run
+- **THEN** the field bake, the replacement table and the edit item sizes are printed, and the directory after the compaction holds the records of the live set only
 
 ### Requirement: STRM-084 The channel graph is a stored kind read through the commit
 The bake SHALL store the channel graph as one record of kind 20 per L tile, holding the pieces of the segments inside the tile's block of H1 cells and one H1 cell beyond it, and the commit record SHALL name the blocks (commit layout version 3).

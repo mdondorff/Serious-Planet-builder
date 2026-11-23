@@ -231,6 +231,8 @@ struct Config {
     site_descent: bool,
     /// The directory the edits are written to and loaded from (`--items`).
     items: Option<PathBuf>,
+    /// Where site bookmarks live outside `WorldDefinition` (`--bookmarks`, VIEW-073, VIEW-075).
+    bookmarks: Option<PathBuf>,
     /// The panel layout (`--editor-layout`, VIEW-018).
     layout: Layout,
     /// `--preview-l1`: the cells a face edge of the level-1 preview's grid (VIEW-068).
@@ -613,12 +615,19 @@ impl App<'_> {
             }
             // The hover pick runs on a thread of its own against a field it makes (the current definition and stamps): a cold bake block is decoded there (VIEW-059).
             let world = self.world.clone();
-            e.set_hover_source(std::sync::Arc::new(move |ray, limits| {
+            e.set_hover_sample_source(std::sync::Arc::new(move |ray, limits| {
                 let field = world.field().ok()?;
-                planet_frame::pick::pick_surface(&ray, &limits, &|d| field.height(d))
+                let hit = planet_frame::pick::pick_surface(&ray, &limits, &|d| field.height(d))?;
+                let readout = planet_editor::ruler::cursor_readout(hit.dir, hit.height_m, limits.radius_m, &|d| field.height(d));
+                Some(crate::hoverpick::HoverSample { hit, readout })
             }));
             // The brush guard limits the stack of strokes by what these parameters can draw (VIEW-043).
             e.session.set_drawable_slope(cfg.lod.drawable_slope());
+            e.set_bookmarks_file(cfg.bookmarks.clone())?;
+            e.set_repros_dir(repro_dir());
+            if !cfg.smoke || std::env::var_os("PLANET_REPRO_DIR").is_some() {
+                e.refresh_repros();
+            }
             Some(e)
         } else {
             None
@@ -1088,6 +1097,9 @@ impl App<'_> {
                         );
                         st.window.set_title(&format!("planet | {text}"));
                         st.notice = Some((text, now_ms + NOTICE_MS));
+                        if let Some(e) = st.edit.as_mut() {
+                            e.refresh_repros();
+                        }
                     }
                     Err(e) => {
                         eprintln!("F9: the repro files were not written: {e}");
@@ -1117,6 +1129,7 @@ impl App<'_> {
                 e.set_capped_tiles(
                     frame.pipeline.draw.plan.nodes.iter().filter(|n| n.state == planet_frame::TileState::Capped).map(|n| n.tile).collect(),
                 );
+                e.set_camera_altitude(st.altitude_m);
                 e.update(&camera, viewport, &wanted, field, &limits, Pointer { cursor: st.cursor, over_ui });
             }
             st.stall.mark("editor update (picks, outlines, lists)");
@@ -1332,22 +1345,28 @@ impl App<'_> {
                 st.surface.present(ctx, &st.rig.renderer).map_err(|e| e.to_string())?
             };
             st.stall.mark("present (swapchain, tone map, egui paint)");
-            // What the panels asked for, and the camera flight to an edit.
+            // What the panels asked for, and camera jumps (bookmark, coordinate target, repro capture, or Fly to).
             if let Some(e) = st.edit.as_mut() {
                 e.apply(panel_events);
-            }
-            if let Some(id) = st.edit.as_mut().and_then(|e| e.take_fly()) {
-                if let Some(pose) = st.edit.as_ref().and_then(|e| e.fly_pose(id, &|d| field.height(d))) {
+                if e.take_capture_repro() {
                     let flight = planet_frame::viewer::camera_at(self.cameras, st.viewer.clock.time_s(now_ms));
-                    if !st.viewer.is_free() {
-                        st.viewer.command(Command::ToggleCamera, now_ms, &flight);
-                    }
-                    st.viewer.mode = planet_frame::viewer::CameraMode::Free(pose);
-                    st.viewer.mouse.release();
-                    apply_grab(&mut st);
-                    if let Some(e) = st.edit.as_mut() {
-                        e.stats.flights += 1;
-                    }
+                    st.viewer.command(Command::SaveRepro, now_ms, &flight);
+                }
+            }
+            let jump = st.edit.as_mut().and_then(|e| e.take_jump_pose(&|d| field.height(d))).or_else(|| {
+                let id = st.edit.as_mut().and_then(|e| e.take_fly())?;
+                st.edit.as_ref().and_then(|e| e.fly_pose(id, &|d| field.height(d)))
+            });
+            if let Some(pose) = jump {
+                let flight = planet_frame::viewer::camera_at(self.cameras, st.viewer.clock.time_s(now_ms));
+                if !st.viewer.is_free() {
+                    st.viewer.command(Command::ToggleCamera, now_ms, &flight);
+                }
+                st.viewer.mode = planet_frame::viewer::CameraMode::Free(pose);
+                st.viewer.mouse.release();
+                apply_grab(&mut st);
+                if let Some(e) = st.edit.as_mut() {
+                    e.stats.flights += 1;
                 }
             }
             match presented {
@@ -2199,6 +2218,12 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         edit: o.edit,
         site_descent: site_descent_wanted(o.edit, o.site.is_some(), o.smoke),
         items: o.items.clone(),
+        bookmarks: crate::resolve_bookmarks_path(
+            o.bookmarks.as_ref(),
+            std::env::var_os("PLANET_BOOKMARKS_FILE").as_deref(),
+            o.items.as_ref(),
+            o.smoke,
+        ),
         layout: match &o.editor_layout {
             Some(p) => Layout::from_toml(&std::fs::read_to_string(p).map_err(|e| format!("--editor-layout {}: {e}", p.display()))?)
                 .map_err(|e| format!("--editor-layout {}: {e}", p.display()))?,
