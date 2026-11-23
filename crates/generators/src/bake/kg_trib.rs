@@ -371,10 +371,11 @@ pub fn extract(inp: &Input, p: &Params) -> Extracted {
 }
 
 /// Lead #182 (G3 R6, Carbon D2.6 (1); spike only, off by default): a head trunk reach starts from its own L inflow only, not the larger of that and its H1 seed, so
-/// the area above an H1 head that reaches the trunk at L a few vertices further down is not counted twice.
+/// the area above an H1 head that reaches the trunk at L a few vertices further down is not counted twice. rg_chain sets it on by default since #182a (reading 45).
 pub static HEAD_ONCE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// Lead #182 (G3 R6, Carbon D2.5; spike only, off by default): the trunks' Strahler orders updated at every `trib_junction` (contract section 3): a tributary of the
 /// trunk's order raises it by one, a higher one sets it; at a node the inflowing trunks combine by the same rule; a head keeps its H1 order.
+/// rg_chain sets it on by default since #182a (reading 46).
 pub static STRAHLER_JUNCTION: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// What the landmass pass changed.
