@@ -1784,7 +1784,7 @@ H1 SHALL derive from a routing (clipped MFD area, GEN-141) the channel graph and
 
 Verify: A
 Status: active
-Source: A3 sections 5.2 to 5.5 and 12.1 (G-CON), inbox #99, ADR 0111 (proposed)
+Source: A3 sections 5.2 to 5.5 and 12.1 (G-CON), inbox #99, ADR 0111 (accepted for the prototype, owner 2026-11-11)
 
 Detail: - The channel discharge `Q(c)` (the potential discharge, before the losses of basins; a basin's `q_out` is the discharge that continues below it) SHALL be the local term `a(c) r(c)` plus `Q` of every D8 donor (zero local term in an outlet cell); the sum of `Q` at the outlets SHALL equal the sum of the local terms over the land to a relative error of 1e-9, and `A_d` at the outlets SHALL equal the sum of the (weighted) true cell areas of the cells that drain to them to 1e-9, also across cube edges.
 - A segment SHALL run from a head or a confluence to the next confluence or the mouth, its id the hash of the body, its downstream end cell and its upstream end cell; every channel cell except the mouths SHALL be in exactly one segment (counted per cell), and every segment SHALL reach a mouth through its downstream segments.
