@@ -83,7 +83,7 @@ Status: closed 2026-11-23. The row is open under O3: it is rerun and judged agai
 | M1 `--trunk-head-once` | 9/11 | 1,300 | 92.20 / 96.03 | 3,191 / 9,387 | 4,011 | 7.01 (5) | 1,242 |
 | M1 `--strahler-junction` | 9/11 | 1,306 | 92.19 / 95.99 | 3,215 / 9,398 | 4,009 | **4.34 (7)** | 1,956 |
 
-- Stage times are loaded runs under the heavy lock, not solo pairs: no saving is claimed. Peak memory 11.6-12.3 GiB on every row.
+- Stage times are loaded runs under the heavy lock, not solo pairs: no saving is claimed. Peak memory 11.3-12.1 GiB (11,601-12,339 MiB) on every row.
 - `--trunk-head-once`: a head trunk reach starts from its own L inflow, not the larger of that and its H1 seed.
   - It passes the ablation rule on all three windows. Kept shares move by 0.01 points at most.
   - Trunk reach areas fall where they change (`raw/s182-head-areas.txt`, `head182.py`):
