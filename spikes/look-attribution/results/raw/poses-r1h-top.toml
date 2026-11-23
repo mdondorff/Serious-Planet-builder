@@ -1,0 +1,20 @@
+# SPIKE-143: the R1h river crop seen straight down (north up), so the viewer's mesh lies beside the shaded height grid of the same crop; low sun from the west.
+[place]
+lat = -36.49203
+lon = -164.51248
+
+[[pose]]
+name = "r1h-river-top-west"
+altitude_m = 10500.0
+back_m = 0.0
+heading_deg = 0.0
+pitch_deg = 89.9
+sun_local_hours = 17.15
+
+[[pose]]
+name = "r1h-river-top-east"
+altitude_m = 10500.0
+back_m = 0.0
+heading_deg = 0.0
+pitch_deg = 89.9
+sun_local_hours = 6.85

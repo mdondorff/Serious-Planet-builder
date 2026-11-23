@@ -1,0 +1,62 @@
+=== r1h-def
+-- kh -> ks0
+  cut over 10 m through a S_KH hump over 10 m: 505 paths, 29495 cells; cut p50 16.3, max 50.0 m
+-- ks0 -> ks1
+  cut over 10 m through a S_KH hump over 10 m: 720 paths, 11104 cells; cut p50 15.8, max 50.0 m
+-- ks1 -> ks1c
+  cut over 10 m through a S_KH hump over 10 m: 22 paths, 124 cells; cut p50 16.8, max 50.0 m
+-- ks1c -> band6
+  cut over 10 m through a S_KH hump over 10 m: 928 paths, 12622 cells; cut p50 21.8, max 49.9 m
+-- band6 -> band6c
+  cut over 10 m through a S_KH hump over 10 m: 136 paths, 797 cells; cut p50 31.6, max 50.0 m
+-- band6c -> kv
+  cut over 10 m through a S_KH hump over 10 m: 535 paths, 86160 cells; cut p50 25.9, max 50.0 m
+-- kv -> final
+  cut over 10 m through a S_KH hump over 10 m: 0 paths, 0 cells; cut p50 0.0, max 0.0 m
+-- kh -> final
+  cut over 10 m through a S_KH hump over 10 m: 2369 paths, 126379 cells; cut p50 17.7, max 50.0 m
+2369 trenches; S0 hump at the S0 crest against the highest end: p10   14.6 p50   56.1 p90  198.0 m
+  K5 surface Z (z_s bilinear): p10    1.2 p50   44.7 p90  181.8 m; sub-814 m detail rho = S0 - Z: p10   -4.7 p50   10.4 p90   39.4 m
+  base B: p10  -12.1 p50   29.8 p90  157.5 m; K5 delta r = S0 - B: p10  -47.3 p50   21.6 p90  133.7 m
+  share of the hump carried by Z: p50 83 % (over the 2363 trenches with a positive S0 hump); trenches where Z carries over half 78.7 %, where Z alone is over 10 m 81.7 %
+  share of the hump carried by rho: p50 17 % (over the 2363 trenches with a positive S0 hump); trenches where rho carries over half 21.0 %, where rho alone is over 10 m 51.3 %
+trenches whose hump is mostly K5 relief (|rho| under half): 77.0 %; mostly sub-814 m detail (|Z| under half): 17.1 %
+z_s (H1, inside the box): strict 4-neighbour maxima 3.79 %, minima 3.55 % of H1 cells (a checkerboard would be 50 %)
+z_s Laplacian (4 z - neighbours) p50 |.| 11.17 m, p90 171.92 m; neighbour sign alternation (lap and right neighbour of opposite sign over 1 m): 30.3 %
+2369 trenches
+S_KH crests at an H1 corner: 15.0 % (uniform 6.25 %)
+S0 crests: at an x edge only 16.9 % (uniform 18.75 %), y edge only 18.2 % (18.75 %), at a corner 21.9 % (6.25 %), interior 43.0 % (56.25 %)
+S0 corner crests: 519; on an H1 saddle block (one diagonal pair of z_s above the other) 427 (82 %)
+humps over 50 m on S0: 1274 (54 %); Z carries over half of 93 % of them
+final: corner-only 2x2 blocks over 2 / 5 / 10 m:    1172 /     260 /     63; of the 5 m ones touching a KS-lowered cell 55 %
+=== r1h-tso
+-- kh -> ks0
+  cut over 10 m through a S_KH hump over 10 m: 505 paths, 29495 cells; cut p50 16.3, max 50.0 m
+-- ks0 -> ks1
+  cut over 10 m through a S_KH hump over 10 m: 720 paths, 11104 cells; cut p50 15.8, max 50.0 m
+-- ks1 -> ks1c
+  cut over 10 m through a S_KH hump over 10 m: 22 paths, 124 cells; cut p50 16.8, max 50.0 m
+-- ks1c -> band6
+  cut over 10 m through a S_KH hump over 10 m: 928 paths, 12626 cells; cut p50 21.8, max 49.9 m
+-- band6 -> band6c
+  cut over 10 m through a S_KH hump over 10 m: 136 paths, 797 cells; cut p50 31.6, max 50.0 m
+-- band6c -> kv
+  cut over 10 m through a S_KH hump over 10 m: 535 paths, 86233 cells; cut p50 25.9, max 50.0 m
+-- kv -> final
+  cut over 10 m through a S_KH hump over 10 m: 0 paths, 0 cells; cut p50 0.0, max 0.0 m
+-- kh -> final
+  cut over 10 m through a S_KH hump over 10 m: 2369 paths, 126318 cells; cut p50 17.7, max 50.0 m
+2369 trenches; S0 hump at the S0 crest against the highest end: p10   14.6 p50   56.1 p90  198.0 m
+  K5 surface Z (z_s bilinear): p10    1.2 p50   44.7 p90  181.8 m; sub-814 m detail rho = S0 - Z: p10   -4.7 p50   10.4 p90   39.4 m
+  base B: p10  -12.1 p50   29.8 p90  157.5 m; K5 delta r = S0 - B: p10  -47.3 p50   21.5 p90  133.7 m
+  share of the hump carried by Z: p50 83 % (over the 2363 trenches with a positive S0 hump); trenches where Z carries over half 78.6 %, where Z alone is over 10 m 81.6 %
+  share of the hump carried by rho: p50 17 % (over the 2363 trenches with a positive S0 hump); trenches where rho carries over half 21.1 %, where rho alone is over 10 m 51.4 %
+trenches whose hump is mostly K5 relief (|rho| under half): 76.9 %; mostly sub-814 m detail (|Z| under half): 17.2 %
+z_s (H1, inside the box): strict 4-neighbour maxima 3.79 %, minima 3.55 % of H1 cells (a checkerboard would be 50 %)
+z_s Laplacian (4 z - neighbours) p50 |.| 11.17 m, p90 171.92 m; neighbour sign alternation (lap and right neighbour of opposite sign over 1 m): 30.3 %
+2369 trenches
+S_KH crests at an H1 corner: 15.0 % (uniform 6.25 %)
+S0 crests: at an x edge only 16.9 % (uniform 18.75 %), y edge only 18.2 % (18.75 %), at a corner 21.9 % (6.25 %), interior 43.0 % (56.25 %)
+S0 corner crests: 519; on an H1 saddle block (one diagonal pair of z_s above the other) 427 (82 %)
+humps over 50 m on S0: 1275 (54 %); Z carries over half of 93 % of them
+final: corner-only 2x2 blocks over 2 / 5 / 10 m:    1172 /     259 /     63; of the 5 m ones touching a KS-lowered cell 56 %

@@ -1,0 +1,22 @@
+2373 trenches; path size p10 10 p50 22 p90 78 max 13132 cells; under 50 cells 1918, 50-500 437, 500+ 18
+crest phase x mod 8 / y mod 8 per layer, and the share of crests within one cell of an H1 cell edge (uniform 43.8 %):
+  S_KH: x  15.9  12.5   9.4  12.0  10.4  11.1  12.1  16.6 | y  16.0  12.6   9.3  11.7  11.3  10.0  11.1  17.8 | at an edge 51.4 %
+        size 0-5e+01:  1918 trenches, at an edge 51.7 %
+        size 50-5e+02:   437 trenches, at an edge 51.5 %
+        size 500-1e+12:    18 trenches, at an edge 22.2 %
+  S0  : x  19.3  12.5   8.8   9.7   9.0   9.1  12.3  19.4 | y  19.3  12.5   8.6   9.4   9.7   9.4  10.3  20.9 | at an edge 56.9 %
+        size 0-5e+01:  1918 trenches, at an edge 56.9 %
+        size 50-5e+02:   437 trenches, at an edge 58.1 %
+        size 500-1e+12:    18 trenches, at an edge 27.8 %
+  B   : x  13.8  12.0  10.4  11.6  12.0  11.6  13.1  15.5 | y  14.5  12.4  10.7  12.6  12.4  13.0  11.3  13.0 | at an edge 44.8 %
+        size 0-5e+01:  1918 trenches, at an edge 44.0 %
+        size 50-5e+02:   437 trenches, at an edge 49.2 %
+        size 500-1e+12:    18 trenches, at an edge 27.8 %
+  r   : x  15.0  12.3  10.8  12.9  12.9  10.3  11.3  14.6 | y  14.7  12.9  10.5  12.6  11.4  10.3  10.6  16.9 | at an edge 46.1 %
+        size 0-5e+01:  1918 trenches, at an edge 47.0 %
+        size 50-5e+02:   437 trenches, at an edge 42.3 %
+        size 500-1e+12:    18 trenches, at an edge 33.3 %
+every trench path cell (126469): x  12.4  12.5  12.5  12.5  12.6  12.6  12.5  12.4 | y  12.1  12.4  12.7  13.2  13.2  12.5  12.0  11.9 | at an edge 40.7 %
+S_KH local maxima (31582): x  11.2  10.9  11.9  15.7  15.5  12.2  11.4  11.2 | y  10.5  10.8  11.9  17.2  15.8  12.5  10.8  10.5 | at an edge 39.0 %
+S0 local maxima (27579): x  10.4  10.9  12.8  15.7  15.8  12.9  11.2  10.5 | y   9.9  10.8  12.7  16.5  16.4  12.7  10.8  10.1 | at an edge 36.5 %
+crest form on S0 (3 x 3): peak 1.7 %, lowest 0.3 %, between (saddle or slope) 98.0 %
