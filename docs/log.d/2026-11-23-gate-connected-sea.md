@@ -1,0 +1,1 @@
+- 2026-11-23 gate-connected-sea (BUILD-055): the gate's outlets are the edge and the sea joined to it, the chain's connected sea mask; an inland pit under the sea level is land (lead, 2026-11-23).
