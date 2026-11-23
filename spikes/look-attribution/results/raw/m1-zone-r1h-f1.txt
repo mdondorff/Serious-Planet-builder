@@ -11,9 +11,4 @@ final   in the zone: X6 +0.010 X8 +0.161 Xdiag +0.096 (kink 82.93 m2) | outside:
 zone cells inside the box: 21.3 % of land
 s0      in the zone: X6 +0.046 X8 +1.009 Xdiag +0.005 (kink 1.53 m2) | outside: X6 +0.148 X8 +0.916 Xdiag +0.003 (kink 0.24 m2)
 kh      in the zone: X6 +0.015 X8 +0.154 Xdiag +0.117 (kink 5.21 m2) | outside: X6 +0.122 X8 +0.793 Xdiag +0.035 (kink 0.29 m2)
-Traceback (most recent call last):
-  File "C:\DEV\Serious-Planet-Builder\.claude\worktrees\sonnet-spikes-36fc88\spikes\look-attribution\results\raw\m1_zone.py", line 22, in <module>
-    b = excess(z[sub], (land & ~zone)[sub], x0 + m - 2, y0 + m - 2)
-  File "C:\DEV\Serious-Planet-Builder\.claude\worktrees\sonnet-spikes-36fc88\spikes\look-attribution\results\raw\m1_facet.py", line 28, in excess
-    lx, sx = ls(dxx[ys, xs] ** 2, gx, P)
-numpy._core._exceptions._ArrayMemoryError: Unable to allocate 148. MiB for an array with shape (19350405,) and data type float64
+(the F1 run stopped here on a memory error while the R3b chain ran; F1 rerun in full: m1-zone-f1-r3b.txt)

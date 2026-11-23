@@ -22,7 +22,7 @@ Status: closed 2026-11-23. The metric was registered before any render was looke
 
 - Straight runs and the chainsaw (decides O8): the coincidence ratio is mixed. R1h 1.14 and F1 1.41 are under the pre-registered 1.5; R3b 1.76 is over it. The two looks overlap on R3b only and have separate mechanisms (KG-trunk's centreline, KH's triangles).
 - Pre-registered results that missed:
-  - M2's bank saw-tooth at +-2 cells finds no chainsaw on any stage: final p90 is under 1.06 x S0's.
+  - M2's bank saw-tooth at +-2 cells finds no chainsaw on any stage: final p90 is 1.03-1.08 x S0's.
   - M1 over the whole window keeps Xdiag under its 0.10 threshold (0.06-0.10).
   - Both missed what the renders show, because the triangles are 814 m wide and lie in the 19-25 % of land along the channels. The in-zone split (post-hoc, labelled below) carries the attribution, together with the renders.
 
