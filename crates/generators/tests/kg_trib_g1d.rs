@@ -81,6 +81,17 @@ pub(crate) fn run_domain(c: &Case, grid: &Grid, exit: &[bool], seed_ext: &[f64])
 }
 
 pub(crate) fn run_domain_with(c: &Case, grid: &Grid, exit: &[bool], seed_ext: &[f64], mfd_init: bool) -> Run {
+    run_domain_weighted(c, grid, exit, seed_ext, mfd_init, None)
+}
+
+pub(crate) fn run_domain_weighted(
+    c: &Case,
+    grid: &Grid,
+    exit: &[bool],
+    seed_ext: &[f64],
+    mfd_init: bool,
+    runoff_weight: Option<&[f64]>,
+) -> Run {
     let n = c.fx.s0.len();
     let outlet: Vec<bool> = (0..n).map(|x| grid.is_active(x) && (c.sea[x] || exit[x])).collect();
     let trunks_r = trunk_reaches(c);
@@ -98,6 +109,7 @@ pub(crate) fn run_domain_with(c: &Case, grid: &Grid, exit: &[bool], seed_ext: &[
         tile: &tile,
         gid: &|x| x as u64,
         keep_fields: true,
+        runoff_weight,
     };
     let ex = extract(&inp, &Params { mfd_init, ..Params::plan(c.graph.body, RUNOFF) });
     let mut all = trunks_r;
@@ -750,4 +762,42 @@ fn the_landmass_pass_accumulates_the_trunk_from_its_tributaries() {
             c.trunks.iter().find(|x| x.id == t.id).unwrap().attrs.a_geo.last().unwrap() / 1e6
         );
     }
+}
+
+// SPIKE-133 (spike prototype; lead #189)
+#[test]
+fn a_per_cell_runoff_accumulates_as_area_times_runoff_and_is_conserved_at_every_node() {
+    // lead #189 (spikes #182: a per-vertex runoff ratio broke conservation at 40,866 nodes on R1h): a runoff weight from 0.25 to 2.0 across the fixture, accumulated as area x
+    // weight down the D8 tree and in the landmass pass, so a_run and q sum exactly at every node; the graph validates and a_run differs from a_geo
+    use planet_generators::bake::kg_trib::accumulate_trunks_weighted;
+    let c = case(4);
+    let n = c.fx.s0.len();
+    let gl = Grid::cube(L_N, RADIUS_M);
+    let weight: Vec<f64> = (0..n).map(|x| 0.25 + 1.75 * ((x * 7919) % 13) as f64 / 12.0).collect();
+    let run = run_domain_weighted(&c, &gl, &vec![false; n], &vec![0.0; n], true, Some(&weight));
+    assert_eq!(run.ex.run.len(), n, "the weighted accumulation is kept");
+    let mut g = assemble(&c, &run);
+    let trunks: BTreeSet<u64> = c.trunks.iter().map(|t| t.id).collect();
+    let inflow = |x: u64| {
+        let x = x as usize;
+        let own = gl.cell_area(x);
+        (own + run.ex.d8[x], own * weight[x] + run.ex.run[x], own * weight[x] + run.ex.run_no_ext[x])
+    };
+    let acc = accumulate_trunks_weighted(&mut g, &trunks, &inflow, RUNOFF);
+    assert_eq!(acc.unordered, 0);
+    let adj = adjacency();
+    let tiles = |x: u64| tile(x as usize);
+    let v = validate(&g, &Checks { adjacent: &adj, tile_of: Some(&tiles), open: false });
+    assert!(!v.iter().any(|x| matches!(x, Violation::ConservationBreak { .. })), "no conservation break: {:?}", &v[..v.len().min(8)]);
+    assert!(v.is_empty(), "the graph validates: {:?}", &v[..v.len().min(8)]);
+    let l: Vec<&Reach> = g.reaches.iter().filter(|r| r.level == Level::L).collect();
+    assert!(l.iter().any(|r| r.attrs.a_run.iter().zip(&r.attrs.a_geo).any(|(a, b)| (a - b).abs() > 1.0)), "the weight changes a_run");
+    assert!(
+        l.iter().all(|r| r.attrs.q.iter().zip(&r.attrs.a_run).all(|(q, a)| (q - a * RUNOFF).abs() <= 1e-12 * a.abs().max(1.0))),
+        "q = a_run runoff"
+    );
+    // without a weight the extract keeps a_run = a_geo (the bits of before)
+    let plain = run_domain(&c, &gl, &vec![false; n], &vec![0.0; n]);
+    assert!(plain.ex.run.is_empty());
+    assert!(plain.ex.reaches.iter().all(|r| r.attrs.a_run == r.attrs.a_geo));
 }

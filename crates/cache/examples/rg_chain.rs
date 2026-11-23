@@ -1778,6 +1778,9 @@ static KV_RIMS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 static KV_CONNECT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 /// lead #178 item 1: `--sea17 on` holds reading 17 (no land cell lowered to the sea + 0.5 m or below) in KV, KC's breach and band6's breach, as KS; `off` (default until the rows) the form before.
 static SEA17: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// lead #189: `--runoff-cell on` gives KG-trib's extract and the landmass pass a per-cell runoff (the H1 field at each L cell's parent, over the uniform mean), accumulated as
+/// area x runoff so a_run sums exactly at nodes; `off` (default until the rows) the uniform runoff.
+static RUNOFF_CELL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// lead #182a: `--trib-rerun on` runs KG-trib post once more with basins-2's kept set where a line-end lake inlet lost its basin, then basins-2 once more on the new lines; on by default since #182c (reading 44); `off` the one extraction.
 static TRIB_RERUN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 /// lead #179: `--inlet-floor on` floors the graph bed of every L vertex on or inside a kept basin's rim at its spill; `off` the beds as coded; on by default since #180a (reading 42).
@@ -2070,6 +2073,7 @@ fn main() -> Result<(), String> {
         ("--band6-outlet-floor", &BAND6_OUTLET_FLOOR, "on"),
         ("--inlet-floor", &INLET_FLOOR, "on"),
         ("--trib-rerun", &TRIB_RERUN, "on"),
+        ("--runoff-cell", &RUNOFF_CELL, "off"),
     ] {
         let v = value(&args, opt).unwrap_or(default);
         if !["off", "on"].contains(&v) {
@@ -2886,6 +2890,10 @@ fn main() -> Result<(), String> {
     // KG-trib's uniform runoff (m/s), q = a_run r; lead #180: the H1 reaches' a_run is a runoff-weighted area q / r, as KG-trib's L reaches carry it
     let land_h1: Vec<f64> = (0..cells).filter(|&c| solve.zs[c] > 0.0).map(|c| f64::from(runoff[c])).collect();
     let runoff_mean = land_h1.iter().sum::<f64>() / land_h1.len().max(1) as f64;
+    // lead #189: each L cell's runoff over the mean, read at its H1 parent (`--runoff-cell on`)
+    let runoff_w: Option<Vec<f64>> = RUNOFF_CELL
+        .load(std::sync::atomic::Ordering::Relaxed)
+        .then(|| (0..w * h).map(|c| f64::from(runoff[((c / w) / L) * rw + (c % w) / L]) / runoff_mean).collect());
     let window = (x0 as u64, y0 as u64, w, h, rw);
     let mut g = if on("kg-trunk") {
         build_graph(&h1, &reaches, grid, &start, &ks_base, &ks0, &budget, window, sea, bar, &order, threads, low, &ocean, runoff_mean).0
@@ -3101,7 +3109,7 @@ fn main() -> Result<(), String> {
             fine = Some((r.receiver, channel));
         }
         if on("kg-trib") && !(trib_once && trib_on == "post") {
-            use planet_generators::bake::kg_trib::{accumulate_trunks, extract, Input, Params, Trunk};
+            use planet_generators::bake::kg_trib::{accumulate_trunks_weighted, extract, Input, Params, Trunk};
             let trunks: Vec<Trunk> = l_trunks
                 .iter()
                 .filter_map(|r| {
@@ -3121,6 +3129,7 @@ fn main() -> Result<(), String> {
                 tile: &tile_l,
                 gid: &gid_l,
                 keep_fields: false,
+                runoff_weight: runoff_w.as_deref(),
             };
             let ex = extract(&inp, &Params { mfd_init: false, ..Params::plan(BODY, runoff_mean) });
             // only what the pass adds: a tributary that ends at a trunk's last vertex returns the trunk's own down node, which must stay (numerics review of f5adb6d8)
@@ -3131,8 +3140,14 @@ fn main() -> Result<(), String> {
             gd.reaches.extend(ex.reaches.iter().cloned());
             // reading 18 (lead #170 item 4): the landmass pass, the L trunks' areas and discharge (q_w, KV's width) accumulated at L from their tributaries and hillslope
             let trunk_ids: BTreeSet<u64> = l_trunks.iter().map(|r| r.id).collect();
-            let inflow = |id: u64| to_local(id).map_or((0.0, 0.0), |c| (dx_l * dx_l + ex.d8[c], dx_l * dx_l + ex.d8_no_ext[c]));
-            let acc = accumulate_trunks(&mut gd, &trunk_ids, &inflow, runoff_mean);
+            let inflow = |id: u64| {
+                to_local(id).map_or((0.0, 0.0, 0.0), |c| {
+                    let own = dx_l * dx_l * runoff_w.as_ref().map_or(1.0, |wt| wt[c]);
+                    let (run, run_no) = if ex.run.is_empty() { (ex.d8[c], ex.d8_no_ext[c]) } else { (ex.run[c], ex.run_no_ext[c]) };
+                    (dx_l * dx_l + ex.d8[c], own + run, own + run_no)
+                })
+            };
+            let acc = accumulate_trunks_weighted(&mut gd, &trunk_ids, &inflow, runoff_mean);
             println!(
                 "RG domain {d} reading 18: {} trunk reaches accumulated at L, {} unordered, {} heads over their H1 seed",
                 acc.reaches, acc.unordered, acc.heads_over_seed
@@ -3457,7 +3472,7 @@ fn main() -> Result<(), String> {
         // lead #164: the post pass's routing, for the fable order's KS1
         let mut fine_post: Option<(Vec<u32>, Vec<bool>)> = None;
         if trib_on == "post" && on("kg-trib") && !order_carbon {
-            use planet_generators::bake::kg_trib::{accumulate_trunks, extract, Input, Params, Trunk};
+            use planet_generators::bake::kg_trib::{accumulate_trunks_weighted, extract, Input, Params, Trunk};
             let t2 = Instant::now();
             gd.reaches.retain(|r| !trib_first.0.contains(&r.id));
             gd.nodes.retain(|x| !trib_first.1.contains(&x.id));
@@ -3516,6 +3531,7 @@ fn main() -> Result<(), String> {
                 tile: &tile_l,
                 gid: &gid_l,
                 keep_fields: false,
+                runoff_weight: runoff_w.as_deref(),
             };
             let ex = extract(&inp, &Params { mfd_init: false, ..Params::plan(BODY, runoff_mean) });
             if order_fable {
@@ -3529,8 +3545,14 @@ fn main() -> Result<(), String> {
             gd.nodes.extend(ex.nodes.iter().cloned());
             gd.reaches.extend(ex.reaches.iter().cloned());
             let trunk_ids: BTreeSet<u64> = l_trunks.iter().map(|r| r.id).collect();
-            let inflow = |id: u64| to_local(id).map_or((0.0, 0.0), |c| (dx_l * dx_l + ex.d8[c], dx_l * dx_l + ex.d8_no_ext[c]));
-            let acc = accumulate_trunks(&mut gd, &trunk_ids, &inflow, runoff_mean);
+            let inflow = |id: u64| {
+                to_local(id).map_or((0.0, 0.0, 0.0), |c| {
+                    let own = dx_l * dx_l * runoff_w.as_ref().map_or(1.0, |wt| wt[c]);
+                    let (run, run_no) = if ex.run.is_empty() { (ex.d8[c], ex.d8_no_ext[c]) } else { (ex.run[c], ex.run_no_ext[c]) };
+                    (dx_l * dx_l + ex.d8[c], own + run, own + run_no)
+                })
+            };
+            let acc = accumulate_trunks_weighted(&mut gd, &trunk_ids, &inflow, runoff_mean);
             if regions <= 1 {
                 acc_trunks = gd.reaches.iter().filter(|r| trunk_ids.contains(&r.id)).map(|r| (r.id, r.attrs.clone())).collect();
             }
@@ -3811,7 +3833,7 @@ fn main() -> Result<(), String> {
                     && on("kg-trib")
                     && !order_carbon
                 {
-                    use planet_generators::bake::kg_trib::{accumulate_trunks, extract, Input, Params, Trunk};
+                    use planet_generators::bake::kg_trib::{accumulate_trunks_weighted, extract, Input, Params, Trunk};
                     let before = lost_inlets(&gd, &kept);
                     let t3 = Instant::now();
                     reran = before > 0;
@@ -3844,14 +3866,22 @@ fn main() -> Result<(), String> {
                             tile: &tile_l,
                             gid: &gid_l,
                             keep_fields: false,
+                            runoff_weight: runoff_w.as_deref(),
                         };
                         let ex = extract(&inp, &Params { mfd_init: false, ..Params::plan(BODY, runoff_mean) });
                         let had: HashSet<u64> = gd.nodes.iter().map(|x| x.id).collect();
                         gd.nodes.extend(ex.nodes.iter().filter(|x| !had.contains(&x.id)).cloned());
                         gd.reaches.extend(ex.reaches.iter().cloned());
                         let trunk_ids: BTreeSet<u64> = l_trunks.iter().map(|r| r.id).collect();
-                        let inflow = |id: u64| to_local(id).map_or((0.0, 0.0), |c| (dx_l * dx_l + ex.d8[c], dx_l * dx_l + ex.d8_no_ext[c]));
-                        accumulate_trunks(&mut gd, &trunk_ids, &inflow, runoff_mean);
+                        let inflow = |id: u64| {
+                            to_local(id).map_or((0.0, 0.0, 0.0), |c| {
+                                let own = dx_l * dx_l * runoff_w.as_ref().map_or(1.0, |wt| wt[c]);
+                                let (run, run_no) =
+                                    if ex.run.is_empty() { (ex.d8[c], ex.d8_no_ext[c]) } else { (ex.run[c], ex.run_no_ext[c]) };
+                                (dx_l * dx_l + ex.d8[c], own + run, own + run_no)
+                            })
+                        };
+                        accumulate_trunks_weighted(&mut gd, &trunk_ids, &inflow, runoff_mean);
                         if regions <= 1 {
                             acc_trunks = gd.reaches.iter().filter(|r| trunk_ids.contains(&r.id)).map(|r| (r.id, r.attrs.clone())).collect();
                         }
@@ -3993,7 +4023,7 @@ fn main() -> Result<(), String> {
             kept.iter().filter(|&&k| k).count()
         );
         if order_carbon && trib_on == "post" && on("kg-trib") {
-            use planet_generators::bake::kg_trib::{accumulate_trunks, extract, Input, Params, Trunk};
+            use planet_generators::bake::kg_trib::{accumulate_trunks_weighted, extract, Input, Params, Trunk};
             let t2 = Instant::now();
             gd.reaches.retain(|r| !trib_first.0.contains(&r.id));
             gd.nodes.retain(|x| !trib_first.1.contains(&x.id));
@@ -4052,13 +4082,20 @@ fn main() -> Result<(), String> {
                 tile: &tile_l,
                 gid: &gid_l,
                 keep_fields: false,
+                runoff_weight: runoff_w.as_deref(),
             };
             let ex = extract(&inp, &Params { mfd_init: false, ..Params::plan(BODY, runoff_mean) });
             gd.nodes.extend(ex.nodes.iter().cloned());
             gd.reaches.extend(ex.reaches.iter().cloned());
             let trunk_ids: BTreeSet<u64> = l_trunks.iter().map(|r| r.id).collect();
-            let inflow = |id: u64| to_local(id).map_or((0.0, 0.0), |c| (dx_l * dx_l + ex.d8[c], dx_l * dx_l + ex.d8_no_ext[c]));
-            let acc = accumulate_trunks(&mut gd, &trunk_ids, &inflow, runoff_mean);
+            let inflow = |id: u64| {
+                to_local(id).map_or((0.0, 0.0, 0.0), |c| {
+                    let own = dx_l * dx_l * runoff_w.as_ref().map_or(1.0, |wt| wt[c]);
+                    let (run, run_no) = if ex.run.is_empty() { (ex.d8[c], ex.d8_no_ext[c]) } else { (ex.run[c], ex.run_no_ext[c]) };
+                    (dx_l * dx_l + ex.d8[c], own + run, own + run_no)
+                })
+            };
+            let acc = accumulate_trunks_weighted(&mut gd, &trunk_ids, &inflow, runoff_mean);
             if regions <= 1 {
                 acc_trunks = gd.reaches.iter().filter(|r| trunk_ids.contains(&r.id)).map(|r| (r.id, r.attrs.clone())).collect();
             }
@@ -4362,6 +4399,7 @@ fn main() -> Result<(), String> {
             ("turned-noise", planet_generators::height::turned_noise().to_string()),
             ("kv-cross", format!("{}", KV_CROSS_MICRO.load(std::sync::atomic::Ordering::Relaxed) as f64 * 1.0e-6)),
             ("trib-rerun", if TRIB_RERUN.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("runoff-cell", if RUNOFF_CELL.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("inlet-floor", if INLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-floors", if BAND6_FLOORS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-outlet-floor", if BAND6_OUTLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),

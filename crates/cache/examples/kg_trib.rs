@@ -2198,6 +2198,7 @@ fn main() -> Result<(), String> {
             tile: &tile_l,
             gid: &gid_l,
             keep_fields: false,
+            runoff_weight: None,
         };
         let t_x = Instant::now();
         let ex = extract(&inp, &Params { mfd_init: false, ..Params::plan(BODY, runoff_mean) });
