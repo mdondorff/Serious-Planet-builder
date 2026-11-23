@@ -1778,8 +1778,8 @@ static KV_RIMS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 static KV_CONNECT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 /// lead #178 item 1: `--sea17 on` holds reading 17 (no land cell lowered to the sea + 0.5 m or below) in KV, KC's breach and band6's breach, as KS; `off` (default until the rows) the form before.
 static SEA17: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-/// lead #182a: `--trib-rerun on` runs KG-trib post once more with basins-2's kept set where a line-end lake inlet lost its basin; `off` (default) the one extraction.
-static TRIB_RERUN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// lead #182a: `--trib-rerun on` runs KG-trib post once more with basins-2's kept set where a line-end lake inlet lost its basin, then basins-2 once more on the new lines; on by default since #182c (reading 44); `off` the one extraction.
+static TRIB_RERUN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 /// lead #179: `--inlet-floor on` floors the graph bed of every L vertex on or inside a kept basin's rim at its spill; `off` the beds as coded; on by default since #180a (reading 42).
 static INLET_FLOOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 /// lead #178 item 3: `--band6-floors on` holds band6's breach within each path cell's budget left after KS; `off` only the floor cell's budget caps the cut; on by default since #180a (reading 42).
@@ -2069,7 +2069,7 @@ fn main() -> Result<(), String> {
         ("--band6-floors", &BAND6_FLOORS, "on"),
         ("--band6-outlet-floor", &BAND6_OUTLET_FLOOR, "on"),
         ("--inlet-floor", &INLET_FLOOR, "on"),
-        ("--trib-rerun", &TRIB_RERUN, "off"),
+        ("--trib-rerun", &TRIB_RERUN, "on"),
     ] {
         let v = value(&args, opt).unwrap_or(default);
         if !["off", "on"].contains(&v) {
