@@ -1175,3 +1175,44 @@ fn trunk_reaches_flagged_rise_over_budget_or_budget_residual_are_the_trunk_excep
     let cols = G2Report { graph: Some(r), ..G2Report::default() }.columns();
     assert!(cols.iter().any(|c| c.0 == "g_trunk_exceptions" && c.1 == "2"));
 }
+
+// spec: BUILD-060
+#[test]
+fn a_cut_through_a_reference_hump_is_a_hump_cut_and_a_corner_only_block_is_a_corner_link() {
+    // G3-1 (lead #186): on a 30 x 9 grid, the reference rises 15 m over x 10..=19 on row 2 and 5 m over the same span on row 6; the surface cuts a 1-cell path along each row
+    // down to 0 m. Row 2's path cuts a 15 m hump by 15 m (a hump cut); row 6's hump is 5 m (none); a path on a plain, cut 12 m, rises over no end (none)
+    use planet_cache::river_suite::{corner_links, hump_cuts};
+    let (w, h) = (30usize, 9usize);
+    let grid = Grid::new(w, h, DX);
+    let cell = |x: usize, y: usize| y * w + x;
+    let mut reference = vec![0.0f64; w * h];
+    for x in 10..=19 {
+        reference[cell(x, 2)] = 15.0;
+        reference[cell(x, 6)] = 5.0;
+    }
+    let all = vec![true; w * h];
+    let mut surface = reference.clone();
+    for x in 5..=24 {
+        surface[cell(x, 2)] = -0.5;
+        surface[cell(x, 6)] = -0.5;
+    }
+    assert_eq!(hump_cuts(&grid, &reference, &surface, &all), 1, "row 2 only");
+    let plain = vec![20.0f64; w * h];
+    let mut cut = plain.clone();
+    for x in 5..=24 {
+        cut[cell(x, 4)] = 8.0;
+    }
+    assert_eq!(hump_cuts(&grid, &plain, &cut, &all), 0, "a cut on a plain rises over no end");
+    // outside the counted cells nothing counts
+    let none = vec![false; w * h];
+    assert_eq!(hump_cuts(&grid, &reference, &surface, &none), 0);
+    // corner links: a 2 x 2 block with its anti-diagonal 6 m above its diagonal, and one 4 m above (no link)
+    let flat = vec![0.0f64; w * h];
+    let mut z = flat.clone();
+    z[cell(4, 3)] = 6.0;
+    z[cell(3, 4)] = 6.0;
+    z[cell(21, 3)] = 4.0;
+    z[cell(20, 4)] = 4.0;
+    assert_eq!(corner_links(&grid, &z, &all), 1, "the 6 m block links its low pair only at a corner");
+    assert_eq!(corner_links(&grid, &flat, &all), 0);
+}

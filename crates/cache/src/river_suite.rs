@@ -1058,3 +1058,77 @@ pub fn ridge_report(g: &Grid, reference: &[f64], surface: &[f64], ridge: &[bool]
     }
     r
 }
+
+/// A hump cut (G3-1, lead #186; the hump-trench rule of lead #184's C8 count): a path of the cut is an 8-connected group of counted cells lowered by more than
+/// [`HUMP_LOWERED_M`] against `reference`; its ends are its cells with at most one lowered neighbour in the group (none: the group's lowest reference cell); the path cuts a
+/// hump when the reference along it rises more than [`HUMP_M`] above the highest of its ends and it is cut more than [`HUMP_M`] somewhere.
+pub const HUMP_LOWERED_M: f64 = 0.25;
+pub const HUMP_M: f64 = 10.0;
+
+/// The hump cuts of `surface` against `reference` over the counted cells `inside`.
+pub fn hump_cuts(g: &Grid, reference: &[f64], surface: &[f64], inside: &[bool]) -> usize {
+    let (w, h) = (g.w(), g.h());
+    let lowered: Vec<bool> = (0..w * h).map(|c| inside[c] && reference[c] - surface[c] > HUMP_LOWERED_M).collect();
+    let mut seen = vec![false; w * h];
+    let mut count = 0usize;
+    let mut stack = Vec::new();
+    let mut group = Vec::new();
+    for s in 0..w * h {
+        if !lowered[s] || seen[s] {
+            continue;
+        }
+        seen[s] = true;
+        stack.push(s);
+        group.clear();
+        while let Some(c) = stack.pop() {
+            group.push(c);
+            for q in neighbours8(w, h, c) {
+                if lowered[q] && !seen[q] {
+                    seen[q] = true;
+                    stack.push(q);
+                }
+            }
+        }
+        let (mut max_cut, mut ref_max, mut ref_min, mut end_max) = (f64::NEG_INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+        for &c in &group {
+            max_cut = max_cut.max(reference[c] - surface[c]);
+            ref_max = ref_max.max(reference[c]);
+            ref_min = ref_min.min(reference[c]);
+            if neighbours8(w, h, c).filter(|&q| lowered[q]).count() <= 1 {
+                end_max = end_max.max(reference[c]);
+            }
+        }
+        let ends = if end_max.is_finite() { end_max } else { ref_min };
+        count += usize::from(max_cut > HUMP_M && ref_max - ends > HUMP_M);
+    }
+    count
+}
+
+/// Corner-only links over [`CORNER_M`] (G3-1, lead #186; lead #184's C8 count): 2 x 2 blocks of counted cells in which one diagonal pair stands more than this above both cells of
+/// the other pair, so the lower pair meets only at a corner.
+pub const CORNER_M: f64 = 5.0;
+
+/// The corner-only links of `z` over the blocks whose four cells are counted.
+pub fn corner_links(g: &Grid, z: &[f64], inside: &[bool]) -> usize {
+    let (w, h) = (g.w(), g.h());
+    let mut count = 0usize;
+    for y in 0..h.saturating_sub(1) {
+        for x in 0..w - 1 {
+            let (ia, ib, ic, id) = (y * w + x, y * w + x + 1, (y + 1) * w + x, (y + 1) * w + x + 1);
+            if !(inside[ia] && inside[ib] && inside[ic] && inside[id]) {
+                continue;
+            }
+            let (a, b, c, d) = (z[ia], z[ib], z[ic], z[id]);
+            count += usize::from(b.min(c) - a.max(d) > CORNER_M || a.min(d) - b.max(c) > CORNER_M);
+        }
+    }
+    count
+}
+
+fn neighbours8(w: usize, h: usize, c: usize) -> impl Iterator<Item = usize> {
+    let (x, y) = ((c % w) as i64, (c / w) as i64);
+    [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)].into_iter().filter_map(move |(dx, dy)| {
+        let (nx, ny) = (x + dx, y + dy);
+        (nx >= 0 && ny >= 0 && nx < w as i64 && ny < h as i64).then(|| ny as usize * w + nx as usize)
+    })
+}
