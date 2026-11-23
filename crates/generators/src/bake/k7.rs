@@ -26,13 +26,94 @@ pub struct RegionField {
     w: usize,
     h: usize,
     data: Vec<f32>,
+    read: RegionRead,
+    /// The B-spline coefficients of `data` for [`RegionRead::BSplineInterp`] (row-major, `w x h`).
+    coef: Vec<f64>,
+}
+
+/// lead #196 (SPIKE-143, spike only): how [`RegionField::at`] reads the cells. `Clamped` (the default, GEN-101's read) is the Catmull-Rom read kept within the four cells around
+/// the point, C1 only where the clamp does not bind: it leaves the 814 m pyramids of SPIKE-143 (X8 0.74-1.07 on S0). `CatmullRom` drops the clamp (C1, interpolating, may
+/// overshoot: counted in [`REGION_OVERSHOOT`]). `BSpline` is the uniform cubic B-spline of the same 4 x 4 cells (C2, approximating: no overshoot of the 16 cells' range, but
+/// it does not pass through a cell's value).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RegionRead {
+    Clamped,
+    CatmullRom,
+    BSpline,
+    /// The interpolating cubic B-spline: the cells prefiltered to B-spline coefficients (Unser's recursive filter, pole `sqrt 3 - 2`, mirror boundary), so the read passes
+    /// through every cell's value and is C2; it may overshoot like the unclamped Catmull-Rom.
+    BSplineInterp,
+}
+
+/// The cubic B-spline coefficients of one line `s` in place (mirror boundary): the read of the coefficients with [`bspline`] passes through `s` at the samples.
+fn bspline_prefilter(s: &mut [f64]) {
+    let n = s.len();
+    if n < 2 {
+        return;
+    }
+    let z = libm::sqrt(3.0) - 2.0;
+    for v in s.iter_mut() {
+        *v *= 6.0;
+    }
+    // the causal start: the mirror-extended sum, truncated where z^k is under 1e-12
+    let horizon = ((libm::log(1e-12) / libm::log(z.abs())).ceil() as usize).min(n);
+    let mut zk = z;
+    let mut sum = s[0];
+    for v in s.iter().take(horizon).skip(1) {
+        sum += zk * v;
+        zk *= z;
+    }
+    s[0] = sum;
+    for k in 1..n {
+        s[k] += z * s[k - 1];
+    }
+    s[n - 1] = (z / (z * z - 1.0)) * (z * s[n - 2] + s[n - 1]);
+    for k in (0..n - 1).rev() {
+        s[k] = z * (s[k + 1] - s[k]);
+    }
+}
+
+/// The overshoot of the unclamped reads beyond the four cells around the point (lead #196): `[reads that left the range, the largest excursion in micrometres, reads]`.
+/// Report only; the values read never depend on it.
+pub static REGION_OVERSHOOT: [std::sync::atomic::AtomicU64; 3] =
+    [std::sync::atomic::AtomicU64::new(0), std::sync::atomic::AtomicU64::new(0), std::sync::atomic::AtomicU64::new(0)];
+
+/// The uniform cubic B-spline basis at `t` in `[0, 1]` between `p[1]` and `p[2]`.
+fn bspline(p: [f64; 4], t: f64) -> f64 {
+    let (t2, t3) = (t * t, t * t * t);
+    let u = 1.0 - t;
+    (u * u * u * p[0] + (3.0 * t3 - 6.0 * t2 + 4.0) * p[1] + (-3.0 * t3 + 3.0 * t2 + 3.0 * t + 1.0) * p[2] + t3 * p[3]) / 6.0
 }
 
 impl RegionField {
     /// `data` row-major, `w x h`, cell `(0, 0)` the cell `(i0, j0)` of the face's grid of `cells` cells an edge.
     pub fn new(face: Face, cells: usize, (i0, j0): (i64, i64), w: usize, h: usize, data: Vec<f32>) -> RegionField {
         assert!(w >= 4 && h >= 4 && data.len() == w * h, "a window of at least 4 x 4 cells");
-        RegionField { face, cells, i0, j0, w, h, data }
+        RegionField { face, cells, i0, j0, w, h, data, read: RegionRead::Clamped, coef: Vec::new() }
+    }
+
+    /// The same field read another way (lead #196).
+    pub fn with_read(mut self, read: RegionRead) -> RegionField {
+        self.read = read;
+        if read == RegionRead::BSplineInterp {
+            let (w, h) = (self.w, self.h);
+            let mut c: Vec<f64> = self.data.iter().map(|&v| f64::from(v)).collect();
+            for row in c.chunks_mut(w) {
+                bspline_prefilter(row);
+            }
+            let mut col = vec![0.0f64; h];
+            for x in 0..w {
+                for y in 0..h {
+                    col[y] = c[y * w + x];
+                }
+                bspline_prefilter(&mut col);
+                for y in 0..h {
+                    c[y * w + x] = col[y];
+                }
+            }
+            self.coef = c;
+        }
+        self
     }
 
     /// The value at a direction on this face's plane.
@@ -49,10 +130,28 @@ impl RegionField {
         let at =
             |a: i64, b: i64| f64::from(self.data[b.clamp(0, self.h as i64 - 1) as usize * self.w + a.clamp(0, self.w as i64 - 1) as usize]);
         let (ii, jj) = (i as i64, j as i64);
-        let row = |dj: i64| catmull_rom([at(ii - 1, jj + dj), at(ii, jj + dj), at(ii + 1, jj + dj), at(ii + 2, jj + dj)], fx);
-        let v = catmull_rom([row(-1), row(0), row(1), row(2)], fy);
+        let coef = |a: i64, b: i64| self.coef[b.clamp(0, self.h as i64 - 1) as usize * self.w + a.clamp(0, self.w as i64 - 1) as usize];
+        let v = if self.read == RegionRead::BSplineInterp {
+            let row = |dj: i64| bspline([coef(ii - 1, jj + dj), coef(ii, jj + dj), coef(ii + 1, jj + dj), coef(ii + 2, jj + dj)], fx);
+            bspline([row(-1), row(0), row(1), row(2)], fy)
+        } else {
+            let spline = if self.read == RegionRead::BSpline { bspline } else { catmull_rom };
+            let row = |dj: i64| spline([at(ii - 1, jj + dj), at(ii, jj + dj), at(ii + 1, jj + dj), at(ii + 2, jj + dj)], fx);
+            spline([row(-1), row(0), row(1), row(2)], fy)
+        };
         let around = [at(ii, jj), at(ii + 1, jj), at(ii, jj + 1), at(ii + 1, jj + 1)];
-        v.clamp(around.iter().copied().fold(f64::INFINITY, f64::min), around.iter().copied().fold(f64::NEG_INFINITY, f64::max))
+        let (lo, hi) = (around.iter().copied().fold(f64::INFINITY, f64::min), around.iter().copied().fold(f64::NEG_INFINITY, f64::max));
+        if self.read == RegionRead::Clamped {
+            return v.clamp(lo, hi);
+        }
+        let over = (lo - v).max(v - hi);
+        if over > 0.0 {
+            use std::sync::atomic::Ordering::Relaxed;
+            REGION_OVERSHOOT[0].fetch_add(1, Relaxed);
+            REGION_OVERSHOOT[1].fetch_max((over * 1.0e6) as u64, Relaxed);
+        }
+        REGION_OVERSHOOT[2].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        v
     }
 }
 

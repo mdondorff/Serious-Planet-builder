@@ -209,6 +209,51 @@ fn a_regional_field_is_read_c1_and_clamped() {
     assert_eq!(pit_stats(&grid, &z, 0.0, 1e-3, 0.5, 0).pit_cells, 0);
 }
 
+// lead #196 (SPIKE-143, spike only; not a spec requirement): the read modes of a regional field. Clamped is the default; Catmull-Rom unclamped overshoots beside a
+// step and stays exact at the centres; the cubic B-spline stays within the 4 x 4 cells' range.
+#[test]
+fn a_regional_field_reads_clamped_by_default_unclamped_or_as_a_b_spline() {
+    use planet_generators::bake::k7::RegionRead;
+    let (w, h, n) = (12usize, 10usize, 384usize);
+    // a step in x between columns 5 and 6 (0 m and 10 m)
+    let data: Vec<f32> = (0..w * h).map(|p| if p % w >= 6 { 10.0 } else { 0.0 }).collect();
+    let field = |r| RegionField::new(Face(1), n, (100, 200), w, h, data.clone()).with_read(r);
+    let (clamped, cr, bs) = (field(RegionRead::Clamped), field(RegionRead::CatmullRom), field(RegionRead::BSpline));
+    let plain = RegionField::new(Face(1), n, (100, 200), w, h, data.clone());
+    let dir = |x: f64, y: f64| {
+        face_to_direction(&TangentWarp, Face(1), 2.0 * (100.0 + x + 0.5) / n as f64 - 1.0, 2.0 * (200.0 + y + 0.5) / n as f64 - 1.0)
+    };
+    let (mut cr_over, mut bs_lo, mut bs_hi) = (0.0f64, f64::INFINITY, f64::NEG_INFINITY);
+    for k in 0..=40 {
+        let x = 3.0 + 6.0 * k as f64 / 40.0;
+        let d = dir(x, 4.3);
+        assert_eq!(plain.at(d).to_bits(), clamped.at(d).to_bits(), "the default is the clamped read at x {x}");
+        let c = clamped.at(d);
+        assert!((0.0..=10.0).contains(&c), "clamped stays within the step at x {x}: {c}");
+        let u = cr.at(d);
+        cr_over = cr_over.max((-u).max(u - 10.0));
+        let b = bs.at(d);
+        bs_lo = bs_lo.min(b);
+        bs_hi = bs_hi.max(b);
+    }
+    assert!(cr_over > 0.1, "Catmull-Rom unclamped overshoots beside the step: {cr_over}");
+    assert!(bs_lo >= -1e-9 && bs_hi <= 10.0 + 1e-9, "the B-spline stays within the cells' range: {bs_lo} .. {bs_hi}");
+    // at a cell centre away from the step the unclamped Catmull-Rom is exact; the B-spline of a constant is the constant
+    for (a, v) in [(2.0, 0.0), (9.0, 10.0)] {
+        assert!((cr.at(dir(a, 4.0)) - v).abs() < 1e-3);
+        assert!((bs.at(dir(a, 4.0)) - v).abs() < 1e-3);
+    }
+    // the interpolating B-spline passes through every cell's value, beside the step too, where the plain B-spline does not
+    let bi = field(RegionRead::BSplineInterp);
+    let wavy: Vec<f32> = (0..w * h).map(|p| ((p % w) as f32 * 1.3).sin() * 20.0 + (p / w) as f32 * 3.0).collect();
+    let bw = RegionField::new(Face(1), n, (100, 200), w, h, wavy.clone()).with_read(RegionRead::BSplineInterp);
+    for (a, b) in [(5usize, 4usize), (6, 4), (3, 6), (8, 2)] {
+        assert!((bi.at(dir(a as f64, b as f64)) - f64::from(data[b * w + a])).abs() < 1e-3, "bsplinei at the step's cell ({a}, {b})");
+        assert!((bw.at(dir(a as f64, b as f64)) - f64::from(wavy[b * w + a])).abs() < 1e-3, "bsplinei at cell ({a}, {b})");
+    }
+    assert!((bs.at(dir(5.0, 4.0)) - 0.0).abs() > 1.0, "the plain B-spline smooths the step's cell");
+}
+
 // spec: GEN-154
 #[test]
 fn the_vertex_report_is_a_consistent_partition_of_the_nodes() {

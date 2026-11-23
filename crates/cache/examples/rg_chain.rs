@@ -2077,6 +2077,18 @@ fn main() -> Result<(), String> {
         }
         flag.store(v == "on", std::sync::atomic::Ordering::Relaxed);
     }
+    // lead #196 (SPIKE-143): --region-read clamped (default, main's K7 read of K5's delta) | cr (unclamped Catmull-Rom) | bspline (cubic B-spline) | bsplinei (the interpolating cubic B-spline)
+    let region_read = value(&args, "--region-read").unwrap_or("clamped");
+    planet_cache::region_bake::K5_REGION_READ.store(
+        match region_read {
+            "clamped" => 0,
+            "cr" => 1,
+            "bspline" => 2,
+            "bsplinei" => 3,
+            o => return Err(format!("--region-read clamped | cr | bspline | bsplinei, not '{o}'")),
+        },
+        std::sync::atomic::Ordering::Relaxed,
+    );
     // crusader #172 (owner, 2026-11-20: measure it): --exception-lakes off (default) | on
     let exception_lakes = value(&args, "--exception-lakes").unwrap_or("off");
     if !["off", "on"].contains(&exception_lakes) {
@@ -2253,6 +2265,18 @@ fn main() -> Result<(), String> {
     par_fill(&mut rl, w, threads, &|p| bl[p] - zb_field.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
     let mut start = vec![0f64; w * h];
     par_fill(&mut start, w, threads, &|p| bl[p] + regional_read.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
+    {
+        use std::sync::atomic::Ordering::Relaxed;
+        let o = &planet_generators::bake::k7::REGION_OVERSHOOT;
+        let (over, max_um, reads) = (o[0].load(Relaxed), o[1].load(Relaxed), o[2].load(Relaxed));
+        if reads > 0 {
+            println!(
+                "RG region read (lead #196): {over} of {reads} unclamped reads left the four cells' range ({:.3} %), largest overshoot {:.3} m (the front's reads and S0's)",
+                100.0 * over as f64 / reads as f64,
+                max_um as f64 / 1.0e6
+            );
+        }
+    }
     chain_f32("base.f32", &bl)?;
     chain_f32("zs.f32", &solve.zs)?;
     drop(bl);
@@ -2659,7 +2683,15 @@ fn main() -> Result<(), String> {
             let mask: Vec<f64> = h1.hydro.channel.iter().map(|&c| if c { 1.0 } else { 0.0 }).collect();
             kh::channel_zone(&mask, rw, rh, 0.5)
         });
-        let zs_field = RegionField::new(face, REGIONAL, (sri0 as i64, srj0 as i64), rw, rh, zs_l.iter().map(|&v| v as f32).collect());
+        // lead #196: KH's C1(z_s) outside the zone takes the same --region-read as K7's read of K5's delta (SPIKE-143: S_KH re-reads z_s, so S0's read alone leaves the final's
+        // 814 m excess where it was)
+        let zs_field = RegionField::new(face, REGIONAL, (sri0 as i64, srj0 as i64), rw, rh, zs_l.iter().map(|&v| v as f32).collect())
+            .with_read(match region_read {
+                "cr" => planet_generators::bake::k7::RegionRead::CatmullRom,
+                "bspline" => planet_generators::bake::k7::RegionRead::BSpline,
+                "bsplinei" => planet_generators::bake::k7::RegionRead::BSplineInterp,
+                _ => planet_generators::bake::k7::RegionRead::Clamped,
+            });
         // h5d: the quads whose D8 diagonal step C1 dams (C1 at the quad's centre over the step line by more than 1 m); C1 at the centre is the mean of the four L cells there
         let dams = (kh_form == "h5d").then(|| {
             let rcv = |c: usize| (recv[c] != NONE).then(|| recv[c] as usize);
@@ -4347,6 +4379,7 @@ fn main() -> Result<(), String> {
             ("inlet-floor", if INLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-floors", if BAND6_FLOORS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-outlet-floor", if BAND6_OUTLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("region-read", region_read.to_string()),
             ("sea17", if SEA17.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-connect", if KV_CONNECT.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-rims", if KV_RIMS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),

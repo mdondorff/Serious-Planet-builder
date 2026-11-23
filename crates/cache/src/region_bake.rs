@@ -354,6 +354,10 @@ pub fn solve_region(spec: &RegionSpec, base: &(dyn Fn(Vec3) -> f64 + Sync)) -> R
     Ok(RegionSolve { face_spec, grid, outlet, zb, zb_in, zs, stream, ri0, rj0, rw, rh, precision })
 }
 
+/// lead #196 (SPIKE-143, spike only): the read of the regional change (K5's delta) that K7 and S0 take: 0 the clamped Catmull-Rom (default), 1 unclamped Catmull-Rom,
+/// 2 the cubic B-spline, 3 the interpolating cubic B-spline ([`planet_generators::bake::k7::RegionRead`]).
+pub static K5_REGION_READ: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
 /// The front half of the bake, which the tile layout does not enter: the regional solve, H1 on the solved surface, the lakes, the channel graph and its channels.
 pub struct RegionFront {
     pub solve: RegionSolve,
@@ -373,7 +377,14 @@ pub fn region_front(spec: &RegionSpec, base: &(dyn Fn(Vec3) -> f64 + Sync), clim
     let n = rw * rh;
     let dir_of = |c: usize| face_spec.halo_direction((ri0 + c % rw) as i64, (rj0 + c / rw) as i64);
     let change: Vec<f32> = zs.iter().zip(zb).map(|(s, b)| (s - b) as f32).collect();
-    let regional_field = RegionField::new(spec.face, spec.regional, (ri0 as i64, rj0 as i64), rw, rh, change);
+    let regional_field = RegionField::new(spec.face, spec.regional, (ri0 as i64, rj0 as i64), rw, rh, change).with_read(
+        match K5_REGION_READ.load(std::sync::atomic::Ordering::Relaxed) {
+            1 => planet_generators::bake::k7::RegionRead::CatmullRom,
+            2 => planet_generators::bake::k7::RegionRead::BSpline,
+            3 => planet_generators::bake::k7::RegionRead::BSplineInterp,
+            _ => planet_generators::bake::k7::RegionRead::Clamped,
+        },
+    );
     let (mut weight, mut runoff, mut evap) = (vec![1.0f32; n], vec![0.0f32; n], vec![0.0f32; n]);
     for c in (0..n).filter(|&c| zs[c] > 0.0) {
         let (ro, ev, w) = climate(dir_of(c));
