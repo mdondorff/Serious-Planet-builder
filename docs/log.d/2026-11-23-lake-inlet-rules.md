@@ -1,0 +1,1 @@
+- 2026-11-23 lake-inlet-rules (GEN-189, BUILD-060): no orphan lake_inlet (lead #182a); the gate counts lake inlets by origin and the line-end ones in no kept basin (lead, 2026-11-23).

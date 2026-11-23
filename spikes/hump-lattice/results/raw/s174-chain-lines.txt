@@ -1,0 +1,7 @@
+== r1h-tso
+RG KG-trunk saddle ortho (lead #174): 14541 diagonal H1 steps across a saddle block routed through the lower orthogonal H1 cell, of 19268 diagonal steps
+== r1h-ksa
+RG KH saddle split (lead #174a, all): 37966 D8 diagonal steps across a z_s saddle block take h4c (17212 of them inside the channel zone already)
+== r1h-kst
+RG KH saddle split (lead #174a, trunk): 14519 D8 diagonal steps across a z_s saddle block take h4c (14519 of them inside the channel zone already)
+== final cells differing, r1h-def against r1h-tso (computed on the final f64 surfaces before their deletion): 16339 window-wide, 6454 over 1 m, 4653 inside the box, max 50.0 m

@@ -1,0 +1,2 @@
+kh      in the zone: X6 +0.021 X8 +0.222 Xdiag +0.104 (kink 60.06 m2) | outside: X6 +0.308 X8 +0.616 Xdiag +0.011 (kink 8.15 m2)
+final   in the zone: X6 +0.013 X8 +0.149 Xdiag +0.092 (kink 87.53 m2) | outside: X6 +0.218 X8 +0.363 Xdiag +0.013 (kink 11.50 m2)

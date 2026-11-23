@@ -231,6 +231,7 @@ fn violation_kind(v: &Violation) -> &'static str {
         Violation::OutgoingCount { .. } => "outgoing_count",
         Violation::InvalidEdge { .. } => "invalid_edge",
         Violation::InvalidMarker { .. } => "invalid_marker",
+        Violation::OrphanLakeInlet { .. } => "orphan_lake_inlet",
         Violation::TributaryLeavesTile { .. } => "tributary_leaves_tile",
         Violation::BedRise { .. } => "bed_rise",
         Violation::BedNotShared { .. } => "bed_not_shared",
@@ -433,7 +434,7 @@ pub fn kept_interiors(g: &Graph, window: &Window, label: &[u32]) -> (Vec<bool>, 
     (label.iter().map(|l| *l != u32::MAX && held.contains(l)).collect(), basins)
 }
 
-/// Lead #182a (DEC crusader-32): the `lake_inlet` nodes inside the window by origin (a line's end, some reach's `down`; a basin's spill target, some basin's `spill_node`),
+/// BUILD-060 (lead #182a, 2026-11-23): the `lake_inlet` nodes inside the window by origin (a line's end, some reach's `down`; a basin's spill target, some basin's `spill_node`),
 /// and the ones the gate holds to a kept basin: a line-end inlet whose anchor lies in no kept-basin depression of `label` ([`kept_interiors`]). A spill target between
 /// reported basins is a hierarchy record and is not held to it; an inlet that is neither is an orphan (GEN-189's graph rule).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -1004,6 +1005,23 @@ pub fn read_kc_patches(dir: &Path) -> Result<Option<(usize, f64)>, String> {
         volume += v;
     }
     Ok(Some((count, volume)))
+}
+
+/// The chain's ocean of a stage directory (lead #185a): `ocean.u8`, one byte per window cell in row order (0 not ocean; 1 reached, 2 an H1 sea-cell seed, 3 an edge seed);
+/// none when the file is missing. Another length, or a byte above 3, is refused naming the file.
+pub fn read_chain_ocean(dir: &Path, n: usize) -> Result<Option<Vec<bool>>, String> {
+    let p = dir.join("ocean.u8");
+    if !p.exists() {
+        return Ok(None);
+    }
+    let bytes = std::fs::read(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+    if bytes.len() != n {
+        return Err(format!("{}: {} bytes, the window has {n} cells", p.display(), bytes.len()));
+    }
+    if let Some(k) = bytes.iter().position(|&b| b > 3) {
+        return Err(format!("{}: cell {k} holds {}, not 0 to 3", p.display(), bytes[k]));
+    }
+    Ok(Some(bytes.iter().map(|&b| b > 0).collect()))
 }
 
 /// The f64 budget validator's records of a stage directory (lead 2026-11-21): `budget-violations.csv`, a header `cell,stage,used_m,budget_m` and one line per overrun or raise;

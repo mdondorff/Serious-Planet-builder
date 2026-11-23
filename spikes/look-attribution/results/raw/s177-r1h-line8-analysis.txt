@@ -1,0 +1,14 @@
+36646 channel D8 steps; 942359 L cells within 4 cells of a line
+kh        stencil 2 L cells: along RMS 6.312 m, across RMS 24.519 m, p90 |along| 7.144 m
+kh        stencil 4 L cells: along RMS 18.523 m, across RMS 75.574 m, p90 |along| 18.949 m
+kh      M4 along-channel kink RMS 2.412 m (p90 3.117); across RMS 7.528 m; along / across 0.320; mid-segment / ends |k| 0.649
+final     stencil 2 L cells: along RMS 7.297 m, across RMS 25.330 m, p90 |along| 8.606 m
+final     stencil 4 L cells: along RMS 18.580 m, across RMS 75.962 m, p90 |along| 19.472 m
+final   M4 along-channel kink RMS 3.727 m (p90 4.336); across RMS 8.803 m; along / across 0.423; mid-segment / ends |k| 0.781
+zone cells inside the box: 18.7 % of land
+kh      in the zone: X6 +0.047 X8 +0.427 Xdiag +0.011 (kink 45.36 m2) | outside: X6 +0.327 X8 +0.658 Xdiag +0.017 (kink 7.69 m2)
+final   in the zone: X6 +0.034 X8 +0.281 Xdiag +0.008 (kink 61.97 m2) | outside: X6 +0.219 X8 +0.368 Xdiag +0.015 (kink 11.33 m2)
+r1h-line8-chain: depressions > 0.5 m in the box: kh 11107 ks1c 10828 band6c 693 final 600
+    drained per stage (+ = fewer): kh->ks1c +279 ks1c->band6c +10135 band6c->final +93
+kh   : corner-only 2x2 blocks over 2 / 5 / 10 m:     745 /      52 /      1; of the 5 m ones touching a KS-lowered cell 69 %
+final: corner-only 2x2 blocks over 2 / 5 / 10 m:    1319 /     331 /     93; of the 5 m ones touching a KS-lowered cell 66 %

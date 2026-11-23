@@ -1,0 +1,7 @@
+# anchor: latitude -36.4920 longitude -164.5125 degrees, ground 370.7 m
+# note: base: computed in memory, not read from a stored bake
+# caption: SPIKE-143 R1h river crop, g1f15 flight store (viewer mesh)
+# pose width height eye_lat_deg eye_lon_deg eye_height_m heading_deg pitch_deg sun_local_hours nodes capped_nodes
+r1h-river-east 1600 900 -36.52351 -164.51248 3948.2 0 45 6.85 308 0
+r1h-river-west 1600 900 -36.52351 -164.51248 3948.2 0 45 17.15 308 0
+r1h-river-low 1600 900 -36.50793 -164.53226 1139.5 45 12 17.15 782 5

@@ -1,0 +1,18 @@
+=== f1
+zone cells inside the box: 21.3 % of land
+s0      in the zone: X6 +0.046 X8 +1.009 Xdiag +0.005 (kink 1.53 m2) | outside: X6 +0.148 X8 +0.916 Xdiag +0.003 (kink 0.24 m2)
+kh      in the zone: X6 +0.015 X8 +0.154 Xdiag +0.117 (kink 5.21 m2) | outside: X6 +0.122 X8 +0.793 Xdiag +0.035 (kink 0.29 m2)
+ks0     in the zone: X6 +0.015 X8 +0.157 Xdiag +0.117 (kink 5.22 m2) | outside: X6 +0.122 X8 +0.793 Xdiag +0.035 (kink 0.29 m2)
+ks1c    in the zone: X6 +0.014 X8 +0.129 Xdiag +0.120 (kink 5.44 m2) | outside: X6 +0.113 X8 +0.691 Xdiag +0.027 (kink 0.32 m2)
+band6c  in the zone: X6 +0.011 X8 +0.110 Xdiag +0.114 (kink 5.40 m2) | outside: X6 +0.057 X8 +0.111 Xdiag +0.075 (kink 0.52 m2)
+kv      in the zone: X6 +0.012 X8 +0.063 Xdiag +0.115 (kink 8.06 m2) | outside: X6 +0.049 X8 +0.118 Xdiag +0.063 (kink 0.59 m2)
+final   in the zone: X6 +0.012 X8 +0.061 Xdiag +0.116 (kink 7.68 m2) | outside: X6 +0.050 X8 +0.118 Xdiag +0.063 (kink 0.59 m2)
+=== r3b
+zone cells inside the box: 25.1 % of land
+s0      in the zone: X6 +0.011 X8 +1.061 Xdiag +0.003 (kink 2.92 m2) | outside: X6 +0.024 X8 +1.089 Xdiag +0.006 (kink 0.31 m2)
+kh      in the zone: X6 +0.005 X8 +0.188 Xdiag +0.116 (kink 9.80 m2) | outside: X6 +0.018 X8 +0.901 Xdiag +0.051 (kink 0.39 m2)
+ks0     in the zone: X6 +0.005 X8 +0.189 Xdiag +0.116 (kink 9.80 m2) | outside: X6 +0.018 X8 +0.901 Xdiag +0.051 (kink 0.39 m2)
+ks1c    in the zone: X6 +0.004 X8 +0.163 Xdiag +0.118 (kink 10.15 m2) | outside: X6 +0.019 X8 +0.821 Xdiag +0.051 (kink 0.41 m2)
+band6c  in the zone: X6 +0.004 X8 +0.163 Xdiag +0.118 (kink 10.13 m2) | outside: X6 +0.013 X8 +0.606 Xdiag +0.061 (kink 0.47 m2)
+kv      in the zone: X6 +0.008 X8 +0.117 Xdiag +0.110 (kink 12.58 m2) | outside: X6 +0.017 X8 +0.547 Xdiag +0.055 (kink 0.53 m2)
+final   in the zone: X6 +0.008 X8 +0.117 Xdiag +0.110 (kink 12.57 m2) | outside: X6 +0.017 X8 +0.547 Xdiag +0.055 (kink 0.53 m2)
