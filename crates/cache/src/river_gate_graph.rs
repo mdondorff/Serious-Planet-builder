@@ -420,22 +420,42 @@ fn dilate(m: &[bool], w: usize, h: usize) -> Vec<bool> {
     out
 }
 
-/// The kept-basin interiors on the window (lead #166; [`KeptReport`]): `label` the gate's depression of each cell on the measured surface (BUILD-057's basin flood, `u32::MAX` dry); an
-/// interior is every cell of a depression that holds a kept basin's floor cell. Returns per cell whether it lies in one, and the number of kept basins whose floor lies in a depression.
-pub fn kept_interiors(g: &Graph, window: &Window, label: &[u32]) -> (Vec<bool>, usize) {
-    let mut held = BTreeSet::new();
+/// The kept-basin interiors on the window (lead #166, #186; G3-1, #182c; [`KeptReport`]): a kept basin's (`protected_surface`) lake is the cells of the measured surface `z`
+/// under its recorded spill (`spill_m`) joined (8-connected) to its floor cell; a floor at or above its spill holds no lake. Returns per cell whether it lies in one, and the number
+/// of kept basins whose floor lies in the window under its spill.
+pub fn kept_interiors(g: &Graph, window: &Window, z: &[f64]) -> (Vec<bool>, usize) {
+    let (w, h) = (window.w, window.h);
+    let mut kept = vec![false; z.len()];
     let mut basins = 0usize;
-    for b in g.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface) {
-        if let Some(f) = window.cell(b.floor_cell).filter(|&f| label[f] != u32::MAX) {
-            held.insert(label[f]);
-            basins += 1;
+    let mut stack = Vec::new();
+    // the basin that last entered each cell: a cell another basin's lake already holds is entered again, so each basin's lake is its own region
+    let mut stamp = vec![usize::MAX; z.len()];
+    for (k, b) in g.basins.iter().enumerate().filter(|(_, b)| b.represented == Represented::ProtectedSurface) {
+        let Some(f) = window.cell(b.floor_cell).filter(|&f| z[f] < b.spill_m) else { continue };
+        basins += 1;
+        stamp[f] = k;
+        stack.push(f);
+        while let Some(c) = stack.pop() {
+            kept[c] = true;
+            let (x, y) = ((c % w) as i64, (c / w) as i64);
+            for (dx, dy) in [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
+                let (nx, ny) = (x + dx, y + dy);
+                if nx < 0 || ny < 0 || nx >= w as i64 || ny >= h as i64 {
+                    continue;
+                }
+                let q = ny as usize * w + nx as usize;
+                if z[q] < b.spill_m && stamp[q] != k {
+                    stamp[q] = k;
+                    stack.push(q);
+                }
+            }
         }
     }
-    (label.iter().map(|l| *l != u32::MAX && held.contains(l)).collect(), basins)
+    (kept, basins)
 }
 
 /// BUILD-060 (lead #182a, 2026-11-23): the `lake_inlet` nodes inside the window by origin (a line's end, some reach's `down`; a basin's spill target, some basin's `spill_node`),
-/// and the ones the gate holds to a kept basin: a line-end inlet whose anchor lies in no kept-basin depression of `label` ([`kept_interiors`]). A spill target between
+/// and the ones the gate holds to a kept basin: a line-end inlet whose anchor lies in no kept-basin lake on `z` ([`kept_interiors`]). A spill target between
 /// reported basins is a hierarchy record and is not held to it; an inlet that is neither is an orphan (GEN-189's graph rule).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct InletReport {
@@ -448,8 +468,8 @@ pub struct InletReport {
     pub line_end_no_basin_far: usize,
 }
 
-pub fn inlets_without_basin(g: &Graph, window: &Window, label: &[u32]) -> InletReport {
-    let (kept, _) = kept_interiors(g, window, label);
+pub fn inlets_without_basin(g: &Graph, window: &Window, z: &[f64]) -> InletReport {
+    let (kept, _) = kept_interiors(g, window, z);
     let (w, h) = (window.w as i64, window.h as i64);
     let downs: BTreeSet<u64> = g.reaches.iter().map(|r| r.down).collect();
     let spills: BTreeSet<u64> = g.basins.iter().map(|b| b.spill_node).collect();

@@ -175,7 +175,7 @@ fn a_missing_spill_node_of_a_basin_in_the_margin_is_counted_apart() {
 
 // spec: TEST-137, BUILD-060
 #[test]
-fn a_kept_basins_interior_is_the_depression_holding_its_floor_and_its_river_steps_are_counted_apart() {
+fn a_kept_basins_interior_is_the_surface_under_its_recorded_spill_joined_to_its_floor_and_its_river_steps_are_counted_apart() {
     use planet_cache::river_gate_graph::{kept_interiors, kept_steps};
     let mut g = graph();
     let cell = |x: usize, y: usize| (y - 200) * 12 + (x - 100);
@@ -206,17 +206,19 @@ fn a_kept_basins_interior_is_the_depression_holding_its_floor_and_its_river_step
         basin((102, 210), 30.0, Represented::None),
         basin((102, 209), 10.0, Represented::ProtectedSurface),
     ];
-    // the gate's depressions: the bowl (label 0) and a pit at (102, 210) (label 1); (102, 209) is dry
-    let mut label = vec![u32::MAX; 144];
-    for y in 207..=209 {
-        for x in 107..=109 {
-            label[cell(x, y)] = 0;
-        }
-    }
-    label[cell(102, 210)] = 1;
-    let (kept, basins) = kept_interiors(&g, &W, &label);
+    // G3-1 (#182c): the kept bowl's lake is the cells under its 6 m spill joined to its floor; the drained basin holds none, and the third's floor (20 m) stands above its 10 m spill
+    let (kept, basins) = kept_interiors(&g, &W, &z);
     assert_eq!((basins, kept.iter().filter(|&&k| k).count()), (1, 9));
     assert!(kept[cell(107, 207)] && !kept[cell(106, 208)]);
+    // a spill recorded at 3 m holds only the floor: the 5 m ring is above it, though the depression of the measured surface holds it
+    let mut low = g.clone();
+    low.basins[0].spill_m = 3.0;
+    let (k3, b3) = kept_interiors(&low, &W, &z);
+    assert_eq!((b3, k3.iter().filter(|&&k| k).count()), (1, 1));
+    // a cell under the spill but not joined to the floor is no part of the lake
+    let mut apart = z.clone();
+    apart[cell(103, 203)] = 2.0;
+    assert!(!kept_interiors(&g, &W, &apart).0[cell(103, 203)]);
     // river steps: into the floor, out over the rim (rising 4 m), and one outside on the plain rising 1 m
     let mut river = vec![false; 144];
     let mut recv = vec![u32::MAX; 144];
@@ -717,8 +719,13 @@ fn kept_lakes_get_their_own_bars_beside_the_raw_closed_basin_share_and_a_spill_m
         represented: Represented::ProtectedSurface,
         owner: Domain::Landmass,
     };
-    // the recorded spill at the pit's floor: no mismatch
-    g.basins = vec![kept_basin(z[cell(floor.0, floor.1)])];
+    // the recorded spill at the pit's level (its depression level at the floor): no mismatch, and the lake (G3-1, #182c: the cells under the spill joined to the floor) is the pit
+    let level = (3..=9)
+        .flat_map(|y| (3..=9).map(move |x| (x, y)))
+        .filter(|&(x, y)| !((4..=8).contains(&x) && (4..=8).contains(&y)))
+        .map(|(x, y)| z[cell(x, y)])
+        .fold(f64::INFINITY, f64::min);
+    g.basins = vec![kept_basin(level)];
     let kept = run(&g, &p);
     assert_eq!(kept.basin_river_cells, open.basin_river_cells, "BUILD-055's raw share is untouched");
     assert_eq!(
@@ -747,7 +754,6 @@ fn kept_lakes_get_their_own_bars_beside_the_raw_closed_basin_share_and_a_spill_m
     );
     assert!(kept.lines().iter().any(|l| l.starts_with("RIVER-GATE kept lakes (BUILD-060, option C): ponds 0.00 %")), "{:?}", kept.lines());
     // a recorded spill 5 m above the pit's level: a spill mismatch, counted in bar_violations
-    let level = z[cell(floor.0, floor.1)] + 6.0;
     g.basins = vec![kept_basin(level + 5.0)];
     let mis = run(&g, &p);
     assert_eq!(mis.spill_mismatch, Some(1), "{mis:?}");
@@ -809,12 +815,12 @@ fn a_rise_into_a_down_node_excused_by_its_residual_is_printed_beside_the_violati
 // spec: BUILD-060
 #[test]
 fn a_line_end_inlet_outside_every_kept_depression_is_counted_and_spill_targets_are_not() {
-    // a kept basin whose floor depression is the 3 x 3 block at (4..=6, 4..=6); reaches ending at inlets inside, beside and far from it; a spill target far from it; an
-    // orphan inlet
-    let mut label = vec![u32::MAX; 144];
+    // a kept basin whose lake (the cells under its 5 m spill joined to its floor) is the 3 x 3 block at (4..=6, 4..=6); reaches ending at inlets inside, beside and far from it; a
+    // spill target far from it; an orphan inlet
+    let mut z = vec![20.0; 144];
     for y in 4..=6 {
         for x in 4..=6 {
-            label[y * 12 + x] = 0;
+            z[y * 12 + x] = 1.0;
         }
     }
     let inlet = |x: u64, y: u64| node(NodeKind::LakeInlet, x, y);
@@ -843,14 +849,14 @@ fn a_line_end_inlet_outside_every_kept_depression_is_counted_and_spill_targets_a
     };
     use planet_cache::river_gate_graph::{inlets_without_basin, InletReport};
     assert_eq!(
-        inlets_without_basin(&g, &W, &label),
+        inlets_without_basin(&g, &W, &z),
         InletReport { inside: 5, line_ends: 3, spill_targets: 1, orphans: 1, line_end_no_basin: 2, line_end_no_basin_far: 1 }
     );
     // numerics review: an inlet that a reach ends at and a basin spills to counts once, as a line end, and is held to a kept basin
     let mut both = g.clone();
     both.basins[1].spill_node = c.id;
     assert_eq!(
-        inlets_without_basin(&both, &W, &label),
+        inlets_without_basin(&both, &W, &z),
         InletReport { inside: 5, line_ends: 3, spill_targets: 0, orphans: 2, line_end_no_basin: 2, line_end_no_basin_far: 1 },
         "the far line end, now also a spill target, is a line end once; the former spill target is an orphan"
     );

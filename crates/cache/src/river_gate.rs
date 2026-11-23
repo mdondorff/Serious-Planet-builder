@@ -1093,7 +1093,7 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
     let (label, pits) = pits(g, z, &filled, BASIN_WET_M);
     // BUILD-060 (owner's option C, 2026-11-20): with a graph, the kept-lake interiors (the depressions of this flood that hold a kept basin's floor) are lakes, not closed
     // basins; the closed-basin bar counts river cells outside them
-    let kept_lakes: Option<Vec<bool>> = input.g2.as_ref().and_then(|x| x.graph.map(|gr| kept_interiors(gr, &x.window, &label).0));
+    let kept_lakes: Option<Vec<bool>> = input.g2.as_ref().and_then(|x| x.graph.map(|gr| kept_interiors(gr, &x.window, z).0));
     let in_kept = |c: usize| kept_lakes.as_ref().is_some_and(|k| k[c]);
     let is_basin = |&(d, k): &(f64, usize)| d >= params.basin_depth_m && k >= params.basin_cells;
     let basin = |c: usize| label[c] != u32::MAX && is_basin(&pits[label[c] as usize]);
@@ -1203,7 +1203,7 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
             })
         }),
         spill_rim_mismatch: input.g2.as_ref().and_then(|x| x.graph.map(|gr| rim_mismatch(gr, &x.window, &label, SPILL_MISMATCH_M))),
-        inlets: input.g2.as_ref().and_then(|x| x.graph.map(|gr| crate::river_gate_graph::inlets_without_basin(gr, &x.window, &label))),
+        inlets: input.g2.as_ref().and_then(|x| x.graph.map(|gr| crate::river_gate_graph::inlets_without_basin(gr, &x.window, z))),
         cell_area_m2: g.dx() * g.dx(),
         reference_river_cells: reference_cells,
         lake_river_cells: lake_cells,
@@ -1246,7 +1246,7 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
             let budget =
                 x.stages.map(|_| budget_field(input.start, g.w(), g.h(), (params.h1_cell_m / g.dx()).round() as usize, g.dx(), R_RELIEF_M));
             // lead #166: kept-basin interiors on the measured surface, counted apart from the uphill and agreement bars
-            let kept = x.graph.map(|gr| kept_interiors(gr, &x.window, &label));
+            let kept = x.graph.map(|gr| kept_interiors(gr, &x.window, z));
             G2Report {
                 graph: x.graph.map(|gr| graph_report(gr, &x.window, input.inside, &land, g.dx())),
                 agreement: x
