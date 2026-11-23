@@ -525,6 +525,7 @@ fn main() -> Result<(), String> {
         inputs_id: class_inputs_key(&def, seed),
         height_bounds: (-11_000.0, 9_000.0),
         keep_channels: false,
+        stage: Default::default(),
     };
     let front = region_front(&spec, &base, &climate)?;
     // The L window: the regional solve's window, 8 L cells a regional cell.

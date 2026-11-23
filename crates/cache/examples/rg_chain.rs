@@ -29,7 +29,7 @@ use std::time::Instant;
 use planet_cache::global_store::{class_inputs, class_inputs_key, GlobalWorld};
 use planet_cache::l_writer::Commit;
 use planet_cache::pack::TileStore;
-use planet_cache::region_bake::{lattice_direction, region_front, RegionSpec, LOCAL_PER_REGIONAL};
+use planet_cache::region_bake::{lattice_direction, region_front, Drain, K5Knobs, K5Route, RegionSpec, StageConfig, LOCAL_PER_REGIONAL};
 use planet_cache::river_gate::{commit_differences, lay_store_ground, LWindow, WindowIdentity};
 use planet_cache::river_suite::corridor_bar_m;
 use planet_core::{Face, TangentWarp, Vec3};
@@ -1941,17 +1941,13 @@ fn main() -> Result<(), String> {
     if !["13", "3", "1"].contains(&base_stages) {
         return Err(format!("--base-stages 13 | 3 | 1, not '{base_stages}'"));
     }
-    if base_form == "aplus" {
-        planet_cache::region_bake::install_s138(
-            match base_stages {
-                "3" => "post-only",
-                "1" => "sel-pre",
-                _ => "sel-post",
-            },
-            f64::INFINITY,
-            &tag,
-        )?;
-    }
+    // R24: the base form is the spec's stage config (`RegionSpec::stage`), no process global: stage 1 the selective drain of z_b, stage 3 the same on z_s
+    let (base_drain, post_drain) = match (base_form, base_stages) {
+        ("aplus", "3") => (Drain::Off, Drain::SELECTIVE_50),
+        ("aplus", "1") => (Drain::SELECTIVE_50, Drain::Off),
+        ("aplus", _) => (Drain::SELECTIVE_50, Drain::SELECTIVE_50),
+        _ => (Drain::Off, Drain::Off),
+    };
     // spikes #147: `--breach-cost cell` (SPIKE-138) or `length` (the cut cost times the step's length, plus a length term)
     let breach_cost = value(&args, "--breach-cost").unwrap_or("cell");
     if !["cell", "length", "square"].contains(&breach_cost) {
@@ -1982,8 +1978,11 @@ fn main() -> Result<(), String> {
     if !["d8", "ltd", "dinf"].contains(&k5_route) {
         return Err(format!("--k5-route d8 | ltd | dinf, not '{k5_route}'"));
     }
-    planet_cache::region_bake::K5_LTD.store(k5_route == "ltd", std::sync::atomic::Ordering::Relaxed);
-    planet_cache::region_bake::K5_DINF.store(k5_route == "dinf", std::sync::atomic::Ordering::Relaxed);
+    let k5_route_cfg = match k5_route {
+        "ltd" => K5Route::Ltd,
+        "dinf" => K5Route::Dinf,
+        _ => K5Route::D8,
+    };
     // SPIKE-139: `--k5-diffuse C` (default 0, off): a hillslope term in K5's rounds, C per sweep on the 5-point Laplacian (round::K5_DIFFUSE; spike only)
     let k5_diffuse: f64 = value(&args, "--k5-diffuse").map_or(Ok(0.0), str::parse).map_err(|_| "--k5-diffuse C")?;
     if !(0.0..=0.25).contains(&k5_diffuse) {
@@ -2067,18 +2066,19 @@ fn main() -> Result<(), String> {
         return Err(format!("--k5-edge dam | free, not '{k5_edge}'"));
     }
     planet_generators::bake::round::K5_EDGE_FREE.store(k5_edge == "free", std::sync::atomic::Ordering::Relaxed);
-    // SPIKE-139 (lead #149b): `--k5-uok-scale X` (default 1): K5's uplift ratio u_over_k times X, k_dt kept (region_bake::K5_UOK_SCALE; spike only)
+    // SPIKE-139 (lead #149b): `--k5-uok-scale X` (default 1): K5's uplift ratio u_over_k times X, k_dt kept (RegionSpec::stage; spike only)
     let k5_uok_scale: f64 = value(&args, "--k5-uok-scale").map_or(Ok(1.0), str::parse).map_err(|_| "--k5-uok-scale X")?;
     if !(k5_uok_scale > 0.0 && k5_uok_scale <= 8.0) {
         return Err("--k5-uok-scale X needs 0 < X <= 8".into());
     }
-    planet_cache::region_bake::K5_UOK_SCALE.store(k5_uok_scale.to_bits(), std::sync::atomic::Ordering::Relaxed);
-    // SPIKE-139 (lead #149 item 3): `--k5-kdt-scale X` (default 1): K5's k_dt times X, the uplift per step with it (region_bake::K5_KDT_SCALE; spike only)
+    // SPIKE-139 (lead #149 item 3): `--k5-kdt-scale X` (default 1): K5's k_dt times X, the uplift per step with it (RegionSpec::stage; spike only)
     let k5_kdt_scale: f64 = value(&args, "--k5-kdt-scale").map_or(Ok(1.0), str::parse).map_err(|_| "--k5-kdt-scale X")?;
     if !(k5_kdt_scale > 0.0 && k5_kdt_scale <= 8.0) {
         return Err("--k5-kdt-scale X needs 0 < X <= 8".into());
     }
-    planet_cache::region_bake::K5_KDT_SCALE.store(k5_kdt_scale.to_bits(), std::sync::atomic::Ordering::Relaxed);
+    // R24: the solve's stage configs in the spec (and its key), not process globals
+    let stage =
+        StageConfig { base_drain, post_drain, k5: K5Knobs { route: k5_route_cfg, kdt_scale: k5_kdt_scale, uok_scale: k5_uok_scale } };
     // SPIKE-139: `--k5-diffuse-amax KM2` (default 0: every cell): the hillslope term moves only cells of a smaller area (round::K5_DIFFUSE_AMAX; spike only)
     let k5_diffuse_amax: f64 = value(&args, "--k5-diffuse-amax").map_or(Ok(0.0), str::parse).map_err(|_| "--k5-diffuse-amax KM2")?;
     planet_generators::bake::round::K5_DIFFUSE_AMAX.store((k5_diffuse_amax * 1e6).to_bits(), std::sync::atomic::Ordering::Relaxed);
@@ -2248,6 +2248,7 @@ fn main() -> Result<(), String> {
         inputs_id: class_inputs_key(&def, seed),
         height_bounds: (-11_000.0, 9_000.0),
         keep_channels: false,
+        stage,
     };
     let front = region_front(&spec, &base, &climate)?;
     let solve = &front.solve;
