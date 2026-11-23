@@ -33,8 +33,8 @@ pub struct Params {
     pub eps: f64,
     /// Initiation on the clipped-MFD area (the plan's extractor-1); false: on the D8 area (the comparison of the results note).
     pub mfd_init: bool,
-    /// Lead #171 (reading 17 in the bed coding; spike only): the lowest bed of a land channel cell (the sea + 0.5 m), or the lowest surface under it met upstream along
-    /// the chain; `None` (default) codes the running minimum alone. Sea cells keep their own code.
+    /// Lead #171 (reading 17 in the bed coding; spike only): the lowest bed of a land channel cell (the sea + 0.5 m), also where the surface lies below it (a coastal flat,
+    /// an inland pit: the bed then stands above the surface, so KV and KC never cut there); `None` (default) codes the running minimum alone. Sea cells keep their own code.
     pub bed_floor: Option<f64>,
 }
 
@@ -185,11 +185,11 @@ pub fn extract(inp: &Input, p: &Params) -> Extracted {
     // Strahler and the bed, donors first: the bed the running minimum (one value at a confluence: the lowest inflow)
     let mut strahler = vec![0u8; n];
     let mut bed = vec![i32::MAX; n];
-    // lead #171: the floor term, a running minimum of min(code(z), code(bed_floor)) on land (code(z) on sea), donors first; the bed is the running minimum raised to it,
-    // so both fall downstream and no bed rises
+    // lead #171: the floor term, a running minimum of code(bed_floor) on land and code(z) on sea, donors first; the bed is the running minimum raised to it, so both
+    // fall downstream and no bed rises
     let floor_code = p.bed_floor.map(code);
     let own_floor = |c: usize| match floor_code {
-        Some(f) if !inp.sea[c] => code(inp.z[c]).min(f),
+        Some(f) if !inp.sea[c] => f,
         _ => code(inp.z[c]),
     };
     let mut flo = vec![i32::MAX; n];
