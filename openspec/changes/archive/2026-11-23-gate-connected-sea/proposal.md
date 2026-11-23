@@ -7,7 +7,10 @@
   - The external review named the gate's sea test a blind spot.
 
 ## What changes
-- BUILD-055: the gate's outlets are the window's edge and the cells at or under the sea level joined to it through such cells (`river_gate::connected_sea_outlets`). An inland pit under the sea level is land, and the floods fill it.
+- BUILD-055: the gate's outlets are the window's edge and the ocean (`river_gate::connected_sea_outlets`).
+  - The ocean is the cells at or under the sea level on the start surface, joined to the edge or to an H1 sea cell inside the region, as the chain decides it.
+  - An inland pit under the sea level is no outlet, and the floods fill it.
+  - A first form that joined the sea on the measured surface took sea cut off by a raised coast for inland pits: R1h's kept-lake area went 778 → 30,711 km2.
 - Land stays the cells above the sea level, unchanged: an inland cell under the sea fills as a pit and stays out of the land-only measures.
 - BUILD-059's raw-grid input names BUILD-055's outlets in place of the old rule.
 - Every flood-based column can move on a window with inland cells under the sea. The before/after rows on g1f15's five windows list each column that changes (crusader outbox).

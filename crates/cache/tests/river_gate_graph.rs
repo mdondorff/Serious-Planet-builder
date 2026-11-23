@@ -873,7 +873,7 @@ fn an_inland_pit_below_sea_level_is_land_to_the_gate_not_sea() {
             z[cell(x, y)] = -5.0;
         }
     }
-    let connected = connected_sea_outlets(&grid, &z, 0.0);
+    let connected = connected_sea_outlets(&grid, &z, 0.0, &|_| false);
     let level = grid.outlets(&z, 0.0);
     assert!((0..12).all(|y| connected[cell(0, y)]), "the sea column on the edge is an outlet");
     assert!((0..144).filter(|&c| grid.is_edge(c)).all(|c| connected[c]), "every edge cell is an outlet");
@@ -886,8 +886,11 @@ fn an_inland_pit_below_sea_level_is_land_to_the_gate_not_sea() {
     for x in 1..4 {
         joined[cell(x, 6)] = -1.0;
     }
-    let jc = connected_sea_outlets(&grid, &joined, 0.0);
+    let jc = connected_sea_outlets(&grid, &joined, 0.0, &|_| false);
     assert!(jc[cell(6, 6)] && jc[cell(2, 6)], "a channel at or under the sea joins the pit to the sea");
+    // a seed cell (an H1 sea cell inside the region) makes the inland pit sea
+    let seeded = connected_sea_outlets(&grid, &z, 0.0, &|c| c == cell(6, 6));
+    assert!((4..=8).all(|y| (4..=8).all(|x| seeded[cell(x, y)])), "the pit holds a seed: it is the sea");
     let all = vec![true; 144];
     let p = GateParams { channel_area_m2: 6.0 * DX * DX, ..GateParams::default() };
     let gate = |outlet: &[bool]| {

@@ -97,7 +97,7 @@ fn grid_gate(arg: &str, params: &GateParams) -> Result<(), String> {
     let bytes = std::fs::read(&file).map_err(|e| format!("{file}: {e}"))?;
     let surface = raw_grid_heights(&bytes, w, h).map_err(|e| format!("{file}: {e}"))?;
     let grid = planet_generators::bake::Grid::new(w, h, GRID_CELL_M);
-    let outlet = planet_cache::river_gate::connected_sea_outlets(&grid, &surface, sea);
+    let outlet = planet_cache::river_gate::connected_sea_outlets(&grid, &surface, sea, &|_| false);
     let inside = border_inside(w, h, GRID_BORDER);
     let region = vec![true; w * h];
     let report = measure(
@@ -364,7 +364,13 @@ fn main() -> Result<(), String> {
         }
     });
     let grid = planet_generators::bake::Grid::new(w, h, front.solve.grid.dx() / l as f64);
-    let outlet = planet_cache::river_gate::connected_sea_outlets(&grid, &surface, sea_level_m);
+    // the ocean on the window's start surface, seeded at the edge and at the L cells of H1's sea cells inside the region, as the chain decides it (a coast the
+    // variant raised does not cut the sea off); the measured surface floods to it
+    let h1_sea = |c: usize| {
+        let hc = (c / w / l) * srw + (c % w) / l;
+        front.solve.zb[hc] <= sea_level_m && !front.solve.grid.is_edge(hc)
+    };
+    let outlet = planet_cache::river_gate::connected_sea_outlets(&grid, &start, sea_level_m, &h1_sea);
     // The G2 inputs (BUILD-060): a canonical graph, the per-stage budget fields, a partition pair; global L ids against this window's origin.
     let graph = value(&args, "--graph").map(read_graph).transpose()?;
     if own_start.is_some() {
