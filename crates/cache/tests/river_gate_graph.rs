@@ -846,4 +846,12 @@ fn a_line_end_inlet_outside_every_kept_depression_is_counted_and_spill_targets_a
         inlets_without_basin(&g, &W, &label),
         InletReport { inside: 5, line_ends: 3, spill_targets: 1, orphans: 1, line_end_no_basin: 2, line_end_no_basin_far: 1 }
     );
+    // numerics review: an inlet that a reach ends at and a basin spills to counts once, as a line end, and is held to a kept basin
+    let mut both = g.clone();
+    both.basins[1].spill_node = c.id;
+    assert_eq!(
+        inlets_without_basin(&both, &W, &label),
+        InletReport { inside: 5, line_ends: 3, spill_targets: 0, orphans: 2, line_end_no_basin: 2, line_end_no_basin_far: 1 },
+        "the far line end, now also a spill target, is a line end once; the former spill target is an orphan"
+    );
 }
