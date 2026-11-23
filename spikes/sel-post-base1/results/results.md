@@ -66,5 +66,48 @@ Status: closed 2026-11-23. The row is open under O3: it is rerun and judged agai
   - one config on 1 and 2 regions is bit-equal;
   - no set-once global remains (a grep test).
 
+## Addendum: #182, the graph's attributes (G3 risk R6; lead #182, #182a)
+- Code: `spike/rg-prototype-spikes` 6ebc286f (three switches, off) and 993709cc (`--trunk-head-once` and `--strahler-junction` on by default, readings 45 and 46). Spike only.
+- Rows: today's tip 7fe4e73d plus each switch; gate main cd84f36a; R1h's defaults row is the one above. `raw/s182-*`.
+
+| Row | bars; failing | violations | agree 1 / 75 km2 | saddles1 vs S_KH / S0 | corner links 5 m | g_rb (orders) | stage time, s |
+|---|---|---|---|---|---|---|---|
+| R1h defaults | 10/11; violations | 102 | 92.73 / 98.26 | 340 / 1,950 | 260 | 7.66 (5) | - |
+| R1h `--trunk-head-once` | 10/11 | 101 | 92.76 / 98.39 | 325 / 1,948 | 262 | 7.66 (5) | 853 |
+| R1h `--strahler-junction` | 10/11 | 102 | 92.73 / 98.26 | 340 / 1,950 | 260 | **5.24 (7)** | 874 |
+| R1h `--runoff-cell` | 10/11 | **40,969** | 92.78 / 98.53 | 322 / 1,945 | 278 | 7.66 (5) | 918 |
+| R3a defaults | 10/11; agree 1 km2 | 0 | 88.89 / 99.21 | 0 / 28 | 0 | 5.36 (4) | 736 |
+| R3a `--trunk-head-once` | 10/11 | 0 | 88.90 / 99.32 | 0 / 28 | 0 | 5.36 (4) | 774 |
+| R3a `--strahler-junction` | 10/11 | 0 | 88.89 / 99.21 | 0 / 28 | 0 | **4.78 (6)** | 688 |
+| M1 defaults | 9/11; violations, spectrum_steep | 1,306 | 92.19 / 95.99 | 3,215 / 9,398 | 4,009 | 7.01 (5) | 1,285 |
+| M1 `--trunk-head-once` | 9/11 | 1,300 | 92.20 / 96.03 | 3,191 / 9,387 | 4,011 | 7.01 (5) | 1,242 |
+| M1 `--strahler-junction` | 9/11 | 1,306 | 92.19 / 95.99 | 3,215 / 9,398 | 4,009 | **4.34 (7)** | 1,956 |
+
+- Stage times are loaded runs under the heavy lock, not solo pairs: no saving is claimed. Peak memory 11.6-12.3 GiB on every row.
+- `--trunk-head-once`: a head trunk reach starts from its own L inflow, not the larger of that and its H1 seed.
+  - It passes the ablation rule on all three windows. Kept shares move by 0.01 points at most.
+  - Trunk reach areas fall where they change (`raw/s182-head-areas.txt`, `head182.py`):
+
+    | Window | reaches changed | last vertex, ratio p10 / p50 / p90 | first vertex, ratio p50 |
+    |---|---|---|---|
+    | R1h | 7,457 | 0.732 / 0.870 / 0.956 | 0.817 |
+    | R3a | 16,574 | 0.698 / 0.859 / 0.959 | 0.798 |
+    | M1 | 17,246 | 0.746 / 0.865 / 0.958 | 0.825 |
+
+  - `catchment_p90` does not move (R1h 3.626, R3a 6.960, M1 1.441): the gate builds it from the routed network, not from the graph's attributes.
+- `--strahler-junction`: the trunks' orders are updated at every `trib_junction` (a tributary of equal order raises the order by one; a higher one sets it).
+  - Attributes only: every surface column is bit-identical to the defaults.
+  - g_rb against the GLO-30 R_b 1 km2 bar (`spikes/river-suite/results/network-bar.md`):
+
+    | Window | bar | defaults | `--strahler-junction` | routed network |
+    |---|---|---|---|---|
+    | R1h | 4.14 to 4.42 | 7.66, above | 5.24, above | 4.52 |
+    | R3a | 4.22 to 5.97 | 5.36, inside | 4.78, inside | 5.38 |
+    | M1 | 4.11 to 5.37 | 7.01, above | 4.34, inside | 4.18 |
+
+- `--runoff-cell`: no runoff field exists at L; the form reads the H1 field at each L cell's parent.
+  - The form as built scales `a_run` per vertex by the catchment's mean runoff from a separate L routing. The per-vertex ratios do not add up at nodes: 40,866 conservation breaks on R1h, and rule 1 fails.
+  - The form that conserves is a runoff-weighted accumulation through the graph's own topology (KG-trib's `extract` and `accumulate_trunks`). It goes to crusader after #187 (lead #182a). R3a and M1 were not run.
+
 ## Visuals
-- None: a gate row and a design note. The chain's surfaces were not rendered.
+- None: gate rows, attribute tables and a design note. The chain's surfaces were not rendered (#182's switches are judged on gate columns).
