@@ -78,3 +78,5 @@ mod water_store;
 mod water_summary_store;
 #[path = "wet_floor_store.rs"]
 mod wet_floor_store;
+#[path = "window_draw.rs"]
+mod window_draw;

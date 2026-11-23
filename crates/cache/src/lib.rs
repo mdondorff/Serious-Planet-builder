@@ -31,3 +31,4 @@ pub mod stage_key;
 pub mod stage_sheet;
 pub mod tiles;
 pub mod transect_sheet;
+pub mod window_draw;
