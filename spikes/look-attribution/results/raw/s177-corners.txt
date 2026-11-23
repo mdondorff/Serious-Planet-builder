@@ -1,0 +1,5 @@
+== corner-only 2x2 links at 5 m (final; S_KH), corner157.py, R1h
+defaults (h4c): S_KH 261, final 260 (s176 r1h)
+line: S_KH 38, final 410
+h4: S_KH 281, final 502
+line8: S_KH 52, final 331

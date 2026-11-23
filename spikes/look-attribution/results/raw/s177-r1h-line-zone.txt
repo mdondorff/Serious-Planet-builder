@@ -1,0 +1,4 @@
+zone cells inside the box: 18.7 % of land
+s0      in the zone: X6 +0.083 X8 +0.964 Xdiag +0.003 (kink 21.59 m2) | outside: X6 +0.339 X8 +0.584 Xdiag +0.004 (kink 7.37 m2)
+kh      in the zone: X6 +0.028 X8 +0.132 Xdiag +0.045 (kink 83.71 m2) | outside: X6 +0.327 X8 +0.658 Xdiag +0.017 (kink 7.69 m2)
+final   in the zone: X6 +0.020 X8 +0.115 Xdiag +0.040 (kink 104.75 m2) | outside: X6 +0.218 X8 +0.365 Xdiag +0.015 (kink 11.42 m2)

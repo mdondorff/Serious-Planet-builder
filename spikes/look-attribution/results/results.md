@@ -137,6 +137,48 @@ Also the base B at L (`base`) and z_s at H1 (`zs`), as layers. All are counted i
 - The bar is relative to h5 instead: `line8` passes M4 when its final surface's M4 is at most 0.75 x h5's final, i.e. 13.90 m. That is a quarter less along-channel kink than the defaults; `line` itself meets it.
 - `line8` must also pass the ablation rule (review-response section 3) against the same defaults row.
 
+### Rows (R1h, today's tip; gate main cd84f36a; `raw/s177-*`)
+| R1h | defaults (h4c) | `line` | `h4` | `line8` |
+|---|---|---|---|---|
+| M4, final (registered bar 13.90 m) | 18.53 | 13.31 | - | **8.61 (pass)** |
+| in-zone Xdiag, S_KH / final | 0.105 / 0.096 | 0.045 / 0.040 | 0.104 / 0.092 | 0.011 / 0.008 |
+| triangles on the river crop (renders) | yes | none | (Xdiag unchanged) | none |
+| bars passing; bar_violations (fails on all) | 10/11; 102 | 10/11; 65 | 10/11; 473 | 10/11; 36 |
+| corner-only links at 5 m, final (S_KH) | 260 (261) | 410 (38) | 502 (281) | **331 (52)** |
+| saddles1 against S_KH / S0 | 340 / 1,950 | 427 / 3,061 | 420 / 1,963 | 388 / **3,602** |
+| kept river / basin share | 3.01 / 3.68 | 3.56 / 4.21 | 3.31 / 3.66 | 3.45 / 4.10 |
+| agreement 1 / 75 km2 | 92.73 / 98.26 | 92.71 / 97.73 | 92.79 / 98.19 | 92.63 / 97.25 |
+| L depressions over 0.5 m, S_KH / final | 10,556 / 485 | 11,014 / 618 | 11,091 / 482 | 11,107 / 600 |
+| KH lowered cells | 2,306,202 | 1,147,417 | 2,346,401 | 2,048,843 |
+
+- `h4` (the unclamped Clough-Tocher) is rejected: the triangles are the split itself, not the clamp.
+- `line8` passes the registered M4 bar and removes the triangles on the renders. Its in-zone Xdiag (0.008) is near S0's 0.003. It fails the ablation rule:
+  - corner links +71 (floor 50);
+  - saddles cut through against S0 +1,652 (floor 195);
+  - agreement at 75 km2 -1.01 points. That is within 10 % relative as now, but the miss grows 1.74 -> 2.75 (+58 %) taken of the miss.
+  - Violations fall 102 -> 36 and the kept shares stay within 0.5.
+- #177 closes: no form is adopted, and every form stays off on the spike branch (`--kh-zone`, default h4c).
+
+### Design note: one root for the chainsaw, the straight rivers and the corner links
+- The chainsaw is the trunk's D8 geometry made visible. h5 splits each 814 m quad along the H1 D8 step that the channel follows, so the facets trace that step.
+- Removing the split (`line`, `line8`) removes the facets but leaves the channel as a chain of straight D8 segments between H1 centres:
+  - the straight rivers (35-52 % of trunk length in straight runs over 2 km, SPIKE-143);
+  - diagonal segments, which need a 4-connected rule at L, hence the corner links;
+  - a lowering along straight segments, which cuts the cols that a curved valley floor would go round (saddles against S0 +1,111 / +1,652).
+- So the three looks share one root: the trunk is confined to H1 D8 segments at L.
+- A sub-cell trunk centreline (G3 decision O8) would address all three:
+  - a smooth curve through the trunk's H1 cells, following the lowest ground inside its corridor, with meanders scaled to the channel width;
+  - rasterised 4-connected at L;
+  - with KH's correction lowering toward that curve.
+  - There would be no quad split (no facets), less straight length, and no corner-only steps. The cut through cols would fall only as far as the curve can bend round them inside the H1 corridor: the trunk still crosses where H1 drains.
+- It would touch:
+  - KG-trunk (the L image from the curve, not the D8 cells);
+  - KH (the correction along the curve, `line8`'s form);
+  - KS1 (it clips toward the rasterised bed);
+  - KV (it widens along the vertex lines);
+  - the trunk's attributes (length and slope: a sinuosity of 1.2-1.4 lowers the slope by the same factor).
+  - H1 routing and the graph's format stay as they are: the vertices are still L cells.
+
 ## Visuals
 ![R1h stages at 10 deg sun from 315 deg](images/sheet-r1h-az315.png)
 - R1h, shaded relief of each stage's own height grid, sun 10 deg from 315 deg. Rows: the river, hill and rim crops; columns: B, S0, S_KH, KS0, KS1, band6, KV, final. The triangles along the river start at S_KH. CPU hillshade, no render engine.
@@ -158,3 +200,9 @@ Also the base B at L (`base`) and z_s at H1 (`zs`), as layers. All are counted i
 
 ![The viewer's mesh beside the height grid, R1h river crop](images/mesh-pair-r1h.png)
 - R1h river crop seen straight down. Left: the viewer's still (planet_turned, flight store flight-r1h-g1f15, real GPU, lit path, sun about 10 deg from the west; poses in `raw/poses-r1h-top.toml`). Then the shaded height grids of the final surface, S_KH and S0 at 10 deg from 270 deg. The viewer shows the same facets as the height grid; S0 holds the round 814 m bumps that KH turns into pyramids.
+
+![R1h with --kh-zone line at 10 deg sun from 315 deg](images/sheet-r1h-line-az315.png)
+- R1h with `--kh-zone line` (#177): the same crops and sun as the defaults' sheet. The river crop shows a straight valley without triangles from S_KH on.
+
+![R1h with --kh-zone line8 at 10 deg sun from 315 deg](images/sheet-r1h-line8-az315.png)
+- R1h with `--kh-zone line8` (#177a): no triangles, and a wider valley than `line`. The owner judges the look; the ablation rule fails on corner links and saddles.
