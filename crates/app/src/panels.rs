@@ -62,6 +62,33 @@ pub enum Event {
         inside: bool,
         layer: Option<String>,
     },
+    /// Save current camera view as a bookmark (VIEW-073, VIEW-075).
+    SaveBookmark {
+        name: String,
+    },
+    /// Fly camera to a saved bookmark by id.
+    JumpBookmark(u64),
+    /// Rename an existing bookmark.
+    RenameBookmark {
+        id: u64,
+        name: String,
+    },
+    /// Delete a saved bookmark by id.
+    DeleteBookmark(u64),
+    /// Jump camera to typed `LAT,LON[,ALT]` coordinates.
+    JumpCoords(String),
+    /// Trigger an F9 repro bundle capture from the Sites tab (VIEW-074, VIEW-075).
+    CaptureRepro,
+    /// Re-scan the repro directory for `.bundle` captures.
+    RefreshRepros,
+    /// Jump camera to the exact pose of repro entry `index`.
+    JumpRepro(usize),
+    /// Promote repro entry `index` into a persistent bookmark.
+    BookmarkRepro(usize),
+    /// Swap A and B endpoints of the pinned ruler transect (VIEW-076).
+    SwapRuler,
+    /// Clear the active ruler anchor/measurement (VIEW-076).
+    ClearRuler,
 }
 
 /// The keys of the editor mode as the help window lists them: the key, what it does.
@@ -103,6 +130,14 @@ pub struct PanelState {
     pub help: bool,
     /// The text of the brush fields while they are edited, by field name.
     brush_text: BTreeMap<&'static str, String>,
+    /// Draft label for creating a new site bookmark.
+    pub bookmark_name: String,
+    /// Draft coordinate jump string (`LAT,LON[,ALT]`).
+    pub jump_text: String,
+    /// Active inline rename buffer for an existing bookmark `(id, text)`.
+    bookmark_rename: Option<(u64, String)>,
+    /// Normalized fraction `0..=1` hovered on the ruler transect chart (VIEW-076).
+    pub ruler_scrub: Option<f64>,
 }
 
 impl PanelState {
@@ -117,6 +152,10 @@ impl PanelState {
             covered: Vec::new(),
             help: false,
             brush_text: BTreeMap::new(),
+            bookmark_name: String::new(),
+            jump_text: String::new(),
+            bookmark_rename: None,
+            ruler_scrub: None,
         }
     }
 
@@ -129,6 +168,40 @@ impl PanelState {
     pub fn covers(&self, p: egui::Pos2) -> bool {
         self.covered.iter().any(|r| r.contains(p))
     }
+}
+
+/// One saved bookmark row shown in the Sites tab (VIEW-075).
+#[derive(Clone, Debug, PartialEq)]
+pub struct BookmarkRow {
+    pub id: u64,
+    pub name: String,
+    pub summary: String,
+    pub site_arg: String,
+    pub distance_m: f64,
+}
+
+/// One scanned F9 repro entry shown in the Sites tab (VIEW-074, VIEW-075).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReproRow {
+    pub index: usize,
+    pub stem: String,
+    pub summary: String,
+    pub compatibility: planet_editor::repro_shelf::ReproCompatibility,
+    pub has_path: bool,
+    pub path_samples: Option<usize>,
+    pub has_png: bool,
+    pub replay_cmd: String,
+}
+
+/// Plain data backing the Sites & Repros tab (`Tab::Sites`, VIEW-075).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SitesView {
+    pub readout: Option<planet_editor::bookmarks::CameraReadout>,
+    pub bookmarks: Vec<BookmarkRow>,
+    pub bookmarks_where: String,
+    pub repros: Vec<ReproRow>,
+    pub repros_dir: String,
+    pub broken_repros: usize,
 }
 
 /// What the panels show.
@@ -161,6 +234,14 @@ pub struct PanelData<'a> {
     pub keys: &'a [planet_frame::keytable::KeyRow],
     /// The item store's count and load time against the revisit trigger of ADR 0066 point 6 (AUTH-006); `None` where there is no editor.
     pub store: Option<&'a planet_editor::store_watch::StoreWatch>,
+    /// Live camera readout, site bookmarks, and F9 repro captures for the Sites tab (VIEW-075).
+    pub sites: &'a SitesView,
+    /// Live cursor coordinates, elevation, and local slope readout (VIEW-076).
+    pub cursor: Option<planet_editor::ruler::CursorReadout>,
+    /// Active two-point ruler transect (or rubber-band preview while anchored, VIEW-076).
+    pub ruler: Option<&'a planet_editor::ruler::TransectProfile>,
+    /// True while `ruler` is a live rubber-band preview (point B not pinned yet).
+    pub ruler_rubber: bool,
 }
 
 fn kind_color(kind: &str) -> egui::Color32 {
@@ -192,6 +273,7 @@ pub fn tool_label(tool: &Tool) -> String {
             let key = ["8", "9", "0", "-"][at];
             format!("{} brush  [{key}]", planet_editor::params::kind_title(k.name()))
         }
+        Tool::Ruler => "Ruler".to_string(),
     }
 }
 
@@ -234,6 +316,7 @@ fn rail(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec<Even
     tools.extend(LINE_KINDS.iter().map(|k| Tool::Line((*k).to_string())));
     tools.push(Tool::Region);
     tools.extend(BrushKind::ALL.iter().map(|k| Tool::Brush(*k)));
+    tools.push(Tool::Ruler);
     for t in tools {
         let on = d.tool == &t;
         let r = ui.add(egui::Button::new(tool_label(&t)).selected(on));
@@ -342,7 +425,7 @@ fn brush_section(ui: &mut egui::Ui, st: &mut PanelState, b: &planet_editor::sess
 }
 
 fn left_panel(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec<Event>) {
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         for tab in &d.layout.tabs {
             let title = if *tab == Tab::Problems && !d.problems.is_empty() {
                 format!("{} ({})", tab.title(), d.problems.len())
@@ -410,6 +493,7 @@ fn left_panel(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Ve
             ui.weak("Procedural base: locked, generator pinned");
         }
         Tab::Problems => problems_tab(ui, st, d, ev),
+        Tab::Sites => sites_tab(ui, st, d, ev),
         Tab::Keys => keys_tab(ui, st, d),
         Tab::Graph => {
             ui.label(egui::RichText::new("Chain, top applies first").small().weak());
@@ -426,6 +510,154 @@ fn left_panel(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Ve
             });
         }
     });
+}
+
+/// The Sites tab (VIEW-075): live camera coordinates, `LAT,LON[,ALT]` jump box, saved site bookmarks, and F9 repro shelf.
+fn sites_tab(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec<Event>) {
+    use planet_editor::repro_shelf::ReproCompatibility;
+
+    ui.strong("Camera");
+    if let Some(readout) = &d.sites.readout {
+        let r = ui.label(readout.summary());
+        st.marks.push(("site:readout".to_string(), r.rect));
+        ui.monospace(readout.site_flag());
+    } else {
+        let r = ui.weak("No camera pose yet.");
+        st.marks.push(("site:readout".to_string(), r.rect));
+    }
+
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        let jr = ui.add(egui::TextEdit::singleline(&mut st.jump_text).hint_text("LAT, LON[, ALT]").desired_width(180.0));
+        st.marks.push(("site:jump-input".to_string(), jr.rect));
+        let enter = jr.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        let go = ui.button("Go");
+        st.marks.push(("site:jump-go".to_string(), go.rect));
+        if enter || go.clicked() {
+            ev.push(Event::JumpCoords(st.jump_text.trim().to_string()));
+        }
+    });
+
+    ui.separator();
+    ui.strong("Bookmarks");
+    if !d.sites.bookmarks_where.is_empty() {
+        ui.label(egui::RichText::new(&d.sites.bookmarks_where).small().weak());
+    }
+    ui.horizontal(|ui| {
+        let nr = ui.add(egui::TextEdit::singleline(&mut st.bookmark_name).hint_text("Site name (optional)").desired_width(165.0));
+        st.marks.push(("site:new-name".to_string(), nr.rect));
+        let enter = nr.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        let save = ui.button("Save view");
+        st.marks.push(("site:save".to_string(), save.rect));
+        if enter || save.clicked() {
+            ev.push(Event::SaveBookmark { name: std::mem::take(&mut st.bookmark_name) });
+        }
+    });
+
+    if d.sites.bookmarks.is_empty() {
+        ui.weak("No saved sites yet.");
+    }
+    for b in &d.sites.bookmarks {
+        ui.push_id(b.id, |ui| {
+            ui.group(|ui| {
+                ui.horizontal(|ui| {
+                    let current =
+                        st.bookmark_rename.as_ref().filter(|(id, _)| *id == b.id).map(|(_, s)| s.clone()).unwrap_or_else(|| b.name.clone());
+                    let mut edited = current;
+                    let r = ui.add(egui::TextEdit::singleline(&mut edited).desired_width(145.0));
+                    st.marks.push((format!("bookmark:name:{}", b.id), r.rect));
+                    if r.has_focus() || r.lost_focus() {
+                        st.bookmark_rename = Some((b.id, edited.clone()));
+                    }
+                    if r.lost_focus() {
+                        let trimmed = edited.trim().to_string();
+                        if !trimmed.is_empty() && trimmed != b.name {
+                            ev.push(Event::RenameBookmark { id: b.id, name: trimmed });
+                        }
+                        st.bookmark_rename = None;
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.weak(format_metres(b.distance_m));
+                    });
+                });
+                ui.label(egui::RichText::new(&b.summary).small().weak());
+                ui.horizontal(|ui| {
+                    let jump = ui.button("Jump");
+                    st.marks.push((format!("bookmark:jump:{}", b.id), jump.rect));
+                    if jump.clicked() {
+                        ev.push(Event::JumpBookmark(b.id));
+                    }
+                    let del = ui.add(egui::Button::new(egui::RichText::new("Delete").color(egui::Color32::from_rgb(242, 179, 179))));
+                    st.marks.push((format!("bookmark:delete:{}", b.id), del.rect));
+                    if del.clicked() {
+                        ev.push(Event::DeleteBookmark(b.id));
+                    }
+                    ui.monospace(format!("--site {}", b.site_arg));
+                });
+            });
+        });
+    }
+
+    ui.separator();
+    ui.horizontal(|ui| {
+        ui.strong("F9 Repro Shelf");
+        let cap = ui.button("Capture F9");
+        st.marks.push(("repro:capture".to_string(), cap.rect));
+        if cap.clicked() {
+            ev.push(Event::CaptureRepro);
+        }
+        let ref_btn = ui.button("Refresh");
+        st.marks.push(("repro:refresh".to_string(), ref_btn.rect));
+        if ref_btn.clicked() {
+            ev.push(Event::RefreshRepros);
+        }
+    });
+    if !d.sites.repros_dir.is_empty() {
+        ui.label(egui::RichText::new(&d.sites.repros_dir).small().weak());
+    }
+    if d.sites.broken_repros > 0 {
+        ui.colored_label(ORANGE, format!("⚠ {} unreadable .bundle file(s) skipped", d.sites.broken_repros));
+    }
+    if d.sites.repros.is_empty() {
+        ui.weak("No F9 repro bundles found yet.");
+    }
+    for r in &d.sites.repros {
+        ui.push_id(&r.stem, |ui| {
+            ui.group(|ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.strong(&r.stem);
+                    let (badge, color) = match r.compatibility {
+                        ReproCompatibility::MatchesWorld => ("match", GREEN),
+                        ReproCompatibility::DifferentDefinition => ("diff world", AMBER),
+                        ReproCompatibility::DifferentSeed => ("seed !=", ORANGE),
+                    };
+                    ui.colored_label(color, badge);
+                    if let Some(samples) = r.path_samples {
+                        ui.weak(format!("path ({samples})"));
+                    } else if r.has_path {
+                        ui.weak("path");
+                    }
+                    if r.has_png {
+                        ui.weak("png");
+                    }
+                });
+                ui.label(egui::RichText::new(&r.summary).small().weak());
+                ui.horizontal(|ui| {
+                    let jump = ui.button("Jump");
+                    st.marks.push((format!("repro:jump:{}", r.stem), jump.rect));
+                    if jump.clicked() {
+                        ev.push(Event::JumpRepro(r.index));
+                    }
+                    let bm = ui.button("Bookmark");
+                    st.marks.push((format!("repro:bookmark:{}", r.stem), bm.rect));
+                    if bm.clicked() {
+                        ev.push(Event::BookmarkRepro(r.index));
+                    }
+                });
+                ui.label(egui::RichText::new(&r.replay_cmd).monospace().small());
+            });
+        });
+    }
 }
 
 /// The Keys tab (VIEW-057): the keys the window accepts, by group, each with what it does and the state it is in.
@@ -567,9 +799,168 @@ fn region_rows(ui: &mut egui::Ui, st: &mut PanelState, r: &planet_editor::params
     });
 }
 
+fn draw_transect_plot(ui: &mut egui::Ui, st: &mut PanelState, p: &planet_editor::ruler::TransectProfile) {
+    let w = ui.available_width().clamp(160.0, 290.0);
+    let total_h = 148.0_f32;
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, total_h), egui::Sense::hover());
+    st.marks.push(("ruler-plot".to_string(), rect));
+    st.ruler_scrub = resp.hover_pos().map(|pos| f64::from((pos.x - rect.left()) / rect.width().max(1.0)).clamp(0.0, 1.0));
+
+    let elev_rect = egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, rect.min.y + 84.0));
+    let slope_rect = egui::Rect::from_min_max(egui::pos2(rect.min.x, rect.min.y + 94.0), rect.max);
+    let painter = ui.painter();
+    let bg = egui::Color32::from_gray(24);
+    let border = egui::Stroke::new(1.0, egui::Color32::from_gray(55));
+    painter.rect_filled(elev_rect, 2.0, bg);
+    painter.rect_stroke(elev_rect, 2.0, border, egui::StrokeKind::Inside);
+    painter.rect_filled(slope_rect, 2.0, bg);
+    painter.rect_stroke(slope_rect, 2.0, border, egui::StrokeKind::Inside);
+
+    let pad = ((p.max_height_m - p.min_height_m) * 0.08).max(1.0);
+    let (h_min, h_max) = (p.min_height_m - pad, p.max_height_m + pad);
+    let h_span = (h_max - h_min).max(1.0);
+    let x_of = |f: f64| rect.left() + (f.clamp(0.0, 1.0) as f32) * rect.width();
+    let y_elev = |h: f64| elev_rect.bottom() - (((h - h_min) / h_span).clamp(0.0, 1.0) as f32) * elev_rect.height();
+
+    if h_min <= 0.0 && h_max >= 0.0 {
+        let y0 = y_elev(0.0);
+        painter.hline(elev_rect.x_range(), y0, egui::Stroke::new(1.0, egui::Color32::from_gray(80)));
+        painter.text(
+            egui::pos2(elev_rect.right() - 4.0, y0 - 2.0),
+            egui::Align2::RIGHT_BOTTOM,
+            "0 m",
+            egui::FontId::monospace(9.5),
+            egui::Color32::from_gray(145),
+        );
+    }
+
+    let slope_top = p.max_slope_deg.max(60.0).max(p.slope_limit_deg + 10.0);
+    let y_slope = |deg: f64| slope_rect.bottom() - ((deg / slope_top).clamp(0.0, 1.0) as f32) * slope_rect.height();
+    let y_lim = y_slope(p.slope_limit_deg);
+    let limit_stroke = egui::Stroke::new(1.0, AMBER.gamma_multiply(0.8));
+    let mut x = slope_rect.left();
+    while x < slope_rect.right() {
+        let x2 = (x + 5.0).min(slope_rect.right());
+        painter.line_segment([egui::pos2(x, y_lim), egui::pos2(x2, y_lim)], limit_stroke);
+        x += 9.0;
+    }
+    painter.text(
+        egui::pos2(slope_rect.right() - 4.0, (y_lim - 2.0).max(slope_rect.top() + 10.0)),
+        egui::Align2::RIGHT_BOTTOM,
+        format!("{:.0}° ADR 0091", p.slope_limit_deg),
+        egui::FontId::monospace(9.5),
+        AMBER,
+    );
+
+    for (i, w_pair) in p.samples.windows(2).enumerate() {
+        let steep = libm::fabs(p.interval_slope_deg(i)) > p.slope_limit_deg;
+        let col = if steep { AMBER } else { TEAL };
+        let (x0, x1) = (x_of(w_pair[0].fraction), x_of(w_pair[1].fraction));
+        painter.line_segment(
+            [egui::pos2(x0, y_elev(w_pair[0].height_m)), egui::pos2(x1, y_elev(w_pair[1].height_m))],
+            egui::Stroke::new(1.8, col),
+        );
+        painter.line_segment(
+            [egui::pos2(x0, y_slope(w_pair[0].slope_deg)), egui::pos2(x1, y_slope(w_pair[1].slope_deg))],
+            egui::Stroke::new(1.5, col),
+        );
+    }
+
+    painter.text(
+        elev_rect.left_top() + egui::vec2(4.0, 2.0),
+        egui::Align2::LEFT_TOP,
+        format!("{:.0} m", p.max_height_m),
+        egui::FontId::monospace(9.5),
+        LIGHT,
+    );
+    painter.text(
+        elev_rect.left_bottom() + egui::vec2(4.0, -2.0),
+        egui::Align2::LEFT_BOTTOM,
+        format!("{:.0} m", p.min_height_m),
+        egui::FontId::monospace(9.5),
+        LIGHT,
+    );
+
+    if let Some(f) = st.ruler_scrub {
+        let xs = x_of(f);
+        let cross = egui::Stroke::new(1.0, LIGHT.gamma_multiply(0.65));
+        painter.vline(xs, elev_rect.y_range(), cross);
+        painter.vline(xs, slope_rect.y_range(), cross);
+        if let Some(s) = p.sample_at_fraction(f) {
+            ui.small(format!("at {} · h {:.1} m · slope {:.1}°", format_metres(s.distance_m), s.height_m, s.slope_deg));
+        }
+    }
+}
+
+fn ruler_section(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec<Event>) {
+    ui.strong("Ruler & Transect");
+    if let Some(c) = &d.cursor {
+        let text = c.summary();
+        if c.over_limit {
+            ui.colored_label(AMBER, text);
+        } else {
+            ui.small(text);
+        }
+    }
+    let Some(p) = d.ruler else {
+        ui.small("Click point A on the planet, then point B to sample a surface elevation and slope transect.");
+        return;
+    };
+    egui::Grid::new("ruler-metrics").num_columns(2).spacing([8.0, 3.0]).show(ui, |ui| {
+        ui.weak("Surface arc");
+        ui.label(format_metres(p.arc_distance_m));
+        ui.end_row();
+        ui.weak("3D chord");
+        ui.label(format_metres(p.chord_distance_m));
+        ui.end_row();
+        ui.weak("Elevation Δh");
+        ui.label(format!("{:+.1} m ({:.0} -> {:.0} m)", p.delta_height_m, p.start_height_m, p.end_height_m));
+        ui.end_row();
+        ui.weak("Net slope");
+        ui.label(format!("{:+.1}° ({:+.1}%)", p.net_slope_deg, p.net_grade * 100.0));
+        ui.end_row();
+        if !d.ruler_rubber {
+            ui.weak("Elev range");
+            ui.label(format!("{:.0} to {:.0} m", p.min_height_m, p.max_height_m));
+            ui.end_row();
+            ui.weak("Max slope");
+            let max_text = format!("{:.1}° ({:.0}% > {:.0}°)", p.max_slope_deg, p.steep_fraction * 100.0, p.slope_limit_deg);
+            let r = if p.max_slope_deg > p.slope_limit_deg { ui.colored_label(AMBER, max_text) } else { ui.label(max_text) };
+            st.marks.push(("ruler-steep".to_string(), r.rect));
+            ui.end_row();
+        }
+    });
+    if !d.ruler_rubber {
+        ui.add_space(4.0);
+        draw_transect_plot(ui, st, p);
+    } else {
+        st.ruler_scrub = None;
+    }
+    ui.add_space(4.0);
+    ui.horizontal_wrapped(|ui| {
+        let swap = ui.add_enabled(!d.ruler_rubber, egui::Button::new("Swap A↔B"));
+        st.marks.push(("ruler-swap".to_string(), swap.rect));
+        if swap.clicked() {
+            ev.push(Event::SwapRuler);
+        }
+        let clear = ui.button("Clear ruler");
+        st.marks.push(("ruler-clear".to_string(), clear.rect));
+        if clear.clicked() {
+            ev.push(Event::ClearRuler);
+        }
+    });
+}
+
 fn inspector(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec<Event>) {
     if let (Some(b), Tool::Brush(kind)) = (&d.brush, d.tool) {
         brush_section(ui, st, b, *kind == BrushKind::Flatten, ev);
+    }
+    if d.tool == &Tool::Ruler || d.ruler.is_some() {
+        ruler_section(ui, st, d, ev);
+        if d.inspector.is_none() {
+            return;
+        }
+        ui.separator();
     }
     let Some(i) = d.inspector else {
         ui.weak("Inspector");
@@ -693,6 +1084,12 @@ fn status_bar(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Ve
         }
         ui.separator();
         ui.label(if d.status.is_empty() { "Ready" } else { d.status });
+        if let Some(c) = &d.cursor {
+            ui.separator();
+            let text = c.summary();
+            let r = if c.over_limit { ui.colored_label(AMBER, text) } else { ui.weak(text) };
+            st.marks.push(("cursor-readout".to_string(), r.rect));
+        }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.weak(counts_line(d));
             let store = store_line(d);
@@ -789,6 +1186,35 @@ pub fn draw_brush(ui: &egui::Ui, brush: &planet_editor::overlay::BrushOverlay, t
         if let (Some(a), Some(b)) = (brush.ring[k], brush.ring[(k + 1) % n]) {
             painter.line_segment([to_points(a), to_points(b)], egui::Stroke::new(1.5, LIGHT));
         }
+    }
+}
+
+/// Draw the 3D viewport ruler overlay: surface transect segments (amber above `ADR 0091` 45°), A/B endpoints,
+/// callout label, and chart hover scrub marker (`VIEW-076`).
+pub fn draw_ruler(ui: &egui::Ui, r: &planet_editor::ruler::RulerOverlay, to_points: impl Fn([f64; 2]) -> egui::Pos2) {
+    let painter = ui.painter();
+    let width = if r.is_rubber_band { 1.8 } else { 2.6 };
+    let alpha = if r.is_rubber_band { 0.7 } else { 1.0 };
+    for seg in &r.segments {
+        let base = if seg.over_limit { AMBER } else { TEAL };
+        painter.line_segment([to_points(seg.a), to_points(seg.b)], egui::Stroke::new(width, base.gamma_multiply(alpha)));
+    }
+    if let Some(a) = r.start.map(&to_points) {
+        painter.circle(a, 5.5, TEAL, egui::Stroke::new(1.5, egui::Color32::BLACK));
+        painter.text(a + egui::vec2(0.0, -10.0), egui::Align2::CENTER_BOTTOM, "A", egui::FontId::proportional(12.0), LIGHT);
+    }
+    if let Some(b) = r.end.map(&to_points) {
+        painter.circle(b, 5.5, AMBER, egui::Stroke::new(1.5, egui::Color32::BLACK));
+        painter.text(b + egui::vec2(0.0, -10.0), egui::Align2::CENTER_BOTTOM, "B", egui::FontId::proportional(12.0), LIGHT);
+    }
+    if let (Some(mid), Some(label)) = (r.midpoint.map(&to_points), r.label.as_deref()) {
+        let at = mid + egui::vec2(0.0, -16.0);
+        let text = painter.text(at, egui::Align2::CENTER_BOTTOM, label, egui::FontId::proportional(12.5), LIGHT);
+        painter.rect_filled(text.expand(3.0), 3.0, egui::Color32::from_black_alpha(190));
+        painter.text(at, egui::Align2::CENTER_BOTTOM, label, egui::FontId::proportional(12.5), LIGHT);
+    }
+    if let Some(scrub) = r.scrub.map(&to_points) {
+        painter.circle(scrub, 5.0, LIGHT, egui::Stroke::new(1.5, egui::Color32::BLACK));
     }
 }
 
@@ -970,6 +1396,10 @@ mod tests {
         selected: Option<ItemId>,
         can_undo: bool,
         brush: Option<planet_editor::session::BrushSettings>,
+        sites: SitesView,
+        cursor: Option<planet_editor::ruler::CursorReadout>,
+        ruler: Option<planet_editor::ruler::TransectProfile>,
+        ruler_rubber: bool,
     }
 
     fn held(f: &Fixture, layout: Layout) -> Held {
@@ -985,6 +1415,10 @@ mod tests {
             selected: f.s.selected(),
             can_undo: true,
             brush: None,
+            sites: SitesView::default(),
+            cursor: None,
+            ruler: None,
+            ruler_rubber: false,
         }
     }
 
@@ -1010,6 +1444,10 @@ mod tests {
             view_status: "",
             keys: &[],
             store: None,
+            sites: &h.sites,
+            cursor: h.cursor,
+            ruler: h.ruler.as_ref(),
+            ruler_rubber: h.ruler_rubber,
         }
     }
 
@@ -1698,5 +2136,125 @@ mod tests {
         pass(vec![], &mut buf, &mut id, &mut commits);
         assert_eq!(commits.last().map(String::as_str), Some("500"), "{commits:?}");
         assert!(ctx.memory(|m| m.has_focus(id.unwrap())), "Enter leaves the focus in the field");
+    }
+
+    // spec: VIEW-075
+    #[test]
+    fn the_sites_tab_drives_coordinate_jumps_bookmarks_and_repro_shelf_events() {
+        use planet_editor::bookmarks::CameraReadout;
+        use planet_editor::repro_shelf::ReproCompatibility;
+
+        let f = fixture();
+        let layout = Layout::default();
+        assert!(layout.tabs.contains(&Tab::Sites), "Sites tab is in default layout");
+        assert_eq!(layout.tabs.last(), Some(&Tab::Keys), "Keys tab stays last (VIEW-057)");
+
+        let mut h = held(&f, layout.clone());
+        h.sites = SitesView {
+            readout: Some(CameraReadout { lat_deg: 47.2, lon_deg: 8.55, altitude_m: 1_500.0, yaw_deg: 45.0, pitch_deg: -35.0 }),
+            bookmarks: vec![BookmarkRow {
+                id: 1,
+                name: "Ridge Overlook".into(),
+                summary: "47.20000° N, 8.55000° E · alt 1.5 km · hdg 045.0° · pitch -35.0°".into(),
+                site_arg: "47.20000,8.55000".into(),
+                distance_m: 2_400.0,
+            }],
+            bookmarks_where: "saved in bookmarks.toml".into(),
+            repros: vec![ReproRow {
+                index: 0,
+                stem: "frame-42".into(),
+                summary: "seed 7 · relief · 20.00000° N, 30.00000° E · alt 2 km · hdg 000.0° · pitch -25.0°".into(),
+                compatibility: ReproCompatibility::MatchesWorld,
+                has_path: true,
+                path_samples: Some(12),
+                has_png: true,
+                replay_cmd: "cargo xtask repro target/review/frame-42-path.txt --window".into(),
+            }],
+            repros_dir: "target/review".into(),
+            broken_repros: 1,
+        };
+
+        let mut rig = Rig::new(&layout);
+        rig.settle(&data(&h));
+        rig.click(&data(&h), rig.mark("tab:sites"));
+        assert_eq!(rig.st.tab, Tab::Sites);
+        assert!(rig.st.mark("site:readout").is_some());
+
+        // Type coordinate jump and click Go.
+        rig.click(&data(&h), rig.mark("site:jump-input"));
+        rig.pass(&data(&h), vec![Raw::Text("-12.5, 40.0, 2 km".into())]);
+        let ev = rig.click(&data(&h), rig.mark("site:jump-go"));
+        assert!(ev.contains(&Event::JumpCoords("-12.5, 40.0, 2 km".into())), "{ev:?}");
+
+        // Type optional bookmark name and click Save view.
+        rig.click(&data(&h), rig.mark("site:new-name"));
+        rig.pass(&data(&h), vec![Raw::Text("Basin Rim".into())]);
+        let ev = rig.click(&data(&h), rig.mark("site:save"));
+        assert!(ev.contains(&Event::SaveBookmark { name: "Basin Rim".into() }), "{ev:?}");
+
+        // Jump and delete on existing bookmark row.
+        let p = rig.mark("bookmark:jump:1");
+        assert_eq!(rig.click(&data(&h), p), vec![Event::JumpBookmark(1)]);
+        let p = rig.mark("bookmark:delete:1");
+        assert_eq!(rig.click(&data(&h), p), vec![Event::DeleteBookmark(1)]);
+
+        // Repro shelf capture, refresh, jump, and bookmark promotion.
+        let p = rig.mark("repro:capture");
+        assert_eq!(rig.click(&data(&h), p), vec![Event::CaptureRepro]);
+        let p = rig.mark("repro:refresh");
+        assert_eq!(rig.click(&data(&h), p), vec![Event::RefreshRepros]);
+        let p = rig.mark("repro:jump:frame-42");
+        assert_eq!(rig.click(&data(&h), p), vec![Event::JumpRepro(0)]);
+        let p = rig.mark("repro:bookmark:frame-42");
+        assert_eq!(rig.click(&data(&h), p), vec![Event::BookmarkRepro(0)]);
+    }
+
+    // spec: VIEW-076
+    #[test]
+    fn ruler_tool_button_cursor_readout_and_inline_transect_plot_fire_ruler_events() {
+        use planet_core::surface::RAD_TO_DEG;
+        use planet_editor::polyline::GeoPoint;
+        use planet_editor::ruler::{CursorReadout, TransectProfile, HEIGHTFIELD_SLOPE_LIMIT_DEG};
+
+        let f = fixture();
+        let layout = Layout::default();
+        let mut h = held(&f, layout.clone());
+        let mut rig = Rig::new(&layout);
+        rig.settle(&data(&h));
+
+        // Rail Ruler button emits Event::Tool(Tool::Ruler) and help keys count stays intact (18).
+        assert_eq!(HELP_KEYS.len(), 18);
+        let p = rig.mark("tool:Ruler");
+        assert_eq!(rig.click(&data(&h), p), vec![Event::Tool(Tool::Ruler)]);
+
+        // Activate Ruler with live steep cursor readout and sampled transect profile exceeding 45°.
+        h.tool = Tool::Ruler;
+        h.inspector = None;
+        h.cursor =
+            Some(CursorReadout { point: GeoPoint::new(47.2, 8.55), height_m: 1_240.0, gradient: 1.2, slope_deg: 50.2, over_limit: true });
+        let a = GeoPoint::new(0.0, 0.0);
+        let b = GeoPoint::new(0.0, 1_000.0 / R * RAD_TO_DEG);
+        let profile =
+            TransectProfile::sample(a, b, R, 17, HEIGHTFIELD_SLOPE_LIMIT_DEG, &|d| 1_200.0 * (R * d.y).clamp(0.0, 1_000.0) / 1_000.0);
+        assert!(profile.max_slope_deg > HEIGHTFIELD_SLOPE_LIMIT_DEG);
+        h.ruler = Some(profile);
+
+        rig.settle(&data(&h));
+        assert!(rig.st.mark("cursor-readout").is_some(), "status bar shows cursor readout");
+        assert!(rig.st.mark("ruler-steep").is_some(), "inspector marks steep >45° summary");
+        let plot_pos = rig.mark("ruler-plot");
+        let right = rig.st.covered.iter().find(|r| (r.max.x - SIZE.0).abs() < 1.0 && r.width() < 500.0).expect("inspector panel");
+        assert!((right.width() - layout.inspector_width).abs() < 2.0, "inspector stayed within exact width: {right:?}");
+
+        // Hovering over the inline transect plot sets ruler_scrub cleanly.
+        rig.pass(&data(&h), vec![Raw::PointerMoved(plot_pos)]);
+        let scrub = rig.st.ruler_scrub.expect("plot hover sets scrub fraction");
+        assert!((scrub - 0.5).abs() < 0.05, "scrub={scrub}");
+
+        // Swap and Clear buttons emit Event::SwapRuler / Event::ClearRuler.
+        let p = rig.mark("ruler-swap");
+        assert_eq!(rig.click(&data(&h), p), vec![Event::SwapRuler]);
+        let p = rig.mark("ruler-clear");
+        assert_eq!(rig.click(&data(&h), p), vec![Event::ClearRuler]);
     }
 }

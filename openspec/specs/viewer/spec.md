@@ -1224,26 +1224,26 @@ A frame that takes at least one second SHALL be a stall: the report `stall (the 
 - **THEN** its thread has the name it was given
 
 ### Requirement: VIEW-054 The shade view and the time of day of the lit viewer
-J SHALL cycle `ViewerState::shade_view` through normal (`ShadeView::Lit`), horizon, shadow and, since M8-6 (GEN-074), soil depth, moisture and insolation; the lit frames SHALL draw that view unless the coupled lens (K) is showing. `[` and `]` SHALL move `ViewerState::sun_offset_h` by `-SUN_STEP_H` and `+SUN_STEP_H` (0.5 hours, wrapping at 24) and Backslash SHALL set it to 0. A lit frame SHALL take `sun_with_offset(look_sun, sun_offset_h)` for `LitPlan::sun_dir`: the look's declination with the sub-solar longitude moved west 15 degrees an hour (the convention of `shading::sun_direction`), the look's sun itself at 0; the editing light (H) SHALL win over it. Both states start at the look's own (normal view, offset 0), so every golden stays.
+J SHALL cycle `ViewerState::shade_view` through normal (`ShadeView::Lit`), shadow (the march's visibility, REND-051) and, since M8-6 (GEN-074), soil depth, moisture and insolation; the lit frames SHALL draw that view unless the coupled lens (K) is showing. `[` and `]` SHALL move `ViewerState::sun_offset_h` by `-SUN_STEP_H` and `+SUN_STEP_H` (0.5 hours, wrapping at 24) and Backslash SHALL set it to 0. A lit frame SHALL take `sun_with_offset(look_sun, sun_offset_h)` for `LitPlan::sun_dir`: the look's declination with the sub-solar longitude moved west 15 degrees an hour (the convention of `shading::sun_direction`), the look's sun itself at 0; the editing light (H) SHALL win over it. Both states start at the look's own (normal view, offset 0), so every golden stays.
 
 Verify: A
 Status: active
-Source: opus-planner (2026-10-25), owner: horizon shadows cannot be seen in the viewer; REND-038, VIEW-042
+Source: opus-planner (2026-10-25), owner: horizon shadows cannot be seen in the viewer; VIEW-042, ADR 0085, REND-051
 
 #### Detail
-The title SHALL name a shade view other than normal, the local solar time at the camera of a moved sun (`local_solar_hours`: 12 when the sun is on the camera's meridian) while the editing light is off, and, on the lit path, a window without the horizon jobs with "no horizon shadows (open a store with a coupled run)". The usage and editor help texts SHALL name J, `[`, `]` and Backslash.
+The title SHALL name a shade view other than normal, and the local solar time at the camera of a moved sun (`local_solar_hours`: 12 when the sun is on the camera's meridian) while the editing light is off. The usage and editor help texts SHALL name J, `[`, `]` and Backslash.
 
 #### Scenario: Keys and sun
-- **WHEN** J is pressed seven times, then `]` twice and `[` once, then `[` twice more, then Backslash
-- **THEN** the shade view goes horizon, shadow, soil depth, moisture, insolation, normal, horizon; the offset is 0.5, then 23.5 hours, then 0
+- **WHEN** J is pressed six times, then `]` twice and `[` once, then `[` twice more, then Backslash
+- **THEN** the shade view goes shadow, soil depth, moisture, insolation, normal, shadow; the offset is 0.5, then 23.5 hours, then 0
 
 #### Scenario: A known pose
 - **WHEN** the look's sun is noon on the equator at longitude 0 and a camera is at longitude 0
 - **THEN** the camera reads 12:00; six hours later the sun is on the -y axis and the camera reads 18:00; a camera 90 degrees west of the first reads 12:00 for that sun; a sun of another declination keeps it
 
 #### Scenario: The title
-- **WHEN** the title is made at the start and with the horizon view and a sun six hours later
-- **THEN** it adds nothing, and adds "shade view horizon" and "sun 18:00 local solar time"; with the editing light on it does not claim the time
+- **WHEN** the title is made at the start, and with the shadow view and a sun six hours later
+- **THEN** it adds nothing, and adds "shade view shadow" and "sun 18:00 local solar time"; with the editing light on it does not claim the time
 
 ### Requirement: VIEW-060 F8 switches the ground look
 The lit window SHALL show the ground look `LookChoice` names: F8 cycles the defaults (the Earth curves at the strength F6 names) and the look file's `ground` table (LOOK-011; its curves, its patch break-up (LOOK-012), and its detail strength in place of the natural mode's, while full and off stay what F6 says); the window starts on the defaults. The window's title SHALL name the choice when it is not the default (`look look file`), the key table SHALL list F8 with its state (`default` or `look file`), and `LitPlan::with_ground_look` SHALL make the plan so that a test can read it. A look file without a ground table shows the same in both. Nothing is stored or keyed (ADR 0035).
@@ -1293,6 +1293,54 @@ Source: opus-planner (2026-10-27), owner test 2026-10-27 group A item 2, VIEW-05
 #### Scenario: A warmed block
 - **WHEN** a direction on a block nobody has read is warmed and the warm-up thread has read it
 - **THEN** the height read at that direction on the main thread decodes no block, where the same read on a cold block decodes one on the thread that reads it
+
+### Requirement: VIEW-062 The erosion options of the viewer
+The viewer SHALL take `--erosion on|off` (off by default: nothing changes, no key, id or golden) and, only with `on`, `--erosion-store DIR` (a bake's output folder or its `tiles/`; the world's store when not given), `--erosion-face-res N` and `--erosion-res N` (replacements of the layer manifest's pass-1 and pass-2 cells; none: the manifest's, or the production 12,288 and 98,304 for a layer without a manifest) and `--erosion-unchecked`. The options SHALL be refused outside the viewer and the stills of the product path (`test-render --scene capture-stills`, which draws the layer as the viewer does), and without `on`; there is no definition key.
+
+Verify: A
+Status: active
+Source: Planner 2026-11-04 (inbox #56 item 1b), owner 2026-11-04 (integrated preview), GEN-112
+
+#### Scenario: Options
+- **WHEN** the options are parsed, and given without `--erosion on` or outside the viewer
+- **THEN** the defaults are off and the shape is the manifest's or the production bake's, bad values are refused, and the options without `on` are refused
+
+### Requirement: VIEW-063 The viewer refuses a layer that does not fit its world
+`--erosion on` SHALL be refused, naming the problem, without `--store`, with a field that is not an eroded one, with a relief scale other than 1 or a sea other than at 0 m (what the layer was carved on), over a folder with no layer tile, with a layer made under other keys (the refusal names both, STRM-065), over a layer whose manifest names a version this build does not read or another field source than the store's world (naming both, STRM-074), and over a store that holds the legacy generator's bake unless `--erosion-unchecked` is given.
+
+Verify: A
+Status: active
+Source: Planner 2026-11-04 (the layer must land on the surface it was carved on), STRM-065
+
+#### Scenario: Refusals
+- **WHEN** a stored world and a tiny layer made under the shape's keys are opened with `--erosion on` without `--erosion-unchecked`, without a store, with a pass-1 size the layer was not made for, over a missing folder, and over definitions with relief scale 1.5 and a sea at 100 m
+- **THEN** each is refused with its reason, and the one with `--erosion-unchecked` and the right keys opens; with a layer manifest, a class-source store opens without it, and a manifest of another kernel version or another field source is refused naming both
+
+### Requirement: VIEW-064 The viewer says the layer is on
+With the layer on, the terrain's implementation id SHALL be the layered field's (`cpu-erosion-v2+band+layer`: the default field is upgraded to the C1 base the layer is read over), `describe()` and the log of the run SHALL name the layer's folder, the bake shape, the seed, the coast fade and the sea level, and the title SHALL carry "erosion layer". A repro bundle records that id, so a replay without the layer meets another id.
+
+Verify: A
+Status: active
+Source: Planner 2026-11-04 (log what is on), CON-05 to CON-08
+
+#### Scenario: What is on
+- **WHEN** the layer is opened over a stored world, and over a world whose field is not an eroded one
+- **THEN** the id is the C1 layered field's and differs from the plain world's, `describe()` names the layer, the field moves land heights, and the other world is refused (the log line and the title are set from the same state and are not asserted in tier A)
+
+### Requirement: VIEW-065 The viewer shows the world a store records
+The viewer, `generate --plan-check` and `generate --coarse-horizon` SHALL open the world a store records (STRM-073): a class-source store as the class world, a legacy store as the legacy one, a store of both bakes only with `--class-source` or `--legacy-source` (refused naming both bakes otherwise). The viewer's title SHALL name the field source (`class source` or `legacy source`) and, with the erosion layer on, `erosion layer`; the log of the run SHALL print the world's description, which names the class source when it is one (a legacy world's description is what it was: the perf logs record it as the measured field, TEST-012).
+
+Verify: A
+Status: active
+Source: Owner 2026-11-04 (the integrated preview: the viewer must show the class-source world), STRM-073, STRM-074, inbox #59
+
+#### Scenario: The recorded world
+- **WHEN** a class-source store, then a store of both bakes, are opened by the viewer's terrain, by the plan check and by the coarse horizon, with and without the options
+- **THEN** the class store opens as the class world and says `class source`, the store of both is refused naming both bakes and opens with either option, the plan check and the horizon do not find "no bake" in a class store, and the title's world label names the source and the layer (the drawn title is tier D)
+
+#### Scenario: The layer by its manifest
+- **WHEN** a layer with a manifest is opened over the class store, with a manifest of another kernel version, with one of another field source, and with a replacement of the pass-1 cells
+- **THEN** the layer opens without a marker flag, says it came from its manifest and bounds by the manifest's range, the other two are refused naming the version and both sources (also with `--erosion-unchecked` on a legacy world), and the replaced cells are refused by the layer's keys
 
 ### Requirement: VIEW-066 --channels fills the driver block from the layer's channels
 The viewer and the stills SHALL take `--channels on|off` (off by default) which, with `--erosion on`, gives the layer's field the baked channels of the layer's store, the drainage area under pass 1's keys and the deposited depth under pass 2's, so the tiles' driver block holds them (GEN-119) and the `soil` and `moisture` views show them. It SHALL be refused without `--erosion on`, and refused naming the folder when the layer holds no drainage area; the title and the log SHALL say it is on. The default look's picture SHALL not change (GEN-073).
@@ -1390,3 +1438,55 @@ Source: Lead 2026-11-13 (P2 E1; the premise was a base difference, the probe fou
 #### Scenario: Another world
 - **WHEN** a world of the in-memory bake is asked for its bake base
 - **THEN** it has none
+
+### Requirement: VIEW-073 Camera coordinates readout, jump parser, and saved site bookmarks
+`planet_editor::bookmarks` SHALL compute a roll-free `CameraReadout` (latitude, longitude, ground clearance altitude, local compass bearing clockwise from north, and pitch) from a `FreePose` or `Camera` using `libm` and `tangent_frame` without pole singularities. `BookmarkShelf` SHALL store named bookmarks (`id`, trimmed name up to `MAX_NAME_CHARS`, coordinates, altitude, bearing, pitch, optional notes) in deterministic `version = 1` TOML outside any `WorldDefinition` or item store, load missing files as empty, refuse malformed or out-of-range files naming the field, write atomically, and reconstruct exact `FreePose` targets above ground. `parse_jump_target` SHALL accept `LAT,LON[,ALT]` (with optional `--site`/`--marker` prefixes, degree symbols, `N`/`S`/`E`/`W` suffixes, and metric altitude) and refuse ambiguous inputs.
+
+Verify: A
+Status: active
+Source: companion backlog 1C (2026-11-22), VIEW-004, VIEW-017, AUTH-001
+
+#### Scenario: Camera readout and bookmark round-trip
+- **WHEN** camera poses at poles, equator, prime meridian, antimeridian, and mid-latitude ground sites are saved to `BookmarkShelf`, serialized to TOML, parsed back, and reconstructed as `FreePose`
+- **THEN** each restored position matches within 1 mm and heading and pitch match within 1e-9
+
+#### Scenario: Jump target parsing and persistence refusals
+- **WHEN** decimal, `--site`, `--marker`, and hemisphere strings are parsed and invalid coordinates or malformed TOML files are loaded
+- **THEN** valid spellings normalize into canonical range and invalid inputs or unknown TOML keys are refused naming the problem
+
+### Requirement: VIEW-074 Directory scanner and metadata shelf for F9 repro captures
+`planet_editor::repro_shelf` SHALL scan a repro directory (`PLANET_REPRO_DIR` or `target/review`) without GPU access, returning an empty shelf when the directory does not exist and collecting up to `MAX_REPRO_ENTRIES` `.bundle` files sorted newest `frame-<n>` first then reverse-lexicographically. Each valid `TerrainBundle` (`planet-terrain-repro` v1/v2) or `ReproBundle` (`planet-repro` v1) SHALL expose its geographic `CameraReadout`, exact `free_pose()`, `to_bookmark()`, sibling `<stem>-path.txt` sample count and `<stem>.png` presence, `ReproCompatibility` against an active seed and `definition_hash`, and `replay_command()` matching `cargo xtask repro` (`--window` over `<stem>-path.txt` when `open_commit` is recorded). Unparseable bundles SHALL be isolated in `broken` with their error without failing the scan.
+
+Verify: A
+Status: active
+Source: companion backlog 1C (2026-11-22), VIEW-024, VIEW-071, BUILD-054
+
+#### Scenario: Repro directory scan and corrupt isolation
+- **WHEN** a directory holding valid `TerrainBundle`, `ReproBundle`, sibling path/PNG files, and a corrupt bundle is scanned
+- **THEN** valid captures sort newest first with exact `free_pose()`, `replay_command()`, compatibility states, and bookmark conversion, while the corrupt bundle lands in `broken` without failing the scan
+
+### Requirement: VIEW-075 The Sites tab and window wiring for bookmarks and repro captures
+The editor layout SHALL include `Tab::Sites` (`sites`) right before `Tab::Keys` so `Keys` remains last. The Sites tab (`planet::panels`) SHALL display the live `CameraReadout` and `--site LAT,LON` string, a `LAT,LON[,ALT]` jump box, a bookmark shelf (`Save view`, inline rename, `Jump`, `Delete`), and an F9 Repro Shelf (`Capture F9`, `Refresh`, compatibility badge, `Jump`, `Bookmark`, replay CLI command). `EditRuntime` and `window` SHALL load/save `BookmarkShelf` atomically outside `WorldDefinition` (`--bookmarks FILE`, `PLANET_BOOKMARKS_FILE`, else `<items>/bookmarks.toml` or `target/review/bookmarks.toml`; in-memory under `--smoke`), switch to `CameraMode::Free` on jumps, and refresh repro entries after captures.
+
+Verify: A
+Status: active
+Source: companion backlog 1C (2026-11-22), VIEW-057, VIEW-073, VIEW-074
+
+#### Scenario: Sites panel interaction and window wiring
+- **WHEN** the Sites tab is opened in the headless panel rig, coordinates or bookmarks are submitted, or repro actions run in `EditRuntime`
+- **THEN** jump, save, rename, delete, capture, refresh, and repro-bookmark events fire without modifying `WorldDefinition::hash()` and resolve to free-camera jumps above ground
+
+### Requirement: VIEW-076 Viewport ruler, elevation transect, and cursor readout
+`planet_editor::ruler` SHALL compute a float64 (`libm`) cursor readout (`lat/lon`, height, pole-safe finite-difference slope) and a great-circle two-point `TransectProfile` (surface arc distance, 3D chord distance, elevation delta, net grade, sampled height/slope profile, and intervals exceeding the 45-degree heightfield limit of ADR 0091), plus `faces_camera`-culled 3D `RulerOverlay` projections. `Tool::Ruler` SHALL measure on the planet without altering `WorldDefinition::hash()`. `HoverPicker` SHALL evaluate cursor height and local slope off the main thread, while the status bar, ruler inspector section, interactive inline cross-section/slope plot (marking the 45-degree limit with hover scrubbing), and 3D viewport overlay present measurements without blocking rendering or modifying terrain pixels.
+
+Verify: A
+Status: active
+Source: companion backlog 1A (2026-11-22), ADR 0091, CON-05, CON-11, CON-14, CON-22
+
+#### Scenario: Cursor readout and steep transect across cliff
+- **WHEN** cursor readouts and two-point transects run over flat terrain, a pole, a 45-degree slope, and a steeper scarp in `planet_editor` and `EditRuntime`
+- **THEN** distances, elevation deltas, slopes, and `over_limit` flags match analytical terrain geometry without mutating `WorldDefinition::hash()`
+
+#### Scenario: Headless panel rig ruler controls and plot scrubbing
+- **WHEN** the Ruler tool button is clicked, steep cursor/transect data are rendered, and the inline plot, swap, and clear controls are exercised
+- **THEN** cursor readout, steep warning, plot hover scrub, `SwapRuler`, and `ClearRuler` events work within fixed inspector width

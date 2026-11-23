@@ -2,8 +2,9 @@
 //! panels' data each frame, and the camera flight to an edit. The window (`window.rs`) is glue around this: it hands over the camera, the
 //! cursor and the events, and draws what comes back. Nothing here names a window or a GPU type, so the flows are tested without either.
 
-use crate::panels::{Event, PanelData, PanelState};
+use crate::panels::{BookmarkRow, Event, PanelData, PanelState, ReproRow, SitesView};
 use planet_core::{PlanetFixed, TileId, Vec3};
+use planet_editor::bookmarks::{parse_jump_target, Bookmark, BookmarkShelf, CameraReadout, MIN_ALTITUDE_M};
 use planet_editor::commands::{Affected, Editor};
 use planet_editor::ids::IdMaker;
 use planet_editor::interaction::{Interaction, PointerView, Pressed};
@@ -11,8 +12,11 @@ use planet_editor::layout::Layout;
 use planet_editor::lists::{LayerGroup, Row};
 use planet_editor::overlay::{self, BrushOverlay, DraftOverlay, OverlayItem};
 use planet_editor::params::{kind_title, Inspector, STAMP_KINDS};
+use planet_editor::polyline::GeoPoint;
 use planet_editor::preview_overlay::{self, PreviewData, PreviewOverlay, PreviewState};
 use planet_editor::relevance::ViewState;
+use planet_editor::repro_shelf::ReproShelf;
+use planet_editor::ruler::{self, CursorReadout, RulerOverlay, RulerState, TransectProfile};
 use planet_editor::session::{Session, SessionError, Tool, LINE_KINDS};
 use planet_editor::shape::{self, Handle};
 use planet_frame::freecam::FreePose;
@@ -196,6 +200,34 @@ pub struct EditRuntime {
     capped_under_edit: Vec<TileId>,
     /// The hover pick on a thread of its own (VIEW-059); none in the tests that pick on the spot.
     hover: Option<crate::hoverpick::HoverPicker>,
+    /// Saved camera bookmarks, stored outside `WorldDefinition` (VIEW-073, VIEW-075).
+    bookmarks: BookmarkShelf,
+    bookmarks_file: Option<PathBuf>,
+    /// Scanned F9 repro bundles in `PLANET_REPRO_DIR` (VIEW-074, VIEW-075).
+    repros: ReproShelf,
+    repros_dir: Option<PathBuf>,
+    sites_view: SitesView,
+    camera_pose: Option<FreePose>,
+    camera_altitude_m: Option<f64>,
+    last_altitude_m: f64,
+    pending_jump: Option<PendingJump>,
+    capture_repro: bool,
+    /// Off-thread or on-spot live cursor terrain readout (VIEW-076).
+    cursor_readout: Option<CursorReadout>,
+    /// Interactive two-point surface ruler state (VIEW-076).
+    ruler: RulerState,
+    /// Cached transect profile keyed by `(item_revision, start, end)`.
+    ruler_profile: Option<(u64, GeoPoint, GeoPoint, TransectProfile)>,
+    /// Live rubber-band preview profile while point A is anchored.
+    ruler_rubber_profile: Option<TransectProfile>,
+    /// Projected 3D ruler overlay drawn over the viewport.
+    ruler_overlay: RulerOverlay,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum PendingJump {
+    Pose(FreePose),
+    Geo { lat_deg: f64, lon_deg: f64, altitude_m: f64, yaw_deg: f64, pitch_deg: f64 },
 }
 
 /// The footprint items of the whole body, layer by layer in stack order (the order the stamp stages are stacked in, ADR 0007): what the
@@ -278,7 +310,7 @@ impl EditRuntime {
             (n, 0) => format!("{n} edits loaded"),
             (n, k) => format!("{n} edits loaded, {k} re-keyed under the current stage version"),
         });
-        Ok(EditRuntime {
+        let mut rt = EditRuntime {
             interaction: Interaction::new(layout.handle_hit_px),
             panels: PanelState::new(&layout),
             session,
@@ -315,7 +347,159 @@ impl EditRuntime {
             gate: false,
             hover: None,
             capped_under_edit: Vec::new(),
+            bookmarks: BookmarkShelf::new(),
+            bookmarks_file: None,
+            repros: ReproShelf::default(),
+            repros_dir: None,
+            sites_view: SitesView::default(),
+            camera_pose: None,
+            camera_altitude_m: None,
+            last_altitude_m: MIN_ALTITUDE_M,
+            pending_jump: None,
+            capture_repro: false,
+            cursor_readout: None,
+            ruler: RulerState::Idle,
+            ruler_profile: None,
+            ruler_rubber_profile: None,
+            ruler_overlay: RulerOverlay::default(),
+        };
+        rt.rebuild_sites_view();
+        Ok(rt)
+    }
+
+    fn bookmarks_where_label(file: Option<&Path>) -> String {
+        match file {
+            Some(p) => format!("saved in {}", p.display()),
+            None => "in memory (start with --bookmarks FILE or --items DIR)".to_string(),
+        }
+    }
+
+    fn rebuild_sites_view(&mut self) {
+        let readout = self.camera_pose.map(|p| CameraReadout::from_pose(&p, self.last_altitude_m));
+        let bookmarks = self
+            .bookmarks
+            .list()
+            .iter()
+            .map(|b| BookmarkRow {
+                id: b.id,
+                name: b.name.clone(),
+                summary: b.summary(),
+                site_arg: b.site_arg(),
+                distance_m: b.distance_m(self.camera_position, self.radius_m),
+            })
+            .collect();
+        let def = self.session.editor().definition();
+        let world_seed = match def.get(WorldDefinition::SEED_PATH) {
+            Some(planet_world_def::NodeValue::U64(s)) => s,
+            _ => 0,
+        };
+        let world_hash = def.hash();
+        let repros = self
+            .repros
+            .entries
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| ReproRow {
+                index,
+                stem: entry.stem.clone(),
+                summary: entry.summary(),
+                compatibility: entry.compatibility(world_seed, world_hash),
+                has_path: entry.path_file.is_some(),
+                path_samples: entry.path_samples,
+                has_png: entry.png_path.is_some(),
+                replay_cmd: entry.replay_command(),
+            })
+            .collect();
+        self.sites_view = SitesView {
+            readout,
+            bookmarks,
+            bookmarks_where: Self::bookmarks_where_label(self.bookmarks_file.as_deref()),
+            repros,
+            repros_dir: self.repros_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
+            broken_repros: self.repros.broken.len(),
+        };
+    }
+
+    fn save_bookmarks(&mut self) -> bool {
+        if let Some(path) = &self.bookmarks_file {
+            if let Err(why) = self.bookmarks.save_file(path) {
+                self.stats.refused += 1;
+                self.session.set_status(why);
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Configures the persistent TOML path for site bookmarks outside `WorldDefinition` (VIEW-073, VIEW-075).
+    pub fn set_bookmarks_file(&mut self, path: Option<PathBuf>) -> Result<(), String> {
+        self.bookmarks = match &path {
+            Some(p) => BookmarkShelf::load_file(p)?,
+            None => BookmarkShelf::new(),
+        };
+        self.bookmarks_file = path;
+        self.rebuild_sites_view();
+        Ok(())
+    }
+
+    /// Sets the directory scanned by the F9 repro shelf without scanning immediately (VIEW-075).
+    pub fn set_repros_dir(&mut self, dir: PathBuf) {
+        self.repros_dir = Some(dir);
+        self.rebuild_sites_view();
+    }
+
+    /// Rescans the configured repro directory for F9 `.bundle` captures (VIEW-074, VIEW-075).
+    pub fn refresh_repros(&mut self) {
+        let Some(dir) = &self.repros_dir else {
+            self.session.set_status("repro directory is not configured");
+            return;
+        };
+        match ReproShelf::scan_dir(dir) {
+            Ok(shelf) => {
+                let count = shelf.entries.len();
+                let broken = shelf.broken.len();
+                self.repros = shelf;
+                self.rebuild_sites_view();
+                if broken > 0 {
+                    self.session.set_status(format!("{count} repro(s), {broken} unreadable skipped"));
+                }
+            }
+            Err(why) => {
+                self.stats.refused += 1;
+                self.session.set_status(why);
+            }
+        }
+    }
+
+    /// Passes the viewer's off-thread ground clearance altitude so bookmark readouts avoid extra terrain reads (VIEW-061).
+    pub fn set_camera_altitude(&mut self, altitude_m: f64) {
+        self.camera_altitude_m = Some(altitude_m);
+    }
+
+    /// Consumes a queued bookmark, coordinate, or repro camera jump once and resolves it to a roll-free pose.
+    pub fn take_jump_pose(&mut self, ground_m: &dyn Fn(Vec3) -> f64) -> Option<FreePose> {
+        let jump = self.pending_jump.take()?;
+        Some(match jump {
+            PendingJump::Pose(pose) => pose,
+            PendingJump::Geo { lat_deg, lon_deg, altitude_m, yaw_deg, pitch_deg } => {
+                let b = Bookmark { id: 1, name: "_".to_string(), lat_deg, lon_deg, altitude_m, yaw_deg, pitch_deg, notes: None };
+                let g = ground_m(b.direction());
+                b.pose(self.radius_m, g)
+            }
         })
+    }
+
+    /// Consumes a queued F9 capture request raised from the Sites tab.
+    pub fn take_capture_repro(&mut self) -> bool {
+        std::mem::take(&mut self.capture_repro)
+    }
+
+    pub fn bookmarks(&self) -> &BookmarkShelf {
+        &self.bookmarks
+    }
+
+    pub fn repros(&self) -> &ReproShelf {
+        &self.repros
     }
 
     /// The tiles the last plan holds back, for the problems list (VIEW-047); call before [`update`](EditRuntime::update).
@@ -444,6 +628,7 @@ impl EditRuntime {
         }
         crate::panels::draw_draft(ui, &self.draft, to_points);
         crate::panels::draw_brush(ui, &self.brush, to_points);
+        crate::panels::draw_ruler(ui, &self.ruler_overlay, to_points);
         // The panels read the lists and write their own state: take the state out for the call.
         let mut panels = std::mem::replace(&mut self.panels, PanelState::new(&self.layout));
         let events = crate::panels::show(ui, &mut panels, &self.panel_data(view_status));
@@ -621,6 +806,8 @@ impl EditRuntime {
         }
         self.stats.frames += 1;
         self.camera_position = camera.position.0;
+        let pose = FreePose::from_camera(camera);
+        self.camera_pose = Some(pose);
         let view = self.view(camera, viewport);
         self.shown = match self.session.shown(wanted, &view) {
             Ok(ids) => ids,
@@ -647,18 +834,26 @@ impl EditRuntime {
         self.draft = overlay::draft(&self.session, &view, &|d| field.height(d), (!over_ui).then_some(cursor));
         // The hover pick finds the ground along the whole ray: its first read of a bake block nobody has touched decodes it, so with a source it runs on its own
         // thread and the frame takes the last pick that finished (VIEW-059, CON-22).
-        let hit = match (over_ui, self.hover.as_mut()) {
+        let (hit, readout) = match (over_ui, self.hover.as_mut()) {
             (true, Some(h)) => {
                 h.clear();
-                None
+                (None, None)
             }
-            (true, None) => None,
+            (true, None) => (None, None),
             (false, Some(h)) => {
                 let ray = cursor_ray(camera, cursor[0], cursor[1], viewport.width_px, viewport.height_px);
-                h.poll((ray, *limits))
+                match h.poll_sample((ray, *limits)) {
+                    Some(sample) => (Some(sample.hit), Some(sample.readout)),
+                    None => (None, None),
+                }
             }
-            (false, None) => Self::hit_at(camera, viewport, cursor, limits, field),
+            (false, None) => {
+                let hit = Self::hit_at(camera, viewport, cursor, limits, field);
+                let readout = hit.map(|h| ruler::cursor_readout(h.dir, h.height_m, self.radius_m, &|d| field.height(d)));
+                (hit, readout)
+            }
         };
+        self.cursor_readout = readout;
         self.brush = overlay::brush(&self.session, &view, &|d| field.height(d), hit.map(|h| h.dir));
         if !over_ui {
             let mpp = self.height_mpp(camera, viewport);
@@ -692,11 +887,20 @@ impl EditRuntime {
             hidden: s.editor().items().filter(|i| s.is_hidden(i.id)).map(|i| i.id).collect(),
             inspector: s.inspector(cam),
         };
+        let alt = self.camera_altitude_m.unwrap_or_else(|| (cam.length() - (self.radius_m + ground(pose.up()))).max(MIN_ALTITUDE_M));
+        self.last_altitude_m = if alt.is_finite() { alt.max(MIN_ALTITUDE_M) } else { MIN_ALTITUDE_M };
+        self.update_ruler(&view, hit, field);
+        self.rebuild_sites_view();
     }
 
     /// Run the hover pick on a thread of its own: `source` makes the field and picks against it.
     pub fn set_hover_source(&mut self, source: crate::hoverpick::PickSource) {
         self.hover = Some(crate::hoverpick::HoverPicker::new(source));
+    }
+
+    /// Run the hover pick on a thread of its own, including off-thread local slope estimation (VIEW-076).
+    pub fn set_hover_sample_source(&mut self, source: crate::hoverpick::SampleSource) {
+        self.hover = Some(crate::hoverpick::HoverPicker::with_samples(source));
     }
 
     /// Metres one pixel spans at the selected edit's height handle.
@@ -739,6 +943,66 @@ impl EditRuntime {
             view_status,
             keys: &self.keys,
             store: Some(s.editor().store_watch()),
+            sites: &self.sites_view,
+            cursor: self.cursor_readout,
+            ruler: self.ruler_profile.as_ref().map(|(_, _, _, p)| p).or(self.ruler_rubber_profile.as_ref()),
+            ruler_rubber: self.ruler_rubber_profile.is_some(),
+        }
+    }
+
+    fn clear_ruler(&mut self) {
+        self.ruler.clear();
+        self.ruler_profile = None;
+        self.ruler_rubber_profile = None;
+        self.ruler_overlay = RulerOverlay::default();
+        self.panels.ruler_scrub = None;
+    }
+
+    fn update_ruler(&mut self, view: &ViewState, hit: Option<SurfaceHit>, field: &dyn HeightField) {
+        match self.ruler {
+            RulerState::Idle => {
+                self.ruler_profile = None;
+                self.ruler_rubber_profile = None;
+                self.ruler_overlay = RulerOverlay::default();
+            }
+            RulerState::Anchored { start, start_height_m } => {
+                self.ruler_profile = None;
+                if let Some(h) = hit {
+                    let end = GeoPoint::of_dir(h.dir).canonical();
+                    let p = TransectProfile::rubber_band(
+                        start,
+                        start_height_m,
+                        end,
+                        h.height_m,
+                        self.radius_m,
+                        ruler::HEIGHTFIELD_SLOPE_LIMIT_DEG,
+                    );
+                    self.ruler_overlay = ruler::build_overlay(&p, view, true, None);
+                    self.ruler_rubber_profile = Some(p);
+                } else {
+                    self.ruler_rubber_profile = None;
+                    self.ruler_overlay = RulerOverlay::default();
+                }
+            }
+            RulerState::Measured { start, end } => {
+                self.ruler_rubber_profile = None;
+                let rev = field.item_revision();
+                let stale = !matches!(&self.ruler_profile, Some((r, s, e, _)) if *r == rev && *s == start && *e == end);
+                if stale {
+                    let profile = TransectProfile::sample(
+                        start,
+                        end,
+                        self.radius_m,
+                        ruler::DEFAULT_TRANSECT_SAMPLES,
+                        ruler::HEIGHTFIELD_SLOPE_LIMIT_DEG,
+                        &|d| field.height(d),
+                    );
+                    self.ruler_profile = Some((rev, start, end, profile));
+                }
+                if let Some((_, _, _, profile)) = &self.ruler_profile {
+                    self.ruler_overlay = ruler::build_overlay(profile, view, false, self.panels.ruler_scrub);
+                }
+            }
         }
     }
 
@@ -799,6 +1063,35 @@ impl EditRuntime {
                 self.affected.extend(affected);
             }
             Ok((Pressed::Selected(_), _)) => self.stats.selected += 1,
+            Ok((Pressed::RulerPoint, _)) => {
+                if let Some(h) = hit {
+                    if self.ruler.click(h.dir, h.height_m) {
+                        match self.ruler {
+                            RulerState::Anchored { .. } => {
+                                self.ruler_profile = None;
+                                self.panels.ruler_scrub = None;
+                                self.session.set_status("Point A anchored — click point B to measure");
+                            }
+                            RulerState::Measured { start, end } => {
+                                self.ruler_rubber_profile = None;
+                                let profile = TransectProfile::sample(
+                                    start,
+                                    end,
+                                    self.radius_m,
+                                    ruler::DEFAULT_TRANSECT_SAMPLES,
+                                    ruler::HEIGHTFIELD_SLOPE_LIMIT_DEG,
+                                    &|d| field.height(d),
+                                );
+                                self.session.set_status(profile.callout_label());
+                                self.ruler_profile = Some((field.item_revision(), start, end, profile));
+                            }
+                            RulerState::Idle => {}
+                        }
+                    } else {
+                        self.session.set_status("click a distinct second point for the transect");
+                    }
+                }
+            }
             Ok(_) => {}
             Err(e) => self.note(Err(e)),
         }
@@ -867,6 +1160,9 @@ impl EditRuntime {
                     self.cancel_drag();
                 } else if !self.session.draft().is_empty() {
                     self.session.cancel_draft();
+                } else if !self.ruler.is_idle() {
+                    self.clear_ruler();
+                    self.session.set_status("ruler cleared");
                 } else if self.session.tool() != &Tool::Select {
                     self.session.set_tool(Tool::Select);
                 } else {
@@ -967,6 +1263,124 @@ impl EditRuntime {
                     Ok(a) => self.affected.extend(a),
                     Err(e) => self.note(Err(e)),
                 },
+                Event::SaveBookmark { name } => match self.camera_pose {
+                    None => {
+                        self.stats.refused += 1;
+                        self.session.set_status("camera pose is not ready yet");
+                    }
+                    Some(pose) => match self.bookmarks.add_from_pose(&name, &pose, self.last_altitude_m, None) {
+                        Ok(id) => {
+                            let saved_name = self.bookmarks.get(id).map(|b| b.name.clone()).unwrap_or_default();
+                            if self.save_bookmarks() {
+                                self.session.set_status(format!("saved site '{saved_name}'"));
+                            }
+                            self.rebuild_sites_view();
+                        }
+                        Err(why) => {
+                            self.stats.refused += 1;
+                            self.session.set_status(why);
+                        }
+                    },
+                },
+                Event::JumpBookmark(id) => match self.bookmarks.get(id) {
+                    Some(b) => {
+                        self.pending_jump = Some(PendingJump::Geo {
+                            lat_deg: b.lat_deg,
+                            lon_deg: b.lon_deg,
+                            altitude_m: b.altitude_m,
+                            yaw_deg: b.yaw_deg,
+                            pitch_deg: b.pitch_deg,
+                        });
+                        self.session.set_status(format!("jumped to '{}'", b.name));
+                    }
+                    None => {
+                        self.stats.refused += 1;
+                        self.session.set_status(format!("bookmark {id} was not found"));
+                    }
+                },
+                Event::RenameBookmark { id, name } => match self.bookmarks.rename(id, &name) {
+                    Ok(()) => {
+                        let _ = self.save_bookmarks();
+                        self.rebuild_sites_view();
+                    }
+                    Err(why) => {
+                        self.stats.refused += 1;
+                        self.session.set_status(why);
+                    }
+                },
+                Event::DeleteBookmark(id) => {
+                    if self.bookmarks.remove(id) {
+                        if self.save_bookmarks() {
+                            self.session.set_status("deleted site bookmark");
+                        }
+                        self.rebuild_sites_view();
+                    }
+                }
+                Event::JumpCoords(text) => match parse_jump_target(&text) {
+                    Ok(t) => {
+                        self.pending_jump = Some(PendingJump::Geo {
+                            lat_deg: t.lat_deg,
+                            lon_deg: t.lon_deg,
+                            altitude_m: t.altitude_m,
+                            yaw_deg: t.yaw_deg,
+                            pitch_deg: t.pitch_deg,
+                        });
+                        self.session.set_status(format!("jumped to {}", t.site_arg()));
+                    }
+                    Err(why) => {
+                        self.stats.refused += 1;
+                        self.session.set_status(why);
+                    }
+                },
+                Event::CaptureRepro => {
+                    self.capture_repro = true;
+                }
+                Event::RefreshRepros => {
+                    self.refresh_repros();
+                }
+                Event::JumpRepro(index) => match self.repros.entries.get(index) {
+                    Some(entry) => {
+                        self.pending_jump = Some(PendingJump::Pose(entry.free_pose()));
+                        self.session.set_status(format!("jumped to {}.bundle", entry.stem));
+                    }
+                    None => {
+                        self.stats.refused += 1;
+                        self.session.set_status("repro entry no longer available");
+                    }
+                },
+                Event::BookmarkRepro(index) => match self.repros.entries.get(index).cloned() {
+                    Some(entry) => {
+                        let bm = entry.to_bookmark(0, 0.0);
+                        match self.bookmarks.insert(bm) {
+                            Ok(id) => {
+                                let name = self.bookmarks.get(id).map(|b| b.name.clone()).unwrap_or_default();
+                                if self.save_bookmarks() {
+                                    self.session.set_status(format!("bookmarked '{name}' from repro"));
+                                }
+                                self.rebuild_sites_view();
+                            }
+                            Err(why) => {
+                                self.stats.refused += 1;
+                                self.session.set_status(why);
+                            }
+                        }
+                    }
+                    None => {
+                        self.stats.refused += 1;
+                        self.session.set_status("repro entry no longer available");
+                    }
+                },
+                Event::SwapRuler => {
+                    if self.ruler.swap() {
+                        self.ruler_profile = None;
+                        self.panels.ruler_scrub = None;
+                        self.session.set_status("ruler A and B swapped");
+                    }
+                }
+                Event::ClearRuler => {
+                    self.clear_ruler();
+                    self.session.set_status("ruler cleared");
+                }
             }
         }
     }
@@ -1161,6 +1575,7 @@ pub fn mode_status(e: &EditRuntime) -> String {
         Tool::Line(k) => format!("Draw {}", kind_title(k)),
         Tool::Region => "Draw region".to_string(),
         Tool::Brush(k) => format!("Brush: {}", k.name()),
+        Tool::Ruler => "Ruler".to_string(),
     }
 }
 
@@ -2234,5 +2649,171 @@ mod tests {
         e.toggle();
         assert!(!e.on);
         assert_eq!(e.globe_markers(&high, VIEWPORT, &tiles).len(), 2);
+    }
+
+    // spec: VIEW-075
+    #[test]
+    fn sites_tab_persists_bookmarks_outside_definition_jumps_coordinates_and_scans_repros() {
+        use planet_frame::plan::{DebugView, FramePlan, PlanRequest};
+        use planet_frame::ReproBundle;
+
+        let dir = temp_dir("sites");
+        std::fs::create_dir_all(&dir).unwrap();
+        let bm_file = dir.join("bookmarks.toml");
+        let repro_dir = dir.join("repros");
+        std::fs::create_dir_all(&repro_dir).unwrap();
+
+        let mut e = runtime(None);
+        let initial_def_hash = e.session.editor().definition().hash();
+        e.set_bookmarks_file(Some(bm_file.clone())).unwrap();
+        e.set_repros_dir(repro_dir.clone());
+        e.toggle();
+
+        let cam_dir = unit(47.2, 8.55);
+        let (north, east) = shape::tangent_frame(cam_dir);
+        let heading = (north * 0.8 + east * 0.6).normalized();
+        let cam_pose = FreePose::new(PlanetFixed(cam_dir * (R + 2_200.0)), heading, (-25.0_f64).to_radians());
+        let cam = cam_pose.camera(std::f64::consts::FRAC_PI_3, 1.5, 0.1);
+        e.set_camera_altitude(2_200.0);
+        frame(&mut e, &cam, false);
+
+        // Saving a bookmark persists to TOML without touching WorldDefinition::hash().
+        e.apply(vec![Event::SaveBookmark { name: "Pass Lookout".into() }]);
+        assert_eq!(e.bookmarks().len(), 1);
+        assert_eq!(e.session.editor().definition().hash(), initial_def_hash);
+        assert!(bm_file.is_file());
+        let saved_id = e.bookmarks().list()[0].id;
+
+        // Reload into a fresh runtime and jump over ground of elevation 350 m.
+        let mut reloaded = runtime(None);
+        reloaded.set_bookmarks_file(Some(bm_file.clone())).unwrap();
+        assert_eq!(reloaded.bookmarks().len(), 1);
+        reloaded.apply(vec![Event::JumpBookmark(saved_id)]);
+        let jumped = reloaded.take_jump_pose(&|_| 350.0).expect("bookmark jump queued");
+        assert!((jumped.position.0.length() - (R + 350.0 + 2_200.0)).abs() < 1e-3);
+
+        // Coordinate jump works and bad coordinates are refused & counted.
+        e.apply(vec![Event::JumpCoords("-10.0, 20.0, 3 km".into())]);
+        let coord_pose = e.take_jump_pose(&|_| 100.0).expect("coord jump queued");
+        assert!((coord_pose.position.0.length() - (R + 3_100.0)).abs() < 1e-3);
+        let refused_before = e.stats.refused;
+        e.apply(vec![Event::JumpCoords("not coords".into())]);
+        assert_eq!(e.stats.refused, refused_before + 1);
+        assert!(e.take_jump_pose(&|_| 0.0).is_none());
+
+        // Scanning a repro directory populates SitesView, supports exact pose jump and bookmark promotion.
+        let bundle_cam = PlanetFixed(unit(20.0, 30.0) * (R + 50_000.0));
+        let bundle = ReproBundle {
+            generator_version: 1,
+            implementation_id: "test".into(),
+            seed: 7,
+            res: 32,
+            definition_hash: initial_def_hash,
+            adapter: "test".into(),
+            request: PlanRequest {
+                tiles: vec![],
+                camera: bundle_cam,
+                size: (640, 480),
+                view: DebugView::Height,
+                radius_m: R,
+                face_mapping: "tangent-v1".into(),
+            },
+            plan: FramePlan {
+                size: (640, 480),
+                view: DebugView::Height,
+                camera: bundle_cam,
+                clear_color: [0, 0, 0, 255],
+                height_range: [-100.0, 100.0],
+                draws: vec![],
+            },
+        };
+        std::fs::write(repro_dir.join("frame-77.bundle"), bundle.to_text()).unwrap();
+        e.apply(vec![Event::RefreshRepros]);
+        assert_eq!(e.repros().entries.len(), 1);
+        let data = e.panel_data("");
+        assert_eq!(data.sites.repros.len(), 1);
+        assert_eq!(data.sites.repros[0].stem, "frame-77");
+
+        e.apply(vec![Event::JumpRepro(0)]);
+        let repro_pose = e.take_jump_pose(&|_| 0.0).expect("repro jump queued");
+        assert!((repro_pose.position.0 - bundle_cam.0).length() < 1e-6);
+
+        e.apply(vec![Event::BookmarkRepro(0)]);
+        assert_eq!(e.bookmarks().len(), 2);
+        assert_eq!(e.session.editor().definition().hash(), initial_def_hash);
+
+        e.apply(vec![Event::CaptureRepro]);
+        assert!(e.take_capture_repro());
+        assert!(!e.take_capture_repro());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: VIEW-076
+    #[test]
+    fn ruler_tool_measures_two_point_transect_updates_panel_data_and_preserves_world_hash() {
+        // Sloped test heightfield raising along -z (screen +x under nadir above()) exceeding 45°.
+        struct SteepSlope;
+        impl HeightField for SteepSlope {
+            fn height(&self, dir: Vec3) -> f64 {
+                (-1.3 * R * dir.z).clamp(-8_000.0, 8_000.0)
+            }
+            fn seed(&self) -> u64 {
+                7
+            }
+            fn implementation_id(&self) -> &'static str {
+                "steep-slope-test"
+            }
+            fn version(&self) -> u32 {
+                1
+            }
+            fn max_abs_height_m(&self) -> f64 {
+                8_000.0
+            }
+        }
+
+        let dir = unit(0.0, 0.0);
+        let cam = above(dir, 10_000.0);
+        let mut e = runtime(None);
+        let hash_before = e.session.editor().definition().hash();
+        e.toggle();
+        e.apply(vec![Event::Tool(Tool::Ruler)]);
+        assert_eq!(mode_status(&e), "Ruler");
+
+        // Update feeds live cursor readout without modifying WorldDefinition.
+        e.update(&cam, VIEWPORT, &[], &SteepSlope, &limits(), Pointer { cursor: CENTRE, over_ui: false });
+        let pd0 = e.panel_data("");
+        let readout = pd0.cursor.expect("cursor readout present");
+        assert!(readout.slope_deg > 45.0 && readout.over_limit, "{readout:?}");
+        assert!(pd0.ruler.is_none());
+
+        // Click A on left half of viewport, verify rubber-band preview during hover, click B on right half.
+        e.press(&cam, VIEWPORT, [350.0, 500.0], &limits(), &SteepSlope);
+        e.update(&cam, VIEWPORT, &[], &SteepSlope, &limits(), Pointer { cursor: [650.0, 500.0], over_ui: false });
+        {
+            let pd1 = e.panel_data("");
+            assert!(pd1.ruler.is_some() && pd1.ruler_rubber, "anchored shows rubber-band preview");
+        }
+        e.press(&cam, VIEWPORT, [650.0, 500.0], &limits(), &SteepSlope);
+        e.update(&cam, VIEWPORT, &[], &SteepSlope, &limits(), Pointer { cursor: [650.0, 500.0], over_ui: false });
+
+        let pd2 = e.panel_data("");
+        let transect = pd2.ruler.expect("measured transect profile present");
+        assert!(!pd2.ruler_rubber);
+        assert!(transect.arc_distance_m > 1_000.0 && transect.delta_height_m > 1_000.0 && transect.max_slope_deg > 45.0);
+
+        // Swapping reverses elevation delta cleanly.
+        e.apply(vec![Event::SwapRuler]);
+        e.update(&cam, VIEWPORT, &[], &SteepSlope, &limits(), Pointer { cursor: [650.0, 500.0], over_ui: false });
+        assert!(e.panel_data("").ruler.unwrap().delta_height_m < -1_000.0);
+
+        // First Escape clears active measurement while keeping Ruler tool; second Escape returns to Select.
+        e.key(EditKey::Escape);
+        e.update(&cam, VIEWPORT, &[], &SteepSlope, &limits(), Pointer { cursor: CENTRE, over_ui: false });
+        assert!(e.panel_data("").ruler.is_none());
+        assert_eq!(e.session.tool(), &Tool::Ruler);
+        e.key(EditKey::Escape);
+        assert_eq!(e.session.tool(), &Tool::Select);
+        assert_eq!(e.session.editor().definition().hash(), hash_before);
     }
 }

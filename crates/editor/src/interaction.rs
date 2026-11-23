@@ -43,6 +43,8 @@ pub enum Pressed {
     DraftPoint(usize),
     /// A brush stroke started at the cursor (VIEW-035); the release puts it.
     Stroke,
+    /// A ruler endpoint was clicked on the surface (VIEW-076).
+    RulerPoint,
     /// Nothing: a placing tool was on and the cursor was off the planet.
     Nothing,
 }
@@ -128,6 +130,12 @@ impl Interaction {
                     s.begin_stroke(hit.dir, hit.height_m)?;
                     Ok((Pressed::Stroke, Vec::new()))
                 }
+                None => Ok((Pressed::Nothing, Vec::new())),
+            };
+        }
+        if matches!(s.tool(), Tool::Ruler) {
+            return match v.hit {
+                Some(_) => Ok((Pressed::RulerPoint, Vec::new())),
                 None => Ok((Pressed::Nothing, Vec::new())),
             };
         }

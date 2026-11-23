@@ -31,6 +31,10 @@ pub static BREACH_MAX_LEN: std::sync::atomic::AtomicUsize = std::sync::atomic::A
 /// spikes #147a (spike only): the breach path's cost per cell is the square of the cut (`max(0, z - z_floor)`^2, m^2), so a path of many shallow cuts beats one of a few
 /// deep ones: the wide shallow saddle over the narrow deep notch. Wins over [`BREACH_BY_LENGTH`].
 pub static BREACH_SQUARE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// lead #191 (spike only): an outlet cell keeps its per-cell floor in [`drain_selective_floors`]. `false`: an outlet is exempt from `cell_lo` (the search enters it and a
+/// path ending there is taken), yet the path's cuts include it, so a border exit is cut past its budget (#190: R1h 11, M1 17 cells). `true`: an outlet the breach would cut
+/// under its floor is not entered, and a path that would is not taken. rg_chain sets it around band6's drain only.
+pub static OUTLET_FLOORS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// The cost per unit of path length of [`BREACH_BY_LENGTH`] (m).
 pub const LENGTH_COST_M: f64 = 0.01;
 
@@ -237,6 +241,9 @@ pub fn drain_selective_floors(
     let mut dist = vec![f64::INFINITY; n];
     let mut parent = vec![u32::MAX; n];
     let mut seen: Vec<usize> = Vec::new();
+    // lead #191: read once per call, so the search and floors_ok agree by construction
+    let outlet_floors = OUTLET_FLOORS.load(std::sync::atomic::Ordering::Relaxed);
+    let outlet_free = |q: usize| outlet[q] && !outlet_floors;
     for round in 0..max_rounds {
         let level = fill_level(&z, w, h, outlet);
         let (label, comps) = depressions(&z, &level, w, h);
@@ -282,8 +289,9 @@ pub fn drain_selective_floors(
                 let by_length = BREACH_BY_LENGTH.load(std::sync::atomic::Ordering::Relaxed);
                 let square = BREACH_SQUARE.load(std::sync::atomic::Ordering::Relaxed);
                 for q in neighbours(w, h, c) {
-                    // lead #178: a cell the breach would cut under its floor is not entered (an outlet ends the path and is never cut)
-                    if !outlet[q] && z[q] > zf && zf < cell_lo(q) {
+                    // lead #178: a cell the breach would cut under its floor is not entered. An outlet ends the path but is cut with it (#190); it is exempt unless
+                    // OUTLET_FLOORS (lead #191)
+                    if !outlet_free(q) && z[q] > zf && zf < cell_lo(q) {
                         continue;
                     }
                     let nd = if square {
@@ -327,11 +335,11 @@ pub fn drain_selective_floors(
                 let v: f64 = path.iter().enumerate().map(|(i, &c)| (z[c] - z[c].min(zf - DELTA * i as f64)).max(0.0) * area(c)).sum();
                 let cut: f64 = path.iter().enumerate().map(|(i, &c)| z[c] - z[c].min(zf - DELTA * i as f64)).fold(0.0, f64::max);
                 let max_len = BREACH_MAX_LEN.load(std::sync::atomic::Ordering::Relaxed);
-                // lead #178: the path's descent of DELTA a cell stays above every cell's floor
+                // lead #178: the path's descent of DELTA a cell stays above every cell's floor (the end outlet's too with OUTLET_FLOORS, lead #191)
                 let floors_ok = path
                     .iter()
                     .enumerate()
-                    .all(|(i, &c)| outlet[c] || z[c] <= zf - DELTA * i as f64 || zf - DELTA * i as f64 >= cell_lo(c));
+                    .all(|(i, &c)| outlet_free(c) || z[c] <= zf - DELTA * i as f64 || zf - DELTA * i as f64 >= cell_lo(c));
                 (floors_ok && cut <= cut_cap(*floor) && (max_len == 0 || path.len() <= max_len), v, cut)
             };
             let prefer_fill = PREFER_FILL.load(std::sync::atomic::Ordering::Relaxed);
@@ -403,6 +411,68 @@ mod tests {
         assert!(sh.breached == 0 && sh.filled >= 1 && sh.left == 0, "{sh:?}");
         let (rep, _, _) = drain_selective_report(&z, w, h, &outlet, &|_| false, &|_| 1.0, 10, 1000, &inf, &inf);
         assert_eq!(rep, free, "no floor: the report's surface");
+    }
+
+    /// Tests that set [`OUTLET_FLOORS`] hold this lock for their whole run; [`OutletFloorsOn`] clears the flag on drop (also on a panic).
+    static OUTLET_FLOORS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    fn outlet_floors_lock() -> std::sync::MutexGuard<'static, ()> {
+        OUTLET_FLOORS_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+    struct OutletFloorsOn;
+    impl OutletFloorsOn {
+        fn set() -> Self {
+            OUTLET_FLOORS.store(true, std::sync::atomic::Ordering::Relaxed);
+            OutletFloorsOn
+        }
+    }
+    impl Drop for OutletFloorsOn {
+        fn drop(&mut self) {
+            OUTLET_FLOORS.store(false, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    // lead #191 (spike only; not a spec requirement): the outlet at a breach's end is cut under its floor with OUTLET_FLOORS off; floors_ok refuses that path with it on
+    #[test]
+    fn floors_ok_refuses_a_path_that_cuts_its_end_outlet_under_its_floor() {
+        let _lock = outlet_floors_lock();
+        // a 10 x 1 strip: the outlet at x = 0 at the pit's floor height, so the search enters it whatever its floor; the path's descent of DELTA a cell cuts it by 2 DELTA
+        let (w, h) = (10usize, 1usize);
+        let z = vec![2.0, 9.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0];
+        let outlet: Vec<bool> = (0..w).map(|p| p == 0).collect();
+        let inf = |_: usize| f64::INFINITY;
+        let lo = |p: usize| if p == 0 { 2.0 - 0.5 * DELTA } else { f64::NEG_INFINITY };
+        let (free, sf, _) = drain_selective_floors(&z, w, h, &outlet, &|_| false, &|_| 1.0, 10, 1000, &inf, &inf, &lo);
+        let (held, sh, _) = {
+            let _on = OutletFloorsOn::set();
+            drain_selective_floors(&z, w, h, &outlet, &|_| false, &|_| 1.0, 10, 1000, &inf, &inf, &lo)
+        };
+        assert!(sf.breached >= 1 && free[0] < 2.0 - 0.5 * DELTA, "off: the end outlet is cut under its floor ({free:?}, {sf:?})");
+        assert!(held[0] >= 2.0 - 0.5 * DELTA, "on: the end outlet stays at or above its floor ({held:?})");
+        assert!(sh.breached == 0 && sh.filled >= 1, "on: the pit is filled instead ({sh:?})");
+    }
+
+    // lead #191 (spike only; not a spec requirement): the breach's end outlet keeps its floor with OUTLET_FLOORS
+    #[test]
+    fn the_end_outlet_keeps_its_floor_with_outlet_floors() {
+        let _lock = outlet_floors_lock();
+        // a 10 x 1 strip: the outlet at x = 0 stands high (a border exit on land), a one-cell rim at x = 1, a wide pit behind it (the breach, 13 m3, is cheaper than the
+        // fill, 56 m3); only the outlet carries a floor
+        let (w, h) = (10usize, 1usize);
+        let z = vec![8.0, 9.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0];
+        let outlet: Vec<bool> = (0..w).map(|p| p == 0).collect();
+        let inf = |_: usize| f64::INFINITY;
+        let lo = |p: usize| if p == 0 { 7.0 } else { f64::NEG_INFINITY };
+        let (free, sf, _) = drain_selective_floors(&z, w, h, &outlet, &|_| false, &|_| 1.0, 10, 1000, &inf, &inf, &lo);
+        let (held, sh, _) = {
+            let _on = OutletFloorsOn::set();
+            drain_selective_floors(&z, w, h, &outlet, &|_| false, &|_| 1.0, 10, 1000, &inf, &inf, &lo)
+        };
+        assert!(sf.breached >= 1 && free[0] < 7.0, "off: the end outlet is cut under its floor ({free:?}, {sf:?})");
+        assert!(held[0] >= 7.0, "on: the end outlet stays at or above its floor ({held:?})");
+        assert!(sh.breached == 0 && sh.filled >= 1, "on: the pit is filled instead ({sh:?})");
+        for p in 1..w {
+            assert!(held[p] >= z[p], "on: no other cell is cut ({held:?})");
+        }
     }
 
     // SPIKE-138 (spike only; not a spec requirement)

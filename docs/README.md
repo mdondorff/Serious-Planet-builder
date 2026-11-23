@@ -9,6 +9,7 @@
 | Who does what, who merges, where a lane reports (read at session start) | `docs/routing.md`; lane names and worktrees: `docs/lanes.txt` |
 | The current work block's plan: items, phases, exit list | `docs/briefings/terrain-prototype.md` |
 | The target architecture and its gate table | `docs/design/terrain-target.md` (A3) |
+| Downstream (`M10`–`M13` / game) producer seams for `G3` & `P4` | `docs/design/hydrology-downstream-seams.md` |
 | Every gate reading with its commit and verdict | `docs/gates/ledger.md` |
 | The stage previews' committed manifest | `docs/stages/manifest.txt` |
 | Interactive offline pipeline DAG, step previews and version pins | `cargo xtask cockpit --help` (`target/review/cockpit/index.html`; brief: `docs/design/pipeline-cockpit.md`) |

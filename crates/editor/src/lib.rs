@@ -6,6 +6,7 @@
 //! the camera shows, the lists and the search, the handles and their drags, the inspector's values and the layout as data. `interaction` and `feed` (VIEW-019) turn the pointer into session calls and the places an edit changed into the tiles
 //! to refresh. Also GPU-free.
 
+pub mod bookmarks;
 pub mod brush;
 pub mod commands;
 pub mod feed;
@@ -20,6 +21,8 @@ pub mod polyline;
 pub mod preview_overlay;
 pub mod problems;
 pub mod relevance;
+pub mod repro_shelf;
+pub mod ruler;
 pub mod session;
 pub mod shape;
 pub mod slope;
