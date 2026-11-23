@@ -1669,6 +1669,10 @@ fn build_graph(
         let n = route.len();
         let mut bed = vec![0f64; n];
         let mut run = node_bed.get(&up).copied().unwrap_or(f64::INFINITY).min(ks_water[route[0]]);
+        // lead #171 (`--bed-sea-floor on`, reading 17 in the bed coding): a land vertex's bed stays at the sea + 0.5 m, or at the lowest surface under it met so far
+        // along the reach (from the up node's bed), so KV and KC never cut a land cell to or below the sea + 0.5 m; both terms fall downstream, so no bed rises
+        let sea_floor = BED_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed);
+        let mut floor = node_bed.get(&up).copied().unwrap_or(f64::INFINITY).min(ks_water[route[0]].min(sea + 0.5));
         let mut over = 0.0f64;
         let mut rise_at: Vec<usize> = Vec::new();
         for (v, &c) in route.iter().enumerate() {
@@ -1684,7 +1688,8 @@ fn build_graph(
             } else {
                 run = run.min(z);
             }
-            bed[v] = run;
+            floor = floor.min(if ocean[c] { z } else { z.min(sea + 0.5) });
+            bed[v] = if sea_floor { run.max(floor) } else { run };
         }
         // spikes #142: a rise at the last vertex is taken one vertex earlier (bed[n-2] raised to bed[n-1]: less cut, never more); its marker would share the
         // down node's anchor (reading 1). A two-vertex reach drops it (its bed then starts at its end's level).
@@ -1807,6 +1812,8 @@ static HYDRO_TWICE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 /// crusader #168b (reading 32): `--trunk-bed shared` (default) keeps a two-vertex trunk image's first vertex at its up node's bed when it rises over the budget, the rise at its down end
 /// excused by its rise_over_budget exception; `lift` raises its first vertex (spikes #142's form).
 static TRUNK_BED_SHARED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+/// lead #171: `--bed-sea-floor on` codes KG-trunk's outlet and coastal-flat beds at the sea + 0.5 m (reading 17); `off` (default) the running minimum alone.
+static BED_SEA_FLOOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// L routing of a window surface (flood with epsilon, D8 steepest receivers, D8 area): the river cells over `a_min` m2 (land only).
 fn l_rivers(z: &[f64], w: usize, h: usize, dx: f64, sea: f64, a_min: f64) -> Vec<bool> {
@@ -2073,6 +2080,7 @@ fn main() -> Result<(), String> {
         ("--kv-rims", &KV_RIMS, "on"),
         ("--kv-connect", &KV_CONNECT, "on"),
         ("--sea17", &SEA17, "off"),
+        ("--bed-sea-floor", &BED_SEA_FLOOR, "off"),
         ("--band6-floors", &BAND6_FLOORS, "on"),
         ("--band6-outlet-floor", &BAND6_OUTLET_FLOOR, "on"),
         ("--inlet-floor", &INLET_FLOOR, "on"),
@@ -3129,7 +3137,14 @@ fn main() -> Result<(), String> {
                 gid: &gid_l,
                 keep_fields: false,
             };
-            let ex = extract(&inp, &Params { mfd_init: false, ..Params::plan(BODY, runoff_mean) });
+            let ex = extract(
+                &inp,
+                &Params {
+                    mfd_init: false,
+                    bed_floor: BED_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed).then_some(sea + 0.5),
+                    ..Params::plan(BODY, runoff_mean)
+                },
+            );
             // only what the pass adds: a tributary that ends at a trunk's last vertex returns the trunk's own down node, which must stay (numerics review of f5adb6d8)
             let had: HashSet<u64> = gd.nodes.iter().map(|x| x.id).collect();
             trib_first =
@@ -3524,7 +3539,14 @@ fn main() -> Result<(), String> {
                 gid: &gid_l,
                 keep_fields: false,
             };
-            let ex = extract(&inp, &Params { mfd_init: false, ..Params::plan(BODY, runoff_mean) });
+            let ex = extract(
+                &inp,
+                &Params {
+                    mfd_init: false,
+                    bed_floor: BED_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed).then_some(sea + 0.5),
+                    ..Params::plan(BODY, runoff_mean)
+                },
+            );
             if order_fable {
                 fine_post = Some((ex.receiver.clone(), ex.channel.clone()));
             }
@@ -4060,7 +4082,14 @@ fn main() -> Result<(), String> {
                 gid: &gid_l,
                 keep_fields: false,
             };
-            let ex = extract(&inp, &Params { mfd_init: false, ..Params::plan(BODY, runoff_mean) });
+            let ex = extract(
+                &inp,
+                &Params {
+                    mfd_init: false,
+                    bed_floor: BED_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed).then_some(sea + 0.5),
+                    ..Params::plan(BODY, runoff_mean)
+                },
+            );
             gd.nodes.extend(ex.nodes.iter().cloned());
             gd.reaches.extend(ex.reaches.iter().cloned());
             let trunk_ids: BTreeSet<u64> = l_trunks.iter().map(|r| r.id).collect();
@@ -4374,6 +4403,7 @@ fn main() -> Result<(), String> {
             ("band6-floors", if BAND6_FLOORS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-outlet-floor", if BAND6_OUTLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("sea17", if SEA17.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("bed-sea-floor", if BED_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-connect", if KV_CONNECT.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-rims", if KV_RIMS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-sea-floor", if KV_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
