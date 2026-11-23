@@ -275,7 +275,7 @@ fn compose(title: &[String], size: usize, rows: &[Row]) -> Vec<u8> {
                 }
             }
             if p.is_none() {
-                put_text(&mut img, ox + 2, oy + 2, "NOT DUMPED", [200, 200, 200]);
+                put_text(&mut img, ox + 2, oy + 2, &"NOT DUMPED".chars().take(fit_chars).collect::<String>(), [200, 200, 200]);
             }
         }
     }
