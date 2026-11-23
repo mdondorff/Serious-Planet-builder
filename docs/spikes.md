@@ -38,6 +38,7 @@ Per-spike register sections of M5 and M6: `docs/archive/M6/spikes.md`. Closed sp
 | SPIKE-132 | KV and KC on the fixture (G1f) | closed 11-17: budget kept; fill clamp, 2 exceptions gaps; #162 shortfall (add. 5) | `spikes/kv-kc/results/results.md` |
 | SPIKE-140 | Base noise and M1's mountain structure (#167) | closed 11-19: unturned lattice; no relief hierarchy, 40 % pits | `spikes/base-noise/results/results.md` |
 | SPIKE-141 | RG carving at the bead-chain spot (#157-#161) | closed 11-21: 4-connected carving, connected sea, lowering-only h5 | `spikes/rg-carving/results/results.md` |
+| SPIKE-142 | Hump trenches against the lattice (#173) | closed 11-23: 78 % K5 cols, 22 % H1 diagonal saddles | `spikes/hump-lattice/results/results.md` |
 | SPIKE-139 | K5 washboard (#148) | closed 11-19: no hillslope term | `spikes/k5-washboard/results/results.md` |
 | SPIKE-138 | Base drained at both scales (A+) | closed 11-18: G-DRAIN 0-0.5 % | `spikes/drain-aplus/results/results.md` |
 | SPIKE-136 | Drained L hand-over | closed 11-17: KH h4c, then h5 | `spikes/handover/results/results.md` |
