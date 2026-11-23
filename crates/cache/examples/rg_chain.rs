@@ -3757,6 +3757,7 @@ fn main() -> Result<(), String> {
             }
             // lead #182a (DEC crusader-32; a stopgap, the design is one hierarchy with the kept set final before extraction): a line-end lake inlet whose cell basins-2 no
             // longer keeps ends a tributary at a lake that is not there; with --trib-rerun on, KG-trib post runs once more with basins-2's kept set
+            let mut reran = false;
             let lost_inlets = |gd: &Graph, kept: &[bool]| -> usize {
                 let downs: HashSet<u64> = gd.reaches.iter().filter(|r| r.level == Level::L).map(|r| r.down).collect();
                 gd.nodes
@@ -3769,6 +3770,7 @@ fn main() -> Result<(), String> {
                 use planet_generators::bake::kg_trib::{accumulate_trunks, extract, Input, Params, Trunk};
                 let before = lost_inlets(&gd, &kept);
                 let t3 = Instant::now();
+                reran = before > 0;
                 if before > 0 {
                     gd.reaches.retain(|r| !trib_post.0.contains(&r.id));
                     gd.nodes.retain(|x| !trib_post.1.contains(&x.id));
@@ -3843,6 +3845,25 @@ fn main() -> Result<(), String> {
             // highest spill where basins meet), so the graph agrees with the rim KV holds (reading 35 test (a)); KV cuts to these beds
             // the pass's nodes join the graph before the inlet markers, so a marker never lands on a cell one of them holds (R1h #180: 2 two_nodes_one_anchor)
             gd.nodes.extend(pb.nodes.iter().cloned());
+            // lead #182a: after a rerun, basins-2's nodes made for the tributaries it saw (a lake inlet where one entered a kept basin, a spill junction on one) may name a
+            // reach the rerun replaced or stand on a cell a new line holds; an inlet no reach ends at and no basin spills to, and a marker whose reach is gone, are dropped
+            if reran {
+                use planet_generators::bake::river_graph::NodeKind;
+                let reach_ids: HashSet<u64> = gd.reaches.iter().map(|r| r.id).collect();
+                let downs: HashSet<u64> = gd.reaches.iter().map(|r| r.down).collect();
+                let spills: HashSet<u64> = pb.basins.iter().map(|b| b.spill_node).collect();
+                let pb_ids: HashSet<u64> = pb.nodes.iter().map(|x| x.id).collect();
+                let n0 = gd.nodes.len();
+                gd.nodes.retain(|x| {
+                    !pb_ids.contains(&x.id)
+                        || match (x.kind, x.marker) {
+                            (NodeKind::LakeInlet, _) => downs.contains(&x.id) || spills.contains(&x.id),
+                            (_, Some(m)) => reach_ids.contains(&m.on_reach),
+                            _ => true,
+                        }
+                });
+                println!("RG domain {d} trib rerun (lead #182a): {} of basins-2's nodes dropped (unreferenced inlets, markers on replaced reaches)", n0 - gd.nodes.len());
+            }
             if INLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) {
                 let fl = planet_generators::bake::basins_rg::floor_inlet_beds(&grid_d, &pb.basins, &pb.cells, &mut gd.reaches, &|id| {
                     to_local(id)
