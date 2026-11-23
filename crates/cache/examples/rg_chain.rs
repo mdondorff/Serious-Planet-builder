@@ -2023,6 +2023,13 @@ fn main() -> Result<(), String> {
     // lead #174a (SPIKE-142): `--kh-saddle-split off | trunk | all`: KH's h5 also takes h4c (its split along the D8 diagonal step, lower only) within 2-4 L cells of
     // every D8 diagonal step of KH's routing that crosses a saddle block of z_s (both off-step cells above both ends), outside the channel zone too; `trunk` only where
     // both ends are H1 channel cells; `off` (default) the zone alone (spike only)
+    // lead #177 (SPIKE-143, the chainsaw): `--kh-zone h4c | h4 | line`, KH h5's read inside the channel zone: h4c (default) the clamped Clough-Tocher on the quad
+    // split; h4 the same unclamped; line no triangulation: C1 lowered toward the straight line of every D8 step of KH's routing from an H1 channel cell (its linear
+    // z_s between the two cell centres), full within 1.5 L cells of the line and smoothly to no change at 4 (spike only)
+    let kh_zone = value(&args, "--kh-zone").unwrap_or("h4c");
+    if !["h4c", "h4", "line"].contains(&kh_zone) {
+        return Err(format!("--kh-zone h4c | h4 | line, not '{kh_zone}'"));
+    }
     let kh_saddle = value(&args, "--kh-saddle-split").unwrap_or("off");
     if !["off", "trunk", "all"].contains(&kh_saddle) {
         return Err(format!("--kh-saddle-split off | trunk | all, not '{kh_saddle}'"));
@@ -2801,6 +2808,39 @@ fn main() -> Result<(), String> {
         // readings 17 and 19 (lead #170 item 3): S_KH = KH(z_s) + r', the band floored so that a cell whose KH lies above the sea + 0.5 m stays there (as ks_kh.rs)
         let floor = sea + 0.5;
         let band = |k: f64, r: f64| if k > floor { r.max(floor - k) } else { r };
+        // lead #177 `--kh-zone line`: the D8 steps of KH's routing from each H1 channel cell, by their start cell
+        let lines: Option<Vec<Option<usize>>> =
+            (kh_zone == "line").then(|| (0..cells).map(|c| (h1.hydro.channel[c] && recv[c] != NONE).then(|| recv[c] as usize)).collect());
+        if let Some(l) = &lines {
+            println!(
+                "RG KH zone read (lead #177): line, {} channel D8 steps as straight lines (no quad split)",
+                l.iter().flatten().count()
+            );
+        }
+        let line_lower = |c1: f64, fx: f64, fy: f64| -> f64 {
+            let Some(l) = &lines else { return c1 };
+            let (ix, iy) = (fx.round() as i64, fy.round() as i64);
+            let mut out = c1;
+            for j in iy - 2..=iy + 2 {
+                for i in ix - 2..=ix + 2 {
+                    if i < 0 || j < 0 || i >= rw as i64 || j >= rh as i64 {
+                        continue;
+                    }
+                    let a = j as usize * rw + i as usize;
+                    let Some(b) = l[a] else { continue };
+                    let (ax, ay, bx, by) = (i as f64, j as f64, (b % rw) as f64, (b / rw) as f64);
+                    let (dx, dy) = (bx - ax, by - ay);
+                    let u = (((fx - ax) * dx + (fy - ay) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+                    let (ex, ey) = (fx - ax - u * dx, fy - ay - u * dy);
+                    let d = (ex * ex + ey * ey).sqrt() * lr;
+                    let s = ((d - 1.5) / (4.0 - 1.5)).clamp(0.0, 1.0);
+                    let wgt = 1.0 - s * s * (3.0 - 2.0 * s);
+                    let target = solve.zs[a] + u * (solve.zs[b] - solve.zs[a]);
+                    out = out.min(c1 + wgt * (target - c1).min(0.0));
+                }
+            }
+            out
+        };
         let kval = |p: usize| {
             let (fx, fy) = (((p % w) as f64 - (lr - 1.0) / 2.0) / lr, ((p / w) as f64 - (lr - 1.0) / 2.0) / lr);
             match kh_form {
@@ -2808,7 +2848,14 @@ fn main() -> Result<(), String> {
                 "h4" => kh::read_ct(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0,
                 "h5" | "h5d" => {
                     let c1 = f64::from(zs_field.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
-                    let h4c = kh::read_ct_clamped(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0;
+                    if kh_zone == "line" {
+                        return line_lower(c1, fx, fy);
+                    }
+                    let h4c = if kh_zone == "h4" {
+                        kh::read_ct(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0
+                    } else {
+                        kh::read_ct_clamped(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0
+                    };
                     let mut wgt = kh::zone_weight(zone.as_ref().expect("h5's zone"), rw, rh, fx, fy);
                     if let Some(s) = &dams {
                         wgt = wgt.max(kh::dam_weight(s, rw, rh, fx, fy, lr, 2.0, 4.0));
@@ -4499,6 +4546,7 @@ fn main() -> Result<(), String> {
             ("bed-sea-floor", if BED_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("trunk-saddle-ortho", if TRUNK_SADDLE_ORTHO.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kh-saddle-split", kh_saddle.to_string()),
+            ("kh-zone", kh_zone.to_string()),
             ("kv-connect", if KV_CONNECT.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-rims", if KV_RIMS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-sea-floor", if KV_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
