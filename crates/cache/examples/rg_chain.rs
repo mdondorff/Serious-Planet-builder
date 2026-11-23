@@ -1783,8 +1783,8 @@ static INLET_FLOOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 /// lead #178 item 3: `--band6-floors on` holds band6's breach within each path cell's budget left after KS; `off` only the floor cell's budget caps the cut; on by default since #180a (reading 42).
 static BAND6_FLOORS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 /// lead #191: `--band6-outlet-floor on`: band6's breach does not cut an outlet at a path's end under that cell's floor (drain::OUTLET_FLOORS; #190: border exits cut past
-/// their budget, R1h 11, M1 17); `off` (default until the rows): the outlet is exempt from the floor but cut with the path.
-static BAND6_OUTLET_FLOOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// their budget, R1h 11, M1 17); `off`: the outlet is exempt from the floor but cut with the path. On by default since #192 (reading 43; rows R1h and M1, outbox 00:40).
+static BAND6_OUTLET_FLOOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 /// crusader #172 (owner, 2026-11-20): `--exception-lakes on` keeps the hollows of over-budget rises as lakes.
 static EXCEPTION_LAKES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -2065,7 +2065,7 @@ fn main() -> Result<(), String> {
         ("--kv-connect", &KV_CONNECT, "on"),
         ("--sea17", &SEA17, "off"),
         ("--band6-floors", &BAND6_FLOORS, "on"),
-        ("--band6-outlet-floor", &BAND6_OUTLET_FLOOR, "off"),
+        ("--band6-outlet-floor", &BAND6_OUTLET_FLOOR, "on"),
         ("--inlet-floor", &INLET_FLOOR, "on"),
     ] {
         let v = value(&args, opt).unwrap_or(default);
