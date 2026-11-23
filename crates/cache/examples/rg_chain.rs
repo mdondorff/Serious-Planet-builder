@@ -1449,6 +1449,7 @@ fn build_graph(
     low_centre: bool,
     ocean: &[bool],
     runoff_mean: f64,
+    zs_h1: &[f64],
 ) -> (Graph, Vec<String>) {
     let (x0, y0, w, h, rw) = window;
     let h1_gid = |c: u32| grid.global_id(c as usize);
@@ -1551,6 +1552,31 @@ fn build_graph(
             anchor.insert((c, kind), a);
         }
     }
+    // lead #174 (`--trunk-saddle-ortho on`, SPIKE-142): a diagonal H1 step whose two off-path H1 cells both stand above both of its ends on z_s (a saddle block) gets the
+    // centre of the lower off-path cell as an extra line point, so the L image's corridor and its lowest path go round the col instead of across the corner; the H1
+    // routing and the reach's H1 cells are unchanged
+    let saddle_count = std::cell::Cell::new((0usize, 0usize));
+    let saddle_line = |cells: &[u32]| -> Vec<(f64, f64)> {
+        let mut line = vec![to_local(cells[0])];
+        for p in cells.windows(2) {
+            let (a, c) = (p[0] as usize, p[1] as usize);
+            let (ax, ay, cx, cy) = ((a % rw) as i64, (a / rw) as i64, (c % rw) as i64, (c / rw) as i64);
+            if TRUNK_SADDLE_ORTHO.load(std::sync::atomic::Ordering::Relaxed) && (cx - ax).abs() == 1 && (cy - ay).abs() == 1 {
+                let (b, d) = (ay as usize * rw + cx as usize, cy as usize * rw + ax as usize);
+                let (n, of) = saddle_count.get();
+                let ends = zs_h1[a].max(zs_h1[c]);
+                if zs_h1[b].min(zs_h1[d]) > ends {
+                    let o = if zs_h1[b] < zs_h1[d] || (zs_h1[b] == zs_h1[d] && b < d) { b } else { d };
+                    line.push(to_local(o as u32));
+                    saddle_count.set((n + 1, of + 1));
+                } else {
+                    saddle_count.set((n, of + 1));
+                }
+            }
+            line.push(to_local(p[1]));
+        }
+        line
+    };
     // routes in parallel
     let jobs: Vec<(usize, Vec<(f64, f64)>, usize, usize)> = reaches
         .iter()
@@ -1558,9 +1584,13 @@ fn build_graph(
         .filter_map(|(k, r)| {
             let up = *anchor.get(&(r.cells[0], r.up_kind))?;
             let down = *anchor.get(&(*r.cells.last().expect("cells"), r.down_kind))?;
-            Some((k, r.cells.iter().map(|&c| to_local(c)).collect(), up, down))
+            Some((k, saddle_line(&r.cells), up, down))
         })
         .collect();
+    if TRUNK_SADDLE_ORTHO.load(std::sync::atomic::Ordering::Relaxed) {
+        let (n, of) = saddle_count.into_inner();
+        println!("RG KG-trunk saddle ortho (lead #174): {n} diagonal H1 steps across a saddle block routed through the lower orthogonal H1 cell, of {of} diagonal steps");
+    }
     let next = std::sync::atomic::AtomicUsize::new(0);
     let done = std::sync::Mutex::new(Vec::new());
     std::thread::scope(|sc| {
@@ -1813,6 +1843,9 @@ static HYDRO_TWICE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 /// crusader #168b (reading 32): `--trunk-bed shared` (default) keeps a two-vertex trunk image's first vertex at its up node's bed when it rises over the budget, the rise at its down end
 /// excused by its rise_over_budget exception; `lift` raises its first vertex (spikes #142's form).
 static TRUNK_BED_SHARED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+/// lead #174 (SPIKE-142): `--trunk-saddle-ortho on` routes KG-trunk's L image of a diagonal H1 step across a saddle block through the lower orthogonal H1 cell; `off`
+/// (default) along the H1 cell centres.
+static TRUNK_SADDLE_ORTHO: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// lead #171: `--bed-sea-floor on` codes KG-trunk's and KG-trib's land beds at the sea + 0.5 m or above (reading 17), over coastal flats too; `off` (default) the running minimum alone.
 static BED_SEA_FLOOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -2082,6 +2115,7 @@ fn main() -> Result<(), String> {
         ("--kv-connect", &KV_CONNECT, "on"),
         ("--sea17", &SEA17, "off"),
         ("--bed-sea-floor", &BED_SEA_FLOOR, "off"),
+        ("--trunk-saddle-ortho", &TRUNK_SADDLE_ORTHO, "off"),
         ("--band6-floors", &BAND6_FLOORS, "on"),
         ("--band6-outlet-floor", &BAND6_OUTLET_FLOOR, "on"),
         ("--inlet-floor", &INLET_FLOOR, "on"),
@@ -2904,7 +2938,25 @@ fn main() -> Result<(), String> {
     let runoff_mean = land_h1.iter().sum::<f64>() / land_h1.len().max(1) as f64;
     let window = (x0 as u64, y0 as u64, w, h, rw);
     let mut g = if on("kg-trunk") {
-        build_graph(&h1, &reaches, grid, &start, &ks_base, &ks0, &budget, window, sea, bar, &order, threads, low, &ocean, runoff_mean).0
+        build_graph(
+            &h1,
+            &reaches,
+            grid,
+            &start,
+            &ks_base,
+            &ks0,
+            &budget,
+            window,
+            sea,
+            bar,
+            &order,
+            threads,
+            low,
+            &ocean,
+            runoff_mean,
+            &solve.zs,
+        )
+        .0
     } else {
         Graph { body: BODY, nodes: Vec::new(), reaches: Vec::new(), basins: Vec::new() }
     };
@@ -4405,6 +4457,7 @@ fn main() -> Result<(), String> {
             ("band6-outlet-floor", if BAND6_OUTLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("sea17", if SEA17.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("bed-sea-floor", if BED_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("trunk-saddle-ortho", if TRUNK_SADDLE_ORTHO.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-connect", if KV_CONNECT.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-rims", if KV_RIMS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-sea-floor", if KV_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
