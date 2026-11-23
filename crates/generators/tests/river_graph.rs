@@ -880,3 +880,24 @@ fn an_open_slice_reports_its_missing_owners_not_violations() {
     assert_eq!(missing_owners(&s), vec![(j, r3)]);
     assert!(!check(&s).is_empty(), "closed, the same slice is invalid");
 }
+
+// spec: TEST-140, GEN-189
+#[test]
+fn an_orphan_lake_inlet_is_found_and_a_referenced_one_is_not() {
+    // lead #182a: a lake_inlet that no reach ends at and no basin spills to is a violation; the base basin's spill node pointed at the inlet, or a reach ending there,
+    // makes it none; an open slice does not check it
+    let orphan = node(NodeKind::LakeInlet, cell(3, 3));
+    let mut g = base();
+    g.nodes.push(orphan.clone());
+    assert!(found(&g, &|v| matches!(v, Violation::OrphanLakeInlet { node } if *node == orphan.id)));
+    assert!(!check_with(&g, false, true).iter().any(|v| matches!(v, Violation::OrphanLakeInlet { .. })), "an open slice does not check it");
+    let mut s = g.clone();
+    s.basins[0].spill_node = orphan.id;
+    assert!(!found(&s, &|v| matches!(v, Violation::OrphanLakeInlet { .. })), "a basin spills to it");
+    let mut r = g.clone();
+    let src = node(NodeKind::Source, cell(3, 2));
+    r.nodes.push(src.clone());
+    r.reaches.push(reach(&src, &orphan, vec![cell(3, 2), cell(3, 3)], attrs(&[1.0e4, 1.2e4], &[12, 10], 1)));
+    r.sort();
+    assert!(!found(&r, &|v| matches!(v, Violation::OrphanLakeInlet { .. })), "a reach ends at it");
+}

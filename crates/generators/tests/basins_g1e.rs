@@ -455,20 +455,23 @@ mod fixture_case {
 
 // SPIKE-130 (spike prototype; not a spec requirement)
 #[test]
-fn a_basin_pass_without_the_tributaries_puts_inlets_on_their_node_cells() {
-    // lead #160: a pass that does not see a tributary may put a lake_inlet on the cell where that tributary ends (the chain runner merged its first pass's nodes, 99 on R1h); the
-    // validator finds it, and the pass that sees every reach puts none there
+fn a_basin_pass_without_the_tributaries_puts_no_inlet_where_a_reach_runs_on_through_a_lake() {
+    // lead #160 and #187: a pass that did not see a tributary put a lake_inlet on the first cell of a reach inside a kept lake, mid-reach (the chain runner merged its first pass's
+    // nodes, 99 on R1h); with a tributary ending there (a confluence) that was two nodes on one anchor, and alone an inlet no reach ends at (GEN-189's OrphanLakeInlet).
+    // Since #187 an inlet stands only where a reach ends at it: the reach running through the lake gets none, so neither pass puts a node on the cell where the tributary ends
     let mut z = base(false);
     cone(&mut z, 12.0, 12.0, 5.0, 10.0);
-    let r = line(&(0..8).map(|j| cell(12, 3 + j)).collect::<Vec<_>>(), NodeKind::OutletSea).0;
+    let cells: Vec<usize> = (0..8).map(|j| cell(12, 3 + j)).collect();
+    let r = line(&cells, NodeKind::OutletSea).0;
     let (_, first) = run(&z, std::slice::from_ref(&r));
-    let x = first
-        .nodes
-        .iter()
-        .find(|n| n.kind == NodeKind::LakeInlet && r.vertices.contains(&n.anchor))
-        .expect("the reach enters the lake")
-        .anchor as usize;
-    // a tributary ending at that cell (a confluence there)
+    let lake = basin_at(&first, cell(12, 12));
+    assert_eq!(lake.represented, Represented::ProtectedSurface, "the cone is a kept lake the reach runs into");
+    assert!(
+        !first.nodes.iter().any(|n| n.kind == NodeKind::LakeInlet && r.vertices[..r.vertices.len() - 1].contains(&n.anchor)),
+        "no inlet on a vertex the reach runs on from"
+    );
+    // a tributary ending at the reach's first cell inside the lake (a confluence there)
+    let x = *cells.iter().find(|&&c| first.cells[&lake.id].contains(&c)).expect("the reach enters the lake");
     let (i, j) = (x % N, x / N);
     let (t, t_up, t_down) = line(&(0..4).map(|k| cell(i - 3 + k, j)).collect::<Vec<_>>(), NodeKind::Confluence);
     let adj = |_: Level, a: u64, b: u64| {
@@ -478,8 +481,8 @@ fn a_basin_pass_without_the_tributaries_puts_inlets_on_their_node_cells() {
     let at_x = |v: &[Violation]| v.iter().any(|v| matches!(v, Violation::TwoNodesOneAnchor { anchor, .. } if *anchor == x as u64));
     let merged = graph_of(&first, &[r.clone(), t.clone()], &[t_up.clone(), t_down.clone()]);
     assert!(
-        at_x(&validate(&merged, &Checks { adjacent: &adj, tile_of: None, open: true })),
-        "the first pass's inlet beside the confluence"
+        !at_x(&validate(&merged, &Checks { adjacent: &adj, tile_of: None, open: true })),
+        "the first pass's nodes beside the confluence: none on its cell"
     );
     let (_, second) = run(&z, &[r.clone(), t.clone()]);
     assert!(

@@ -1,0 +1,6 @@
+r1h-chain: depressions > 0.5 m in the box: kh 10556 ks1c 10299 band6c 559 final 485
+    drained per stage (+ = fewer): kh->ks1c +257 ks1c->band6c +9740 band6c->final +74
+r1h-line-chain: depressions > 0.5 m in the box: kh 11014 ks1c 10776 band6c 701 final 618
+    drained per stage (+ = fewer): kh->ks1c +238 ks1c->band6c +10075 band6c->final +83
+r1h-h4-chain: depressions > 0.5 m in the box: kh 11091 ks1c 10929 band6c 1169 final 482
+    drained per stage (+ = fewer): kh->ks1c +162 ks1c->band6c +9760 band6c->final +687

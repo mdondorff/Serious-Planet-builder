@@ -1,0 +1,8 @@
+2373 trenches; S0 hump at the S0 crest against the highest end: p10   14.6 p50   55.9 p90  198.0 m
+  K5 surface Z (z_s bilinear): p10    1.2 p50   44.5 p90  181.6 m; sub-814 m detail rho = S0 - Z: p10   -4.7 p50   10.4 p90   39.5 m
+  base B: p10  -12.0 p50   30.2 p90  156.6 m; K5 delta r = S0 - B: p10  -48.6 p50   21.2 p90  133.5 m
+  share of the hump carried by Z: p50 83 % (over the 2366 trenches with a positive S0 hump); trenches where Z carries over half 78.7 %, where Z alone is over 10 m 81.7 %
+  share of the hump carried by rho: p50 17 % (over the 2366 trenches with a positive S0 hump); trenches where rho carries over half 21.0 %, where rho alone is over 10 m 51.2 %
+trenches whose hump is mostly K5 relief (|rho| under half): 76.9 %; mostly sub-814 m detail (|Z| under half): 17.1 %
+z_s (H1, inside the box): strict 4-neighbour maxima 3.79 %, minima 3.55 % of H1 cells (a checkerboard would be 50 %)
+z_s Laplacian (4 z - neighbours) p50 |.| 11.17 m, p90 171.92 m; neighbour sign alternation (lap and right neighbour of opposite sign over 1 m): 30.3 %

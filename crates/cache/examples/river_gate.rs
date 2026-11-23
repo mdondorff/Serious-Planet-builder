@@ -97,7 +97,7 @@ fn grid_gate(arg: &str, params: &GateParams) -> Result<(), String> {
     let bytes = std::fs::read(&file).map_err(|e| format!("{file}: {e}"))?;
     let surface = raw_grid_heights(&bytes, w, h).map_err(|e| format!("{file}: {e}"))?;
     let grid = planet_generators::bake::Grid::new(w, h, GRID_CELL_M);
-    let outlet = grid.outlets(&surface, sea);
+    let outlet = planet_cache::river_gate::connected_sea_outlets(&grid, &surface, &surface, sea, &|_| false);
     let inside = border_inside(w, h, GRID_BORDER);
     let region = vec![true; w * h];
     let report = measure(
@@ -371,7 +371,28 @@ fn main() -> Result<(), String> {
         println!("RIVER-GATE surface written: {f} ({w} x {h} f64)");
     }
     let grid = planet_generators::bake::Grid::new(w, h, front.solve.grid.dx() / l as f64);
-    let outlet = grid.outlets(&surface, sea_level_m);
+    // the ocean on the window's start surface, seeded at the edge and at the L cells of H1's sea cells inside the region, as the chain decides it (a coast the
+    // variant raised does not cut the sea off); the measured surface floods to it
+    let h1_sea = |c: usize| {
+        let hc = (c / w / l) * srw + (c % w) / l;
+        front.solve.zb[hc] <= sea_level_m && !front.solve.grid.is_edge(hc)
+    };
+    let outlet = planet_cache::river_gate::connected_sea_outlets(&grid, &start, &surface, sea_level_m, &h1_sea);
+    // lead #185b: the gate builds its own ocean (a candidate does not supply the gate's rule, CON-31); a chain's `ocean.u8` beside the stage fields is a cross-check only, both counts 0 on a chain row
+    let chain_ocean = match value(&args, "--stages") {
+        Some(dir) => planet_cache::river_gate_graph::read_chain_ocean(Path::new(dir), w * h)?,
+        None => None,
+    };
+    if let Some(ocean) = &chain_ocean {
+        let own_ocean = planet_cache::river_gate::connected_sea_outlets(&grid, &start, &start, sea_level_m, &h1_sea);
+        let chain_set: Vec<bool> = (0..w * h).map(|p| ocean[p] || (grid.is_edge(p) && start[p] <= sea_level_m)).collect();
+        let own_set: Vec<bool> = (0..w * h).map(|p| own_ocean[p] && start[p] <= sea_level_m).collect();
+        let (xc, xk) = planet_cache::river_gate::mask_difference(&grid, &chain_set, &own_set);
+        let (mc, mk) = planet_cache::river_gate::mask_difference(&grid, &own_set, &chain_set);
+        println!(
+            "RIVER-GATE ocean: the chain's (ocean.u8); g_ocean_extra={xc} g_ocean_extra_components={xk} g_ocean_missing={mc} g_ocean_missing_components={mk}"
+        );
+    }
     // The G2 inputs (BUILD-060): a canonical graph, the per-stage budget fields, a partition pair; global L ids against this window's origin.
     let graph = value(&args, "--graph").map(read_graph).transpose()?;
     if own_start.is_some() {

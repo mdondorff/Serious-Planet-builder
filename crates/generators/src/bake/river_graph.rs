@@ -640,6 +640,11 @@ pub enum Violation {
         reach: u64,
         why: &'static str,
     },
+    /// A `lake_inlet` that no reach ends at and no basin spills to (lead #182a, 2026-11-23): an inlet that enters nothing; not checked on an open slice, whose
+    /// reaches and basins may be owned elsewhere.
+    OrphanLakeInlet {
+        node: u64,
+    },
     /// A marker that does not sit on its reach (`on_reach` missing, `at_vertex` out of range, or the vertex not its anchor), or a marker field on a non-marker kind.
     InvalidMarker {
         node: u64,
@@ -855,6 +860,16 @@ pub fn validate_excused(graph: &Graph, checks: &Checks) -> (Vec<Violation>, Vec<
     }
     for (level, anchor) in twice {
         v.push(Violation::TwoNodesOneAnchor { level, anchor });
+    }
+    // lead #182a: a lake_inlet is some reach's down node or some basin's spill node (an open slice may hold neither of them)
+    if !open {
+        let downs: BTreeSet<u64> = g.reaches.iter().map(|r| r.down).collect();
+        let spills: BTreeSet<u64> = g.basins.iter().map(|b| b.spill_node).collect();
+        for n in g.nodes.iter().filter(|n| n.kind == NodeKind::LakeInlet) {
+            if !downs.contains(&n.id) && !spills.contains(&n.id) {
+                v.push(Violation::OrphanLakeInlet { node: n.id });
+            }
+        }
     }
     // exception markers by reach
     let mut excepted: BTreeMap<u64, BTreeSet<u32>> = BTreeMap::new();

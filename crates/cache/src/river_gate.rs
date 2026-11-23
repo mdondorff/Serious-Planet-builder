@@ -2,7 +2,7 @@
 //! (`rivers_at_l`, `erosion_at_l`) with the limits agreed by crusader and spikes for SPIKE-117 and SPIKE-118 (2026-11-14). The measure is a pure function of its input: the `river_gate` example of
 //! this crate builds the input from a window or a store, and `cargo xtask river-gate` runs it under the heavy lock.
 use planet_generators::bake::flood::priority_flood_with;
-use planet_generators::bake::route::{route_rules_filled, RoundRules, Routing, NONE};
+use planet_generators::bake::route::{route_rules_filled, MfdClip, RoundRules, Routing, NONE};
 use planet_generators::bake::Grid;
 
 use crate::river_gate_graph::{
@@ -17,6 +17,66 @@ use crate::river_suite::{
 /// The crest rounding bar (lead #172; review B Q5): the p95 of the ridge lowering against `S_KH` at most this (metres), and on a mountain window (M1).
 pub const CREST_P95_MAX_M: f64 = 15.0;
 pub const CREST_P95_MAX_M_MOUNTAIN: f64 = 35.0;
+/// The gate's outlets (BUILD-055, lead 2026-11-23, the chain's connected sea mask of readings 12 and 39): the window's edge cells, and the ocean cells still at or under
+/// `sea` on the measured surface `surface`. The ocean is decided on `z`, the window's start surface, as the chain decides it: the cells at or under `sea` joined through
+/// such cells (8-connected) to an edge cell or to a `seed` cell (the L cells of an H1 sea cell inside the region). An inland cell under the sea level is no outlet, and its
+/// pit fills; a start-sea cell the variant raised above the sea is land; a sea cut off by a raised coast stays sea.
+pub fn connected_sea_outlets(
+    grid: &planet_generators::bake::Grid,
+    z: &[f64],
+    surface: &[f64],
+    sea: f64,
+    seed: &dyn Fn(usize) -> bool,
+) -> Vec<bool> {
+    let n = z.len();
+    let mut out: Vec<bool> = (0..n).map(|p| grid.is_edge(p)).collect();
+    let mut stack: Vec<usize> = (0..n).filter(|&p| (grid.is_edge(p) || seed(p)) && z[p] <= sea).collect();
+    let mut seen = vec![false; n];
+    for &p in &stack {
+        seen[p] = true;
+    }
+    while let Some(c) = stack.pop() {
+        out[c] = out[c] || surface[c] <= sea;
+        for k in 0..8 {
+            if let Some(q) = grid.neighbour(c, k) {
+                if !seen[q] && z[q] <= sea {
+                    seen[q] = true;
+                    stack.push(q);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The cells of `a` outside `b`, and their 8-connected components (lead #185b: `g_ocean_extra` is the chain's `ocean.u8` outside the gate's own ocean, `g_ocean_missing` the reverse; a cross-check, 0 on a chain row).
+pub fn mask_difference(grid: &Grid, a: &[bool], b: &[bool]) -> (usize, usize) {
+    let n = a.len();
+    let diff: Vec<bool> = (0..n).map(|p| a[p] && !b[p]).collect();
+    let mut seen = vec![false; n];
+    let (mut cells, mut comps) = (0usize, 0usize);
+    for s in 0..n {
+        if !diff[s] || seen[s] {
+            continue;
+        }
+        comps += 1;
+        seen[s] = true;
+        let mut stack = vec![s];
+        while let Some(c) = stack.pop() {
+            cells += 1;
+            for k in 0..8 {
+                if let Some(q) = grid.neighbour(c, k) {
+                    if diff[q] && !seen[q] {
+                        seen[q] = true;
+                        stack.push(q);
+                    }
+                }
+            }
+        }
+    }
+    (cells, comps)
+}
+
 /// The ponds bar (BUILD-060, owner 2026-11-20, option C): river length in closed basins outside the kept lakes, over the river length outside them, at most this (percent).
 pub const PONDS_MAX_PCT: f64 = 10.0;
 /// The kept-river bar: river length in kept lakes, over all river length, at most this (percent) on a lowland window and `KEPT_RIVER_MAX_PCT_MOUNTAIN` on a mountain one.
@@ -25,10 +85,14 @@ pub const KEPT_RIVER_MAX_PCT_MOUNTAIN: f64 = 10.0;
 /// A kept basin whose depression level on the measured surface lies more than this under its recorded spill is a spill mismatch (metres): a graph violation.
 pub const SPILL_MISMATCH_M: f64 = 0.5;
 
-/// The routing's flood grade between cells (the spikes' 1e-3 m).
-pub const ROUTE_EPSILON_M: f64 = 1.0e-3;
 /// The basin flood's grade between cells (SPIKE-117/118's 1e-7 m): its graded flats stand far below [`BASIN_WET_M`].
 pub const BASIN_EPSILON_M: f64 = 1.0e-7;
+/// The routing's flood grade between cells (lead #185c): a flat drains by GEN-173's grade (distance to its exit), and a flat as wide as a window (8,160 cells) rises 8 cm, under the uphill
+/// step (`UPHILL_M`). The spikes' 1e-3 m lifted a flat 1 m over 1,000 cells, and R3a's coastal flats drained onto land up to 2.44 m higher. It is the smallest grade whose regrade step
+/// (1e-6 of the grade) stays above the f64 spacing of heights up to about 9 km; the basin grade (1e-7 m) left a cell with no lower neighbour on B's R3a store.
+pub const ROUTE_EPSILON_M: f64 = 1.0e-5;
+/// The routing's flood (lead #185c): the canonical flood with GEN-173's Euclidean grade of the flats.
+pub const ROUTE_RULES: RoundRules = RoundRules { clip_mfd: MfdClip::Off, canonical_flood: true };
 /// A cell lies in a basin when the basin flood stands more than this above it (a flat graded at 1e-7 m a cell reaches it only after 10,000 cells).
 pub const BASIN_WET_M: f64 = 1.0e-3;
 /// SPIKE-114's reference: a river cell in a pit of the routing's flood standing more than 5 cm above it, with no depth or cell limit.
@@ -234,8 +298,11 @@ pub struct GateReport {
     pub spill_mismatch: Option<usize>,
     /// With a graph: test (a), the kept basins whose rim holds an L vertex with its bed more than `SPILL_MISMATCH_M` under the recorded spill ([`rim_mismatch`]).
     pub spill_rim_mismatch: Option<usize>,
-    /// Lead #182a (spike): the lake_inlet nodes by origin and the line-end ones in no kept-basin depression ([`crate::river_gate_graph::InletReport`]).
-    pub inlets_without_basin: Option<crate::river_gate_graph::InletReport>,
+    /// Lead #183 (spike, a count first): the kept basins with their floor in the window, by how far their recorded spill sits above the final surface's pour level at the
+    /// floor (over 0.01, 0.1 and 0.5 m: a notch cut partly below the record), the largest gap (m), and the dry ones (the floor holds no water over 1 mm).
+    pub spill_notch: Option<(usize, [usize; 3], f64, usize)>,
+    /// With a graph (lead #182a): the lake_inlet nodes by origin and the line-end ones in no kept-basin depression ([`crate::river_gate_graph::InletReport`]).
+    pub inlets: Option<crate::river_gate_graph::InletReport>,
     /// The area of an L cell (m2), for the kept lakes' area.
     pub cell_area_m2: f64,
     /// SPIKE-114's reference count: river cells inside in any pit of 5 cm.
@@ -341,12 +408,18 @@ impl GateReport {
             ("kept_lake_km2", self.kept_lake_cells.map_or("-".to_string(), |k| format!("{:.2}", k as f64 * self.cell_area_m2 / 1.0e6))),
             ("g_spill_mismatch", self.spill_mismatch.map_or("-".to_string(), c)),
             ("g_spill_rim", self.spill_rim_mismatch.map_or("-".to_string(), c)),
-            ("g_lake_inlets", self.inlets_without_basin.map_or("-".to_string(), |x| x.inside.to_string())),
-            ("g_inlet_line_ends", self.inlets_without_basin.map_or("-".to_string(), |x| x.line_ends.to_string())),
-            ("g_inlet_spill_targets", self.inlets_without_basin.map_or("-".to_string(), |x| x.spill_targets.to_string())),
-            ("g_inlet_orphans", self.inlets_without_basin.map_or("-".to_string(), |x| x.orphans.to_string())),
-            ("g_inlet_no_basin", self.inlets_without_basin.map_or("-".to_string(), |x| x.line_end_no_basin.to_string())),
-            ("g_inlet_no_basin_far", self.inlets_without_basin.map_or("-".to_string(), |x| x.line_end_no_basin_far.to_string())),
+            ("g_kept_in_window", self.spill_notch.map_or("-".to_string(), |x| x.0.to_string())),
+            ("g_notch_over_0_01", self.spill_notch.map_or("-".to_string(), |x| x.1[0].to_string())),
+            ("g_notch_over_0_1", self.spill_notch.map_or("-".to_string(), |x| x.1[1].to_string())),
+            ("g_notch_over_0_5", self.spill_notch.map_or("-".to_string(), |x| x.1[2].to_string())),
+            ("g_notch_max_m", self.spill_notch.map_or("-".to_string(), |x| format!("{:.2}", x.2))),
+            ("g_kept_dry", self.spill_notch.map_or("-".to_string(), |x| x.3.to_string())),
+            ("g_lake_inlets", self.inlets.map_or("-".to_string(), |x| x.inside.to_string())),
+            ("g_inlet_line_ends", self.inlets.map_or("-".to_string(), |x| x.line_ends.to_string())),
+            ("g_inlet_spill_targets", self.inlets.map_or("-".to_string(), |x| x.spill_targets.to_string())),
+            ("g_inlet_orphans", self.inlets.map_or("-".to_string(), |x| x.orphans.to_string())),
+            ("g_inlet_no_basin", self.inlets.map_or("-".to_string(), |x| x.line_end_no_basin.to_string())),
+            ("g_inlet_no_basin_far", self.inlets.map_or("-".to_string(), |x| x.line_end_no_basin_far.to_string())),
             ("reference_cells", c(self.reference_river_cells)),
             ("reference_pct", pct(self.reference_river_cells, n)),
             ("valley_over_cells", c(self.valley.count_over)),
@@ -1020,7 +1093,7 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         input.surface
     };
     let outlet: Vec<bool> = (0..n).map(|c| input.outlet[c] || drained(c)).collect();
-    let (routing, route_filled) = route_rules_filled(g, z, &outlet, ROUTE_EPSILON_M, input.seed, 0.0, None, RoundRules::default());
+    let (routing, route_filled) = route_rules_filled(g, z, &outlet, ROUTE_EPSILON_M, input.seed, 0.0, None, ROUTE_RULES);
     let area = areas(g, &routing);
     let river: Vec<bool> = (0..n).map(|c| area[c] >= params.channel_area_m2 && z[c] > input.sea_level_m).collect();
     let (reference, _) = pits(g, z, &route_filled, REFERENCE_WET_M);
@@ -1101,7 +1174,7 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
     let ridge = ridge_cells(g, input.start, input.inside, input.sea_level_m);
     let ref_area = |r: &[f64]| {
         let rz: Vec<f64> = (0..n).map(|c| if drained(c) { r[c].min(input.sea_level_m - 1.0) } else { r[c] }).collect();
-        areas(g, &route_rules_filled(g, &rz, &outlet, ROUTE_EPSILON_M, input.seed, 0.0, None, RoundRules::default()).0)
+        areas(g, &route_rules_filled(g, &rz, &outlet, ROUTE_EPSILON_M, input.seed, 0.0, None, ROUTE_RULES).0)
     };
     let area_s0 = ref_area(input.start);
     let ridge_s0 = ridge_report(g, input.start, input.surface, &ridge, &area, &area_s0);
@@ -1139,10 +1212,26 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
             })
         }),
         spill_rim_mismatch: input.g2.as_ref().and_then(|x| x.graph.map(|gr| rim_mismatch(gr, &x.window, &label, SPILL_MISMATCH_M))),
-        inlets_without_basin: input
-            .g2
-            .as_ref()
-            .and_then(|x| x.graph.map(|gr| crate::river_gate_graph::inlets_without_basin(gr, &x.window, &label))),
+        spill_notch: input.g2.as_ref().and_then(|x| {
+            x.graph.map(|gr| {
+                let (mut kept, mut over, mut worst, mut dry) = (0usize, [0usize; 3], 0.0f64, 0usize);
+                for b in gr.basins.iter().filter(|b| b.represented == planet_generators::bake::river_graph::Represented::ProtectedSurface) {
+                    let Some(f) = x.window.cell(b.floor_cell) else { continue };
+                    if !b.spill_m.is_finite() {
+                        continue;
+                    }
+                    kept += 1;
+                    let gap = b.spill_m - filled[f];
+                    for (k, t) in [0.01, 0.1, 0.5].iter().enumerate() {
+                        over[k] += usize::from(gap > *t);
+                    }
+                    worst = worst.max(gap);
+                    dry += usize::from(filled[f] - z[f] <= BASIN_WET_M);
+                }
+                (kept, over, worst, dry)
+            })
+        }),
+        inlets: input.g2.as_ref().and_then(|x| x.graph.map(|gr| crate::river_gate_graph::inlets_without_basin(gr, &x.window, &label))),
         cell_area_m2: g.dx() * g.dx(),
         reference_river_cells: reference_cells,
         lake_river_cells: lake_cells,

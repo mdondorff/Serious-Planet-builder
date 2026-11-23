@@ -807,7 +807,7 @@ fn a_rise_into_a_down_node_excused_by_its_residual_is_printed_beside_the_violati
     assert!(lines.iter().any(|l| l.contains("1 bed rises into a down node excused by budget_residual (0.5 m, reading 41)")), "{lines:?}");
 }
 
-// SPIKE-130 (lead #182a, spike only; the gate's line-end inlet check)
+// spec: BUILD-060
 #[test]
 fn a_line_end_inlet_outside_every_kept_depression_is_counted_and_spill_targets_are_not() {
     // a kept basin whose floor depression is the 3 x 3 block at (4..=6, 4..=6); reaches ending at inlets inside, beside and far from it; a spill target far from it; an
@@ -847,4 +847,185 @@ fn a_line_end_inlet_outside_every_kept_depression_is_counted_and_spill_targets_a
         inlets_without_basin(&g, &W, &label),
         InletReport { inside: 5, line_ends: 3, spill_targets: 1, orphans: 1, line_end_no_basin: 2, line_end_no_basin_far: 1 }
     );
+    // numerics review: an inlet that a reach ends at and a basin spills to counts once, as a line end, and is held to a kept basin
+    let mut both = g.clone();
+    both.basins[1].spill_node = c.id;
+    assert_eq!(
+        inlets_without_basin(&both, &W, &label),
+        InletReport { inside: 5, line_ends: 3, spill_targets: 0, orphans: 2, line_end_no_basin: 2, line_end_no_basin_far: 1 },
+        "the far line end, now also a spill target, is a line end once; the former spill target is an orphan"
+    );
+}
+
+// spec: BUILD-055
+#[test]
+fn an_inland_pit_below_sea_level_is_land_to_the_gate_not_sea() {
+    // lead #185 (the chain's connected sea mask, readings 12 and 39): a 12 x 12 window of 100 m cells, sea on its west column, ground falling west, and a 5 x 5 pit of -5 m in
+    // its middle; the pit is no outlet (it is not joined to the edge through cells at or under the sea), so the gate's flood fills it as a closed basin
+    use planet_cache::river_gate::connected_sea_outlets;
+    let grid = Grid::new(12, 12, DX);
+    let cell = |x: usize, y: usize| y * 12 + x;
+    let mut z: Vec<f64> = (0..144).map(|c| 20.0 + 1.0 * (c % 12) as f64).collect();
+    for y in 0..12 {
+        z[cell(0, y)] = -1.0;
+    }
+    for y in 4..=8 {
+        for x in 4..=8 {
+            z[cell(x, y)] = -5.0;
+        }
+    }
+    let connected = connected_sea_outlets(&grid, &z, &z, 0.0, &|_| false);
+    let level = grid.outlets(&z, 0.0);
+    assert!((0..12).all(|y| connected[cell(0, y)]), "the sea column on the edge is an outlet");
+    assert!((0..144).filter(|&c| grid.is_edge(c)).all(|c| connected[c]), "every edge cell is an outlet");
+    assert!(
+        (4..=8).all(|y| (4..=8).all(|x| !connected[cell(x, y)] && level[cell(x, y)])),
+        "the inland pit: land to the connected mask, sea to the level mask"
+    );
+    // a sea cell inland but joined to the edge through cells at or under the sea is an outlet
+    let mut joined = z.clone();
+    for x in 1..4 {
+        joined[cell(x, 6)] = -1.0;
+    }
+    let jc = connected_sea_outlets(&grid, &joined, &joined, 0.0, &|_| false);
+    assert!(jc[cell(6, 6)] && jc[cell(2, 6)], "a channel at or under the sea joins the pit to the sea");
+    // a seed cell (an H1 sea cell inside the region) makes the inland pit sea
+    let seeded = connected_sea_outlets(&grid, &z, &z, 0.0, &|c| c == cell(6, 6));
+    assert!((4..=8).all(|y| (4..=8).all(|x| seeded[cell(x, y)])), "the pit holds a seed: it is the sea");
+    // the ocean is decided on the start: a start-sea cell the variant raised above the sea is land; a sea cell a raised coast cut off stays sea
+    let mut raised = joined.clone();
+    raised[cell(1, 6)] = 2.0;
+    let cut = connected_sea_outlets(&grid, &joined, &raised, 0.0, &|_| false);
+    assert!(!cut[cell(1, 6)] && cut[cell(6, 6)] && cut[cell(2, 6)], "the raised cell is land; the sea behind it stays sea");
+    // lead #185b: the cross-check of a chain's ocean against the gate's own, in cells and components
+    use planet_cache::river_gate::mask_difference;
+    let mut ocean = vec![false; 144];
+    for y in 0..12 {
+        ocean[cell(0, y)] = true;
+    }
+    ocean[cell(6, 6)] = true;
+    ocean[cell(8, 8)] = true;
+    let own: Vec<bool> = (0..144).map(|c| connected[c] && z[c] <= 0.0).collect();
+    assert_eq!(mask_difference(&grid, &ocean, &own), (2, 2), "two lone chain-ocean cells in the pit: two cells, two components");
+    let seeded_sea: Vec<bool> = (0..144).map(|c| seeded[c] && z[c] <= 0.0).collect();
+    assert_eq!(mask_difference(&grid, &seeded_sea, &own), (25, 1), "the seeded pit beyond the edge's sea: 25 cells, one component");
+    // the reader: one byte per cell, 0 to 3; another length or byte is refused
+    let dir = std::env::temp_dir().join(format!("river-gate-ocean-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    assert_eq!(planet_cache::river_gate_graph::read_chain_ocean(&dir, 4).unwrap(), None, "no file: no chain ocean");
+    std::fs::write(dir.join("ocean.u8"), [0u8, 1, 2, 3]).unwrap();
+    assert_eq!(planet_cache::river_gate_graph::read_chain_ocean(&dir, 4).unwrap(), Some(vec![false, true, true, true]));
+    assert!(planet_cache::river_gate_graph::read_chain_ocean(&dir, 5).is_err(), "a length other than the window's is refused");
+    std::fs::write(dir.join("ocean.u8"), [0u8, 4, 0, 0]).unwrap();
+    assert!(planet_cache::river_gate_graph::read_chain_ocean(&dir, 4).is_err(), "a byte above 3 is refused");
+    std::fs::remove_dir_all(&dir).unwrap();
+    let all = vec![true; 144];
+    let p = GateParams { channel_area_m2: 6.0 * DX * DX, ..GateParams::default() };
+    let gate = |outlet: &[bool]| {
+        measure(
+            &GateInput {
+                grid: &grid,
+                start: &z,
+                surface: &z,
+                outlet,
+                inside: &all,
+                region: &all,
+                h1: &[],
+                seed: 7,
+                sea_level_m: 0.0,
+                outside_drains: false,
+                trunks: &[],
+                g2: None,
+            },
+            &p,
+        )
+    };
+    assert!(gate(&connected).basins >= 1, "the pit is a closed basin to the connected mask");
+    assert_eq!(gate(&level).basins, 0, "the level mask drains it as sea");
+}
+
+// spec: BUILD-055
+#[test]
+fn a_long_flat_beside_a_gentle_ramp_drains_along_itself_not_uphill() {
+    // lead #185c (R3a: 1,197 uphill steps, each within the 1 mm-a-cell routing grade's excess over the exact fill): a 400 x 5 window of 100 m cells, its west column the outlet;
+    // row 1 a flat at 0 m, row 2 a ramp rising 0.75 mm a cell to 0.3 m, rows 0, 3 and 4 a 10 m wall. A grade of 1 mm a cell lifts the flat's far end above the ramp, so the flat
+    // would drain onto the ramp, 0.3 m uphill on the measured surface; GEN-173's grade at the gate's grade (1e-5 m) drains it along itself
+    let (w, h) = (400usize, 5usize);
+    let grid = Grid::new(w, h, DX);
+    let outlet: Vec<bool> = (0..w * h).map(|c| c % w == 0).collect();
+    let all = vec![true; w * h];
+    // the same at 8,000 m
+    for base in [0.0, 8000.0] {
+        let z: Vec<f64> = (0..w * h)
+            .map(|c| {
+                base + match c / w {
+                    1 => 0.0,
+                    2 => 0.3 * (c % w) as f64 / (w - 1) as f64,
+                    _ => 10.0,
+                }
+            })
+            .collect();
+        let report = measure(
+            &GateInput {
+                grid: &grid,
+                start: &z,
+                surface: &z,
+                outlet: &outlet,
+                inside: &all,
+                region: &all,
+                h1: &[],
+                seed: 7,
+                sea_level_m: base - 1.0,
+                outside_drains: false,
+                trunks: &[],
+                g2: None,
+            },
+            &GateParams { channel_area_m2: 6.0 * DX * DX, ..GateParams::default() },
+        );
+        assert!(report.suite.steps > 300, "the flat carries a river ({} steps)", report.suite.steps);
+        assert_eq!(
+            report.suite.uphill_steps, 0,
+            "no river step climbs from the flat onto the ramp at {base} m (largest {:.3} m)",
+            report.suite.uphill_max_m
+        );
+    }
+}
+
+// spec: BUILD-055
+#[test]
+fn the_gate_routes_regraded_irregular_flats_at_600_and_8000_m() {
+    // lead #185c: GEN-173 regrades a lifted flat narrower than its bound (127 cells); where a cell's Euclidean distance does not grow over its parent's (round an island, a
+    // concave shore) it stands only 1e-6 of the grade above it, and at the basin grade (1e-7 m) that gap is under the f64 spacing of heights from 512 m (B's R3a store stopped on
+    // such a cell; seeds 3 to 6 here stop the same way at 1e-7). 64 random floors (a 20 x 20 pit, each cell floor or a 3 m wall) at 600 m and 8,000 m: at the gate's grade every
+    // cell drains to a lower one
+    use planet_cache::river_gate::{ROUTE_EPSILON_M, ROUTE_RULES};
+    use planet_generators::bake::route::route_rules_filled;
+    let n = 24usize;
+    let grid = Grid::new(n, n, DX);
+    let outlet: Vec<bool> = (0..n * n).map(|c| c % n == 0).collect();
+    for base in [600.0, 8000.0] {
+        for seed in 0u64..64 {
+            let mut st = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let mut rnd = || {
+                st ^= st << 13;
+                st ^= st >> 7;
+                st ^= st << 17;
+                st
+            };
+            let p = 0.15 + 0.5 * ((seed % 7) as f64 / 7.0);
+            let z: Vec<f64> = (0..n * n)
+                .map(|c| {
+                    let (x, y) = (c % n, c / n);
+                    let inner = (2..n - 2).contains(&x) && (2..n - 2).contains(&y);
+                    let r = (rnd() % 1000) as f64 / 1000.0;
+                    base + if inner && r > p { 0.0 } else { 3.0 + 0.01 * x as f64 }
+                })
+                .collect();
+            let (routing, filled) = route_rules_filled(&grid, &z, &outlet, ROUTE_EPSILON_M, 7, 0.0, None, ROUTE_RULES);
+            assert!(
+                (0..n * n).all(|c| outlet[c] || filled[routing.receiver[c] as usize] < filled[c]),
+                "every cell drains to a lower one on the graded surface at {base} m, seed {seed}"
+            );
+        }
+    }
 }
