@@ -1778,6 +1778,8 @@ static KV_RIMS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 static KV_CONNECT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 /// lead #178 item 1: `--sea17 on` holds reading 17 (no land cell lowered to the sea + 0.5 m or below) in KV, KC's breach and band6's breach, as KS; `off` (default until the rows) the form before.
 static SEA17: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// lead #182a: `--trib-rerun on` runs KG-trib post once more with basins-2's kept set where a line-end lake inlet lost its basin; `off` (default) the one extraction.
+static TRIB_RERUN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// lead #179: `--inlet-floor on` floors the graph bed of every L vertex on or inside a kept basin's rim at its spill; `off` the beds as coded; on by default since #180a (reading 42).
 static INLET_FLOOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 /// lead #178 item 3: `--band6-floors on` holds band6's breach within each path cell's budget left after KS; `off` only the floor cell's budget caps the cut; on by default since #180a (reading 42).
@@ -2063,6 +2065,7 @@ fn main() -> Result<(), String> {
         ("--sea17", &SEA17, "off"),
         ("--band6-floors", &BAND6_FLOORS, "on"),
         ("--inlet-floor", &INLET_FLOOR, "on"),
+        ("--trib-rerun", &TRIB_RERUN, "off"),
     ] {
         let v = value(&args, opt).unwrap_or(default);
         if !["off", "on"].contains(&v) {
@@ -3040,6 +3043,8 @@ fn main() -> Result<(), String> {
         let mut fine: Option<(Vec<u32>, Vec<bool>)> = None;
         // the first pass's tributary reaches and nodes (crusader #168: --trib-on post replaces them)
         let mut trib_first: (BTreeSet<u64>, BTreeSet<u64>) = (BTreeSet::new(), BTreeSet::new());
+        // lead #182a: the post pass's own reaches and nodes, which --trib-rerun replaces
+        let mut trib_post: (BTreeSet<u64>, BTreeSet<u64>) = (BTreeSet::new(), BTreeSet::new());
         // lead #162: --trib-once's routing of KS0 for KS1, and the running-minimum bed of its channels
         let mut bed_min: Option<Vec<f64>> = None;
         if trib_once && trib_on == "post" && !order_fable {
@@ -3491,6 +3496,11 @@ fn main() -> Result<(), String> {
             if order_fable {
                 fine_post = Some((ex.receiver.clone(), ex.channel.clone()));
             }
+            {
+                let had: HashSet<u64> = gd.nodes.iter().map(|x| x.id).collect();
+                trib_post =
+                    (ex.reaches.iter().map(|r| r.id).collect(), ex.nodes.iter().map(|x| x.id).filter(|id| !had.contains(id)).collect());
+            }
             gd.nodes.extend(ex.nodes.iter().cloned());
             gd.reaches.extend(ex.reaches.iter().cloned());
             let trunk_ids: BTreeSet<u64> = l_trunks.iter().map(|r| r.id).collect();
@@ -3744,6 +3754,71 @@ fn main() -> Result<(), String> {
                 for &c in &pb.cells[&b.id] {
                     kept[c] = true;
                 }
+            }
+            // lead #182a (DEC crusader-32; a stopgap, the design is one hierarchy with the kept set final before extraction): a line-end lake inlet whose cell basins-2 no
+            // longer keeps ends a tributary at a lake that is not there; with --trib-rerun on, KG-trib post runs once more with basins-2's kept set
+            let lost_inlets = |gd: &Graph, kept: &[bool]| -> usize {
+                let downs: HashSet<u64> = gd.reaches.iter().filter(|r| r.level == Level::L).map(|r| r.down).collect();
+                gd.nodes
+                    .iter()
+                    .filter(|x| x.kind == planet_generators::bake::river_graph::NodeKind::LakeInlet && downs.contains(&x.id))
+                    .filter(|x| to_local(x.anchor).is_some_and(|c| core[c] && !kept[c]))
+                    .count()
+            };
+            if TRIB_RERUN.load(std::sync::atomic::Ordering::Relaxed) && trib_once && trib_on == "post" && on("kg-trib") && !order_carbon {
+                use planet_generators::bake::kg_trib::{accumulate_trunks, extract, Input, Params, Trunk};
+                let before = lost_inlets(&gd, &kept);
+                let t3 = Instant::now();
+                if before > 0 {
+                    gd.reaches.retain(|r| !trib_post.0.contains(&r.id));
+                    gd.nodes.retain(|x| !trib_post.1.contains(&x.id));
+                    let first_attrs: HashMap<u64, planet_generators::bake::river_graph::Attrs> =
+                        l_trunks.iter().map(|r| (r.id, r.attrs.clone())).collect();
+                    for r in gd.reaches.iter_mut() {
+                        if let Some(a) = first_attrs.get(&r.id) {
+                            r.attrs = a.clone();
+                        }
+                    }
+                    let trunks: Vec<Trunk> = l_trunks
+                        .iter()
+                        .filter_map(|r| {
+                            let v: Option<Vec<usize>> = r.vertices.iter().map(|&c| to_local(c)).collect();
+                            let down = g.nodes.iter().find(|x| x.id == r.down)?.clone();
+                            v.map(|vertices| Trunk { id: r.id, vertices, attrs: r.attrs.clone(), down })
+                        })
+                        .collect();
+                    let inp = Input {
+                        grid: &grid_d,
+                        z: &ks_d,
+                        sea: &sea_l,
+                        exit: &exit,
+                        trunks: &trunks,
+                        kept: &kept,
+                        seed_ext: &seed,
+                        tile: &tile_l,
+                        gid: &gid_l,
+                        keep_fields: false,
+                    };
+                    let ex = extract(&inp, &Params { mfd_init: false, ..Params::plan(BODY, runoff_mean) });
+                    let had: HashSet<u64> = gd.nodes.iter().map(|x| x.id).collect();
+                    gd.nodes.extend(ex.nodes.iter().filter(|x| !had.contains(&x.id)).cloned());
+                    gd.reaches.extend(ex.reaches.iter().cloned());
+                    let trunk_ids: BTreeSet<u64> = l_trunks.iter().map(|r| r.id).collect();
+                    let inflow = |id: u64| to_local(id).map_or((0.0, 0.0), |c| (dx_l * dx_l + ex.d8[c], dx_l * dx_l + ex.d8_no_ext[c]));
+                    accumulate_trunks(&mut gd, &trunk_ids, &inflow, runoff_mean);
+                    if regions <= 1 {
+                        acc_trunks = gd.reaches.iter().filter(|r| trunk_ids.contains(&r.id)).map(|r| (r.id, r.attrs.clone())).collect();
+                    }
+                }
+                let after = lost_inlets(&gd, &kept);
+                t_trib += t3.elapsed().as_secs_f64();
+                println!(
+                    "RG domain {d} trib rerun (lead #182a): {before} line-end lake inlets in no kept basin before, {after} after; {} reruns; {:.1} s",
+                    usize::from(before > 0),
+                    t3.elapsed().as_secs_f64()
+                );
+            } else if trib_once && trib_on == "post" && on("kg-trib") && !order_carbon {
+                println!("RG domain {d} trib rerun (lead #182a): off; {} line-end lake inlets in no kept basin", lost_inlets(&gd, &kept));
             }
             if KV_RIMS.load(std::sync::atomic::Ordering::Relaxed) {
                 rim_floor = vec![f64::NEG_INFINITY; n_l];
@@ -4199,6 +4274,7 @@ fn main() -> Result<(), String> {
             ("margin", margin.to_string()),
             ("turned-noise", planet_generators::height::turned_noise().to_string()),
             ("kv-cross", format!("{}", KV_CROSS_MICRO.load(std::sync::atomic::Ordering::Relaxed) as f64 * 1.0e-6)),
+            ("trib-rerun", if TRIB_RERUN.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("inlet-floor", if INLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-floors", if BAND6_FLOORS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("sea17", if SEA17.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
