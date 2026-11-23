@@ -165,6 +165,9 @@ pub struct GateParams {
     pub relief_indexed: bool,
     /// The corridor bar given by hand (`--corridor-bar`): `corridor_min_pct` as it is, not relief-indexed.
     pub corridor_fixed: bool,
+    /// G3-1 (lead review of #1648): the relief index, the window's own start relief ([`relief_index`] of main's S0 over the region's box), the same for every candidate on the
+    /// window; without it the row's start relief (`relief10_start_m`).
+    pub relief_index_m: Option<f64>,
 }
 
 impl Default for GateParams {
@@ -184,6 +187,7 @@ impl Default for GateParams {
             kept_river_max_pct: KEPT_RIVER_MAX_PCT,
             relief_indexed: true,
             corridor_fixed: false,
+            relief_index_m: None,
         }
     }
 }
@@ -342,6 +346,8 @@ pub struct GateReport {
     /// the surface and on `S0`, over the counted cells.
     pub hump_cuts: usize,
     pub hump_cuts_s_kh: Option<usize>,
+    /// Lead review of #1648: S0's humps over 10 m and those the surface lowers by more than 10 m at a crest ([`crate::river_suite::humps_removed`]); reported, not barred.
+    pub humps: (usize, usize),
     pub corner_links: usize,
     pub corner_links_s0: usize,
     pub spill_mismatch: Option<usize>,
@@ -485,6 +491,10 @@ impl GateReport {
             ("m_uphill_steps", c(self.margin.uphill_steps)),
             ("m_uphill_pct", format!("{:.2}", share(self.margin.uphill_steps, self.margin.steps))),
             ("m_kept_lake_km2", format!("{:.2}", self.margin.kept_lake_cells as f64 * self.cell_area_m2 / 1.0e6)),
+            ("relief_index_m", m(self.relief_index())),
+            ("humps", c(self.humps.0)),
+            ("humps_removed", c(self.humps.1)),
+            ("humps_removed_per_10k_km2", format!("{:.2}", self.per_10k_km2(self.humps.1 as f64))),
             ("hump_cuts", c(self.hump_cuts)),
             ("hump_cuts_s_kh", self.hump_cuts_s_kh.map_or("-".to_string(), c)),
             ("hump_cuts_per_10k_km2", format!("{:.2}", self.per_10k_km2(self.hump_cuts as f64))),
@@ -806,6 +816,11 @@ impl GateReport {
         .collect()
     }
 
+    /// The relief index of this row's relief-indexed limits: the window's shared index when given, else the row's start relief.
+    pub fn relief_index(&self) -> f64 {
+        self.params.relief_index_m.unwrap_or(self.relief_10_start_m)
+    }
+
     /// A count per 10,000 km2 of the counted land (the suite's land area).
     pub fn per_10k_km2(&self, n: f64) -> f64 {
         if self.suite.land_km2 > 0.0 {
@@ -818,7 +833,7 @@ impl GateReport {
     /// The G3-1 relief-indexed limits of the corridor, crest and kept-river bars at this row's start relief: (corridor percent, crest metres, kept river percent).
     pub fn limits(&self) -> (f64, f64, f64) {
         let p = &self.params;
-        let r = self.relief_10_start_m;
+        let r = self.relief_index();
         let ix = |given: f64, mountain: f64| if p.relief_indexed { relief_indexed(given, mountain, r) } else { given };
         let corridor = if p.corridor_fixed { p.corridor_min_pct } else { ix(p.corridor_min_pct, CORRIDOR_MIN_PCT_MOUNTAIN) };
         (corridor, ix(p.crest_max_m, CREST_P95_MAX_M_MOUNTAIN), ix(p.kept_river_max_pct, KEPT_RIVER_MAX_PCT_MOUNTAIN))
@@ -1039,6 +1054,11 @@ fn valley_floor(grid: &Grid, z: &[f64], c: usize, (r0, r1): (i64, i64)) -> f64 {
 }
 
 /// The p50 of the height range of the land blocks of `k x k` cells that lie inside (blocks tiled from the grid's corner).
+/// The relief index of a window (G3-1): the p50 of the height range of the land blocks of 10 x 10 cells of `start` (main's S0 of the window) inside `region` (the region's box).
+pub fn relief_index(grid: &Grid, start: &[f64], region: &[bool], sea: f64) -> f64 {
+    relief(grid, start, region, 10, sea)
+}
+
 fn relief(grid: &Grid, z: &[f64], inside: &[bool], k: usize, sea: f64) -> f64 {
     let (w, h) = (grid.w(), grid.h());
     let mut r: Vec<f64> = Vec::new();
@@ -1356,6 +1376,7 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
     // counted over the land inside (the per-10,000 km2 rates divide by the land area)
     let land_inside: Vec<bool> = (0..n).map(|c| input.inside[c] && input.surface[c] > input.sea_level_m).collect();
     let hump_cuts = crate::river_suite::hump_cuts(g, input.start, input.surface, &land_inside);
+    let humps = crate::river_suite::humps_removed(g, input.start, input.surface, &land_inside);
     let hump_cuts_s_kh = s_kh.as_ref().map(|s_kh| crate::river_suite::hump_cuts(g, s_kh, input.surface, &land_inside));
     drop(s_kh);
     let corner_links = crate::river_suite::corner_links(g, input.surface, &land_inside);
@@ -1375,6 +1396,7 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         margin,
         hump_cuts,
         hump_cuts_s_kh,
+        humps,
         corner_links,
         corner_links_s0,
         // a kept basin with its floor in the window whose depression level there (the basin flood) lies more than SPILL_MISMATCH_M under its recorded spill

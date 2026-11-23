@@ -264,9 +264,6 @@ fn main() -> Result<(), String> {
     // BUILD-060 `--start` (lead #171): the run's own start surface on the window's L grid (a chain that conditions its base, as A+, has another S0 than main's); every delta and the
     // corridor are then measured against it, and the trunks come from the run's own graph (`--graph`'s H1 reaches); the H1 edge-agreement check still reads main's H1
     let own_start = value(&args, "--start");
-    if let Some(path) = own_start {
-        start = read_surface(path, w * h)?;
-    }
     let (bi0, bi1, bj0, bj1) = ((region.0 * l) as i64, ((region.1 + 1) * l) as i64, (region.2 * l) as i64, ((region.3 + 1) * l) as i64);
     let in_box: Vec<bool> = (0..w * h)
         .map(|c| {
@@ -274,6 +271,16 @@ fn main() -> Result<(), String> {
             gx >= bi0 && gx < bi1 && gy >= bj0 && gy < bj1
         })
         .collect();
+    // G3-1 (lead review of #1648): the relief index is the window's own, main's S0 over the region's box, the same for every candidate; a run's own start replaces S0 after it
+    let relief_index_m = planet_cache::river_gate::relief_index(
+        &planet_generators::bake::Grid::new(w, h, front.solve.grid.dx() / l as f64),
+        &start,
+        &in_box,
+        0.0,
+    );
+    if let Some(path) = own_start {
+        start = read_surface(path, w * h)?;
+    }
     let mut surface = start.clone();
     let mut inside = in_box.clone();
     let mut label = match own_start {
@@ -439,7 +446,7 @@ fn main() -> Result<(), String> {
             trunks: &trunks,
             g2: g2_input.as_ref(),
         },
-        &params,
+        &GateParams { relief_index_m: Some(relief_index_m), ..params },
     );
     println!("RIVER-GATE input: {label}; {w} x {h} L cells of {:.1} m", grid.dx());
     for line in report.lines() {

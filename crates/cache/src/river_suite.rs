@@ -1154,3 +1154,49 @@ fn neighbours8(w: usize, h: usize, c: usize) -> impl Iterator<Item = usize> {
         (nx >= 0 && ny >= 0 && nx < w as i64 && ny < h as i64).then(|| ny as usize * w + nx as usize)
     })
 }
+
+/// The humps of a reference removed by a surface (G3-1, lead review of #1648; reported beside the hump cuts, not barred): a hump crest is a counted cell of the reference at
+/// least [`HUMP_M`] above both cells [`RIDGE_STEP`] away along a face axis or a diagonal; a hump is an 8-connected group of crest cells; it is removed when the surface lies more
+/// than [`HUMP_M`] under the reference at one of its crest cells. Returns (humps, removed). The trench measure ([`hump_cuts`]) sees a channel cut through a hump; this one also
+/// sees a hump lowered as a whole.
+pub fn humps_removed(g: &Grid, reference: &[f64], surface: &[f64], inside: &[bool]) -> (usize, usize) {
+    let (w, h) = (g.w(), g.h());
+    let (wi, hi) = (w as i64, h as i64);
+    let s = RIDGE_STEP;
+    let at = |x: i64, y: i64| (x >= 0 && y >= 0 && x < wi && y < hi).then(|| reference[(y * wi + x) as usize]);
+    let crest: Vec<bool> = (0..w * h)
+        .map(|c| {
+            if !inside[c] {
+                return false;
+            }
+            let (x, y, z) = ((c % w) as i64, (c / w) as i64, reference[c]);
+            [(1, 0), (0, 1), (1, 1), (1, -1)].iter().any(|&(dx, dy)| match (at(x - s * dx, y - s * dy), at(x + s * dx, y + s * dy)) {
+                (Some(a), Some(b)) => z - a >= HUMP_M && z - b >= HUMP_M,
+                _ => false,
+            })
+        })
+        .collect();
+    let mut seen = vec![false; w * h];
+    let (mut humps, mut removed) = (0usize, 0usize);
+    let mut stack = Vec::new();
+    for st in 0..w * h {
+        if !crest[st] || seen[st] {
+            continue;
+        }
+        humps += 1;
+        seen[st] = true;
+        stack.push(st);
+        let mut lowered = false;
+        while let Some(c) = stack.pop() {
+            lowered |= reference[c] - surface[c] > HUMP_M;
+            for q in neighbours8(w, h, c) {
+                if crest[q] && !seen[q] {
+                    seen[q] = true;
+                    stack.push(q);
+                }
+            }
+        }
+        removed += usize::from(lowered);
+    }
+    (humps, removed)
+}

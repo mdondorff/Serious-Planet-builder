@@ -1188,6 +1188,9 @@ fn the_corridor_crest_and_kept_river_bars_are_relief_indexed_not_keyed_on_a_wind
     let fixed =
         GateReport { params: GateParams { corridor_min_pct: 96.0, corridor_fixed: true, ..GateParams::default() }, ..steep.clone() };
     assert_eq!(fixed.limits(), (96.0, 35.0, 10.0));
+    // lead review of #1648: the window's shared index (main's S0) decides, whatever the row's own start relief, so B and RG on one window get the same limits
+    let shared = GateReport { params: GateParams { relief_index_m: Some(10.0), ..GateParams::default() }, ..steep.clone() };
+    assert_eq!((shared.relief_index(), shared.limits()), (10.0, (97.5, 15.0, 5.0)));
 }
 
 // spec: BUILD-060
@@ -1267,6 +1270,20 @@ fn a_cut_through_a_reference_hump_is_a_hump_cut_and_a_corner_only_block_is_a_cor
     z[cell(21, 3)] = 4.0;
     z[cell(20, 4)] = 4.0;
     assert_eq!(corner_links(&grid, &z, &all), 1, "the 6 m block links its low pair only at a corner");
+    // lead review of #1648: humps removed as a whole. Row 2's 15 m hump and row 6's 5 m one: one hump over 10 m; lowered 12 m at its crest it is removed, lowered 8 m not,
+    // and a channel through it counts as removed too
+    use planet_cache::river_suite::humps_removed;
+    let mut lowered = reference.clone();
+    for x in 10..=19 {
+        lowered[cell(x, 2)] -= 12.0;
+    }
+    assert_eq!(humps_removed(&grid, &reference, &lowered, &all), (1, 1), "the 15 m hump lowered 12 m as a whole");
+    let mut shaved = reference.clone();
+    for x in 10..=19 {
+        shaved[cell(x, 2)] -= 8.0;
+    }
+    assert_eq!(humps_removed(&grid, &reference, &shaved, &all), (1, 0), "lowered 8 m: not removed");
+    assert_eq!(humps_removed(&grid, &reference, &surface, &all), (1, 1), "the 1-cell channel through it");
     assert_eq!(corner_links(&grid, &flat, &all), 0);
 }
 
