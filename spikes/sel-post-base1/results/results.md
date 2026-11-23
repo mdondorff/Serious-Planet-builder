@@ -35,9 +35,9 @@ Status: closed 2026-11-23. The row is open under O3: it is rerun and judged agai
 - The default's stage 3 meets 10 depressions on R1h's z_s (7 filled, 3 breached): `raw/r1h-def-chain-lines.txt`. Without it, ponds and uphill steps nearly vanish.
 
 ## Design note: `base1` on the H1 cube grid (no build)
-- Today: `install_s138`'s `BASE_HOOK` (`region_bake.rs` 216-255) runs `drain_selective` on z_b over the region's flat H1 window before K5's rounds.
+- Today: `install_s138`'s `BASE_HOOK` (`region_bake.rs` 216-258) runs `drain_selective` on z_b over the region's flat H1 window before K5's rounds.
   - Rules: breach or fill each depression whose cut or fill depth is within 50 m; at most 12 rounds and a search of 2^20 cells.
-  - Outlets: the window grid's (sea cells and the window edge). Neighbours: x/y arithmetic on `w`, `h` (`drain.rs` 178-205).
+  - Outlets: the window grid's (sea cells and the window edge). Neighbours: x/y arithmetic on `w`, `h` (`drain.rs` 77-84, `fn neighbours`; `drain_selective` itself at 178).
   - The regional field stays `z_s - z_b` of the undrained base.
 - On the cube (G3-5, wave 1):
   1. Adjacency: `drain_selective`'s neighbour loop over `CubePatch` (GlobalCell neighbours across face edges, the folded halo). Corner cells have 7 neighbours.
