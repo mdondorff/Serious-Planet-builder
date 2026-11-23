@@ -108,6 +108,8 @@ pub struct GraphReport {
     /// Trunk reaches (H1, or L with a parent) and those whose `down` node is held, neither an outlet nor left by a reach (a break).
     pub trunk_reaches: usize,
     pub trunk_breaks: usize,
+    /// G3-1 (lead #186, A6): trunk reaches flagged `rise_over_budget` or `budget_residual` (the trunk profile's exceptions).
+    pub trunk_exceptions: usize,
     /// Bed profile: reaches whose bed rises above its running minimum somewhere (exception vertices included), the largest such rise (m), and the validator's rises outside exceptions.
     pub bed_rise_reaches: usize,
     pub bed_residual_max_m: f64,
@@ -305,6 +307,7 @@ pub fn graph_report(g: &Graph, window: &Window, inside: &[bool], land: &[bool], 
     }
     for x in g.reaches.iter().filter(|x| x.level == Level::H1 || x.parent.is_some()) {
         r.trunk_reaches += 1;
+        r.trunk_exceptions += usize::from(x.has_exception(Reason::RiseOverBudget) || x.has_exception(Reason::BudgetResidual));
         if let Some(k) = kind.get(&x.down) {
             if !k.is_outlet() && !out.contains_key(&x.down) && !k.is_marker() {
                 r.trunk_breaks += 1;
@@ -771,6 +774,7 @@ impl G2Report {
             push("g_sources_open", g.sources_open.to_string(), Correctness);
             push("g_trunk_reaches", g.trunk_reaches.to_string(), Correctness);
             push("g_trunk_breaks", g.trunk_breaks.to_string(), Correctness);
+            push("g_trunk_exceptions", g.trunk_exceptions.to_string(), Correctness);
             push("g_conservation_breaks", g.violations.get("conservation_break").copied().unwrap_or(0).to_string(), Correctness);
             push("g_bed_rises", g.bed_rises.to_string(), Correctness);
             push("g_bed_rise_reaches", g.bed_rise_reaches.to_string(), Correctness);
@@ -1107,6 +1111,8 @@ pub fn read_stages(dir: &Path, n: usize) -> Result<(Vec<StageField>, Option<usiz
 /// missing basin spill nodes, each pass or fail.
 pub const UPHILL_MAX_PCT: f64 = 1.0;
 pub const AGREE_MIN_PCT: f64 = 90.0;
+/// The share of trunk reaches flagged `rise_over_budget` or `budget_residual`, at most this (percent; G3-1, lead #186, A6: proposed for the owner, O10).
+pub const TRUNK_EXCEPTIONS_MAX_PCT: f64 = 1.0;
 /// The share of routed river cells above a graph head (`routed_above_head` over the routed cells with them), at most this (percent; G3-1, lead #186: proposed for the owner, O10).
 pub const ABOVE_HEAD_MAX_PCT: f64 = 10.0;
 /// The corridor bar outside mountain windows, and on a mountain window (M1).
@@ -1159,6 +1165,9 @@ pub fn g2_bars(g2: &G2Report, uphill_pct: f64, corridor_pct: f64, corridor_min_p
     let validator = g2.budget.as_ref().and_then(|b| b.validator_overrun).unwrap_or(0);
     out.push(bar("bar_violations".into(), (g.violations.values().sum::<usize>() + validator) as f64, 0.0, true, Correctness));
     out.push(bar("bar_spill_missing".into(), g.basin_spill_missing as f64, 0.0, true, Correctness));
+    // G3-1 (A6): the trunk profile's exceptions as a share of the trunk reaches, beside the corridor
+    let exc = 100.0 * g.trunk_exceptions as f64 / g.trunk_reaches.max(1) as f64;
+    out.push(bar("bar_trunk_exceptions".into(), exc, TRUNK_EXCEPTIONS_MAX_PCT, true, Correctness));
     out
 }
 

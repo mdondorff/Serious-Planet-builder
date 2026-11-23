@@ -290,7 +290,7 @@ fn the_g2_bars_pass_or_fail_against_the_owners_limits() {
     use planet_cache::river_gate_graph::{bars_line, g2_bars, Agreement, GraphReport, CORRIDOR_MIN_PCT, CORRIDOR_MIN_PCT_MOUNTAIN};
     // no graph, no bars (B's row)
     assert!(g2_bars(&G2Report::default(), 0.0, 100.0, CORRIDOR_MIN_PCT).is_empty());
-    let gr = GraphReport { basin_spill_missing: 3, ..GraphReport::default() };
+    let gr = GraphReport { basin_spill_missing: 3, trunk_reaches: 200, trunk_exceptions: 2, ..GraphReport::default() };
     let g2 = G2Report {
         graph: Some(gr),
         agreement: vec![
@@ -325,10 +325,15 @@ fn the_g2_bars_pass_or_fail_against_the_owners_limits() {
     assert_eq!((value("bar_agree_1km2"), value("bar_agree_75km2")), (90.0, 89.0));
     // routed cells above a graph head: 11 of 111 (9.91 %) passes the 10 % bar, 12 of 112 (10.71 %) fails
     assert!(pass("bar_above_head_1km2") && !pass("bar_above_head_75km2"));
+    // A6: 2 of 200 trunk reaches flagged (1 %) passes the 1 % bar; 3 fails
+    assert!(pass("bar_trunk_exceptions"));
+    let mut g3 = g2.clone();
+    g3.graph.as_mut().unwrap().trunk_exceptions = 3;
+    assert!(!g2_bars(&g3, 1.0, 97.4, CORRIDOR_MIN_PCT).iter().find(|b| b.name == "bar_trunk_exceptions").unwrap().pass());
     assert!(g2_bars(&g2, 1.0, 97.4, CORRIDOR_MIN_PCT_MOUNTAIN).iter().find(|b| b.name == "bar_corridor").unwrap().pass(), "95 % on M1");
     assert_eq!(bars.iter().find(|b| b.name == "bar_spill_missing").unwrap().cell(), "FAIL:3.00");
     let line = bars_line(&bars).unwrap();
-    assert!(line.contains("bar_uphill PASS 1.00 (<= 1)") && line.ends_with("4 of 8 pass"), "{line}");
+    assert!(line.contains("bar_uphill PASS 1.00 (<= 1)") && line.ends_with("5 of 9 pass"), "{line}");
 }
 
 // spec: TEST-137, BUILD-060
@@ -1149,4 +1154,24 @@ fn the_corridor_crest_and_kept_river_bars_are_relief_indexed_not_keyed_on_a_wind
     let fixed =
         GateReport { params: GateParams { corridor_min_pct: 96.0, corridor_fixed: true, ..GateParams::default() }, ..steep.clone() };
     assert_eq!(fixed.limits(), (96.0, 35.0, 10.0));
+}
+
+// spec: BUILD-060
+#[test]
+fn trunk_reaches_flagged_rise_over_budget_or_budget_residual_are_the_trunk_exceptions() {
+    // G3-1 (lead #186, A6): of the hand graph's four reaches, three get a parent (trunk reaches); one of them flagged rise_over_budget, one budget_residual; the
+    // tributary's unresolved_endpoint is no trunk exception
+    let mut g = graph();
+    let parent = g.reaches[3].id;
+    for k in 0..3 {
+        g.reaches[k].parent = Some(parent);
+    }
+    g.reaches[0].exceptions = vec![Exception { reason: Reason::RiseOverBudget, value: 1.0 }];
+    g.reaches[1].exceptions = vec![Exception { reason: Reason::BudgetResidual, value: 0.5 }];
+    g.reaches[3].exceptions = vec![Exception { reason: Reason::UnresolvedEndpoint, value: 0.0 }];
+    let all = vec![true; 144];
+    let r = graph_report(&g, &W, &all, &all, DX);
+    assert_eq!((r.trunk_reaches, r.trunk_exceptions), (3, 2), "{r:?}");
+    let cols = G2Report { graph: Some(r), ..G2Report::default() }.columns();
+    assert!(cols.iter().any(|c| c.0 == "g_trunk_exceptions" && c.1 == "2"));
 }
