@@ -2273,6 +2273,7 @@ mod tests {
             inputs_id: 11,
             height_bounds: (-11_000.0, 9_000.0),
             keep_channels: false,
+            stage: Default::default(),
         };
         let base = |d: planet_core::Vec3| 500.0 - 2400.0 * (d.x - 0.1) + 120.0 * libm::sin(40.0 * d.z);
         let climate = |_: planet_core::Vec3| (1.0e-8, 0.0, 1.0);
@@ -2343,6 +2344,7 @@ mod tests {
             inputs_id: 11,
             height_bounds: (-11_000.0, 9_000.0),
             keep_channels: false,
+            stage: Default::default(),
         };
         let base = |d: planet_core::Vec3| 500.0 - 2400.0 * (d.x - 0.1) + 120.0 * libm::sin(40.0 * d.z);
         let climate = |_: planet_core::Vec3| (1.0e-8, 0.0, 1.0);

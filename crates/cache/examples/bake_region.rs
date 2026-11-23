@@ -118,6 +118,7 @@ fn main() {
         // Earth's span (the default world's base heights plus the profile's largest uplift): its flood epsilon is the profile's, so its heights are the ones they were (the keys change: the bounds are keyed).
         height_bounds: (-11_000.0, 9_000.0),
         keep_channels: false,
+        stage: Default::default(),
     };
     std::fs::create_dir_all(&out).expect("the output folder");
     let (commit, report) = bake_region(&world, &spec, &base, &climate, &out).unwrap_or_else(|e| panic!("the region bake: {e}"));

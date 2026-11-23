@@ -16,7 +16,7 @@ use planet_generators::bake::k7::{k7_tile, K7Params, RegionField};
 use planet_generators::bake::lakes::lakes_from_hydro;
 use planet_generators::bake::metric::Metric;
 use planet_generators::bake::precision::{WorldPrecision, EPSILON_MAX_M};
-use planet_generators::bake::round::solve_rounds;
+use planet_generators::bake::round::solve_rounds_with;
 use planet_generators::bake::route::{route_rules, RoundRules};
 use planet_generators::bake::tile::{tile_has_land, TileGrid, TileId};
 use planet_generators::bake::Grid;
@@ -61,6 +61,101 @@ pub struct RegionSpec {
     pub height_bounds: (f64, f64),
     /// Keep the channels the bake burnt in the report (a test's: they are millions on a real region).
     pub keep_channels: bool,
+    /// R24 (spike branch only): the stage configs that were process globals (`BASE_HOOK`, `POST_HOOK`, `LEVEL_FLOOR`, K5's atomics). In the key when not the default.
+    pub stage: StageConfig,
+}
+
+/// R24 (spike branch only): a drain of the regional surface before or after K5's rounds (SPIKE-138's stages 1 and 3).
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub enum Drain {
+    /// No drain (today's main path).
+    #[default]
+    Off,
+    /// Every depression breached or filled; a breach deeper than `cap_m` filled (`f64::INFINITY`: uncapped). `drain::drain_capped`.
+    Capped { cap_m: f64, rounds: usize, search: usize },
+    /// Only depressions with a breach cut within `cut_cap_m` or a fill within `fill_cap_m`; deeper basins stay. `drain::drain_selective`. Before K5, `clamp` also floors K5's
+    /// breach at the fill level inside the basins left (`drain::level_floor`, passed to the rounds as `Drivers::level_floor`).
+    Selective { cut_cap_m: f64, fill_cap_m: f64, rounds: usize, search: usize, clamp: bool },
+}
+
+impl Drain {
+    /// SPIKE-138's selective drain: 50 m caps, 12 rounds, a search of 2^20 cells.
+    pub const SELECTIVE_50: Drain = Drain::Selective { cut_cap_m: 50.0, fill_cap_m: 50.0, rounds: 12, search: 1 << 20, clamp: false };
+
+    fn put(&self, b: &mut Vec<u8>) {
+        match *self {
+            Drain::Off => b.push(0),
+            Drain::Capped { cap_m, rounds, search } => {
+                b.push(1);
+                b.extend(cap_m.to_bits().to_le_bytes());
+                b.extend((rounds as u64).to_le_bytes());
+                b.extend((search as u64).to_le_bytes());
+            }
+            Drain::Selective { cut_cap_m, fill_cap_m, rounds, search, clamp } => {
+                b.push(2);
+                b.extend(cut_cap_m.to_bits().to_le_bytes());
+                b.extend(fill_cap_m.to_bits().to_le_bytes());
+                b.extend((rounds as u64).to_le_bytes());
+                b.extend((search as u64).to_le_bytes());
+                b.push(u8::from(clamp));
+            }
+        }
+    }
+}
+
+/// R24 (spike branch only): K5's receiver form in the rounds (SPIKE-139).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum K5Route {
+    /// The jittered steepest D8 (main's).
+    #[default]
+    D8,
+    /// D8-LTD (Orlandini et al. 2003; `route::RECEIVER_LTD`).
+    Ltd,
+    /// D-infinity's two receivers (Tarboton 1997; `round::RECEIVER_DINF`).
+    Dinf,
+}
+
+/// R24 (spike branch only): K5's knobs that were `K5_LTD`, `K5_DINF`, `K5_KDT_SCALE` and `K5_UOK_SCALE`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct K5Knobs {
+    pub route: K5Route,
+    /// A factor on K5's `k_dt` (the uplift per step with it; `u_over_k` kept). 1: unchanged.
+    pub kdt_scale: f64,
+    /// A factor on K5's `u_over_k` (`k_dt` kept). 1: unchanged.
+    pub uok_scale: f64,
+}
+
+impl Default for K5Knobs {
+    fn default() -> Self {
+        K5Knobs { route: K5Route::D8, kdt_scale: 1.0, uok_scale: 1.0 }
+    }
+}
+
+/// R24 (spike branch only): the regional solve's stage configs, a value of the spec instead of process globals.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub struct StageConfig {
+    /// The drain of `z_b` before K5 (stage 1). The regional field stays `z_s - z_b` of the undrained base.
+    pub base_drain: Drain,
+    /// The drain of `z_s` after K5 (stage 3).
+    pub post_drain: Drain,
+    pub k5: K5Knobs,
+}
+
+impl StageConfig {
+    /// The canonical bytes of the config: a version byte, the two drains, K5's route and the two scales' bits, little-endian.
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        let mut b = vec![1u8];
+        self.base_drain.put(&mut b);
+        self.post_drain.put(&mut b);
+        b.push(match self.k5.route {
+            K5Route::D8 => 0,
+            K5Route::Ltd => 1,
+            K5Route::Dinf => 2,
+        });
+        b.extend(self.k5.kdt_scale.to_bits().to_le_bytes());
+        b.extend(self.k5.uok_scale.to_bits().to_le_bytes());
+        b
+    }
 }
 
 impl RegionSpec {
@@ -96,6 +191,16 @@ impl RegionSpec {
             self.height_bounds.1.to_bits(),
         ] {
             put(v);
+        }
+        // R24: a stage config other than the default enters the key (the default adds nothing, so main's keys are unchanged)
+        if self.stage != StageConfig::default() {
+            let fnv = self
+                .stage
+                .canonical_bytes()
+                .iter()
+                .fold(0xcbf2_9ce4_8422_2325u64, |h, &x| (h ^ u64::from(x)).wrapping_mul(0x0000_0100_0000_01b3));
+            put(0x5354_4147_4531_0000);
+            put(fnv);
         }
         h
     }
@@ -176,14 +281,9 @@ pub struct RegionReport {
 }
 
 /// The regional solve of a region (GEN-175): the base and the solved surface on the window's regional cells, with the world's precision applied.
-/// SPIKE-139 (spike branch only): K5's rounds route by D8-LTD instead of the jittered D8 (`planet_generators::bake::route::RECEIVER_LTD`).
-pub static K5_LTD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-/// SPIKE-139 (spike branch only): the f64 bits of a factor on K5's k_dt (0 or 1: unchanged).
-pub static K5_KDT_SCALE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-/// SPIKE-139 (spike branch only, lead #149b): the f64 bits of a factor on K5's u_over_k (0 or 1: unchanged).
-pub static K5_UOK_SCALE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-/// SPIKE-139 (spike branch only): K5's rounds step with D-infinity's two receivers (`planet_generators::bake::round::RECEIVER_DINF`).
-pub static K5_DINF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// R24: K5's receiver form is still a toggle inside the generators (`route::RECEIVER_LTD`, `round::RECEIVER_DINF`), set from the spec for the rounds alone; one regional solve
+/// at a time holds it, so two specs in one process never see each other's form.
+static K5_ROUTE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[derive(Clone, Debug)]
 pub struct RegionSolve {
@@ -191,7 +291,7 @@ pub struct RegionSolve {
     pub grid: Grid,
     pub outlet: Vec<bool>,
     pub zb: Vec<f64>,
-    /// SPIKE-138 (spike branch only): the base the rounds started from; `zb` unless [`BASE_HOOK`] changed it.
+    /// SPIKE-138 (spike branch only): the base the rounds started from; `zb` unless the spec's `stage.base_drain` changed it.
     pub zb_in: Vec<f64>,
     pub zs: Vec<f64>,
     pub stream: u64,
@@ -202,82 +302,39 @@ pub struct RegionSolve {
     pub precision: WorldPrecision,
 }
 
-/// SPIKE-138 (spike branch only): a change of the base before the rounds, `(grid, outlet, zb, direction of a cell) -> the base the rounds start from`. The regional field stays
-/// `zs - zb` (the original base), so the band `B - C1(zb)` is unchanged.
-pub type BaseHook = Box<dyn Fn(&Grid, &[bool], &[f64], &(dyn Fn(usize) -> Vec3 + Sync)) -> Vec<f64> + Send + Sync>;
-pub static BASE_HOOK: std::sync::OnceLock<BaseHook> = std::sync::OnceLock::new();
-/// SPIKE-138 (spikes #145, spike only): a change of the solved surface after the rounds (a bounded post-K5 drain).
-pub type PostHook = Box<dyn Fn(&Grid, &[bool], &mut Vec<f64>) + Send + Sync>;
-pub static POST_HOOK: std::sync::OnceLock<PostHook> = std::sync::OnceLock::new();
-
-/// SPIKE-138 (spike only): installs the base form. `uncapped` / `cap`: every depression of `z_b` breached or filled before K5 (a breach deeper than `cap` m filled);
-/// `sel-post`: before K5 only depressions with a breach cut or a fill depth within 50 m, after K5 the same on `z_s`; `sel-clamp`: the same before K5, and K5's breach floor at
-/// the fill level inside the basins left.
-pub fn install_s138(form: &str, cap: f64, tag: &str) -> Result<(), String> {
+/// SPIKE-138 (spike only): the spec's drain on a regional surface, with its log line (`HO stage` + `what`).
+fn run_drain(drain: &Drain, grid: &Grid, outlet: &[bool], z: &[f64], what: &str) -> Vec<f64> {
     use planet_generators::bake::drain;
-    if !["uncapped", "cap", "sel-post", "sel-clamp", "post-only", "sel-pre"].contains(&form) {
-        return Err(format!("--base-form uncapped | cap | sel-post | sel-clamp | post-only | sel-pre, not '{form}'"));
-    }
-    // spikes #147: `post-only`, no drain before K5 (K5 drains z_b's pits as today), the selective drain on z_s after it; lead #178 (R16): `sel-pre`, the
-    // selective drain before K5 only (no drain on z_s after K5, the sel-post stage ablated)
-    let (form, tag) = (form.to_string(), tag.to_string());
-    let selective = form.starts_with("sel");
-    let post_only = form == "post-only";
-    let t2 = tag.clone();
-    let f2 = form.clone();
-    let _ = BASE_HOOK.set(Box::new(move |grid: &Grid, outlet: &[bool], zb: &[f64], _dir: &(dyn Fn(usize) -> Vec3 + Sync)| {
-        if post_only {
-            println!("HO {t2} stage 1 off (post-only)");
-            return zb.to_vec();
+    let (w, h) = (grid.w(), grid.len() / grid.w());
+    let area = |p: usize| grid.cell_area(p);
+    let t = std::time::Instant::now();
+    let (d, st) = match *drain {
+        Drain::Off => return z.to_vec(),
+        Drain::Capped { cap_m, rounds, search } => drain::drain_capped(z, w, h, outlet, &|_| false, &area, rounds, search, cap_m),
+        Drain::Selective { cut_cap_m, fill_cap_m, rounds, search, .. } => {
+            drain::drain_selective(z, w, h, outlet, &|_| false, &area, rounds, search, &|_| cut_cap_m, &|_| fill_cap_m)
         }
-        let t = std::time::Instant::now();
-        let (w, h) = (grid.w(), grid.len() / grid.w());
-        let area = |p: usize| grid.cell_area(p);
-        let (d, st) = if selective {
-            drain::drain_selective(zb, w, h, outlet, &|_| false, &area, 12, 1 << 20, &|_| 50.0, &|_| 50.0)
+    };
+    let (mut lo, mut hi) = (0.0f64, 0.0f64);
+    for p in 0..z.len() {
+        let dz = (d[p] - z[p]) * grid.cell_area(p) / 1e9;
+        if dz < 0.0 {
+            lo -= dz;
         } else {
-            drain::drain_capped(zb, w, h, outlet, &|_| false, &area, 12, 1 << 20, cap)
-        };
-        println!(
-            "HO {t2} A drain of z_b ({f2}, cap {cap}): {} rounds, {} depressions met ({} filled, {} breached), {} left of them {} deep (both over 50 m); {:.1} s",
-            st.rounds,
-            st.depressions,
-            st.filled,
-            st.breached,
-            st.left,
-            st.deep,
-            t.elapsed().as_secs_f64()
-        );
-        if f2 == "sel-clamp" {
-            let lf = drain::level_floor(&d, w, h, outlet);
-            let n = lf.iter().filter(|v| v.is_finite()).count();
-            println!("HO {t2} K5 clamp: the breach floor at the fill level on {n} cells of the basins left");
-            let _ = planet_generators::bake::round::LEVEL_FLOOR.set(lf);
+            hi += dz;
         }
-        d
-    }));
-    if form == "sel-post" || form == "post-only" {
-        let _ = POST_HOOK.set(Box::new(move |grid: &Grid, outlet: &[bool], zs: &mut Vec<f64>| {
-            let (w, h) = (grid.w(), grid.len() / grid.w());
-            let (d, st) =
-                drain::drain_selective(zs, w, h, outlet, &|_| false, &|p| grid.cell_area(p), 12, 1 << 20, &|_| 50.0, &|_| 50.0);
-            let (mut lo, mut hi) = (0.0f64, 0.0f64);
-            for p in 0..zs.len() {
-                let dz = (d[p] - zs[p]) * grid.cell_area(p) / 1e9;
-                if dz < 0.0 {
-                    lo -= dz;
-                } else {
-                    hi += dz;
-                }
-            }
-            println!(
-                "HO {tag} post-K5 drain of z_s: {} rounds, {} depressions met ({} filled, {} breached), {} left of them {} deep; lowered {lo:.3} km3, raised {hi:.3} km3",
-                st.rounds, st.depressions, st.filled, st.breached, st.left, st.deep
-            );
-            *zs = d;
-        }));
     }
-    Ok(())
+    println!(
+        "HO stage {what} ({drain:?}): {} rounds, {} depressions met ({} filled, {} breached), {} left of them {} deep; lowered {lo:.3} km3, raised {hi:.3} km3; {:.1} s",
+        st.rounds,
+        st.depressions,
+        st.filled,
+        st.breached,
+        st.left,
+        st.deep,
+        t.elapsed().as_secs_f64()
+    );
+    d
 }
 
 /// Solves the regional surface of the region: the first stage of [`bake_region`], public so that a test (or a tool) can run it without the rest.
@@ -311,32 +368,39 @@ pub fn solve_region(spec: &RegionSpec, base: &(dyn Fn(Vec3) -> f64 + Sync)) -> R
         ..CarveParams::default()
     };
     precision.apply(&mut carve);
-    // SPIKE-139 (spike only): K5's k_dt scaled by K5_KDT_SCALE (1 unless set); the uplift per step scales with it (u_over_k is kept)
-    let kdt_scale = f64::from_bits(K5_KDT_SCALE.load(std::sync::atomic::Ordering::Relaxed));
-    if kdt_scale > 0.0 && kdt_scale != 1.0 {
-        carve.k_dt *= kdt_scale;
+    // SPIKE-139 (spike only; R24: the spec's `stage.k5`): K5's k_dt times kdt_scale, the uplift per step with it (u_over_k kept); u_over_k times uok_scale (k_dt kept)
+    let k5 = spec.stage.k5;
+    if k5.kdt_scale > 0.0 && k5.kdt_scale != 1.0 {
+        carve.k_dt *= k5.kdt_scale;
     }
-    // SPIKE-139 (spike only, lead #149b): K5's uplift ratio u_over_k scaled by K5_UOK_SCALE (1 unless set); k_dt kept
-    let uok_scale = f64::from_bits(K5_UOK_SCALE.load(std::sync::atomic::Ordering::Relaxed));
-    if uok_scale > 0.0 && uok_scale != 1.0 {
-        carve.u_over_k *= uok_scale;
+    if k5.uok_scale > 0.0 && k5.uok_scale != 1.0 {
+        carve.u_over_k *= k5.uok_scale;
     }
     let stream = face_spec.stream();
-    let zb_in = match BASE_HOOK.get() {
-        Some(hook) => hook(&grid, &outlet, &zb, &dir_of),
-        None => zb.clone(),
+    // SPIKE-138 (spike only; R24: the spec's `stage.base_drain`): the drain of z_b before the rounds, and with `clamp` K5's breach floor at the fill level of the basins left
+    let zb_in = run_drain(&spec.stage.base_drain, &grid, &outlet, &zb, "1, z_b before K5");
+    let level_floor: Option<Vec<f64>> = match spec.stage.base_drain {
+        Drain::Selective { clamp: true, .. } => {
+            let lf = planet_generators::bake::drain::level_floor(&zb_in, grid.w(), grid.len() / grid.w(), &outlet);
+            println!(
+                "HO stage 1 K5 clamp: the breach floor at the fill level on {} cells of the basins left",
+                lf.iter().filter(|v| v.is_finite()).count()
+            );
+            Some(lf)
+        }
+        _ => None,
     };
+    let drivers = planet_generators::bake::round::Drivers { level_floor: level_floor.as_deref(), ..Default::default() };
     let mut zs = zb_in.clone();
     // The rounds' own narrowing guard asserts when a round lifts a summit past the binade the epsilon was chosen for: that is the same refusal as the check after them, returned as an error naming the cell.
     let solved = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        // SPIKE-139 (spike only): K5's receiver form for the rounds alone (`K5_LTD`), back to D8 after them
-        planet_generators::bake::route::RECEIVER_LTD
-            .store(K5_LTD.load(std::sync::atomic::Ordering::Relaxed), std::sync::atomic::Ordering::Relaxed);
-        planet_generators::bake::round::RECEIVER_DINF
-            .store(K5_DINF.load(std::sync::atomic::Ordering::Relaxed), std::sync::atomic::Ordering::Relaxed);
+        // SPIKE-139 (spike only; R24: the spec's `stage.k5.route`): K5's receiver form for the rounds alone, back to D8 after them, under the lock
+        let _held = K5_ROUTE_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        planet_generators::bake::route::RECEIVER_LTD.store(k5.route == K5Route::Ltd, std::sync::atomic::Ordering::Relaxed);
+        planet_generators::bake::round::RECEIVER_DINF.store(k5.route == K5Route::Dinf, std::sync::atomic::Ordering::Relaxed);
         let t = std::time::Instant::now();
-        let r = solve_rounds(&grid, &mut zs, &outlet, &carve, spec.rounds, &spec.threads, stream);
-        if K5_LTD.load(std::sync::atomic::Ordering::Relaxed) || K5_DINF.load(std::sync::atomic::Ordering::Relaxed) {
+        let r = solve_rounds_with(&grid, &mut zs, &outlet, &carve, spec.rounds, &spec.threads, stream, &drivers);
+        if k5.route != K5Route::D8 {
             println!("K5TIME {:.1} s for {} rounds on {rw} x {rh} cells", t.elapsed().as_secs_f64(), spec.rounds);
         }
         planet_generators::bake::route::RECEIVER_LTD.store(false, std::sync::atomic::Ordering::Relaxed);
@@ -348,8 +412,9 @@ pub fn solve_region(spec: &RegionSpec, base: &(dyn Fn(Vec3) -> f64 + Sync)) -> R
             panic.downcast_ref::<String>().cloned().or_else(|| panic.downcast_ref::<&str>().map(|s| (*s).to_string())).unwrap_or_default();
         return Err(format!("after the rounds of the region: the rounds refused the surface (GEN-175): {why}"));
     }
-    if let Some(hook) = POST_HOOK.get() {
-        hook(&grid, &outlet, &mut zs);
+    // SPIKE-138 (spike only; R24: the spec's `stage.post_drain`): the drain of z_s after the rounds
+    if spec.stage.post_drain != Drain::Off {
+        zs = run_drain(&spec.stage.post_drain, &grid, &outlet, &zs, "3, z_s after K5");
     }
     precision.check_within_radius(&grid, &zs, |c| grid.global_id(c)).map_err(|e| format!("after the rounds of the region: {e}"))?;
     Ok(RegionSolve { face_spec, grid, outlet, zb, zb_in, zs, stream, ri0, rj0, rw, rh, precision })
@@ -645,6 +710,7 @@ fn fixture_spec(threads: usize) -> RegionSpec {
         inputs_id: 11,
         height_bounds: (-11_000.0, 9_000.0),
         keep_channels: false,
+        stage: Default::default(),
     }
 }
 

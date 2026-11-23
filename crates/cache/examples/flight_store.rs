@@ -153,6 +153,7 @@ fn main() -> Result<(), String> {
         inputs_id: class_inputs_key(&def, seed),
         height_bounds: (-11_000.0, 9_000.0),
         keep_channels: false,
+        stage: Default::default(),
     };
     // the window's L grid: the region with its margin, cell (0, 0) at the face's local cell (x0, y0)
     let l = LOCAL_PER_REGIONAL;

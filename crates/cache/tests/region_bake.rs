@@ -30,6 +30,7 @@ fn spec(threads: usize) -> RegionSpec {
         inputs_id: 11,
         height_bounds: (-11_000.0, 9_000.0),
         keep_channels: true,
+        stage: Default::default(),
     }
 }
 
@@ -175,6 +176,7 @@ fn the_production_constants_of_the_example_pass_the_checks_and_tiles_of_1024_do_
         inputs_id: 2,
         height_bounds: (-11_000.0, 9_000.0),
         keep_channels: false,
+        stage: Default::default(),
     };
     prod.check().expect("the example's defaults are a bakeable spec");
     assert_eq!(prod.tiles_per_edge(), 128);
@@ -280,4 +282,43 @@ fn a_halo_that_is_too_small_changes_the_cells_near_the_seam_more_than_the_cells_
 fn the_report_is_the_same_at_one_thread_and_at_eight() {
     let (a, b) = (planet_cache::region_bake::layout_fixture(1).unwrap(), planet_cache::region_bake::layout_fixture(8).unwrap());
     assert_eq!(a, b);
+}
+
+// spec: GEN-177, TEST-125 (R24, spike branch: the stage configs are values of the spec, in its key; no process global)
+#[test]
+fn two_stage_configs_in_one_process_give_two_keys_and_each_solve_sees_its_own() {
+    use planet_cache::region_bake::{solve_region, Drain, K5Knobs, K5Route, StageConfig};
+    let a = spec(2);
+    let b = RegionSpec {
+        stage: StageConfig {
+            base_drain: Drain::SELECTIVE_50,
+            post_drain: Drain::SELECTIVE_50,
+            k5: K5Knobs { kdt_scale: 2.0, ..K5Knobs::default() },
+        },
+        ..spec(2)
+    };
+    let c = RegionSpec {
+        stage: StageConfig { k5: K5Knobs { route: K5Route::Ltd, ..K5Knobs::default() }, ..StageConfig::default() },
+        ..spec(2)
+    };
+    let ids = [a.effective_inputs_id(), b.effective_inputs_id(), c.effective_inputs_id()];
+    assert!(ids[0] != ids[1] && ids[0] != ids[2] && ids[1] != ids[2], "three stage configs, three identities: {ids:x?}");
+    assert_eq!(
+        RegionSpec { stage: StageConfig::default(), ..spec(2) }.effective_inputs_id(),
+        ids[0],
+        "the default config adds nothing to the key"
+    );
+    // the bakes' keys
+    let w = world();
+    let (da, db) = (Dir::new("region-stage-a"), Dir::new("region-stage-b"));
+    let (ca, _) = bake_region(&w, &a, &base, &climate, da.path()).unwrap();
+    let (cb, _) = bake_region(&w, &b, &base, &climate, db.path()).unwrap();
+    assert_ne!(ca.id, cb.id, "two stage configs are two bakes");
+    assert!(ca.tiles.iter().any(|(t, k)| cb.tiles.get(t).is_some_and(|o| o != k)), "some tile has another key");
+    // a, b, a in one process: the second solve of a is the first bit for bit, b's differs (a set-once global would have kept one of them)
+    let bits = |s: &RegionSpec| solve_region(s, &base).unwrap().zs.iter().map(|v| v.to_bits()).collect::<Vec<u64>>();
+    let (a1, b1, c1, a2) = (bits(&a), bits(&b), bits(&c), bits(&a));
+    assert_eq!(a1, a2, "the default config's solve after two others is the same");
+    assert_ne!(a1, b1, "the drains and the k_dt factor change the solve");
+    assert_ne!(a1, c1, "D8-LTD changes the solve");
 }
