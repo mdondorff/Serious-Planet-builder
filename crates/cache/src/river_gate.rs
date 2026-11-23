@@ -7,7 +7,7 @@ use planet_generators::bake::Grid;
 
 use crate::river_gate_graph::{
     agreement, bars_line, budget_field, budget_report, g2_bars, graph_report, kept_interiors, kept_steps, partition_report, rim_mismatch,
-    Bar, BudgetReport, G2Input, G2Report, CORRIDOR_MIN_PCT,
+    Bar, BudgetReport, G2Input, G2Report, CORRIDOR_MIN_PCT, CORRIDOR_MIN_PCT_MOUNTAIN,
 };
 use crate::river_suite::{
     corridor_bar_m, measure_suite, network, ridge_cells, ridge_report, trunk_burn, trunk_corridor, Network, RidgeReport, Snap, SuiteInput,
@@ -79,6 +79,15 @@ pub fn mask_difference(grid: &Grid, a: &[bool], b: &[bool]) -> (usize, usize) {
 
 /// The ponds bar (BUILD-060, owner 2026-11-20, option C): river length in closed basins outside the kept lakes, over the river length outside them, at most this (percent).
 pub const PONDS_MAX_PCT: f64 = 10.0;
+/// The finer river network of the uphill and ponds bars (G3-1, lead #186, A4): river cells drain at least this (km2), beside the 75 km2 network.
+pub const FINE_NETWORK_KM2: f64 = 1.0;
+/// The bars on the finer network (G3-1): uphill steps at most `UPHILL_MAX_PCT`, as on the 75 km2 network, and ponds at most this (percent; proposed for the owner, O10).
+pub const PONDS_FINE_MAX_PCT: f64 = 10.0;
+/// G3-1 (lead #186): hump cuts against `S0` ([`crate::river_suite::hump_cuts`]) per 10,000 km2 of counted land, at most this (B's row: 0.04 to 0.24 on the five windows,
+/// rounded up to 1); and corner-only links over 5 m that the surface adds to `S0`'s ([`crate::river_suite::corner_links`]), per 10,000 km2, at most this (both proposed for
+/// the owner, O10).
+pub const HUMP_CUTS_MAX_PER_10K_KM2: f64 = 1.0;
+pub const CORNER_LINKS_MAX_PER_10K_KM2: f64 = 10.0;
 /// The kept-river bar: river length in kept lakes, over all river length, at most this (percent) on a lowland window and `KEPT_RIVER_MAX_PCT_MOUNTAIN` on a mountain one.
 pub const KEPT_RIVER_MAX_PCT: f64 = 5.0;
 pub const KEPT_RIVER_MAX_PCT_MOUNTAIN: f64 = 10.0;
@@ -102,6 +111,29 @@ pub const VALLEY_RING: (i64, i64) = (2, 4);
 /// The near ring of the valley depth (the canyon a viewer sees): the cells 1 to 2 cells out (102-204 m at L; lead, 2026-11-14, DEC crusader-4).
 pub const NEAR_RING: (i64, i64) = (1, 2);
 
+/// The relief index of the relief-indexed bars (G3-1, lead #186, A5; owner 2026-11-21): the window's start relief at 10 x 10 cells (`relief10_start_m`). A bar holds its lowland value
+/// up to `RELIEF_LOWLAND_M` and its mountain value from `RELIEF_MOUNTAIN_M`, linear in the logarithm of the relief between (both endpoints proposed by the lead for the owner, O10).
+pub const RELIEF_LOWLAND_M: f64 = 60.0;
+pub const RELIEF_MOUNTAIN_M: f64 = 300.0;
+
+/// The weight of the mountain value at start relief `relief_m` (0 at or under `RELIEF_LOWLAND_M`, 1 at or over `RELIEF_MOUNTAIN_M`).
+pub fn relief_weight(relief_m: f64) -> f64 {
+    // a window without land samples (NaN relief) takes the lowland values
+    if relief_m.is_nan() || relief_m <= RELIEF_LOWLAND_M {
+        0.0
+    } else if relief_m >= RELIEF_MOUNTAIN_M {
+        1.0
+    } else {
+        libm::log(relief_m / RELIEF_LOWLAND_M) / libm::log(RELIEF_MOUNTAIN_M / RELIEF_LOWLAND_M)
+    }
+}
+
+/// A relief-indexed limit: `lowland` and `mountain` weighted by [`relief_weight`].
+pub fn relief_indexed(lowland: f64, mountain: f64, relief_m: f64) -> f64 {
+    let t = relief_weight(relief_m);
+    lowland + (mountain - lowland) * t
+}
+
 /// The gate's limits.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GateParams {
@@ -123,12 +155,19 @@ pub struct GateParams {
     pub h1_cell_m: f64,
     /// The channel thresholds of the network measure (BUILD-059), km2.
     pub network_km2: [f64; 2],
-    /// The corridor bar of the G2 bars (lead #168): the share of snapped k_c 2 trunk reaches passing, percent (95 on a mountain window).
+    /// The corridor bar of the G2 bars (lead #168): the share of snapped k_c 2 trunk reaches passing, percent; its lowland value (95 at mountain relief), unless `corridor_fixed`.
     pub corridor_min_pct: f64,
-    /// The crest rounding bar: the p95 of the ridge lowering, metres (35 on a mountain window).
+    /// The crest rounding bar: the p95 of the ridge lowering, metres; its lowland value (35 at mountain relief).
     pub crest_max_m: f64,
-    /// The kept-river bar (percent; 10 on a mountain window).
+    /// The kept-river bar (percent); its lowland value (10 at mountain relief).
     pub kept_river_max_pct: f64,
+    /// G3-1: the three limits above are relief-indexed ([`relief_indexed`]) by the row's start relief; off, each is the value given.
+    pub relief_indexed: bool,
+    /// The corridor bar given by hand (`--corridor-bar`): `corridor_min_pct` as it is, not relief-indexed.
+    pub corridor_fixed: bool,
+    /// G3-1 (lead review of #1648): the relief index, the window's own start relief ([`relief_index`] of main's S0 over the region's box), the same for every candidate on the
+    /// window; without it the row's start relief (`relief10_start_m`).
+    pub relief_index_m: Option<f64>,
 }
 
 impl Default for GateParams {
@@ -146,6 +185,9 @@ impl Default for GateParams {
             corridor_min_pct: CORRIDOR_MIN_PCT,
             crest_max_m: CREST_P95_MAX_M,
             kept_river_max_pct: KEPT_RIVER_MAX_PCT,
+            relief_indexed: true,
+            corridor_fixed: false,
+            relief_index_m: None,
         }
     }
 }
@@ -295,6 +337,19 @@ pub struct GateReport {
     pub ponds_river_cells: Option<usize>,
     pub kept_river_cells: Option<usize>,
     pub kept_lake_cells: Option<usize>,
+    /// The 1 km2 network (G3-1, [`FINE_NETWORK_KM2`]): river cells inside on land, their river steps and uphill steps outside kept-basin interiors, and the river cells outside
+    /// the interiors with those of them in a closed basin (on a row without a graph every river cell is outside an interior).
+    pub fine: FineReport,
+    /// G3-1: the window's margin outside the region's box ([`MarginReport`]).
+    pub margin: MarginReport,
+    /// G3-1 (lead #186): hump cuts of the surface against `S0`, and against `S_KH` on a row with KH's stage field (printed beside, not barred); corner-only links over 5 m on
+    /// the surface and on `S0`, over the counted cells.
+    pub hump_cuts: usize,
+    pub hump_cuts_s_kh: Option<usize>,
+    /// Lead review of #1648: S0's humps over 10 m and those the surface lowers by more than 10 m at a crest ([`crate::river_suite::humps_removed`]); reported, not barred.
+    pub humps: (usize, usize),
+    pub corner_links: usize,
+    pub corner_links_s0: usize,
     pub spill_mismatch: Option<usize>,
     /// With a graph: test (a), the kept basins whose rim holds an L vertex with its bed more than `SPILL_MISMATCH_M` under the recorded spill ([`rim_mismatch`]).
     pub spill_rim_mismatch: Option<usize>,
@@ -350,6 +405,29 @@ pub struct GateReport {
     pub ridge_vs_kh: bool,
 }
 
+/// The margin (G3-1, lead #186; Carbon M4.7): the window's cells outside the region's box, which no bar counts: river cells (75 km2 network) on land, those in a closed
+/// basin and those in one outside the kept-basin interiors, river steps and uphill steps outside the interiors, and the interiors' cells. Reported, not barred.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MarginReport {
+    pub cells: usize,
+    pub river_cells: usize,
+    pub basin_cells: usize,
+    pub ponds_cells: usize,
+    pub steps: usize,
+    pub uphill_steps: usize,
+    pub kept_lake_cells: usize,
+}
+
+/// The uphill and ponds counts on the 1 km2 network (G3-1).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FineReport {
+    pub river_cells: usize,
+    pub steps: usize,
+    pub uphill_steps: usize,
+    pub outside_cells: usize,
+    pub ponds_cells: usize,
+}
+
 fn share(n: usize, of: usize) -> f64 {
     100.0 * n as f64 / of.max(1) as f64
 }
@@ -399,6 +477,30 @@ impl GateReport {
             ("basin_pct", pct(self.basin_river_cells, n)),
             ("ponds_cells", self.ponds_river_cells.map_or("-".to_string(), c)),
             ("ponds_pct", self.ponds_pct().map_or("-".to_string(), |v| format!("{v:.2}"))),
+            ("fine_river_cells", c(self.fine.river_cells)),
+            ("fine_uphill_steps", c(self.fine.uphill_steps)),
+            ("fine_uphill_pct", format!("{:.2}", share(self.fine.uphill_steps, self.fine.steps))),
+            ("fine_ponds_cells", c(self.fine.ponds_cells)),
+            ("fine_ponds_pct", format!("{:.2}", share(self.fine.ponds_cells, self.fine.outside_cells))),
+            ("m_cells", c(self.margin.cells)),
+            ("m_river_cells", c(self.margin.river_cells)),
+            ("m_basin_cells", c(self.margin.basin_cells)),
+            ("m_basin_pct", format!("{:.2}", share(self.margin.basin_cells, self.margin.river_cells))),
+            ("m_ponds_cells", c(self.margin.ponds_cells)),
+            ("m_ponds_pct", format!("{:.2}", share(self.margin.ponds_cells, self.margin.river_cells))),
+            ("m_uphill_steps", c(self.margin.uphill_steps)),
+            ("m_uphill_pct", format!("{:.2}", share(self.margin.uphill_steps, self.margin.steps))),
+            ("m_kept_lake_km2", format!("{:.2}", self.margin.kept_lake_cells as f64 * self.cell_area_m2 / 1.0e6)),
+            ("relief_index_m", m(self.relief_index())),
+            ("humps", c(self.humps.0)),
+            ("humps_removed", c(self.humps.1)),
+            ("humps_removed_per_10k_km2", format!("{:.2}", self.per_10k_km2(self.humps.1 as f64))),
+            ("hump_cuts", c(self.hump_cuts)),
+            ("hump_cuts_s_kh", self.hump_cuts_s_kh.map_or("-".to_string(), c)),
+            ("hump_cuts_per_10k_km2", format!("{:.2}", self.per_10k_km2(self.hump_cuts as f64))),
+            ("corner_links", c(self.corner_links)),
+            ("corner_links_s0", c(self.corner_links_s0)),
+            ("corner_links_added_per_10k_km2", format!("{:.2}", self.per_10k_km2(self.corner_links as f64 - self.corner_links_s0 as f64))),
             ("kept_river_cells", self.kept_river_cells.map_or("-".to_string(), c)),
             ("kept_river_pct", self.kept_river_cells.map_or("-".to_string(), |k| pct(k, n))),
             ("kept_lake_cells", self.kept_lake_cells.map_or("-".to_string(), c)),
@@ -635,7 +737,7 @@ impl GateReport {
                     "RIVER-GATE kept lakes (BUILD-060, option C): ponds {:.2} % of the river length outside the kept lakes ({pd} cells; bar <= {PONDS_MAX_PCT} %); kept lakes {:.2} % of river length ({k} cells; bar <= {} %), {a} cells inside ({:.2} km2); {sm} kept basins with a spill mismatch over {SPILL_MISMATCH_M} m (depression level, test b), {} with a rim vertex bed under the spill by more (test a)",
                     self.ponds_pct().unwrap_or(0.0),
                     share(k, self.river_cells),
-                    p.kept_river_max_pct,
+                    self.limits().2,
                     a as f64 * self.cell_area_m2 / 1.0e6,
                     self.spill_rim_mismatch.unwrap_or(0)
                 ),
@@ -714,6 +816,29 @@ impl GateReport {
         .collect()
     }
 
+    /// The relief index of this row's relief-indexed limits: the window's shared index when given, else the row's start relief.
+    pub fn relief_index(&self) -> f64 {
+        self.params.relief_index_m.unwrap_or(self.relief_10_start_m)
+    }
+
+    /// A count per 10,000 km2 of the counted land (the suite's land area).
+    pub fn per_10k_km2(&self, n: f64) -> f64 {
+        if self.suite.land_km2 > 0.0 {
+            1.0e4 * n / self.suite.land_km2
+        } else {
+            0.0
+        }
+    }
+
+    /// The G3-1 relief-indexed limits of the corridor, crest and kept-river bars at this row's start relief: (corridor percent, crest metres, kept river percent).
+    pub fn limits(&self) -> (f64, f64, f64) {
+        let p = &self.params;
+        let r = self.relief_index();
+        let ix = |given: f64, mountain: f64| if p.relief_indexed { relief_indexed(given, mountain, r) } else { given };
+        let corridor = if p.corridor_fixed { p.corridor_min_pct } else { ix(p.corridor_min_pct, CORRIDOR_MIN_PCT_MOUNTAIN) };
+        (corridor, ix(p.crest_max_m, CREST_P95_MAX_M_MOUNTAIN), ix(p.kept_river_max_pct, KEPT_RIVER_MAX_PCT_MOUNTAIN))
+    }
+
     /// The G2 bars of a row with a graph (lead #168; none without): the snapped k_c 2 corridor share against `corridor_min_pct`, the uphill river steps, the graph/raster
     /// agreement, the graph's violations and missing spill nodes.
     pub fn bars(&self) -> Vec<Bar> {
@@ -722,8 +847,7 @@ impl GateReport {
         let corridor = self.trunk_corridors_snapped.get(k2).map_or(0.0, |t| share(t.reaches - t.reaches_over, t.reaches));
         // lead #166: the river steps in kept-basin interiors are counted apart from the uphill bar
         let k = g2.kept.clone().unwrap_or_default();
-        let mut out =
-            g2_bars(g2, share(self.suite.uphill_steps - k.uphill, self.suite.steps - k.steps), corridor, self.params.corridor_min_pct);
+        let mut out = g2_bars(g2, share(self.suite.uphill_steps - k.uphill, self.suite.steps - k.steps), corridor, self.limits().0);
         // owner 2026-11-20 (option C): a kept basin's spill mismatch is a graph violation; the ponds and the kept river length each have a bar
         let sm = self.spill_mismatch.unwrap_or(0) + self.spill_rim_mismatch.unwrap_or(0);
         if sm > 0 {
@@ -732,12 +856,43 @@ impl GateReport {
             }
         }
         if let (Some(ponds), Some(k)) = (self.ponds_pct(), self.kept_river_cells) {
-            use crate::river_gate_graph::GateClass::Geomorphology;
+            use crate::river_gate_graph::GateClass::{Correctness, Geomorphology};
             out.push(Bar { name: "bar_ponds".into(), value: ponds, limit: PONDS_MAX_PCT, at_most: true, class: Geomorphology });
+            // G3-1 (A4): the same two on the 1 km2 network
+            let f = self.fine;
+            out.push(Bar {
+                name: "bar_uphill_1km2".into(),
+                value: share(f.uphill_steps, f.steps),
+                limit: crate::river_gate_graph::UPHILL_MAX_PCT,
+                at_most: true,
+                class: Correctness,
+            });
+            out.push(Bar {
+                name: "bar_ponds_1km2".into(),
+                value: share(f.ponds_cells, f.outside_cells),
+                limit: PONDS_FINE_MAX_PCT,
+                at_most: true,
+                class: Geomorphology,
+            });
+            // G3-1 (lead #186): hump cuts and the corner-only links the surface adds, both against S0
+            out.push(Bar {
+                name: "bar_hump_cuts".into(),
+                value: self.per_10k_km2(self.hump_cuts as f64),
+                limit: HUMP_CUTS_MAX_PER_10K_KM2,
+                at_most: true,
+                class: Geomorphology,
+            });
+            out.push(Bar {
+                name: "bar_corner_links".into(),
+                value: self.per_10k_km2(self.corner_links as f64 - self.corner_links_s0 as f64),
+                limit: CORNER_LINKS_MAX_PER_10K_KM2,
+                at_most: true,
+                class: Geomorphology,
+            });
             out.push(Bar {
                 name: "bar_kept_river".into(),
                 value: share(k, self.river_cells),
-                limit: self.params.kept_river_max_pct,
+                limit: self.limits().2,
                 at_most: true,
                 class: Geomorphology,
             });
@@ -748,7 +903,7 @@ impl GateReport {
         out.push(Bar {
             name: "bar_crest".into(),
             value: self.ridge.lowering_p95_m,
-            limit: self.params.crest_max_m,
+            limit: self.limits().1,
             at_most: true,
             class: crate::river_gate_graph::GateClass::Preservation,
         });
@@ -899,6 +1054,11 @@ fn valley_floor(grid: &Grid, z: &[f64], c: usize, (r0, r1): (i64, i64)) -> f64 {
 }
 
 /// The p50 of the height range of the land blocks of `k x k` cells that lie inside (blocks tiled from the grid's corner).
+/// The relief index of a window (G3-1): the p50 of the height range of the land blocks of 10 x 10 cells of `start` (main's S0 of the window) inside `region` (the region's box).
+pub fn relief_index(grid: &Grid, start: &[f64], region: &[bool], sea: f64) -> f64 {
+    relief(grid, start, region, 10, sea)
+}
+
 fn relief(grid: &Grid, z: &[f64], inside: &[bool], k: usize, sea: f64) -> f64 {
     let (w, h) = (grid.w(), grid.h());
     let mut r: Vec<f64> = Vec::new();
@@ -1093,7 +1253,7 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
     let (label, pits) = pits(g, z, &filled, BASIN_WET_M);
     // BUILD-060 (owner's option C, 2026-11-20): with a graph, the kept-lake interiors (the depressions of this flood that hold a kept basin's floor) are lakes, not closed
     // basins; the closed-basin bar counts river cells outside them
-    let kept_lakes: Option<Vec<bool>> = input.g2.as_ref().and_then(|x| x.graph.map(|gr| kept_interiors(gr, &x.window, &label).0));
+    let kept_lakes: Option<Vec<bool>> = input.g2.as_ref().and_then(|x| x.graph.map(|gr| kept_interiors(gr, &x.window, z, &label).0));
     let in_kept = |c: usize| kept_lakes.as_ref().is_some_and(|k| k[c]);
     let is_basin = |&(d, k): &(f64, usize)| d >= params.basin_depth_m && k >= params.basin_cells;
     let basin = |c: usize| label[c] != u32::MAX && is_basin(&pits[label[c] as usize]);
@@ -1126,6 +1286,40 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         canyon.push(floor - with_lakes[c]);
         canyon_b.push(floor - breached[c]);
         erosion.push(input.start[c] - with_lakes[c]);
+    }
+    // G3-1 (A4): uphill and ponds on the 1 km2 network, kept-basin interiors apart
+    let fine_river: Vec<bool> = (0..n).map(|c| area[c] >= FINE_NETWORK_KM2 * 1.0e6 && z[c] > input.sea_level_m).collect();
+    let mut fine = FineReport::default();
+    for c in (0..n).filter(|&c| fine_river[c] && input.inside[c]) {
+        fine.river_cells += 1;
+        if !in_kept(c) {
+            fine.outside_cells += 1;
+            fine.ponds_cells += usize::from(basin(c));
+        }
+        let r = routing.receiver[c];
+        if r == NONE || !fine_river[r as usize] || in_kept(c) || in_kept(r as usize) {
+            continue;
+        }
+        fine.steps += 1;
+        fine.uphill_steps += usize::from(input.surface[r as usize] - input.surface[c] > crate::river_suite::UPHILL_M);
+    }
+    // G3-1 (Carbon M4.7): the margin outside the region's box, reported only
+    let mut margin = MarginReport::default();
+    for c in (0..n).filter(|&c| !input.region[c]) {
+        margin.cells += 1;
+        margin.kept_lake_cells += usize::from(in_kept(c));
+        if !river[c] {
+            continue;
+        }
+        margin.river_cells += 1;
+        margin.basin_cells += usize::from(basin(c));
+        margin.ponds_cells += usize::from(basin(c) && !in_kept(c));
+        let r = routing.receiver[c];
+        if r == NONE || !river[r as usize] || in_kept(c) || in_kept(r as usize) {
+            continue;
+        }
+        margin.steps += 1;
+        margin.uphill_steps += usize::from(input.surface[r as usize] - input.surface[c] > crate::river_suite::UPHILL_M);
     }
     let w = g.w();
     let mut l_cross: Vec<Crossing> = Vec::new();
@@ -1170,16 +1364,23 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
     let area_s0 = ref_area(input.start);
     let ridge_s0 = ridge_report(g, input.start, input.surface, &ridge, &area, &area_s0);
     let kh = input.g2.as_ref().and_then(|x| x.stages).and_then(|st| st.iter().find(|s| s.name == "kh"));
-    let (ridge_kh, ridge_vs_kh) = match kh {
-        Some(kh) => {
-            let step = crate::river_gate_graph::STAGE_STEP_M;
-            let s_kh: Vec<f64> = (0..n)
-                .map(|c| input.start[c] - f64::from(kh.lower[c]) * step + kh.fill.as_ref().map_or(0.0, |f| f64::from(f[c]) * step))
-                .collect();
-            (ridge_report(g, &s_kh, input.surface, &ridge, &area, &ref_area(&s_kh)), true)
-        }
+    let s_kh: Option<Vec<f64>> = kh.map(|kh| {
+        let step = crate::river_gate_graph::STAGE_STEP_M;
+        (0..n).map(|c| input.start[c] - f64::from(kh.lower[c]) * step + kh.fill.as_ref().map_or(0.0, |f| f64::from(f[c]) * step)).collect()
+    });
+    let (ridge_kh, ridge_vs_kh) = match &s_kh {
+        Some(s_kh) => (ridge_report(g, s_kh, input.surface, &ridge, &area, &ref_area(s_kh)), true),
         None => (ridge_s0.clone(), false),
     };
+    // G3-1 (lead #186): hump cuts and corner-only links, S0 the one reference of B and RG; RG's count against S_KH beside
+    // counted over the land inside (the per-10,000 km2 rates divide by the land area)
+    let land_inside: Vec<bool> = (0..n).map(|c| input.inside[c] && input.surface[c] > input.sea_level_m).collect();
+    let hump_cuts = crate::river_suite::hump_cuts(g, input.start, input.surface, &land_inside);
+    let humps = crate::river_suite::humps_removed(g, input.start, input.surface, &land_inside);
+    let hump_cuts_s_kh = s_kh.as_ref().map(|s_kh| crate::river_suite::hump_cuts(g, s_kh, input.surface, &land_inside));
+    drop(s_kh);
+    let corner_links = crate::river_suite::corner_links(g, input.surface, &land_inside);
+    let corner_links_s0 = crate::river_suite::corner_links(g, input.start, &land_inside);
     GateReport {
         ridge: ridge_kh,
         ridge_s0,
@@ -1191,6 +1392,13 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         ponds_river_cells: kept_lakes.as_ref().map(|_| ponds_cells),
         kept_river_cells: kept_lakes.as_ref().map(|_| kept_river),
         kept_lake_cells: kept_lakes.as_ref().map(|k| (0..n).filter(|&c| k[c] && input.inside[c]).count()),
+        fine,
+        margin,
+        hump_cuts,
+        hump_cuts_s_kh,
+        humps,
+        corner_links,
+        corner_links_s0,
         // a kept basin with its floor in the window whose depression level there (the basin flood) lies more than SPILL_MISMATCH_M under its recorded spill
         spill_mismatch: input.g2.as_ref().and_then(|x| {
             x.graph.map(|gr| {
@@ -1203,7 +1411,7 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
             })
         }),
         spill_rim_mismatch: input.g2.as_ref().and_then(|x| x.graph.map(|gr| rim_mismatch(gr, &x.window, &label, SPILL_MISMATCH_M))),
-        inlets: input.g2.as_ref().and_then(|x| x.graph.map(|gr| crate::river_gate_graph::inlets_without_basin(gr, &x.window, &label))),
+        inlets: input.g2.as_ref().and_then(|x| x.graph.map(|gr| crate::river_gate_graph::inlets_without_basin(gr, &x.window, z, &label))),
         cell_area_m2: g.dx() * g.dx(),
         reference_river_cells: reference_cells,
         lake_river_cells: lake_cells,
@@ -1246,7 +1454,7 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
             let budget =
                 x.stages.map(|_| budget_field(input.start, g.w(), g.h(), (params.h1_cell_m / g.dx()).round() as usize, g.dx(), R_RELIEF_M));
             // lead #166: kept-basin interiors on the measured surface, counted apart from the uphill and agreement bars
-            let kept = x.graph.map(|gr| kept_interiors(gr, &x.window, &label));
+            let kept = x.graph.map(|gr| kept_interiors(gr, &x.window, z, &label));
             G2Report {
                 graph: x.graph.map(|gr| graph_report(gr, &x.window, input.inside, &land, g.dx())),
                 agreement: x

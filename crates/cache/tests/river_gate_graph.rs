@@ -1,6 +1,6 @@
 //! Tier A, TEST-137 and BUILD-060: the river gate's G2 columns on a hand graph in a 12 x 12 window at global L cell (100, 200). Sources S1 (101, 201) and S2 (101, 205) meet at the
 //! confluence C (103, 203), which runs to the sea outlet O (106, 203); a tributary T from S3 (104, 207) ends at a `trib_junction` J on C -> O's vertex (105, 203).
-use planet_cache::river_gate::{measure, GateInput, GateParams};
+use planet_cache::river_gate::{measure, GateInput, GateParams, GateReport};
 use planet_cache::river_gate_graph::{
     agreement, budget_field, budget_report, graph_report, partition_report, BudgetReport, G2Input, G2Report, GateClass, StageField, Window,
 };
@@ -143,6 +143,16 @@ fn agreement_counts_kept_interiors_and_cells_above_a_graph_head_apart() {
     assert_eq!((a.routed, a.routed_agree, a.routed_above_head, a.routed_kept), (4, 2, 2, 1), "{a:?}");
     // T's cell (104, 206) is in the kept interior: one graph cell leaves the graph share
     assert_eq!((a.graph, a.graph_kept), (11, 1), "{a:?}");
+    // G3-1: the graph side counts the cells whose reach drains at least the threshold there; at 3 km2 only C -> O's four cells (5 to 9 km2, the junction cell its
+    // own) of the 12, while the routed side still matches against every graph cell
+    let big = agreement(&g, &W, &area.iter().map(|a| a * 2.0).collect::<Vec<_>>(), &all, &all, &kept, &recv, 3.0e6);
+    assert_eq!((big.graph, big.graph_kept), (4, 0), "{big:?}");
+    assert_eq!((big.routed, big.routed_agree), (a.routed, a.routed_agree), "{big:?}");
+    // G3-1 (diagnostic): with S1 head cell (101, 201) under the sea, it counts in the share and apart as a sea cell without a routed cell beside it
+    let mut land = all.clone();
+    land[cell(101, 201)] = false;
+    let sea = agreement(&g, &W, &area, &land, &all, &kept, &recv, 1.0e6);
+    assert_eq!((sea.graph_sea, sea.graph_sea_missed), (1, 1), "{sea:?}");
 }
 
 // spec: TEST-137, BUILD-060
@@ -175,7 +185,7 @@ fn a_missing_spill_node_of_a_basin_in_the_margin_is_counted_apart() {
 
 // spec: TEST-137, BUILD-060
 #[test]
-fn a_kept_basins_interior_is_the_depression_holding_its_floor_and_its_river_steps_are_counted_apart() {
+fn a_kept_basins_interior_is_the_surface_under_its_recorded_spill_joined_to_its_floor_and_its_river_steps_are_counted_apart() {
     use planet_cache::river_gate_graph::{kept_interiors, kept_steps};
     let mut g = graph();
     let cell = |x: usize, y: usize| (y - 200) * 12 + (x - 100);
@@ -206,17 +216,40 @@ fn a_kept_basins_interior_is_the_depression_holding_its_floor_and_its_river_step
         basin((102, 210), 30.0, Represented::None),
         basin((102, 209), 10.0, Represented::ProtectedSurface),
     ];
-    // the gate's depressions: the bowl (label 0) and a pit at (102, 210) (label 1); (102, 209) is dry
+    // the gate's depressions: the bowl (label 0); everything else dry
     let mut label = vec![u32::MAX; 144];
     for y in 207..=209 {
         for x in 107..=109 {
             label[cell(x, y)] = 0;
         }
     }
-    label[cell(102, 210)] = 1;
-    let (kept, basins) = kept_interiors(&g, &W, &label);
+    // G3-1 (#182c): the kept bowl's lake is the cells under its 6 m spill joined to its floor in its depression; the drained basin holds none, and the third's floor (20 m)
+    // stands above its 10 m spill
+    let (kept, basins) = kept_interiors(&g, &W, &z, &label);
     assert_eq!((basins, kept.iter().filter(|&&k| k).count()), (1, 9));
     assert!(kept[cell(107, 207)] && !kept[cell(106, 208)]);
+    // a spill recorded at 3 m holds only the floor: the 5 m ring is above it, though the depression of the measured surface holds it
+    let mut low = g.clone();
+    low.basins[0].spill_m = 3.0;
+    let (k3, b3) = kept_interiors(&low, &W, &z, &label);
+    assert_eq!((b3, k3.iter().filter(|&&k| k).count()), (1, 1));
+    // a cell under the spill but not joined to the floor is no part of the lake
+    let mut apart = z.clone();
+    apart[cell(103, 203)] = 2.0;
+    assert!(!kept_interiors(&g, &W, &apart, &label).0[cell(103, 203)]);
+    // numerics review: a rim cut under the spill (110, 208) at 3 m, with a valley under 6 m beyond it: the lake stays the bowl, its depression
+    let mut cut = z.clone();
+    cut[cell(110, 208)] = 3.0;
+    for x in 111..=111 {
+        for y in 200..=211 {
+            cut[cell(x, y)] = 2.0;
+        }
+    }
+    let (kc, _) = kept_interiors(&g, &W, &cut, &label);
+    assert_eq!(kc.iter().filter(|&&k| k).count(), 9, "the cut rim does not let the lake run on");
+    assert!(!kc[cell(111, 205)] && !kc[cell(110, 208)]);
+    // a floor in no depression (a drained basin) holds no lake
+    assert_eq!(kept_interiors(&g, &W, &z, &vec![u32::MAX; 144]).1, 0);
     // river steps: into the floor, out over the rim (rising 4 m), and one outside on the plain rising 1 m
     let mut river = vec![false; 144];
     let mut recv = vec![u32::MAX; 144];
@@ -230,6 +263,7 @@ fn a_kept_basins_interior_is_the_depression_holding_its_floor_and_its_river_step
     z[cell(102, 204)] = 21.0;
     let all = vec![true; 144];
     let k = kept_steps(&kept, basins, &recv, &river, &all, &z);
+    let _ = &label;
     // four steps touch the interior; (108, 208) -> (109, 208) rises 4 m and (109, 208) -> (110, 208) 15 m: two uphill; the plain's step is not theirs
     assert_eq!((k.basins, k.cells, k.steps, k.uphill), (1, 9, 4, 2), "{k:?}");
 }
@@ -288,24 +322,50 @@ fn the_g2_bars_pass_or_fail_against_the_owners_limits() {
     use planet_cache::river_gate_graph::{bars_line, g2_bars, Agreement, GraphReport, CORRIDOR_MIN_PCT, CORRIDOR_MIN_PCT_MOUNTAIN};
     // no graph, no bars (B's row)
     assert!(g2_bars(&G2Report::default(), 0.0, 100.0, CORRIDOR_MIN_PCT).is_empty());
-    let gr = GraphReport { basin_spill_missing: 3, ..GraphReport::default() };
+    let gr = GraphReport { basin_spill_missing: 3, trunk_reaches: 200, trunk_exceptions: 2, ..GraphReport::default() };
     let g2 = G2Report {
         graph: Some(gr),
         agreement: vec![
-            Agreement { threshold_km2: 1.0, routed: 100, routed_agree: 90, ..Agreement::default() },
-            Agreement { threshold_km2: 75.0, routed: 100, routed_agree: 89, ..Agreement::default() },
+            Agreement {
+                threshold_km2: 1.0,
+                routed: 100,
+                routed_agree: 90,
+                graph: 50,
+                graph_agree: 48,
+                routed_above_head: 11,
+                ..Agreement::default()
+            },
+            Agreement {
+                threshold_km2: 75.0,
+                routed: 100,
+                routed_agree: 95,
+                graph: 100,
+                graph_agree: 89,
+                routed_above_head: 12,
+                ..Agreement::default()
+            },
         ],
         ..G2Report::default()
     };
     let bars = g2_bars(&g2, 1.0, 97.4, CORRIDOR_MIN_PCT);
     let pass = |n: &str| bars.iter().find(|b| b.name == n).map(|b| b.pass()).unwrap();
+    let value = |n: &str| bars.iter().find(|b| b.name == n).map(|b| b.value).unwrap();
     // at the limits: uphill 1.0 % and agreement 90 % pass; 89 % and a corridor of 97.4 % fail; no violations pass; 3 missing spill nodes fail
     assert!(pass("bar_uphill") && pass("bar_agree_1km2") && pass("bar_violations"));
     assert!(!pass("bar_agree_75km2") && !pass("bar_corridor") && !pass("bar_spill_missing"));
+    // G3-1 (A4): the agreement bar is the lower share, the routed 90 % at 1 km2 (graph 96 %) and the graph 89 % at 75 km2 (routed 95 %)
+    assert_eq!((value("bar_agree_1km2"), value("bar_agree_75km2")), (90.0, 89.0));
+    // routed cells above a graph head: 11 of 111 (9.91 %) passes the 10 % bar, 12 of 112 (10.71 %) fails
+    assert!(pass("bar_above_head_1km2") && !pass("bar_above_head_75km2"));
+    // A6: 2 of 200 trunk reaches flagged (1 %) passes the 1 % bar; 3 fails
+    assert!(pass("bar_trunk_exceptions"));
+    let mut g3 = g2.clone();
+    g3.graph.as_mut().unwrap().trunk_exceptions = 3;
+    assert!(!g2_bars(&g3, 1.0, 97.4, CORRIDOR_MIN_PCT).iter().find(|b| b.name == "bar_trunk_exceptions").unwrap().pass());
     assert!(g2_bars(&g2, 1.0, 97.4, CORRIDOR_MIN_PCT_MOUNTAIN).iter().find(|b| b.name == "bar_corridor").unwrap().pass(), "95 % on M1");
     assert_eq!(bars.iter().find(|b| b.name == "bar_spill_missing").unwrap().cell(), "FAIL:3.00");
     let line = bars_line(&bars).unwrap();
-    assert!(line.contains("bar_uphill PASS 1.00 (<= 1)") && line.ends_with("3 of 6 pass"), "{line}");
+    assert!(line.contains("bar_uphill PASS 1.00 (<= 1)") && line.ends_with("5 of 9 pass"), "{line}");
 }
 
 // spec: TEST-137, BUILD-060
@@ -717,8 +777,13 @@ fn kept_lakes_get_their_own_bars_beside_the_raw_closed_basin_share_and_a_spill_m
         represented: Represented::ProtectedSurface,
         owner: Domain::Landmass,
     };
-    // the recorded spill at the pit's floor: no mismatch
-    g.basins = vec![kept_basin(z[cell(floor.0, floor.1)])];
+    // the recorded spill at the pit's level (its depression level at the floor): no mismatch, and the lake (G3-1, #182c: the cells under the spill joined to the floor) is the pit
+    let level = (3..=9)
+        .flat_map(|y| (3..=9).map(move |x| (x, y)))
+        .filter(|&(x, y)| !((4..=8).contains(&x) && (4..=8).contains(&y)))
+        .map(|(x, y)| z[cell(x, y)])
+        .fold(f64::INFINITY, f64::min);
+    g.basins = vec![kept_basin(level)];
     let kept = run(&g, &p);
     assert_eq!(kept.basin_river_cells, open.basin_river_cells, "BUILD-055's raw share is untouched");
     assert_eq!(
@@ -731,6 +796,8 @@ fn kept_lakes_get_their_own_bars_beside_the_raw_closed_basin_share_and_a_spill_m
     let kept_pct = 100.0 * open.basin_river_cells as f64 / open.river_cells as f64;
     let (ponds, kr) = (bar(&kept, "bar_ponds"), bar(&kept, "bar_kept_river"));
     assert_eq!((ponds.value, ponds.limit, ponds.at_most), (0.0, PONDS_MAX_PCT, true));
+    // G3-1 (A4): the graph row carries the 1 km2 network's uphill and ponds bars too
+    assert!(bar(&kept, "bar_uphill_1km2").at_most && bar(&kept, "bar_ponds_1km2").limit == planet_cache::river_gate::PONDS_FINE_MAX_PCT);
     assert!((kr.value - kept_pct).abs() < 1e-9 && kr.limit == KEPT_RIVER_MAX_PCT && kr.at_most, "{kr:?}");
     let mountain = run(&g, &GateParams { kept_river_max_pct: KEPT_RIVER_MAX_PCT_MOUNTAIN, ..p });
     assert_eq!(bar(&mountain, "bar_kept_river").limit, 10.0);
@@ -747,7 +814,6 @@ fn kept_lakes_get_their_own_bars_beside_the_raw_closed_basin_share_and_a_spill_m
     );
     assert!(kept.lines().iter().any(|l| l.starts_with("RIVER-GATE kept lakes (BUILD-060, option C): ponds 0.00 %")), "{:?}", kept.lines());
     // a recorded spill 5 m above the pit's level: a spill mismatch, counted in bar_violations
-    let level = z[cell(floor.0, floor.1)] + 6.0;
     g.basins = vec![kept_basin(level + 5.0)];
     let mis = run(&g, &p);
     assert_eq!(mis.spill_mismatch, Some(1), "{mis:?}");
@@ -809,11 +875,13 @@ fn a_rise_into_a_down_node_excused_by_its_residual_is_printed_beside_the_violati
 // spec: BUILD-060
 #[test]
 fn a_line_end_inlet_outside_every_kept_depression_is_counted_and_spill_targets_are_not() {
-    // a kept basin whose floor depression is the 3 x 3 block at (4..=6, 4..=6); reaches ending at inlets inside, beside and far from it; a spill target far from it; an
-    // orphan inlet
+    // a kept basin whose lake (the cells under its 5 m spill joined to its floor) is the 3 x 3 block at (4..=6, 4..=6); reaches ending at inlets inside, beside and far from it; a
+    // spill target far from it; an orphan inlet
+    let mut z = vec![20.0; 144];
     let mut label = vec![u32::MAX; 144];
     for y in 4..=6 {
         for x in 4..=6 {
+            z[y * 12 + x] = 1.0;
             label[y * 12 + x] = 0;
         }
     }
@@ -843,14 +911,14 @@ fn a_line_end_inlet_outside_every_kept_depression_is_counted_and_spill_targets_a
     };
     use planet_cache::river_gate_graph::{inlets_without_basin, InletReport};
     assert_eq!(
-        inlets_without_basin(&g, &W, &label),
+        inlets_without_basin(&g, &W, &z, &label),
         InletReport { inside: 5, line_ends: 3, spill_targets: 1, orphans: 1, line_end_no_basin: 2, line_end_no_basin_far: 1 }
     );
     // numerics review: an inlet that a reach ends at and a basin spills to counts once, as a line end, and is held to a kept basin
     let mut both = g.clone();
     both.basins[1].spill_node = c.id;
     assert_eq!(
-        inlets_without_basin(&both, &W, &label),
+        inlets_without_basin(&both, &W, &z, &label),
         InletReport { inside: 5, line_ends: 3, spill_targets: 0, orphans: 2, line_end_no_basin: 2, line_end_no_basin_far: 1 },
         "the far line end, now also a spill target, is a line end once; the former spill target is an orphan"
     );
@@ -1027,4 +1095,241 @@ fn the_gate_routes_regraded_irregular_flats_at_600_and_8000_m() {
             );
         }
     }
+}
+
+// spec: BUILD-060
+#[test]
+fn uphill_and_ponds_are_counted_on_the_1_km2_network_beside_the_75_km2_one() {
+    // G3-1 (lead #186, A4): a 40 x 40 window of 100 m cells falling west to a sea column, its centre row a valley, and a 2 m pit of 6 x 3 cells on the valley (over BUILD-055's 16-cell basin); the 1 km2
+    // network (100 cells) runs through the pit and climbs out of it, while the 75 km2 network holds no river
+    let n = 40usize;
+    let grid = Grid::new(n, n, DX);
+    let cell = |x: usize, y: usize| y * n + x;
+    let mut z: Vec<f64> = (0..n * n).map(|c| 10.0 + 0.1 * (c % n) as f64 + 0.5 * ((c / n) as f64 - 20.0).abs()).collect();
+    for y in 0..n {
+        z[cell(0, y)] = -1.0;
+    }
+    for y in 19..=21 {
+        for x in 10..=15 {
+            z[cell(x, y)] -= 2.0;
+        }
+    }
+    let outlet = grid.outlets(&z, 0.0);
+    let all = vec![true; n * n];
+    let report = measure(
+        &GateInput {
+            grid: &grid,
+            start: &z,
+            surface: &z,
+            outlet: &outlet,
+            inside: &all,
+            region: &all,
+            h1: &[],
+            seed: 7,
+            sea_level_m: 0.0,
+            outside_drains: false,
+            trunks: &[],
+            g2: None,
+        },
+        &GateParams::default(),
+    );
+    assert_eq!(report.river_cells, 0, "no cell drains 75 km2");
+    let f = report.fine;
+    assert!(f.river_cells > 0 && f.ponds_cells > 0 && f.ponds_cells <= 18, "the pit's river cells are ponds on the 1 km2 network: {f:?}");
+    assert!(f.uphill_steps >= 1, "the river climbs out of the pit: {f:?}");
+    assert_eq!(f.outside_cells, f.river_cells, "no graph: no kept interior");
+    let line = report.fields_line();
+    assert!(line.contains(&format!(" fine_ponds_cells={} ", f.ponds_cells)) && line.contains(" fine_uphill_pct="), "{line}");
+    assert!(report.bars().is_empty(), "no graph, no bars");
+}
+
+// spec: BUILD-060
+#[test]
+fn the_corridor_crest_and_kept_river_bars_are_relief_indexed_not_keyed_on_a_window() {
+    // G3-1 (lead #186, A5): the lowland value up to 60 m of start relief, the mountain value from 300 m, linear in ln relief between; today's windows R3a 9.8, R3b 10.9, F1 13.4
+    // and R1h 54.0 m are lowland, M1 368.5 m mountain
+    use planet_cache::river_gate::{relief_indexed, relief_weight, RELIEF_LOWLAND_M, RELIEF_MOUNTAIN_M};
+    use planet_cache::river_gate_graph::{CORRIDOR_MIN_PCT, CORRIDOR_MIN_PCT_MOUNTAIN};
+    for r in [9.8, 54.0, RELIEF_LOWLAND_M] {
+        assert_eq!(relief_weight(r), 0.0, "{r} m is lowland");
+        assert_eq!(relief_indexed(CORRIDOR_MIN_PCT, CORRIDOR_MIN_PCT_MOUNTAIN, r), 97.5);
+    }
+    for r in [RELIEF_MOUNTAIN_M, 368.5] {
+        assert_eq!(relief_indexed(CORRIDOR_MIN_PCT, CORRIDOR_MIN_PCT_MOUNTAIN, r), 95.0, "{r} m is mountain");
+    }
+    let mid = libm::sqrt(RELIEF_LOWLAND_M * RELIEF_MOUNTAIN_M);
+    assert!((relief_weight(mid) - 0.5).abs() < 1e-12, "the geometric mean is half way");
+    assert!((relief_indexed(15.0, 35.0, mid) - 25.0).abs() < 1e-9, "the crest bar half way: 25 m");
+    // a row's limits follow its start relief; a corridor bar given by hand stays as given
+    let grid = Grid::new(12, 12, DX);
+    let z: Vec<f64> = (0..144).map(|c| 1.0 + (c % 12) as f64).collect();
+    let all = vec![true; 144];
+    let base = measure(
+        &GateInput {
+            grid: &grid,
+            start: &z,
+            surface: &z,
+            outlet: &grid.outlets(&z, 0.0),
+            inside: &all,
+            region: &all,
+            h1: &[],
+            seed: 7,
+            sea_level_m: 0.0,
+            outside_drains: false,
+            trunks: &[],
+            g2: None,
+        },
+        &GateParams::default(),
+    );
+    let flat = GateReport { relief_10_start_m: 10.0, ..base.clone() };
+    let steep = GateReport { relief_10_start_m: 400.0, ..base };
+    assert_eq!(flat.limits(), (97.5, 15.0, 5.0));
+    assert_eq!(steep.limits(), (95.0, 35.0, 10.0));
+    let fixed =
+        GateReport { params: GateParams { corridor_min_pct: 96.0, corridor_fixed: true, ..GateParams::default() }, ..steep.clone() };
+    assert_eq!(fixed.limits(), (96.0, 35.0, 10.0));
+    // lead review of #1648: the window's shared index (main's S0) decides, whatever the row's own start relief, so B and RG on one window get the same limits
+    let shared = GateReport { params: GateParams { relief_index_m: Some(10.0), ..GateParams::default() }, ..steep.clone() };
+    assert_eq!((shared.relief_index(), shared.limits()), (10.0, (97.5, 15.0, 5.0)));
+}
+
+// spec: BUILD-060
+#[test]
+fn trunk_reaches_flagged_rise_over_budget_or_budget_residual_are_the_trunk_exceptions() {
+    // G3-1 (lead #186, A6): of the hand graph's four reaches, three get a parent (trunk reaches); one of them flagged rise_over_budget, one budget_residual; the
+    // tributary's unresolved_endpoint is no trunk exception
+    let mut g = graph();
+    let parent = g.reaches[3].id;
+    for k in 0..3 {
+        g.reaches[k].parent = Some(parent);
+    }
+    g.reaches[0].exceptions = vec![Exception { reason: Reason::RiseOverBudget, value: 1.0 }];
+    g.reaches[1].exceptions = vec![Exception { reason: Reason::BudgetResidual, value: 0.5 }];
+    g.reaches[3].exceptions = vec![Exception { reason: Reason::UnresolvedEndpoint, value: 0.0 }];
+    let all = vec![true; 144];
+    let r = graph_report(&g, &W, &all, &all, DX);
+    assert_eq!((r.trunk_reaches, r.trunk_exceptions), (3, 2), "{r:?}");
+    let cols = G2Report { graph: Some(r), ..G2Report::default() }.columns();
+    assert!(cols.iter().any(|c| c.0 == "g_trunk_exceptions" && c.1 == "2"));
+}
+
+// spec: BUILD-060
+#[test]
+fn a_cut_through_a_reference_hump_is_a_hump_cut_and_a_corner_only_block_is_a_corner_link() {
+    // G3-1 (lead #186): on a 30 x 9 grid, the reference rises 15 m over x 10..=19 on row 2 and 5 m over the same span on row 6; the surface cuts a 1-cell path along each row
+    // down to 0 m. Row 2's path cuts a 15 m hump by 15 m (a hump cut); row 6's hump is 5 m (none); a path on a plain, cut 12 m, rises over no end (none)
+    use planet_cache::river_suite::{corner_links, hump_cuts};
+    let (w, h) = (30usize, 9usize);
+    let grid = Grid::new(w, h, DX);
+    let cell = |x: usize, y: usize| y * w + x;
+    let mut reference = vec![0.0f64; w * h];
+    for x in 10..=19 {
+        reference[cell(x, 2)] = 15.0;
+        reference[cell(x, 6)] = 5.0;
+    }
+    let all = vec![true; w * h];
+    let mut surface = reference.clone();
+    for x in 5..=24 {
+        surface[cell(x, 2)] = -0.5;
+        surface[cell(x, 6)] = -0.5;
+    }
+    assert_eq!(hump_cuts(&grid, &reference, &surface, &all), 1, "row 2 only");
+    let plain = vec![20.0f64; w * h];
+    let mut cut = plain.clone();
+    for x in 5..=24 {
+        cut[cell(x, 4)] = 8.0;
+    }
+    assert_eq!(hump_cuts(&grid, &plain, &cut, &all), 0, "a cut on a plain rises over no end");
+    // numerics review: a downhill cut is no hump cut, whether it bends (an L-shaped 1-cell path) or is two cells wide; the reference falls 1 m a cell along it, cut 12 m
+    let mut slope = vec![0.0f64; w * h];
+    let mut down = vec![0.0f64; w * h];
+    let mut l_path: Vec<(usize, usize)> = (0..20).map(|x| (x + 2, 1)).collect();
+    l_path.extend((2..8).map(|y| (21, y)));
+    for (k, &(x, y)) in l_path.iter().enumerate() {
+        slope[cell(x, y)] = 40.0 - k as f64;
+        down[cell(x, y)] = slope[cell(x, y)] - 12.0;
+    }
+    assert_eq!(hump_cuts(&grid, &slope, &down, &all), 0, "an L-shaped downhill cut");
+    let mut wide = vec![50.0f64; w * h];
+    let mut wide_cut = wide.clone();
+    for x in 2..=27 {
+        for y in 3..=4 {
+            wide[cell(x, y)] = 40.0 - x as f64;
+            wide_cut[cell(x, y)] = wide[cell(x, y)] - 12.0;
+        }
+    }
+    assert_eq!(hump_cuts(&grid, &wide, &wide_cut, &all), 0, "a two-cell-wide downhill cut");
+    // outside the counted cells nothing counts
+    let none = vec![false; w * h];
+    assert_eq!(hump_cuts(&grid, &reference, &surface, &none), 0);
+    // corner links: a 2 x 2 block with its anti-diagonal 6 m above its diagonal, and one 4 m above (no link)
+    let flat = vec![0.0f64; w * h];
+    let mut z = flat.clone();
+    z[cell(4, 3)] = 6.0;
+    z[cell(3, 4)] = 6.0;
+    z[cell(21, 3)] = 4.0;
+    z[cell(20, 4)] = 4.0;
+    assert_eq!(corner_links(&grid, &z, &all), 1, "the 6 m block links its low pair only at a corner");
+    // lead review of #1648: humps removed as a whole. Row 2's 15 m hump and row 6's 5 m one: one hump over 10 m; lowered 12 m at its crest it is removed, lowered 8 m not,
+    // and a channel through it counts as removed too
+    use planet_cache::river_suite::humps_removed;
+    let mut lowered = reference.clone();
+    for x in 10..=19 {
+        lowered[cell(x, 2)] -= 12.0;
+    }
+    assert_eq!(humps_removed(&grid, &reference, &lowered, &all), (1, 1), "the 15 m hump lowered 12 m as a whole");
+    let mut shaved = reference.clone();
+    for x in 10..=19 {
+        shaved[cell(x, 2)] -= 8.0;
+    }
+    assert_eq!(humps_removed(&grid, &reference, &shaved, &all), (1, 0), "lowered 8 m: not removed");
+    assert_eq!(humps_removed(&grid, &reference, &surface, &all), (1, 1), "the 1-cell channel through it");
+    assert_eq!(corner_links(&grid, &flat, &all), 0);
+}
+
+// spec: BUILD-060
+#[test]
+fn the_margin_outside_the_regions_box_is_measured_and_reported() {
+    // G3-1 (Carbon M4.7): the 40 x 40 slope with its pit on the valley (x 10..=15); the region's box is the east half (x >= 20), so the pit lies in the margin
+    let n = 40usize;
+    let grid = Grid::new(n, n, DX);
+    let cell = |x: usize, y: usize| y * n + x;
+    let mut z: Vec<f64> = (0..n * n).map(|c| 10.0 + 0.1 * (c % n) as f64 + 0.5 * ((c / n) as f64 - 20.0).abs()).collect();
+    for y in 0..n {
+        z[cell(0, y)] = -1.0;
+    }
+    for y in 19..=21 {
+        for x in 10..=15 {
+            z[cell(x, y)] -= 2.0;
+        }
+    }
+    let outlet = grid.outlets(&z, 0.0);
+    let all = vec![true; n * n];
+    let region: Vec<bool> = (0..n * n).map(|c| c % n >= 20).collect();
+    let report = measure(
+        &GateInput {
+            grid: &grid,
+            start: &z,
+            surface: &z,
+            outlet: &outlet,
+            inside: &all,
+            region: &region,
+            h1: &[],
+            seed: 7,
+            sea_level_m: 0.0,
+            outside_drains: false,
+            trunks: &[],
+            g2: None,
+        },
+        &GateParams { channel_area_m2: 6.0 * DX * DX, ..GateParams::default() },
+    );
+    let m = report.margin;
+    assert_eq!(m.cells, 20 * n, "the west half");
+    assert!(m.river_cells > 0 && m.basin_cells > 0 && m.ponds_cells == m.basin_cells, "the pit's river cells are the margin's: {m:?}");
+    assert!(m.uphill_steps >= 1 && m.kept_lake_cells == 0, "{m:?}");
+    let line = report.fields_line();
+    assert!(
+        line.contains(&format!(" m_cells={} ", 20 * n)) && line.contains(" m_basin_pct=") && line.contains(" m_kept_lake_km2=0.00 "),
+        "{line}"
+    );
 }

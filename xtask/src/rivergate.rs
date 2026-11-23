@@ -283,7 +283,8 @@ pub fn parse_timing(text: &str) -> Result<(f64, Option<f64>), String> {
 /// - `bar_relief_lost`: its `relief10_lost_m` at most B's, a gain of relief counting as no loss (`<= max(B's, 0)`), preservation;
 /// - `bar_beta_change`: its `|beta_change|` at most B's, geomorphology;
 /// - `bar_cost`: its `cost_s` at most B's, product (only when both rows carry a timing);
-/// - `bar_saddles1`, `bar_saddles5`: its cut-through saddles at 1 and 5 km2 at most B's, preservation.
+/// - `bar_saddles1`, `bar_saddles5`: its cut-through saddles at 1 and 5 km2 at most B's, preservation;
+/// - `bar_saddles_s0` (G3-1, owner decision 3 revisited, lead #186): its cut-through saddles at 1 km2 against `S0` (`saddles1_s0`) at most B's (`saddles1`, B's reference is `S0`), preservation.
 ///
 /// A row's window is its label's part after ` @ `. The cells are `PASS:<value>` or `FAIL:<value>`; the columns' classes are added to `classes`.
 pub fn b_bars(table: &mut [(String, Vec<(String, String)>)], stores: &[bool], classes: &mut Vec<(String, String)>) {
@@ -320,6 +321,7 @@ pub fn b_bars(table: &mut [(String, Vec<(String, String)>)], stores: &[bool], cl
         // lead #172: cut-through saddles at most B's
         add("bar_saddles1", "preservation", get(&refs[i].1, "saddles1"), get(b, "saddles1"), &|v, l| v <= l);
         add("bar_saddles5", "preservation", get(&refs[i].1, "saddles5"), get(b, "saddles5"), &|v, l| v <= l);
+        add("bar_saddles_s0", "preservation", get(&refs[i].1, "saddles1_s0"), get(b, "saddles1"), &|v, l| v <= l);
     }
     for (n, c) in used {
         if !classes.iter().any(|(k, _)| k == n) {
@@ -550,6 +552,7 @@ mod tests {
                     ("cost_s", "900.0"),
                     ("saddles1", "764"),
                     ("saddles5", "501"),
+                    ("saddles1_s0", "765"),
                 ]),
             ),
             ("r3a-proto @ r3a".to_string(), f(&[("g_nodes", "6"), ("relief10_lost_m", "2.0"), ("beta_change", "1.0")])),
@@ -566,6 +569,9 @@ mod tests {
         assert_eq!(cell(1, "bar_cost").as_deref(), Some("FAIL:900.00"));
         // as many saddles at 1 km2 as B passes, one more at 5 km2 fails
         assert_eq!((cell(1, "bar_saddles1").as_deref(), cell(1, "bar_saddles5").as_deref()), (Some("PASS:764.00"), Some("FAIL:501.00")));
+        // G3-1 (decision 3): one saddle more than B's against S0 fails; a row without the S0 column gets none
+        assert_eq!(cell(1, "bar_saddles_s0").as_deref(), Some("FAIL:765.00"));
+        assert_eq!(cell(2, "bar_saddles_s0"), None);
         // R3a: B is after it in the table; it loses 2 m against B's 1 m; no timing, no cost bar
         assert_eq!(cell(2, "bar_relief_lost").as_deref(), Some("FAIL:2.00"));
         assert_eq!(cell(2, "bar_cost"), None);
