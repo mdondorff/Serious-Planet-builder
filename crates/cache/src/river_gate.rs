@@ -234,6 +234,8 @@ pub struct GateReport {
     pub spill_mismatch: Option<usize>,
     /// With a graph: test (a), the kept basins whose rim holds an L vertex with its bed more than `SPILL_MISMATCH_M` under the recorded spill ([`rim_mismatch`]).
     pub spill_rim_mismatch: Option<usize>,
+    /// With a graph (lead #182a): the lake_inlet nodes by origin and the line-end ones in no kept-basin depression ([`crate::river_gate_graph::InletReport`]).
+    pub inlets: Option<crate::river_gate_graph::InletReport>,
     /// The area of an L cell (m2), for the kept lakes' area.
     pub cell_area_m2: f64,
     /// SPIKE-114's reference count: river cells inside in any pit of 5 cm.
@@ -339,6 +341,12 @@ impl GateReport {
             ("kept_lake_km2", self.kept_lake_cells.map_or("-".to_string(), |k| format!("{:.2}", k as f64 * self.cell_area_m2 / 1.0e6))),
             ("g_spill_mismatch", self.spill_mismatch.map_or("-".to_string(), c)),
             ("g_spill_rim", self.spill_rim_mismatch.map_or("-".to_string(), c)),
+            ("g_lake_inlets", self.inlets.map_or("-".to_string(), |x| x.inside.to_string())),
+            ("g_inlet_line_ends", self.inlets.map_or("-".to_string(), |x| x.line_ends.to_string())),
+            ("g_inlet_spill_targets", self.inlets.map_or("-".to_string(), |x| x.spill_targets.to_string())),
+            ("g_inlet_orphans", self.inlets.map_or("-".to_string(), |x| x.orphans.to_string())),
+            ("g_inlet_no_basin", self.inlets.map_or("-".to_string(), |x| x.line_end_no_basin.to_string())),
+            ("g_inlet_no_basin_far", self.inlets.map_or("-".to_string(), |x| x.line_end_no_basin_far.to_string())),
             ("reference_cells", c(self.reference_river_cells)),
             ("reference_pct", pct(self.reference_river_cells, n)),
             ("valley_over_cells", c(self.valley.count_over)),
@@ -1131,6 +1139,7 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
             })
         }),
         spill_rim_mismatch: input.g2.as_ref().and_then(|x| x.graph.map(|gr| rim_mismatch(gr, &x.window, &label, SPILL_MISMATCH_M))),
+        inlets: input.g2.as_ref().and_then(|x| x.graph.map(|gr| crate::river_gate_graph::inlets_without_basin(gr, &x.window, &label))),
         cell_area_m2: g.dx() * g.dx(),
         reference_river_cells: reference_cells,
         lake_river_cells: lake_cells,
