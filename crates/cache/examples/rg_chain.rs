@@ -2027,8 +2027,8 @@ fn main() -> Result<(), String> {
     // split; h4 the same unclamped; line no triangulation: C1 lowered toward the straight line of every D8 step of KH's routing from an H1 channel cell (its linear
     // z_s between the two cell centres), full within 1.5 L cells of the line and smoothly to no change at 4 (spike only)
     let kh_zone = value(&args, "--kh-zone").unwrap_or("h4c");
-    if !["h4c", "h4", "line"].contains(&kh_zone) {
-        return Err(format!("--kh-zone h4c | h4 | line, not '{kh_zone}'"));
+    if !["h4c", "h4", "line", "line8"].contains(&kh_zone) {
+        return Err(format!("--kh-zone h4c | h4 | line | line8, not '{kh_zone}'"));
     }
     let kh_saddle = value(&args, "--kh-saddle-split").unwrap_or("off");
     if !["off", "trunk", "all"].contains(&kh_saddle) {
@@ -2809,14 +2809,16 @@ fn main() -> Result<(), String> {
         let floor = sea + 0.5;
         let band = |k: f64, r: f64| if k > floor { r.max(floor - k) } else { r };
         // lead #177 `--kh-zone line`: the D8 steps of KH's routing from each H1 channel cell, by their start cell
-        let lines: Option<Vec<Option<usize>>> =
-            (kh_zone == "line").then(|| (0..cells).map(|c| (h1.hydro.channel[c] && recv[c] != NONE).then(|| recv[c] as usize)).collect());
+        let lines: Option<Vec<Option<usize>>> = (kh_zone == "line" || kh_zone == "line8")
+            .then(|| (0..cells).map(|c| (h1.hydro.channel[c] && recv[c] != NONE).then(|| recv[c] as usize)).collect());
         if let Some(l) = &lines {
             println!(
-                "RG KH zone read (lead #177): line, {} channel D8 steps as straight lines (no quad split)",
+                "RG KH zone read (lead #177): {kh_zone}, {} channel D8 steps as straight lines (no quad split)",
                 l.iter().flatten().count()
             );
         }
+        // lead #177a: line8 falls off over h5's zone width, to no change at 8 L cells (one H1 cell), so a diagonal line's two edge cells take nearly its full lowering
+        let line_outer = if kh_zone == "line8" { 8.0 } else { 4.0 };
         let line_lower = |c1: f64, fx: f64, fy: f64| -> f64 {
             let Some(l) = &lines else { return c1 };
             let (ix, iy) = (fx.round() as i64, fy.round() as i64);
@@ -2833,7 +2835,7 @@ fn main() -> Result<(), String> {
                     let u = (((fx - ax) * dx + (fy - ay) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
                     let (ex, ey) = (fx - ax - u * dx, fy - ay - u * dy);
                     let d = (ex * ex + ey * ey).sqrt() * lr;
-                    let s = ((d - 1.5) / (4.0 - 1.5)).clamp(0.0, 1.0);
+                    let s = ((d - 1.5) / (line_outer - 1.5)).clamp(0.0, 1.0);
                     let wgt = 1.0 - s * s * (3.0 - 2.0 * s);
                     let target = solve.zs[a] + u * (solve.zs[b] - solve.zs[a]);
                     out = out.min(c1 + wgt * (target - c1).min(0.0));
@@ -2848,7 +2850,7 @@ fn main() -> Result<(), String> {
                 "h4" => kh::read_ct(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0,
                 "h5" | "h5d" => {
                     let c1 = f64::from(zs_field.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
-                    if kh_zone == "line" {
+                    if kh_zone == "line" || kh_zone == "line8" {
                         return line_lower(c1, fx, fy);
                     }
                     let h4c = if kh_zone == "h4" {
