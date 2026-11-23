@@ -1197,8 +1197,13 @@ fn infer_stage_and_variant(path: &Path, file_name: &str, idx: &PreviewCatalogInd
 
 fn discover_artifacts(root: &Path, out_dir: &Path, chain: Option<&str>, catalog: &JsonVal) -> (Vec<DiscoveredImage>, Vec<DiscoveredText>) {
     let idx = build_preview_index(catalog);
-    let mut scan_roots =
-        vec![out_dir.join("previews"), root.join("target/preview"), root.join("target/review/stages"), root.join("docs/stages/sheets")];
+    let mut scan_roots = vec![
+        out_dir.join("previews"),
+        root.join("target/preview"),
+        root.join("target/review/stages"),
+        root.join("target/review/look"),
+        root.join("docs/stages/sheets"),
+    ];
     let chain_path = chain.map(|c| lexically_absolutize(root, Path::new(c)));
     if let Some(cp) = &chain_path {
         scan_roots.push(cp.clone());

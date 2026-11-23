@@ -105,6 +105,7 @@ pub fn crop_box(w: usize, h: usize, coarse: usize, c: &Crop) -> Result<(usize, u
 }
 
 /// Writes a chain's fields as crops while the chain runs (the chain hook `--probe-crops`), so the crops outlive a deletion of the full dumps.
+#[derive(Debug)]
 pub struct CropWriter {
     root: PathBuf,
     w: usize,
@@ -116,7 +117,7 @@ pub struct CropWriter {
 impl CropWriter {
     /// A store at `root` for a window of `w x h` L cells and `coarse` L cells an H1 cell; writes `crops.txt` and makes the crop directories.
     pub fn new(root: &Path, w: usize, h: usize, coarse: usize, crops: &[Crop]) -> Result<CropWriter, String> {
-        if coarse == 0 || w % coarse != 0 || h % coarse != 0 {
+        if coarse == 0 || !w.is_multiple_of(coarse) || !h.is_multiple_of(coarse) {
             return Err(format!("the window {w} x {h} is not a multiple of coarse {coarse}"));
         }
         let mut boxed = Vec::new();
@@ -142,9 +143,9 @@ impl CropWriter {
     pub fn field(&self, name: &str, bytes: &[u8]) -> Result<(), String> {
         let (nl, k) = (self.w * self.h, self.coarse);
         let nh = (self.w / k) * (self.h / k);
-        let (fw, scale, elem) = if bytes.len() % nl == 0 && [1, 2, 4, 8].contains(&(bytes.len() / nl)) {
+        let (fw, scale, elem) = if bytes.len().is_multiple_of(nl) && [1, 2, 4, 8].contains(&(bytes.len() / nl)) {
             (self.w, 1, bytes.len() / nl)
-        } else if bytes.len() % nh == 0 && [1, 2, 4, 8].contains(&(bytes.len() / nh)) {
+        } else if bytes.len().is_multiple_of(nh) && [1, 2, 4, 8].contains(&(bytes.len() / nh)) {
             (self.w / k, k, bytes.len() / nh)
         } else {
             return Err(format!("{name}: {} bytes are neither an L field of {nl} cells nor an H1 field of {nh} cells", bytes.len()));
@@ -247,8 +248,11 @@ fn compose(title: &[String], size: usize, rows: &[Row]) -> Vec<u8> {
     }
     let top = 2 * TEXT_ROW_H + GAP;
     let x0 = GAP + LABEL_CHARS * TEXT_CELL_W + GAP;
+    // a stage label longer than its panel is cut at the panel's width
+    let fit_chars = (size / TEXT_CELL_W).max(1);
     for (s, (_, label)) in STAGES.iter().enumerate() {
-        put_text(&mut img, x0 + s * (size + GAP), top, label, [230, 230, 230]);
+        let fit: String = label.chars().take(fit_chars).collect();
+        put_text(&mut img, x0 + s * (size + GAP), top, &fit, [230, 230, 230]);
     }
     let body = top + TEXT_ROW_H + 4;
     for (r, row) in rows.iter().enumerate() {
@@ -271,7 +275,7 @@ fn compose(title: &[String], size: usize, rows: &[Row]) -> Vec<u8> {
             }
         }
     }
-    img.data.chunks_exact(4).flat_map(|c| [c[0], c[1], c[2]]).collect()
+    img.data.as_chunks::<4>().0.iter().flat_map(|c| [c[0], c[1], c[2]]).collect()
 }
 
 /// An 8-bit RGB PNG of `rgb`.
