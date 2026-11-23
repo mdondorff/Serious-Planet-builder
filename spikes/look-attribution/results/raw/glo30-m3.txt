@@ -1,0 +1,16 @@
+Copernicus_DSM_COG_10_N27_00_E086_00_DEM channel length     880 km, in straight runs over 2 km   0.3 %
+Copernicus_DSM_COG_10_N31_00_W004_00_DEM channel length    1060 km, in straight runs over 2 km   0.8 %
+Copernicus_DSM_COG_10_N33_00_W092_00_DEM channel length    1075 km, in straight runs over 2 km  13.1 %
+Copernicus_DSM_COG_10_N36_00_W113_00_DEM channel length     830 km, in straight runs over 2 km   0.4 %
+Copernicus_DSM_COG_10_N36_00_W117_00_DEM channel length     776 km, in straight runs over 2 km  15.2 %
+Copernicus_DSM_COG_10_N40_00_W078_00_DEM channel length     869 km, in straight runs over 2 km   1.8 %
+Copernicus_DSM_COG_10_N41_00_W096_00_DEM channel length    1107 km, in straight runs over 2 km   1.3 %
+Copernicus_DSM_COG_10_N43_00_W102_00_DEM channel length     895 km, in straight runs over 2 km   0.0 %
+Copernicus_DSM_COG_10_N46_00_W122_00_DEM channel length     606 km, in straight runs over 2 km   2.3 %
+Copernicus_DSM_COG_10_N47_00_E011_00_DEM channel length     666 km, in straight runs over 2 km   2.8 %
+Copernicus_DSM_COG_10_N48_00_E008_00_DEM channel length     750 km, in straight runs over 2 km   1.0 %
+Copernicus_DSM_COG_10_N52_00_E012_00_DEM channel length     699 km, in straight runs over 2 km   7.2 %
+Copernicus_DSM_COG_10_N57_00_W005_00_DEM channel length     561 km, in straight runs over 2 km  21.5 %
+Copernicus_DSM_COG_10_S04_00_W061_00_DEM channel length    1120 km, in straight runs over 2 km  25.8 %
+Copernicus_DSM_COG_10_S44_00_E170_00_DEM channel length     708 km, in straight runs over 2 km  16.7 %
+all tiles: straight-run share 7.3 %; sinuosity of reaches over 2 km (760): p50 1.251, length-weighted mean 1.371
