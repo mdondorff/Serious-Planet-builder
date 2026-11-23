@@ -285,8 +285,12 @@ fn main() -> Result<(), String> {
             "h1" => (planet_generators::bake::river_graph::Level::H1, spec.regional, ri0, rj0, ri1 - ri0 + 1, rj1 - rj0 + 1),
             o => return Err(format!("--graph-level l|h1, not '{o}'")),
         };
-        // lead #176: a vertex is stored only where its drained area is at least `--graph-min-km2` (default 5 km2; the drawing has a width floor of about one stored cell)
-        let min_m2: f64 = opt(&args, "--graph-min-km2").map_or(Ok(5.0), str::parse::<f64>).map_err(|_| "--graph-min-km2 KM2")? * 1.0e6;
+        // lead #176: a vertex is stored only where its drained area is at least `--graph-min-km2` (lead #194: default 1 km2, was 5; the drawing takes at least one
+        // L cell's width, REND-059, and drops a ribbon under half a node sample, MIN_RIVER_SAMPLES, so 1 km2 channels show only on nodes of at most 2 L cells a sample)
+        let min_m2: f64 = opt(&args, "--graph-min-km2").map_or(Ok(1.0), str::parse::<f64>).map_err(|_| "--graph-min-km2 KM2")? * 1.0e6;
+        // lead #194 (Carbon's G3 review M6): an L chain breaks where it crosses a kept lake: a vertex on a wet cell is not stored, so no ribbon is drawn over the water
+        let wet = |c: u32| level_name == "l" && lake_of.get(c as usize).is_some_and(|&k| k != u32::MAX);
+        let mut wet_skipped = 0usize;
         let h1 = planet_generators::bake::Grid::new(rw, rh, spec.radius_m * std::f64::consts::FRAC_PI_2 / per_edge as f64);
         let index = |id: u64| -> Option<u32> {
             let (gx, gy) = ((id & 0xffff_ffff) as usize, (id >> 32) as usize);
@@ -312,6 +316,11 @@ fn main() -> Result<(), String> {
                     flush(&mut cur, &mut part);
                     continue;
                 };
+                if wet(c) {
+                    wet_skipped += 1;
+                    flush(&mut cur, &mut part);
+                    continue;
+                }
                 let adjacent = cur.0.last().is_none_or(|&p| (0..8).any(|d| h1.neighbour(p as usize, d) == Some(c as usize)));
                 if !adjacent {
                     flush(&mut cur, &mut part);
@@ -335,7 +344,7 @@ fn main() -> Result<(), String> {
         }
         graph_cells = per_edge as u32;
         println!("FLIGHT-STORE graph {gpath} ({level_name}, drained area >= {} km2): {chains_n} chains,", min_m2 / 1.0e6);
-        println!("FLIGHT-STORE graph detail: {verts_n} vertices, {} blocks", graph_keys.len());
+        println!("FLIGHT-STORE graph detail: {verts_n} vertices, {} blocks; {wet_skipped} vertices on kept lakes' water not stored (chains broken there)", graph_keys.len());
     }
     writer.finish().map_err(|e| e.to_string())?;
     let commit = Commit::new(CommitSpec::of(&l_spec, spec.res)?, tables, keys, graph_cells, graph_keys);
