@@ -1216,3 +1216,50 @@ fn a_cut_through_a_reference_hump_is_a_hump_cut_and_a_corner_only_block_is_a_cor
     assert_eq!(corner_links(&grid, &z, &all), 1, "the 6 m block links its low pair only at a corner");
     assert_eq!(corner_links(&grid, &flat, &all), 0);
 }
+
+// spec: BUILD-060
+#[test]
+fn the_margin_outside_the_regions_box_is_measured_and_reported() {
+    // G3-1 (Carbon M4.7): the 40 x 40 slope with its pit on the valley (x 10..=15); the region's box is the east half (x >= 20), so the pit lies in the margin
+    let n = 40usize;
+    let grid = Grid::new(n, n, DX);
+    let cell = |x: usize, y: usize| y * n + x;
+    let mut z: Vec<f64> = (0..n * n).map(|c| 10.0 + 0.1 * (c % n) as f64 + 0.5 * ((c / n) as f64 - 20.0).abs()).collect();
+    for y in 0..n {
+        z[cell(0, y)] = -1.0;
+    }
+    for y in 19..=21 {
+        for x in 10..=15 {
+            z[cell(x, y)] -= 2.0;
+        }
+    }
+    let outlet = grid.outlets(&z, 0.0);
+    let all = vec![true; n * n];
+    let region: Vec<bool> = (0..n * n).map(|c| c % n >= 20).collect();
+    let report = measure(
+        &GateInput {
+            grid: &grid,
+            start: &z,
+            surface: &z,
+            outlet: &outlet,
+            inside: &all,
+            region: &region,
+            h1: &[],
+            seed: 7,
+            sea_level_m: 0.0,
+            outside_drains: false,
+            trunks: &[],
+            g2: None,
+        },
+        &GateParams { channel_area_m2: 6.0 * DX * DX, ..GateParams::default() },
+    );
+    let m = report.margin;
+    assert_eq!(m.cells, 20 * n, "the west half");
+    assert!(m.river_cells > 0 && m.basin_cells > 0 && m.ponds_cells == m.basin_cells, "the pit's river cells are the margin's: {m:?}");
+    assert!(m.uphill_steps >= 1 && m.kept_lake_cells == 0, "{m:?}");
+    let line = report.fields_line();
+    assert!(
+        line.contains(&format!(" m_cells={} ", 20 * n)) && line.contains(" m_basin_pct=") && line.contains(" m_kept_lake_km2=0.00 "),
+        "{line}"
+    );
+}

@@ -334,6 +334,8 @@ pub struct GateReport {
     /// The 1 km2 network (G3-1, [`FINE_NETWORK_KM2`]): river cells inside on land, their river steps and uphill steps outside kept-basin interiors, and the river cells outside
     /// the interiors with those of them in a closed basin (on a row without a graph every river cell is outside an interior).
     pub fine: FineReport,
+    /// G3-1: the window's margin outside the region's box ([`MarginReport`]).
+    pub margin: MarginReport,
     /// G3-1 (lead #186): hump cuts of the surface against `S0`, and against `S_KH` on a row with KH's stage field (printed beside, not barred); corner-only links over 5 m on
     /// the surface and on `S0`, over the counted cells.
     pub hump_cuts: usize,
@@ -393,6 +395,19 @@ pub struct GateReport {
     pub ridge: RidgeReport,
     pub ridge_s0: RidgeReport,
     pub ridge_vs_kh: bool,
+}
+
+/// The margin (G3-1, lead #186; Carbon M4.7): the window's cells outside the region's box, which no bar counts: river cells (75 km2 network) on land, those in a closed
+/// basin and those in one outside the kept-basin interiors, river steps and uphill steps outside the interiors, and the interiors' cells. Reported, not barred.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MarginReport {
+    pub cells: usize,
+    pub river_cells: usize,
+    pub basin_cells: usize,
+    pub ponds_cells: usize,
+    pub steps: usize,
+    pub uphill_steps: usize,
+    pub kept_lake_cells: usize,
 }
 
 /// The uphill and ponds counts on the 1 km2 network (G3-1).
@@ -459,6 +474,12 @@ impl GateReport {
             ("fine_uphill_pct", format!("{:.2}", share(self.fine.uphill_steps, self.fine.steps))),
             ("fine_ponds_cells", c(self.fine.ponds_cells)),
             ("fine_ponds_pct", format!("{:.2}", share(self.fine.ponds_cells, self.fine.outside_cells))),
+            ("m_cells", c(self.margin.cells)),
+            ("m_river_cells", c(self.margin.river_cells)),
+            ("m_basin_pct", format!("{:.2}", share(self.margin.basin_cells, self.margin.river_cells))),
+            ("m_ponds_pct", format!("{:.2}", share(self.margin.ponds_cells, self.margin.river_cells))),
+            ("m_uphill_pct", format!("{:.2}", share(self.margin.uphill_steps, self.margin.steps))),
+            ("m_kept_lake_km2", format!("{:.2}", self.margin.kept_lake_cells as f64 * self.cell_area_m2 / 1.0e6)),
             ("hump_cuts", c(self.hump_cuts)),
             ("hump_cuts_s_kh", self.hump_cuts_s_kh.map_or("-".to_string(), c)),
             ("hump_cuts_per_10k_km2", format!("{:.2}", self.per_10k_km2(self.hump_cuts as f64))),
@@ -1257,6 +1278,24 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         fine.steps += 1;
         fine.uphill_steps += usize::from(input.surface[r as usize] - input.surface[c] > crate::river_suite::UPHILL_M);
     }
+    // G3-1 (Carbon M4.7): the margin outside the region's box, reported only
+    let mut margin = MarginReport::default();
+    for c in (0..n).filter(|&c| !input.region[c]) {
+        margin.cells += 1;
+        margin.kept_lake_cells += usize::from(in_kept(c));
+        if !river[c] {
+            continue;
+        }
+        margin.river_cells += 1;
+        margin.basin_cells += usize::from(basin(c));
+        margin.ponds_cells += usize::from(basin(c) && !in_kept(c));
+        let r = routing.receiver[c];
+        if r == NONE || !river[r as usize] || in_kept(c) || in_kept(r as usize) {
+            continue;
+        }
+        margin.steps += 1;
+        margin.uphill_steps += usize::from(input.surface[r as usize] - input.surface[c] > crate::river_suite::UPHILL_M);
+    }
     let w = g.w();
     let mut l_cross: Vec<Crossing> = Vec::new();
     let mut l_area: Vec<f64> = Vec::new();
@@ -1326,6 +1365,7 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         kept_river_cells: kept_lakes.as_ref().map(|_| kept_river),
         kept_lake_cells: kept_lakes.as_ref().map(|k| (0..n).filter(|&c| k[c] && input.inside[c]).count()),
         fine,
+        margin,
         hump_cuts,
         hump_cuts_s_kh,
         corner_links,
