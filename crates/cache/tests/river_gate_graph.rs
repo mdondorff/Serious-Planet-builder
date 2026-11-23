@@ -806,3 +806,45 @@ fn a_rise_into_a_down_node_excused_by_its_residual_is_printed_beside_the_violati
     let lines = G2Report { graph: Some(rep), ..G2Report::default() }.lines();
     assert!(lines.iter().any(|l| l.contains("1 bed rises into a down node excused by budget_residual (0.5 m, reading 41)")), "{lines:?}");
 }
+
+// SPIKE-130 (lead #182a, spike only; the gate's line-end inlet check)
+#[test]
+fn a_line_end_inlet_outside_every_kept_depression_is_counted_and_spill_targets_are_not() {
+    // a kept basin whose floor depression is the 3 x 3 block at (4..=6, 4..=6); reaches ending at inlets inside, beside and far from it; a spill target far from it; an
+    // orphan inlet
+    let mut label = vec![u32::MAX; 144];
+    for y in 4..=6 {
+        for x in 4..=6 {
+            label[y * 12 + x] = 0;
+        }
+    }
+    let inlet = |x: u64, y: u64| node(NodeKind::LakeInlet, x, y);
+    let (a, b, c, s, o) = (inlet(104, 204), inlet(107, 205), inlet(110, 210), inlet(110, 202), inlet(102, 210));
+    let src = node(NodeKind::Source, 101, 201);
+    let to = |d: &Node| reach(&src, d, &[(101, 201), (d.anchor & 0xFFFF_FFFF, d.anchor >> 32)], attrs(&[1.0e6, 2.0e6], &[20, 18], 1));
+    let kept = Basin {
+        id: 9,
+        level: Level::L,
+        parent: None,
+        floor_cell: gid(105, 205),
+        floor_m: 1.0,
+        spill_cell: gid(107, 205),
+        spill_m: 5.0,
+        spill_node: 0,
+        outlet: Outlet::Active,
+        represented: Represented::ProtectedSurface,
+        owner: Domain::Landmass,
+    };
+    let reported = Basin { id: 10, represented: Represented::None, spill_node: s.id, ..kept.clone() };
+    let g = Graph {
+        body: BODY,
+        nodes: vec![src.clone(), a.clone(), b.clone(), c.clone(), s.clone(), o.clone()],
+        reaches: vec![to(&a), to(&b), to(&c)],
+        basins: vec![kept, reported],
+    };
+    use planet_cache::river_gate_graph::{inlets_without_basin, InletReport};
+    assert_eq!(
+        inlets_without_basin(&g, &W, &label),
+        InletReport { inside: 5, line_ends: 3, spill_targets: 1, orphans: 1, line_end_no_basin: 2, line_end_no_basin_far: 1 }
+    );
+}

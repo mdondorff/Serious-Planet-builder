@@ -433,6 +433,49 @@ pub fn kept_interiors(g: &Graph, window: &Window, label: &[u32]) -> (Vec<bool>, 
     (label.iter().map(|l| *l != u32::MAX && held.contains(l)).collect(), basins)
 }
 
+/// Lead #182a (DEC crusader-32): the `lake_inlet` nodes inside the window by origin (a line's end, some reach's `down`; a basin's spill target, some basin's `spill_node`),
+/// and the ones the gate holds to a kept basin: a line-end inlet whose anchor lies in no kept-basin depression of `label` ([`kept_interiors`]). A spill target between
+/// reported basins is a hierarchy record and is not held to it; an inlet that is neither is an orphan (GEN-189's graph rule).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct InletReport {
+    pub inside: usize,
+    pub line_ends: usize,
+    pub spill_targets: usize,
+    pub orphans: usize,
+    /// Line-end inlets (also spill targets among them) in no kept-basin depression; and of those, the ones not within one cell of one.
+    pub line_end_no_basin: usize,
+    pub line_end_no_basin_far: usize,
+}
+
+pub fn inlets_without_basin(g: &Graph, window: &Window, label: &[u32]) -> InletReport {
+    let (kept, _) = kept_interiors(g, window, label);
+    let (w, h) = (window.w as i64, window.h as i64);
+    let downs: BTreeSet<u64> = g.reaches.iter().map(|r| r.down).collect();
+    let spills: BTreeSet<u64> = g.basins.iter().map(|b| b.spill_node).collect();
+    let mut r = InletReport::default();
+    for n in g.nodes.iter().filter(|n| n.kind == NodeKind::LakeInlet && n.level == Level::L) {
+        let Some(c) = window.cell(n.anchor) else { continue };
+        r.inside += 1;
+        let (line_end, spill) = (downs.contains(&n.id), spills.contains(&n.id));
+        r.line_ends += usize::from(line_end);
+        r.spill_targets += usize::from(spill && !line_end);
+        r.orphans += usize::from(!line_end && !spill);
+        if !line_end || kept[c] {
+            continue;
+        }
+        r.line_end_no_basin += 1;
+        let (x, y) = ((c % window.w) as i64, (c / window.w) as i64);
+        let near = (-1..=1).any(|dy| {
+            (-1..=1).any(|dx| {
+                let (qx, qy) = (x + dx, y + dy);
+                qx >= 0 && qy >= 0 && qx < w && qy < h && kept[(qy * w + qx) as usize]
+            })
+        });
+        r.line_end_no_basin_far += usize::from(!near);
+    }
+    r
+}
+
 /// Spill mismatch test (a) (BUILD-060, lead 2026-11-21): the kept basins with their floor in the window whose rim (the cells outside the floor's depression in `label` that touch
 /// it, 8-connected) holds an L vertex whose bed lies more than `margin_m` under the basin's recorded spill: a line that leaves the lake below its spill.
 pub fn rim_mismatch(g: &Graph, window: &Window, label: &[u32], margin_m: f64) -> usize {

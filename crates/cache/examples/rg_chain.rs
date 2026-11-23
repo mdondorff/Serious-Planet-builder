@@ -1778,6 +1778,8 @@ static KV_RIMS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 static KV_CONNECT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 /// lead #178 item 1: `--sea17 on` holds reading 17 (no land cell lowered to the sea + 0.5 m or below) in KV, KC's breach and band6's breach, as KS; `off` (default until the rows) the form before.
 static SEA17: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// lead #182a: `--trib-rerun on` runs KG-trib post once more with basins-2's kept set where a line-end lake inlet lost its basin, then basins-2 once more on the new lines; on by default since #182c (reading 44); `off` the one extraction.
+static TRIB_RERUN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 /// lead #179: `--inlet-floor on` floors the graph bed of every L vertex on or inside a kept basin's rim at its spill; `off` the beds as coded; on by default since #180a (reading 42).
 static INLET_FLOOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 /// lead #178 item 3: `--band6-floors on` holds band6's breach within each path cell's budget left after KS; `off` only the floor cell's budget caps the cut; on by default since #180a (reading 42).
@@ -2067,6 +2069,7 @@ fn main() -> Result<(), String> {
         ("--band6-floors", &BAND6_FLOORS, "on"),
         ("--band6-outlet-floor", &BAND6_OUTLET_FLOOR, "on"),
         ("--inlet-floor", &INLET_FLOOR, "on"),
+        ("--trib-rerun", &TRIB_RERUN, "on"),
     ] {
         let v = value(&args, opt).unwrap_or(default);
         if !["off", "on"].contains(&v) {
@@ -3044,6 +3047,8 @@ fn main() -> Result<(), String> {
         let mut fine: Option<(Vec<u32>, Vec<bool>)> = None;
         // the first pass's tributary reaches and nodes (crusader #168: --trib-on post replaces them)
         let mut trib_first: (BTreeSet<u64>, BTreeSet<u64>) = (BTreeSet::new(), BTreeSet::new());
+        // lead #182a: the post pass's own reaches and nodes, which --trib-rerun replaces
+        let mut trib_post: (BTreeSet<u64>, BTreeSet<u64>) = (BTreeSet::new(), BTreeSet::new());
         // lead #162: --trib-once's routing of KS0 for KS1, and the running-minimum bed of its channels
         let mut bed_min: Option<Vec<f64>> = None;
         if trib_once && trib_on == "post" && !order_fable {
@@ -3498,6 +3503,11 @@ fn main() -> Result<(), String> {
             if order_fable {
                 fine_post = Some((ex.receiver.clone(), ex.channel.clone()));
             }
+            {
+                let had: HashSet<u64> = gd.nodes.iter().map(|x| x.id).collect();
+                trib_post =
+                    (ex.reaches.iter().map(|r| r.id).collect(), ex.nodes.iter().map(|x| x.id).filter(|id| !had.contains(id)).collect());
+            }
             gd.nodes.extend(ex.nodes.iter().cloned());
             gd.reaches.extend(ex.reaches.iter().cloned());
             let trunk_ids: BTreeSet<u64> = l_trunks.iter().map(|r| r.id).collect();
@@ -3638,119 +3648,227 @@ fn main() -> Result<(), String> {
             use planet_generators::bake::basins_rg::{produce_drain_avoiding_forced, BasinParams, CellIds};
             use planet_generators::bake::river_graph::Represented;
             let t2 = Instant::now();
-            let all: Vec<GReach> = gd.reaches.iter().filter(|r| r.level == Level::L).cloned().collect();
-            let ids = CellIds { gid: &gid_l, local: &to_local };
-            // spikes #142: the cells of the markers on the reaches (KG-trunk's exceptions, KG-trib's junctions); an inlet passes them (reading 1)
-            let marker_cells: BTreeSet<usize> =
-                gd.nodes.iter().filter(|x| x.level == Level::L && x.kind.is_marker()).filter_map(|x| to_local(x.anchor)).collect();
-            {
-                let (pk, nw) = memory_mib();
-                println!("RG mem before basin pass 2: peak {pk} MiB, now {nw} MiB");
-            }
-            // crusader #161, reading 22: a kept-size depression drains unless neither its fill nor a bounded breach fits the budget KS left against S_KH (reading 21)
-            let remaining: Vec<f64> = (0..n_l).map(|p| (budget_l[p] - (ks_base[p] - ks_d[p]).max(0.0)).max(0.0)).collect();
-            // crusader #172 (owner, 2026-11-20; --exception-lakes on): the hollow each over-budget rise of an L reach crosses is a kept lake; the cell the bed rises from and the
-            // bed it rises to
-            let forced: Vec<(usize, f64)> = if EXCEPTION_LAKES.load(std::sync::atomic::Ordering::Relaxed) {
-                all.iter()
-                    .filter(|r| r.has_exception(planet_generators::bake::river_graph::Reason::RiseOverBudget))
-                    .flat_map(|r| {
-                        (1..r.vertices.len())
-                            .filter(|&k| r.attrs.bed[k] > r.attrs.bed[k - 1])
-                            .filter_map(move |k| to_local(r.vertices[k - 1]).map(|c| (c, f64::from(r.attrs.bed[k]) * 0.5)))
-                    })
-                    .collect()
-            } else {
-                Vec::new()
+            // lead #182b (DEC crusader-33): with --trib-rerun, after the rerun basins-2's producer runs once more on the new lines (the same rules), so its basins, spill nodes
+            // and inlets fit them; no third extraction; the kept-drained flips against the first round are printed
+            let lost_inlets_now = |gd: &Graph, kept: &[bool]| -> usize {
+                let downs: HashSet<u64> = gd.reaches.iter().filter(|r| r.level == Level::L).map(|r| r.down).collect();
+                gd.nodes
+                    .iter()
+                    .filter(|x| x.kind == planet_generators::bake::river_graph::NodeKind::LakeInlet && downs.contains(&x.id))
+                    .filter(|x| to_local(x.anchor).is_some_and(|c| core[c] && !kept[c]))
+                    .count()
             };
-            let mut pb = produce_drain_avoiding_forced(
-                &grid_d,
-                &ks_d,
-                &outlet_d,
-                &all,
-                &tile_l,
-                &BasinParams::l(BODY),
-                &ids,
-                &remaining,
-                &marker_cells,
-                &forced,
-            );
-            if !forced.is_empty() {
-                println!(
-                    "RG domain {d} exception lakes (crusader #172): {} over-budget rises, {} hollows kept as lakes",
-                    forced.len(),
-                    pb.forced
-                );
-            }
-            drop(remaining);
-            // crusader #171 (DEC crusader-20, reading 35; --kept-drained drop): a kept basin whose rim an L line crosses with a bed more than 0.5 m below its spill is drained
-            // by that line (the graph's line is the authority; KV carves it): the basin is not protected
-            if KEPT_DRAINED_DROP.load(std::sync::atomic::Ordering::Relaxed) {
-                let mut low_bed: HashMap<usize, f64> = HashMap::new();
-                for r in &all {
-                    for (k, &v) in r.vertices.iter().enumerate() {
-                        if let Some(c) = to_local(v) {
-                            let b = f64::from(r.attrs.bed[k]) * 0.5;
-                            let e = low_bed.entry(c).or_insert(b);
-                            *e = e.min(b);
-                        }
-                    }
+            let mut reran = false;
+            let mut first_kept: Option<BTreeSet<u64>> = None;
+            let mut round = 0usize;
+            let pb = loop {
+                let all: Vec<GReach> = gd.reaches.iter().filter(|r| r.level == Level::L).cloned().collect();
+                let ids = CellIds { gid: &gid_l, local: &to_local };
+                // spikes #142: the cells of the markers on the reaches (KG-trunk's exceptions, KG-trib's junctions); an inlet passes them (reading 1)
+                let marker_cells: BTreeSet<usize> =
+                    gd.nodes.iter().filter(|x| x.level == Level::L && x.kind.is_marker()).filter_map(|x| to_local(x.anchor)).collect();
+                {
+                    let (pk, nw) = memory_mib();
+                    println!("RG mem before basin pass 2: peak {pk} MiB, now {nw} MiB");
                 }
-                // --kept-drained exit: each vertex cell's next vertex downstream and its bed (a reach's last vertex has none)
-                let exit_only = KEPT_DRAINED_EXIT.load(std::sync::atomic::Ordering::Relaxed);
-                let mut next_of: HashMap<usize, Vec<(usize, f64)>> = HashMap::new();
-                if exit_only {
+                // crusader #161, reading 22: a kept-size depression drains unless neither its fill nor a bounded breach fits the budget KS left against S_KH (reading 21)
+                let remaining: Vec<f64> = (0..n_l).map(|p| (budget_l[p] - (ks_base[p] - ks_d[p]).max(0.0)).max(0.0)).collect();
+                // crusader #172 (owner, 2026-11-20; --exception-lakes on): the hollow each over-budget rise of an L reach crosses is a kept lake; the cell the bed rises from and the
+                // bed it rises to
+                let forced: Vec<(usize, f64)> = if EXCEPTION_LAKES.load(std::sync::atomic::Ordering::Relaxed) {
+                    all.iter()
+                        .filter(|r| r.has_exception(planet_generators::bake::river_graph::Reason::RiseOverBudget))
+                        .flat_map(|r| {
+                            (1..r.vertices.len())
+                                .filter(|&k| r.attrs.bed[k] > r.attrs.bed[k - 1])
+                                .filter_map(move |k| to_local(r.vertices[k - 1]).map(|c| (c, f64::from(r.attrs.bed[k]) * 0.5)))
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                let mut pb = produce_drain_avoiding_forced(
+                    &grid_d,
+                    &ks_d,
+                    &outlet_d,
+                    &all,
+                    &tile_l,
+                    &BasinParams::l(BODY),
+                    &ids,
+                    &remaining,
+                    &marker_cells,
+                    &forced,
+                );
+                if !forced.is_empty() {
+                    println!(
+                        "RG domain {d} exception lakes (crusader #172): {} over-budget rises, {} hollows kept as lakes",
+                        forced.len(),
+                        pb.forced
+                    );
+                }
+                drop(remaining);
+                // crusader #171 (DEC crusader-20, reading 35; --kept-drained drop): a kept basin whose rim an L line crosses with a bed more than 0.5 m below its spill is drained
+                // by that line (the graph's line is the authority; KV carves it): the basin is not protected
+                if KEPT_DRAINED_DROP.load(std::sync::atomic::Ordering::Relaxed) {
+                    let mut low_bed: HashMap<usize, f64> = HashMap::new();
                     for r in &all {
-                        for k in 0..r.vertices.len().saturating_sub(1) {
-                            if let (Some(c), Some(q)) = (to_local(r.vertices[k]), to_local(r.vertices[k + 1])) {
-                                next_of.entry(c).or_default().push((q, f64::from(r.attrs.bed[k + 1]) * 0.5));
+                        for (k, &v) in r.vertices.iter().enumerate() {
+                            if let Some(c) = to_local(v) {
+                                let b = f64::from(r.attrs.bed[k]) * 0.5;
+                                let e = low_bed.entry(c).or_insert(b);
+                                *e = e.min(b);
                             }
                         }
                     }
-                }
-                let (mut dropped, mut checked, mut at_edge) = (0usize, 0usize, 0usize);
-                // lead (DEC crusader-21 b): a basin whose spill leaves the window (its spill path ends at the window's edge unresolved) or that holds a border cell spills beyond
-                // the window; its level is not known here, so it is no kept lake
-                let unresolved: HashSet<u64> = pb.unresolved.iter().copied().collect();
-                for b in pb.basins.iter_mut().filter(|b| b.represented == Represented::ProtectedSurface) {
-                    checked += 1;
-                    let cells = &pb.cells[&b.id];
-                    if unresolved.contains(&b.id) || cells.iter().any(|&c| border[c]) {
-                        b.represented = Represented::None;
-                        at_edge += 1;
-                        continue;
+                    // --kept-drained exit: each vertex cell's next vertex downstream and its bed (a reach's last vertex has none)
+                    let exit_only = KEPT_DRAINED_EXIT.load(std::sync::atomic::Ordering::Relaxed);
+                    let mut next_of: HashMap<usize, Vec<(usize, f64)>> = HashMap::new();
+                    if exit_only {
+                        for r in &all {
+                            for k in 0..r.vertices.len().saturating_sub(1) {
+                                if let (Some(c), Some(q)) = (to_local(r.vertices[k]), to_local(r.vertices[k + 1])) {
+                                    next_of.entry(c).or_default().push((q, f64::from(r.attrs.bed[k + 1]) * 0.5));
+                                }
+                            }
+                        }
                     }
-                    let inside: HashSet<usize> = cells.iter().copied().collect();
-                    let drains = if exit_only {
-                        cells.iter().any(|&c| {
-                            next_of.get(&c).is_some_and(|v| v.iter().any(|&(q, bed)| !inside.contains(&q) && bed < b.spill_m - 0.5))
-                        })
-                    } else {
-                        cells.iter().any(|&c| {
-                            (0..8)
-                                .filter_map(|k| grid_d.neighbour(c, k))
-                                .any(|q| !inside.contains(&q) && low_bed.get(&q).is_some_and(|&bed| bed < b.spill_m - 0.5))
-                        })
-                    };
-                    if drains {
-                        b.represented = Represented::None;
-                        dropped += 1;
+                    let (mut dropped, mut checked, mut at_edge) = (0usize, 0usize, 0usize);
+                    // lead (DEC crusader-21 b): a basin whose spill leaves the window (its spill path ends at the window's edge unresolved) or that holds a border cell spills beyond
+                    // the window; its level is not known here, so it is no kept lake
+                    let unresolved: HashSet<u64> = pb.unresolved.iter().copied().collect();
+                    for b in pb.basins.iter_mut().filter(|b| b.represented == Represented::ProtectedSurface) {
+                        checked += 1;
+                        let cells = &pb.cells[&b.id];
+                        if unresolved.contains(&b.id) || cells.iter().any(|&c| border[c]) {
+                            b.represented = Represented::None;
+                            at_edge += 1;
+                            continue;
+                        }
+                        let inside: HashSet<usize> = cells.iter().copied().collect();
+                        let drains = if exit_only {
+                            cells.iter().any(|&c| {
+                                next_of.get(&c).is_some_and(|v| v.iter().any(|&(q, bed)| !inside.contains(&q) && bed < b.spill_m - 0.5))
+                            })
+                        } else {
+                            cells.iter().any(|&c| {
+                                (0..8)
+                                    .filter_map(|k| grid_d.neighbour(c, k))
+                                    .any(|q| !inside.contains(&q) && low_bed.get(&q).is_some_and(|&bed| bed < b.spill_m - 0.5))
+                            })
+                        };
+                        if drains {
+                            b.represented = Represented::None;
+                            dropped += 1;
+                        }
+                    }
+                    println!("RG domain {d} kept-drained (crusader #171): {dropped} of {checked} kept L basins drained by an L line crossing the rim below spill - 0.5 m, {at_edge} spilling beyond the window's edge; no longer protected");
+                }
+                println!("RG domain {d} second pass, reading 22: {} kept-size depressions drained", pb.drained);
+                {
+                    let (pk, nw) = memory_mib();
+                    println!("RG mem after basin pass 2: peak {pk} MiB, now {nw} MiB");
+                }
+                for p in 0..n_l {
+                    kept[p] = protected_h1[parent(p)];
+                }
+                for b in pb.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface) {
+                    for &c in &pb.cells[&b.id] {
+                        kept[c] = true;
                     }
                 }
-                println!("RG domain {d} kept-drained (crusader #171): {dropped} of {checked} kept L basins drained by an L line crossing the rim below spill - 0.5 m, {at_edge} spilling beyond the window's edge; no longer protected");
-            }
-            println!("RG domain {d} second pass, reading 22: {} kept-size depressions drained", pb.drained);
-            {
-                let (pk, nw) = memory_mib();
-                println!("RG mem after basin pass 2: peak {pk} MiB, now {nw} MiB");
-            }
-            for p in 0..n_l {
-                kept[p] = protected_h1[parent(p)];
-            }
-            for b in pb.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface) {
-                for &c in &pb.cells[&b.id] {
-                    kept[c] = true;
+                // lead #182a (DEC crusader-32; a stopgap, the design is one hierarchy with the kept set final before extraction): a line-end lake inlet whose cell basins-2 no
+                // longer keeps ends a tributary at a lake that is not there; with --trib-rerun on, KG-trib post runs once more with basins-2's kept set
+                let lost_inlets = |gd: &Graph, kept: &[bool]| -> usize {
+                    let downs: HashSet<u64> = gd.reaches.iter().filter(|r| r.level == Level::L).map(|r| r.down).collect();
+                    gd.nodes
+                        .iter()
+                        .filter(|x| x.kind == planet_generators::bake::river_graph::NodeKind::LakeInlet && downs.contains(&x.id))
+                        .filter(|x| to_local(x.anchor).is_some_and(|c| core[c] && !kept[c]))
+                        .count()
+                };
+                if round == 0
+                    && TRIB_RERUN.load(std::sync::atomic::Ordering::Relaxed)
+                    && trib_once
+                    && trib_on == "post"
+                    && on("kg-trib")
+                    && !order_carbon
+                {
+                    use planet_generators::bake::kg_trib::{accumulate_trunks, extract, Input, Params, Trunk};
+                    let before = lost_inlets(&gd, &kept);
+                    let t3 = Instant::now();
+                    reran = before > 0;
+                    if before > 0 {
+                        gd.reaches.retain(|r| !trib_post.0.contains(&r.id));
+                        gd.nodes.retain(|x| !trib_post.1.contains(&x.id));
+                        let first_attrs: HashMap<u64, planet_generators::bake::river_graph::Attrs> =
+                            l_trunks.iter().map(|r| (r.id, r.attrs.clone())).collect();
+                        for r in gd.reaches.iter_mut() {
+                            if let Some(a) = first_attrs.get(&r.id) {
+                                r.attrs = a.clone();
+                            }
+                        }
+                        let trunks: Vec<Trunk> = l_trunks
+                            .iter()
+                            .filter_map(|r| {
+                                let v: Option<Vec<usize>> = r.vertices.iter().map(|&c| to_local(c)).collect();
+                                let down = g.nodes.iter().find(|x| x.id == r.down)?.clone();
+                                v.map(|vertices| Trunk { id: r.id, vertices, attrs: r.attrs.clone(), down })
+                            })
+                            .collect();
+                        let inp = Input {
+                            grid: &grid_d,
+                            z: &ks_d,
+                            sea: &sea_l,
+                            exit: &exit,
+                            trunks: &trunks,
+                            kept: &kept,
+                            seed_ext: &seed,
+                            tile: &tile_l,
+                            gid: &gid_l,
+                            keep_fields: false,
+                        };
+                        let ex = extract(&inp, &Params { mfd_init: false, ..Params::plan(BODY, runoff_mean) });
+                        let had: HashSet<u64> = gd.nodes.iter().map(|x| x.id).collect();
+                        gd.nodes.extend(ex.nodes.iter().filter(|x| !had.contains(&x.id)).cloned());
+                        gd.reaches.extend(ex.reaches.iter().cloned());
+                        let trunk_ids: BTreeSet<u64> = l_trunks.iter().map(|r| r.id).collect();
+                        let inflow = |id: u64| to_local(id).map_or((0.0, 0.0), |c| (dx_l * dx_l + ex.d8[c], dx_l * dx_l + ex.d8_no_ext[c]));
+                        accumulate_trunks(&mut gd, &trunk_ids, &inflow, runoff_mean);
+                        if regions <= 1 {
+                            acc_trunks = gd.reaches.iter().filter(|r| trunk_ids.contains(&r.id)).map(|r| (r.id, r.attrs.clone())).collect();
+                        }
+                    }
+                    let after = lost_inlets(&gd, &kept);
+                    t_trib += t3.elapsed().as_secs_f64();
+                    println!(
+                        "RG domain {d} trib rerun (lead #182a): {before} line-end lake inlets in no kept basin before, {after} after; {} reruns; {:.1} s",
+                        usize::from(before > 0),
+                        t3.elapsed().as_secs_f64()
+                    );
+                } else if round == 0 && trib_once && trib_on == "post" && on("kg-trib") && !order_carbon {
+                    println!(
+                        "RG domain {d} trib rerun (lead #182a): off; {} line-end lake inlets in no kept basin",
+                        lost_inlets(&gd, &kept)
+                    );
                 }
+                if reran && round == 0 {
+                    first_kept = Some(pb.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface).map(|b| b.id).collect());
+                    round += 1;
+                    continue;
+                }
+                break pb;
+            };
+            if let Some(fk) = &first_kept {
+                let now: BTreeSet<u64> =
+                    pb.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface).map(|b| b.id).collect();
+                println!(
+                    "RG domain {d} trib rerun check pass (lead #182b): basins-2 again on the new lines; {} kept basins (first round {}), {} no longer kept, {} newly kept; {} line-end inlets in no kept basin",
+                    now.len(),
+                    fk.len(),
+                    fk.difference(&now).count(),
+                    now.difference(fk).count(),
+                    lost_inlets_now(&gd, &kept)
+                );
             }
             if KV_RIMS.load(std::sync::atomic::Ordering::Relaxed) {
                 rim_floor = vec![f64::NEG_INFINITY; n_l];
@@ -3775,6 +3893,25 @@ fn main() -> Result<(), String> {
             // highest spill where basins meet), so the graph agrees with the rim KV holds (reading 35 test (a)); KV cuts to these beds
             // the pass's nodes join the graph before the inlet markers, so a marker never lands on a cell one of them holds (R1h #180: 2 two_nodes_one_anchor)
             gd.nodes.extend(pb.nodes.iter().cloned());
+            // lead #182a: after a rerun, basins-2's nodes made for the tributaries it saw (a lake inlet where one entered a kept basin, a spill junction on one) may name a
+            // reach the rerun replaced or stand on a cell a new line holds; an inlet no reach ends at and no basin spills to, and a marker whose reach is gone, are dropped
+            if reran {
+                use planet_generators::bake::river_graph::NodeKind;
+                let reach_ids: HashSet<u64> = gd.reaches.iter().map(|r| r.id).collect();
+                let downs: HashSet<u64> = gd.reaches.iter().map(|r| r.down).collect();
+                let spills: HashSet<u64> = pb.basins.iter().map(|b| b.spill_node).collect();
+                let pb_ids: HashSet<u64> = pb.nodes.iter().map(|x| x.id).collect();
+                let n0 = gd.nodes.len();
+                gd.nodes.retain(|x| {
+                    !pb_ids.contains(&x.id)
+                        || match (x.kind, x.marker) {
+                            (NodeKind::LakeInlet, _) => downs.contains(&x.id) || spills.contains(&x.id),
+                            (_, Some(m)) => reach_ids.contains(&m.on_reach),
+                            _ => true,
+                        }
+                });
+                println!("RG domain {d} trib rerun (lead #182a): {} of basins-2's nodes dropped (unreferenced inlets, markers on replaced reaches)", n0 - gd.nodes.len());
+            }
             if INLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) {
                 let fl = planet_generators::bake::basins_rg::floor_inlet_beds(&grid_d, &pb.basins, &pb.cells, &mut gd.reaches, &|id| {
                     to_local(id)
@@ -4206,6 +4343,7 @@ fn main() -> Result<(), String> {
             ("margin", margin.to_string()),
             ("turned-noise", planet_generators::height::turned_noise().to_string()),
             ("kv-cross", format!("{}", KV_CROSS_MICRO.load(std::sync::atomic::Ordering::Relaxed) as f64 * 1.0e-6)),
+            ("trib-rerun", if TRIB_RERUN.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("inlet-floor", if INLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-floors", if BAND6_FLOORS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-outlet-floor", if BAND6_OUTLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
