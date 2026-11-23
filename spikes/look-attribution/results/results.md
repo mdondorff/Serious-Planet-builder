@@ -116,6 +116,27 @@ Also the base B at L (`base`) and z_s at H1 (`zs`), as layers. All are counted i
 - 120 x 120 L cells each: R1h river (3160, 3640), hill (3280, 3520), rim (2219, 2555); F1 river (1720, 6400), hill (2680, 3520), rim (2356, 2028); R3b river (2080, 2920), hill (6280, 6280), rim (2948, 4140).
 - R3b's hill crop is a straight north-south step that is already in B (the base). The crop rule picked it for its X8; it is not a hill flank.
 
+## Addendum 2026-11-23: the chainsaw fix (lead #177, #177a)
+### M4, registered before the `line8` row runs (#177a)
+- Why: the in-zone Xdiag bar (1.5 x S0's 0.003) cannot be met while a channel runs on an H1 D8 diagonal. A straight valley along a quad diagonal is itself a run of quad-diagonal kinks: `line`, which shows no facets on the renders, keeps 0.045.
+- M4: kinks along the channel direction. A straight valley has its kinks parallel to the channel; triangle facets cut across it.
+  - Lines: every H1 channel cell (h1-rivers.u8) and its D8 receiver by steepest descent on z_s, each a segment between the two H1 cell centres.
+  - Cells: L land cells inside the box within 4 L cells of a line, each taking the direction t of its nearest line.
+  - k2(p) = z(p + 2t) - 2 z(p) + z(p - 2t), bilinear. M4 is the p90 of |k2| (`raw/m4_along.py`).
+- Values from the existing dumps (`raw/m4-registration.txt`, R1h, today's tip):
+
+| Surface | M4 (p90, m) |
+|---|---|
+| S0 | 18.94 |
+| S_KH, h5 (h4c, the defaults) | 17.07 |
+| final, h5 | 18.53 |
+| S_KH, `line` | 11.80 |
+| final, `line` | 13.31 |
+
+- S0 is not a facet-free reference: it holds the 814 m bumps along channels (SPIKE-143's mesh crop), so its along-channel kinks are as large as h5's.
+- The bar is relative to h5 instead: `line8` passes M4 when its final surface's M4 is at most 0.75 x h5's final, i.e. 13.90 m. That is a quarter less along-channel kink than the defaults; `line` itself meets it.
+- `line8` must also pass the ablation rule (review-response section 3) against the same defaults row.
+
 ## Visuals
 ![R1h stages at 10 deg sun from 315 deg](images/sheet-r1h-az315.png)
 - R1h, shaded relief of each stage's own height grid, sun 10 deg from 315 deg. Rows: the river, hill and rim crops; columns: B, S0, S_KH, KS0, KS1, band6, KV, final. The triangles along the river start at S_KH. CPU hillshade, no render engine.

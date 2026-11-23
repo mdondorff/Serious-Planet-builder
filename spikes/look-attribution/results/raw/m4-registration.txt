@@ -1,0 +1,19 @@
+=== defaults
+36646 channel D8 steps; 942359 L cells within 4 cells of a line
+s0        stencil 2 L cells: along RMS 13.322 m, across RMS 20.928 m, p90 |along| 18.936 m
+s0        stencil 4 L cells: along RMS 40.654 m, across RMS 70.328 m, p90 |along| 58.720 m
+s0      M4 along-channel kink RMS 4.176 m (p90 5.826); across RMS 6.141 m; along / across 0.680; mid-segment / ends |k| 0.871
+kh        stencil 2 L cells: along RMS 13.038 m, across RMS 29.749 m, p90 |along| 17.074 m
+kh        stencil 4 L cells: along RMS 34.722 m, across RMS 79.922 m, p90 |along| 45.896 m
+kh      M4 along-channel kink RMS 5.403 m (p90 6.917); across RMS 11.366 m; along / across 0.475; mid-segment / ends |k| 0.813
+final     stencil 2 L cells: along RMS 13.783 m, across RMS 31.378 m, p90 |along| 18.531 m
+final     stencil 4 L cells: along RMS 34.945 m, across RMS 81.694 m, p90 |along| 46.319 m
+final   M4 along-channel kink RMS 6.384 m (p90 8.350); across RMS 12.830 m; along / across 0.498; mid-segment / ends |k| 0.852
+=== line
+36646 channel D8 steps; 942359 L cells within 4 cells of a line
+kh        stencil 2 L cells: along RMS 11.258 m, across RMS 37.521 m, p90 |along| 11.796 m
+kh        stencil 4 L cells: along RMS 28.347 m, across RMS 92.745 m, p90 |along| 31.675 m
+kh      M4 along-channel kink RMS 5.275 m (p90 5.711); across RMS 16.203 m; along / across 0.326; mid-segment / ends |k| 0.818
+final     stencil 2 L cells: along RMS 11.949 m, across RMS 38.339 m, p90 |along| 13.311 m
+final     stencil 4 L cells: along RMS 28.458 m, across RMS 93.517 m, p90 |along| 32.123 m
+final   M4 along-channel kink RMS 6.130 m (p90 7.159); across RMS 17.082 m; along / across 0.359; mid-segment / ends |k| 0.870
