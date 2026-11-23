@@ -40,6 +40,7 @@ Per-spike register sections of M5 and M6: `docs/archive/M6/spikes.md`. Closed sp
 | SPIKE-141 | RG carving at the bead-chain spot (#157-#161) | closed 11-21: 4-connected carving, connected sea, lowering-only h5 | `spikes/rg-carving/results/results.md` |
 | SPIKE-142 | Hump trenches against the lattice (#173) | closed 11-23: 78 % K5 cols, 22 % H1 diagonal saddles | `spikes/hump-lattice/results/results.md` |
 | SPIKE-143 | Pyramid and chainsaw looks by stage (#176) | closed 11-23: chainsaw from KH h5; 814 m and 611 m facets from main's reads; straight rivers from the graph | `spikes/look-attribution/results/results.md` |
+| SPIKE-144 | sel-post ablated; base1 on the cube, hooks as configs (#178) | closed 11-23: sel-post off fails rule 1 (+8 violations), open under O3; note | `spikes/sel-post-base1/results/results.md` |
 | SPIKE-139 | K5 washboard (#148) | closed 11-19: no hillslope term | `spikes/k5-washboard/results/results.md` |
 | SPIKE-138 | Base drained at both scales (A+) | closed 11-18: G-DRAIN 0-0.5 % | `spikes/drain-aplus/results/results.md` |
 | SPIKE-136 | Drained L hand-over | closed 11-17: KH h4c, then h5 | `spikes/handover/results/results.md` |
