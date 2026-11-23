@@ -1449,6 +1449,7 @@ fn build_graph(
     low_centre: bool,
     ocean: &[bool],
     runoff_mean: f64,
+    zs_h1: &[f64],
 ) -> (Graph, Vec<String>) {
     let (x0, y0, w, h, rw) = window;
     let h1_gid = |c: u32| grid.global_id(c as usize);
@@ -1551,6 +1552,31 @@ fn build_graph(
             anchor.insert((c, kind), a);
         }
     }
+    // lead #174 (`--trunk-saddle-ortho on`, SPIKE-142): a diagonal H1 step whose two off-path H1 cells both stand above both of its ends on z_s (a saddle block) gets the
+    // centre of the lower off-path cell as an extra line point, so the L image's corridor and its lowest path go round the col instead of across the corner; the H1
+    // routing and the reach's H1 cells are unchanged
+    let saddle_count = std::cell::Cell::new((0usize, 0usize));
+    let saddle_line = |cells: &[u32]| -> Vec<(f64, f64)> {
+        let mut line = vec![to_local(cells[0])];
+        for p in cells.windows(2) {
+            let (a, c) = (p[0] as usize, p[1] as usize);
+            let (ax, ay, cx, cy) = ((a % rw) as i64, (a / rw) as i64, (c % rw) as i64, (c / rw) as i64);
+            if TRUNK_SADDLE_ORTHO.load(std::sync::atomic::Ordering::Relaxed) && (cx - ax).abs() == 1 && (cy - ay).abs() == 1 {
+                let (b, d) = (ay as usize * rw + cx as usize, cy as usize * rw + ax as usize);
+                let (n, of) = saddle_count.get();
+                let ends = zs_h1[a].max(zs_h1[c]);
+                if zs_h1[b].min(zs_h1[d]) > ends {
+                    let o = if zs_h1[b] < zs_h1[d] || (zs_h1[b] == zs_h1[d] && b < d) { b } else { d };
+                    line.push(to_local(o as u32));
+                    saddle_count.set((n + 1, of + 1));
+                } else {
+                    saddle_count.set((n, of + 1));
+                }
+            }
+            line.push(to_local(p[1]));
+        }
+        line
+    };
     // routes in parallel
     let jobs: Vec<(usize, Vec<(f64, f64)>, usize, usize)> = reaches
         .iter()
@@ -1558,9 +1584,13 @@ fn build_graph(
         .filter_map(|(k, r)| {
             let up = *anchor.get(&(r.cells[0], r.up_kind))?;
             let down = *anchor.get(&(*r.cells.last().expect("cells"), r.down_kind))?;
-            Some((k, r.cells.iter().map(|&c| to_local(c)).collect(), up, down))
+            Some((k, saddle_line(&r.cells), up, down))
         })
         .collect();
+    if TRUNK_SADDLE_ORTHO.load(std::sync::atomic::Ordering::Relaxed) {
+        let (n, of) = saddle_count.into_inner();
+        println!("RG KG-trunk saddle ortho (lead #174): {n} diagonal H1 steps across a saddle block routed through the lower orthogonal H1 cell, of {of} diagonal steps");
+    }
     let next = std::sync::atomic::AtomicUsize::new(0);
     let done = std::sync::Mutex::new(Vec::new());
     std::thread::scope(|sc| {
@@ -1669,6 +1699,11 @@ fn build_graph(
         let n = route.len();
         let mut bed = vec![0f64; n];
         let mut run = node_bed.get(&up).copied().unwrap_or(f64::INFINITY).min(ks_water[route[0]]);
+        // lead #171 (`--bed-sea-floor on`, reading 17 in the bed coding): a land vertex's bed stays at the sea + 0.5 m, also over a coastal flat or an inland pit below it
+        // (the bed then stands above the surface), so KV and KC never cut a land cell to or below the sea + 0.5 m; the floor term falls only on a sea vertex, so no bed rises
+        let sea_floor = BED_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed);
+        let mut floor =
+            node_bed.get(&up).copied().unwrap_or(f64::INFINITY).min(if ocean[route[0]] { ks_water[route[0]] } else { sea + 0.5 });
         let mut over = 0.0f64;
         let mut rise_at: Vec<usize> = Vec::new();
         for (v, &c) in route.iter().enumerate() {
@@ -1684,7 +1719,8 @@ fn build_graph(
             } else {
                 run = run.min(z);
             }
-            bed[v] = run;
+            floor = floor.min(if ocean[c] { z } else { sea + 0.5 });
+            bed[v] = if sea_floor { run.max(floor) } else { run };
         }
         // spikes #142: a rise at the last vertex is taken one vertex earlier (bed[n-2] raised to bed[n-1]: less cut, never more); its marker would share the
         // down node's anchor (reading 1). A two-vertex reach drops it (its bed then starts at its end's level).
@@ -1810,6 +1846,18 @@ static HYDRO_TWICE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 /// crusader #168b (reading 32): `--trunk-bed shared` (default) keeps a two-vertex trunk image's first vertex at its up node's bed when it rises over the budget, the rise at its down end
 /// excused by its rise_over_budget exception; `lift` raises its first vertex (spikes #142's form).
 static TRUNK_BED_SHARED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+/// lead #174 (SPIKE-142): `--trunk-saddle-ortho on` routes KG-trunk's L image of a diagonal H1 step across a saddle block through the lower orthogonal H1 cell; `off`
+/// (default) along the H1 cell centres.
+static TRUNK_SADDLE_ORTHO: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// lead #180 (G3 R8, SPIKE-142's 22 %): `--band6-keep-rims on` keeps every depression of band6's input that basins-2's rule would keep (at least 0.25 km2 and 2 m deep,
+/// reading 22's thresholds): band6 neither breaches nor fills it, so it spills at its rim and stays for basins-2; `off` (default) band6 protects no L basin.
+static BAND6_KEEP_RIMS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// lead #182 (G3 R6, Carbon D2.6 (2)): `--runoff-ratio on` (renamed from `--runoff-cell` by lead #189: that name is the accumulated form) makes every L reach's `a_run` per-cell runoff weighted: `a_geo` times the catchment mean of the H1 runoff field
+/// (read at each L cell's H1 parent; there is no runoff field at L) over the window mean, by an L routing of the KS output; `q = q_w = a_run runoff_mean`; `off` (default)
+/// the window scalar alone.
+static RUNOFF_RATIO: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// lead #171: `--bed-sea-floor on` codes KG-trunk's and KG-trib's land beds at the sea + 0.5 m or above (reading 17), over coastal flats too; `off` (default) the running minimum alone.
+static BED_SEA_FLOOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// L routing of a window surface (flood with epsilon, D8 steepest receivers, D8 area): the river cells over `a_min` m2 (land only).
 fn l_rivers(z: &[f64], w: usize, h: usize, dx: f64, sea: f64, a_min: f64) -> Vec<bool> {
@@ -1888,13 +1936,21 @@ fn main() -> Result<(), String> {
     if !["aplus", "today"].contains(&base_form) {
         return Err(format!("--base aplus | today, not '{base_form}'"));
     }
-    // spikes #147: `--base-stages 13` (stages 1 and 3, the default) or `3` (stage 3 only: no drain before K5)
+    // spikes #147: `--base-stages 13` (stages 1 and 3, the default) or `3` (stage 3 only: no drain before K5); lead #178 (R16): `1` (stage 1 only: no drain of z_s after K5)
     let base_stages = value(&args, "--base-stages").unwrap_or("13");
-    if !["13", "3"].contains(&base_stages) {
-        return Err(format!("--base-stages 13 | 3, not '{base_stages}'"));
+    if !["13", "3", "1"].contains(&base_stages) {
+        return Err(format!("--base-stages 13 | 3 | 1, not '{base_stages}'"));
     }
     if base_form == "aplus" {
-        planet_cache::region_bake::install_s138(if base_stages == "3" { "post-only" } else { "sel-post" }, f64::INFINITY, &tag)?;
+        planet_cache::region_bake::install_s138(
+            match base_stages {
+                "3" => "post-only",
+                "1" => "sel-pre",
+                _ => "sel-post",
+            },
+            f64::INFINITY,
+            &tag,
+        )?;
     }
     // spikes #147: `--breach-cost cell` (SPIKE-138) or `length` (the cut cost times the step's length, plus a length term)
     let breach_cost = value(&args, "--breach-cost").unwrap_or("cell");
@@ -1975,6 +2031,27 @@ fn main() -> Result<(), String> {
     let order_carbon = stage_order == "carbon";
     // lead #180a (reading 42, DEC crusader-31): --trib-once is the default; `--trib-once off` the former two passes (a bare `--trib-once` stays on)
     let trib_once = !matches!(value(&args, "--trib-once"), Some("off")) || order_fable || order_carbon;
+    // spikes #170 (lead #170, spike only): `--budget-floor <m>` lowers the budget field's 10 m minimum (the clamp [10, 50] m) for every stage of the chain; the gate keeps 10 m
+    let budget_floor =
+        value(&args, "--budget-floor").map_or(Ok(10.0), |v| v.parse::<f64>().map_err(|e| format!("--budget-floor <m>: {e}")))?;
+    if !(0.0..=50.0).contains(&budget_floor) {
+        return Err(format!("--budget-floor 0 to 50 m, not {budget_floor}"));
+    }
+    planet_cache::river_gate_graph::BUDGET_FLOOR_MM.store((budget_floor * 1000.0).round() as u64, std::sync::atomic::Ordering::Relaxed);
+    // lead #174a (SPIKE-142): `--kh-saddle-split off | trunk | all`: KH's h5 also takes h4c (its split along the D8 diagonal step, lower only) within 2-4 L cells of
+    // every D8 diagonal step of KH's routing that crosses a saddle block of z_s (both off-step cells above both ends), outside the channel zone too; `trunk` only where
+    // both ends are H1 channel cells; `off` (default) the zone alone (spike only)
+    // lead #177 (SPIKE-143, the chainsaw): `--kh-zone h4c | h4 | line`, KH h5's read inside the channel zone: h4c (default) the clamped Clough-Tocher on the quad
+    // split; h4 the same unclamped; line no triangulation: C1 lowered toward the straight line of every D8 step of KH's routing from an H1 channel cell (its linear
+    // z_s between the two cell centres), full within 1.5 L cells of the line and smoothly to no change at 4 (spike only)
+    let kh_zone = value(&args, "--kh-zone").unwrap_or("h4c");
+    if !["h4c", "h4", "line", "line8"].contains(&kh_zone) {
+        return Err(format!("--kh-zone h4c | h4 | line | line8, not '{kh_zone}'"));
+    }
+    let kh_saddle = value(&args, "--kh-saddle-split").unwrap_or("off");
+    if !["off", "trunk", "all"].contains(&kh_saddle) {
+        return Err(format!("--kh-saddle-split off | trunk | all, not '{kh_saddle}'"));
+    }
     let kh_lower_only = match value(&args, "--kh-lower-only").unwrap_or("on") {
         "on" => true,
         "off" => false,
@@ -2069,11 +2146,17 @@ fn main() -> Result<(), String> {
         ("--kv-rims", &KV_RIMS, "on"),
         ("--kv-connect", &KV_CONNECT, "on"),
         ("--sea17", &SEA17, "off"),
+        ("--bed-sea-floor", &BED_SEA_FLOOR, "off"),
+        ("--trunk-saddle-ortho", &TRUNK_SADDLE_ORTHO, "off"),
+        ("--band6-keep-rims", &BAND6_KEEP_RIMS, "off"),
+        ("--runoff-cell", &RUNOFF_CELL, "off"),
+        ("--trunk-head-once", &planet_generators::bake::kg_trib::HEAD_ONCE, "on"),
+        ("--strahler-junction", &planet_generators::bake::kg_trib::STRAHLER_JUNCTION, "on"),
         ("--band6-floors", &BAND6_FLOORS, "on"),
         ("--band6-outlet-floor", &BAND6_OUTLET_FLOOR, "on"),
         ("--inlet-floor", &INLET_FLOOR, "on"),
         ("--trib-rerun", &TRIB_RERUN, "on"),
-        ("--runoff-cell", &RUNOFF_CELL, "off"),
+        ("--runoff-ratio", &RUNOFF_RATIO, "off"),
     ] {
         let v = value(&args, opt).unwrap_or(default);
         if !["off", "on"].contains(&v) {
@@ -2715,9 +2798,74 @@ fn main() -> Result<(), String> {
             );
             steps
         });
+        // lead #174a: the D8 diagonal steps of KH's routing across a z_s saddle block (all, or with both ends H1 channel cells)
+        let saddles = (kh_saddle != "off" && (kh_form == "h5" || kh_form == "h5d")).then(|| {
+            let rcv = |c: usize| (recv[c] != NONE).then(|| recv[c] as usize);
+            let z = &solve.zs;
+            let ch = &h1.hydro.channel;
+            let steps: Vec<Option<(usize, usize)>> = (0..cells)
+                .map(|q| {
+                    if q % rw + 1 >= rw || q / rw + 1 >= rh {
+                        return None;
+                    }
+                    let (a, b, c, d) = (q, q + 1, q + rw, q + rw + 1);
+                    let (step, off) = if rcv(a) == Some(d) || rcv(d) == Some(a) {
+                        ((a, d), (b, c))
+                    } else if rcv(b) == Some(c) || rcv(c) == Some(b) {
+                        ((b, c), (a, d))
+                    } else {
+                        return None;
+                    };
+                    let saddle = z[off.0].min(z[off.1]) > z[step.0].max(z[step.1]);
+                    let on = saddle && (kh_saddle == "all" || (ch[step.0] && ch[step.1]));
+                    on.then_some(step)
+                })
+                .collect();
+            let zoned = zone.as_ref().map_or(0, |zn| steps.iter().flatten().filter(|&&(a, b)| zn[a] && zn[b]).count());
+            println!(
+                "RG KH saddle split (lead #174a, {kh_saddle}): {} D8 diagonal steps across a z_s saddle block take h4c ({zoned} of them inside the channel zone already)",
+                steps.iter().flatten().count()
+            );
+            steps
+        });
         // readings 17 and 19 (lead #170 item 3): S_KH = KH(z_s) + r', the band floored so that a cell whose KH lies above the sea + 0.5 m stays there (as ks_kh.rs)
         let floor = sea + 0.5;
         let band = |k: f64, r: f64| if k > floor { r.max(floor - k) } else { r };
+        // lead #177 `--kh-zone line`: the D8 steps of KH's routing from each H1 channel cell, by their start cell
+        let lines: Option<Vec<Option<usize>>> = (kh_zone == "line" || kh_zone == "line8")
+            .then(|| (0..cells).map(|c| (h1.hydro.channel[c] && recv[c] != NONE).then(|| recv[c] as usize)).collect());
+        if let Some(l) = &lines {
+            println!(
+                "RG KH zone read (lead #177): {kh_zone}, {} channel D8 steps as straight lines (no quad split)",
+                l.iter().flatten().count()
+            );
+        }
+        // lead #177a: line8 falls off over h5's zone width, to no change at 8 L cells (one H1 cell), so a diagonal line's two edge cells take nearly its full lowering
+        let line_outer = if kh_zone == "line8" { 8.0 } else { 4.0 };
+        let line_lower = |c1: f64, fx: f64, fy: f64| -> f64 {
+            let Some(l) = &lines else { return c1 };
+            let (ix, iy) = (fx.round() as i64, fy.round() as i64);
+            let mut out = c1;
+            for j in iy - 2..=iy + 2 {
+                for i in ix - 2..=ix + 2 {
+                    if i < 0 || j < 0 || i >= rw as i64 || j >= rh as i64 {
+                        continue;
+                    }
+                    let a = j as usize * rw + i as usize;
+                    let Some(b) = l[a] else { continue };
+                    let (ax, ay, bx, by) = (i as f64, j as f64, (b % rw) as f64, (b / rw) as f64);
+                    let (dx, dy) = (bx - ax, by - ay);
+                    let u = (((fx - ax) * dx + (fy - ay) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+                    let (ex, ey) = (fx - ax - u * dx, fy - ay - u * dy);
+                    let d = (ex * ex + ey * ey).sqrt() * lr;
+                    let s = ((d - 1.5) / (line_outer - 1.5)).clamp(0.0, 1.0);
+                    let wgt = 1.0 - s * s * (3.0 - 2.0 * s);
+                    let target = solve.zs[a] + u * (solve.zs[b] - solve.zs[a]);
+                    out = out.min(c1 + wgt * (target - c1).min(0.0));
+                }
+            }
+            out
+        };
         let kval = |p: usize| {
             let (fx, fy) = (((p % w) as f64 - (lr - 1.0) / 2.0) / lr, ((p / w) as f64 - (lr - 1.0) / 2.0) / lr);
             match kh_form {
@@ -2725,9 +2873,19 @@ fn main() -> Result<(), String> {
                 "h4" => kh::read_ct(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0,
                 "h5" | "h5d" => {
                     let c1 = f64::from(zs_field.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
-                    let h4c = kh::read_ct_clamped(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0;
+                    if kh_zone == "line" || kh_zone == "line8" {
+                        return line_lower(c1, fx, fy);
+                    }
+                    let h4c = if kh_zone == "h4" {
+                        kh::read_ct(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0
+                    } else {
+                        kh::read_ct_clamped(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0
+                    };
                     let mut wgt = kh::zone_weight(zone.as_ref().expect("h5's zone"), rw, rh, fx, fy);
                     if let Some(s) = &dams {
+                        wgt = wgt.max(kh::dam_weight(s, rw, rh, fx, fy, lr, 2.0, 4.0));
+                    }
+                    if let Some(s) = &saddles {
                         wgt = wgt.max(kh::dam_weight(s, rw, rh, fx, fy, lr, 2.0, 4.0));
                     }
                     // lead #161: `--kh-lower-only`: h5 only lowers C1 toward h4c (never raises it), as h3 never raises
@@ -2896,7 +3054,25 @@ fn main() -> Result<(), String> {
         .then(|| (0..w * h).map(|c| f64::from(runoff[((c / w) / L) * rw + (c % w) / L]) / runoff_mean).collect());
     let window = (x0 as u64, y0 as u64, w, h, rw);
     let mut g = if on("kg-trunk") {
-        build_graph(&h1, &reaches, grid, &start, &ks_base, &ks0, &budget, window, sea, bar, &order, threads, low, &ocean, runoff_mean).0
+        build_graph(
+            &h1,
+            &reaches,
+            grid,
+            &start,
+            &ks_base,
+            &ks0,
+            &budget,
+            window,
+            sea,
+            bar,
+            &order,
+            threads,
+            low,
+            &ocean,
+            runoff_mean,
+            &solve.zs,
+        )
+        .0
     } else {
         Graph { body: BODY, nodes: Vec::new(), reaches: Vec::new(), basins: Vec::new() }
     };
@@ -3131,7 +3307,14 @@ fn main() -> Result<(), String> {
                 keep_fields: false,
                 runoff_weight: runoff_w.as_deref(),
             };
-            let ex = extract(&inp, &Params { mfd_init: false, ..Params::plan(BODY, runoff_mean) });
+            let ex = extract(
+                &inp,
+                &Params {
+                    mfd_init: false,
+                    bed_floor: BED_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed).then_some(sea + 0.5),
+                    ..Params::plan(BODY, runoff_mean)
+                },
+            );
             // only what the pass adds: a tributary that ends at a trunk's last vertex returns the trunk's own down node, which must stay (numerics review of f5adb6d8)
             let had: HashSet<u64> = gd.nodes.iter().map(|x| x.id).collect();
             trib_first =
@@ -3331,12 +3514,37 @@ fn main() -> Result<(), String> {
             };
             planet_generators::bake::drain::OUTLET_FLOORS
                 .store(BAND6_OUTLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed), std::sync::atomic::Ordering::Relaxed);
+            // lead #180: the depressions of band6's input that basins-2 would keep (>= 0.25 km2 and >= 2 m deep) are band6's intended cells
+            let keep6: Vec<bool> = if BAND6_KEEP_RIMS.load(std::sync::atomic::Ordering::Relaxed) {
+                let level = planet_generators::bake::drain::fill_level(&ks_d, w, h, &outl);
+                let (_, comps) = planet_generators::bake::drain::depressions(&ks_d, &level, w, h);
+                let mut k = vec![false; n_l];
+                let (mut kept, mut cells) = (0usize, 0usize);
+                for (cs, _) in &comps {
+                    let area = cs.len() as f64 * dx_l * dx_l;
+                    let depth = cs.iter().map(|&c| level[c as usize] - ks_d[c as usize]).fold(0.0f64, f64::max);
+                    if area >= 0.25e6 && depth >= 2.0 {
+                        kept += 1;
+                        cells += cs.len();
+                        for &c in cs {
+                            k[c as usize] = true;
+                        }
+                    }
+                }
+                println!(
+                    "RG domain {d} band6 keep rims (lead #180): {kept} of {} depressions kept (>= 0.25 km2, >= 2 m; {cells} cells)",
+                    comps.len()
+                );
+                k
+            } else {
+                Vec::new()
+            };
             let (d6, st, deep6) = planet_generators::bake::drain::drain_selective_floors(
                 &ks_d,
                 w,
                 h,
                 &outl,
-                &|_| false,
+                &|p| !keep6.is_empty() && keep6[p],
                 &|_| dx_l * dx_l,
                 8,
                 4096,
@@ -3533,7 +3741,14 @@ fn main() -> Result<(), String> {
                 keep_fields: false,
                 runoff_weight: runoff_w.as_deref(),
             };
-            let ex = extract(&inp, &Params { mfd_init: false, ..Params::plan(BODY, runoff_mean) });
+            let ex = extract(
+                &inp,
+                &Params {
+                    mfd_init: false,
+                    bed_floor: BED_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed).then_some(sea + 0.5),
+                    ..Params::plan(BODY, runoff_mean)
+                },
+            );
             if order_fable {
                 fine_post = Some((ex.receiver.clone(), ex.channel.clone()));
             }
@@ -4084,7 +4299,14 @@ fn main() -> Result<(), String> {
                 keep_fields: false,
                 runoff_weight: runoff_w.as_deref(),
             };
-            let ex = extract(&inp, &Params { mfd_init: false, ..Params::plan(BODY, runoff_mean) });
+            let ex = extract(
+                &inp,
+                &Params {
+                    mfd_init: false,
+                    bed_floor: BED_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed).then_some(sea + 0.5),
+                    ..Params::plan(BODY, runoff_mean)
+                },
+            );
             gd.nodes.extend(ex.nodes.iter().cloned());
             gd.reaches.extend(ex.reaches.iter().cloned());
             let trunk_ids: BTreeSet<u64> = l_trunks.iter().map(|r| r.id).collect();
@@ -4120,6 +4342,44 @@ fn main() -> Result<(), String> {
         let mut seen: HashSet<u64> = HashSet::new();
         gd.nodes.retain(|x| seen.insert(x.id));
         gd.sort();
+        // lead #182 `--runoff-ratio` (was spikes' `--runoff-cell`): a_run per-cell runoff weighted (catchment mean of the H1 runoff over the window mean, along an L routing of the KS output)
+        if RUNOFF_RATIO.load(std::sync::atomic::Ordering::Relaxed) {
+            use planet_generators::bake::route::route_rules_filled;
+            let outlet: Vec<bool> = (0..n_l).map(|c| active[c] && (sea_l[c] || exit[c])).collect();
+            let (r, _) = route_rules_filled(&grid_d, &ks_d[..], &outlet, 1.0e-3, 1, 0.0, None, RoundRules::ROUND);
+            let mut ag: Vec<f64> = (0..n_l).map(|c| if active[c] { 1.0 } else { 0.0 }).collect();
+            let mut aw: Vec<f64> = (0..n_l).map(|c| if active[c] { f64::from(runoff[parent(c)]) / runoff_mean } else { 0.0 }).collect();
+            for &c in r.order.iter().rev() {
+                let c = c as usize;
+                let to = r.receiver[c];
+                if to != NONE {
+                    ag[to as usize] += ag[c];
+                    aw[to as usize] += aw[c];
+                }
+            }
+            let mut fs: Vec<f64> = Vec::new();
+            for rc in gd.reaches.iter_mut().filter(|x| x.level == Level::L) {
+                for k in 0..rc.vertices.len() {
+                    let Some(c) = to_local(rc.vertices[k]) else { continue };
+                    let f = if ag[c] > 0.0 { aw[c] / ag[c] } else { 1.0 };
+                    fs.push(f);
+                    let a = &mut rc.attrs;
+                    a.a_run[k] = a.a_geo[k] * f;
+                    a.a_run_no_ext[k] *= f;
+                    a.q[k] = a.a_run[k] * runoff_mean;
+                    a.q_w[k] = a.q[k];
+                }
+            }
+            fs.sort_by(f64::total_cmp);
+            let pq = |q: f64| fs.get(((fs.len() as f64 - 1.0) * q) as usize).copied().unwrap_or(1.0);
+            println!(
+                "RG domain {d} runoff per cell (lead #182): {} L vertices; catchment runoff over the window mean p10 {:.3} p50 {:.3} p90 {:.3}",
+                fs.len(),
+                pq(0.1),
+                pq(0.5),
+                pq(0.9)
+            );
+        }
         // KV and KC (crusader's G1f) on the domain's KS output, within the budget KS left; the domain's L reaches in window cells (the module reads vertices as grid cells)
         let t = Instant::now();
         let (kv_d, kc_d, rkc) = if on("kv") || on("kc") {
@@ -4388,6 +4648,7 @@ fn main() -> Result<(), String> {
             ("kh-lower-only", if kh_lower_only { "on" } else { "off" }.to_string()),
             ("trib-once", if trib_once { "on" } else { "off" }.to_string()),
             ("order", stage_order.to_string()),
+            ("budget-floor", format!("{budget_floor}")),
             ("k5-diffuse-amax", k5_diffuse_amax.to_string()),
             ("k5-parity", k5_parity.to_string()),
             ("ks", ks_mode.to_string()),
@@ -4404,6 +4665,22 @@ fn main() -> Result<(), String> {
             ("band6-floors", if BAND6_FLOORS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-outlet-floor", if BAND6_OUTLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("sea17", if SEA17.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("bed-sea-floor", if BED_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("trunk-saddle-ortho", if TRUNK_SADDLE_ORTHO.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("band6-keep-rims", if BAND6_KEEP_RIMS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("runoff-ratio", if RUNOFF_RATIO.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            (
+                "trunk-head-once",
+                if planet_generators::bake::kg_trib::HEAD_ONCE.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }
+                    .to_string(),
+            ),
+            (
+                "strahler-junction",
+                if planet_generators::bake::kg_trib::STRAHLER_JUNCTION.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }
+                    .to_string(),
+            ),
+            ("kh-saddle-split", kh_saddle.to_string()),
+            ("kh-zone", kh_zone.to_string()),
             ("kv-connect", if KV_CONNECT.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-rims", if KV_RIMS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-sea-floor", if KV_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),

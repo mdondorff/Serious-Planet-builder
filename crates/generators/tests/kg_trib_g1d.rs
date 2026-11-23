@@ -801,3 +801,92 @@ fn a_per_cell_runoff_accumulates_as_area_times_runoff_and_is_conserved_at_every_
     assert!(plain.ex.run.is_empty());
     assert!(plain.ex.reaches.iter().all(|r| r.attrs.a_run == r.attrs.a_geo));
 }
+
+/// spikes #171 (spike only): `Params.bed_floor` on the fixture, with its coast lowered to coastal flats (every land cell within 3 cells of the sea at 0.2 m above it) so
+/// chains cross land below the floor. Against the same run without the floor (same reaches, ids and vertices): no bed rises along a reach, every land vertex's bed at
+/// or above the floor code, a raised bed exactly at the floor, and every sea end keeping its own code.
+#[test]
+fn the_sea_floor_codes_land_beds_at_the_floor_without_rises() {
+    let mut c = case(4);
+    let gl = Grid::cube(L_N, RADIUS_M);
+    let n = c.fx.s0.len();
+    // coastal flats: land within 3 cells (8-connected) of a sea cell
+    let mut near = c.sea.clone();
+    for _ in 0..3 {
+        let prev = near.clone();
+        for x in 0..n {
+            if !prev[x] && (0..8).any(|d| gl.neighbour(x, d).is_some_and(|y| prev[y])) {
+                near[x] = true;
+            }
+        }
+    }
+    let flats = (0..n).filter(|&x| near[x] && !c.sea[x]).count();
+    for x in 0..n {
+        if near[x] && !c.sea[x] {
+            c.fx.s0[x] = SEA_LEVEL_M + 0.2;
+        }
+    }
+    let exit = vec![false; n];
+    let seed = vec![0.0; n];
+    let outlet: Vec<bool> = (0..n).map(|x| gl.is_active(x) && c.sea[x]).collect();
+    let trunks_r = trunk_reaches(&c);
+    let first = produce(&gl, &c.fx.s0, &outlet, &trunks_r, &tile, &BasinParams::l(c.graph.body));
+    let kept = kept_of(&first, n);
+    let inp = Input {
+        grid: &gl,
+        z: &c.fx.s0,
+        sea: &c.sea,
+        exit: &exit,
+        trunks: &c.trunks,
+        kept: &kept,
+        seed_ext: &seed,
+        tile: &tile,
+        gid: &|x| x as u64,
+        keep_fields: false,
+        runoff_weight: None,
+    };
+    let floor_m = SEA_LEVEL_M + 0.5;
+    let plain = extract(&inp, &Params::plan(c.graph.body, RUNOFF));
+    let floored = extract(&inp, &Params { bed_floor: Some(floor_m), ..Params::plan(c.graph.body, RUNOFF) });
+    let by_id: BTreeMap<u64, &Reach> = plain.reaches.iter().map(|r| (r.id, r)).collect();
+    assert_eq!(plain.reaches.len(), floored.reaches.len(), "the floor changes beds only");
+    let f = libm::floor(floor_m / 0.5) as i32;
+    let on_trunk: BTreeSet<u64> = c.trunks.iter().flat_map(|t| t.vertices.iter().map(|&v| v as u64)).collect();
+    let (mut raised, mut sea_ends) = (0usize, 0usize);
+    for r in &floored.reaches {
+        let p = by_id[&r.id];
+        assert_eq!(p.vertices, r.vertices, "reach {:x}: the same vertices", r.id);
+        let (b, pb) = (&r.attrs.bed, &p.attrs.bed);
+        for k in 1..b.len() {
+            assert!(b[k] <= b[k - 1], "reach {:x}: no bed rise at vertex {k} ({} after {})", r.id, b[k], b[k - 1]);
+        }
+        for (k, &v) in r.vertices.iter().enumerate() {
+            let cell = v as usize;
+            if c.sea[cell] {
+                assert_eq!(b[k], pb[k], "reach {:x}: a sea vertex keeps its own code", r.id);
+                sea_ends += usize::from(k + 1 == b.len());
+                continue;
+            }
+            if on_trunk.contains(&v) {
+                continue; // the last vertex on a trunk takes the trunk's bed (the trunk's own floor is KG-trunk's)
+            }
+            assert!(
+                b[k] >= f && b[k] >= pb[k],
+                "reach {:x} vertex {k}: a land bed at or above the floor code {f} ({} from {})",
+                r.id,
+                b[k],
+                pb[k]
+            );
+            if b[k] > pb[k] {
+                raised += 1;
+                assert!(pb[k] < f && b[k] == f, "reach {:x} vertex {k}: raised only to the floor ({} from {})", r.id, b[k], pb[k]);
+            }
+        }
+    }
+    println!(
+        "spikes #171: {flats} coastal-flat cells at the sea + 0.2 m; {} reaches; {raised} land vertices raised to the floor code {f}; {sea_ends} reaches ending on a sea cell",
+        floored.reaches.len()
+    );
+    assert!(raised > 0, "chains cross the coastal flats below the floor");
+    assert!(sea_ends > 0, "chains end on the sea");
+}
