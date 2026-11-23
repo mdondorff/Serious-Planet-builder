@@ -245,7 +245,7 @@ fn a_regional_field_reads_clamped_by_default_unclamped_or_as_a_b_spline() {
     }
     // the interpolating B-spline passes through every cell's value, beside the step too, where the plain B-spline does not
     let bi = field(RegionRead::BSplineInterp);
-    let wavy: Vec<f32> = (0..w * h).map(|p| ((p % w) as f32 * 1.3).sin() * 20.0 + (p / w) as f32 * 3.0).collect();
+    let wavy: Vec<f32> = (0..w * h).map(|p| libm::sinf((p % w) as f32 * 1.3) * 20.0 + (p / w) as f32 * 3.0).collect();
     let bw = RegionField::new(Face(1), n, (100, 200), w, h, wavy.clone()).with_read(RegionRead::BSplineInterp);
     for (a, b) in [(5usize, 4usize), (6, 4), (3, 6), (8, 2)] {
         assert!((bi.at(dir(a as f64, b as f64)) - f64::from(data[b * w + a])).abs() < 1e-3, "bsplinei at the step's cell ({a}, {b})");

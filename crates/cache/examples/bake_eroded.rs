@@ -208,8 +208,8 @@ fn main() -> Result<(), String> {
         if bytes.len() != w * h * 8 {
             return Err(format!("{}: {} bytes, the window's L grid is {w} x {h} f64 ({} bytes)", path.display(), bytes.len(), w * h * 8));
         }
-        for (c, v) in bytes.chunks_exact(8).enumerate() {
-            z0[c] = f64::from_le_bytes(v.try_into().expect("8 bytes"));
+        for (c, v) in bytes.as_chunks::<8>().0.iter().enumerate() {
+            z0[c] = f64::from_le_bytes(*v);
         }
         identity = fnv(bytes.iter().copied(), 0xcbf2_9ce4_8422_2325);
     }

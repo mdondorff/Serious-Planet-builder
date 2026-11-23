@@ -64,9 +64,9 @@ fn qi5_correct(s: &mut [f64]) {
     let (t0, t1, t2) = (t0 / sum, t1 / sum, t2 / sum);
     let src = s.to_vec();
     let at = |k: i64| src[k.clamp(0, n as i64 - 1) as usize];
-    for k in 0..n {
+    for (k, v) in s.iter_mut().enumerate() {
         let i = k as i64;
-        s[k] = t0 * at(i) + t1 * (at(i - 1) + at(i + 1)) + t2 * (at(i - 2) + at(i + 2));
+        *v = t0 * at(i) + t1 * (at(i - 1) + at(i + 1)) + t2 * (at(i - 2) + at(i + 2));
     }
 }
 
@@ -77,9 +77,9 @@ fn qi_correct(s: &mut [f64]) {
         return;
     }
     let src = s.to_vec();
-    for k in 0..n {
+    for (k, v) in s.iter_mut().enumerate() {
         let (a, b) = (src[k.saturating_sub(1)], src[(k + 1).min(n - 1)]);
-        s[k] = (8.0 * src[k] - a - b) / 6.0;
+        *v = (8.0 * src[k] - a - b) / 6.0;
     }
 }
 
