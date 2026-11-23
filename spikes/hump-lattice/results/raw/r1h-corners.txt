@@ -1,0 +1,5 @@
+2373 trenches
+S_KH crests at an H1 corner: 14.9 % (uniform 6.25 %)
+S0 crests: at an x edge only 16.8 % (uniform 18.75 %), y edge only 18.3 % (18.75 %), at a corner 21.8 % (6.25 %), interior 43.1 % (56.25 %)
+S0 corner crests: 518; on an H1 saddle block (one diagonal pair of z_s above the other) 426 (82 %)
+humps over 50 m on S0: 1272 (54 %); Z carries over half of 93 % of them

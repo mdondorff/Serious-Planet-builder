@@ -49,7 +49,8 @@ print(f'{tr.sum()} trenches; S0 hump at the S0 crest against the highest end: {q
 print(f'  K5 surface Z (z_s bilinear): {q(dZ)}; sub-814 m detail rho = S0 - Z: {q(dRho)}')
 print(f'  base B: {q(dB)}; K5 delta r = S0 - B: {q(dR)}')
 for name, v in (('Z', dZ), ('rho', dRho)):
-    print(f'  share of the hump carried by {name}: p50 {np.median(v / dS0) * 100:.0f} %; trenches where {name} carries over half {np.mean(v / dS0 > 0.5) * 100:.1f} %, '
+    pos = dS0 > 0
+    print(f'  share of the hump carried by {name}: p50 {np.median(v[pos] / dS0[pos]) * 100:.0f} % (over the {pos.sum()} trenches with a positive S0 hump); trenches where {name} carries over half {np.mean(v / dS0 > 0.5) * 100:.1f} %, '
           f'where {name} alone is over 10 m {np.mean(v > 10) * 100:.1f} %')
 small = np.abs(dRho) < 0.5 * dS0
 print(f'trenches whose hump is mostly K5 relief (|rho| under half): {small.mean() * 100:.1f} %; mostly sub-814 m detail (|Z| under half): {(np.abs(dZ) < 0.5 * dS0).mean() * 100:.1f} %')

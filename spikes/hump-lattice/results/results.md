@@ -6,7 +6,7 @@ Why it matters: G3's pre-port item "hump trenches"; the source-stage fix depends
 Time box: 1 day of agent work.
 Success criteria: the crest histogram against the 611 m and 814 m lattices, the layer attribution, and the smooth-base row.
 Fallback if it fails: the trenches stay a known G3 item.
-Code location: `spikes/hump-lattice/results/raw/` (analysis scripts on g1f15's R1h chain dumps); the chain is `spike/rg-prototype` faa923f0.
+Code location: `spikes/hump-lattice/results/raw/` (lattice173.py to lattice173d.py and plot173.py, on g1f15's R1h chain dumps); the chain is `spike/rg-prototype` faa923f0.
 Status: closed 2026-11-23.
 
 ## Answer
@@ -29,7 +29,7 @@ Status: closed 2026-11-23.
 ## Numbers (R1h)
 - Trench paths: 2,373. Size p10 10, p50 22, p90 78, max 13,132 cells; 1,918 under 50 cells.
 - Hump on S0: p10 14.6, p50 55.9, p90 198.0 m.
-- Crest height above S0's 1 km (11 x 11 cell) mean: p50 -3.7 m. 98 % of crests are neither a peak nor a pit of their 3 x 3, so they are cols.
+- Crest height above S0's 1 km (11 x 11 cell) mean: p50 -3.7 m. 98 % of crests are neither a peak nor a pit of their 3 x 3 (a saddle or a slope): the path's highest point is a col it crosses, not a summit.
 
 | Phase test | trench crests | S0 local maxima | reference |
 |---|---|---|---|
@@ -49,7 +49,9 @@ Status: closed 2026-11-23.
 | r (K5's delta) | -48.6 m | 21.2 m | 133.5 m | - |
 
 - Humps over 50 m: 1,272 (54 %). Z carries over half of 93 % of them.
-- Corner crests: 518, of them 426 (82 %) on an H1 saddle block.
+- Corner crests: 518, of them 426 (82 %) on an H1 saddle block (z_s's 2 x 2 H1 block around the corner, one diagonal pair above the other).
+- Median share of the S0 hump carried by Z: 83 %; by rho: 17 % (2,366 trenches with a positive S0 hump).
+- Sources: `raw/r1h-lattice.txt` (lattice173.py), `raw/r1h-lattice-b.txt` (lattice173b.py), `raw/r1h-layers.txt` (lattice173c.py), `raw/r1h-corners.txt` (lattice173d.py, the corner, saddle-block and over-50 m figures).
 
 ## Step 3: the smooth-base row
 - Not run as a separate row. rg_chain's base reads its 16,384-per-face lattice (611 m) with `read_elevation_c1`, GEN-107's C1 reader (`cpu-erosion-v2`), since the runner's first commit (62819068).
