@@ -1926,13 +1926,21 @@ fn main() -> Result<(), String> {
     if !["aplus", "today"].contains(&base_form) {
         return Err(format!("--base aplus | today, not '{base_form}'"));
     }
-    // spikes #147: `--base-stages 13` (stages 1 and 3, the default) or `3` (stage 3 only: no drain before K5)
+    // spikes #147: `--base-stages 13` (stages 1 and 3, the default) or `3` (stage 3 only: no drain before K5); lead #178 (R16): `1` (stage 1 only: no drain of z_s after K5)
     let base_stages = value(&args, "--base-stages").unwrap_or("13");
-    if !["13", "3"].contains(&base_stages) {
-        return Err(format!("--base-stages 13 | 3, not '{base_stages}'"));
+    if !["13", "3", "1"].contains(&base_stages) {
+        return Err(format!("--base-stages 13 | 3 | 1, not '{base_stages}'"));
     }
     if base_form == "aplus" {
-        planet_cache::region_bake::install_s138(if base_stages == "3" { "post-only" } else { "sel-post" }, f64::INFINITY, &tag)?;
+        planet_cache::region_bake::install_s138(
+            match base_stages {
+                "3" => "post-only",
+                "1" => "sel-pre",
+                _ => "sel-post",
+            },
+            f64::INFINITY,
+            &tag,
+        )?;
     }
     // spikes #147: `--breach-cost cell` (SPIKE-138) or `length` (the cut cost times the step's length, plus a length term)
     let breach_cost = value(&args, "--breach-cost").unwrap_or("cell");
