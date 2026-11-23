@@ -607,7 +607,8 @@ fn produce_core(
         out.node_of_basin.insert(id, k as u32);
         out.cells.range.insert(id, (first[k], first[k] + size[k]));
     }
-    // inlets: each given reach entering a kept basin gets a lake_inlet on its first vertex inside it
+    // inlets: each given reach ending in a kept basin at its own lake_inlet gets that inlet (lead #187; before, any reach entering one got an inlet on its first vertex
+    // inside it, mid-reach too: an orphan under GEN-189)
     // (SPIKE-133: a reach that starts inside a kept basin does not enter it there: from its second vertex, and only from outside that basin)
     // spikes #142: the markers this producer made (spill trib_junctions) are passed like the given ones
     let own_markers: std::collections::BTreeSet<usize> =
@@ -634,7 +635,9 @@ fn produce_core(
                         if (j + 1 == r.vertices.len() && !own) || (node_cells.contains(&cj) && !(j + 1 == r.vertices.len() && own)) {
                             break;
                         }
-                        if !markers.contains(&cj) && !own_markers.contains(&cj) {
+                        // lead #187 (GEN-189's OrphanLakeInlet, main #1639): the inlet only where the reach ends, at its own inlet node; a reach that runs on through the
+                        // kept basin gets none (an inlet mid-reach is a node no reach ends at and no basin spills to)
+                        if j + 1 == r.vertices.len() && own && !markers.contains(&cj) && !own_markers.contains(&cj) {
                             inlet(cj, &mut nodes);
                             break;
                         }
