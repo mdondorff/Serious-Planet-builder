@@ -14,7 +14,7 @@ const SAMPLES: usize = 16;
 
 fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let mut out = "spikes/river-suite/results/g3-windows.toml".to_string();
+    let mut out = "crates/cache/data/g3-windows.toml".to_string();
     let mut threads = 8usize;
     let mut it = args.iter();
     while let Some(a) = it.next() {

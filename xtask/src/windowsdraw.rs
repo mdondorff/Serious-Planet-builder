@@ -1,5 +1,5 @@
 //! `cargo xtask windows-draw [--out FILE] [--threads N]` (BUILD-066, lead #186a): G3-8's out-of-sample windows, a seeded stratified draw over the seed-14 world's coarse
-//! field (the `windows_draw` example of `planet-cache`); writes `spikes/river-suite/results/g3-windows.toml` unless `--out` names another file.
+//! field (the `windows_draw` example of `planet-cache`); writes `crates/cache/data/g3-windows.toml` unless `--out` names another file.
 
 use crate::util::{run, Res};
 use std::path::Path;

@@ -11,7 +11,7 @@
 
 ## 2. Window draw (BUILD-066)
 - [ ] 2.1 `cargo xtask windows-draw`: strata from the coarse field, seeded draw, no overlap with the five windows; test
-- [ ] 2.2 Commit the drawn windows as `tests/data/g3-windows.toml` before any run on them
+- [ ] 2.2 Commit the drawn windows as `crates/cache/data/g3-windows.toml` before any run on them
 
 ## 3. Rows and values
 - [ ] 3.1 B and RG on the five windows; the new bars' values proposed in the PR body (O10)

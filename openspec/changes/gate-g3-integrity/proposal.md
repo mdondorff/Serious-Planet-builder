@@ -27,8 +27,8 @@
 - none: the gate is a CPU measurement; no rendered output changes.
 
 ## Impact
-- Spec deltas: BUILD-060 (modified), BUILD-066 (added).
-- Crates: cache (`river_gate.rs`, `river_gate_graph.rs`, `river_suite.rs`, the `river_gate` example), xtask (`windows-draw`).
-- Data: `tests/data/g3-windows.toml` (the drawn windows, pre-registered).
+- Spec deltas: BUILD-060 (modified), BUILD-066 and TEST-149 (added).
+- Crates: cache (`river_gate.rs`, `river_gate_graph.rs`, `river_suite.rs`, `window_draw.rs`, the `river_gate` and `windows_draw` examples), xtask (`windows-draw`, `river-gate --table`'s `bar_saddles_s0`).
+- Data: `crates/cache/data/g3-windows.toml` (the drawn windows, pre-registered).
 - Every graph row's bar set grows; the G2 record stays as published.
 - A contract rule of the gate changes: the merge waits for the lead's review and the owner's values (O10).
