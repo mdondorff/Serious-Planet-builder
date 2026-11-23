@@ -143,6 +143,11 @@ fn agreement_counts_kept_interiors_and_cells_above_a_graph_head_apart() {
     assert_eq!((a.routed, a.routed_agree, a.routed_above_head, a.routed_kept), (4, 2, 2, 1), "{a:?}");
     // T's cell (104, 206) is in the kept interior: one graph cell leaves the graph share
     assert_eq!((a.graph, a.graph_kept), (11, 1), "{a:?}");
+    // G3-1: the graph side counts the cells whose reach drains at least the threshold there; at 3 km2 only C -> O's four cells (5 to 9 km2, the junction cell its
+    // own) of the 12, while the routed side still matches against every graph cell
+    let big = agreement(&g, &W, &area.iter().map(|a| a * 2.0).collect::<Vec<_>>(), &all, &all, &kept, &recv, 3.0e6);
+    assert_eq!((big.graph, big.graph_kept), (4, 0), "{big:?}");
+    assert_eq!((big.routed, big.routed_agree), (a.routed, a.routed_agree), "{big:?}");
 }
 
 // spec: TEST-137, BUILD-060

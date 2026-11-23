@@ -561,10 +561,15 @@ pub fn agreement(
     threshold_m2: f64,
 ) -> Agreement {
     let n = window.w * window.h;
+    // every rasterised cell (the routed side's match), and those whose reach drains at least the threshold there (the graph side's cells, G3-1: a 75 km2 share counts
+    // the graph's 75 km2 network, not its 1 km2 tributaries)
+    let by_id: BTreeMap<u64, &planet_generators::bake::river_graph::Reach> = g.reaches.iter().map(|r| (r.id, r)).collect();
     let mut graph = vec![false; n];
-    for &cell in rasterise(g).keys() {
+    let mut graph_at = vec![false; n];
+    for (&cell, &(id, k)) in rasterise(g).iter() {
         if let Some(c) = window.cell(cell) {
             graph[c] = true;
+            graph_at[c] = by_id.get(&id).and_then(|r| r.attrs.a_geo.get(k)).is_some_and(|&a| a >= threshold_m2);
         }
     }
     let mut head = vec![false; n];
@@ -613,7 +618,7 @@ pub fn agreement(
                 }
             }
         }
-        if graph[c] {
+        if graph_at[c] {
             if kept[c] {
                 a.graph_kept += 1;
             } else {
