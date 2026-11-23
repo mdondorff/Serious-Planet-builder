@@ -97,7 +97,7 @@ fn grid_gate(arg: &str, params: &GateParams) -> Result<(), String> {
     let bytes = std::fs::read(&file).map_err(|e| format!("{file}: {e}"))?;
     let surface = raw_grid_heights(&bytes, w, h).map_err(|e| format!("{file}: {e}"))?;
     let grid = planet_generators::bake::Grid::new(w, h, GRID_CELL_M);
-    let outlet = grid.outlets(&surface, sea);
+    let outlet = planet_cache::river_gate::connected_sea_outlets(&grid, &surface, sea);
     let inside = border_inside(w, h, GRID_BORDER);
     let region = vec![true; w * h];
     let report = measure(
@@ -364,7 +364,7 @@ fn main() -> Result<(), String> {
         }
     });
     let grid = planet_generators::bake::Grid::new(w, h, front.solve.grid.dx() / l as f64);
-    let outlet = grid.outlets(&surface, sea_level_m);
+    let outlet = planet_cache::river_gate::connected_sea_outlets(&grid, &surface, sea_level_m);
     // The G2 inputs (BUILD-060): a canonical graph, the per-stage budget fields, a partition pair; global L ids against this window's origin.
     let graph = value(&args, "--graph").map(read_graph).transpose()?;
     if own_start.is_some() {

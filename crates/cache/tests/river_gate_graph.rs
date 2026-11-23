@@ -855,3 +855,60 @@ fn a_line_end_inlet_outside_every_kept_depression_is_counted_and_spill_targets_a
         "the far line end, now also a spill target, is a line end once; the former spill target is an orphan"
     );
 }
+
+// spec: BUILD-055
+#[test]
+fn an_inland_pit_below_sea_level_is_land_to_the_gate_not_sea() {
+    // lead #185 (the chain's connected sea mask, readings 12 and 39): a 12 x 12 window of 100 m cells, sea on its west column, ground falling west, and a 5 x 5 pit of -5 m in
+    // its middle; the pit is no outlet (it is not joined to the edge through cells at or under the sea), so the gate's flood fills it as a closed basin
+    use planet_cache::river_gate::connected_sea_outlets;
+    let grid = Grid::new(12, 12, DX);
+    let cell = |x: usize, y: usize| y * 12 + x;
+    let mut z: Vec<f64> = (0..144).map(|c| 20.0 + 1.0 * (c % 12) as f64).collect();
+    for y in 0..12 {
+        z[cell(0, y)] = -1.0;
+    }
+    for y in 4..=8 {
+        for x in 4..=8 {
+            z[cell(x, y)] = -5.0;
+        }
+    }
+    let connected = connected_sea_outlets(&grid, &z, 0.0);
+    let level = grid.outlets(&z, 0.0);
+    assert!((0..12).all(|y| connected[cell(0, y)]), "the sea column on the edge is an outlet");
+    assert!((0..144).filter(|&c| grid.is_edge(c)).all(|c| connected[c]), "every edge cell is an outlet");
+    assert!(
+        (4..=8).all(|y| (4..=8).all(|x| !connected[cell(x, y)] && level[cell(x, y)])),
+        "the inland pit: land to the connected mask, sea to the level mask"
+    );
+    // a sea cell inland but joined to the edge through cells at or under the sea is an outlet
+    let mut joined = z.clone();
+    for x in 1..4 {
+        joined[cell(x, 6)] = -1.0;
+    }
+    let jc = connected_sea_outlets(&grid, &joined, 0.0);
+    assert!(jc[cell(6, 6)] && jc[cell(2, 6)], "a channel at or under the sea joins the pit to the sea");
+    let all = vec![true; 144];
+    let p = GateParams { channel_area_m2: 6.0 * DX * DX, ..GateParams::default() };
+    let gate = |outlet: &[bool]| {
+        measure(
+            &GateInput {
+                grid: &grid,
+                start: &z,
+                surface: &z,
+                outlet,
+                inside: &all,
+                region: &all,
+                h1: &[],
+                seed: 7,
+                sea_level_m: 0.0,
+                outside_drains: false,
+                trunks: &[],
+                g2: None,
+            },
+            &p,
+        )
+    };
+    assert!(gate(&connected).basins >= 1, "the pit is a closed basin to the connected mask");
+    assert_eq!(gate(&level).basins, 0, "the level mask drains it as sea");
+}
