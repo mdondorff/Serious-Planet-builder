@@ -106,6 +106,24 @@ Status: closed 2026-11-23; addendum (#174, #174a) the same day: the three switch
 - Finding: the corner cols are kept-basin rims. So the 22 % belongs with band6 respecting kept rims, not with KH or the trunk image (lead, 2026-11-23).
 - State: #174 closed on 2026-11-23; all three forms stay off. The 22 % stays a G3 item with the 78 %.
 
+## Addendum 2026-11-23: band6 keeping kept-basin rims (lead #180, #180a)
+- `--band6-keep-rims` (spike/rg-prototype-spikes 42850d8c, off by default): band6 keeps every depression of its input at least 0.25 km2 and 2 m deep, so it spills at its rim. That is 11,891 of 48,824 depressions (`raw/s180-r1h-keep-chain-lines.txt`).
+
+| R1h (`raw/s180-*`; defaults: SPIKE-143's `s177-r1h-def-gate.txt`) | defaults | band6-keep-rims |
+|---|---|---|
+| bars passing | 10/11 | 9/11 (`bar_spill_missing` 0 -> 1) |
+| hump trenches: band6 / band6 connect / KV / KC | 928 / 136 / 535 / 0 | 98 / 26 / 1,046 / 58 |
+| band6's corner-crest trenches | 365 | 34 |
+| trenches S_KH -> final | 2,369 | 2,211 |
+| corner-only links at 5 m (final) | 260 | 1,114 |
+| kept river / basin share | 3.01 / 3.68 | 3.58 / 4.24 |
+| kept basins / kept lakes | 1,491 / 778 km2 | 1,626 / 941 km2 |
+| bar_violations | 102 | 25 |
+
+- It fails the ablation rule: a newly failing bar, corner links +854, and kept river and basin over the 0.5 floor. It stays off.
+- The cuts move to KV (535 -> 1,046): KV's vertex lines cut through the rims band6 leaves standing.
+- Every local fix so far (#174a, #177, #177a, #180) moved the cut to the next stage. The fix belongs where the lines are decided: `line-geometry.md` (lead #181).
+
 ## Visuals
 ![Crest phase modulo 8 and 6 on R1h: trench crests against path cells and S0 local maxima](images/crest-phase.png)
 - Crest phase on R1h (g1f15). Top: modulo 8 L cells (814 m). The trench crests on S0 (red) peak at the H1 cell edges (shaded); S0's local maxima (blue) peak at H1 centres; the path cells (grey) are flat. Bottom: modulo 6 L cells (611 m). The trench crests are flat, while S0's maxima carry the lattice. CPU analysis plot, no render.
