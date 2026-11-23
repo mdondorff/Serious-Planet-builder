@@ -630,6 +630,11 @@ pub fn solve_rounds_memo(
 ) -> (RoundReport, Vec<RoundWork>) {
     check(grid, z, p, rounds, drivers);
     assert!(p.round_rules.canonical_flood, "the memoised solve routes in tiles: the canonical flood is required");
+    // R24: the catchment key does not hash the spike's level floor, so the memo refuses one (G-EQ)
+    assert!(
+        drivers.level_floor.is_none(),
+        "the memoised solve takes no level floor (SPIKE-138, spike only): its catchment key does not carry it"
+    );
     let (mut report, mut work) = (RoundReport::default(), Vec::new());
     if let Some(pb) = &p.pre_breach {
         report.pre_breach = Some(super::breach::breach_basins(grid, z, outlet, p.epsilon, pb));

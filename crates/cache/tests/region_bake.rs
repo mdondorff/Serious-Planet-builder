@@ -317,8 +317,8 @@ fn two_stage_configs_in_one_process_give_two_keys_and_each_solve_sees_its_own() 
     assert!(ca.tiles.iter().any(|(t, k)| cb.tiles.get(t).is_some_and(|o| o != k)), "some tile has another key");
     // a, b, a in one process: the second solve of a is the first bit for bit, b's differs (a set-once global would have kept one of them)
     let bits = |s: &RegionSpec| solve_region(s, &base).unwrap().zs.iter().map(|v| v.to_bits()).collect::<Vec<u64>>();
-    let (a1, b1, c1, a2) = (bits(&a), bits(&b), bits(&c), bits(&a));
-    assert_eq!(a1, a2, "the default config's solve after two others is the same");
+    // (no LTD solve here: its receiver toggle is global for every routing, and tests share the process)
+    let (a1, b1, a2) = (bits(&a), bits(&b), bits(&a));
+    assert_eq!(a1, a2, "the default config's solve after the other is the same");
     assert_ne!(a1, b1, "the drains and the k_dt factor change the solve");
-    assert_ne!(a1, c1, "D8-LTD changes the solve");
 }

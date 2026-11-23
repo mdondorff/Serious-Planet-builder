@@ -284,6 +284,21 @@ pub struct RegionReport {
 /// R24: K5's receiver form is still a toggle inside the generators (`route::RECEIVER_LTD`, `round::RECEIVER_DINF`), set from the spec for the rounds alone; one regional solve
 /// at a time holds it, so two specs in one process never see each other's form.
 static K5_ROUTE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Sets the receiver toggles for the rounds and puts them back to D8 when dropped, also when the rounds panic.
+struct K5RouteSet;
+impl K5RouteSet {
+    fn new(route: K5Route) -> Self {
+        planet_generators::bake::route::RECEIVER_LTD.store(route == K5Route::Ltd, std::sync::atomic::Ordering::Relaxed);
+        planet_generators::bake::round::RECEIVER_DINF.store(route == K5Route::Dinf, std::sync::atomic::Ordering::Relaxed);
+        K5RouteSet
+    }
+}
+impl Drop for K5RouteSet {
+    fn drop(&mut self) {
+        planet_generators::bake::route::RECEIVER_LTD.store(false, std::sync::atomic::Ordering::Relaxed);
+        planet_generators::bake::round::RECEIVER_DINF.store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct RegionSolve {
@@ -395,16 +410,14 @@ pub fn solve_region(spec: &RegionSpec, base: &(dyn Fn(Vec3) -> f64 + Sync)) -> R
     // The rounds' own narrowing guard asserts when a round lifts a summit past the binade the epsilon was chosen for: that is the same refusal as the check after them, returned as an error naming the cell.
     let solved = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         // SPIKE-139 (spike only; R24: the spec's `stage.k5.route`): K5's receiver form for the rounds alone, back to D8 after them, under the lock
+        // (the toggles are global for every route_rules call: a non-D8 form is a spike tool's, run alone in its process; H1 routing outside the lock reads D8)
         let _held = K5_ROUTE_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        planet_generators::bake::route::RECEIVER_LTD.store(k5.route == K5Route::Ltd, std::sync::atomic::Ordering::Relaxed);
-        planet_generators::bake::round::RECEIVER_DINF.store(k5.route == K5Route::Dinf, std::sync::atomic::Ordering::Relaxed);
+        let _route = K5RouteSet::new(k5.route);
         let t = std::time::Instant::now();
         let r = solve_rounds_with(&grid, &mut zs, &outlet, &carve, spec.rounds, &spec.threads, stream, &drivers);
         if k5.route != K5Route::D8 {
             println!("K5TIME {:.1} s for {} rounds on {rw} x {rh} cells", t.elapsed().as_secs_f64(), spec.rounds);
         }
-        planet_generators::bake::route::RECEIVER_LTD.store(false, std::sync::atomic::Ordering::Relaxed);
-        planet_generators::bake::round::RECEIVER_DINF.store(false, std::sync::atomic::Ordering::Relaxed);
         r
     }));
     if let Err(panic) = solved {
