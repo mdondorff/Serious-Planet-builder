@@ -619,6 +619,36 @@ fn the_diff_separates_topology_from_attributes() {
 
 // spec: TEST-140
 #[test]
+fn the_net_budget_rule_credits_a_fill_between_two_lowerings_and_the_gross_rule_does_not() {
+    // lead #199 (owner O3; spike only, not a spec requirement yet): a 50 m budget. KS lowers cell 0 by 40 m, band6 fills it back 30 m, KV lowers it 30 m again.
+    // Gross use 40 + 30 = 70 m (over); net use against S_KH at each boundary 40, 10, 40 m (within). Cell 1 is lowered 60 m net at KV: over under both rules.
+    let g = base();
+    let s_kh = vec![100.0, 100.0, 100.0];
+    let budget = vec![50.0, 50.0, 50.0];
+    let (ks, band6, kv) = ([60.0, 80.0, 100.0], [90.0, 80.0, 100.0], [60.0, 40.0, 100.0]);
+    let stages = [
+        Stage { name: "ks", out: &ks, wanted_lowering: None, wanted_fill: None, fills: false },
+        Stage { name: "band6", out: &band6, wanted_lowering: None, wanted_fill: None, fills: true },
+        Stage { name: "kv", out: &kv, wanted_lowering: None, wanted_fill: None, fills: true },
+    ];
+    let over = |v: &[Violation]| -> Vec<(usize, &'static str)> {
+        v.iter().filter_map(|x| if let Violation::BudgetOverrun { cell, stage, .. } = x { Some((*cell, *stage)) } else { None }).collect()
+    };
+    assert_eq!(
+        over(&validate_budget(&s_kh, &budget, &stages, &[], &g)),
+        vec![(0, "kv"), (1, "kv")],
+        "gross: cell 0 (40 + 30) and cell 1 (20 + 40)"
+    );
+    let net = validate_budget_net(&s_kh, &budget, &stages);
+    assert_eq!(over(&net), vec![(1, "kv")], "net: only cell 1 (60 m at KV); cell 0 never stands more than 40 m under S_KH");
+    assert!(matches!(net[..], [Violation::BudgetOverrun { used_m, budget_m, .. }] if (used_m - 60.0).abs() < 1e-12 && budget_m == 50.0));
+    // within the budget at every boundary: no record under the net rule
+    let ok = [80.0, 80.0, 100.0];
+    let st = [Stage { name: "kv", out: &ok, wanted_lowering: None, wanted_fill: None, fills: true }];
+    assert!(validate_budget_net(&s_kh, &budget, &st).is_empty());
+}
+
+#[test]
 fn the_budget_validator_finds_overruns_raises_and_clamps_without_residuals() {
     let g = base();
     let s0 = vec![100.0, 100.0, 100.0];

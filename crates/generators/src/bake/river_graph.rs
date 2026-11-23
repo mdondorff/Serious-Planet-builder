@@ -1276,6 +1276,32 @@ pub fn validate_budget(s0: &[f64], budget: &[f64], stages: &[Stage], residuals: 
     v
 }
 
+/// lead #199 (owner O3, 2026-11-23; spike only, beside [`validate_budget`]): the budget rule on net lowering. At every stage boundary `k` a cell's use is
+/// `s_kh - out_k` (the lowering against `s_kh`, the reference the budget is measured from; a fill after a lowering takes the use back), and the rule is
+/// `max_k (s_kh - out_k) <= budget`. A cell over it is reported once, at the first stage whose output passes the budget, with that stage's net use (`used_m`).
+/// The gross rule ([`validate_budget`]) adds every stage's lowering and credits no fill; the two differ only where a stage fills a cell an earlier stage lowered and a
+/// later stage lowers it again.
+pub fn validate_budget_net(s_kh: &[f64], budget: &[f64], stages: &[Stage]) -> Vec<Violation> {
+    let n = s_kh.len();
+    if budget.len() != n {
+        return vec![Violation::BudgetInput { cell: budget.len().min(n), stage: "budget" }];
+    }
+    if let Some(st) = stages.iter().find(|st| st.out.len() != n) {
+        return vec![Violation::BudgetInput { cell: st.out.len().min(n), stage: st.name }];
+    }
+    let mut v = Vec::new();
+    for c in 0..n {
+        if !s_kh[c].is_finite() || !budget[c].is_finite() {
+            v.push(Violation::BudgetInput { cell: c, stage: "s_kh" });
+            continue;
+        }
+        if let Some(st) = stages.iter().find(|st| st.out[c].is_finite() && s_kh[c] - st.out[c] > budget[c] + BUDGET_EPS_M) {
+            v.push(Violation::BudgetOverrun { cell: c, stage: st.name, used_m: s_kh[c] - st.out[c], budget_m: budget[c] });
+        }
+    }
+    v
+}
+
 /// The slice of a graph a set of domains holds: the items those domains own. Endpoints owned elsewhere stay as ids (validate the slice with `open`).
 pub fn slice(g: &Graph, holds: &dyn Fn(Domain) -> bool) -> Graph {
     let mut s = Graph {
