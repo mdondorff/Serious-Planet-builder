@@ -1,0 +1,20 @@
+-- kh -> ks0
+  cut over 10 m through a S_KH hump over 10 m: 505 paths, 29495 cells; cut p50 16.3, max 50.0 m
+-- ks0 -> ks1
+  cut over 10 m through a S_KH hump over 10 m: 720 paths, 11104 cells; cut p50 15.8, max 50.0 m
+-- ks1 -> ks1c
+  cut over 10 m through a S_KH hump over 10 m: 22 paths, 124 cells; cut p50 16.8, max 50.0 m
+-- ks1c -> band6
+  cut over 10 m through a S_KH hump over 10 m: 98 paths, 581 cells; cut p50 21.1, max 44.1 m
+-- band6 -> band6c
+  cut over 10 m through a S_KH hump over 10 m: 26 paths, 116 cells; cut p50 31.2, max 44.9 m
+-- band6c -> kv
+  cut over 10 m through a S_KH hump over 10 m: 1046 paths, 84184 cells; cut p50 21.6, max 50.0 m
+-- kv -> final
+  cut over 10 m through a S_KH hump over 10 m: 58 paths, 1012 cells; cut p50 18.5, max 45.1 m
+-- kh -> final
+  cut over 10 m through a S_KH hump over 10 m: 2211 paths, 119090 cells; cut p50 17.7, max 50.0 m
+ks1c -> band6: 98 trenches, S_KH crest at an H1 corner 34.7 % (34)
+band6 -> band6c: 26 trenches, S_KH crest at an H1 corner 34.6 % (9)
+kh -> final: 2211 trenches, S_KH crest at an H1 corner 11.6 % (257)
+final: corner-only 2x2 blocks over 2 / 5 / 10 m:    2980 /    1114 /    397; of the 5 m ones touching a KS-lowered cell 49 %
