@@ -79,6 +79,10 @@ pub fn mask_difference(grid: &Grid, a: &[bool], b: &[bool]) -> (usize, usize) {
 
 /// The ponds bar (BUILD-060, owner 2026-11-20, option C): river length in closed basins outside the kept lakes, over the river length outside them, at most this (percent).
 pub const PONDS_MAX_PCT: f64 = 10.0;
+/// The finer river network of the uphill and ponds bars (G3-1, lead #186, A4): river cells drain at least this (km2), beside the 75 km2 network.
+pub const FINE_NETWORK_KM2: f64 = 1.0;
+/// The bars on the finer network (G3-1): uphill steps at most `UPHILL_MAX_PCT`, as on the 75 km2 network, and ponds at most this (percent; proposed for the owner, O10).
+pub const PONDS_FINE_MAX_PCT: f64 = 10.0;
 /// The kept-river bar: river length in kept lakes, over all river length, at most this (percent) on a lowland window and `KEPT_RIVER_MAX_PCT_MOUNTAIN` on a mountain one.
 pub const KEPT_RIVER_MAX_PCT: f64 = 5.0;
 pub const KEPT_RIVER_MAX_PCT_MOUNTAIN: f64 = 10.0;
@@ -295,6 +299,9 @@ pub struct GateReport {
     pub ponds_river_cells: Option<usize>,
     pub kept_river_cells: Option<usize>,
     pub kept_lake_cells: Option<usize>,
+    /// The 1 km2 network (G3-1, [`FINE_NETWORK_KM2`]): river cells inside on land, their river steps and uphill steps outside kept-basin interiors, and the river cells outside
+    /// the interiors with those of them in a closed basin (on a row without a graph every river cell is outside an interior).
+    pub fine: FineReport,
     pub spill_mismatch: Option<usize>,
     /// With a graph: test (a), the kept basins whose rim holds an L vertex with its bed more than `SPILL_MISMATCH_M` under the recorded spill ([`rim_mismatch`]).
     pub spill_rim_mismatch: Option<usize>,
@@ -350,6 +357,16 @@ pub struct GateReport {
     pub ridge_vs_kh: bool,
 }
 
+/// The uphill and ponds counts on the 1 km2 network (G3-1).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FineReport {
+    pub river_cells: usize,
+    pub steps: usize,
+    pub uphill_steps: usize,
+    pub outside_cells: usize,
+    pub ponds_cells: usize,
+}
+
 fn share(n: usize, of: usize) -> f64 {
     100.0 * n as f64 / of.max(1) as f64
 }
@@ -399,6 +416,11 @@ impl GateReport {
             ("basin_pct", pct(self.basin_river_cells, n)),
             ("ponds_cells", self.ponds_river_cells.map_or("-".to_string(), c)),
             ("ponds_pct", self.ponds_pct().map_or("-".to_string(), |v| format!("{v:.2}"))),
+            ("fine_river_cells", c(self.fine.river_cells)),
+            ("fine_uphill_steps", c(self.fine.uphill_steps)),
+            ("fine_uphill_pct", format!("{:.2}", share(self.fine.uphill_steps, self.fine.steps))),
+            ("fine_ponds_cells", c(self.fine.ponds_cells)),
+            ("fine_ponds_pct", format!("{:.2}", share(self.fine.ponds_cells, self.fine.outside_cells))),
             ("kept_river_cells", self.kept_river_cells.map_or("-".to_string(), c)),
             ("kept_river_pct", self.kept_river_cells.map_or("-".to_string(), |k| pct(k, n))),
             ("kept_lake_cells", self.kept_lake_cells.map_or("-".to_string(), c)),
@@ -732,8 +754,24 @@ impl GateReport {
             }
         }
         if let (Some(ponds), Some(k)) = (self.ponds_pct(), self.kept_river_cells) {
-            use crate::river_gate_graph::GateClass::Geomorphology;
+            use crate::river_gate_graph::GateClass::{Correctness, Geomorphology};
             out.push(Bar { name: "bar_ponds".into(), value: ponds, limit: PONDS_MAX_PCT, at_most: true, class: Geomorphology });
+            // G3-1 (A4): the same two on the 1 km2 network
+            let f = self.fine;
+            out.push(Bar {
+                name: "bar_uphill_1km2".into(),
+                value: share(f.uphill_steps, f.steps),
+                limit: crate::river_gate_graph::UPHILL_MAX_PCT,
+                at_most: true,
+                class: Correctness,
+            });
+            out.push(Bar {
+                name: "bar_ponds_1km2".into(),
+                value: share(f.ponds_cells, f.outside_cells),
+                limit: PONDS_FINE_MAX_PCT,
+                at_most: true,
+                class: Geomorphology,
+            });
             out.push(Bar {
                 name: "bar_kept_river".into(),
                 value: share(k, self.river_cells),
@@ -1127,6 +1165,22 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         canyon_b.push(floor - breached[c]);
         erosion.push(input.start[c] - with_lakes[c]);
     }
+    // G3-1 (A4): uphill and ponds on the 1 km2 network, kept-basin interiors apart
+    let fine_river: Vec<bool> = (0..n).map(|c| area[c] >= FINE_NETWORK_KM2 * 1.0e6 && z[c] > input.sea_level_m).collect();
+    let mut fine = FineReport::default();
+    for c in (0..n).filter(|&c| fine_river[c] && input.inside[c]) {
+        fine.river_cells += 1;
+        if !in_kept(c) {
+            fine.outside_cells += 1;
+            fine.ponds_cells += usize::from(basin(c));
+        }
+        let r = routing.receiver[c];
+        if r == NONE || !fine_river[r as usize] || in_kept(c) || in_kept(r as usize) {
+            continue;
+        }
+        fine.steps += 1;
+        fine.uphill_steps += usize::from(input.surface[r as usize] - input.surface[c] > crate::river_suite::UPHILL_M);
+    }
     let w = g.w();
     let mut l_cross: Vec<Crossing> = Vec::new();
     let mut l_area: Vec<f64> = Vec::new();
@@ -1191,6 +1245,7 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
         ponds_river_cells: kept_lakes.as_ref().map(|_| ponds_cells),
         kept_river_cells: kept_lakes.as_ref().map(|_| kept_river),
         kept_lake_cells: kept_lakes.as_ref().map(|k| (0..n).filter(|&c| k[c] && input.inside[c]).count()),
+        fine,
         // a kept basin with its floor in the window whose depression level there (the basin flood) lies more than SPILL_MISMATCH_M under its recorded spill
         spill_mismatch: input.g2.as_ref().and_then(|x| {
             x.graph.map(|gr| {

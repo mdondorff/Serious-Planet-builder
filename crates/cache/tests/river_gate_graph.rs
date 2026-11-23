@@ -759,6 +759,8 @@ fn kept_lakes_get_their_own_bars_beside_the_raw_closed_basin_share_and_a_spill_m
     let kept_pct = 100.0 * open.basin_river_cells as f64 / open.river_cells as f64;
     let (ponds, kr) = (bar(&kept, "bar_ponds"), bar(&kept, "bar_kept_river"));
     assert_eq!((ponds.value, ponds.limit, ponds.at_most), (0.0, PONDS_MAX_PCT, true));
+    // G3-1 (A4): the graph row carries the 1 km2 network's uphill and ponds bars too
+    assert!(bar(&kept, "bar_uphill_1km2").at_most && bar(&kept, "bar_ponds_1km2").limit == planet_cache::river_gate::PONDS_FINE_MAX_PCT);
     assert!((kr.value - kept_pct).abs() < 1e-9 && kr.limit == KEPT_RIVER_MAX_PCT && kr.at_most, "{kr:?}");
     let mountain = run(&g, &GateParams { kept_river_max_pct: KEPT_RIVER_MAX_PCT_MOUNTAIN, ..p });
     assert_eq!(bar(&mountain, "bar_kept_river").limit, 10.0);
@@ -1054,4 +1056,50 @@ fn the_gate_routes_regraded_irregular_flats_at_600_and_8000_m() {
             );
         }
     }
+}
+
+// spec: BUILD-060
+#[test]
+fn uphill_and_ponds_are_counted_on_the_1_km2_network_beside_the_75_km2_one() {
+    // G3-1 (lead #186, A4): a 40 x 40 window of 100 m cells falling west to a sea column, its centre row a valley, and a 2 m pit of 6 x 3 cells on the valley (over BUILD-055's 16-cell basin); the 1 km2
+    // network (100 cells) runs through the pit and climbs out of it, while the 75 km2 network holds no river
+    let n = 40usize;
+    let grid = Grid::new(n, n, DX);
+    let cell = |x: usize, y: usize| y * n + x;
+    let mut z: Vec<f64> = (0..n * n).map(|c| 10.0 + 0.1 * (c % n) as f64 + 0.5 * ((c / n) as f64 - 20.0).abs()).collect();
+    for y in 0..n {
+        z[cell(0, y)] = -1.0;
+    }
+    for y in 19..=21 {
+        for x in 10..=15 {
+            z[cell(x, y)] -= 2.0;
+        }
+    }
+    let outlet = grid.outlets(&z, 0.0);
+    let all = vec![true; n * n];
+    let report = measure(
+        &GateInput {
+            grid: &grid,
+            start: &z,
+            surface: &z,
+            outlet: &outlet,
+            inside: &all,
+            region: &all,
+            h1: &[],
+            seed: 7,
+            sea_level_m: 0.0,
+            outside_drains: false,
+            trunks: &[],
+            g2: None,
+        },
+        &GateParams::default(),
+    );
+    assert_eq!(report.river_cells, 0, "no cell drains 75 km2");
+    let f = report.fine;
+    assert!(f.river_cells > 0 && f.ponds_cells > 0 && f.ponds_cells <= 18, "the pit's river cells are ponds on the 1 km2 network: {f:?}");
+    assert!(f.uphill_steps >= 1, "the river climbs out of the pit: {f:?}");
+    assert_eq!(f.outside_cells, f.river_cells, "no graph: no kept interior");
+    let line = report.fields_line();
+    assert!(line.contains(&format!(" fine_ponds_cells={} ", f.ponds_cells)) && line.contains(" fine_uphill_pct="), "{line}");
+    assert!(report.bars().is_empty(), "no graph, no bars");
 }
