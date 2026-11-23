@@ -1,0 +1,1 @@
+- 2026-11-24 gate-relief-floor (BUILD-060): bar_relief_lost at most max(B's loss, min(0.03 x the window's relief index, 2 m)) (owner, 2026-11-23).
