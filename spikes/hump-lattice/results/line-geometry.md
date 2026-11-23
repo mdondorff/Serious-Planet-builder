@@ -35,11 +35,11 @@ Status: design note, 2026-11-23. No build. It decides nothing that O8 (the sub-c
 ## 2. What it removes (R1h, today's tip)
 | Look | Today | What decides it after |
 |---|---|---|
-| Chainsaw | in-zone Xdiag 0.096, M4 18.53 m (final) | KH along the curve: `line8` showed 0.008 and 8.61 m |
+| Chainsaw | in-zone Xdiag 0.096, M4 18.53 m (final; M4 = p90 of the along-channel kink at 2 L cells) | KH along the curve: `line8` showed 0.008 and 8.61 m (SPIKE-143's `raw/s177-r1h-line8-analysis.txt`) |
 | Straight runs | 34.8 % of trunk length in runs over 2 km (F1 52.2 %, R3b 40.9 %); sinuosity p50 1.12 | the curve (GLO-30: 7.3 %, 1.25) |
 | Corner links at 5 m | 260 (`line` 410, `line8` 331, keep-rims 1,114) | a 4-connected raster: none from the lines by construction |
-| Hump trenches over 10 m | 2,369 (KS0 505, KS1 720, band6 928, band6 connect 136, KV 535) | `around` and `spill` crossings take the cols the curve can avoid. A trunk still cuts where H1 drains: SPIKE-142's 78 % are real K5 cols and stay `breach` crossings unless they are kept as lakes |
-| band6's kept-rim cuts | 365 corner-crest trenches (82 % on saddle blocks) | `spill` crossings at kept rims; `band6-keep-rims` alone took them 365 -> 34, but KV cut them again |
+| Hump trenches over 10 m | 2,369 from S_KH to final; per stage (each stage alone, not additive) KS0 505, KS1 720, band6 928, band6 connect 136, KV 535 | `around` and `spill` crossings take the cols the curve can avoid. A trunk still cuts where H1 drains: SPIKE-142's 78 % are real K5 cols and stay `breach` crossings unless they are kept as lakes |
+| band6's kept-rim cuts | 365 corner-crest trenches, 353 of them (97 %) on a z_s saddle block (`raw/s174-r1h-def-band6-corners.txt`) | `spill` crossings at kept rims; `band6-keep-rims` alone took them 365 -> 34, but KV cut them again |
 
 ## 3. Cost
 - Stages and files:
