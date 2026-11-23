@@ -17,10 +17,17 @@ use crate::river_suite::{
 /// The crest rounding bar (lead #172; review B Q5): the p95 of the ridge lowering against `S_KH` at most this (metres), and on a mountain window (M1).
 pub const CREST_P95_MAX_M: f64 = 15.0;
 pub const CREST_P95_MAX_M_MOUNTAIN: f64 = 35.0;
-/// The gate's outlets (BUILD-055, lead 2026-11-23, the chain's connected sea mask of readings 12 and 39): the window's edge cells, and the cells at or under `sea` on `z`
-/// (the window's start surface, as the chain decides its ocean) joined through cells at or under it (8-connected) to an edge cell or to a `seed` cell (the L cells of
-/// an H1 sea cell inside the region). An inland cell under the sea level is land, not sea: its pit fills like any other.
-pub fn connected_sea_outlets(grid: &planet_generators::bake::Grid, z: &[f64], sea: f64, seed: &dyn Fn(usize) -> bool) -> Vec<bool> {
+/// The gate's outlets (BUILD-055, lead 2026-11-23, the chain's connected sea mask of readings 12 and 39): the window's edge cells, and the ocean cells still at or under
+/// `sea` on the measured surface `surface`. The ocean is decided on `z`, the window's start surface, as the chain decides it: the cells at or under `sea` joined through
+/// such cells (8-connected) to an edge cell or to a `seed` cell (the L cells of an H1 sea cell inside the region). An inland cell under the sea level is no outlet, and its
+/// pit fills; a start-sea cell the variant raised above the sea is land; a sea cut off by a raised coast stays sea.
+pub fn connected_sea_outlets(
+    grid: &planet_generators::bake::Grid,
+    z: &[f64],
+    surface: &[f64],
+    sea: f64,
+    seed: &dyn Fn(usize) -> bool,
+) -> Vec<bool> {
     let n = z.len();
     let mut out: Vec<bool> = (0..n).map(|p| grid.is_edge(p)).collect();
     let mut stack: Vec<usize> = (0..n).filter(|&p| (grid.is_edge(p) || seed(p)) && z[p] <= sea).collect();
@@ -29,7 +36,7 @@ pub fn connected_sea_outlets(grid: &planet_generators::bake::Grid, z: &[f64], se
         seen[p] = true;
     }
     while let Some(c) = stack.pop() {
-        out[c] = true;
+        out[c] = out[c] || surface[c] <= sea;
         for k in 0..8 {
             if let Some(q) = grid.neighbour(c, k) {
                 if !seen[q] && z[q] <= sea {
