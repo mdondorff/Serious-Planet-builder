@@ -1,0 +1,5 @@
+HO r1h-nopost A drain of z_b (sel-pre, cap inf): 6 rounds, 15045 depressions met (3409 filled, 3718 breached), 1319 left of them 1319 deep (both over 50 m); 3.1 s
+RG budget validator (lead #178): ks: 0 overruns (0 over 0.1 m, largest 0.00 m), 0 raises in a lowering stage
+RG budget validator (lead #178): band6: 0 overruns (0 over 0.1 m, largest 0.00 m), 0 raises in a lowering stage
+RG budget validator (lead #178): kv: 108 overruns (106 over 0.1 m, largest 26.53 m), 0 raises in a lowering stage
+RG budget validator (lead #178): kc: 2 overruns (2 over 0.1 m, largest 15.97 m), 0 raises in a lowering stage
