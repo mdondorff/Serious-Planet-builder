@@ -2020,6 +2020,13 @@ fn main() -> Result<(), String> {
         return Err(format!("--budget-floor 0 to 50 m, not {budget_floor}"));
     }
     planet_cache::river_gate_graph::BUDGET_FLOOR_MM.store((budget_floor * 1000.0).round() as u64, std::sync::atomic::Ordering::Relaxed);
+    // lead #174a (SPIKE-142): `--kh-saddle-split off | trunk | all`: KH's h5 also takes h4c (its split along the D8 diagonal step, lower only) within 2-4 L cells of
+    // every D8 diagonal step of KH's routing that crosses a saddle block of z_s (both off-step cells above both ends), outside the channel zone too; `trunk` only where
+    // both ends are H1 channel cells; `off` (default) the zone alone (spike only)
+    let kh_saddle = value(&args, "--kh-saddle-split").unwrap_or("off");
+    if !["off", "trunk", "all"].contains(&kh_saddle) {
+        return Err(format!("--kh-saddle-split off | trunk | all, not '{kh_saddle}'"));
+    }
     let kh_lower_only = match value(&args, "--kh-lower-only").unwrap_or("on") {
         "on" => true,
         "off" => false,
@@ -2761,6 +2768,36 @@ fn main() -> Result<(), String> {
             );
             steps
         });
+        // lead #174a: the D8 diagonal steps of KH's routing across a z_s saddle block (all, or with both ends H1 channel cells)
+        let saddles = (kh_saddle != "off" && (kh_form == "h5" || kh_form == "h5d")).then(|| {
+            let rcv = |c: usize| (recv[c] != NONE).then(|| recv[c] as usize);
+            let z = &solve.zs;
+            let ch = &h1.hydro.channel;
+            let steps: Vec<Option<(usize, usize)>> = (0..cells)
+                .map(|q| {
+                    if q % rw + 1 >= rw || q / rw + 1 >= rh {
+                        return None;
+                    }
+                    let (a, b, c, d) = (q, q + 1, q + rw, q + rw + 1);
+                    let (step, off) = if rcv(a) == Some(d) || rcv(d) == Some(a) {
+                        ((a, d), (b, c))
+                    } else if rcv(b) == Some(c) || rcv(c) == Some(b) {
+                        ((b, c), (a, d))
+                    } else {
+                        return None;
+                    };
+                    let saddle = z[off.0].min(z[off.1]) > z[step.0].max(z[step.1]);
+                    let on = saddle && (kh_saddle == "all" || (ch[step.0] && ch[step.1]));
+                    on.then_some(step)
+                })
+                .collect();
+            let zoned = zone.as_ref().map_or(0, |zn| steps.iter().flatten().filter(|&&(a, b)| zn[a] && zn[b]).count());
+            println!(
+                "RG KH saddle split (lead #174a, {kh_saddle}): {} D8 diagonal steps across a z_s saddle block take h4c ({zoned} of them inside the channel zone already)",
+                steps.iter().flatten().count()
+            );
+            steps
+        });
         // readings 17 and 19 (lead #170 item 3): S_KH = KH(z_s) + r', the band floored so that a cell whose KH lies above the sea + 0.5 m stays there (as ks_kh.rs)
         let floor = sea + 0.5;
         let band = |k: f64, r: f64| if k > floor { r.max(floor - k) } else { r };
@@ -2774,6 +2811,9 @@ fn main() -> Result<(), String> {
                     let h4c = kh::read_ct_clamped(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0;
                     let mut wgt = kh::zone_weight(zone.as_ref().expect("h5's zone"), rw, rh, fx, fy);
                     if let Some(s) = &dams {
+                        wgt = wgt.max(kh::dam_weight(s, rw, rh, fx, fy, lr, 2.0, 4.0));
+                    }
+                    if let Some(s) = &saddles {
                         wgt = wgt.max(kh::dam_weight(s, rw, rh, fx, fy, lr, 2.0, 4.0));
                     }
                     // lead #161: `--kh-lower-only`: h5 only lowers C1 toward h4c (never raises it), as h3 never raises
@@ -4458,6 +4498,7 @@ fn main() -> Result<(), String> {
             ("sea17", if SEA17.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("bed-sea-floor", if BED_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("trunk-saddle-ortho", if TRUNK_SADDLE_ORTHO.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("kh-saddle-split", kh_saddle.to_string()),
             ("kv-connect", if KV_CONNECT.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-rims", if KV_RIMS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-sea-floor", if KV_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
