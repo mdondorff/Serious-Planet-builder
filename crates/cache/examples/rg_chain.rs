@@ -1173,6 +1173,11 @@ fn route_through(m: &Measure, line: &[(f64, f64)], points: &[usize], avoid: &Has
 /// (`z_min` the corridor's lowest cell), steps from land only, a sea cell ends the route; ties by cell id. Returns the route, whether its largest rise above its
 /// running minimum exceeds `bar`, and that rise.
 fn route_low(m: &Measure, line: &[(f64, f64)], points: &[usize], avoid: &HashSet<usize>) -> Option<(Vec<usize>, bool, f64)> {
+    route_low_n(m, line, points, avoid, false)
+}
+
+/// [`route_low`] with 4-connected steps when `four` (lead #184b: the curves' last fallback).
+fn route_low_n(m: &Measure, line: &[(f64, f64)], points: &[usize], avoid: &HashSet<usize>, four: bool) -> Option<(Vec<usize>, bool, f64)> {
     let (mut index, cells) = m.corridor(line)?;
     index.retain(|c, _| !avoid.contains(c) || points.contains(c));
     if points.iter().any(|p| !index.contains_key(p)) {
@@ -1207,6 +1212,9 @@ fn route_low(m: &Measure, line: &[(f64, f64)], points: &[usize], avoid: &HashSet
                 }
                 let n = ny as usize * w + nx as usize;
                 let Some(&ni) = index.get(&n) else { continue };
+                if four && dx != 0 && dy != 0 {
+                    continue;
+                }
                 let len = if dx != 0 && dy != 0 { std::f64::consts::SQRT_2 } else { 1.0 };
                 let nd = d + len * (1.0 + (m.water[n] - zmin).max(0.0) / 10.0);
                 if nd < dist[ni] {
@@ -1235,6 +1243,11 @@ fn route_low(m: &Measure, line: &[(f64, f64)], points: &[usize], avoid: &HashSet
         rise = rise.max(m.water[c] - bed);
     }
     Some((route, rise > m.bar, rise))
+}
+
+/// Lead #184b: a trunk reach's seed for its meander's jitter, from its first and last H1 cells (window-local; GlobalCell order is a hygiene item after the sign-off).
+fn reach_id_seed(r: &H1Reach) -> u64 {
+    (u64::from(r.cells[0]) << 32) ^ u64::from(*r.cells.last().expect("cells")) ^ 0x4D45_414E_4445_5232
 }
 
 /// An H1 reach of the trunk graph before its L image: the H1 cells (up first), its up and down node kinds, its source segment.
@@ -2787,7 +2800,15 @@ fn main() -> Result<(), String> {
                         let m = r.cells.len();
                         let qw_at = |f: f64| h1.hydro.qw[r.cells[(libm::round(f * (m - 1) as f64) as usize).min(m - 1)] as usize];
                         let avoid = |c: usize| c != up && c != down && taken.contains(&c);
-                        let cv = curve::build(&base, w, h, &s0w, &ocean, &avoid, &|f| law.width_m(qw_at(f)), &cp);
+                        let mut cv = curve::build(reach_id_seed(r), &base, w, h, &s0w, &ocean, &avoid, &|f| law.width_m(qw_at(f)), &cp);
+                        // #184b: the 8-connected fallback becomes a 4-connected lowest path where the corridor has one
+                        if cv.fallback == 2 {
+                            if let Some((b4, _, _)) = route_low_n(&ms0, &line, &[up, down], &taken, true) {
+                                cv.offsets = vec![(0, 0); b4.len()];
+                                cv.raster = b4;
+                                cv.fallback = 3;
+                            }
+                        }
                         // the bed along the curve: z_s along the reach's H1 cells at the same share of its length, never rising downstream
                         let n = cv.pts.len();
                         let mut zb = Vec::with_capacity(n);
@@ -2813,7 +2834,7 @@ fn main() -> Result<(), String> {
         let cell_m = grid.dx() / L as f64;
         let mut sin: Vec<f64> = Vec::new();
         let (mut pts_n, mut ras_n, mut wavy) = (0usize, 0usize, 0.0f64);
-        let mut fb = [0usize; 3];
+        let mut fb = [0usize; 4];
         for (cv, _) in cs.iter().flatten() {
             fb[cv.fallback as usize] += 1;
             pts_n += cv.pts.len();
@@ -2828,12 +2849,13 @@ fn main() -> Result<(), String> {
         }
         sin.sort_by(f64::total_cmp);
         println!(
-            "RG trunk curves (lead #184): {} of {} H1 trunk reaches, {pts_n} points, {ras_n} raster cells (curve {}, base 4-connected {}, base 8-connected {}); meander {} ({:.1} % of the points); curve sinuosity over 2 km p50 {:.3} ({} reaches); {:.1} s",
+            "RG trunk curves (lead #184): {} of {} H1 trunk reaches, {pts_n} points, {ras_n} raster cells (curve {}, base 4-connected {}, base 8-connected {}, 4-connected lowest path {}); meander {} ({:.1} % of the points); curve sinuosity over 2 km p50 {:.3} ({} reaches); {:.1} s",
             cs.iter().flatten().count(),
             reaches.len(),
             fb[0],
             fb[1],
             fb[2],
+            fb[3],
             if cp.meander { "on" } else { "off" },
             100.0 * wavy / pts_n.max(1) as f64,
             sin.get(sin.len() / 2).copied().unwrap_or(f64::NAN),

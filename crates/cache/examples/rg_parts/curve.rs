@@ -42,7 +42,7 @@ pub struct Curve {
     /// The share of the curve's points that meander (amplitude over zero).
     pub meander_share: f64,
     /// Numerics review F1: 0 the curve's raster; 1 the base path's 4-connected raster, when a curve cell was sea, another node's anchor or above its point's room;
-    /// 2 the base path itself (8-connected), when that raster failed too.
+    /// 2 the base path itself (8-connected), when that raster failed too; 3 (set by the caller, #184b) a 4-connected lowest path in place of 2.
     pub fallback: u8,
 }
 
@@ -88,8 +88,10 @@ fn cell_of(q: (f64, f64), w: usize, h: usize) -> Option<usize> {
 
 /// The curve of a reach whose lowest path is `base` (window cells, up first): `water` is S0 with the ocean at the sea level, `width_m(f)` the river's width at the share `f`
 /// of the reach's length.
-/// `avoid(c)`: a cell no raster cell but the ends may take (other nodes' anchors).
+/// `avoid(c)`: a cell no raster cell but the ends may take (other nodes' anchors). `seed`: the reach's, for the meander's per-wave wavelength jitter.
+#[allow(clippy::too_many_arguments)]
 pub fn build(
+    seed: u64,
     base: &[usize],
     w: usize,
     h: usize,
@@ -145,9 +147,50 @@ pub fn build(
     let total = ds * (n - 1) as f64;
     let lam: Vec<f64> = (0..n).map(|i| p.wave_widths * width_m(i as f64 / (n - 1) as f64) / p.cell_m).collect();
     let wide: Vec<bool> = (0..n).map(|i| p.meander && width_m(i as f64 / (n - 1) as f64) > p.min_width_m).collect();
+    // #184b (owner, 2026-11-24): no straight pinch at a confluence and no regular sine. Each wave's wavelength is jittered by 0.85 to 1.15 (a hash of the reach's seed
+    // and the wave's number); the phase is then scaled so the reach holds a whole number of waves: the displacement is zero at both nodes without a taper there, and
+    // the curve leaves every node in the same sense (continuous across a confluence). A reach shorter than half a wave keeps the taper at its ends.
+    let two_pi = 2.0 * std::f64::consts::PI;
+    let jitter = |wave: u64| {
+        let mut z = seed ^ wave.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^= z >> 31;
+        0.85 + 0.3 * ((z >> 11) as f64 / (1u64 << 53) as f64)
+    };
     let mut phase = vec![0.0f64; n];
+    let (mut wave, mut jit) = (0u64, jitter(0));
     for i in 1..n {
-        phase[i] = phase[i - 1] + if wide[i] { 2.0 * std::f64::consts::PI * ds / lam[i].max(1e-9) } else { 0.0 };
+        phase[i] = phase[i - 1] + if wide[i] { two_pi * ds / (lam[i] * jit).max(1e-9) } else { 0.0 };
+        let wn = (phase[i] / two_pi) as u64;
+        if wn != wave {
+            wave = wn;
+            jit = jitter(wn);
+        }
+    }
+    let waves = libm::round(phase[n - 1] / two_pi);
+    let whole = waves >= 1.0;
+    if whole {
+        let k = waves * two_pi / phase[n - 1];
+        for v in &mut phase {
+            *v *= k;
+        }
+    }
+    // the taper: over half a wavelength from a narrow point (and from the reach's ends when it holds no whole wave)
+    let mut narrow_s = vec![f64::INFINITY; n];
+    let mut last = if whole { f64::NEG_INFINITY } else { 0.0 };
+    for i in 0..n {
+        if !wide[i] {
+            last = ds * i as f64;
+        }
+        narrow_s[i] = ds * i as f64 - last;
+    }
+    let mut next = if whole { f64::INFINITY } else { ds * (n - 1) as f64 };
+    for i in (0..n).rev() {
+        if !wide[i] {
+            next = ds * i as f64;
+        }
+        narrow_s[i] = narrow_s[i].min(next - ds * i as f64);
     }
     let win = |i: usize| ((0.25 * lam[i] / ds).ceil() as usize).max(1);
     // numerics review F1, then lead #184's first row (a whole-curve fallback on one failing cell took the meanders off a third of the reaches): a failing raster cell
@@ -181,10 +224,10 @@ pub fn build(
             if !wide[i] {
                 return smc[i];
             }
-            let s = ds * i as f64;
-            let t = ((s.min(total - s)) / (0.5 * lam[i])).clamp(0.0, 1.0);
+            let t = (narrow_s[i] / (0.5 * lam[i])).clamp(0.0, 1.0);
             let t = t * t * (3.0 - 2.0 * t);
-            let a = m * cap[i] * p.amp_wave * lam[i] * t * libm::sin(phase[i]);
+            // a second harmonic skews each bend (zero at the nodes as the first is)
+            let a = m * cap[i] * p.amp_wave * lam[i] * t * (libm::sin(phase[i]) + 0.2 * libm::sin(2.0 * phase[i])) / 1.1;
             let nv = normal(i);
             (smc[i].0 + a * nv.0, smc[i].1 + a * nv.1)
         };
@@ -378,14 +421,20 @@ mod tests {
         let ocean = vec![false; w * h];
         let base: Vec<usize> = (5..295).map(|x| 30 * w + x).collect();
         let p = CurveParams::standard(100.0, true);
-        let wide = build(&base, w, h, &water, &ocean, &|_| false, &|_| 100.0, &p);
-        let narrow = build(&base, w, h, &water, &ocean, &|_| false, &|_| 5.0, &p);
+        let wide = build(7, &base, w, h, &water, &ocean, &|_| false, &|_| 100.0, &p);
+        let narrow = build(7, &base, w, h, &water, &ocean, &|_| false, &|_| 5.0, &p);
         let len = |c: &Curve| c.pts.windows(2).map(|s| dist(s[0], s[1])).sum::<f64>();
         let chord = 289.0;
         let (sw, sn) = (len(&wide) / chord, len(&narrow) / chord);
         assert!((1.15..1.45).contains(&sw), "a 100 m river's sinuosity {sw}");
         assert!((sn - 1.0).abs() < 1e-6, "a 5 m river stays straight: {sn}");
         assert!(wide.meander_share > 0.8);
+        // #184b: a whole number of waves, so the curve meets both ends with no straight pinch: the displacement is already large a quarter wave from each end
+        let mid_dev = |c: &Curve, s: f64| {
+            let i = ((s / 0.5) as usize).min(c.pts.len() - 1);
+            (c.pts[i].1 - 30.0).abs()
+        };
+        assert!(mid_dev(&wide, 4.0) > 0.5, "near the up end the curve is already off the line: {}", mid_dev(&wide, 4.0));
         // a wall: the floor two cells wide, everything else 30 m higher: the meander is held to the floor
         let mut walled = vec![40.0; w * h];
         for x in 0..w {
@@ -393,7 +442,7 @@ mod tests {
                 walled[y * w + x] = 10.0;
             }
         }
-        let held = build(&base, w, h, &walled, &ocean, &|_| false, &|_| 100.0, &p);
+        let held = build(7, &base, w, h, &walled, &ocean, &|_| false, &|_| 100.0, &p);
         assert!(held.pts.iter().all(|&q| walled[cell_of(q, w, h).unwrap()] <= 20.0), "every point stays within room_m of the floor");
         assert!(held.raster.iter().all(|&c| walled[c] <= 20.0), "and so does every raster cell (F1)");
     }
@@ -411,7 +460,7 @@ mod tests {
         let ocean: Vec<bool> = (0..w * h).map(sea).collect();
         let base: Vec<usize> = (2..=30).map(|i| i * w + i).collect();
         let p = CurveParams::standard(100.0, false);
-        let c = build(&base, w, h, &water, &ocean, &|_| false, &|_| 5.0, &p);
+        let c = build(7, &base, w, h, &water, &ocean, &|_| false, &|_| 5.0, &p);
         assert!(c.raster[1..c.raster.len() - 1].iter().all(|&x| !ocean[x]), "fallback {}", c.fallback);
     }
 }
