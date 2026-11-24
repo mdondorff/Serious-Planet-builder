@@ -353,8 +353,9 @@ pub struct GateReport {
     pub spill_mismatch: Option<usize>,
     /// With a graph: test (a), the kept basins whose rim holds an L vertex with its bed more than `SPILL_MISMATCH_M` under the recorded spill ([`rim_mismatch`]).
     pub spill_rim_mismatch: Option<usize>,
-    /// Lead #183 (spike, a count first): the kept basins with their floor in the window, by how far their recorded spill sits above the final surface's pour level at the
-    /// floor (over 0.01, 0.1 and 0.5 m: a notch cut partly below the record), the largest gap (m), and the dry ones (the floor holds no water over 1 mm).
+    /// With a graph (lead #183, moved from the spike by lead #192): the kept basins with their floor in the window, by how far their recorded spill sits above the
+    /// measured surface's pour level at the floor (the basin flood's level; over 0.01, 0.1 and 0.5 m: a notch cut partly below the record), the largest gap (m), and the
+    /// dry ones (the flood stands no more than `BASIN_WET_M` over the floor).
     pub spill_notch: Option<(usize, [usize; 3], f64, usize)>,
     /// With a graph (lead #182a): the lake_inlet nodes by origin and the line-end ones in no kept-basin depression ([`crate::river_gate_graph::InletReport`]).
     pub inlets: Option<crate::river_gate_graph::InletReport>,
@@ -1420,6 +1421,7 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
             })
         }),
         spill_rim_mismatch: input.g2.as_ref().and_then(|x| x.graph.map(|gr| rim_mismatch(gr, &x.window, &label, SPILL_MISMATCH_M))),
+        // lead #183 (moved from the spike, lead #192): the kept basins' notch, recorded spill against the basin flood's level at the floor
         spill_notch: input.g2.as_ref().and_then(|x| {
             x.graph.map(|gr| {
                 let (mut kept, mut over, mut worst, mut dry) = (0usize, [0usize; 3], 0.0f64, 0usize);
@@ -1483,25 +1485,6 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
                 x.stages.map(|_| budget_field(input.start, g.w(), g.h(), (params.h1_cell_m / g.dx()).round() as usize, g.dx(), R_RELIEF_M));
             // lead #166: kept-basin interiors on the measured surface, counted apart from the uphill and agreement bars
             let kept = x.graph.map(|gr| kept_interiors(gr, &x.window, z, &label));
-            // spikes #152 (spike branch only): PLANET_GATE_DUMP_UPHILL=FILE writes every BUILD-057 river step inside that rises over UPHILL_M, 24 bytes a record:
-            // u32 cell, u32 receiver, f32 rise (m), f32 area (m2), f32 the cell's depth under the basin flood (m), u8 in a kept-basin interior, 3 bytes padding
-            if let Ok(path) = std::env::var("PLANET_GATE_DUMP_UPHILL") {
-                let mut b: Vec<u8> = Vec::new();
-                for c in (0..n).filter(|&c| river[c] && input.inside[c]) {
-                    let r = routing.receiver[c];
-                    if r == NONE || !river[r as usize] || input.surface[r as usize] - input.surface[c] <= crate::river_suite::UPHILL_M {
-                        continue;
-                    }
-                    let in_kept = kept.as_ref().is_some_and(|(k, _)| k[c] || k[r as usize]);
-                    b.extend((c as u32).to_le_bytes());
-                    b.extend(r.to_le_bytes());
-                    b.extend(((input.surface[r as usize] - input.surface[c]) as f32).to_le_bytes());
-                    b.extend((area[c] as f32).to_le_bytes());
-                    b.extend(((filled[c] - z[c]) as f32).to_le_bytes());
-                    b.extend([u8::from(in_kept), 0, 0, 0]);
-                }
-                std::fs::write(&path, b).unwrap_or_else(|e| panic!("{path}: {e}"));
-            }
             G2Report {
                 graph: x.graph.map(|gr| graph_report(gr, &x.window, input.inside, &land, g.dx())),
                 agreement: x

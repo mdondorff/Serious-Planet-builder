@@ -1,0 +1,1 @@
+- 2026-11-24 planet-primitives (lead #193, owner O2): GlobalCell and the public fold_cell (COORD-011) and the seam-pair spill engine, SpillGraph::connect_seams with intra-face, cube-edge and corner seams in tie-key order (GEN-191); additive and output-neutral

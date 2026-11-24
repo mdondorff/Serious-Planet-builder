@@ -49,7 +49,7 @@ Owner, 2026-11-12 (ADR 0120). These items are outside the current milestone, one
 - Volcanoes (SPIKE-102 D5; owner, 2026-11-05: after M9). Young edifices as an additive layer; old ones in the base. Trigger: terrain round 2.
 - Isostatic rebound (GEN-124): dropped from M9; a flexural version is the candidate. Trigger: hypsometry tuning, rifts, escarpments.
 - Glacial erosion (ADR 0106) and coastal erosion (ADR 0107): out of the prototype's scope (replan, 2026-11-08).
-- ADR 0045 (bodies, bake resolution, storage budget): proposed. Trigger: multi-body work.
+- ADR 0045 (bodies, bake resolution, storage budget): proposed; point 2 superseded by ADR 0115. Trigger: multi-body work.
 - Region keep-inside for Cities (owner, 2026-10-21, Q8). Trigger: Cities.
 - Global authoring preview (owner, 2026-10-31): a coarse whole-planet preview before the bake. Trigger: after M9's bake, or SPIKE-69.
 - Coarse-first refinement of an edit (owner, 2026-10-20). Trigger: a brush case missing its budget.

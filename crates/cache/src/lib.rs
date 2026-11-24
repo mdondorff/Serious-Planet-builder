@@ -24,6 +24,7 @@ pub mod meshpack;
 pub mod pack;
 pub mod region_bake;
 pub mod relief_store;
+pub mod rg_budget;
 pub mod river_gate;
 pub mod river_gate_graph;
 pub mod river_read;

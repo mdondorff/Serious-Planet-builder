@@ -95,9 +95,9 @@ Obsolete when: K7 reads region-wide inflow at the halo border.
 
 ## 2026-11-13 A push is gated on the prepush in the same command
 Scope: project
-What happened: a push to PR 1482 (68cb12a3, one golden PNG) went out although its prepush had failed (test gpu: 2 known WARP d3d10warp crashes, 3 gpu_skeleton timeouts of 300-450 s under load), because the push was a separate statement after the prepush.
+What happened: a push to PR 1482 (68cb12a3, one golden PNG) went out although its prepush had failed (test gpu: 2 known WARP d3d10warp crashes, 3 gpu_skeleton timeouts of 300-450 s under load), because the push was a separate statement after the prepush. Again 2026-11-24, PR 1651: `prepush | tail && git push` returned tail's status.
 Assumption it changes: CLAUDE.md "Before every push to a PR branch run `cargo xtask prepush`" assumed the push follows only a passing prepush.
-Proposed follow-up: every lane pushes with `cargo xtask prepush && git push`; nothing else.
+Proposed follow-up: `cargo xtask prepush && git push`, with no pipe before `&&` (or `set -o pipefail`).
 Obsolete when: a git pre-push hook runs the prepush.
 
 ## 2026-11-14 The L basins come from the 814 m to L hand-over, not from B

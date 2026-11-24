@@ -141,7 +141,6 @@ fn main() -> Result<(), String> {
         "--corridor-bar",
         "--start",
         "--noise",
-        "--dump-surface",
     ];
     let mut k = 0;
     while k < args.len() {
@@ -366,12 +365,6 @@ fn main() -> Result<(), String> {
             }
         }
     });
-    // spike/rg-chain (explorer #167, never merged): the measured surface as little-endian f64 on the window's L grid, for the stills
-    if let Some(f) = value(&args, "--dump-surface") {
-        let b: Vec<u8> = surface.iter().flat_map(|v| v.to_le_bytes()).collect();
-        std::fs::write(f, b).map_err(|e| format!("{f}: {e}"))?;
-        println!("RIVER-GATE surface written: {f} ({w} x {h} f64)");
-    }
     let grid = planet_generators::bake::Grid::new(w, h, front.solve.grid.dx() / l as f64);
     // the ocean on the window's start surface, seeded at the edge and at the L cells of H1's sea cells inside the region, as the chain decides it (a coast the
     // variant raised does not cut the sea off); the measured surface floods to it

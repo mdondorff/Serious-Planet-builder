@@ -1,0 +1,1 @@
+- 2026-11-24 docs: G3 decisions of 2026-11-23/24 recorded in status (O8 option A, decision 11, the capped relief bar, O7, O9, O11, decision 9 form 1, O10's confirmed values); E6 queue rows brought to G3-A done, G3-B and G3-C in work.

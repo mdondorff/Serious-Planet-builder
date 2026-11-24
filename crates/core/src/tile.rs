@@ -248,7 +248,7 @@ impl TileId {
 
 // ---- The lattice normal stencil (ADR 0073) ----
 
-fn int_axes(face: Face) -> ([i64; 3], [i64; 3], [i64; 3]) {
+pub(crate) fn int_axes(face: Face) -> ([i64; 3], [i64; 3], [i64; 3]) {
     let r = |v: Vec3| [v.x as i64, v.y as i64, v.z as i64];
     (r(face.normal()), r(face.u_axis()), r(face.v_axis()))
 }
@@ -284,7 +284,8 @@ fn lattice_cube_point(face: Face, n: i64, i: i64, j: i64) -> [i64; 3] {
 /// The cell of the neighbour face that the extended cell `(i, j)` of `face` is (`n` cells per face edge, exactly one coordinate one step
 /// outside `0..n`): the cube point of its centre in half-cell units, folded over the shared edge (the cell lies `e` half-cells beyond the
 /// edge on the extended plane, so on the neighbour face it lies `e` below the edge), read on the neighbour face. Integers only.
-fn fold_cell(face: Face, n: i64, i: i64, j: i64) -> (Face, i64, i64) {
+/// Public since COORD-011 (lead #193): the planet primitives' cross-edge step; `TileId::neighbors8` calls it unchanged.
+pub fn fold_cell(face: Face, n: i64, i: i64, j: i64) -> (Face, i64, i64) {
     let (nrm, u, v) = int_axes(face);
     let (a, b) = (2 * i + 1 - n, 2 * j + 1 - n);
     let beyond = |c: i64| c.abs() - n;
