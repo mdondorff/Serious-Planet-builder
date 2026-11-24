@@ -1173,11 +1173,20 @@ fn route_through(m: &Measure, line: &[(f64, f64)], points: &[usize], avoid: &Has
 /// (`z_min` the corridor's lowest cell), steps from land only, a sea cell ends the route; ties by cell id. Returns the route, whether its largest rise above its
 /// running minimum exceeds `bar`, and that rise.
 fn route_low(m: &Measure, line: &[(f64, f64)], points: &[usize], avoid: &HashSet<usize>) -> Option<(Vec<usize>, bool, f64)> {
-    route_low_n(m, line, points, avoid, false)
+    route_low_n(m, line, points, avoid, false, false)
 }
 
-/// [`route_low`] with 4-connected steps when `four` (lead #184b: the curves' last fallback).
-fn route_low_n(m: &Measure, line: &[(f64, f64)], points: &[usize], avoid: &HashSet<usize>, four: bool) -> Option<(Vec<usize>, bool, f64)> {
+/// [`route_low`] with 4-connected steps when `four` (lead #184b: the curves' last fallback), and minimax first when `minimax` (lead #184j): per leg the cost
+/// Dijkstra runs only on the cells at or below the leg's bottleneck B* (the lowest highest point over every corridor path to the leg's end set), so the route
+/// minimises its highest point first and the cost second (exact; a single Dijkstra on (max, cost) is not, its order is not kept under extension).
+fn route_low_n(
+    m: &Measure,
+    line: &[(f64, f64)],
+    points: &[usize],
+    avoid: &HashSet<usize>,
+    four: bool,
+    minimax: bool,
+) -> Option<(Vec<usize>, bool, f64)> {
     let (mut index, cells) = m.corridor(line)?;
     index.retain(|c, _| !avoid.contains(c) || points.contains(c));
     if points.iter().any(|p| !index.contains_key(p)) {
@@ -1186,8 +1195,48 @@ fn route_low_n(m: &Measure, line: &[(f64, f64)], points: &[usize], avoid: &HashS
     let zmin = cells.iter().map(|&c| m.water[c]).fold(f64::INFINITY, f64::min);
     let w = m.w;
     let mut route = vec![points[0]];
+    let steps: Vec<(i64, i64)> = [(-1i64, -1i64), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+        .into_iter()
+        .filter(|&(dx, dy)| !(four && dx != 0 && dy != 0))
+        .collect();
+    let near = |c: usize| {
+        let (cx, cy) = ((c % w) as i64, (c / w) as i64);
+        steps.iter().filter_map(move |&(dx, dy)| {
+            let (nx, ny) = (cx + dx, cy + dy);
+            (nx >= 0 && ny >= 0 && nx < w as i64 && ny < m.h as i64).then(|| (ny as usize * w + nx as usize, dx, dy))
+        })
+    };
     for leg in points.windows(2) {
         let (from, to) = (leg[0], leg[1]);
+        // lead #184j: the leg's bottleneck B*, popped in order of the path's highest point (ties by cell id); the end set as below
+        let cap = if minimax {
+            let mut best = vec![f64::INFINITY; cells.len()];
+            let mut heap = BinaryHeap::new();
+            best[index[&from]] = m.water[from];
+            heap.push(Key(m.water[from], from as u32));
+            let mut bstar = None;
+            while let Some(Key(b, c)) = heap.pop() {
+                let c = c as usize;
+                if b > best[index[&c]] {
+                    continue;
+                }
+                if c == to || (c != from && !m.land(c)) {
+                    bstar = Some(b);
+                    break;
+                }
+                for (n, _, _) in near(c) {
+                    let Some(&ni) = index.get(&n) else { continue };
+                    let nb = b.max(m.water[n]);
+                    if nb < best[ni] {
+                        best[ni] = nb;
+                        heap.push(Key(nb, n as u32));
+                    }
+                }
+            }
+            bstar?
+        } else {
+            f64::INFINITY
+        };
         let mut dist = vec![f64::INFINITY; cells.len()];
         let mut parent = vec![usize::MAX; cells.len()];
         let mut heap = BinaryHeap::new();
@@ -1204,15 +1253,9 @@ fn route_low_n(m: &Measure, line: &[(f64, f64)], points: &[usize], avoid: &HashS
                 end = Some(c);
                 break;
             }
-            let (cx, cy) = ((c % w) as i64, (c / w) as i64);
-            for (dx, dy) in [(-1i64, -1i64), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
-                let (nx, ny) = (cx + dx, cy + dy);
-                if nx < 0 || ny < 0 || nx >= w as i64 || ny >= m.h as i64 {
-                    continue;
-                }
-                let n = ny as usize * w + nx as usize;
+            for (n, dx, dy) in near(c) {
                 let Some(&ni) = index.get(&n) else { continue };
-                if four && dx != 0 && dy != 0 {
+                if m.water[n] > cap {
                     continue;
                 }
                 let len = if dx != 0 && dy != 0 { std::f64::consts::SQRT_2 } else { 1.0 };
@@ -1923,6 +1966,9 @@ static KV_WALL_S0: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool
 static KH_KEEP_S0: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// lead #184c (the corner-link trace): `--kh-curve-dams off` drops h4c at the dammed diagonals under 75 km2 from `--kh-zone curve`; `on` (default, #184's order) keeps it.
 static KH_CURVE_DAMS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+/// lead #184j (spike only): `--curve-minimax on` routes each trunk curve's base path minimax first: per leg the lowest reachable highest S0 point B* (a bottleneck
+/// Dijkstra in the corridor), then the lowest-path cost among the cells at or below B*; water takes the lowest pass. `off` (default) the cost alone.
+static CURVE_MINIMAX: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// lead #182a: `--trib-rerun on` runs KG-trib post once more with basins-2's kept set where a line-end lake inlet lost its basin, then basins-2 once more on the new lines; on by default since #182c (reading 44); `off` the one extraction.
 static TRIB_RERUN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 /// lead #179: `--inlet-floor on` floors the graph bed of every L vertex on or inside a kept basin's rim at its spill; `off` the beds as coded; on by default since #180a (reading 42).
@@ -2305,6 +2351,7 @@ fn main() -> Result<(), String> {
         ("--kv-wall-s0", &KV_WALL_S0, "off"),
         ("--kh-keep-s0", &KH_KEEP_S0, "off"),
         ("--kh-curve-dams", &KH_CURVE_DAMS, "on"),
+        ("--curve-minimax", &CURVE_MINIMAX, "off"),
         ("--trunk-head-once", &planet_generators::bake::kg_trib::HEAD_ONCE, "on"),
         ("--strahler-junction", &planet_generators::bake::kg_trib::STRAHLER_JUNCTION, "on"),
         ("--band6-floors", &BAND6_FLOORS, "on"),
@@ -2874,14 +2921,15 @@ fn main() -> Result<(), String> {
                             return None;
                         }
                         let line: Vec<(f64, f64)> = r.cells.iter().map(|&c| to_local(c)).collect();
-                        let (base, _, _) = route_low(&ms0, &line, &[up, down], &taken)?;
+                        let mm = CURVE_MINIMAX.load(std::sync::atomic::Ordering::Relaxed);
+                        let (base, _, _) = route_low_n(&ms0, &line, &[up, down], &taken, false, mm)?;
                         let m = r.cells.len();
                         let qw_at = |f: f64| h1.hydro.qw[r.cells[(libm::round(f * (m - 1) as f64) as usize).min(m - 1)] as usize];
                         let avoid = |c: usize| c != up && c != down && taken.contains(&c);
                         let mut cv = curve::build(reach_id_seed(r), &base, w, h, &s0w, &ocean, &avoid, &|f| law.width_m(qw_at(f)), &cp);
                         // #184b: the 8-connected fallback becomes a 4-connected lowest path where the corridor has one
                         if cv.fallback == 2 {
-                            if let Some((b4, _, _)) = route_low_n(&ms0, &line, &[up, down], &taken, true) {
+                            if let Some((b4, _, _)) = route_low_n(&ms0, &line, &[up, down], &taken, true, mm) {
                                 cv.offsets = vec![(0, 0); b4.len()];
                                 cv.raster = b4;
                                 cv.fallback = 3;
@@ -5216,6 +5264,7 @@ fn main() -> Result<(), String> {
             ("kv-wall-s0", if KV_WALL_S0.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kh-keep-s0", if KH_KEEP_S0.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kh-curve-dams", if KH_CURVE_DAMS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("curve-minimax", if CURVE_MINIMAX.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("curve-thalweg-slope", curve_thalweg.to_string()),
             ("curve-bed", curve_bed.to_string()),
             ("curve-blend", curve_blend.to_string()),
