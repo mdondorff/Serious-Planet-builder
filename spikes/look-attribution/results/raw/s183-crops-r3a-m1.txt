@@ -1,0 +1,9 @@
+# lead #183: the crops of R3a and M1 by SPIKE-143's rule (crops.py on m2_m3.py's vertices), chosen from each window's defaults run on spike/rg-prototype bf99eb8e before any stage of it was rendered
+## r3a
+{'size': 120, 'river': (1840, 2080), 'hill': (1720, 6160), 'hill_x8': np.float64(1.124858108710642), 'rim': None, 'rim_depth_m': -1.0}
+sinuosity of reaches over 2 km (20088): p50 1.093, length-weighted mean 1.110
+coincidence: high saw-tooth vertices in straight runs 4.2 % against all vertices 9.0 % (ratio 0.47); high saw-tooth on diagonal steps 54.1 % against all 52.2 %
+## m1
+{'size': 120, 'river': (4960, 1600), 'hill': (4360, 2200), 'hill_x8': np.float64(1.0864813107684994), 'rim': (4682, 5019), 'rim_depth_m': 481.12838070599264}
+sinuosity of reaches over 2 km (23758): p50 1.127, length-weighted mean 1.157
+coincidence: high saw-tooth vertices in straight runs 4.7 % against all vertices 4.3 % (ratio 1.08); high saw-tooth on diagonal steps 55.3 % against all 46.3 %
