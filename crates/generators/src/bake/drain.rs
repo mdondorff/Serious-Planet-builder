@@ -38,6 +38,57 @@ pub static OUTLET_FLOORS: std::sync::atomic::AtomicBool = std::sync::atomic::Ato
 /// The cost per unit of path length of [`BREACH_BY_LENGTH`] (m).
 pub const LENGTH_COST_M: f64 = 0.01;
 
+/// crusader #198 (spike only, diagnostic like `PLANET_WIDTH_DUMP`): the stage whose accepted breaches are recorded, with the grid's place on the cube
+/// (face, cells per face edge, the face cell of grid cell 0). `None`: nothing is recorded (the default). Recording reads the breach and changes nothing.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BreachStage {
+    pub stage: &'static str,
+    pub face: u8,
+    pub n: i64,
+    pub origin: (i64, i64),
+}
+
+/// crusader #198: one accepted breach: its path (grid cells, from the depression's floor to the cell it drains to), its deepest cut and cut volume, and the
+/// depression's cells, area (m2), spill (fill) level and floor (m).
+#[derive(Clone, Debug, PartialEq)]
+pub struct BreachRecord {
+    pub at: BreachStage,
+    pub w: usize,
+    pub path: Vec<u32>,
+    pub cut_max_m: f64,
+    pub cut_volume_m3: f64,
+    pub depression_cells: usize,
+    pub depression_area_m2: f64,
+    pub spill_m: f64,
+    pub floor_m: f64,
+}
+
+static BREACH_AT: std::sync::Mutex<Option<BreachStage>> = std::sync::Mutex::new(None);
+static BREACH_LOG: std::sync::Mutex<Vec<BreachRecord>> = std::sync::Mutex::new(Vec::new());
+
+/// crusader #198: records the accepted breaches of the stage `at` from now on (`None`: stops recording).
+pub fn record_breaches(at: Option<BreachStage>) {
+    *BREACH_AT.lock().unwrap() = at;
+}
+
+/// crusader #198: the stage being recorded, if any.
+pub fn breach_stage() -> Option<BreachStage> {
+    *BREACH_AT.lock().unwrap()
+}
+
+/// crusader #198: records one breach when a stage is being recorded; `make` builds it only then.
+pub fn record_breach(make: impl FnOnce(BreachStage) -> BreachRecord) {
+    if let Some(at) = breach_stage() {
+        let r = make(at);
+        BREACH_LOG.lock().unwrap().push(r);
+    }
+}
+
+/// crusader #198: the breaches recorded so far, removed from the log.
+pub fn take_breaches() -> Vec<BreachRecord> {
+    std::mem::take(&mut *BREACH_LOG.lock().unwrap())
+}
+
 /// A depression is a fill over this depth (m).
 pub const TOL: f64 = 1e-3;
 /// The descent per cell of a breach path (m).
@@ -350,6 +401,17 @@ pub fn drain_selective_floors(
                     cuts.push((c, zf - DELTA * i as f64));
                 }
                 st.breached += 1;
+                record_breach(|at| BreachRecord {
+                    at,
+                    w,
+                    path: path.iter().map(|&c| c as u32).collect(),
+                    cut_max_m: cut,
+                    cut_volume_m3: breach_v,
+                    depression_cells: cells.len(),
+                    depression_area_m2: cells.iter().map(|&c| area(c as usize)).sum(),
+                    spill_m: lv,
+                    floor_m: zf,
+                });
             } else if fill_ok {
                 fills.push(k);
             } else {
@@ -384,6 +446,48 @@ pub fn drain_selective_floors(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // crusader #198 (spike only, diagnostic): PLANET_BREACH_DUMP's record changes no cell
+    #[test]
+    fn recording_the_breaches_changes_no_cell_and_records_each_accepted_one() {
+        // a 13 x 5 strip (a width no other test uses: the log is process-global), outlet at x = 0, three pits behind one-cell rims of different heights
+        let (w, h) = (13usize, 5usize);
+        let mut z = vec![10.0f64; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                z[y * w + x] = if x == 0 { 0.0 } else { 1.0 + 0.05 * x as f64 };
+            }
+            for (rim, top) in [(3usize, 4.0), (7, 2.5), (10, 6.0)] {
+                z[y * w + rim] = top;
+            }
+            z[y * w + 5] = 0.6;
+            z[y * w + 9] = 0.8;
+            z[y * w + 12] = 0.7;
+        }
+        let outlet: Vec<bool> = (0..w * h).map(|p| p % w == 0).collect();
+        let caps = |_: usize| 50.0;
+        let run = || drain_selective(&z, w, h, &outlet, &|_| false, &|_| 4.0, 10, 1000, &caps, &caps);
+        let (off, st_off) = run();
+        let at = BreachStage { stage: "test-198", face: 2, n: 64, origin: (5, 7) };
+        record_breaches(Some(at));
+        let (on, st_on) = run();
+        record_breaches(None);
+        let mine: Vec<BreachRecord> = take_breaches().into_iter().filter(|r| r.w == w && r.at == at).collect();
+        assert!(off.iter().zip(&on).all(|(a, b)| a.to_bits() == b.to_bits()), "the record changes no cell");
+        assert_eq!((st_off.breached, st_off.filled), (st_on.breached, st_on.filled));
+        assert!(st_on.breached >= 1, "{st_on:?}");
+        assert_eq!(mine.len(), st_on.breached, "one record per accepted breach");
+        for r in &mine {
+            let (first, last) = (r.path[0] as usize, *r.path.last().unwrap() as usize);
+            assert!(z[first] <= r.spill_m && (r.floor_m - z[first]).abs() < 1e-12, "the path starts at the depression's floor");
+            assert!(outlet[last] || z[last] < r.floor_m, "it ends where the water leaves");
+            assert!(r.cut_max_m >= 0.0 && r.cut_max_m <= 50.0 && r.cut_volume_m3 >= 0.0);
+            assert!(r.depression_cells >= 1 && r.depression_area_m2 == 4.0 * r.depression_cells as f64 && r.spill_m >= r.floor_m);
+        }
+        // nothing is recorded with no stage set
+        let _ = run();
+        assert!(take_breaches().iter().all(|r| r.w != w || r.at != at));
+    }
 
     // SPIKE-138 (spike only; not a spec requirement)
     #[test]

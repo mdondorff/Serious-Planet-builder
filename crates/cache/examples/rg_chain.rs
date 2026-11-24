@@ -1964,6 +1964,15 @@ fn main() -> Result<(), String> {
     // spikes #147: `--breach-max-len N` (cells of the grid the drain runs on; 0: none), the hybrid breach-fill's limit
     let breach_max_len: usize = value(&args, "--breach-max-len").map_or(Ok(0), str::parse).map_err(|_| "--breach-max-len cells")?;
     planet_generators::bake::drain::BREACH_MAX_LEN.store(breach_max_len, std::sync::atomic::Ordering::Relaxed);
+    // crusader #198 (spike only, diagnostic like PLANET_WIDTH_DUMP): PLANET_BREACH_DUMP=FILE writes every accepted breach of base1, sel-post, band6 and KC as one CSV
+    // row (write_breaches); recording reads the breaches and changes no cell
+    let breach_dump = std::env::var("PLANET_BREACH_DUMP").ok();
+    if breach_dump.is_some() {
+        planet_cache::region_bake::BREACH_DUMP.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(f) = &breach_dump {
+            std::fs::write(f, BREACH_CSV_HEADER).map_err(|e| format!("{f}: {e}"))?;
+        }
+    }
     let base_today = h1_form == "k6";
     // SPIKE-139 (lead #148 item 2, control): `--zs-read c1` (default) reads z_s at L by C1; `contour` first smooths z_s along its contour (5 taps [1 4 6 4 1]/16 at half-cell
     // steps, bilinear, perpendicular to the central-difference gradient) on every cell but H1's channel cells, so S0 = C1(z_s') + r and KH's C1 reads z_s'; K5, H1, HAND, KH's
@@ -3626,6 +3635,15 @@ fn main() -> Result<(), String> {
             } else {
                 Vec::new()
             };
+            let l_stage = |stage: &'static str| planet_generators::bake::drain::BreachStage {
+                stage,
+                face: face.0,
+                n: (REGIONAL * L) as i64,
+                origin: ((sri0 * L) as i64, (srj0 * L) as i64),
+            };
+            if breach_dump.is_some() {
+                planet_generators::bake::drain::record_breaches(Some(l_stage("band6")));
+            }
             let (d6, st, deep6) = planet_generators::bake::drain::drain_selective_floors(
                 &ks_d,
                 w,
@@ -3639,6 +3657,7 @@ fn main() -> Result<(), String> {
                 &|p| budget_l[p],
                 &cell_lo,
             );
+            planet_generators::bake::drain::record_breaches(None);
             planet_generators::bake::drain::HUMP_LIMIT_MICRO.store(0, std::sync::atomic::Ordering::Relaxed);
             planet_generators::bake::drain::OUTLET_FLOORS.store(false, std::sync::atomic::Ordering::Relaxed);
             let (mut lo, mut hi) = (0.0f64, 0.0f64);
@@ -4489,6 +4508,14 @@ fn main() -> Result<(), String> {
             // crusader #161: the budget left is budget - max(0, S_KH - KS's output) inside run_with (reading 21); KC breaches before it fills (reading 22)
             // KV/KC's outlets: the sea, and the window's edge (as H1's; a window without sea, M1, has no other: the flood needs one)
             let outlet_kv: Vec<bool> = (0..n_l).map(|p| sea_l[p] || p % w == 0 || p % w == w - 1 || p / w == 0 || p / w == h - 1).collect();
+            if breach_dump.is_some() {
+                planet_generators::bake::drain::record_breaches(Some(planet_generators::bake::drain::BreachStage {
+                    stage: "kc",
+                    face: face.0,
+                    n: (REGIONAL * L) as i64,
+                    origin: ((sri0 * L) as i64, (srj0 * L) as i64),
+                }));
+            }
             let r = run_with_rims(
                 &gl,
                 &ks_d,
@@ -4511,6 +4538,10 @@ fn main() -> Result<(), String> {
                 (!rim_floor.is_empty()).then_some(&rim_floor[..]),
             );
             drop(outlet_kv);
+            planet_generators::bake::drain::record_breaches(None);
+            if let Some(f) = &breach_dump {
+                write_breaches(f, &planet_generators::bake::drain::take_breaches())?;
+            }
             println!("RG domain {d} KC breaches: {} ({:.4} km3)", r.breaches, r.breach_volume / 1.0e9);
             // reading 10 (crusader #165): the divide cells within W_floor/2 + d_buf of a graph line that put no buffer
             let (div, exempt) = (r.divide.iter().filter(|&&x| x).count(), r.divide_exempt.iter().filter(|&&x| x).count());
@@ -4994,4 +5025,65 @@ fn memory_mib() -> (u64, u64) {
     let s = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
     let kb = |k: &str| s.lines().find(|l| l.starts_with(k)).and_then(|l| l.split_whitespace().nth(1)?.parse::<u64>().ok()).unwrap_or(0);
     (kb("VmHWM:") >> 10, kb("VmRSS:") >> 10)
+}
+
+/// crusader #198: the columns of PLANET_BREACH_DUMP.
+const BREACH_CSV_HEADER: &str =
+    "stage,face,n,cells,len_cells,len_km,l_tiles,cut_max_m,cut_volume_m3,depression_cells,depression_area_km2,spill_m,floor_m,start_i,start_j,end_i,end_j\n";
+
+/// crusader #198 (spike only, diagnostic): appends the breaches `recs` to `f`, one row each.
+/// - `len_cells`: the path's steps, an axis step 1 and a diagonal one sqrt 2 (cells of its grid: H1 at n 12,288, L at 98,304);
+/// - `len_km`: each step times sqrt(GlobalCell::area) of its first cell, an approximation within the cell's aspect ratio (the cube is equiangular, its cells near square);
+///   a cell past its face (a window margin) takes the nearest cell of the face;
+/// - `l_tiles`: the tiles of GEN-182's production grid at L (3,072 L cells, 384 H1 cells, an edge) the path touches.
+fn write_breaches(f: &str, recs: &[planet_generators::bake::drain::BreachRecord]) -> Result<(), String> {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    for r in recs {
+        let at = r.at;
+        let cell = |c: u32| {
+            let (i, j) = (at.origin.0 + (c as usize % r.w) as i64, at.origin.1 + (c as usize / r.w) as i64);
+            (i.clamp(0, at.n - 1), j.clamp(0, at.n - 1))
+        };
+        let tile_edge = 3072 * at.n / (98_304);
+        let mut len_cells = 0.0f64;
+        let mut len_m = 0.0f64;
+        let mut tiles: std::collections::BTreeSet<(i64, i64)> = std::collections::BTreeSet::new();
+        for (k, &c) in r.path.iter().enumerate() {
+            let (i, j) = cell(c);
+            tiles.insert((i / tile_edge, j / tile_edge));
+            if let Some(&q) = r.path.get(k + 1) {
+                let (qi, qj) = cell(q);
+                let step = if qi != i && qj != j { std::f64::consts::SQRT_2 } else { 1.0 };
+                let gc = planet_core::GlobalCell::new(planet_core::Face(at.face), at.n, i, j).expect("a face cell");
+                len_cells += step;
+                len_m += step * libm::sqrt(gc.area(at.n, R));
+            }
+        }
+        let (s, e) = (cell(r.path[0]), cell(*r.path.last().unwrap()));
+        let _ = writeln!(
+            out,
+            "{},{},{},{},{:.3},{:.4},{},{:.4},{:.1},{},{:.6},{:.4},{:.4},{},{},{},{}",
+            at.stage,
+            at.face,
+            at.n,
+            r.path.len(),
+            len_cells,
+            len_m / 1000.0,
+            tiles.len(),
+            r.cut_max_m,
+            r.cut_volume_m3,
+            r.depression_cells,
+            r.depression_area_m2 / 1.0e6,
+            r.spill_m,
+            r.floor_m,
+            s.0,
+            s.1,
+            e.0,
+            e.1
+        );
+    }
+    use std::io::Write as _;
+    let mut file = std::fs::OpenOptions::new().append(true).open(f).map_err(|e| format!("{f}: {e}"))?;
+    file.write_all(out.as_bytes()).map_err(|e| format!("{f}: {e}"))
 }
