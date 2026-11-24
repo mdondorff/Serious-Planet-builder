@@ -162,6 +162,9 @@ fn the_area_is_the_radius_squared_times_the_solid_angle_and_a_cell_outside_its_l
     let big = GlobalCell::new(Face(0), 8, 7, 0).unwrap();
     assert!(std::panic::catch_unwind(|| big.solid_angle(4)).is_err(), "a cell of another level");
     assert!(std::panic::catch_unwind(|| cell_solid_angle(4, 4, 0)).is_err());
+    // numerics review: a level over 2^30 cells an edge is refused, not wrapped
+    assert!(std::panic::catch_unwind(|| cell_solid_angle((1 << 30) + 1, 0, 0)).is_err());
+    assert!(std::panic::catch_unwind(|| cell_solid_angle(i64::MAX, 0, 0)).is_err());
 }
 
 /// The 24 rotations of the cube: the signed permutation matrices of determinant +1.

@@ -11,9 +11,11 @@
 /// Subcells an edge are `ceil(SUBCELL_LEVEL / n)`: the rule always runs on steps of at most `pi / (2 SUBCELL_LEVEL)`.
 pub const SUBCELL_LEVEL: i64 = 512;
 
-/// The solid angle (steradians) of cell `(i, j)` of a level with `n` cells per face edge (`0 <= i, j < n`, `n >= 1`).
+/// The solid angle (steradians) of cell `(i, j)` of a level with `n` cells per face edge (`0 <= i, j < n`, `1 <= n <= 2^30`).
 pub fn cell_solid_angle(n: i64, i: i64, j: i64) -> f64 {
-    assert!(n >= 1 && (0..n).contains(&i) && (0..n).contains(&j), "cell ({i}, {j}) of a level with {n} cells per face edge");
+    // numerics review: n bounded as GlobalCell's levels are, so n k stays exact in f64 and nothing overflows
+    let ok = (1..=crate::global_cell::MAX_CELLS_PER_EDGE).contains(&n) && (0..n).contains(&i) && (0..n).contains(&j);
+    assert!(ok, "cell ({i}, {j}) of a level with {n} cells per face edge");
     // the octant fold: the integrand is even in each angle and symmetric under their swap
     let (a, b) = (i.min(n - 1 - i), j.min(n - 1 - j));
     let (a, b) = if a <= b { (a, b) } else { (b, a) };
@@ -28,17 +30,16 @@ pub fn cell_solid_angle(n: i64, i: i64, j: i64) -> f64 {
         let x = libm::tan(angle(t));
         (1.0 + x * x, x * x)
     };
+    // the 2 k nodes along u, once (numerics review: the same values and the same order as evaluating them in every row)
+    let along_u: Vec<(f64, f64)> = (0..k).flat_map(|su| offsets.map(|ou| sec2((a * k + su) as f64 + ou))).collect();
     let mut rows = 0.0;
     for sv in 0..k {
         for ov in offsets {
             let (qv, yy) = sec2((b * k + sv) as f64 + ov);
             let mut row = 0.0;
-            for su in 0..k {
-                for ou in offsets {
-                    let (pu, xx) = sec2((a * k + su) as f64 + ou);
-                    let s = 1.0 + xx + yy;
-                    row += pu * qv / (s * libm::sqrt(s));
-                }
+            for &(pu, xx) in &along_u {
+                let s = 1.0 + xx + yy;
+                row += pu * qv / (s * libm::sqrt(s));
             }
             rows += row;
         }

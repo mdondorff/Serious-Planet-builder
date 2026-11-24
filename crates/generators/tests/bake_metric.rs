@@ -106,5 +106,6 @@ fn todays_metric_area_at_98304_cells_is_measured_against_the_cell_solid_angle() 
         worst = worst.max((old - new).abs() / new);
     }
     eprintln!("GEN-138 Metric::area at n {n}: worst relative error {worst:e} over 400 cells (report only)");
-    assert!(worst.is_finite() && worst < 1e-3, "today's area is still the same metric in form: {worst:e}");
+    // numerics review: loose enough to judge nothing, tight enough to see a regression of the four-term form (9.1e-7 measured, 2026-11-24)
+    assert!(worst.is_finite() && worst < 1e-5, "today's area is still the same metric in form: {worst:e}");
 }

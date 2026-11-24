@@ -173,8 +173,8 @@ Detail:
 - integrand: `d Omega = sec^2(alpha) sec^2(beta) / (1 + tan^2(alpha) + tan^2(beta))^(3/2) d alpha d beta`, even in each angle and symmetric under their swap (the face square's eight symmetries);
 - form: a 2 x 2 Gauss-Legendre rule in `(alpha, beta)` on each of `k x k` equal subcells, `k = ceil(512 / n)` (`SUBCELL_LEVEL` 512), one form at every `n`; no difference of nearly equal values, so no cancellation;
 - canonical: computed from the cell folded into one octant, `(min(i, n-1-i), min(j, n-1-j))` sorted; every cell a symmetry of the cube maps onto it has the same bits, the 24 rotations included;
-- sums: a sum of cell areas uses one fixed reduction, `pairwise_sum` (halves down to at most 8 values, then in order), per face row, then over the rows, then over the faces;
-- `libm` only, no thread or platform input (CON-14); panics for a cell outside the level `n`;
+- sums: a sum of cell areas uses one fixed reduction, `pairwise_sum` (halves down to at most 8 values, then in order), over each whole face row, then over the rows, then over the faces; a caller that holds the cells in tiles or regions SHALL assemble whole face rows before reducing (a sum of tile sums is other bits);
+- `libm` only, no thread or platform input (CON-14); panics for a cell outside the level `n` or a level outside `1..=2^30`;
 - additive: no caller switched; GEN-138's `Metric::area` keeps its values (9.1e-7 worst relative error at 98,304, measured in TEST-152, report only); hashes, goldens and the determinism manifest stay bit-identical.
 
 #### Scenario: Exact within 1e-9, closed sums, the same bits
