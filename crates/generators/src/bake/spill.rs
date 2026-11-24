@@ -284,18 +284,23 @@ pub struct Seam<'a> {
 impl SpillGraph {
     /// Joins tiles across caller-supplied seams (GEN-191): each seam's cell pairs by its kind, every pair with `w = max(z, z)`, two outlet cells not joined; the seams
     /// in the order of their tie key (ties by their order in `seams`). Returns the number of edges added. The planet-wide levels are a minimax, so they do not depend
-    /// on the order edges are added: the key makes the graph itself canonical. Refused: rows of different lengths, or a corner seam of more than one cell a side.
+    /// on the order edges are added; the key fixes that order for equal inputs. Refused before any edge is added (the graph unchanged): rows of different lengths, a
+    /// corner seam of other than one cell a side, or a height that is not finite.
     pub fn connect_seams(&mut self, seams: &[Seam<'_>]) -> usize {
+        for sm in seams {
+            assert_eq!(sm.a_cells.len(), sm.b_cells.len(), "seam {}: both sides list the same number of cells", sm.key);
+            if sm.kind == SeamKind::Corner {
+                assert_eq!(sm.a_cells.len(), 1, "seam {}: a corner seam joins one cell a side", sm.key);
+            }
+            // f64::max would hide a NaN on one side; the heights come from the caller, not from a flood that checked them
+            assert!(sm.a_cells.iter().chain(sm.b_cells).all(|c| c.1.is_finite()), "seam {}: a height that is not finite", sm.key);
+        }
         let mut order: Vec<usize> = (0..seams.len()).collect();
         order.sort_by_key(|&k| (seams[k].key, k));
         let mut added = 0usize;
         for k in order {
             let sm = &seams[k];
-            assert_eq!(sm.a_cells.len(), sm.b_cells.len(), "seam {}: both sides list the same number of cells", sm.key);
             let n = sm.a_cells.len();
-            if sm.kind == SeamKind::Corner {
-                assert!(n <= 1, "seam {}: a corner seam joins one cell a side, not {n}", sm.key);
-            }
             for i in 0..n {
                 let reach: &[i64] = if sm.kind == SeamKind::IntraFace { &[-1, 0, 1] } else { &[0] };
                 for &d in reach {
