@@ -2161,6 +2161,12 @@ fn main() -> Result<(), String> {
     // lead #184d (the in-zone Xdiag item): `--curve-blend min` (default) KH's curve correction as min(C1, target); `smooth` a polynomial smooth minimum over 3 m,
     // so the crease where the profile meets C1 is rounded
     let curve_blend = value(&args, "--curve-blend").unwrap_or("min");
+    // lead #184f item 2 (the facets enter at KH: in-zone Xdiag S0 0.003 -> S_KH 0.037 on the dams-off row): `--curve-profile v` (default) the cross-section
+    // z_bed + s d; `round` a hyperbola z_bed + s (sqrt(d^2 + d0^2) - d0), d0 = 1.5 L cells: the same walls away from the thalweg, its tip rounded
+    let curve_profile = value(&args, "--curve-profile").unwrap_or("v");
+    if !["v", "round"].contains(&curve_profile) {
+        return Err(format!("--curve-profile v | round, not '{curve_profile}'"));
+    }
     if !["min", "smooth"].contains(&curve_blend) {
         return Err(format!("--curve-blend min | smooth, not '{curve_blend}'"));
     }
@@ -3337,7 +3343,14 @@ fn main() -> Result<(), String> {
                 if let Some((d, zb)) = &curve_near {
                     if d[p].is_finite() {
                         let zb = f64::from(zb[p]);
-                        let mut target = zb + s0_slope(p).max(curve_thalweg) * f64::from(d[p]) * cell_m;
+                        let dm = f64::from(d[p]) * cell_m;
+                        let reach = if curve_profile == "round" {
+                            let d0 = 1.5 * cell_m;
+                            libm::sqrt(dm * dm + d0 * d0) - d0
+                        } else {
+                            dm
+                        };
+                        let mut target = zb + s0_slope(p).max(curve_thalweg) * reach;
                         if curve_blend == "smooth" {
                             // a polynomial smooth minimum of v and the target over k = 3 m (never above v; the target where it lies k under v or more)
                             let k = 3.0;
@@ -5200,6 +5213,7 @@ fn main() -> Result<(), String> {
             ("curve-thalweg-slope", curve_thalweg.to_string()),
             ("curve-bed", curve_bed.to_string()),
             ("curve-blend", curve_blend.to_string()),
+            ("curve-profile", curve_profile.to_string()),
             ("inlet-floor", if INLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-floors", if BAND6_FLOORS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-outlet-floor", if BAND6_OUTLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
