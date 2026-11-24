@@ -2132,3 +2132,43 @@ Detail:
 #### Scenario: The look sheet's fixtures
 - **WHEN** the tests of `look_sheet` and the cockpit's look test run
 - **THEN** each check above has an assertion that cites BUILD-067 and TEST-150
+
+### Requirement: TEST-151 TEST-139's partition layouts as data
+TEST-139's fixture SHALL carry its partition layouts as a data file (`crates/generators/tests/support/g0_layouts.txt`): each a name, a region count, a tile size, a halo and the region of every tile of the six faces, regions of whole tiles of GEN-182's grid on the fixture's L lattice; every layout SHALL tile the cube with no gap and no overlap, each tile a `CubePatch` (COORD-012).
+
+Verify: A
+Status: active
+Source: Lead 2026-11-24 (#195, owner O2; the G3 port order's C1 and C2, reconciliation rows 1 and 2; DEC on the halo: 24, lead 2026-11-24), TEST-139, GEN-182, COORD-012
+Detail:
+| Layout | Regions | Seam |
+|---|---|---|
+| `one-region` | 1 | none |
+| `two-regions` | 2 | face 0's tile line at longitude -15 (TEST-139's layout) |
+| `four-regions` | 4 | `two-regions` split by the sign of each tile centre's latitude |
+| `shifted-seam` | 2 | `two-regions` with its cut one tile column east, face 0's tile line at +15 |
+| `face-edge-seam` | 2 | face 0 against the other faces: face 0's four cube edges |
+- tiles of 64 L cells (3 x 3 a face), halo 24: GEN-182's bounds, `DISC_RADIUS_MAX + PROFILE_CARRY_MIN` (16 + 8) at least, `n / 8` (192 / 8) at most, tile more than twice the halo.
+
+#### Scenario: Whole tiles, no gap, the declared seams
+- **WHEN** the layouts are read and each tile is built as a `CubePatch` with the layout's halo
+- **THEN** every L cell lies in exactly one tile's core, each region holds a tile, `two-regions` equals TEST-139's layout, face 0's seam is its tile line 64 in `two-regions` and 128 in `shifted-seam`, every pair across `face-edge-seam` lies on two faces (4 n pairs), and `four-regions` cuts a face in both directions
+
+### Requirement: TEST-152 The cube cell's solid angle against independent references
+Tier-A tests SHALL check COORD-013's solid angle against references independent of the form under test, its sums, its symmetry and its thread independence, each test naming its reference.
+
+Verify: A
+Status: active
+Source: Lead 2026-11-24 (#197, the plan's references), COORD-013
+Detail:
+| Check | Reference | Levels |
+|---|---|---|
+| a cell within 1e-9 | the exact four-term `atan` solid angle of the gnomonic patch (its rounding at most about 5e-11 here) | every canonical cell of n 1 to 64, 128, 256, 512 |
+| a cell within 1e-9 | 8 x 8 Gauss-Legendre in the angles on the whole cell (not exact at n of 1 to 4, so only above 512) | n 513, 1,000, 1,024, 4,096, 98,304, 2^20, 2^30; corner, edge, centre and 20 scattered cells |
+| a face sums to 4 pi / 6, the cube to 4 pi, within 1e-9 | the fixed reduction (pairwise per row, rows, faces) | n 1, 2, 3, 4, 5, 7, 8, 16, 64, 512, 1,024 (the cube at 1, 7, 1,024) |
+| the same bits under the 24 rotations | the rotated cell's own value | every cell of n 5 and 6; 200 cells of n 1,024 |
+| the same bits on 1 and 7 threads | the fixed reduction | face 0 of n 1,024 |
+- GEN-138's `Metric::area` against COORD-013 at 98,304 is measured and printed, not judged (report only).
+
+#### Scenario: A form that drops the fold or the subcells
+- **WHEN** the octant fold or the subcells (`k = 1` at every `n`) are removed
+- **THEN** the rotation test, or the small-level and closure tests, fail
