@@ -2,12 +2,20 @@
 //! cells) of synthetic terrain with basins that cross tile edges, a basin wider than a tile, a cube-edge-like gluing of two tiles (rotated, with the neighbour pairs named by the caller), a tile
 //! of sea, nested basins and flats. The tiled result must equal the oracle bit for bit.
 
-use planet_generators::bake::spill::{final_level, flood_labelled, perimeter_cell, perimeter_index, perimeter_len, SpillGraph, SEA};
+use planet_core::{Face, GlobalCell};
+use planet_generators::bake::fillgeom::border_neighbours;
+use planet_generators::bake::spill::{
+    final_level, flood_labelled, perimeter_cell, perimeter_index, perimeter_len, Seam, SeamKind, SpillGraph, SEA,
+};
+use planet_generators::bake::tile::{TileGrid, TileId};
 use std::cmp::Reverse;
-use std::collections::BinaryHeap;
+use std::collections::{BTreeSet, BinaryHeap};
 
 /// A cell of a test world: the tile, the column and the row.
 type Cell = (usize, usize, usize);
+
+/// A seam side as the engine takes it: (seed, height) per cell.
+type SeamRow = [(u32, f64)];
 
 struct World {
     n: usize,
@@ -395,4 +403,332 @@ fn a_border_outlet_is_the_sea_a_weight_must_be_finite_and_a_signed_zero_is_one_h
     oo[0][2] = true;
     let sign = World { n: m, z: zz, outlet: oo, cross: Vec::new() };
     assert_equal(&sign, "signed zero");
+}
+
+/// A seam of a test world: its kind, its tie key and the two rows of border cells (`a[k]` faces `b[k]`).
+struct SeamCells {
+    kind: SeamKind,
+    key: u64,
+    a: Vec<Cell>,
+    b: Vec<Cell>,
+}
+
+impl SeamCells {
+    /// The cell pairs a seam of its kind stands for (GEN-191's table): intra-face `k` with `k - 1`, `k`, `k + 1`; cube edge and corner `k` with `k`.
+    fn pairs(&self) -> Vec<(Cell, Cell)> {
+        let m = self.a.len() as i64;
+        let reach: &[i64] = if self.kind == SeamKind::IntraFace { &[-1, 0, 1] } else { &[0] };
+        let mut out = Vec::new();
+        for k in 0..m {
+            for &d in reach {
+                if (0..m).contains(&(k + d)) {
+                    out.push((self.a[k as usize], self.b[(k + d) as usize]));
+                }
+            }
+        }
+        out
+    }
+}
+
+impl World {
+    /// The tiled result through `connect_seams` (GEN-191): every tile flooded alone, the seams' cell pairs added by the engine, the graph solved; with the number
+    /// of edges the engine added.
+    fn tiled_seams(&self, seams: &[SeamCells]) -> (Vec<f64>, usize) {
+        let n = self.n;
+        let floods: Vec<_> = (0..self.z.len()).map(|t| flood_labelled(n, n, &self.z[t], &self.outlet[t])).collect();
+        let mut graph = SpillGraph::new();
+        let refs: Vec<_> = floods.iter().map(|f| graph.add_tile(perimeter_len(n, n), &f.edges)).collect();
+        let seed =
+            |c: Cell| if self.is_outlet(c) { SEA } else { perimeter_index(n, n, c.1, c.2).expect("a seam cell is on a tile's border") };
+        let rows: Vec<(Box<SeamRow>, Box<SeamRow>)> = seams
+            .iter()
+            .map(|sm| {
+                let row = |cs: &[Cell]| cs.iter().map(|&c| (seed(c), self.height(c))).collect::<Vec<_>>();
+                (row(&sm.a).into_boxed_slice(), row(&sm.b).into_boxed_slice())
+            })
+            .collect();
+        let list: Vec<Seam<'_>> = seams
+            .iter()
+            .zip(&rows)
+            .filter(|(sm, _)| !sm.a.is_empty())
+            .map(|(sm, (ra, rb))| Seam { a: refs[sm.a[0].0], b: refs[sm.b[0].0], kind: sm.kind, key: sm.key, a_cells: ra, b_cells: rb })
+            .collect();
+        let added = graph.connect_seams(&list);
+        let levels = graph.solve();
+        let mut out = Vec::new();
+        for (t, f) in floods.iter().enumerate() {
+            out.extend(final_level(f, &|s| levels.seed(refs[t], s)));
+        }
+        (out, added)
+    }
+
+    /// The cross pairs that are not two outlet cells: the edges a correct engine adds for them.
+    fn joined_pairs(&self) -> usize {
+        self.cross.iter().filter(|(a, b)| !(self.is_outlet(*a) && self.is_outlet(*b))).count()
+    }
+}
+
+/// The seams of `grid_world`'s layout: an intra-face seam between tiles side by side and one above the other, and a corner seam where four tiles meet.
+fn grid_seams(cols: usize, rows: usize, n: usize) -> Vec<SeamCells> {
+    let mut v = Vec::new();
+    let mut key = 0u64;
+    let mut push = |kind, a: Vec<Cell>, b: Vec<Cell>| {
+        key += 1;
+        v.push(SeamCells { kind, key, a, b });
+    };
+    for ty in 0..rows {
+        for tx in 0..cols {
+            let t = ty * cols + tx;
+            if tx + 1 < cols {
+                push(SeamKind::IntraFace, (0..n).map(|k| (t, n - 1, k)).collect(), (0..n).map(|k| (t + 1, 0, k)).collect());
+            }
+            if ty + 1 < rows {
+                push(SeamKind::IntraFace, (0..n).map(|k| (t, k, n - 1)).collect(), (0..n).map(|k| (t + cols, k, 0)).collect());
+                if tx + 1 < cols {
+                    push(SeamKind::Corner, vec![(t, n - 1, n - 1)], vec![(t + cols + 1, 0, 0)]);
+                }
+                if tx > 0 {
+                    push(SeamKind::Corner, vec![(t, 0, n - 1)], vec![(t + cols - 1, n - 1, 0)]);
+                }
+            }
+        }
+    }
+    v
+}
+
+/// A pair of cells as an unordered key.
+fn unordered(p: (Cell, Cell)) -> (Cell, Cell) {
+    if p.0 <= p.1 {
+        p
+    } else {
+        (p.1, p.0)
+    }
+}
+
+// spec: GEN-191
+#[test]
+fn the_seam_engine_gives_todays_planar_spill_levels_bit_for_bit() {
+    // lead #193: given a face's tiles as intra-face and corner seams, the engine adds the pairs today's caller names (layer_fillpass through border_neighbours,
+    // inside a face: the 8 neighbours of a border cell in other tiles), so the levels are the same bits as that pair list's and the oracle's (output-neutral)
+    for (cols, rows, n, seed) in [(3, 3, 10, 7u64), (4, 2, 12, 11), (2, 3, 11, 5)] {
+        let w = grid_world(cols, rows, n, seed);
+        let seams = grid_seams(cols, rows, n);
+        let want: BTreeSet<(Cell, Cell)> = w.cross.iter().copied().map(unordered).collect();
+        let got: BTreeSet<(Cell, Cell)> = seams.iter().flat_map(|sm| sm.pairs()).map(unordered).collect();
+        assert_eq!(got, want, "{cols} x {rows} tiles of {n}: the seams stand for the caller's pairs, no more, no fewer");
+        let (today, oracle) = (w.tiled(), w.oracle());
+        let (engine, added) = w.tiled_seams(&seams);
+        assert_eq!(added, w.joined_pairs(), "{cols} x {rows} tiles of {n}: one edge per pair that is not two outlet cells");
+        assert_eq!(today.len(), engine.len());
+        for k in 0..today.len() {
+            assert_eq!(today[k].to_bits(), engine[k].to_bits(), "{cols} x {rows} tiles of {n}: cell {k}");
+            assert_eq!(engine[k].to_bits(), oracle[k].to_bits());
+        }
+        // the tie key orders the edges, never the levels: the seams in reverse order of keys give the same bits
+        let mut reversed = grid_seams(cols, rows, n);
+        let m = reversed.len() as u64;
+        for (k, sm) in reversed.iter_mut().enumerate() {
+            sm.key = m - k as u64;
+        }
+        let (again, _) = w.tiled_seams(&reversed);
+        assert!(again.iter().zip(&engine).all(|(a, b)| a.to_bits() == b.to_bits()), "the key order changes no level");
+    }
+    // today's caller, cell by cell: inside a face, border_neighbours of a 3 x 3 grid of tiles names exactly the pairs of grid_seams (tile t at ti = t % 3, tj = t / 3)
+    let t = 6usize;
+    let g = TileGrid { cells: 3 * t, tile: t, halo: 2, radius_m: 100.0 * (3 * t) as f64 / core::f64::consts::FRAC_PI_2 };
+    let tile_of = |id: TileId| -> usize { id.tj as usize * 3 + id.ti as usize };
+    let mut today: BTreeSet<(Cell, Cell)> = BTreeSet::new();
+    for tj in 0..3u32 {
+        for ti in 0..3u32 {
+            let id = TileId { face: Face(0), ti, tj };
+            for j in 0..t {
+                for i in 0..t {
+                    if i != 0 && j != 0 && i != t - 1 && j != t - 1 {
+                        continue;
+                    }
+                    for (o, bi, bj) in border_neighbours(&g, id, i, j) {
+                        if o.face == Face(0) {
+                            today.insert(unordered(((tile_of(id), i, j), (tile_of(o), bi, bj))));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let engine: BTreeSet<(Cell, Cell)> = grid_seams(3, 3, t).iter().flat_map(|sm| sm.pairs()).map(unordered).collect();
+    assert_eq!(engine, today, "the seams of one face stand for today's in-face pairs");
+}
+
+// spec: GEN-191
+#[test]
+fn a_cube_edge_seam_joins_two_faces_basins_axis_only() {
+    // two tiles on two faces glued across a cube edge, rotated: tile 0's east column meets tile 1's south row, cell k against cell n - 1 - k, axis-only (GEN-139). A
+    // basin across the edge drains only through tile 1's far side; the engine with a cube-edge seam equals the oracle with those axis pairs and no diagonals
+    let n = 10usize;
+    let mut z = vec![vec![30.0; n * n]; 2];
+    let mut outlet = vec![vec![false; n * n]; 2];
+    for j in 3..7 {
+        for i in 6..n {
+            z[0][j * n + i] = 5.0;
+        }
+    }
+    for j in 0..4 {
+        for i in 3..7 {
+            z[1][j * n + i] = 5.0;
+        }
+    }
+    // the only outlet: tile 1's north row, behind a 12 m rim; a 5 m channel leads from tile 1's basin to the rim
+    for i in 0..n {
+        z[1][(n - 1) * n + i] = -2.0;
+        outlet[1][(n - 1) * n + i] = true;
+        z[1][(n - 2) * n + i] = 12.0;
+    }
+    for j in 4..n - 2 {
+        z[1][j * n + 5] = 5.0;
+    }
+    let cross: Vec<(Cell, Cell)> = (0..n).map(|k| ((0, n - 1, k), (1, n - 1 - k, 0))).collect();
+    let w = World { n, z, outlet, cross };
+    let seams = vec![SeamCells {
+        kind: SeamKind::CubeEdge,
+        key: 1,
+        a: (0..n).map(|k| (0, n - 1, k)).collect(),
+        b: (0..n).map(|k| (1, n - 1 - k, 0)).collect(),
+    }];
+    let ((engine, added), oracle) = (w.tiled_seams(&seams), w.oracle());
+    assert_eq!(added, n);
+    assert!(engine.iter().zip(&oracle).all(|(a, b)| a.to_bits() == b.to_bits()), "the cube-edge seam equals the oracle");
+    // tile 0's basin has no outlet of its own: joined across the edge, it fills to tile 1's 12 m rim, as tile 1's basin does
+    assert_eq!((engine[5 * n + 8], engine[n * n + 2 * n + 4]), (12.0, 12.0), "the basin across the edge spills at the rim");
+    // an intra-face seam joins diagonals too (3 n - 2 pairs); across a cube edge the engine joins the facing cells only (n pairs)
+    let mut g = SpillGraph::new();
+    let r = (g.add_tile(perimeter_len(n, n), &[]), g.add_tile(perimeter_len(n, n), &[]));
+    let rows: Vec<(u32, f64)> = (0..n as u32).map(|k| (k, 1.0)).collect();
+    let count = |kind| g.clone().connect_seams(&[Seam { a: r.0, b: r.1, kind, key: 1, a_cells: &rows, b_cells: &rows }]);
+    assert_eq!((count(SeamKind::CubeEdge), count(SeamKind::IntraFace)), (n, 3 * n - 2), "axis-only across a cube edge");
+}
+
+// spec: GEN-191
+#[test]
+fn three_faces_at_a_cube_corner_join_through_their_corner_cells_without_a_diagonal() {
+    // lead #193: a cube corner joins 3 tiles on 3 faces. The world is three whole faces of a level of n cells (one tile a face) around a real cube corner; its
+    // cross pairs are every axis neighbour relation between them by GlobalCell (COORD-011, the fold); the seams are one cube-edge seam per pair of faces
+    let n = 6i64;
+    let nu = n as usize;
+    let c0 = GlobalCell::new(Face(0), n, 0, 0).unwrap();
+    let across: Vec<GlobalCell> = c0.neighbours4(n).into_iter().filter(|b| b.face() != c0.face()).collect();
+    let corners = [c0, across[0], across[1]];
+    let faces: Vec<Face> = corners.iter().map(|c| c.face()).collect();
+    let tile = |f: Face| faces.iter().position(|&g| g == f);
+    // the three corner cells are corner cells of their faces and pairwise axis neighbours (no diagonal at a cube corner)
+    for (k, c) in corners.iter().enumerate() {
+        assert!((c.i() == 0 || c.i() == n - 1) && (c.j() == 0 || c.j() == n - 1), "{c:?}");
+        for d in &corners[k + 1..] {
+            assert!(c.neighbours4(n).contains(d), "{c:?} and {d:?}: an axis pair");
+        }
+    }
+    // the cross pairs and the seams, both from the fold: the a side the lower tile; seam t + u - 1 joins tiles t and u
+    let mut seam_pairs: Vec<Vec<(Cell, Cell)>> = vec![Vec::new(); 3];
+    for (t, &f) in faces.iter().enumerate() {
+        for j in 0..n {
+            for i in 0..n {
+                let c = GlobalCell::new(f, n, i, j).unwrap();
+                for b in c.neighbours4(n) {
+                    if let Some(u) = tile(b.face()).filter(|&u| u > t) {
+                        seam_pairs[t + u - 1].push(((t, i as usize, j as usize), (u, b.i() as usize, b.j() as usize)));
+                    }
+                }
+                // no diagonal of the 8-neighbourhood leaves the face (GEN-139)
+                assert!(c.neighbours8(n).iter().all(|b| b.face() == f || c.neighbours4(n).contains(b)));
+            }
+        }
+    }
+    assert!(seam_pairs.iter().all(|s| s.len() == nu), "each pair of faces shares one edge of n axis pairs");
+    let cross: Vec<(Cell, Cell)> = seam_pairs.iter().flatten().copied().collect();
+    let corner_cell = |c: GlobalCell| -> Cell { (tile(c.face()).unwrap(), c.i() as usize, c.j() as usize) };
+    for (k, c) in corners.iter().enumerate() {
+        for d in &corners[k + 1..] {
+            let p = unordered((corner_cell(*c), corner_cell(*d)));
+            assert!(cross.iter().any(|&q| unordered(q) == p), "the corner cells are joined pairwise");
+        }
+    }
+    // terrain: 50 m everywhere; each corner cell a pit walled in on its own face (tile 0 at 5 m, tile 1 at 7 m); tile 2's corner cell (6 m) leads by a 6 m
+    // channel along its face's diagonal to the face's only outlet. The pits of tiles 0 and 1 drain only through the corner cells' pairs
+    let mut z = vec![vec![50.0; nu * nu]; 3];
+    let mut outlet = vec![vec![false; nu * nu]; 3];
+    let at = |c: GlobalCell| c.j() as usize * nu + c.i() as usize;
+    let cz = [5.0, 7.0, 6.0];
+    for t in 0..3 {
+        z[t][at(corners[t])] = cz[t];
+    }
+    let oz = corners[2];
+    let (si, sj) = (if oz.i() == 0 { 1 } else { -1 }, if oz.j() == 0 { 1 } else { -1 });
+    for s in 1..n {
+        let k = (oz.j() + sj * s) as usize * nu + (oz.i() + si * s) as usize;
+        z[2][k] = if s == n - 1 { -1.0 } else { 6.0 };
+        outlet[2][k] = s == n - 1;
+    }
+    let w = World { n: nu, z, outlet, cross };
+    let seams: Vec<SeamCells> = seam_pairs
+        .iter()
+        .enumerate()
+        .map(|(k, ps)| SeamCells {
+            kind: SeamKind::CubeEdge,
+            key: k as u64,
+            a: ps.iter().map(|p| p.0).collect(),
+            b: ps.iter().map(|p| p.1).collect(),
+        })
+        .collect();
+    let ((engine, added), oracle) = (w.tiled_seams(&seams), w.oracle());
+    assert_eq!(added, w.joined_pairs());
+    assert!(engine.iter().zip(&oracle).all(|(a, b)| a.to_bits() == b.to_bits()), "three cube-edge seams at a corner equal the oracle");
+    // tile 0's pit (5 m) fills to tile 2's 6 m through its pair with tile 2's corner cell; tile 1's corner (7 m) stays at 7 m
+    let level = |e: &[f64], t: usize| e[t * nu * nu + at(corners[t])];
+    assert_eq!((level(&engine, 0), level(&engine, 1), level(&engine, 2)), (6.0, 7.0, 6.0), "the corner cells carry the drainage");
+    // without the corner cells' pairs the pits of tiles 0 and 1 fill to their 50 m walls
+    let mut cut = seams;
+    let is_corner = |c: Cell| corners.iter().any(|&g| corner_cell(g) == c);
+    for sm in cut.iter_mut() {
+        let keep: Vec<usize> = (0..sm.a.len()).filter(|&k| !is_corner(sm.a[k]) && !is_corner(sm.b[k])).collect();
+        sm.a = keep.iter().map(|&k| sm.a[k]).collect();
+        sm.b = keep.iter().map(|&k| sm.b[k]).collect();
+    }
+    let (without, _) = w.tiled_seams(&cut);
+    assert_eq!((level(&without, 0), level(&without, 1)), (50.0, 50.0), "the drainage hinges on the corner cells");
+}
+
+// spec: GEN-191
+#[test]
+fn a_bad_seam_is_refused_before_any_edge_is_added() {
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+    let n = 4usize;
+    let row = |z: f64| -> Vec<(u32, f64)> { (0..n as u32).map(|k| (k, z)).collect() };
+    let good = row(1.0);
+    let short = good[..3].to_vec();
+    let mut nan = row(1.0);
+    nan[2].1 = f64::NAN;
+    let two = good[..2].to_vec();
+    let inf = vec![(0u32, f64::NEG_INFINITY)];
+    let one = good[..1].to_vec();
+    let none: Vec<(u32, f64)> = Vec::new();
+    let cases: [(SeamKind, &SeamRow, &SeamRow, &str); 5] = [
+        (SeamKind::IntraFace, &good, &short, "rows of different lengths"),
+        (SeamKind::CubeEdge, &good, &nan, "a NaN height on one side"),
+        (SeamKind::Corner, &two, &two, "a corner seam of two cells"),
+        (SeamKind::Corner, &none, &none, "a corner seam of no cell"),
+        (SeamKind::CubeEdge, &inf, &one, "an infinite height"),
+    ];
+    for (kind, a, b, what) in cases {
+        let mut g = SpillGraph::new();
+        let r = (g.add_tile(perimeter_len(n, n), &[]), g.add_tile(perimeter_len(n, n), &[]));
+        let before = format!("{g:?}");
+        // a good seam keyed first, then the bad one: refused as a whole, the graph unchanged
+        let res = catch_unwind(AssertUnwindSafe(|| {
+            g.connect_seams(&[
+                Seam { a: r.0, b: r.1, kind: SeamKind::CubeEdge, key: 0, a_cells: &good, b_cells: &good },
+                Seam { a: r.0, b: r.1, kind, key: 1, a_cells: a, b_cells: b },
+            ])
+        }));
+        assert!(res.is_err(), "{what} is refused");
+        assert_eq!(format!("{g:?}"), before, "{what}: no edge added");
+    }
 }
