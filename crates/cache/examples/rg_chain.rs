@@ -2164,6 +2164,9 @@ fn main() -> Result<(), String> {
     // lead #184f item 2 (the facets enter at KH: in-zone Xdiag S0 0.003 -> S_KH 0.037 on the dams-off row): `--curve-profile v` (default) the cross-section
     // z_bed + s d; `round` a hyperbola z_bed + s (sqrt(d^2 + d0^2) - d0), d0 = 1.5 L cells: the same walls away from the thalweg, its tip rounded
     let curve_profile = value(&args, "--curve-profile").unwrap_or("v");
+    // lead #184f item 2: the facets follow the curves' lattice-aligned headings (R1h: 54 % of the curve length within 5 degrees of 0 / 45 / 90 / 135, uniform 22 %);
+    // `--curve-sigma S` the smoothing's sigma (L cells, default 2)
+    let curve_sigma: f64 = value(&args, "--curve-sigma").map_or(Ok(2.0), str::parse).map_err(|_| "--curve-sigma S")?;
     if !["v", "round"].contains(&curve_profile) {
         return Err(format!("--curve-profile v | round, not '{curve_profile}'"));
     }
@@ -2845,7 +2848,10 @@ fn main() -> Result<(), String> {
         let all_inside = vec![true; w * h];
         let ms0 =
             Measure { w, h, water: &s0w, inside: &all_inside, region: &all_inside, sea, radius: K_C * L as f64, bar, ocean: Some(&ocean) };
-        let cp = curve::CurveParams::standard(grid.dx() / L as f64, MEANDER.load(std::sync::atomic::Ordering::Relaxed));
+        let cp = curve::CurveParams {
+            sigma: curve_sigma,
+            ..curve::CurveParams::standard(grid.dx() / L as f64, MEANDER.load(std::sync::atomic::Ordering::Relaxed))
+        };
         let to_local = |c: u32| {
             let c = c as usize;
             ((L * (c % rw)) as f64 + (L as f64 - 1.0) / 2.0, (L * (c / rw)) as f64 + (L as f64 - 1.0) / 2.0)
@@ -5214,6 +5220,7 @@ fn main() -> Result<(), String> {
             ("curve-bed", curve_bed.to_string()),
             ("curve-blend", curve_blend.to_string()),
             ("curve-profile", curve_profile.to_string()),
+            ("curve-sigma", curve_sigma.to_string()),
             ("inlet-floor", if INLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-floors", if BAND6_FLOORS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-outlet-floor", if BAND6_OUTLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
