@@ -84,6 +84,18 @@ impl GlobalCell {
         out
     }
 
+    /// The cell's solid angle in steradians (COORD-013): the 2 x 2 Gauss-Legendre rule of [`crate::cell_area::cell_solid_angle`], from the cell's
+    /// canonical octant, so cells a cube symmetry maps onto each other have the same bits. Panics for a cell outside the level `n`.
+    pub fn solid_angle(self, n: i64) -> f64 {
+        assert!(self.in_level(n), "{self:?} is no cell of a level with {n} cells per face edge");
+        crate::cell_area::cell_solid_angle(n, self.i(), self.j())
+    }
+
+    /// The cell's area in square metres on a sphere of `radius_m`: `(radius_m * radius_m) * solid_angle(n)`, in that order (COORD-013).
+    pub fn area(self, n: i64, radius_m: f64) -> f64 {
+        radius_m * radius_m * self.solid_angle(n)
+    }
+
     /// The exact cube point of the cell's centre, in half-cell units (a face's normal coordinate is `n`; its in-face coordinates are `2 i + 1 - n` and `2 j + 1 - n`).
     pub fn centre_point(self, n: i64) -> [i64; 3] {
         let (nrm, u, v) = int_axes(self.face());
