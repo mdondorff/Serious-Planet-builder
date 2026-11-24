@@ -142,78 +142,101 @@ pub fn build(
     }
     // meanders (row 6): a sine along the smoothed curve's normal, its wavelength wave_widths channel widths, tapered over half a wavelength at both ends and held to
     // the valley floor (room_m above the path); the amplitude's factor is the largest of 1, 3/4, 1/2, 1/4, 0 that keeps the point there, smoothed along the curve
-    let mut pts = sm.clone();
-    let mut share = 0.0;
-    if p.meander {
-        let total = ds * (n - 1) as f64;
-        let lam: Vec<f64> = (0..n).map(|i| p.wave_widths * width_m(i as f64 / (n - 1) as f64) / p.cell_m).collect();
-        let wide: Vec<bool> = (0..n).map(|i| width_m(i as f64 / (n - 1) as f64) > p.min_width_m).collect();
-        let mut phase = vec![0.0f64; n];
-        for i in 1..n {
-            phase[i] = phase[i - 1] + if wide[i] { 2.0 * std::f64::consts::PI * ds / lam[i].max(1e-9) } else { 0.0 };
-        }
+    let total = ds * (n - 1) as f64;
+    let lam: Vec<f64> = (0..n).map(|i| p.wave_widths * width_m(i as f64 / (n - 1) as f64) / p.cell_m).collect();
+    let wide: Vec<bool> = (0..n).map(|i| p.meander && width_m(i as f64 / (n - 1) as f64) > p.min_width_m).collect();
+    let mut phase = vec![0.0f64; n];
+    for i in 1..n {
+        phase[i] = phase[i - 1] + if wide[i] { 2.0 * std::f64::consts::PI * ds / lam[i].max(1e-9) } else { 0.0 };
+    }
+    let win = |i: usize| ((0.25 * lam[i] / ds).ceil() as usize).max(1);
+    // numerics review F1, then lead #184's first row (a whole-curve fallback on one failing cell took the meanders off a third of the reaches): a failing raster cell
+    // halves the meander's cap within a quarter wavelength of its point, and from the third pass also pulls the smoothed curve halfway back to the path within two
+    // cells; up to five passes, then the fallbacks
+    let mut cap = vec![1.0f64; n];
+    let mut smc = sm.clone();
+    let bad = |c: usize| ocean[c] || avoid(c);
+    // a raster cell's point: its dense sample's share of the curve, at the path's sample; its room taken over the path's samples within two cells (the share is approximate
+    // once the curve meanders)
+    let room_at = |i: usize| (i.saturating_sub(4)..=(i + 4).min(n - 1)).map(|j| zref[j]).fold(f64::NEG_INFINITY, f64::max) + p.room_m;
+    let failing = |cells: &[usize], at: &[usize], dn: usize, height: bool| -> Vec<usize> {
+        let last = cells.len().saturating_sub(1);
+        cells
+            .iter()
+            .enumerate()
+            .filter_map(|(k, &c)| {
+                let i = if dn > 1 { (libm::round(at[k] as f64 / (dn - 1) as f64 * (n - 1) as f64) as usize).min(n - 1) } else { 0 };
+                (k != 0 && k != last && (bad(c) || (height && water[c] > room_at(i)))).then_some(i)
+            })
+            .collect()
+    };
+    for pass in 0..5 {
         let normal = |i: usize| {
-            let (a, b) = (sm[i.saturating_sub(1)], sm[(i + 1).min(n - 1)]);
+            let (a, b) = (smc[i.saturating_sub(1)], smc[(i + 1).min(n - 1)]);
             let (tx, ty) = (b.0 - a.0, b.1 - a.1);
             let l = libm::hypot(tx, ty).max(1e-12);
             (-ty / l, tx / l)
         };
         let disp = |i: usize, m: f64| {
             if !wide[i] {
-                return sm[i];
+                return smc[i];
             }
             let s = ds * i as f64;
             let t = ((s.min(total - s)) / (0.5 * lam[i])).clamp(0.0, 1.0);
             let t = t * t * (3.0 - 2.0 * t);
-            let a = m * p.amp_wave * lam[i] * t * libm::sin(phase[i]);
+            let a = m * cap[i] * p.amp_wave * lam[i] * t * libm::sin(phase[i]);
             let nv = normal(i);
-            (sm[i].0 + a * nv.0, sm[i].1 + a * nv.1)
+            (smc[i].0 + a * nv.0, smc[i].1 + a * nv.1)
         };
-        let fac: Vec<f64> = (0..n)
-            .map(|i| [1.0, 0.75, 0.5, 0.25, 0.0].into_iter().find(|&m| m == 0.0 || ok(disp(i, m), i, p.room_m)).unwrap_or(0.0))
-            .collect();
-        // a quarter wavelength's moving minimum, then its moving mean, so the amplitude changes smoothly
-        let win = |i: usize| ((0.25 * lam[i] / ds).ceil() as usize).max(1);
-        let mn: Vec<f64> =
-            (0..n).map(|i| (i.saturating_sub(win(i))..=(i + win(i)).min(n - 1)).map(|j| fac[j]).fold(1.0, f64::min)).collect();
-        let fm: Vec<f64> = (0..n)
-            .map(|i| {
-                let r = i.saturating_sub(win(i))..=(i + win(i)).min(n - 1);
-                let k = r.clone().count() as f64;
-                r.map(|j| mn[j]).sum::<f64>() / k
-            })
-            .collect();
-        let mut wavy = 0usize;
-        for i in 1..n - 1 {
-            let q = disp(i, fm[i]);
-            // numerics review F6: a smoothed factor that leaves the room falls back to the point's own checked factor, not to no meander
-            pts[i] = if ok(q, i, p.room_m) {
-                q
-            } else if ok(disp(i, fac[i]), i, p.room_m) {
-                disp(i, fac[i])
-            } else {
-                sm[i]
-            };
-            wavy += usize::from(wide[i] && fm[i] > 0.0);
+        let mut pts = smc.clone();
+        let mut share = 0.0;
+        if p.meander {
+            let fac: Vec<f64> = (0..n)
+                .map(|i| [1.0, 0.75, 0.5, 0.25, 0.0].into_iter().find(|&m| m == 0.0 || ok(disp(i, m), i, p.room_m)).unwrap_or(0.0))
+                .collect();
+            // a quarter wavelength's moving minimum, then its moving mean, so the amplitude changes smoothly
+            let mn: Vec<f64> =
+                (0..n).map(|i| (i.saturating_sub(win(i))..=(i + win(i)).min(n - 1)).map(|j| fac[j]).fold(1.0, f64::min)).collect();
+            let fm: Vec<f64> = (0..n)
+                .map(|i| {
+                    let r = i.saturating_sub(win(i))..=(i + win(i)).min(n - 1);
+                    let k = r.clone().count() as f64;
+                    r.map(|j| mn[j]).sum::<f64>() / k
+                })
+                .collect();
+            let mut wavy = 0usize;
+            for i in 1..n - 1 {
+                let q = disp(i, fm[i]);
+                // numerics review F6: a smoothed factor that leaves the room falls back to the point's own checked factor, not to no meander
+                pts[i] = if ok(q, i, p.room_m) {
+                    q
+                } else if ok(disp(i, fac[i]), i, p.room_m) {
+                    disp(i, fac[i])
+                } else {
+                    smc[i]
+                };
+                wavy += usize::from(wide[i] && fm[i] * cap[i] > 0.0);
+            }
+            share = wavy as f64 / n as f64;
         }
-        share = wavy as f64 / n as f64;
-    }
-    // numerics review F1: every raster cell but the ends is checked (not sea, no other node's anchor, within room_m of its point's path height); a failing curve falls
-    // back to its base path's 4-connected raster, then to the base path itself
-    let bad = |c: usize| ocean[c] || avoid(c);
-    let check = |cells: &[usize], at: &[usize], dn: usize, height: bool| {
-        let last = cells.len().saturating_sub(1);
-        cells.iter().enumerate().all(|(k, &c)| {
-            let i = if dn > 1 { (libm::round(at[k] as f64 / (dn - 1) as f64 * (n - 1) as f64) as usize).min(n - 1) } else { 0 };
-            k == 0 || k == last || (!bad(c) && (!height || water[c] <= zref[i] + p.room_m))
-        })
-    };
-    let (raster, offsets, at, dn) = rasterise(&pts, w, h, water, &bad);
-    if check(&raster, &at, dn, true) {
-        return Curve { pts, raster, offsets, meander_share: share, fallback: 0 };
+        let (raster, offsets, at, dn) = rasterise(&pts, w, h, water, &bad);
+        let fail = failing(&raster, &at, dn, true);
+        if fail.is_empty() {
+            return Curve { pts, raster, offsets, meander_share: share, fallback: 0 };
+        }
+        for &i in &fail {
+            for j in i.saturating_sub(win(i))..=(i + win(i)).min(n - 1) {
+                cap[j] *= 0.5;
+            }
+            if pass >= 2 {
+                for j in i.saturating_sub(4)..=(i + 4).min(n - 1) {
+                    smc[j] = (0.5 * (smc[j].0 + raw[j].0), 0.5 * (smc[j].1 + raw[j].1));
+                }
+            }
+        }
     }
     let (r4, o4, a4, d4) = rasterise(&raw, w, h, water, &bad);
-    if check(&r4, &a4, d4, false) {
+    if failing(&r4, &a4, d4, false).is_empty() {
         return Curve { pts: raw, raster: r4, offsets: o4, meander_share: 0.0, fallback: 1 };
     }
     Curve { pts: raw, raster: base.to_vec(), offsets: vec![(0, 0); base.len()], meander_share: 0.0, fallback: 2 }

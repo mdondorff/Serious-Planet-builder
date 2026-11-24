@@ -2864,6 +2864,10 @@ fn main() -> Result<(), String> {
     if kh_zone == "curve" && curves.is_none() {
         return Err("--kh-zone curve needs --trunk-curve on".into());
     }
+    // lead #184 (spike only): `--stop-after-curves` ends the run after the curve stage (the curves' numbers alone)
+    if args.iter().any(|a| a == "--stop-after-curves") {
+        return Ok(());
+    }
     if KV_WALL_S0.load(std::sync::atomic::Ordering::Relaxed) {
         // lead #184a: S0's side slope per L cell (central differences), KV's wall grade cap
         let cm = grid.dx() / L as f64;
