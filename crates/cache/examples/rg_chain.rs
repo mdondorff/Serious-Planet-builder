@@ -3215,9 +3215,10 @@ fn main() -> Result<(), String> {
                         let zb = f64::from(zb[p]);
                         let target = zb + s0_slope(p).max(curve_thalweg) * f64::from(d[p]) * cell_m;
                         if target < v {
-                            // width form 1 (#184a): only cells standing below the bed + 10 m, blended to C1 above (8 to 12 m; numerics review F3: the cell's own
-                            // height above the bed, so a terrace or spur by the curve is not cut)
-                            let s = ((v - zb - 8.0) / 4.0).clamp(0.0, 1.0);
+                            // width form 1 (#184a): the correction holds the band below the bed + 10 m (the profile's target there), blended to C1 above (8 to 12 m).
+                            // Gated on the target's height, so every thalweg cell reaches the bed; the cell's own height (numerics review F3) left perched raster cells
+                            // uncut on R1h (KV/KC residuals 12,560 -> 1,298,042). A terrace within the band's reach is lowered to it (F3's design question, lead).
+                            let s = ((target - zb - 8.0) / 4.0).clamp(0.0, 1.0);
                             v += (1.0 - s * s * (3.0 - 2.0 * s)) * (target - v);
                         }
                     }
