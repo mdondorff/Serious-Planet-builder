@@ -4,6 +4,7 @@
 
 pub mod cube;
 pub mod frames;
+pub mod global_cell;
 pub mod hash;
 pub mod math;
 pub mod par;
@@ -14,6 +15,7 @@ pub mod vec3;
 
 pub use cube::{Face, FaceMapping, TangentWarp};
 pub use frames::{CameraRelative, PlanetFixed, TileLocal};
+pub use global_cell::GlobalCell;
 pub use math::smoothstep;
 pub use surface::{Geo, ReferenceSurface, Sphere, EARTH_RADIUS_M};
 pub use tile::{Corner, Side, TileId};
