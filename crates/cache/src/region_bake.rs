@@ -76,6 +76,8 @@ pub enum Drain {
     /// Only depressions with a breach cut within `cut_cap_m` or a fill within `fill_cap_m`; deeper basins stay. `drain::drain_selective`. Before K5, `clamp` also floors K5's
     /// breach at the fill level inside the basins left (`drain::level_floor`, passed to the rounds as `Drivers::level_floor`).
     Selective { cut_cap_m: f64, fill_cap_m: f64, rounds: usize, search: usize, clamp: bool },
+    /// Lead #202 (O7): every depression filled to its spill, no breach (`drain::fill_level`; a cell no outlet reaches keeps its height). The pit-reduced S0 proxy.
+    Fill,
 }
 
 impl Drain {
@@ -85,6 +87,7 @@ impl Drain {
     fn put(&self, b: &mut Vec<u8>) {
         match *self {
             Drain::Off => b.push(0),
+            Drain::Fill => b.push(3),
             Drain::Capped { cap_m, rounds, search } => {
                 b.push(1);
                 b.extend(cap_m.to_bits().to_le_bytes());
@@ -325,6 +328,14 @@ fn run_drain(drain: &Drain, grid: &Grid, outlet: &[bool], z: &[f64], what: &str)
     let t = std::time::Instant::now();
     let (d, st) = match *drain {
         Drain::Off => return z.to_vec(),
+        Drain::Fill => {
+            let level = drain::fill_level(z, w, h, outlet);
+            let d: Vec<f64> = (0..z.len()).map(|p| if level[p].is_finite() { level[p].max(z[p]) } else { z[p] }).collect();
+            let raised = (0..z.len()).filter(|&p| d[p] > z[p]).count();
+            let km3: f64 = (0..z.len()).map(|p| (d[p] - z[p]) * grid.cell_area(p) / 1e9).sum();
+            println!("HO stage {what} (Fill): {raised} cells raised to their spill, {km3:.3} km3; {:.1} s", t.elapsed().as_secs_f64());
+            return d;
+        }
         Drain::Capped { cap_m, rounds, search } => drain::drain_capped(z, w, h, outlet, &|_| false, &area, rounds, search, cap_m),
         Drain::Selective { cut_cap_m, fill_cap_m, rounds, search, .. } => {
             drain::drain_selective(z, w, h, outlet, &|_| false, &area, rounds, search, &|_| cut_cap_m, &|_| fill_cap_m)

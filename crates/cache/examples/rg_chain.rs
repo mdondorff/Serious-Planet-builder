@@ -1932,9 +1932,10 @@ fn main() -> Result<(), String> {
     // spikes #146 (SPIKE-138): `--base aplus` (the default) is stages 1 and 3, the selective drain of `z_b` before K5 and of `z_s` after it (a breach only within 50 m of
     // cut, a fill only within 50 m of depth; deeper basins stay), and stage 6, the same rule on the KS1 output with the budget at the floor as both caps (reading 23 post).
     // `--base today` is today's base, no drain.
+    // lead #202 (O7): `--base fill` is the pit-reduced S0 proxy: stages 1 and 3 fill every depression to its spill (no breach), stage 6 as under aplus
     let base_form = value(&args, "--base").unwrap_or("aplus");
-    if !["aplus", "today"].contains(&base_form) {
-        return Err(format!("--base aplus | today, not '{base_form}'"));
+    if !["aplus", "today", "fill"].contains(&base_form) {
+        return Err(format!("--base aplus | today | fill, not '{base_form}'"));
     }
     // spikes #147: `--base-stages 13` (stages 1 and 3, the default) or `3` (stage 3 only: no drain before K5); lead #178 (R16): `1` (stage 1 only: no drain of z_s after K5)
     let base_stages = value(&args, "--base-stages").unwrap_or("13");
@@ -1946,6 +1947,9 @@ fn main() -> Result<(), String> {
         ("aplus", "3") => (Drain::Off, Drain::SELECTIVE_50),
         ("aplus", "1") => (Drain::SELECTIVE_50, Drain::Off),
         ("aplus", _) => (Drain::SELECTIVE_50, Drain::SELECTIVE_50),
+        ("fill", "3") => (Drain::Off, Drain::Fill),
+        ("fill", "1") => (Drain::Fill, Drain::Off),
+        ("fill", _) => (Drain::Fill, Drain::Fill),
         _ => (Drain::Off, Drain::Off),
     };
     // spikes #147: `--breach-cost cell` (SPIKE-138) or `length` (the cut cost times the step's length, plus a length term)
@@ -3546,7 +3550,7 @@ fn main() -> Result<(), String> {
         // lead #163 (B5): `--skip band6` leaves KS1's output undrained (no band drain, so no post-band6 connect pass either)
         // lead #178: KS1's surface before band6, the validator's ks stage
         let ks1_d = ks_d.clone();
-        let ks_d = if (base_form == "aplus" || census) && ks_mode != "off" && on("band6") {
+        let ks_d = if (base_form != "today" || census) && ks_mode != "off" && on("band6") {
             let t6 = Instant::now();
             let outl: Vec<bool> = (0..n_l).map(|p| outlet_d[p] || !active[p]).collect();
             // spikes #147a: the drain switches (--breach-cost, --drain-rule, --breach-max-len) are the base stages' (1 and 3, at 814 m); band6 keeps SPIKE-138's rule
@@ -3708,7 +3712,7 @@ fn main() -> Result<(), String> {
                 t6.elapsed().as_secs_f64()
             );
             // under `--base today` the census runs but band6 is not applied
-            if base_form == "aplus" {
+            if base_form != "today" {
                 d6
             } else {
                 ks_d
@@ -4825,7 +4829,19 @@ fn main() -> Result<(), String> {
         }
         let today = base_form == "today";
         for (step, stage, name, form) in [
-            (1, "1", "base1", if today { "off" } else { "sel" }.to_string()),
+            (
+                1,
+                "1",
+                "base1",
+                if today {
+                    "off"
+                } else if base_form == "fill" {
+                    "fill"
+                } else {
+                    "sel"
+                }
+                .to_string(),
+            ),
             (
                 2,
                 "2",
@@ -4837,7 +4853,19 @@ fn main() -> Result<(), String> {
                 }
                 .to_string(),
             ),
-            (3, "3", "base3", if today { "off" } else { "post" }.to_string()),
+            (
+                3,
+                "3",
+                "base3",
+                if today {
+                    "off"
+                } else if base_form == "fill" {
+                    "fill"
+                } else {
+                    "post"
+                }
+                .to_string(),
+            ),
             (4, "4", "h1", h1_form.to_string()),
             (5, "5", "kh", format!("{kh}, band floored at the sea + 0.5 m")),
             (6, "13", "budget", "relief10 on S0, lowering against S_KH".to_string()),
