@@ -2098,10 +2098,28 @@ fn main() -> Result<(), String> {
     if let Some(d) = &chain_dir {
         std::fs::create_dir_all(d.join("stages")).map_err(|e| e.to_string())?;
     }
-    let chain_f32 = |name: &str, z: &[f64]| -> Result<(), String> {
+    // lead #183 (BUILD-067): `--probe-crops FILE` (SPIKE-143's crops.json form) writes the crop store `<out>/<tag>-crops/`, the crops of every chain field as the chain writes
+    // it (with or without --chain), for `cargo xtask look-sheet`
+    let probe_crops: Option<Vec<planet_cache::look_sheet::Crop>> = match value(&args, "--probe-crops") {
+        Some(f) => {
+            Some(planet_cache::look_sheet::parse_crops_json(&std::fs::read_to_string(f).map_err(|e| format!("--probe-crops {f}: {e}"))?)?)
+        }
+        None => None,
+    };
+    let crop_store: std::cell::OnceCell<planet_cache::look_sheet::CropWriter> = std::cell::OnceCell::new();
+    let chain_bytes = |name: &str, b: &[u8]| -> Result<(), String> {
         if let Some(d) = &chain_dir {
-            let b: Vec<u8> = z.iter().flat_map(|&v| (v as f32).to_le_bytes()).collect();
             std::fs::write(d.join(name), b).map_err(|e| e.to_string())?;
+        }
+        if let Some(c) = crop_store.get() {
+            c.field(name, b)?;
+        }
+        Ok(())
+    };
+    let chain_f32 = |name: &str, z: &[f64]| -> Result<(), String> {
+        if chain_dir.is_some() || crop_store.get().is_some() {
+            let b: Vec<u8> = z.iter().flat_map(|&v| (v as f32).to_le_bytes()).collect();
+            chain_bytes(name, &b)?;
         }
         Ok(())
     };
@@ -2254,6 +2272,11 @@ fn main() -> Result<(), String> {
     let solve = &front.solve;
     let (sri0, srj0, rw, rh) = (solve.ri0, solve.rj0, solve.rw, solve.rh);
     let (x0, y0, w, h) = ((sri0 * L) as i64, (srj0 * L) as i64, rw * L, rh * L);
+    if let Some(cs) = &probe_crops {
+        let root = out_dir.join(format!("{tag}-crops"));
+        let _ = crop_store.set(planet_cache::look_sheet::CropWriter::new(&root, w, h, L, cs)?);
+        println!("RG crops (lead #183): {} crops into {}", cs.len(), root.display());
+    }
     let n = spec.local() as f64;
     let dir_of = |x: i64, y: i64| {
         planet_core::cube::face_to_direction(&TangentWarp, face, 2.0 * (x as f64 + 0.5) / n - 1.0, 2.0 * (y as f64 + 0.5) / n - 1.0)
@@ -2500,13 +2523,13 @@ fn main() -> Result<(), String> {
         dump("chan", &h1.hydro.channel.iter().map(|&c| if c { 1.0 } else { 0.0 }).collect::<Vec<_>>())?;
         return Ok(());
     }
-    if let Some(d) = &chain_dir {
+    if chain_dir.is_some() || crop_store.get().is_some() {
         // H1 rivers: the cells of the H1 channel segments the chain hands over (q at least EDGE_Q)
         let mut riv = vec![0u8; cells];
         for c in h1.trunk_cells.iter().flatten() {
             riv[*c as usize] = 1;
         }
-        std::fs::write(d.join("h1-rivers.u8"), riv).map_err(|e| e.to_string())?;
+        chain_bytes("h1-rivers.u8", &riv)?;
     }
     // the basin census (lead #132a): kept H1 basins, their depth and size against GEN-145's artefact floor (fewer than 4 cells and shallower than 2 m) and the
     // 0.5 m pit limit, the channel-segment cells they hold by depth class, and (K6') those that the sills alone close
@@ -4617,6 +4640,9 @@ fn main() -> Result<(), String> {
         if let Some(d) = &chain_dir {
             std::fs::write(d.join("stages").join(name), &bytes).map_err(|e| e.to_string())?;
         }
+        if let Some(c) = crop_store.get() {
+            c.field(&format!("stages/{name}"), &bytes)?;
+        }
         std::fs::write(stages_dir.join(name), bytes).map_err(|e| e.to_string())
     };
     // lead #169 item 2, #170 item 9: the run's chain (`{tag}-chain.txt`, and the chain layout's chain.txt): the commit, every switch's value and every stage's form, in the
@@ -4758,6 +4784,9 @@ fn main() -> Result<(), String> {
     if let Some(d) = &chain_dir {
         std::fs::write(d.join("graph.txt"), g.canonical()).map_err(|e| e.to_string())?;
         std::fs::write(d.join("chain.txt"), &chain_text).map_err(|e| e.to_string())?;
+    }
+    if let Some(c) = crop_store.get() {
+        c.manifest(&chain_text)?;
     }
     chain_f32("s0.f32", &start)?;
     chain_f32("ks.f32", &ks_out)?;
