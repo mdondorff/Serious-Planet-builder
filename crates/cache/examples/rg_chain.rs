@@ -2083,6 +2083,9 @@ fn main() -> Result<(), String> {
     // spikes #147: `--breach-max-len N` (cells of the grid the drain runs on; 0: none), the hybrid breach-fill's limit
     let breach_max_len: usize = value(&args, "--breach-max-len").map_or(Ok(0), str::parse).map_err(|_| "--breach-max-len cells")?;
     planet_generators::bake::drain::BREACH_MAX_LEN.store(breach_max_len, std::sync::atomic::Ordering::Relaxed);
+    // crusader #198a (spike only): `--breach-max-len-l N`, the L stages' breach cap (band6 and KC), in path cells as `--breach-max-len`; 0: none (the default)
+    let breach_max_len_l: usize = value(&args, "--breach-max-len-l").map_or(Ok(0), str::parse).map_err(|_| "--breach-max-len-l cells")?;
+    planet_generators::bake::kv_kc::KC_BREACH_MAX_LEN.store(breach_max_len_l, std::sync::atomic::Ordering::Relaxed);
     // crusader #198 (spike only, diagnostic like PLANET_WIDTH_DUMP): PLANET_BREACH_DUMP=FILE writes every accepted breach of base1, sel-post, band6 and KC as one CSV
     // row (write_breaches); recording reads the breaches and changes no cell
     let breach_dump = std::env::var("PLANET_BREACH_DUMP").ok();
@@ -3715,7 +3718,8 @@ fn main() -> Result<(), String> {
                 dr::BREACH_BY_LENGTH.store(false, Relaxed);
                 dr::BREACH_SQUARE.store(false, Relaxed);
                 dr::PREFER_FILL.store(false, Relaxed);
-                dr::BREACH_MAX_LEN.store(0, Relaxed);
+                // crusader #198a (spike only): `--breach-max-len-l N` caps band6's breach paths at N L cells (0: none, the default)
+                dr::BREACH_MAX_LEN.store(breach_max_len_l, Relaxed);
             }
             // spikes #147: the census, the same drain on each earlier stage's surface (KH alone, S_KH = KH + r', KS0, KS1); band6's deep depressions are traced to the first
             // stage with a deep depression whose floor lies within 4 L cells
@@ -5046,6 +5050,7 @@ fn main() -> Result<(), String> {
             ("drain-rule", drain_rule.to_string()),
             ("breach-cost", breach_cost.to_string()),
             ("breach-max-len", breach_max_len.to_string()),
+            ("breach-max-len-l", breach_max_len_l.to_string()),
             ("centre", if low { "low" } else { "maximin" }.to_string()),
             ("threads", threads.to_string()),
             ("census", args.iter().any(|a| a == "--census").to_string()),
