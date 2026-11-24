@@ -2,7 +2,9 @@
 //! cells) of synthetic terrain with basins that cross tile edges, a basin wider than a tile, a cube-edge-like gluing of two tiles (rotated, with the neighbour pairs named by the caller), a tile
 //! of sea, nested basins and flats. The tiled result must equal the oracle bit for bit.
 
-use planet_generators::bake::spill::{final_level, flood_labelled, perimeter_cell, perimeter_index, perimeter_len, SpillGraph, SEA};
+use planet_generators::bake::spill::{
+    final_level, flood_labelled, perimeter_cell, perimeter_index, perimeter_len, Seam, SeamKind, SpillGraph, SEA,
+};
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
@@ -395,4 +397,188 @@ fn a_border_outlet_is_the_sea_a_weight_must_be_finite_and_a_signed_zero_is_one_h
     oo[0][2] = true;
     let sign = World { n: m, z: zz, outlet: oo, cross: Vec::new() };
     assert_equal(&sign, "signed zero");
+}
+
+/// A seam of a test world: its kind, its tie key and the two rows of border cells (`a[k]` faces `b[k]`).
+struct SeamCells {
+    kind: SeamKind,
+    key: u64,
+    a: Vec<Cell>,
+    b: Vec<Cell>,
+}
+
+impl World {
+    /// The tiled result through `connect_seams` (GEN-191): every tile flooded alone, the seams' cell pairs added by the engine, the graph solved.
+    fn tiled_seams(&self, seams: &[SeamCells]) -> Vec<f64> {
+        let n = self.n;
+        let floods: Vec<_> = (0..self.z.len()).map(|t| flood_labelled(n, n, &self.z[t], &self.outlet[t])).collect();
+        let mut graph = SpillGraph::new();
+        let refs: Vec<_> = floods.iter().map(|f| graph.add_tile(perimeter_len(n, n), &f.edges)).collect();
+        let seed =
+            |c: Cell| if self.is_outlet(c) { SEA } else { perimeter_index(n, n, c.1, c.2).expect("a seam cell is on a tile's border") };
+        let rows: Vec<(Vec<(u32, f64)>, Vec<(u32, f64)>)> = seams
+            .iter()
+            .map(|sm| {
+                let row = |cs: &[Cell]| cs.iter().map(|&c| (seed(c), self.height(c))).collect::<Vec<_>>();
+                (row(&sm.a), row(&sm.b))
+            })
+            .collect();
+        let list: Vec<Seam<'_>> = seams
+            .iter()
+            .zip(&rows)
+            .map(|(sm, (ra, rb))| Seam { a: refs[sm.a[0].0], b: refs[sm.b[0].0], kind: sm.kind, key: sm.key, a_cells: ra, b_cells: rb })
+            .collect();
+        graph.connect_seams(&list);
+        let levels = graph.solve();
+        let mut out = Vec::new();
+        for (t, f) in floods.iter().enumerate() {
+            out.extend(final_level(f, &|s| levels.seed(refs[t], s)));
+        }
+        out
+    }
+}
+
+/// The seams of `grid_world`'s layout: an intra-face seam between tiles side by side and one above the other, and a corner seam where four tiles meet.
+fn grid_seams(cols: usize, rows: usize, n: usize) -> Vec<SeamCells> {
+    let mut v = Vec::new();
+    let mut key = 0u64;
+    let mut push = |kind, a: Vec<Cell>, b: Vec<Cell>| {
+        key += 1;
+        v.push(SeamCells { kind, key, a, b });
+    };
+    for ty in 0..rows {
+        for tx in 0..cols {
+            let t = ty * cols + tx;
+            if tx + 1 < cols {
+                push(SeamKind::IntraFace, (0..n).map(|k| (t, n - 1, k)).collect(), (0..n).map(|k| (t + 1, 0, k)).collect());
+            }
+            if ty + 1 < rows {
+                push(SeamKind::IntraFace, (0..n).map(|k| (t, k, n - 1)).collect(), (0..n).map(|k| (t + cols, k, 0)).collect());
+                if tx + 1 < cols {
+                    push(SeamKind::Corner, vec![(t, n - 1, n - 1)], vec![(t + cols + 1, 0, 0)]);
+                }
+                if tx > 0 {
+                    push(SeamKind::Corner, vec![(t, 0, n - 1)], vec![(t + cols - 1, n - 1, 0)]);
+                }
+            }
+        }
+    }
+    v
+}
+
+// spec: GEN-191
+#[test]
+fn the_seam_engine_gives_todays_planar_spill_levels_bit_for_bit() {
+    // lead #193: today's planar caller names its pairs cell by cell; the engine, given the same tiles as intra-face and corner seams, adds the same pairs, so the
+    // planet-wide levels are the same bits, and they are the oracle's (output-neutral)
+    for (cols, rows, n, seed) in [(3, 3, 10, 7u64), (4, 2, 12, 11), (2, 3, 11, 5)] {
+        let w = grid_world(cols, rows, n, seed);
+        let seams = grid_seams(cols, rows, n);
+        let (today, engine, oracle) = (w.tiled(), w.tiled_seams(&seams), w.oracle());
+        assert_eq!(today.len(), engine.len());
+        for k in 0..today.len() {
+            assert_eq!(today[k].to_bits(), engine[k].to_bits(), "{cols} x {rows} tiles of {n}: cell {k}");
+            assert_eq!(engine[k].to_bits(), oracle[k].to_bits());
+        }
+        // the tie key orders the edges, never the levels: the seams in reverse order of keys give the same bits
+        let mut reversed = grid_seams(cols, rows, n);
+        let m = reversed.len() as u64;
+        for (k, sm) in reversed.iter_mut().enumerate() {
+            sm.key = m - k as u64;
+        }
+        let again = w.tiled_seams(&reversed);
+        assert!(again.iter().zip(&engine).all(|(a, b)| a.to_bits() == b.to_bits()), "the key order changes no level");
+    }
+}
+
+// spec: GEN-191
+#[test]
+fn a_cube_edge_seam_joins_two_faces_basins_axis_only() {
+    // two tiles on two faces glued across a cube edge, rotated: tile 0's east column meets tile 1's south row, cell k against cell n - 1 - k, axis-only (GEN-139). A
+    // basin across the edge drains only through tile 1's far side; the engine with a cube-edge seam equals the oracle with those axis pairs and no diagonals
+    let n = 10usize;
+    let mut z = vec![vec![30.0; n * n]; 2];
+    let mut outlet = vec![vec![false; n * n]; 2];
+    for j in 3..7 {
+        for i in 6..n {
+            z[0][j * n + i] = 5.0;
+        }
+    }
+    for j in 0..4 {
+        for i in 3..7 {
+            z[1][j * n + i] = 5.0;
+        }
+    }
+    // the only outlet: tile 1's north row, behind a 12 m rim; a 5 m channel leads from tile 1's basin to the rim
+    for i in 0..n {
+        z[1][(n - 1) * n + i] = -2.0;
+        outlet[1][(n - 1) * n + i] = true;
+        z[1][(n - 2) * n + i] = 12.0;
+    }
+    for j in 4..n - 2 {
+        z[1][j * n + 5] = 5.0;
+    }
+    let cross: Vec<(Cell, Cell)> = (0..n).map(|k| ((0, n - 1, k), (1, n - 1 - k, 0))).collect();
+    let w = World { n, z, outlet, cross };
+    let seams = vec![SeamCells {
+        kind: SeamKind::CubeEdge,
+        key: 1,
+        a: (0..n).map(|k| (0, n - 1, k)).collect(),
+        b: (0..n).map(|k| (1, n - 1 - k, 0)).collect(),
+    }];
+    let (engine, oracle) = (w.tiled_seams(&seams), w.oracle());
+    assert!(engine.iter().zip(&oracle).all(|(a, b)| a.to_bits() == b.to_bits()), "the cube-edge seam equals the oracle");
+    // tile 0's basin has no outlet of its own: joined across the edge, it fills to tile 1's 12 m rim, as tile 1's basin does
+    assert_eq!((engine[5 * n + 8], engine[n * n + 2 * n + 4]), (12.0, 12.0), "the basin across the edge spills at the rim");
+    // an intra-face seam joins diagonals too (3 n - 2 pairs); across a cube edge the engine joins the facing cells only (n pairs)
+    let mut g = SpillGraph::new();
+    let r = (g.add_tile(perimeter_len(n, n), &[]), g.add_tile(perimeter_len(n, n), &[]));
+    let rows: Vec<(u32, f64)> = (0..n as u32).map(|k| (k, 1.0)).collect();
+    let count = |kind| g.clone().connect_seams(&[Seam { a: r.0, b: r.1, kind, key: 1, a_cells: &rows, b_cells: &rows }]);
+    assert_eq!((count(SeamKind::CubeEdge), count(SeamKind::IntraFace)), (n, 3 * n - 2), "axis-only across a cube edge");
+}
+
+// spec: GEN-191
+#[test]
+fn three_tiles_at_a_cube_corner_join_through_their_three_cube_edge_seams() {
+    // lead #193: a cube corner joins 3 tiles on 3 faces. Their corner cells are pairwise axis neighbours (COORD-011), so three cube-edge seams (one per pair of faces)
+    // join them, with no diagonal; the engine equals the oracle over those axis pairs, and a basin at the corner of tile 0 drains through tile 2's outlet
+    let n = 8usize;
+    let mut z = vec![vec![40.0; n * n]; 3];
+    let mut outlet = vec![vec![false; n * n]; 3];
+    // a low corner on each tile at its (0, 0) cell's side, the outlet on tile 2's far row
+    for t in 0..3 {
+        for j in 0..3 {
+            for i in 0..3 {
+                z[t][j * n + i] = 8.0 + t as f64;
+            }
+        }
+    }
+    for i in 0..n {
+        z[2][(n - 1) * n + i] = -1.0;
+        outlet[2][(n - 1) * n + i] = true;
+    }
+    for j in 0..n - 1 {
+        z[2][j * n] = 9.0;
+    }
+    // the three edges at the corner: tile 0's west column meets tile 1's south row; tile 1's west column meets tile 2's south row; tile 2's west column meets tile 0's
+    // south row; each row runs away from the corner on both sides, so cell k meets cell k
+    let edge =
+        |a: usize, b: usize| -> (Vec<Cell>, Vec<Cell>) { ((0..n).map(|k| (a, 0, k)).collect(), (0..n).map(|k| (b, k, 0)).collect()) };
+    let pairs = [edge(0, 1), edge(1, 2), edge(2, 0)];
+    let cross: Vec<(Cell, Cell)> = pairs.iter().flat_map(|(a, b)| a.iter().copied().zip(b.iter().copied())).collect();
+    let w = World { n, z, outlet, cross };
+    let seams: Vec<SeamCells> = pairs
+        .iter()
+        .enumerate()
+        .map(|(k, (a, b))| SeamCells { kind: SeamKind::CubeEdge, key: k as u64, a: a.clone(), b: b.clone() })
+        .collect();
+    let (engine, oracle) = (w.tiled_seams(&seams), w.oracle());
+    assert!(engine.iter().zip(&oracle).all(|(a, b)| a.to_bits() == b.to_bits()), "three cube-edge seams at a corner equal the oracle");
+    // the corner cell of each tile meets the corner cells of the other two through the seams' first cells
+    for (a, b) in &pairs {
+        assert_eq!((a[0].1, a[0].2, b[0].1, b[0].2), (0, 0, 0, 0), "each seam starts at the corner cell on both sides");
+    }
+    // tile 0's 8 m corner basin has no outlet of its own: through tile 2's 9 m channel it fills to 9 m, and tile 1's 9 m basin, joined to both, stays at 9 m
+    assert_eq!((engine[0], engine[n * n]), (9.0, 9.0), "the corner basins drain through tile 2");
 }
