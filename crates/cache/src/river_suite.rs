@@ -319,57 +319,7 @@ pub struct SuiteInput<'a> {
     pub pairs: &'a [(f64, f64)],
 }
 
-/// lead #198 (R9, spike only): with `PLANET_WIDTH_DUMP=FILE`, every river cell inside with a receiver as one CSV line `cell,area_m2,width10_m,capped_sides,strahler`
-/// (the width the suite measures at [`WIDTH_DEPTH_M`]; Strahler order over the river cells by their receivers). Report only: nothing the gate prints depends on it.
-fn dump_widths(i: &SuiteInput, path: &str) {
-    let (g, z) = (i.grid, i.surface);
-    let (w, h) = (g.w(), g.h());
-    let n = w * h;
-    let mut cells: Vec<usize> = (0..n).filter(|&c| i.river[c]).collect();
-    // upstream first: a river cell drains less than its receiver
-    cells.sort_by(|&a, &b| i.area[a].total_cmp(&i.area[b]).then(a.cmp(&b)));
-    let mut order = vec![0u8; n];
-    let mut top = vec![0u8; n];
-    let mut tops = vec![0u8; n];
-    for &c in &cells {
-        let o = if top[c] == 0 {
-            1
-        } else if tops[c] >= 2 {
-            top[c] + 1
-        } else {
-            top[c]
-        };
-        order[c] = o;
-        let r = i.receiver[c];
-        if r != NONE && i.river[r as usize] {
-            let r = r as usize;
-            if o > top[r] {
-                top[r] = o;
-                tops[r] = 1;
-            } else if o == top[r] {
-                tops[r] += 1;
-            }
-        }
-    }
-    let mut out = String::from("cell,area_m2,width10_m,capped_sides,strahler\n");
-    for c in 0..n {
-        if !i.river[c] || !i.inside[c] {
-            continue;
-        }
-        let Some((nx, ny)) = across(w, c, i.receiver[c]) else { continue };
-        let (a, ca) = reach(z, w, h, c, (nx, ny), z[c], WIDTH_DEPTH_M);
-        let (b, cb) = reach(z, w, h, c, (-nx, -ny), z[c], WIDTH_DEPTH_M);
-        out += &format!("{c},{:.0},{:.1},{},{}\n", i.area[c], (a + b) * g.dx(), usize::from(ca) + usize::from(cb), order[c]);
-    }
-    if let Err(e) = std::fs::write(path, out) {
-        eprintln!("PLANET_WIDTH_DUMP {path}: {e}");
-    }
-}
-
 pub fn measure_suite(i: &SuiteInput) -> SuiteReport {
-    if let Ok(p) = std::env::var("PLANET_WIDTH_DUMP") {
-        dump_widths(i, &p);
-    }
     let (g, z) = (i.grid, i.surface);
     let (w, h) = (g.w(), g.h());
     let (mut steps, mut uphill, mut uphill_max) = (0usize, 0usize, 0f64);
