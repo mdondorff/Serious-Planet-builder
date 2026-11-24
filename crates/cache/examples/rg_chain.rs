@@ -2036,7 +2036,7 @@ fn main() -> Result<(), String> {
     if !(0.0..=50.0).contains(&budget_floor) {
         return Err(format!("--budget-floor 0 to 50 m, not {budget_floor}"));
     }
-    planet_cache::river_gate_graph::BUDGET_FLOOR_MM.store((budget_floor * 1000.0).round() as u64, std::sync::atomic::Ordering::Relaxed);
+    planet_cache::rg_budget::BUDGET_FLOOR_MM.store((budget_floor * 1000.0).round() as u64, std::sync::atomic::Ordering::Relaxed);
     // lead #174a (SPIKE-142): `--kh-saddle-split off | trunk | all`: KH's h5 also takes h4c (its split along the D8 diagonal step, lower only) within 2-4 L cells of
     // every D8 diagonal step of KH's routing that crosses a saddle block of z_s (both off-step cells above both ends), outside the channel zone too; `trunk` only where
     // both ends are H1 channel cells; `off` (default) the zone alone (spike only)
@@ -3071,7 +3071,7 @@ fn main() -> Result<(), String> {
     let t = Instant::now();
     // reading 28 (lead #170 item 7): the budget's size field relief10 on S0; the lowering it limits is measured against S_KH (reading 21)
     // lead #163 (B3, result-preserving): the budget field on `threads` threads (each block's value is computed alone, so the bits are the serial ones)
-    let budget_l = planet_cache::river_gate_graph::budget_field_threads(&start, w, h, L, dx_l, 25_000.0, threads);
+    let budget_l = planet_cache::rg_budget::budget_field_threads(&start, w, h, L, dx_l, 25_000.0, threads);
     let budget: Vec<f64> = (0..cells).map(|c| budget_l[((c / rw) * L) * w + (c % rw) * L]).collect();
     if args.iter().any(|a| a == "--dump-s0") {
         let b: Vec<u8> = ks_base.iter().flat_map(|v| v.to_le_bytes()).collect();

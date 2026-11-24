@@ -6,7 +6,7 @@
 //! 1. [`flood_labelled`] floods one tile from its outlets and from every cell of its border (each border cell is a seed with its own label), in order of height: every cell gets the label of the
 //!    seed that reaches it first and `level`, the highest height on its path from that seed; the tile also returns the territories' adjacency, `(label a, label b, w)` with `w = max(level, level)`
 //!    of two neighbouring cells of different labels;
-//! 2. [`SpillGraph`] joins the tiles: the territory edges of every tile and the pairs of neighbouring border cells of two tiles (the caller names them: a cube edge is a pair list like any other)
+//! 2. [`SpillGraph`] joins the tiles: the territory edges of every tile and the pairs of neighbouring border cells of two tiles (the caller names them one by one, or as seams through [`SpillGraph::connect_seams`], GEN-191: a cube edge is a pair list like any other)
 //!    with `w = max(z, z)`; `solve` gives each seed its planet-wide level `G` (Dijkstra with `max` for `+`, from the sea);
 //! 3. [`final_level`] gives every cell `max(level(c), G(label(c)))`.
 //!
@@ -254,6 +254,70 @@ impl SpillGraph {
             }
         }
         SpillLevels { base: self.base.clone(), seeds: self.seeds.clone(), g }
+    }
+}
+
+/// How the border cells of two tiles meet across a seam (GEN-191, lead #193; the G3 port order's S1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SeamKind {
+    /// Two tiles side by side on one face: a border cell meets the cell facing it and that cell's two neighbours along the seam (8-connected).
+    IntraFace,
+    /// Two tiles of two faces across a cube edge: a border cell meets only the cell facing it (axis-only, GEN-139).
+    CubeEdge,
+    /// Two tiles of one face that touch at a corner only: their one corner cell each, a diagonal contact (none at a cube corner, where no diagonal exists).
+    Corner,
+}
+
+/// One seam between two tiles: their border cells along it, in the same order on both sides (`a_cells[k]` faces `b_cells[k]`; the caller orients a cube edge), each
+/// cell as (seed, height) from the tile's labelled flood ([`SEA`] for an outlet cell), and an opaque tie key that orders the seams' edges (lead #193: the
+/// `GlobalCell` order).
+#[derive(Clone, Copy, Debug)]
+pub struct Seam<'a> {
+    pub a: TileRef,
+    pub b: TileRef,
+    pub kind: SeamKind,
+    pub key: u64,
+    pub a_cells: &'a [(u32, f64)],
+    pub b_cells: &'a [(u32, f64)],
+}
+
+impl SpillGraph {
+    /// Joins tiles across caller-supplied seams (GEN-191): each seam's cell pairs by its kind, every pair with `w = max(z, z)`, two outlet cells not joined; the seams
+    /// in the order of their tie key (ties by their order in `seams`). Returns the number of edges added. The planet-wide levels are a minimax, so they do not depend
+    /// on the order edges are added; the key fixes that order for equal inputs. Refused before any edge is added (the graph unchanged): rows of different lengths, a
+    /// corner seam of other than one cell a side, or a height that is not finite.
+    pub fn connect_seams(&mut self, seams: &[Seam<'_>]) -> usize {
+        for sm in seams {
+            assert_eq!(sm.a_cells.len(), sm.b_cells.len(), "seam {}: both sides list the same number of cells", sm.key);
+            if sm.kind == SeamKind::Corner {
+                assert_eq!(sm.a_cells.len(), 1, "seam {}: a corner seam joins one cell a side", sm.key);
+            }
+            // f64::max would hide a NaN on one side; the heights come from the caller, not from a flood that checked them
+            assert!(sm.a_cells.iter().chain(sm.b_cells).all(|c| c.1.is_finite()), "seam {}: a height that is not finite", sm.key);
+        }
+        let mut order: Vec<usize> = (0..seams.len()).collect();
+        order.sort_by_key(|&k| (seams[k].key, k));
+        let mut added = 0usize;
+        for k in order {
+            let sm = &seams[k];
+            let n = sm.a_cells.len();
+            for i in 0..n {
+                let reach: &[i64] = if sm.kind == SeamKind::IntraFace { &[-1, 0, 1] } else { &[0] };
+                for &d in reach {
+                    let m = i as i64 + d;
+                    if m < 0 || m >= n as i64 {
+                        continue;
+                    }
+                    let ((sa, za), (sb, zb)) = (sm.a_cells[i], sm.b_cells[m as usize]);
+                    if sa == SEA && sb == SEA {
+                        continue;
+                    }
+                    self.connect(sm.a, sa, sm.b, sb, za.max(zb));
+                    added += 1;
+                }
+            }
+        }
+        added
     }
 }
 

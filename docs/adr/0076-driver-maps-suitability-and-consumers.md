@@ -1,5 +1,5 @@
 # 0076 Driver maps: physical fields decide materials, plants and shapes through suitability rules
-Status: proposed (opus-planner, 2026-10-21); open (opus-planner, 2026-10-30): the chunk stage's driver channels leave with the chunk stage (ADR 0086); driver maps are decided again with M9's bake; point 9 added 2026-11-01 for ADR 0089 (owner, group 3)
+Status: proposed (opus-planner, 2026-10-21); open (opus-planner, 2026-10-30): the chunk stage's driver channels leave with the chunk stage (ADR 0086); driver maps are decided again with M9's bake; point 9 added 2026-11-01 for ADR 0089 (owner, group 3); stays proposed for M10 (owner, 2026-11-24)
 Date: 2026-10-21
 Source: owner, 2026-10-21 (generation principles; materials and plants from physical maps such as soil depth, not from painted type maps); `docs/archive/M8/briefings/m8-driver-maps.md`; ADR 0022, 0026, 0030, 0035, 0039, 0066, 0089; constitution CON-06, CON-07, CON-08, CON-14
 

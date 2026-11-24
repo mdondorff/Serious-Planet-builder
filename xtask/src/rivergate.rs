@@ -279,8 +279,13 @@ pub fn parse_timing(text: &str) -> Result<(f64, Option<f64>), String> {
     Ok((total, peak))
 }
 
+/// `bar_relief_lost`'s allowance beside B's loss (owner, 2026-11-23): this share of the window's relief index, at most `RELIEF_LOST_CAP_M`.
+pub const RELIEF_LOST_SHARE: f64 = 0.03;
+pub const RELIEF_LOST_CAP_M: f64 = 2.0;
+
 /// The table's bars against B (plan section 4.1, lead #172): each row that is not a store row gets, when its window has a store row (B):
-/// - `bar_relief_lost`: its `relief10_lost_m` at most B's, a gain of relief counting as no loss (`<= max(B's, 0)`), preservation;
+/// - `bar_relief_lost`: its `relief10_lost_m` at most `max(B's, min(0.03 x relief index, 2 m))` (owner 2026-11-23: relaxed for the look, capped at 2 m; the relief index is the
+///   window's shared S0's, `relief_index_m`, else `relief10_start_m`), preservation;
 /// - `bar_beta_change`: its `|beta_change|` at most B's, geomorphology;
 /// - `bar_cost`: its `cost_s` at most B's, product (only when both rows carry a timing);
 /// - `bar_saddles1`, `bar_saddles5`: its cut-through saddles at 1 and 5 km2 at most B's, preservation;
@@ -307,9 +312,10 @@ pub fn b_bars(table: &mut [(String, Vec<(String, String)>)], stores: &[bool], cl
                 used.push((name, class));
             }
         };
-        add("bar_relief_lost", "preservation", get(&refs[i].1, "relief10_lost_m"), get(b, "relief10_lost_m"), &|v, l| {
-            v <= l.max(0.0) + 1e-9
-        });
+        // owner 2026-11-23: relaxed for the look, capped at 2 m, on the window's shared relief index (the same for B and RG)
+        let index = get(&refs[i].1, "relief_index_m").or_else(|| get(b, "relief_index_m")).or_else(|| get(b, "relief10_start_m"));
+        let allowed = get(b, "relief10_lost_m").map(|bl| bl.max(index.map_or(0.0, |r| (RELIEF_LOST_SHARE * r).min(RELIEF_LOST_CAP_M))));
+        add("bar_relief_lost", "preservation", get(&refs[i].1, "relief10_lost_m"), allowed, &|v, l| v <= l + 1e-9);
         add(
             "bar_beta_change",
             "geomorphology",
@@ -609,5 +615,34 @@ mod tests {
         assert!(example_args(&s(&["r3a", "--window", "1,2,3,4,5,6"])).unwrap_err().contains("a window already"));
         assert!(example_args(&s(&["r3a", "--no-key-check"])).unwrap_err().contains("--no-key-check reads a store"));
         assert_eq!(example_args(&s(&["p2e", "--no-key-check", "--d", "5"])).unwrap(), s(&["--store", "p2e", "--no-key-check", "--d", "5"]));
+    }
+
+    // spec: BUILD-060
+    #[test]
+    fn the_relief_lost_bar_allows_three_percent_of_the_relief_index_capped_at_2_m() {
+        // owner 2026-11-23 (lead #191): bar_relief_lost <= max(B's loss, min(0.03 x relief index, 2 m)), the index the window's shared S0's
+        let f = |kv: &[(&str, &str)]| kv.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect::<Vec<_>>();
+        let rows = |index: &str, b_lost: &str, lost: &str| {
+            vec![
+                ("b @ w".to_string(), f(&[("relief10_lost_m", b_lost), ("relief_index_m", index)])),
+                ("rg @ w".to_string(), f(&[("g_nodes", "1"), ("relief10_lost_m", lost), ("relief_index_m", index)])),
+            ]
+        };
+        let cell = |index: &str, b_lost: &str, lost: &str| {
+            let mut t = rows(index, b_lost, lost);
+            b_bars(&mut t, &[true, false], &mut Vec::new());
+            t[1].1.iter().find(|(c, _)| c == "bar_relief_lost").map(|(_, v)| v.clone()).unwrap()
+        };
+        // a 50 m index allows 1.5 m beside B's 0.2 m: 1.5 m passes, 1.51 m fails
+        assert_eq!(cell("50", "0.2", "1.5"), "PASS:1.50");
+        assert_eq!(cell("50", "0.2", "1.51"), "FAIL:1.51");
+        // a 100 m index: 3 m capped at 2 m
+        assert_eq!(cell("100", "0.2", "2.0"), "PASS:2.00");
+        assert_eq!(cell("100", "0.2", "2.01"), "FAIL:2.01");
+        // B losing more than the allowance sets the bar
+        assert_eq!(cell("100", "3.0", "2.9"), "PASS:2.90");
+        // a gain of relief is no loss on a flat window (index 0)
+        assert_eq!(cell("0", "-1.0", "-0.5"), "PASS:-0.50");
+        assert_eq!(cell("0", "-1.0", "0.1"), "FAIL:0.10");
     }
 }
