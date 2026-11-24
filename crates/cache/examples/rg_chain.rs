@@ -2158,6 +2158,12 @@ fn main() -> Result<(), String> {
     // lead #184d item 3b: `--curve-bed zs` (default) the bed z_s along the reach; `fit` a monotone least-squares fit of it (pool adjacent violators, never rising
     // downstream), smoothed by a 4 L cell Gaussian (which keeps it monotone) and held to a slope floor of 1e-4
     let curve_bed = value(&args, "--curve-bed").unwrap_or("zs");
+    // lead #184d (the in-zone Xdiag item): `--curve-blend min` (default) KH's curve correction as min(C1, target); `smooth` a polynomial smooth minimum over 3 m,
+    // so the crease where the profile meets C1 is rounded
+    let curve_blend = value(&args, "--curve-blend").unwrap_or("min");
+    if !["min", "smooth"].contains(&curve_blend) {
+        return Err(format!("--curve-blend min | smooth, not '{curve_blend}'"));
+    }
     if !["zs", "fit"].contains(&curve_bed) {
         return Err(format!("--curve-bed zs | fit, not '{curve_bed}'"));
     }
@@ -3331,7 +3337,13 @@ fn main() -> Result<(), String> {
                 if let Some((d, zb)) = &curve_near {
                     if d[p].is_finite() {
                         let zb = f64::from(zb[p]);
-                        let target = zb + s0_slope(p).max(curve_thalweg) * f64::from(d[p]) * cell_m;
+                        let mut target = zb + s0_slope(p).max(curve_thalweg) * f64::from(d[p]) * cell_m;
+                        if curve_blend == "smooth" {
+                            // a polynomial smooth minimum of v and the target over k = 3 m (never above v; the target where it lies k under v or more)
+                            let k = 3.0;
+                            let hh = (0.5 + 0.5 * (v - target) / k).clamp(0.0, 1.0);
+                            target = (v + hh * (target - v) - k * hh * (1.0 - hh)).min(v);
+                        }
                         if target < v {
                             // width form 1 (#184a): the correction holds the band below the bed + 10 m (the profile's target there), blended to C1 above (8 to 12 m).
                             // Gated on the target's height, so every thalweg cell reaches the bed; the cell's own height (numerics review F3) left perched raster cells
@@ -5187,6 +5199,7 @@ fn main() -> Result<(), String> {
             ("kh-curve-dams", if KH_CURVE_DAMS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("curve-thalweg-slope", curve_thalweg.to_string()),
             ("curve-bed", curve_bed.to_string()),
+            ("curve-blend", curve_blend.to_string()),
             ("inlet-floor", if INLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-floors", if BAND6_FLOORS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-outlet-floor", if BAND6_OUTLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
