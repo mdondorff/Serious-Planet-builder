@@ -214,6 +214,15 @@ pub fn parse_fields(out: &str) -> Result<Vec<(String, String)>, String> {
         .collect()
 }
 
+/// The `RIVER-GATE widths:` line of a gate run's output (the width at 10 m by Strahler order and by drained-area class, lead #200) as (column, value); empty when the
+/// run printed none.
+pub fn parse_widths(out: &str) -> Vec<(String, String)> {
+    out.lines()
+        .find_map(|l| l.strip_prefix("RIVER-GATE widths: "))
+        .map(|line| line.split_whitespace().filter_map(|kv| kv.split_once('=')).map(|(k, v)| (k.to_string(), v.to_string())).collect())
+        .unwrap_or_default()
+}
+
 /// The `RIVER-GATE classes:` line of a gate run's output as (column, gate class); empty when the run printed none (BUILD-060).
 pub fn parse_classes(out: &str) -> Vec<(String, String)> {
     out.lines()
@@ -370,6 +379,7 @@ pub fn run_table(root: &Path, args: &[String]) -> Res {
     let mut classes: Vec<(String, String)> = Vec::new();
     let mut chains: Vec<(String, Vec<String>)> = Vec::new();
     let mut stores: Vec<bool> = Vec::new();
+    let mut widths: Vec<(String, Vec<(String, String)>)> = Vec::new();
     for row in &rows {
         let (label, chain) = match &row.chain {
             Some(path) => {
@@ -392,6 +402,7 @@ pub fn run_table(root: &Path, args: &[String]) -> Res {
             fields.push(("cost_peak_mib".to_string(), peak.map_or("-".to_string(), |p| format!("{p:.0}"))));
         }
         stores.push(row.args.iter().any(|a| a == "--store"));
+        widths.push((label.clone(), parse_widths(&out)));
         table.push((label.clone(), fields));
         if let Some(lines) = chain {
             chains.push((label, lines));
@@ -407,7 +418,11 @@ pub fn run_table(root: &Path, args: &[String]) -> Res {
     let md = md + &render_chains(&chains);
     let dir = root.join("target").join("review");
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    for (name, text) in [("river-gate-table.md", &md), ("river-gate-table.csv", &csv)] {
+    // lead #200 (BUILD-057, report only): the width at 10 m by Strahler order and by drained-area class, one row per run, beside the table
+    let (wmd, wcsv) = render_table(&widths, &[]);
+    for (name, text) in
+        [("river-gate-table.md", &md), ("river-gate-table.csv", &csv), ("river-gate-widths.md", &wmd), ("river-gate-widths.csv", &wcsv)]
+    {
         std::fs::write(dir.join(name), text).map_err(|e| format!("{name}: {e}"))?;
     }
     println!("{md}");
@@ -435,6 +450,18 @@ mod tests {
         assert!(table_rows(&s(&["--d", "30"])).unwrap_err().contains("at least one row"));
         assert!(table_rows(&s(&["r1h", "--fast", "1"])).unwrap_err().contains("unknown river-gate option '--fast'"));
         assert!(table_rows(&s(&["r1h", "--windows"])).unwrap_err().contains("--windows takes a value"));
+    }
+
+    // spec: BUILD-057 (lead #200: the widths beside the table)
+    #[test]
+    fn the_widths_line_parses_into_its_own_table_and_a_run_without_it_gives_an_empty_row() {
+        let out = "RIVER-GATE fields: river_cells=3\nRIVER-GATE widths: all_p50_m=584 all_cells=118496 o1_p50_m=685 o1_cells=70000\n";
+        let w = parse_widths(out);
+        assert_eq!(w[0], ("all_p50_m".to_string(), "584".to_string()));
+        assert_eq!(w.len(), 4);
+        assert!(parse_widths("RIVER-GATE fields: river_cells=3").is_empty());
+        let (_, csv) = render_table(&[("r @ r1h".to_string(), w)], &[]);
+        assert_eq!(csv, "row,all_p50_m,all_cells,o1_p50_m,o1_cells\n\"r @ r1h\",584,118496,685,70000\n");
     }
 
     // spec: BUILD-057

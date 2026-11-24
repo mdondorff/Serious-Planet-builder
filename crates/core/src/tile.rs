@@ -286,10 +286,17 @@ fn lattice_cube_point(face: Face, n: i64, i: i64, j: i64) -> [i64; 3] {
 /// edge on the extended plane, so on the neighbour face it lies `e` below the edge), read on the neighbour face. Integers only.
 /// Public since COORD-011 (lead #193): the planet primitives' cross-edge step; `TileId::neighbors8` calls it unchanged.
 pub fn fold_cell(face: Face, n: i64, i: i64, j: i64) -> (Face, i64, i64) {
+    fold_cell_axis(face, n, i, j, (2 * i + 1 - n).abs() > n)
+}
+
+/// [`fold_cell`] over a chosen edge: across the `i` edge when `fold_i`, else across the `j` edge (COORD-012: the corner stitch of
+/// [`crate::CubePatch`] folds the deeper coordinate first). The other coordinate may lie outside `0..n` too: the result is then a cell of the
+/// neighbour face's extended plane, outside its `0..n` on one axis, which a second fold takes across that face's edge.
+pub(crate) fn fold_cell_axis(face: Face, n: i64, i: i64, j: i64, fold_i: bool) -> (Face, i64, i64) {
     let (nrm, u, v) = int_axes(face);
     let (a, b) = (2 * i + 1 - n, 2 * j + 1 - n);
     let beyond = |c: i64| c.abs() - n;
-    let p: [i64; 3] = if a.abs() > n {
+    let p: [i64; 3] = if fold_i {
         let (s, e) = (a.signum(), beyond(a));
         [0, 1, 2].map(|k| (n - e) * nrm[k] + s * n * u[k] + b * v[k])
     } else {

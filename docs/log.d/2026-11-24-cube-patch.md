@@ -1,0 +1,1 @@
+- 2026-11-24 cube-patch (lead #195, owner O2): CubePatch, a tile plus its halo on the cube over GlobalCell with a stitched 3-face corner (COORD-012), and TEST-139's partition layouts as data with halo 24 (TEST-151); additive and output-neutral
