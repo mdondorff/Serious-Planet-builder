@@ -90,3 +90,22 @@ fn the_routing_conserves_the_true_area_and_the_carve_is_the_same_bits_on_every_r
     let uniform = Grid::new(m, m, g.dx());
     assert_ne!(run(&g), run(&uniform), "the metric changed nothing");
 }
+
+// spec: TEST-152
+#[test]
+fn todays_metric_area_at_98304_cells_is_measured_against_the_cell_solid_angle() {
+    // COORD-013 (lead #197), report only: GEN-138's four-term area at L's 98,304 cells a face edge against GlobalCell's quadrature area (TEST-152's 1e-9);
+    // no caller is switched, so this measures what a switch would change
+    let n = 98_304usize;
+    let m = Metric::cube_face(n, R, (0, 0), n, n);
+    let mut worst = 0.0f64;
+    for k in 0..400usize {
+        let (i, j) = ((k * 7919 + 3) % n, (k * 104_729 + 11) % n);
+        let c = planet_core::GlobalCell::new(planet_core::Face(0), n as i64, i as i64, j as i64).unwrap();
+        let (old, new) = (m.area(i, j), c.area(n as i64, R));
+        worst = worst.max((old - new).abs() / new);
+    }
+    eprintln!("GEN-138 Metric::area at n {n}: worst relative error {worst:e} over 400 cells (report only)");
+    // numerics review: loose enough to judge nothing, tight enough to see a regression of the four-term form (9.1e-7 measured, 2026-11-24)
+    assert!(worst.is_finite() && worst < 1e-5, "today's area is still the same metric in form: {worst:e}");
+}
