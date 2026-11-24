@@ -529,7 +529,7 @@ The slot SHALL be bit-identical across runs, thread counts and operating systems
 
 Verify: A, B
 Status: active
-Source: ADR 0062 point 2, ADR 0063, ADR 0076, SPIKE-12 Q3, ADR 0033 points 3-4, GEN-019, GEN-021, GEN-074, GEN-126, CON-11, CON-14
+Source: ADR 0062 point 2, ADR 0063, ADR 0076 (proposed, for M10), SPIKE-12 Q3, ADR 0033 points 3-4, GEN-019, GEN-021, GEN-074, GEN-126, CON-11, CON-14
 
 #### Scenario: Offsets and stride
 - **WHEN** a slot is built at cells 16, 32 and 64
@@ -856,7 +856,7 @@ The driver block of a compact tile (GEN-074) SHALL hold the soil depth, the mois
 
 Verify: A
 Status: active
-Source: ADR 0076, planner decision 2026-10-26, ADR 0086
+Source: ADR 0076 (proposed, for M10), planner decision 2026-10-26, ADR 0086
 
 #### Scenario: The range edge
 - **WHEN** the weight goes from 0 to 1
@@ -867,7 +867,7 @@ Source: ADR 0076, planner decision 2026-10-26, ADR 0086
 
 Verify: A
 Status: active
-Source: LOOK-008, ADR 0076 point 5
+Source: LOOK-008, ADR 0076 point 5 (proposed, for M10)
 
 #### Scenario: A hollow
 - **WHEN** a look gives soil a curve on the moisture input and the drivers describe a wet hollow
@@ -889,7 +889,7 @@ A compact tile SHALL carry a driver block of 9 x 9 words (GEN-025): at each clim
 
 Verify: A, C
 Status: active
-Source: ADR 0076 point 5, GEN-071, GEN-072, GEN-025, ADR 0086, GEN-119
+Source: ADR 0076 point 5 (proposed, for M10), GEN-071, GEN-072, GEN-025, ADR 0086, GEN-119
 
 #### Scenario: The neutral block
 - **WHEN** compact tiles are built over a field
@@ -1180,7 +1180,7 @@ A field MAY give the tile builder baked channels at the 81 texels of a driver bl
 
 Verify: A, C
 Status: active
-Source: planner inbox #65 (2026-11-05), ground-channels-2b decision 1, STRM-075, GEN-074, ADR 0076, ADR 0086
+Source: planner inbox #65 (2026-11-05), ground-channels-2b decision 1, STRM-075, GEN-074, ADR 0076 (proposed, for M10), ADR 0086
 
 #### Scenario: Channels in the block
 - **WHEN** compact tiles are built over a field that gives channels, over the same field without them, and over fields wrapping one, and the driver views of the tiles are drawn with the default look

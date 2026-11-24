@@ -54,7 +54,7 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0042 | [M5 frame structure, look data and the viewer window](0042-m5-frame-structure-and-viewer-window.md) | accepted | accepted when the M5 queue starts |
 | 0043 | [CON-11: geometry stays strict, presentation shading is judged by a tested bound](0043-con-11-geometry-strict-shading-by-bound.md) | accepted |  |
 | 0044 | [M4 implementation readings of ADR 0031 (cancellation) and ADR 0032 (dive pitch)](0044-m4-implementation-readings-of-0031-and-0032.md) | superseded by 0055 (content in specs) |  |
-| 0045 | [Bodies, bake resolution and the storage budget](0045-bodies-bake-resolution-and-storage-budget.md) | proposed | all but point 3: multi-body work (point 7 before the editor ships) |
+| 0045 | [Bodies, bake resolution and the storage budget](0045-bodies-bake-resolution-and-storage-budget.md) | proposed; point 2 superseded by 0115 | all but points 2 and 3: multi-body work (point 7 before the editor ships) |
 | 0046 | [Generation workers run below normal priority](0046-generation-workers-run-below-normal-priority.md) | accepted |  |
 | 0047 | [Adapter gate: a discrete GPU, chosen before the device exists](0047-adapter-gate.md) | accepted |  |
 | 0048 | [Frame-target share (amends ADR 0033's remainder) and the lit path's readings of ADR 0038 and ADR 0042](0048-frame-target-share-and-lit-path-readings.md) | superseded by 0055 (content in specs) |  |
@@ -85,7 +85,7 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0073 | [Normals from the tile's height lattice](0073-normals-from-the-tile-height-lattice.md) | accepted | amends GEN-019 and GEN-010; extends 0033 point 4 |
 | 0074 | [A tile too steep to morph is not refined; the plan degrades locally](0074-a-tile-too-steep-to-morph-is-not-refined.md) | accepted | amends LOD-008; extends 0016 and 0014; built (#505, #523, #524) |
 | 0075 | [Documentation budget: the hot files stay small and current](0075-documentation-budget.md) | accepted (opus-planner; owner approved) | amends 0055 point 5 |
-| 0076 | [Driver maps: physical fields decide materials, plants and shapes through suitability rules](0076-driver-maps-suitability-and-consumers.md) | proposed, open | chunk driver channels leave with the chunk stage; driver maps decided with M9's bake |
+| 0076 | [Driver maps: physical fields decide materials, plants and shapes through suitability rules](0076-driver-maps-suitability-and-consumers.md) | proposed, open; stays proposed for M10 (owner, 2026-11-24) | chunk driver channels leave with the chunk stage; driver maps decided in M10 |
 | 0077 | [Regional stages run per chunk of a fixed grid; the global coupled run fixes the river network](0077-regional-stages-per-chunk-and-a-global-river-network.md) | accepted (owner) | CON-08 amended to name chunks (constitution v1.6); extends 0022 and 0030; built in M8 |
 | 0078 | [Maintenance of accepted ADRs: links, spec-owned values, domain terms, errata](0078-maintenance-of-accepted-adrs.md) | accepted (owner) | amends CON-23 (constitution v1.5); spec-lint check queued |
 | 0079 | [The constitution's size cap follows the owner's amendments](0079-constitution-cap-follows-owner-amendments.md) | accepted (owner) | amends 0075 point 1 for the constitution |
