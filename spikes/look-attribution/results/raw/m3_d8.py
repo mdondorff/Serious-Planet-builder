@@ -72,6 +72,9 @@ for c in np.nonzero(ch)[0]:
 starts = np.nonzero(ch & ((inflow == 0) | (inflow >= 2)))[0]
 tl = ts = 0.0
 sins, ws = [], []
+# lead #184c: the straight share by drained-area class (km2) of the path's cells
+cls = [(75, 300), (300, 1000), (1000, 3000), (3000, 1e12)]
+cl_len = np.zeros(len(cls)); cl_st = np.zeros(len(cls))
 for s in starts:
     path = [s]; c = s
     while True:
@@ -92,6 +95,10 @@ for s in starts:
     rl = np.bincount(rid, weights=seg)
     stt = rl[rid] > 2000.0
     tl += seg.sum(); ts += seg[stt].sum()
+    ar = area[np.array(path[:-1])] / 1e6
+    for j, (lo, hi) in enumerate(cls):
+        k = (ar >= lo) & (ar < hi)
+        cl_len[j] += seg[k].sum(); cl_st[j] += seg[k & stt].sum()
     L = seg.sum()
     if L > 2000.0:
         chord = np.hypot((px[-1] - px[0]) * dx, (py[-1] - py[0]) * dx)
@@ -100,7 +107,20 @@ for s in starts:
 s, wg = np.array(sins), np.array(ws)
 print(f'{st} D8 (GLO-30 method): channel length {tl / 1000:.0f} km, in straight runs over 2 km {ts / max(tl, 1) * 100:.1f} %; sinuosity of reaches over 2 km ({len(s)}): '
       f'p50 {np.median(s):.3f}, length-weighted mean {np.sum(s * wg) / np.sum(wg):.3f}')
+print('  straight share by drained area: ' + ', '.join(f'{lo:.0f}-{hi:.0f} km2 {100 * cl_st[j] / max(cl_len[j], 1):.1f} % of {cl_len[j] / 1000:.0f} km' for j, (lo, hi) in enumerate(cls)).replace('-1000000000000 km2', '+ km2'))
 if len(sys.argv) > 3:
+    # lead #184d item 3c: the share of the final D8 channel length (over 75 km2) whose cells are curve raster cells
+    b = open(sys.argv[3], 'rb').read()
+    k = 8; cnt = struct.unpack_from('<I', b, 4)[0]
+    on = np.zeros((n, n), np.bool_)
+    for _ in range(cnt):
+        _r, npt = struct.unpack_from('<II', b, k); k += 8 + 8 * npt
+        nr = struct.unpack_from('<I', b, k)[0]; k += 4
+        cells = np.frombuffer(b, np.dtype([('c', '<u4'), ('dx', 'i1'), ('dy', 'i1')]), nr, k)['c']; k += 6 * nr
+        on.ravel()[cells] = True
+    onb = on[m:n - m, m:n - m].ravel()
+    chc = np.nonzero(ch)[0]
+    print(f'  D8 channel cells (over 75 km2) on a curve raster cell: {100 * onb[chc].mean():.1f} % of {len(chc)}')
     b = open(sys.argv[3], 'rb').read()
     assert b[:4] == b'TRC1'
     k = 8; cnt = struct.unpack_from('<I', b, 4)[0]

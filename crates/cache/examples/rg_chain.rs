@@ -1245,6 +1245,52 @@ fn route_low_n(m: &Measure, line: &[(f64, f64)], points: &[usize], avoid: &HashS
     Some((route, rise > m.bar, rise))
 }
 
+/// Lead #184d item 3b: the curve's points' mean spacing (L cells).
+fn cv_ds(pts: &[(f64, f64)]) -> f64 {
+    if pts.len() < 2 {
+        return 0.5;
+    }
+    pts.windows(2).map(|s| libm::hypot(s[1].0 - s[0].0, s[1].1 - s[0].1)).sum::<f64>() / (pts.len() - 1) as f64
+}
+
+/// Lead #184d item 3b: a bed that never rises downstream: the least-squares non-increasing fit of `z` (pool adjacent violators), a Gaussian of 4 L cells (edges held;
+/// a positive kernel keeps the fit monotone), then a slope floor of 1e-4 m/m along the points (`ds` L cells apart, `cell_m` m an L cell).
+fn monotone_bed(z: &[f64], ds: f64, cell_m: f64) -> Vec<f64> {
+    let n = z.len();
+    if n < 2 {
+        return z.to_vec();
+    }
+    let mut blocks: Vec<(f64, usize)> = Vec::with_capacity(n);
+    for &v in z {
+        blocks.push((v, 1));
+        while blocks.len() >= 2 {
+            let (s1, c1) = blocks[blocks.len() - 2];
+            let (s2, c2) = blocks[blocks.len() - 1];
+            if s1 / c1 as f64 >= s2 / c2 as f64 {
+                break;
+            }
+            blocks.pop();
+            *blocks.last_mut().expect("a block") = (s1 + s2, c1 + c2);
+        }
+    }
+    let mut fit = Vec::with_capacity(n);
+    for (s, c) in blocks {
+        fit.extend(std::iter::repeat_n(s / c as f64, c));
+    }
+    let sn = (4.0 / ds.max(1e-6)).max(1.0);
+    let half = (3.0 * sn).ceil() as i64;
+    let kern: Vec<f64> = (-half..=half).map(|k| libm::exp(-0.5 * (k as f64 / sn) * (k as f64 / sn))).collect();
+    let ksum: f64 = kern.iter().sum();
+    let mut sm: Vec<f64> = (0..n as i64)
+        .map(|i| (-half..=half).map(|k| kern[(k + half) as usize] * fit[(i + k).clamp(0, n as i64 - 1) as usize]).sum::<f64>() / ksum)
+        .collect();
+    let drop = 1e-4 * ds * cell_m;
+    for i in 1..n {
+        sm[i] = sm[i].min(sm[i - 1] - drop);
+    }
+    sm
+}
+
 /// Lead #184b: a trunk reach's seed for its meander's jitter, from its first and last H1 cells (window-local; GlobalCell order is a hygiene item after the sign-off).
 fn reach_id_seed(r: &H1Reach) -> u64 {
     (u64::from(r.cells[0]) << 32) ^ u64::from(*r.cells.last().expect("cells")) ^ 0x4D45_414E_4445_5232
@@ -2109,6 +2155,12 @@ fn main() -> Result<(), String> {
     // `--curve-thalweg-slope`, default 0.05, and S0's side slope; only below the bed + 10 m, blended to C1 above; lower only), and h4c only on the dammed D8 diagonals of
     // rivers under 75 km2 (h5d's dams); needs `--trunk-curve on`
     let curve_thalweg: f64 = value(&args, "--curve-thalweg-slope").map_or(Ok(0.05), str::parse).map_err(|_| "--curve-thalweg-slope S")?;
+    // lead #184d item 3b: `--curve-bed zs` (default) the bed z_s along the reach; `fit` a monotone least-squares fit of it (pool adjacent violators, never rising
+    // downstream), smoothed by a 4 L cell Gaussian (which keeps it monotone) and held to a slope floor of 1e-4
+    let curve_bed = value(&args, "--curve-bed").unwrap_or("zs");
+    if !["zs", "fit"].contains(&curve_bed) {
+        return Err(format!("--curve-bed zs | fit, not '{curve_bed}'"));
+    }
     if !["h4c", "h4", "line", "line8", "curve"].contains(&kh_zone) {
         return Err(format!("--kh-zone h4c | h4 | line | line8 | curve, not '{kh_zone}'"));
     }
@@ -2827,6 +2879,9 @@ fn main() -> Result<(), String> {
                             let b = (a + 1).min(m - 1);
                             let (za, zbb) = (solve.zs[r.cells[a] as usize], solve.zs[r.cells[b] as usize]);
                             zb.push(za + (f - a as f64) * (zbb - za));
+                        }
+                        if curve_bed == "fit" {
+                            zb = monotone_bed(&zb, cv_ds(&cv.pts), grid.dx() / L as f64);
                         }
                         Some((cv, zb))
                     })();
@@ -5131,6 +5186,7 @@ fn main() -> Result<(), String> {
             ("kh-keep-s0", if KH_KEEP_S0.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kh-curve-dams", if KH_CURVE_DAMS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("curve-thalweg-slope", curve_thalweg.to_string()),
+            ("curve-bed", curve_bed.to_string()),
             ("inlet-floor", if INLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-floors", if BAND6_FLOORS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-outlet-floor", if BAND6_OUTLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
