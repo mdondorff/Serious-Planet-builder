@@ -4240,15 +4240,13 @@ fn main() -> Result<(), String> {
                 if intended_on {
                     let kept_at: HashMap<u64, &planet_generators::bake::river_graph::Basin> =
                         pb.basins.iter().map(|b| (b.floor_cell, b)).collect();
-                    let mut t = String::from("basin_id,type,outlet,floor_cell,floor_m,spill_cell,spill_m,cells,area_km2,marked_share,terms,aridity,endorheic_candidate,represented
-");
+                    let mut t = String::from("basin_id,type,outlet,floor_cell,floor_m,spill_cell,spill_m,cells,area_km2,marked_share,terms,aridity,endorheic_candidate,represented\n");
                     let mut kept = 0usize;
                     for b in &intended2 {
                         let k = kept_at.get(&gid_l(b.floor));
                         kept += usize::from(k.is_some());
                         t += &format!(
-                            "{},intentional,{},{},{:.3},{},{:.3},{},{:.4},{:.3},{},{:.4},{},{}
-",
+                            "{},intentional,{},{},{:.3},{},{:.3},{},{:.4},{:.3},{},{:.4},{},{}\n",
                             k.map_or("none".to_string(), |x| x.id.to_string()),
                             k.map_or("-".to_string(), |x| format!("{:?}", x.outlet).to_lowercase()),
                             gid_l(b.floor),

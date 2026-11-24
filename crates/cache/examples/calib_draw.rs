@@ -97,39 +97,18 @@ fn main() -> Result<(), String> {
     }
     let wstr = |w: &Box| format!("{},{},{},{},{},{WORLD_SEED}", w.face, w.i0, w.i1, w.j0, w.j1);
     let mut s = format!(
-        "# R23's calibration windows (lead #203, 2026-11-24): the arid stratum of BUILD-066's draw (#186a) over the coarse field of the seed-{WORLD_SEED} world, by the
-         # spike example `calib_draw`, with the lead's draw seed. Not G3-8's windows (those are g3-windows.toml and stay unseen until G3-8).
-         # A window is `face,i0,i1,j0,j1,seed` in regional cells. Rejected candidates are listed in the draw's order, before and between the windows taken.
-         world_seed = {WORLD_SEED}
-draw_seed = {CALIB_SEED}
-size = {SIZE}
-stratum = \"{}\"
-",
+        "# R23's calibration windows (lead #203, 2026-11-24): the arid stratum of BUILD-066's draw (#186a) over the coarse field of the seed-{WORLD_SEED} world, by the\n\
+         # spike example `calib_draw`, with the lead's draw seed. Not G3-8's windows (those are g3-windows.toml and stay unseen until G3-8).\n\
+         # A window is `face,i0,i1,j0,j1,seed` in regional cells. Rejected candidates are listed in the draw's order, before and between the windows taken.\n\
+         world_seed = {WORLD_SEED}\ndraw_seed = {CALIB_SEED}\nsize = {SIZE}\nstratum = \"{}\"\n",
         Stratum::Arid.name()
     );
     for (w, why) in &rejected {
-        s += &format!(
-            "
-[[rejected]]
-window = \"{}\"
-reason = \"{why}\"
-",
-            wstr(w)
-        );
+        s += &format!("\n[[rejected]]\nwindow = \"{}\"\nreason = \"{why}\"\n", wstr(w));
     }
     for (k, (w, st)) in taken.iter().enumerate() {
         s += &format!(
-            "
-[[window]]
-index = {k}
-class = \"calibration-{}\"
-window = \"{}\"
-land = {:.3}
-land_p50_m = {:.1}
-land_p90_m = {:.1}
-runoff_mm = {:.1}
-abs_lat_deg = {:.2}
-",
+            "\n[[window]]\nindex = {k}\nclass = \"calibration-{}\"\nwindow = \"{}\"\nland = {:.3}\nland_p50_m = {:.1}\nland_p90_m = {:.1}\nrunoff_mm = {:.1}\nabs_lat_deg = {:.2}\n",
             Stratum::Arid.name(),
             wstr(w),
             st.land,
