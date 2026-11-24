@@ -657,6 +657,18 @@ pub fn run_with_rims(
                         }
                         breaches += 1;
                         breach_volume += vol;
+                        // crusader #198 (spike only, diagnostic): the accepted breach, read and not changed
+                        super::drain::record_breach(|at| super::drain::BreachRecord {
+                            at,
+                            w: grid.w(),
+                            path: path.iter().map(|&c| c as u32).collect(),
+                            cut_max_m: path.iter().filter(|&&c| !outlet[c]).map(|&c| (kv[c] - floor).max(0.0)).fold(0.0, f64::max),
+                            cut_volume_m3: vol,
+                            depression_cells: cells.len(),
+                            depression_area_m2: cells.iter().map(|&c| grid.cell_area(c)).sum(),
+                            spill_m: level[cells[0]],
+                            floor_m: floor,
+                        });
                     }
                 }
             }
