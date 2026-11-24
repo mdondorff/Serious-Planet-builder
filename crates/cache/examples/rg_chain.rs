@@ -1969,6 +1969,10 @@ static KH_CURVE_DAMS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicB
 /// lead #184j (spike only): `--curve-minimax on` routes each trunk curve's base path minimax first: per leg the lowest reachable highest S0 point B* (a bottleneck
 /// Dijkstra in the corridor), then the lowest-path cost among the cells at or below B*; water takes the lowest pass. `off` (default) the cost alone.
 static CURVE_MINIMAX: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// lead #184j item 2 (spike only; A5's cap): `--kh-guard on` bounds KH's curve correction: in C1's space (S0 = C1 + r) a cell is lowered by at most
+/// max(C1 - the defaults' KH value there, 10 m), the defaults' KH being h5 on its h4c zone (C1 + w min(h4c - C1, 0)). Cells the cap holds are crossing
+/// candidates for row 3 (spill or around), counted and written as `<tag>-kh-guard.txt`; not a breach rule. `off` (default) no bound.
+static KH_GUARD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// lead #182a: `--trib-rerun on` runs KG-trib post once more with basins-2's kept set where a line-end lake inlet lost its basin, then basins-2 once more on the new lines; on by default since #182c (reading 44); `off` the one extraction.
 static TRIB_RERUN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 /// lead #179: `--inlet-floor on` floors the graph bed of every L vertex on or inside a kept basin's rim at its spill; `off` the beds as coded; on by default since #180a (reading 42).
@@ -2352,6 +2356,7 @@ fn main() -> Result<(), String> {
         ("--kh-keep-s0", &KH_KEEP_S0, "off"),
         ("--kh-curve-dams", &KH_CURVE_DAMS, "on"),
         ("--curve-minimax", &CURVE_MINIMAX, "off"),
+        ("--kh-guard", &KH_GUARD, "off"),
         ("--trunk-head-once", &planet_generators::bake::kg_trib::HEAD_ONCE, "on"),
         ("--strahler-junction", &planet_generators::bake::kg_trib::STRAHLER_JUNCTION, "on"),
         ("--band6-floors", &BAND6_FLOORS, "on"),
@@ -3376,6 +3381,15 @@ fn main() -> Result<(), String> {
             let gy = (at(x, (y + 1).min(h - 1)) - at(x, y.saturating_sub(1))) / (2.0 * cell_m);
             libm::hypot(gx, gy)
         };
+        // lead #184j item 2: the KH guard's cap at a cell, in C1's space: max(C1 - the defaults' KH value (h5 on its h4c zone, no dams), 10 m)
+        let kh_guard = KH_GUARD.load(std::sync::atomic::Ordering::Relaxed) && kh_zone == "curve" && (kh_form == "h5" || kh_form == "h5d");
+        let guard_cap = |p: usize, c1: f64| {
+            let (fx, fy) = (((p % w) as f64 - (lr - 1.0) / 2.0) / lr, ((p / w) as f64 - (lr - 1.0) / 2.0) / lr);
+            let wgt = kh::zone_weight(zone.as_ref().expect("h5's zone"), rw, rh, fx, fy);
+            let h4c = kh::read_ct_clamped(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0;
+            let vdef = if kh_lower_only { c1 + wgt * (h4c - c1).min(0.0) } else { c1 + wgt * (h4c - c1) };
+            (c1 - vdef).max(10.0)
+        };
         let kval = |p: usize| {
             let (fx, fy) = (((p % w) as f64 - (lr - 1.0) / 2.0) / lr, ((p / w) as f64 - (lr - 1.0) / 2.0) / lr);
             if kh_zone == "curve" && (kh_form == "h5" || kh_form == "h5d") {
@@ -3417,6 +3431,9 @@ fn main() -> Result<(), String> {
                             // uncut on R1h (KV/KC residuals 12,560 -> 1,298,042). A terrace within the band's reach is lowered to it (F3's design question, lead).
                             let s = ((target - zb - 8.0) / 4.0).clamp(0.0, 1.0);
                             v += (1.0 - s * s * (3.0 - 2.0 * s)) * (target - v);
+                            if kh_guard {
+                                v = v.max(c1 - guard_cap(p, c1));
+                            }
                         }
                     }
                 }
@@ -3468,6 +3485,30 @@ fn main() -> Result<(), String> {
         };
         if let Some(z) = &zone {
             println!("RG KH h5: h4c on {} zone cells of 814 m, C1 elsewhere", z.iter().filter(|&&x| x).count());
+        }
+        // lead #184j item 2: the crossing candidates, the curve-zone cells the guard holds at its cap (C1 - v equal to the cap)
+        if kh_guard {
+            if let Some((d, _)) = &curve_near {
+                let mut held: Vec<usize> = Vec::new();
+                for p in 0..n_l {
+                    if d[p].is_finite() {
+                        let c1 = f64::from(zs_field.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
+                        let cap = guard_cap(p, c1);
+                        if (c1 - kval(p) - cap).abs() < 1e-9 {
+                            held.push(p);
+                        }
+                    }
+                }
+                let mut txt = String::from("kh-guard 1
+# crossing candidates (lead #184j item 2): window x y, held at the cap
+");
+                for &p in &held {
+                    txt.push_str(&format!("{} {}
+", p % w, p / w));
+                }
+                std::fs::write(out_dir.join(format!("{tag}-kh-guard.txt")), txt).map_err(|e| e.to_string())?;
+                println!("RG KH guard (lead #184j item 2): {} curve-zone cells held at the cap (crossing candidates for row 3), {tag}-kh-guard.txt", held.len());
+            }
         }
         if census {
             let mut k = vec![0f64; n_l];
@@ -5265,6 +5306,7 @@ fn main() -> Result<(), String> {
             ("kh-keep-s0", if KH_KEEP_S0.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kh-curve-dams", if KH_CURVE_DAMS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("curve-minimax", if CURVE_MINIMAX.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("kh-guard", if KH_GUARD.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("curve-thalweg-slope", curve_thalweg.to_string()),
             ("curve-bed", curve_bed.to_string()),
             ("curve-blend", curve_blend.to_string()),
