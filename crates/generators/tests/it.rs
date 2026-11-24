@@ -106,6 +106,8 @@ mod erosion;
 mod g0_fixture;
 #[path = "g0_graph.rs"]
 mod g0_graph;
+#[path = "g0_layouts.rs"]
+mod g0_layouts;
 #[path = "generator_contract.rs"]
 mod generator_contract;
 #[path = "global.rs"]
