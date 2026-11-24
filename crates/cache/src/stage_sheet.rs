@@ -155,8 +155,13 @@ fn read_u16(dir: &Path, name: &str, n: usize) -> Result<Option<Vec<u16>>, String
 /// The shade of a surface at every pixel of `v`: the mean over the pixel's L cells of the cell's hillshade (central differences, the sun of `SUN_*`), as grey 0..1 at the fixed `GAIN`,
 /// and the pixel's mean height.
 pub fn shade(z: &[f32], m: &Manifest, v: &View) -> (Vec<f64>, Vec<f64>) {
+    shade_at(z, m, v, SUN_AZ_DEG)
+}
+
+/// [`shade`] with the sun at azimuth `az_deg` (degrees clockwise from north) and the altitude `SUN_ALT_DEG` (the look sheet's two suns, BUILD-067).
+pub fn shade_at(z: &[f32], m: &Manifest, v: &View, az_deg: f64) -> (Vec<f64>, Vec<f64>) {
     let (pw, ph) = v.px();
-    let (az, alt) = (SUN_AZ_DEG.to_radians(), SUN_ALT_DEG.to_radians());
+    let (az, alt) = (az_deg.to_radians(), SUN_ALT_DEG.to_radians());
     // the light's direction: x east (the window's +x), y north (the window's -y), z up
     let (lx, ly, lz) = (libm::cos(alt) * libm::sin(az), libm::cos(alt) * libm::cos(az), libm::sin(alt));
     let at = |x: usize, y: usize| f64::from(z[y.min(m.h - 1) * m.w + x.min(m.w - 1)]);
@@ -185,7 +190,7 @@ pub fn shade(z: &[f32], m: &Manifest, v: &View) -> (Vec<f64>, Vec<f64>) {
 }
 
 /// The colour of a shaded pixel: grey land, blue-tinted sea at or below `sea_m`.
-fn base_colour(g: f64, h: f64, sea_m: f64) -> [f64; 3] {
+pub(crate) fn base_colour(g: f64, h: f64, sea_m: f64) -> [f64; 3] {
     if h <= sea_m {
         [0.15 + 0.3 * g, 0.25 + 0.35 * g, 0.45 + 0.4 * g]
     } else {
@@ -232,7 +237,7 @@ fn pixel_mean(m: &Manifest, v: &View, f: &dyn Fn(usize) -> f64) -> Vec<f64> {
 }
 
 /// Tints `rgb` by a signed change per pixel (negative = lowered, red; positive = raised, blue), saturating at `scale_m`.
-fn tint_change(rgb: &mut [[f64; 3]], change: &[f64], scale_m: f64) {
+pub(crate) fn tint_change(rgb: &mut [[f64; 3]], change: &[f64], scale_m: f64) {
     for (c, &d) in rgb.iter_mut().zip(change) {
         if d < 0.0 {
             *c = mix(*c, LOWER, -d / scale_m);

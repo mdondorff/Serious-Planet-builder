@@ -48,6 +48,8 @@ mod layer_manifest;
 mod layer_store;
 #[path = "layer_tiles.rs"]
 mod layer_tiles;
+#[path = "look_sheet.rs"]
+mod look_sheet;
 #[path = "meshpack.rs"]
 mod meshpack;
 #[path = "pack.rs"]
