@@ -1482,6 +1482,7 @@ dependencies = [
  "planet-generators",
  "planet-streaming",
  "planet-world-def",
+ "png",
 ]
 
 [[package]]

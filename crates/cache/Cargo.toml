@@ -26,6 +26,7 @@ blake3.workspace = true
 lz4_flex.workspace = true
 brotli.workspace = true
 libm.workspace = true
+png.workspace = true
 
 [dev-dependencies]
 planet-generators = { workspace = true, features = ["stress"] }
