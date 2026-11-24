@@ -1165,7 +1165,11 @@ fn infer_stage_and_variant(path: &Path, file_name: &str, idx: &PreviewCatalogInd
     let in_chain =
         chain_dir.is_some_and(|c| lexically_absolutize(Path::new("."), path).starts_with(lexically_absolutize(Path::new("."), c)));
 
-    let stage_id = if in_chain || norm_path.contains("/review/stages/") || norm_path.contains("/stages/sheets/") {
+    let stage_id = if in_chain
+        || norm_path.contains("/review/stages/")
+        || norm_path.contains("/review/look/")
+        || norm_path.contains("/stages/sheets/")
+    {
         "k7-local-refinement".to_string()
     } else if let Some(candidates) = idx.shared_file_candidates.get(file_name) {
         parent_stage.clone().filter(|ps| candidates.contains(ps)).unwrap_or_else(|| candidates[0].clone())
@@ -1197,8 +1201,13 @@ fn infer_stage_and_variant(path: &Path, file_name: &str, idx: &PreviewCatalogInd
 
 fn discover_artifacts(root: &Path, out_dir: &Path, chain: Option<&str>, catalog: &JsonVal) -> (Vec<DiscoveredImage>, Vec<DiscoveredText>) {
     let idx = build_preview_index(catalog);
-    let mut scan_roots =
-        vec![out_dir.join("previews"), root.join("target/preview"), root.join("target/review/stages"), root.join("docs/stages/sheets")];
+    let mut scan_roots = vec![
+        out_dir.join("previews"),
+        root.join("target/preview"),
+        root.join("target/review/stages"),
+        root.join("target/review/look"),
+        root.join("docs/stages/sheets"),
+    ];
     let chain_path = chain.map(|c| lexically_absolutize(root, Path::new(c)));
     if let Some(cp) = &chain_path {
         scan_roots.push(cp.clone());
@@ -1828,6 +1837,35 @@ mod tests {
             relative_posix_path(&root, &out_dir, &root.join("target/preview/world-seed-14/k.png")),
             "../../preview/world-seed-14/k.png"
         );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // spec: BUILD-064, BUILD-067, TEST-150
+    #[test]
+    fn the_look_sheets_under_target_review_look_are_indexed_with_the_stage_sheets() {
+        let root = temp_workspace("look");
+        let look = root.join("target/review/look/r1h-switch");
+        fs::create_dir_all(&look).unwrap();
+        fs::write(look.join("river-az315.png"), minimal_png_bytes(1056, 442)).unwrap();
+        fs::write(
+            look.join("look.txt"),
+            "look-numbers 1
+run r1h-switch
+",
+        )
+        .unwrap();
+        let out_dir = root.join("target/review/cockpit");
+        let summary = assemble_cockpit(&root, &sample_catalog_json(2), &out_dir, None).unwrap();
+        assert_eq!((summary.image_count, summary.text_count), (1, 1));
+        let html = fs::read_to_string(&summary.index_html).unwrap();
+        let marker = r#"<script id="cockpit-bundle" type="application/json">"#;
+        let start = html.find(marker).unwrap() + marker.len();
+        let end = html[start..].find("</script>").unwrap() + start;
+        let parsed = parse_json(&html[start..end]).unwrap();
+        let imgs = parsed.get("artifacts").unwrap().get("images").and_then(JsonVal::as_arr).unwrap();
+        assert_eq!(imgs[0].get("rel_path").and_then(JsonVal::as_str), Some("../look/r1h-switch/river-az315.png"));
+        assert_eq!(imgs[0].get("stage_id").and_then(JsonVal::as_str), Some("k7-local-refinement"), "filed with the stage sheets");
+        assert_eq!(imgs[0].get("variant").and_then(JsonVal::as_str), Some("r1h-switch"), "the run is the variant");
         let _ = fs::remove_dir_all(&root);
     }
 

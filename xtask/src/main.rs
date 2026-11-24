@@ -16,6 +16,7 @@ mod knowntierc;
 mod lanes;
 mod layering;
 mod logcmd;
+mod looksheet;
 mod nextid;
 mod package;
 mod perfab;
@@ -93,6 +94,7 @@ const USAGE: &str = "cargo xtask <command>
   plan                 the current milestone's exit items (docs/milestones/, Status line `active`) with their state, queue rows (docs/status.md) and open PRs naming them; fails for a queue row off the milestone and for an open item without a row (BUILD-053)
   stages [--update]    the stage manifest (BUILD-047): runs the stage probe's fixture and checks docs/stages/manifest.txt against it (a stale manifest fails naming the stage, field and column); --update rewrites it from the run; the sheets go to target/review/stages/ci/
   stages --chain DIR [--step S] [--view X,Y,SX,SY] [--out FILE]   the chain sheet (BUILD-060): one PNG of a chain directory's twelve stage panels (base, z_s, H1 rivers, S0, KH, KS, trunks, tributaries and basins, KV, KC, final, final - S0) at a 10-degree sun and one fixed scale; default the whole window at 12 L cells per pixel to target/review/stages/chain/<label>.png
+  look-sheet RUN [--against DEFAULTS] [--az A,B] [--out DIR]   the look sheet (BUILD-067): a chain run's crop store (--probe-crops) at one L cell a pixel under a fixed 10-degree sun, beside the defaults run and their difference; target/review/look/<run>/
   transects --chain DIR [--face F] [--out FILE]   the cross-section sheet (BUILD-061): per SPIKE-119 river transect inside a chain directory's window, S0, the final surface and the matched GLO-30 valley on one vertical scale, with each profile's valley depth and its width at 10 m and 50 m above the river; to target/review/stages/transects/<label>.png and a .txt table (the face from chain.txt's `switch window`, or --face)
   windows-draw [--out FILE] [--threads N]   G3-8's out-of-sample windows (BUILD-066): a seeded stratified draw of 10 windows over the seed-14 world's coarse field (cube edges and a corner, flat coasts, high mountains, arid or endorheic land, mixed mid-latitude), none overlapping the five windows; written as data to crates/cache/data/g3-windows.toml
   cockpit [--seed N | --world F] [--erosion on|off [--channels on|off] | --commit DIR] [--pipeline-json F] [--run <world|drivers|stages|all>] [--compare-seed N] [--chain DIR [--face F]] [--km N] [--threads N] [--out-dir DIR]   assemble the offline pipeline DAG, switch simulator, Global Authoring preview inspector, and pin/probe ledger under target/review/cockpit/index.html (BUILD-064)
@@ -162,6 +164,7 @@ fn main() -> ExitCode {
         Some("plan") => plancmd::run(&root),
         Some("gates") => gates::run(&root),
         Some("stages") => heavy::with(&format!("stages {}", args[1..].join(" ")), || stages::run_cmd(&root, &args[1..])),
+        Some("look-sheet") => heavy::with(&format!("look-sheet {}", args[1..].join(" ")), || looksheet::run_cmd(&root, &args[1..])),
         Some("transects") => heavy::with(&format!("transects {}", args[1..].join(" ")), || transects::run_cmd(&root, &args[1..])),
         Some("windows-draw") => heavy::with(&format!("windows-draw {}", args[1..].join(" ")), || windowsdraw::run_cmd(&root, &args[1..])),
         Some("cockpit") if cockpit::needs_heavy_slot(&args[1..]) => {
