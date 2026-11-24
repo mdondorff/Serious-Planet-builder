@@ -14,6 +14,9 @@ use std::collections::{BTreeSet, BinaryHeap};
 /// A cell of a test world: the tile, the column and the row.
 type Cell = (usize, usize, usize);
 
+/// A seam side as the engine takes it: (seed, height) per cell.
+type SeamRow = [(u32, f64)];
+
 struct World {
     n: usize,
     z: Vec<Vec<f64>>,
@@ -437,11 +440,11 @@ impl World {
         let refs: Vec<_> = floods.iter().map(|f| graph.add_tile(perimeter_len(n, n), &f.edges)).collect();
         let seed =
             |c: Cell| if self.is_outlet(c) { SEA } else { perimeter_index(n, n, c.1, c.2).expect("a seam cell is on a tile's border") };
-        let rows: Vec<(Vec<(u32, f64)>, Vec<(u32, f64)>)> = seams
+        let rows: Vec<(Box<SeamRow>, Box<SeamRow>)> = seams
             .iter()
             .map(|sm| {
                 let row = |cs: &[Cell]| cs.iter().map(|&c| (seed(c), self.height(c))).collect::<Vec<_>>();
-                (row(&sm.a), row(&sm.b))
+                (row(&sm.a).into_boxed_slice(), row(&sm.b).into_boxed_slice())
             })
             .collect();
         let list: Vec<Seam<'_>> = seams
@@ -707,7 +710,7 @@ fn a_bad_seam_is_refused_before_any_edge_is_added() {
     let inf = vec![(0u32, f64::NEG_INFINITY)];
     let one = good[..1].to_vec();
     let none: Vec<(u32, f64)> = Vec::new();
-    let cases: [(SeamKind, &[(u32, f64)], &[(u32, f64)], &str); 5] = [
+    let cases: [(SeamKind, &SeamRow, &SeamRow, &str); 5] = [
         (SeamKind::IntraFace, &good, &short, "rows of different lengths"),
         (SeamKind::CubeEdge, &good, &nan, "a NaN height on one side"),
         (SeamKind::Corner, &two, &two, "a corner seam of two cells"),
