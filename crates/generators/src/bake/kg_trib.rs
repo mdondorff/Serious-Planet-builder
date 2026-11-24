@@ -71,6 +71,9 @@ pub struct Input<'a> {
     pub gid: &'a dyn Fn(usize) -> u64,
     /// Keep the per-cell fields `filled`, `root` and `init` (the fixture's halo tests); a window leaves them empty.
     pub keep_fields: bool,
+    /// Lead #189 (spike, `--runoff-cell`): each cell's runoff over the uniform `Params::runoff` (the H1 field read at the L cell's parent); `a_run` then accumulates area x weight down
+    /// the D8 tree, so it sums exactly at every confluence, and `q = a_run runoff` is the runoff-weighted discharge. None: weight 1 (`a_run = a_geo`, the bits of before).
+    pub runoff_weight: Option<&'a [f64]>,
 }
 
 /// What a run made.
@@ -89,6 +92,9 @@ pub struct Extracted {
     pub init: Vec<f64>,
     pub d8: Vec<f64>,
     pub d8_no_ext: Vec<f64>,
+    /// Lead #189: the runoff-weighted D8 accumulations with and without the seed (empty without `runoff_weight`: they equal `d8` and `d8_no_ext`).
+    pub run: Vec<f64>,
+    pub run_no_ext: Vec<f64>,
     /// Channel cells whose D8 area is below `A_crit` (initiated by MFD), and heads whose D8 area is at least `A_crit`.
     pub mfd_only: usize,
     /// Reaches whose last vertex sits on a trunk with a smaller `a_geo` than the vertex before (the trunk's given area below the tributary's).
@@ -150,6 +156,23 @@ pub fn extract(inp: &Input, p: &Params) -> Extracted {
         }
     }
     let d8: Vec<f64> = (0..n).map(|c| d8_no_ext[c] + ext[c]).collect();
+    // lead #189: the runoff-weighted accumulation on the same tree; the seed enters unweighted (it is already a runoff-weighted area of the window's outside)
+    let (run, run_no_ext): (Vec<f64>, Vec<f64>) = match inp.runoff_weight {
+        None => (Vec::new(), Vec::new()),
+        Some(wt) => {
+            let mut rn: Vec<f64> = (0..n).map(|c| if g.is_active(c) && !outlet[c] { g.cell_area(c) * wt[c] } else { 0.0 }).collect();
+            for &c in r.order.iter().rev() {
+                let to = r.receiver[c as usize];
+                if to != NONE {
+                    let a = rn[c as usize];
+                    rn[to as usize] += a;
+                }
+            }
+            ((0..n).map(|c| rn[c] + ext[c]).collect(), rn)
+        }
+    };
+    let run_at = |c: usize| if run.is_empty() { d8[c] } else { run[c] };
+    let run_no_at = |c: usize| if run_no_ext.is_empty() { d8_no_ext[c] } else { run_no_ext[c] };
     let init_at = |c: usize| if p.mfd_init { r.area[c] + ext[c] } else { d8[c] };
     let init: Vec<f64> = if inp.keep_fields { (0..n).map(init_at).collect() } else { Vec::new() };
     // channel cells, donors first: the threshold, or a channel donor (closure); never an outlet or a kept basin cell
@@ -304,10 +327,10 @@ pub fn extract(inp: &Input, p: &Params) -> Extracted {
         let mut a = Attrs {
             a_geo: cells.iter().map(|&c| d8[c]).collect(),
             a_ext: cells.iter().map(|&c| inp.seed_ext[c]).collect(),
-            a_run: cells.iter().map(|&c| d8[c]).collect(),
-            a_run_no_ext: cells.iter().map(|&c| d8_no_ext[c]).collect(),
-            q: cells.iter().map(|&c| d8[c] * p.runoff).collect(),
-            q_w: cells.iter().map(|&c| d8[c] * p.runoff).collect(),
+            a_run: cells.iter().map(|&c| run_at(c)).collect(),
+            a_run_no_ext: cells.iter().map(|&c| run_no_at(c)).collect(),
+            q: cells.iter().map(|&c| run_at(c) * p.runoff).collect(),
+            q_w: cells.iter().map(|&c| run_at(c) * p.runoff).collect(),
             strahler: vec![st; cells.len()],
             bed: cells
                 .iter()
@@ -364,6 +387,8 @@ pub fn extract(inp: &Input, p: &Params) -> Extracted {
         init,
         d8,
         d8_no_ext,
+        run,
+        run_no_ext,
         mfd_only,
         trunk_area_breaks,
         open_ends,
@@ -400,6 +425,25 @@ pub fn accumulate_trunks(
     inflow: &dyn Fn(u64) -> (f64, f64),
     runoff: f64,
 ) -> Accumulated {
+    accumulate_trunks_weighted(
+        g,
+        trunks,
+        &|x| {
+            let (a, a_no) = inflow(x);
+            (a, a, a_no)
+        },
+        runoff,
+    )
+}
+
+/// [`accumulate_trunks`] with a runoff-weighted inflow (lead #189): `inflow(cell)` is (the geometric area, the runoff-weighted area, the runoff-weighted area without the seed); `a_geo`
+/// accumulates the first, `a_run` the second and `a_run_no_ext` the third, each summed exactly at a node, and `q = q_w = a_run runoff`.
+pub fn accumulate_trunks_weighted(
+    g: &mut Graph,
+    trunks: &std::collections::BTreeSet<u64>,
+    inflow: &dyn Fn(u64) -> (f64, f64, f64),
+    runoff: f64,
+) -> Accumulated {
     let mut out = Accumulated::default();
     let idx: Vec<usize> = (0..g.reaches.len()).filter(|&i| trunks.contains(&g.reaches[i].id)).collect();
     out.reaches = idx.len();
@@ -431,18 +475,18 @@ pub fn accumulate_trunks(
         let up = g.reaches[i].up;
         let cells = g.reaches[i].vertices.clone();
         // the head: the node's value from its inflowing trunk reaches, or the seed against the own inflow
-        let (own0, own0_no) = inflow(cells[0]);
+        let (own0, own0_run, own0_no) = inflow(cells[0]);
         let ins: Vec<usize> = into.get(&up).cloned().unwrap_or_default();
-        let (mut v, mut v_no) = if ins.is_empty() {
+        let (mut v, mut v_run, mut v_no) = if ins.is_empty() {
             let a = &g.reaches[i].attrs;
-            let (seed, seed_no) = (a.a_geo[0], a.a_run_no_ext[0]);
+            let (seed, seed_run, seed_no) = (a.a_geo[0], a.a_run[0], a.a_run_no_ext[0]);
             if own0 > seed {
                 out.heads_over_seed += 1;
             }
             if HEAD_ONCE.load(std::sync::atomic::Ordering::Relaxed) {
-                (own0, own0_no)
+                (own0, own0_run, own0_no)
             } else {
-                (seed.max(own0), seed_no.max(own0_no))
+                (seed.max(own0), seed_run.max(own0_run), seed_no.max(own0_no))
             }
         } else {
             let pre = |r: &Reach, f: fn(&Attrs) -> &Vec<f64>| {
@@ -450,32 +494,34 @@ pub fn accumulate_trunks(
                 x[x.len().saturating_sub(2)]
             };
             let s: f64 = ins.iter().map(|&j| pre(&g.reaches[j], |a| &a.a_geo)).sum::<f64>() + own0;
+            let s_run: f64 = ins.iter().map(|&j| pre(&g.reaches[j], |a| &a.a_run)).sum::<f64>() + own0_run;
             let s_no: f64 = ins.iter().map(|&j| pre(&g.reaches[j], |a| &a.a_run_no_ext)).sum::<f64>() + own0_no;
             // the inflowing reaches end with the node's value
             for &j in &ins {
                 let a = &mut g.reaches[j].attrs;
                 let m = a.a_geo.len() - 1;
                 a.a_geo[m] = s;
-                a.a_run[m] = s;
+                a.a_run[m] = s_run;
                 a.a_run_no_ext[m] = s_no;
-                a.q[m] = s * runoff;
-                a.q_w[m] = s * runoff;
+                a.q[m] = s_run * runoff;
+                a.q_w[m] = s_run * runoff;
             }
-            (s, s_no)
+            (s, s_run, s_no)
         };
         let a = &mut g.reaches[i].attrs;
         let n = cells.len();
         for k in 0..n {
             if k > 0 {
-                let (o, o_no) = inflow(cells[k]);
+                let (o, o_run, o_no) = inflow(cells[k]);
                 v += o;
+                v_run += o_run;
                 v_no += o_no;
             }
             a.a_geo[k] = v;
-            a.a_run[k] = v;
+            a.a_run[k] = v_run;
             a.a_run_no_ext[k] = v_no;
-            a.q[k] = v * runoff;
-            a.q_w[k] = v * runoff;
+            a.q[k] = v_run * runoff;
+            a.q_w[k] = v_run * runoff;
         }
     }
     if STRAHLER_JUNCTION.load(std::sync::atomic::Ordering::Relaxed) {

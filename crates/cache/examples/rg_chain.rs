@@ -29,7 +29,7 @@ use std::time::Instant;
 use planet_cache::global_store::{class_inputs, class_inputs_key, GlobalWorld};
 use planet_cache::l_writer::Commit;
 use planet_cache::pack::TileStore;
-use planet_cache::region_bake::{lattice_direction, region_front, RegionSpec, LOCAL_PER_REGIONAL};
+use planet_cache::region_bake::{lattice_direction, region_front, Drain, K5Knobs, K5Route, RegionSpec, StageConfig, LOCAL_PER_REGIONAL};
 use planet_cache::river_gate::{commit_differences, lay_store_ground, LWindow, WindowIdentity};
 use planet_cache::river_suite::corridor_bar_m;
 use planet_core::{Face, TangentWarp, Vec3};
@@ -1814,6 +1814,9 @@ static KV_RIMS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 static KV_CONNECT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 /// lead #178 item 1: `--sea17 on` holds reading 17 (no land cell lowered to the sea + 0.5 m or below) in KV, KC's breach and band6's breach, as KS; `off` (default until the rows) the form before.
 static SEA17: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// lead #189: `--runoff-cell on` gives KG-trib's extract and the landmass pass a per-cell runoff (the H1 field at each L cell's parent, over the uniform mean), accumulated as
+/// area x runoff so a_run sums exactly at nodes; `off` (default until the rows) the uniform runoff.
+static RUNOFF_CELL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// lead #182a: `--trib-rerun on` runs KG-trib post once more with basins-2's kept set where a line-end lake inlet lost its basin, then basins-2 once more on the new lines; on by default since #182c (reading 44); `off` the one extraction.
 static TRIB_RERUN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 /// lead #179: `--inlet-floor on` floors the graph bed of every L vertex on or inside a kept basin's rim at its spill; `off` the beds as coded; on by default since #180a (reading 42).
@@ -1849,10 +1852,10 @@ static TRUNK_SADDLE_ORTHO: std::sync::atomic::AtomicBool = std::sync::atomic::At
 /// lead #180 (G3 R8, SPIKE-142's 22 %): `--band6-keep-rims on` keeps every depression of band6's input that basins-2's rule would keep (at least 0.25 km2 and 2 m deep,
 /// reading 22's thresholds): band6 neither breaches nor fills it, so it spills at its rim and stays for basins-2; `off` (default) band6 protects no L basin.
 static BAND6_KEEP_RIMS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-/// lead #182 (G3 R6, Carbon D2.6 (2)): `--runoff-cell on` makes every L reach's `a_run` per-cell runoff weighted: `a_geo` times the catchment mean of the H1 runoff field
+/// lead #182 (G3 R6, Carbon D2.6 (2)): `--runoff-ratio on` (renamed from `--runoff-cell` by lead #189: that name is the accumulated form) makes every L reach's `a_run` per-cell runoff weighted: `a_geo` times the catchment mean of the H1 runoff field
 /// (read at each L cell's H1 parent; there is no runoff field at L) over the window mean, by an L routing of the KS output; `q = q_w = a_run runoff_mean`; `off` (default)
 /// the window scalar alone.
-static RUNOFF_CELL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static RUNOFF_RATIO: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// lead #171: `--bed-sea-floor on` codes KG-trunk's and KG-trib's land beds at the sea + 0.5 m or above (reading 17), over coastal flats too; `off` (default) the running minimum alone.
 static BED_SEA_FLOOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -1938,17 +1941,13 @@ fn main() -> Result<(), String> {
     if !["13", "3", "1"].contains(&base_stages) {
         return Err(format!("--base-stages 13 | 3 | 1, not '{base_stages}'"));
     }
-    if base_form == "aplus" {
-        planet_cache::region_bake::install_s138(
-            match base_stages {
-                "3" => "post-only",
-                "1" => "sel-pre",
-                _ => "sel-post",
-            },
-            f64::INFINITY,
-            &tag,
-        )?;
-    }
+    // R24: the base form is the spec's stage config (`RegionSpec::stage`), no process global: stage 1 the selective drain of z_b, stage 3 the same on z_s
+    let (base_drain, post_drain) = match (base_form, base_stages) {
+        ("aplus", "3") => (Drain::Off, Drain::SELECTIVE_50),
+        ("aplus", "1") => (Drain::SELECTIVE_50, Drain::Off),
+        ("aplus", _) => (Drain::SELECTIVE_50, Drain::SELECTIVE_50),
+        _ => (Drain::Off, Drain::Off),
+    };
     // spikes #147: `--breach-cost cell` (SPIKE-138) or `length` (the cut cost times the step's length, plus a length term)
     let breach_cost = value(&args, "--breach-cost").unwrap_or("cell");
     if !["cell", "length", "square"].contains(&breach_cost) {
@@ -1979,8 +1978,11 @@ fn main() -> Result<(), String> {
     if !["d8", "ltd", "dinf"].contains(&k5_route) {
         return Err(format!("--k5-route d8 | ltd | dinf, not '{k5_route}'"));
     }
-    planet_cache::region_bake::K5_LTD.store(k5_route == "ltd", std::sync::atomic::Ordering::Relaxed);
-    planet_cache::region_bake::K5_DINF.store(k5_route == "dinf", std::sync::atomic::Ordering::Relaxed);
+    let k5_route_cfg = match k5_route {
+        "ltd" => K5Route::Ltd,
+        "dinf" => K5Route::Dinf,
+        _ => K5Route::D8,
+    };
     // SPIKE-139: `--k5-diffuse C` (default 0, off): a hillslope term in K5's rounds, C per sweep on the 5-point Laplacian (round::K5_DIFFUSE; spike only)
     let k5_diffuse: f64 = value(&args, "--k5-diffuse").map_or(Ok(0.0), str::parse).map_err(|_| "--k5-diffuse C")?;
     if !(0.0..=0.25).contains(&k5_diffuse) {
@@ -2064,18 +2066,19 @@ fn main() -> Result<(), String> {
         return Err(format!("--k5-edge dam | free, not '{k5_edge}'"));
     }
     planet_generators::bake::round::K5_EDGE_FREE.store(k5_edge == "free", std::sync::atomic::Ordering::Relaxed);
-    // SPIKE-139 (lead #149b): `--k5-uok-scale X` (default 1): K5's uplift ratio u_over_k times X, k_dt kept (region_bake::K5_UOK_SCALE; spike only)
+    // SPIKE-139 (lead #149b): `--k5-uok-scale X` (default 1): K5's uplift ratio u_over_k times X, k_dt kept (RegionSpec::stage; spike only)
     let k5_uok_scale: f64 = value(&args, "--k5-uok-scale").map_or(Ok(1.0), str::parse).map_err(|_| "--k5-uok-scale X")?;
     if !(k5_uok_scale > 0.0 && k5_uok_scale <= 8.0) {
         return Err("--k5-uok-scale X needs 0 < X <= 8".into());
     }
-    planet_cache::region_bake::K5_UOK_SCALE.store(k5_uok_scale.to_bits(), std::sync::atomic::Ordering::Relaxed);
-    // SPIKE-139 (lead #149 item 3): `--k5-kdt-scale X` (default 1): K5's k_dt times X, the uplift per step with it (region_bake::K5_KDT_SCALE; spike only)
+    // SPIKE-139 (lead #149 item 3): `--k5-kdt-scale X` (default 1): K5's k_dt times X, the uplift per step with it (RegionSpec::stage; spike only)
     let k5_kdt_scale: f64 = value(&args, "--k5-kdt-scale").map_or(Ok(1.0), str::parse).map_err(|_| "--k5-kdt-scale X")?;
     if !(k5_kdt_scale > 0.0 && k5_kdt_scale <= 8.0) {
         return Err("--k5-kdt-scale X needs 0 < X <= 8".into());
     }
-    planet_cache::region_bake::K5_KDT_SCALE.store(k5_kdt_scale.to_bits(), std::sync::atomic::Ordering::Relaxed);
+    // R24: the solve's stage configs in the spec (and its key), not process globals
+    let stage =
+        StageConfig { base_drain, post_drain, k5: K5Knobs { route: k5_route_cfg, kdt_scale: k5_kdt_scale, uok_scale: k5_uok_scale } };
     // SPIKE-139: `--k5-diffuse-amax KM2` (default 0: every cell): the hillslope term moves only cells of a smaller area (round::K5_DIFFUSE_AMAX; spike only)
     let k5_diffuse_amax: f64 = value(&args, "--k5-diffuse-amax").map_or(Ok(0.0), str::parse).map_err(|_| "--k5-diffuse-amax KM2")?;
     planet_generators::bake::round::K5_DIFFUSE_AMAX.store((k5_diffuse_amax * 1e6).to_bits(), std::sync::atomic::Ordering::Relaxed);
@@ -2153,6 +2156,7 @@ fn main() -> Result<(), String> {
         ("--band6-outlet-floor", &BAND6_OUTLET_FLOOR, "on"),
         ("--inlet-floor", &INLET_FLOOR, "on"),
         ("--trib-rerun", &TRIB_RERUN, "on"),
+        ("--runoff-ratio", &RUNOFF_RATIO, "off"),
     ] {
         let v = value(&args, opt).unwrap_or(default);
         if !["off", "on"].contains(&v) {
@@ -2261,6 +2265,7 @@ fn main() -> Result<(), String> {
         inputs_id: class_inputs_key(&def, seed),
         height_bounds: (-11_000.0, 9_000.0),
         keep_channels: false,
+        stage,
     };
     let front = region_front(&spec, &base, &climate)?;
     let solve = &front.solve;
@@ -3107,6 +3112,10 @@ fn main() -> Result<(), String> {
     // KG-trib's uniform runoff (m/s), q = a_run r; lead #180: the H1 reaches' a_run is a runoff-weighted area q / r, as KG-trib's L reaches carry it
     let land_h1: Vec<f64> = (0..cells).filter(|&c| solve.zs[c] > 0.0).map(|c| f64::from(runoff[c])).collect();
     let runoff_mean = land_h1.iter().sum::<f64>() / land_h1.len().max(1) as f64;
+    // lead #189: each L cell's runoff over the mean, read at its H1 parent (`--runoff-cell on`)
+    let runoff_w: Option<Vec<f64>> = RUNOFF_CELL
+        .load(std::sync::atomic::Ordering::Relaxed)
+        .then(|| (0..w * h).map(|c| f64::from(runoff[((c / w) / L) * rw + (c % w) / L]) / runoff_mean).collect());
     let window = (x0 as u64, y0 as u64, w, h, rw);
     let mut g = if on("kg-trunk") {
         build_graph(
@@ -3340,7 +3349,7 @@ fn main() -> Result<(), String> {
             fine = Some((r.receiver, channel));
         }
         if on("kg-trib") && !(trib_once && trib_on == "post") {
-            use planet_generators::bake::kg_trib::{accumulate_trunks, extract, Input, Params, Trunk};
+            use planet_generators::bake::kg_trib::{accumulate_trunks_weighted, extract, Input, Params, Trunk};
             let trunks: Vec<Trunk> = l_trunks
                 .iter()
                 .filter_map(|r| {
@@ -3360,6 +3369,7 @@ fn main() -> Result<(), String> {
                 tile: &tile_l,
                 gid: &gid_l,
                 keep_fields: false,
+                runoff_weight: runoff_w.as_deref(),
             };
             let ex = extract(
                 &inp,
@@ -3377,8 +3387,14 @@ fn main() -> Result<(), String> {
             gd.reaches.extend(ex.reaches.iter().cloned());
             // reading 18 (lead #170 item 4): the landmass pass, the L trunks' areas and discharge (q_w, KV's width) accumulated at L from their tributaries and hillslope
             let trunk_ids: BTreeSet<u64> = l_trunks.iter().map(|r| r.id).collect();
-            let inflow = |id: u64| to_local(id).map_or((0.0, 0.0), |c| (dx_l * dx_l + ex.d8[c], dx_l * dx_l + ex.d8_no_ext[c]));
-            let acc = accumulate_trunks(&mut gd, &trunk_ids, &inflow, runoff_mean);
+            let inflow = |id: u64| {
+                to_local(id).map_or((0.0, 0.0, 0.0), |c| {
+                    let own = dx_l * dx_l * runoff_w.as_ref().map_or(1.0, |wt| wt[c]);
+                    let (run, run_no) = if ex.run.is_empty() { (ex.d8[c], ex.d8_no_ext[c]) } else { (ex.run[c], ex.run_no_ext[c]) };
+                    (dx_l * dx_l + ex.d8[c], own + run, own + run_no)
+                })
+            };
+            let acc = accumulate_trunks_weighted(&mut gd, &trunk_ids, &inflow, runoff_mean);
             println!(
                 "RG domain {d} reading 18: {} trunk reaches accumulated at L, {} unordered, {} heads over their H1 seed",
                 acc.reaches, acc.unordered, acc.heads_over_seed
@@ -3728,7 +3744,7 @@ fn main() -> Result<(), String> {
         // lead #164: the post pass's routing, for the fable order's KS1
         let mut fine_post: Option<(Vec<u32>, Vec<bool>)> = None;
         if trib_on == "post" && on("kg-trib") && !order_carbon {
-            use planet_generators::bake::kg_trib::{accumulate_trunks, extract, Input, Params, Trunk};
+            use planet_generators::bake::kg_trib::{accumulate_trunks_weighted, extract, Input, Params, Trunk};
             let t2 = Instant::now();
             gd.reaches.retain(|r| !trib_first.0.contains(&r.id));
             gd.nodes.retain(|x| !trib_first.1.contains(&x.id));
@@ -3787,6 +3803,7 @@ fn main() -> Result<(), String> {
                 tile: &tile_l,
                 gid: &gid_l,
                 keep_fields: false,
+                runoff_weight: runoff_w.as_deref(),
             };
             let ex = extract(
                 &inp,
@@ -3807,8 +3824,14 @@ fn main() -> Result<(), String> {
             gd.nodes.extend(ex.nodes.iter().cloned());
             gd.reaches.extend(ex.reaches.iter().cloned());
             let trunk_ids: BTreeSet<u64> = l_trunks.iter().map(|r| r.id).collect();
-            let inflow = |id: u64| to_local(id).map_or((0.0, 0.0), |c| (dx_l * dx_l + ex.d8[c], dx_l * dx_l + ex.d8_no_ext[c]));
-            let acc = accumulate_trunks(&mut gd, &trunk_ids, &inflow, runoff_mean);
+            let inflow = |id: u64| {
+                to_local(id).map_or((0.0, 0.0, 0.0), |c| {
+                    let own = dx_l * dx_l * runoff_w.as_ref().map_or(1.0, |wt| wt[c]);
+                    let (run, run_no) = if ex.run.is_empty() { (ex.d8[c], ex.d8_no_ext[c]) } else { (ex.run[c], ex.run_no_ext[c]) };
+                    (dx_l * dx_l + ex.d8[c], own + run, own + run_no)
+                })
+            };
+            let acc = accumulate_trunks_weighted(&mut gd, &trunk_ids, &inflow, runoff_mean);
             if regions <= 1 {
                 acc_trunks = gd.reaches.iter().filter(|r| trunk_ids.contains(&r.id)).map(|r| (r.id, r.attrs.clone())).collect();
             }
@@ -4089,7 +4112,7 @@ fn main() -> Result<(), String> {
                     && on("kg-trib")
                     && !order_carbon
                 {
-                    use planet_generators::bake::kg_trib::{accumulate_trunks, extract, Input, Params, Trunk};
+                    use planet_generators::bake::kg_trib::{accumulate_trunks_weighted, extract, Input, Params, Trunk};
                     let before = lost_inlets(&gd, &kept);
                     let t3 = Instant::now();
                     reran = before > 0;
@@ -4122,14 +4145,22 @@ fn main() -> Result<(), String> {
                             tile: &tile_l,
                             gid: &gid_l,
                             keep_fields: false,
+                            runoff_weight: runoff_w.as_deref(),
                         };
                         let ex = extract(&inp, &Params { mfd_init: false, ..Params::plan(BODY, runoff_mean) });
                         let had: HashSet<u64> = gd.nodes.iter().map(|x| x.id).collect();
                         gd.nodes.extend(ex.nodes.iter().filter(|x| !had.contains(&x.id)).cloned());
                         gd.reaches.extend(ex.reaches.iter().cloned());
                         let trunk_ids: BTreeSet<u64> = l_trunks.iter().map(|r| r.id).collect();
-                        let inflow = |id: u64| to_local(id).map_or((0.0, 0.0), |c| (dx_l * dx_l + ex.d8[c], dx_l * dx_l + ex.d8_no_ext[c]));
-                        accumulate_trunks(&mut gd, &trunk_ids, &inflow, runoff_mean);
+                        let inflow = |id: u64| {
+                            to_local(id).map_or((0.0, 0.0, 0.0), |c| {
+                                let own = dx_l * dx_l * runoff_w.as_ref().map_or(1.0, |wt| wt[c]);
+                                let (run, run_no) =
+                                    if ex.run.is_empty() { (ex.d8[c], ex.d8_no_ext[c]) } else { (ex.run[c], ex.run_no_ext[c]) };
+                                (dx_l * dx_l + ex.d8[c], own + run, own + run_no)
+                            })
+                        };
+                        accumulate_trunks_weighted(&mut gd, &trunk_ids, &inflow, runoff_mean);
                         if regions <= 1 {
                             acc_trunks = gd.reaches.iter().filter(|r| trunk_ids.contains(&r.id)).map(|r| (r.id, r.attrs.clone())).collect();
                         }
@@ -4271,7 +4302,7 @@ fn main() -> Result<(), String> {
             kept.iter().filter(|&&k| k).count()
         );
         if order_carbon && trib_on == "post" && on("kg-trib") {
-            use planet_generators::bake::kg_trib::{accumulate_trunks, extract, Input, Params, Trunk};
+            use planet_generators::bake::kg_trib::{accumulate_trunks_weighted, extract, Input, Params, Trunk};
             let t2 = Instant::now();
             gd.reaches.retain(|r| !trib_first.0.contains(&r.id));
             gd.nodes.retain(|x| !trib_first.1.contains(&x.id));
@@ -4330,6 +4361,7 @@ fn main() -> Result<(), String> {
                 tile: &tile_l,
                 gid: &gid_l,
                 keep_fields: false,
+                runoff_weight: runoff_w.as_deref(),
             };
             let ex = extract(
                 &inp,
@@ -4342,8 +4374,14 @@ fn main() -> Result<(), String> {
             gd.nodes.extend(ex.nodes.iter().cloned());
             gd.reaches.extend(ex.reaches.iter().cloned());
             let trunk_ids: BTreeSet<u64> = l_trunks.iter().map(|r| r.id).collect();
-            let inflow = |id: u64| to_local(id).map_or((0.0, 0.0), |c| (dx_l * dx_l + ex.d8[c], dx_l * dx_l + ex.d8_no_ext[c]));
-            let acc = accumulate_trunks(&mut gd, &trunk_ids, &inflow, runoff_mean);
+            let inflow = |id: u64| {
+                to_local(id).map_or((0.0, 0.0, 0.0), |c| {
+                    let own = dx_l * dx_l * runoff_w.as_ref().map_or(1.0, |wt| wt[c]);
+                    let (run, run_no) = if ex.run.is_empty() { (ex.d8[c], ex.d8_no_ext[c]) } else { (ex.run[c], ex.run_no_ext[c]) };
+                    (dx_l * dx_l + ex.d8[c], own + run, own + run_no)
+                })
+            };
+            let acc = accumulate_trunks_weighted(&mut gd, &trunk_ids, &inflow, runoff_mean);
             if regions <= 1 {
                 acc_trunks = gd.reaches.iter().filter(|r| trunk_ids.contains(&r.id)).map(|r| (r.id, r.attrs.clone())).collect();
             }
@@ -4368,8 +4406,8 @@ fn main() -> Result<(), String> {
         let mut seen: HashSet<u64> = HashSet::new();
         gd.nodes.retain(|x| seen.insert(x.id));
         gd.sort();
-        // lead #182 `--runoff-cell`: a_run per-cell runoff weighted (catchment mean of the H1 runoff over the window mean, along an L routing of the KS output)
-        if RUNOFF_CELL.load(std::sync::atomic::Ordering::Relaxed) {
+        // lead #182 `--runoff-ratio` (was spikes' `--runoff-cell`): a_run per-cell runoff weighted (catchment mean of the H1 runoff over the window mean, along an L routing of the KS output)
+        if RUNOFF_RATIO.load(std::sync::atomic::Ordering::Relaxed) {
             use planet_generators::bake::route::route_rules_filled;
             let outlet: Vec<bool> = (0..n_l).map(|c| active[c] && (sea_l[c] || exit[c])).collect();
             let (r, _) = route_rules_filled(&grid_d, &ks_d[..], &outlet, 1.0e-3, 1, 0.0, None, RoundRules::ROUND);
@@ -4696,6 +4734,7 @@ fn main() -> Result<(), String> {
             ("turned-noise", planet_generators::height::turned_noise().to_string()),
             ("kv-cross", format!("{}", KV_CROSS_MICRO.load(std::sync::atomic::Ordering::Relaxed) as f64 * 1.0e-6)),
             ("trib-rerun", if TRIB_RERUN.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("runoff-cell", if RUNOFF_CELL.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("inlet-floor", if INLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-floors", if BAND6_FLOORS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-outlet-floor", if BAND6_OUTLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
@@ -4705,7 +4744,7 @@ fn main() -> Result<(), String> {
             ("bed-sea-floor", if BED_SEA_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("trunk-saddle-ortho", if TRUNK_SADDLE_ORTHO.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-keep-rims", if BAND6_KEEP_RIMS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
-            ("runoff-cell", if RUNOFF_CELL.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("runoff-ratio", if RUNOFF_RATIO.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             (
                 "trunk-head-once",
                 if planet_generators::bake::kg_trib::HEAD_ONCE.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }
