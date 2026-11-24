@@ -1,0 +1,45 @@
+# TEST-139's partition layouts as data (TEST-151; lead #195, owner O2; the G3 port order's C2). Regions of whole tiles of GEN-182's grid on
+# the fixture's L lattice (192 cells a face edge, tiles of 64: 3 x 3 tiles a face). Halo 24: GEN-182's bounds, DISC_RADIUS_MAX 16 plus
+# PROFILE_CARRY_MIN 8 at least and n / 8 at most (lead, 2026-11-24).
+# A layout: a header line, then one line a face: the face index and its three tile rows (tj = 0, 1, 2), each the region digits of the
+# tiles ti = 0, 1, 2.
+# one-region      the whole cube;
+# two-regions     the cut along face 0's tile line at longitude -15 (G0 contract section 11; the tiles of layouts()[1]);
+# four-regions    two-regions split again by the sign of each tile centre's latitude;
+# shifted-seam    two-regions with its cut moved one tile column east, to face 0's tile line at +15;
+# face-edge-seam  face 0 against the other five faces: the seam runs on face 0's four cube edges.
+layout one-region regions 1 tile 64 halo 24
+0 000 000 000
+1 000 000 000
+2 000 000 000
+3 000 000 000
+4 000 000 000
+5 000 000 000
+layout two-regions regions 2 tile 64 halo 24
+0 011 011 011
+1 110 110 110
+2 111 111 111
+3 000 000 000
+4 000 111 111
+5 111 111 000
+layout four-regions regions 4 tile 64 halo 24
+0 011 233 233
+1 110 332 332
+2 111 333 333
+3 000 222 222
+4 222 333 333
+5 111 111 000
+layout shifted-seam regions 2 tile 64 halo 24
+0 001 001 001
+1 110 110 110
+2 111 111 111
+3 000 000 000
+4 000 100 111
+5 111 100 000
+layout face-edge-seam regions 2 tile 64 halo 24
+0 000 000 000
+1 111 111 111
+2 111 111 111
+3 111 111 111
+4 111 111 111
+5 111 111 111

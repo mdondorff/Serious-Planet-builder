@@ -3,6 +3,7 @@
 //! transcendental functions come from `libm` (CON-14, ADR 0010).
 
 pub mod cube;
+pub mod cube_patch;
 pub mod frames;
 pub mod global_cell;
 pub mod hash;
@@ -14,6 +15,7 @@ pub mod tile;
 pub mod vec3;
 
 pub use cube::{Face, FaceMapping, TangentWarp};
+pub use cube_patch::CubePatch;
 pub use frames::{CameraRelative, PlanetFixed, TileLocal};
 pub use global_cell::GlobalCell;
 pub use math::smoothstep;
