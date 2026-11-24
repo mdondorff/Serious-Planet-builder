@@ -353,6 +353,10 @@ pub struct GateReport {
     pub spill_mismatch: Option<usize>,
     /// With a graph: test (a), the kept basins whose rim holds an L vertex with its bed more than `SPILL_MISMATCH_M` under the recorded spill ([`rim_mismatch`]).
     pub spill_rim_mismatch: Option<usize>,
+    /// With a graph (lead #183, moved from the spike by lead #192): the kept basins with their floor in the window, by how far their recorded spill sits above the
+    /// measured surface's pour level at the floor (the basin flood's level; over 0.01, 0.1 and 0.5 m: a notch cut partly below the record), the largest gap (m), and the
+    /// dry ones (the flood stands no more than `BASIN_WET_M` over the floor).
+    pub spill_notch: Option<(usize, [usize; 3], f64, usize)>,
     /// With a graph (lead #182a): the lake_inlet nodes by origin and the line-end ones in no kept-basin depression ([`crate::river_gate_graph::InletReport`]).
     pub inlets: Option<crate::river_gate_graph::InletReport>,
     /// The area of an L cell (m2), for the kept lakes' area.
@@ -507,6 +511,12 @@ impl GateReport {
             ("kept_lake_km2", self.kept_lake_cells.map_or("-".to_string(), |k| format!("{:.2}", k as f64 * self.cell_area_m2 / 1.0e6))),
             ("g_spill_mismatch", self.spill_mismatch.map_or("-".to_string(), c)),
             ("g_spill_rim", self.spill_rim_mismatch.map_or("-".to_string(), c)),
+            ("g_kept_in_window", self.spill_notch.map_or("-".to_string(), |x| x.0.to_string())),
+            ("g_notch_over_0_01", self.spill_notch.map_or("-".to_string(), |x| x.1[0].to_string())),
+            ("g_notch_over_0_1", self.spill_notch.map_or("-".to_string(), |x| x.1[1].to_string())),
+            ("g_notch_over_0_5", self.spill_notch.map_or("-".to_string(), |x| x.1[2].to_string())),
+            ("g_notch_max_m", self.spill_notch.map_or("-".to_string(), |x| format!("{:.2}", x.2))),
+            ("g_kept_dry", self.spill_notch.map_or("-".to_string(), |x| x.3.to_string())),
             ("g_lake_inlets", self.inlets.map_or("-".to_string(), |x| x.inside.to_string())),
             ("g_inlet_line_ends", self.inlets.map_or("-".to_string(), |x| x.line_ends.to_string())),
             ("g_inlet_spill_targets", self.inlets.map_or("-".to_string(), |x| x.spill_targets.to_string())),
@@ -1411,6 +1421,26 @@ pub fn measure(input: &GateInput, params: &GateParams) -> GateReport {
             })
         }),
         spill_rim_mismatch: input.g2.as_ref().and_then(|x| x.graph.map(|gr| rim_mismatch(gr, &x.window, &label, SPILL_MISMATCH_M))),
+        // lead #183 (moved from the spike, lead #192): the kept basins' notch, recorded spill against the basin flood's level at the floor
+        spill_notch: input.g2.as_ref().and_then(|x| {
+            x.graph.map(|gr| {
+                let (mut kept, mut over, mut worst, mut dry) = (0usize, [0usize; 3], 0.0f64, 0usize);
+                for b in gr.basins.iter().filter(|b| b.represented == planet_generators::bake::river_graph::Represented::ProtectedSurface) {
+                    let Some(f) = x.window.cell(b.floor_cell) else { continue };
+                    if !b.spill_m.is_finite() {
+                        continue;
+                    }
+                    kept += 1;
+                    let gap = b.spill_m - filled[f];
+                    for (k, t) in [0.01, 0.1, 0.5].iter().enumerate() {
+                        over[k] += usize::from(gap > *t);
+                    }
+                    worst = worst.max(gap);
+                    dry += usize::from(filled[f] - z[f] <= BASIN_WET_M);
+                }
+                (kept, over, worst, dry)
+            })
+        }),
         inlets: input.g2.as_ref().and_then(|x| x.graph.map(|gr| crate::river_gate_graph::inlets_without_basin(gr, &x.window, z, &label))),
         cell_area_m2: g.dx() * g.dx(),
         reference_river_cells: reference_cells,

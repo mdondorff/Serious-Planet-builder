@@ -817,6 +817,15 @@ fn kept_lakes_get_their_own_bars_beside_the_raw_closed_basin_share_and_a_spill_m
     g.basins = vec![kept_basin(level + 5.0)];
     let mis = run(&g, &p);
     assert_eq!(mis.spill_mismatch, Some(1), "{mis:?}");
+    // lead #183 (moved from the spike, lead #192): the notch; a spill at the pit's pour level sits on the flood's level at the floor, one recorded 5 m above it is over every
+    // threshold by 5 m; neither pit is dry
+    let (k0, o0, w0, d0) = kept.spill_notch.expect("a graph row has the notch");
+    assert_eq!((k0, o0, d0), (1, [0, 0, 0], 0), "{:?}", kept.spill_notch);
+    assert!(w0.abs() < 1e-6, "{w0}");
+    let (k1, o1, w1, _) = mis.spill_notch.unwrap();
+    assert_eq!((k1, o1), (1, [1, 1, 1]));
+    assert!((w1 - 5.0).abs() < 1e-6, "{w1}");
+    assert!(mis.fields_line().contains(" g_notch_over_0_5=1 ") && open.spill_notch == Some((0, [0, 0, 0], 0.0, 0)));
     assert_eq!(bar(&mis, "bar_violations").value, bar(&kept, "bar_violations").value + 1.0, "the mismatch is a graph violation");
     assert!(!bar(&mis, "bar_violations").pass());
     // test (a) (lead 2026-11-21): the hand graph's beds at the pit's rim (row 203, at most 9 m) lie far under the 26 m spill: the line leaves the lake below its spill, one basin, a
