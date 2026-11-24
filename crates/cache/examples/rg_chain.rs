@@ -4640,7 +4640,8 @@ fn main() -> Result<(), String> {
     let (ks1_out, ks_out, kv_out, kc_out) = outs.expect("at least one domain");
     // lead #178 item 3: the f64 budget validator's overruns and raises per stage against S_KH (reading 21), no residuals passed (the clamp records are the gate's; here only the
     // use is checked); ks is KS1 (a lowering stage), band6 its drain and connect pass (it fills too)
-    // lead #199 (owner O3): the net rule beside it, max over the stage boundaries of (S_KH - z_k) <= budget, in the same record format (budget-violations-net.csv)
+    // lead #199 (owner O3), #199a (reading 47): the net rule is the budget, max over the stage boundaries of (S_KH - z_k) <= budget (budget-violations.csv); the gross rule
+    // is reported only (budget-violations-gross.csv), the same record format
     let (budget_violations, budget_violations_net): (Vec<(usize, &'static str, f64, f64)>, Vec<(usize, &'static str, f64, f64)>) = {
         use planet_generators::bake::river_graph::{validate_budget, validate_budget_net, Stage, Violation};
         let stages = [
@@ -4658,12 +4659,17 @@ fn main() -> Result<(), String> {
                 })
                 .collect()
         };
-        (records(validate_budget(&ks_base, &budget_l, &stages, &[], &g)), records(validate_budget_net(&ks_base, &budget_l, &stages)))
+        let gross = records(validate_budget(&ks_base, &budget_l, &stages, &[], &g));
+        // lead #199a (contract section 6 amended, reading 47): the net rule is the budget; a raise in a lowering stage stays a violation under it too
+        let mut net = records(validate_budget_net(&ks_base, &budget_l, &stages));
+        net.extend(gross.iter().copied().filter(|v| !v.2.is_finite()));
+        net.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(b.1)));
+        (gross, net)
     };
     for st in ["ks", "band6", "kv", "kc"] {
         let (gross, net) = (
             budget_violations.iter().filter(|v| v.1 == st && v.2.is_finite()).count(),
-            budget_violations_net.iter().filter(|v| v.1 == st).count(),
+            budget_violations_net.iter().filter(|v| v.1 == st && v.2.is_finite()).count(),
         );
         println!("RG budget validator (lead #199): {st}: gross {gross} overruns, net {net} overruns (max_k S_KH - z_k over the budget)");
     }
@@ -4886,14 +4892,16 @@ fn main() -> Result<(), String> {
         write("kc-fill.u16", field(&|p| kc_out[p] - kv_out[p]))?;
     }
     {
+        // lead #199a (reading 47): budget-violations.csv holds the net records (the budget; main's gate counts them into b_validator_overrun and bar_violations);
+        // budget-violations-gross.csv the gross ones, reported only
         let mut f = std::fs::File::create(stages_dir.join("budget-violations.csv")).map_err(|e| e.to_string())?;
         writeln!(f, "cell,stage,used_m,budget_m").map_err(|e| e.to_string())?;
-        for &(c, st, u, b) in &budget_violations {
+        for &(c, st, u, b) in &budget_violations_net {
             writeln!(f, "{c},{st},{u:.4},{b:.4}").map_err(|e| e.to_string())?;
         }
-        let mut f = std::fs::File::create(stages_dir.join("budget-violations-net.csv")).map_err(|e| e.to_string())?;
+        let mut f = std::fs::File::create(stages_dir.join("budget-violations-gross.csv")).map_err(|e| e.to_string())?;
         writeln!(f, "cell,stage,used_m,budget_m").map_err(|e| e.to_string())?;
-        for &(c, st, u, b) in &budget_violations_net {
+        for &(c, st, u, b) in &budget_violations {
             writeln!(f, "{c},{st},{u:.4},{b:.4}").map_err(|e| e.to_string())?;
         }
     }
