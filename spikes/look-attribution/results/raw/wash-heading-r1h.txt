@@ -1,0 +1,7 @@
+curve length in the box 123973 L cells; land cells: in a trough (W < 0) 43.3 %, in a deep trough (W < p25 = -3.62 m) 25.0 %
+  within 5 deg of   0 deg:   9.0 % of curve length; of it in a trough  87.1 %, in a deep trough  75.7 %
+  within 5 deg of  45 deg:  19.2 % of curve length; of it in a trough  88.8 %, in a deep trough  76.3 %
+  within 5 deg of  90 deg:  13.6 % of curve length; of it in a trough  85.4 %, in a deep trough  69.8 %
+  within 5 deg of 135 deg:  11.4 % of curve length; of it in a trough  92.2 %, in a deep trough  78.9 %
+  other headings:  46.8 %; in a trough  90.0 %, in a deep trough  71.4 %
+  all curve length: in a trough  89.1 %, in a deep trough  73.4 %
