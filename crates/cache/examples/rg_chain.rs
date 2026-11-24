@@ -2809,17 +2809,16 @@ fn main() -> Result<(), String> {
                                 cv.fallback = 3;
                             }
                         }
-                        // the bed along the curve: z_s along the reach's H1 cells at the same share of its length, never rising downstream
+                        // the bed along the curve: z_s along the reach's H1 cells at the same share of its length. Lead #184 (R1h): not a running minimum, which
+                        // cut every rim and col the trunk crosses down to the lowest bed upstream (kept basins 1,492 -> 564, hump cuts 2,480 -> 4,413); a rise stays
                         let n = cv.pts.len();
                         let mut zb = Vec::with_capacity(n);
-                        let mut run = f64::INFINITY;
                         for i in 0..n {
                             let f = if n > 1 { i as f64 / (n - 1) as f64 } else { 0.0 } * (m - 1) as f64;
                             let a = (f.floor() as usize).min(m - 1);
                             let b = (a + 1).min(m - 1);
                             let (za, zbb) = (solve.zs[r.cells[a] as usize], solve.zs[r.cells[b] as usize]);
-                            run = run.min(za + (f - a as f64) * (zbb - za));
-                            zb.push(run);
+                            zb.push(za + (f - a as f64) * (zbb - za));
                         }
                         Some((cv, zb))
                     })();
