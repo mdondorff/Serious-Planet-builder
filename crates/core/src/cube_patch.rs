@@ -26,7 +26,7 @@ pub struct CubePatch {
 impl CubePatch {
     /// The patch of the core `[i0, i0 + size) x [j0, j0 + size)` of `face` (a level of `n` cells per face edge) with `halo` cells a side;
     /// refused (None) when the core leaves the face, `size` is not positive, `halo` is negative or over `n` (the fold reaches one face deep),
-    /// or `n` is out of range.
+    /// `n` is out of range, or the patch's cell count does not fit a `usize` (memory beyond that is the caller's bound).
     pub fn new(face: Face, n: i64, i0: i64, j0: i64, size: i64, halo: i64) -> Option<CubePatch> {
         let ok = face.0 < 6
             && n > 0
@@ -41,7 +41,8 @@ impl CubePatch {
             return None;
         }
         let edge = size + 2 * halo;
-        let mut cells = Vec::with_capacity((edge * edge) as usize);
+        let count = usize::try_from(edge.checked_mul(edge)?).ok()?;
+        let mut cells = Vec::with_capacity(count);
         for v in -halo..size + halo {
             for u in -halo..size + halo {
                 cells.push(extended_cell(face, n, i0 + u, j0 + v));

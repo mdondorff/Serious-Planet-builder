@@ -73,6 +73,10 @@ fn a_patch_is_refused_outside_its_face_or_level() {
     assert!(CubePatch::new(Face(0), 8, 6, 0, 3, 2).is_none(), "a core over the face's edge");
     assert!(CubePatch::new(Face(0), 8, 0, 0, 0, 2).is_none() && CubePatch::new(Face(0), 8, -1, 0, 2, 2).is_none());
     assert!(CubePatch::new(Face(0), 8, 0, 0, 2, 9).is_none() && CubePatch::new(Face(0), 8, 0, 0, 2, -1).is_none(), "a halo over n");
+    assert!(CubePatch::new(Face(0), 8, 0, 0, 2, 8).is_some(), "a halo of n: the fold reaches the neighbour's far edge");
+    // numerics review: a patch whose cell count overflows is refused, not a panic
+    let m = 1i64 << 30;
+    assert!(CubePatch::new(Face(0), m, 0, 0, m, m).is_none(), "3 x 2^30 cells an edge: refused");
     assert!(CubePatch::new(Face(6), 8, 0, 0, 2, 2).is_none());
     let p = CubePatch::new(Face(2), 8, 2, 3, 4, 2).unwrap();
     assert_eq!((p.edge(), p.cells().len(), p.get(-3, 0), p.get(5, 5).is_some()), (8, 64, None, true));
@@ -81,7 +85,7 @@ fn a_patch_is_refused_outside_its_face_or_level() {
 // spec: COORD-012
 #[test]
 fn the_interior_is_the_faces_cells_and_every_halo_cell_is_its_fold() {
-    for (n, size, halo) in [(8i64, 3i64, 2i64), (9, 4, 4), (6, 2, 3), (12, 4, 5)] {
+    for (n, size, halo) in [(8i64, 3i64, 2i64), (9, 4, 4), (6, 2, 3), (12, 4, 5), (4, 1, 4), (5, 2, 5)] {
         for p in patches(n, size, halo) {
             let (f, (i0, j0)) = (p.face(), p.origin());
             let at = |u: i64, v: i64| p.cell(u, v);
@@ -115,8 +119,19 @@ fn the_interior_is_the_faces_cells_and_every_halo_cell_is_its_fold() {
                                 std::cmp::Ordering::Greater => from_i,
                                 std::cmp::Ordering::Less => from_j,
                                 std::cmp::Ordering::Equal => {
-                                    assert!(at(u, v) == from_i || at(u, v) == from_j, "n {n}: a diagonal cell is one of its two folds");
-                                    at(u, v)
+                                    // the spec's rule, pinned: fold first across the i edge when det(n, n_i, n_j) > 0 (numerics review)
+                                    let r = |x: planet_core::Vec3| [x.x as i64, x.y as i64, x.z as i64];
+                                    let (nrm, au, av) = (r(f.normal()), r(f.u_axis()), r(f.v_axis()));
+                                    let (si, sj) = (if i < 0 { -1 } else { 1 }, if j < 0 { -1 } else { 1 });
+                                    let (ni, nj) = (au.map(|x| si * x), av.map(|x| sj * x));
+                                    let det = nrm[0] * (ni[1] * nj[2] - ni[2] * nj[1]) - nrm[1] * (ni[0] * nj[2] - ni[2] * nj[0])
+                                        + nrm[2] * (ni[0] * nj[1] - ni[1] * nj[0]);
+                                    assert_ne!(det, 0);
+                                    if det > 0 {
+                                        from_i
+                                    } else {
+                                        from_j
+                                    }
                                 }
                             }
                         }
