@@ -90,6 +90,45 @@ fn the_valley_width_is_read_across_the_flow_at_a_fixed_depth_and_at_half_the_rin
     assert!(flat.suite.width_fixed_capped > 0 && flat.suite.width_fixed.p50 >= 3000.0, "{:?}", flat.suite.width_fixed);
 }
 
+// spec: TEST-137, BUILD-057 (lead #200: the width by Strahler order and by drained-area class, report only)
+#[test]
+fn the_width_is_split_by_strahler_order_and_area_class_and_the_split_covers_every_measured_cell() {
+    let r = run(&valley(2.0, 2.0));
+    let s = &r.suite;
+    let total = s.width_fixed.n;
+    assert!(total > 20, "{:?}", s.width_fixed);
+    assert_eq!(s.width_by_order.iter().map(|x| x.n).sum::<usize>(), total, "every measured cell has one order");
+    assert_eq!(s.width_by_area.iter().map(|x| x.n).sum::<usize>(), total, "every measured cell has one area class");
+    // one valley, no tributary: every river cell is order 1, so order 1 is the whole set
+    assert_eq!((s.width_by_order[0].n, s.width_by_order[0].p50), (total, s.width_fixed.p50), "{:?}", s.width_by_order);
+    // the printed line's p50 over all the measured cells is width10_p50's
+    let line = s.widths_line();
+    assert!(line.starts_with("RIVER-GATE widths: "), "{line}");
+    let field = |k: &str| line.split_whitespace().find_map(|kv| kv.strip_prefix(&format!("{k}="))).map(str::to_string);
+    assert_eq!(field("all_p50_m"), Some(format!("{:.0}", s.width_fixed.p50)));
+    assert_eq!(field("all_cells"), Some(total.to_string()));
+    assert_eq!(field("o1_cells"), Some(total.to_string()));
+    // two tributary valleys (floors at x 12 and 28, y from 20 up) joining a trunk (floor at x 20, y under 20; its cross slope beats its down slope, so both converge): order 2 below the junction
+    let y_shape: Vec<f64> = (0..N * N)
+        .map(|c| {
+            let (x, y) = ((c % N) as f64, (c / N) as f64);
+            if y >= 20.0 {
+                100.0 + 2.0 * (x - 12.0).abs().min((x - 28.0).abs()) + y
+            } else {
+                100.0 + 2.0 * (x - 20.0).abs() + 0.2 * y
+            }
+        })
+        .collect();
+    let t = run(&y_shape).suite;
+    assert!(
+        t.width_by_order[0].n > 0 && t.width_by_order[1].n > 0,
+        "tributaries of order 1 and a trunk of order 2: {:?}",
+        t.width_by_order
+    );
+    assert_eq!(t.width_by_order[2].n + t.width_by_order[3].n, 0, "no order 3 in two branches: {:?}", t.width_by_order);
+    assert_eq!(t.width_by_order.iter().map(|x| x.n).sum::<usize>(), t.width_fixed.n);
+}
+
 // spec: TEST-137, BUILD-057
 #[test]
 fn the_asymmetry_is_zero_for_a_symmetric_valley_and_a_third_for_sides_of_4_and_2() {

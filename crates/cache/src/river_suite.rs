@@ -9,6 +9,9 @@ pub const UPHILL_M: f64 = 0.25;
 pub const WIDTH_DEPTH_M: f64 = 10.0;
 /// The cross-section is walked at most this many cells to each side; a side that reaches it is capped.
 pub const WIDTH_MAX_CELLS: usize = 64;
+/// The drained-area classes' lower bounds (km2) the width at [`WIDTH_DEPTH_M`] is split by (lead #200, report only): under 75 (a gate run at a lower channel
+/// threshold), 75-300, 300-1,000, 1,000-3,000 and from 3,000 km2.
+pub const WIDTH_AREA_KM2: [f64; 4] = [75.0, 300.0, 1000.0, 3000.0];
 /// The asymmetry reads the surface 2 to 4 cells out on each side.
 pub const ASYM_CELLS: (usize, usize) = (2, 4);
 /// A ratio is counted only above this denominator (metres).
@@ -66,6 +69,10 @@ pub struct SuiteReport {
     /// The valley width (metres, both sides, across the flow) at [`WIDTH_DEPTH_M`] above the river cell and at half the ring 2-4 depth; sides that reached [`WIDTH_MAX_CELLS`]; cells with a flat ring (no half depth).
     pub width_fixed: Spread,
     pub width_fixed_capped: usize,
+    /// The same widths split by the river cell's Strahler order on the river cells (by their receivers: 1, 2, 3, and 4 or more) and by its drained area
+    /// (the classes of [`WIDTH_AREA_KM2`], the first under its first bound; lead #200, report only): every measured cell lies in exactly one of each.
+    pub width_by_order: [Spread; 4],
+    pub width_by_area: [Spread; 5],
     pub width_half: Spread,
     pub width_half_capped: usize,
     pub width_half_flat: usize,
@@ -136,6 +143,37 @@ fn across(w: usize, c: usize, r: u32) -> Option<(f64, f64)> {
     let (dx, dy) = ((r as usize % w) as f64 - (c % w) as f64, (r as usize / w) as f64 - (c / w) as f64);
     let len = libm::hypot(dx, dy);
     (len > 0.0).then(|| (-dy / len, dx / len))
+}
+
+/// The Strahler order of every river cell on the river cells' own network (each to its receiver when that is a river cell; 0 off the network): a cell no river cell
+/// drains into is order 1; otherwise the largest order among those draining into it, plus 1 when two or more carry it. Cells are taken upstream first, by drained area,
+/// ties by cell id (a river cell drains less than its receiver), so the result does not depend on the scan order.
+fn strahler(i: &SuiteInput) -> Vec<u8> {
+    let n = i.river.len();
+    let mut cells: Vec<usize> = (0..n).filter(|&c| i.river[c]).collect();
+    cells.sort_by(|&a, &b| i.area[a].total_cmp(&i.area[b]).then(a.cmp(&b)));
+    let (mut order, mut top, mut tops) = (vec![0u8; n], vec![0u8; n], vec![0u8; n]);
+    for &c in &cells {
+        let o = if top[c] == 0 {
+            1
+        } else if tops[c] >= 2 {
+            top[c].saturating_add(1)
+        } else {
+            top[c]
+        };
+        order[c] = o;
+        let r = i.receiver[c];
+        if r != NONE && i.river[r as usize] {
+            let r = r as usize;
+            if o > top[r] {
+                top[r] = o;
+                tops[r] = 1;
+            } else if o == top[r] {
+                tops[r] = tops[r].saturating_add(1);
+            }
+        }
+    }
+    order
 }
 
 /// The in-place radix-2 FFT of `re + i im` (length a power of two).
@@ -288,6 +326,9 @@ pub fn measure_suite(i: &SuiteInput) -> SuiteReport {
     let (mut wf, mut wh, mut asym) = (Vec::new(), Vec::new(), Vec::new());
     let (mut capped_f, mut capped_h, mut flat_h) = (0usize, 0usize, 0usize);
     let (mut river_len, mut rank) = (0.0, 0usize);
+    let order = strahler(i);
+    let mut by_order: [Vec<f64>; 4] = Default::default();
+    let mut by_area: [Vec<f64>; 5] = Default::default();
     for c in 0..w * h {
         if !i.river[c] || !i.inside[c] {
             continue;
@@ -318,6 +359,9 @@ pub fn measure_suite(i: &SuiteInput) -> SuiteReport {
         let (m, k) = width(WIDTH_DEPTH_M);
         wf.push(m);
         capped_f += k;
+        by_order[usize::from(order[c].clamp(1, 4)) - 1].push(m);
+        let km2 = i.area[c] / 1.0e6;
+        by_area[WIDTH_AREA_KM2.iter().filter(|&&lo| km2 >= lo).count()].push(m);
         if ring >= 2.0 * MIN_DEPTH_M {
             let (m, k) = width(0.5 * ring);
             wh.push(m);
@@ -408,6 +452,8 @@ pub fn measure_suite(i: &SuiteInput) -> SuiteReport {
         uphill_max_m: uphill_max,
         width_fixed: spread(wf),
         width_fixed_capped: capped_f,
+        width_by_order: by_order.map(spread),
+        width_by_area: by_area.map(spread),
         width_half: spread(wh),
         width_half_capped: capped_h,
         width_half_flat: flat_h,
@@ -435,6 +481,22 @@ pub fn measure_suite(i: &SuiteInput) -> SuiteReport {
 }
 
 impl SuiteReport {
+    /// The width at [`WIDTH_DEPTH_M`] split by Strahler order and by drained-area class (lead #200, report only), as `RIVER-GATE widths: name=value ...`: the p50 (m)
+    /// and the cells of all the measured cells, of each order (`o1`, `o2`, `o3`, `o4plus`) and of each area class (`a_lt75`, `a75_300`, `a300_1000`, `a1000_3000`,
+    /// `a_ge3000`, km2). `cargo xtask river-gate --table` writes these beside the table.
+    pub fn widths_line(&self) -> String {
+        let mut f = vec![format!("all_p50_m={:.0}", self.width_fixed.p50), format!("all_cells={}", self.width_fixed.n)];
+        for (name, s) in ["o1", "o2", "o3", "o4plus"].iter().zip(&self.width_by_order) {
+            f.push(format!("{name}_p50_m={:.0}", s.p50));
+            f.push(format!("{name}_cells={}", s.n));
+        }
+        for (name, s) in ["a_lt75", "a75_300", "a300_1000", "a1000_3000", "a_ge3000"].iter().zip(&self.width_by_area) {
+            f.push(format!("{name}_p50_m={:.0}", s.p50));
+            f.push(format!("{name}_cells={}", s.n));
+        }
+        format!("RIVER-GATE widths: {}", f.join(" "))
+    }
+
     /// The printed lines, one per metric.
     pub fn lines(&self) -> Vec<String> {
         let sa: Vec<String> = self
@@ -464,6 +526,7 @@ impl SuiteReport {
                 self.width_half_capped,
                 self.width_half_flat
             ),
+            self.widths_line(),
             format!("RIVER-GATE asymmetry: |L - R| / (L + R) of the rise 2 to 4 cells out: p50 {:.2} p90 {:.2} ({} cells)", self.asymmetry.p50, self.asymmetry.p90, self.asymmetry.n),
             format!("RIVER-GATE drainage density: {:.3} km/km2 ({:.1} km of river over {:.1} km2 of land)", self.density_km_per_km2, self.river_km, self.land_km2),
             format!(
