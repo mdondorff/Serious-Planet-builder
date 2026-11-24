@@ -949,7 +949,7 @@ Detail: One definition per metric; the bars come from the spikes' Earth benchmar
 
 #### Scenario: A store
 - **WHEN** the gate runs on a store
-- **THEN** the nine suite lines are measured on the stored ground B + L over the commit's tiles, with the same definitions as on a window
+- **THEN** the suite lines are measured on the stored ground B + L over the commit's tiles, with the same definitions as on a window
 
 #### Scenario: Metrics of a valley
 - **WHEN** the surface is a V valley with a river on its floor
