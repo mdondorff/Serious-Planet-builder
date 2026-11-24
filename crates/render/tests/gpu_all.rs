@@ -30,6 +30,8 @@ mod gpu_pipelined;
 mod gpu_pools;
 #[path = "gpu_preview.rs"]
 mod gpu_preview;
+#[path = "gpu_quad_split.rs"]
+mod gpu_quad_split;
 #[path = "gpu_quadrants.rs"]
 mod gpu_quadrants;
 #[path = "gpu_reference.rs"]
