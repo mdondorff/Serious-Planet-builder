@@ -1871,6 +1871,12 @@ static TRUNK_CURVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 static MEANDER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// lead #184a (width form 1 with A2): `--kv-wall-s0 on` caps KV's wall grade per cell at S0's side slope (kv_kc::WALL_CAP); `off` (default) KV's s_wall alone.
 static KV_WALL_S0: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// lead #184c (a reversible call in the gate, the owner may overrule; not row 3): `--kh-keep-s0 on` protects the S0 depressions basins-2's default rule would keep
+/// (>= 0.25 km2, >= 2 m; no 10 m cap) from KH's curve correction: inside one KH leaves C1 as it is, and on its rim ring (the cells within 2 L cells outside it, its
+/// outlet path among them) the correction never lowers S0 below the depression's spill level; `off` (default) no mask.
+static KH_KEEP_S0: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// lead #184c (the corner-link trace): `--kh-curve-dams off` drops h4c at the dammed diagonals under 75 km2 from `--kh-zone curve`; `on` (default, #184's order) keeps it.
+static KH_CURVE_DAMS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 /// lead #182a: `--trib-rerun on` runs KG-trib post once more with basins-2's kept set where a line-end lake inlet lost its basin, then basins-2 once more on the new lines; on by default since #182c (reading 44); `off` the one extraction.
 static TRIB_RERUN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 /// lead #179: `--inlet-floor on` floors the graph bed of every L vertex on or inside a kept basin's rim at its spill; `off` the beds as coded; on by default since #180a (reading 42).
@@ -2230,6 +2236,8 @@ fn main() -> Result<(), String> {
         ("--trunk-curve", &TRUNK_CURVE, "off"),
         ("--meander", &MEANDER, "off"),
         ("--kv-wall-s0", &KV_WALL_S0, "off"),
+        ("--kh-keep-s0", &KH_KEEP_S0, "off"),
+        ("--kh-curve-dams", &KH_CURVE_DAMS, "on"),
         ("--trunk-head-once", &planet_generators::bake::kg_trib::HEAD_ONCE, "on"),
         ("--strahler-junction", &planet_generators::bake::kg_trib::STRAHLER_JUNCTION, "on"),
         ("--band6-floors", &BAND6_FLOORS, "on"),
@@ -2885,6 +2893,56 @@ fn main() -> Result<(), String> {
     if kh_zone == "curve" && curves.is_none() {
         return Err("--kh-zone curve needs --trunk-curve on".into());
     }
+    // lead #184c: the S0 keep mask for KH's curve correction (1 inside a kept-size S0 depression, 2 on its rim ring; the floor its spill level on S0)
+    let keep_s0: Option<(Vec<u8>, Vec<f32>)> = if KH_KEEP_S0.load(std::sync::atomic::Ordering::Relaxed) {
+        let outl: Vec<bool> = (0..w * h).map(|c| ocean[c] || c % w == 0 || c / w == 0 || c % w == w - 1 || c / w == h - 1).collect();
+        let level = planet_generators::bake::drain::fill_level(&start, w, h, &outl);
+        let (_, comps) = planet_generators::bake::drain::depressions(&start, &level, w, h);
+        let cm = grid.dx() / L as f64;
+        let mut kind = vec![0u8; w * h];
+        let mut floor = vec![f32::NEG_INFINITY; w * h];
+        let (mut kept, mut inside) = (0usize, 0usize);
+        for (cs, _) in &comps {
+            let area = cs.len() as f64 * cm * cm;
+            let depth = cs.iter().map(|&c| level[c as usize] - start[c as usize]).fold(0.0f64, f64::max);
+            if area >= 0.25e6 && depth >= 2.0 {
+                kept += 1;
+                inside += cs.len();
+                let spill = level[cs[0] as usize] as f32;
+                for &c in cs {
+                    kind[c as usize] = 1;
+                    floor[c as usize] = spill;
+                }
+            }
+        }
+        // the rim ring: within 2 L cells (Chebyshev) of a kept depression's cell, outside every one; the highest spill around it
+        let mut ring = 0usize;
+        let inside_cells: Vec<usize> = (0..w * h).filter(|&c| kind[c] == 1).collect();
+        for &c in &inside_cells {
+            let (x, y) = ((c % w) as i64, (c / w) as i64);
+            for dy in -2i64..=2 {
+                for dx in -2i64..=2 {
+                    let (nx, ny) = (x + dx, y + dy);
+                    if nx < 0 || ny < 0 || nx >= w as i64 || ny >= h as i64 {
+                        continue;
+                    }
+                    let q = ny as usize * w + nx as usize;
+                    if kind[q] == 1 {
+                        continue;
+                    }
+                    if kind[q] == 0 {
+                        ring += 1;
+                    }
+                    kind[q] = 2;
+                    floor[q] = floor[q].max(floor[c]);
+                }
+            }
+        }
+        println!("RG KH keep S0 (lead #184c): {kept} of {} S0 depressions kept-size (>= 0.25 km2, >= 2 m); {inside} cells inside, {ring} rim-ring cells", comps.len());
+        Some((kind, floor))
+    } else {
+        None
+    };
     // lead #184 (spike only): `--stop-after-curves` ends the run after the curve stage (the curves' numbers alone)
     if args.iter().any(|a| a == "--stop-after-curves") {
         return Ok(());
@@ -3049,7 +3107,7 @@ fn main() -> Result<(), String> {
             RegionField::new(face, REGIONAL, (sri0 as i64, srj0 as i64), rw, rh, zs_l.iter().map(|&v| v as f32).collect()).with_read(r)
         });
         // h5d: the quads whose D8 diagonal step C1 dams (C1 at the quad's centre over the step line by more than 1 m); C1 at the centre is the mean of the four L cells there
-        let dams = (kh_form == "h5d" || kh_zone == "curve").then(|| {
+        let dams = (kh_form == "h5d" || (kh_zone == "curve" && KH_CURVE_DAMS.load(std::sync::atomic::Ordering::Relaxed))).then(|| {
             let rcv = |c: usize| (recv[c] != NONE).then(|| recv[c] as usize);
             // lead #184: with `--kh-zone curve` only the diagonals of rivers under 75 km2 (neither end an H1 channel cell); the trunks have their curves
             let small = |(a, b): (usize, usize)| kh_zone != "curve" || (!h1.hydro.channel[a] && !h1.hydro.channel[b]);
@@ -3209,6 +3267,12 @@ fn main() -> Result<(), String> {
                         v = c1 + wd * (h4c - c1).min(0.0);
                     }
                 }
+                // lead #184c: inside a kept-size S0 depression KH leaves C1 as it is
+                if let Some((kind, _)) = &keep_s0 {
+                    if kind[p] == 1 {
+                        return c1;
+                    }
+                }
                 if let Some((d, zb)) = &curve_near {
                     if d[p].is_finite() {
                         let zb = f64::from(zb[p]);
@@ -3220,6 +3284,12 @@ fn main() -> Result<(), String> {
                             let s = ((target - zb - 8.0) / 4.0).clamp(0.0, 1.0);
                             v += (1.0 - s * s * (3.0 - 2.0 * s)) * (target - v);
                         }
+                    }
+                }
+                // lead #184c: on a kept depression's rim ring S0 (KH + r) stays at its spill level or above where C1 stood there
+                if let Some((kind, fl)) = &keep_s0 {
+                    if kind[p] == 2 {
+                        v = v.max(c1.min(f64::from(fl[p]) - rl[p]));
                     }
                 }
                 return v;
@@ -5058,6 +5128,8 @@ fn main() -> Result<(), String> {
             ("trunk-curve", if TRUNK_CURVE.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("meander", if MEANDER.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("kv-wall-s0", if KV_WALL_S0.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("kh-keep-s0", if KH_KEEP_S0.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("kh-curve-dams", if KH_CURVE_DAMS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("curve-thalweg-slope", curve_thalweg.to_string()),
             ("inlet-floor", if INLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-floors", if BAND6_FLOORS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
