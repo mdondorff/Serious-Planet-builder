@@ -6,11 +6,11 @@ Verify: A
 Status: active
 Source: Lead 2026-11-24 (#193, owner O2 2026-11-23: planet primitives on main during G3, additive and output-neutral; the G3 port order's C1), GEN-139, COORD-007
 Detail:
-- bits: face in bits 60-62, `j` in bits 30-59, `i` in bits 0-29; 30 bits an axis hold 2^30 cells per face edge (`MAX_CELLS_PER_EDGE`), above the runtime's deepest level; bit 63 stays reserved (0); a cell outside `0..n`, a face over 5 or an `n` over 2^30 is refused;
+- bits: face in bits 60-62, `j` in bits 30-59, `i` in bits 0-29; 30 bits an axis hold 2^30 cells per face edge (`MAX_CELLS_PER_EDGE`), above the runtime's deepest level; bit 63 stays reserved (0); a cell outside `0..n`, a face over 5 or an `n` over 2^30 is refused; the id is private, built only by `new` or `from_raw` (which refuses a face over 5 or bit 63), and read by `raw`;
 - order: the `u64` order is (face, j, i); it is the canonical tie key of the seam-pair spill engine (GEN-191);
-- `step(n, di, dj)` for `|di|, |dj| <= 1`: inside the face the cell itself; one coordinate one step outside `0..n` with the other inside and an axis step, `fold_cell`; a diagonal that leaves the face, or both coordinates outside, has none;
-- `neighbours4(n)` (east, west, north, south) always exist; `neighbours8(n)` adds the diagonals that stay in the face: 8 inside a face, 6 on an edge, 5 at a face's corner cell;
-- `centre_point(n)`: the cell centre as a cube point in half-cell units (normal coordinate `n`, in-face coordinates `2 i + 1 - n`, `2 j + 1 - n`); `of_centre_point(p, n)` its inverse;
+- `step(n, di, dj)` for `|di|, |dj| <= 1`: inside the face the cell itself; one coordinate one step outside `0..n` with the other inside and an axis step, `fold_cell`; a diagonal that leaves the face, or both coordinates outside, has none; a cell outside the level `n` passed in has none (`in_level`; `neighbours4` panics on it, a caller's error);
+- `neighbours4(n)` (east, west, north, south) always exist; `neighbours8(n)` adds the diagonals that stay in the face: 8 inside a face, 6 on an edge, 5 at a face's corner cell (4 at `n = 1`);
+- `centre_point(n)`: the cell centre as a cube point in half-cell units (normal coordinate `n`, in-face coordinates `2 i + 1 - n`, `2 j + 1 - n`); `of_centre_point(p, n)` its inverse, None for a point off the cube's surface or a level out of range;
 - additive: no caller changes; hashes, goldens and the determinism manifest stay bit-identical.
 
 #### Scenario: Rotations and corners

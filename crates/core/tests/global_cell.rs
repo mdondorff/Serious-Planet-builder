@@ -44,13 +44,28 @@ fn rotate(m: &[[i64; 3]; 3], p: [i64; 3]) -> [i64; 3] {
 fn a_cell_packs_face_j_and_i_and_refuses_what_lies_outside_its_level() {
     let c = GlobalCell::new(Face(5), 1 << 20, 123_456, 654_321).unwrap();
     assert_eq!((c.face(), c.i(), c.j()), (Face(5), 123_456, 654_321));
-    assert_eq!(c.0 >> 63, 0, "bit 63 stays reserved");
+    assert_eq!(c.raw() >> 63, 0, "bit 63 stays reserved");
+    assert_eq!(GlobalCell::from_raw(c.raw()), Some(c));
+    assert!(GlobalCell::from_raw(7 << 60).is_none() && GlobalCell::from_raw(1 << 63).is_none(), "a face over 5 or bit 63 is no cell");
+    // numerics review: a cell of another level has no neighbour at this one, and no centre point lies off the cube
+    let big = GlobalCell::new(Face(0), 8, 7, 0).unwrap();
+    assert!(!big.in_level(4) && big.step(4, 0, 1).is_none(), "not a wrong fold");
+    assert!(GlobalCell::of_centre_point([i64::MAX; 3], 4).is_none() && GlobalCell::of_centre_point([i64::MIN; 3], 4).is_none());
     let top = GlobalCell::new(Face(5), MAX_CELLS_PER_EDGE, MAX_CELLS_PER_EDGE - 1, MAX_CELLS_PER_EDGE - 1).unwrap();
     assert_eq!(
-        (top.i(), top.j(), top.0 >> 63),
+        (top.i(), top.j(), top.raw() >> 63),
         (MAX_CELLS_PER_EDGE - 1, MAX_CELLS_PER_EDGE - 1, 0),
         "30 bits an axis, bit 63 free at the limit"
     );
+    // at the limit: the four corner cells and an edge cell of a face keep symmetric neighbours and round-trip their centres (no overflow)
+    let m = MAX_CELLS_PER_EDGE;
+    for (i, j) in [(0, 0), (m - 1, 0), (0, m - 1), (m - 1, m - 1), (m / 2, 0)] {
+        let c = GlobalCell::new(Face(3), m, i, j).unwrap();
+        assert_eq!(GlobalCell::of_centre_point(c.centre_point(m), m), Some(c));
+        for b in c.neighbours4(m) {
+            assert!(b.neighbours4(m).contains(&c), "{c:?} and {b:?} at 2^30 cells an edge");
+        }
+    }
     assert!(GlobalCell::new(Face(0), 4, 4, 0).is_none() && GlobalCell::new(Face(0), 4, 0, -1).is_none());
     assert!(GlobalCell::new(Face(6), 4, 0, 0).is_none() && GlobalCell::new(Face(0), MAX_CELLS_PER_EDGE + 1, 0, 0).is_none());
 }
@@ -74,6 +89,9 @@ fn the_id_order_is_face_then_row_then_column_the_seam_engines_tie_key() {
 fn neighbours_are_symmetric_and_no_diagonal_crosses_an_edge_or_a_corner() {
     for n in [1, 2, 4, 5] {
         for c in cells(n) {
+            if n == 1 {
+                assert_eq!(c.neighbours8(n).len(), 4, "one cell a face: its 4 axis neighbours only");
+            }
             let n4 = c.neighbours4(n);
             for b in n4 {
                 assert!(b.neighbours4(n).contains(&c), "n {n}: {c:?}'s axis neighbour {b:?} has it back");
@@ -157,6 +175,19 @@ fn global_cells_and_tile_neighbours_fold_alike() {
                     for b in g.neighbours8(n) {
                         assert!(t.contains(&(b.face().0, b.i() as u32, b.j() as u32)), "level {level}: {g:?}'s {b:?}");
                     }
+                    // numerics review, exactly: the in-face neighbours are the tile's in-face ones, and every axis step off the face has its folded cell
+                    let n8: BTreeSet<(u8, u32, u32)> = g.neighbours8(n).iter().map(|b| (b.face().0, b.i() as u32, b.j() as u32)).collect();
+                    let in_face = |s: &BTreeSet<(u8, u32, u32)>| s.iter().copied().filter(|c| c.0 == f.0).collect::<BTreeSet<_>>();
+                    assert_eq!(in_face(&n8), in_face(&t), "level {level}: {g:?}'s in-face neighbours");
+                    let off_axes = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                        .iter()
+                        .filter(|&&(dx, dy)| !(0..n).contains(&(i64::from(x) + dx)) || !(0..n).contains(&(i64::from(y) + dy)))
+                        .count();
+                    assert_eq!(
+                        n8.iter().filter(|c| c.0 != f.0).count(),
+                        off_axes,
+                        "level {level}: {g:?}: one folded cell per axis step off the face"
+                    );
                 }
             }
         }
