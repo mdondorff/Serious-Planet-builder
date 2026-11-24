@@ -1904,6 +1904,11 @@ fn l_rivers(z: &[f64], w: usize, h: usize, dx: f64, sea: f64, a_min: f64) -> Vec
 const INTENDED_MARK: f64 = 0.5;
 /// lead #203: a marked node's spill stays below its floor plus this many budgets (the field cannot name a basin deeper than the stages could move).
 const INTENDED_BUDGETS: f64 = 10.0;
+/// lead #203 (revised): an intended depression's area from this (m2; a 39 km province lattice does not decide small hollows).
+const INTENDED_MIN_M2: f64 = 10e6;
+/// lead #203 (revised): the mark is the basin term alone (bit 0); rift (bit 1) and foreland (bit 2) are uplifted provinces, back_arc x plateau_field never reaches 0.5
+/// (plateau_field fades where back_arc grows, classes.rs:520); bits 1 to 3 are recorded, never marking.
+const INTENDED_BITS: u8 = 1;
 /// lead #203: aridity P / PET under this makes an intended basin an `endorheic_candidate` (an input for O9's water balance, not a decision; ADR 0111 point 5).
 const ENDORHEIC_CANDIDATE_AI: f64 = 0.2;
 
@@ -1934,7 +1939,7 @@ fn intended_select(grid: &Grid, z: &[f64], outlet: &[bool], mark: &[u8], budget:
         for &c in &nd.own {
             size[k] += 1;
             area[k] += grid.cell_area(c);
-            if mark[c] != 0 {
+            if mark[c] & INTENDED_BITS != 0 {
                 marked[k] += 1;
                 terms[k] |= mark[c];
             }
@@ -1951,10 +1956,10 @@ fn intended_select(grid: &Grid, z: &[f64], outlet: &[bool], mark: &[u8], budget:
         .map(|k| {
             let nd = &hy.nodes[k];
             nd.spill.is_some_and(|sp| {
-                mark[nd.floor_cell] != 0
+                mark[nd.floor_cell] & INTENDED_BITS != 0
                     && 2 * marked[k] > size[k]
                     && sp.1 - nd.floor_m >= 2.0
-                    && area[k] >= 0.25e6
+                    && area[k] >= INTENDED_MIN_M2
                     && sp.1 < nd.floor_m + INTENDED_BUDGETS * budget[nd.floor_cell]
             })
         })
@@ -1991,6 +1996,44 @@ fn intended_select(grid: &Grid, z: &[f64], outlet: &[bool], mark: &[u8], budget:
         .collect();
     let cells: Vec<bool> = hy.node_of.iter().map(|&k| (k as usize) < nn && inside[k as usize]).collect();
     (chosen, cells)
+}
+
+/// lead #203 (revised, the lead's back-arc question): the closed arid depressions the mark misses: the largest hierarchy nodes with a spill, an area from INTENDED_MIN_M2, a
+/// depth from 2 m and aridity under ENDORHEIC_CANDIDATE_AI at the floor, whose floor is in no intended basin. Returns (floor, floor_m, spill_m, area_m2) per depression.
+fn arid_missed(grid: &Grid, z: &[f64], outlet: &[bool], ai: &[f64], intended: &[bool]) -> Vec<(usize, f64, f64, f64)> {
+    use planet_generators::bake::basins_rg::hierarchy;
+    let hy = hierarchy(grid, z, outlet);
+    let nn = hy.nodes.len();
+    let mut area = vec![0f64; nn];
+    for k in 0..nn {
+        let nd = &hy.nodes[k];
+        area[k] = nd.own.iter().map(|&c| grid.cell_area(c)).sum::<f64>() + nd.kids.iter().map(|&kid| area[kid as usize]).sum::<f64>();
+    }
+    let cand: Vec<bool> = (0..nn)
+        .map(|k| {
+            let nd = &hy.nodes[k];
+            nd.spill.is_some_and(|sp| {
+                area[k] >= INTENDED_MIN_M2
+                    && sp.1 - nd.floor_m >= 2.0
+                    && ai[nd.floor_cell] < ENDORHEIC_CANDIDATE_AI
+                    && !intended[nd.floor_cell]
+            })
+        })
+        .collect();
+    let mut above = vec![false; nn];
+    for k in (0..nn).rev() {
+        let par = hy.nodes[k].parent as usize;
+        if par < nn {
+            above[k] = cand[par] || above[par];
+        }
+    }
+    (0..nn)
+        .filter(|&k| cand[k] && !above[k])
+        .map(|k| {
+            let nd = &hy.nodes[k];
+            (nd.floor_cell, nd.floor_m, nd.spill.map_or(f64::NAN, |sp| sp.1), area[k])
+        })
+        .collect()
 }
 
 /// lead #203: one summary line of intended basins (count, km2, by term, endorheic candidates).
@@ -2523,10 +2566,9 @@ fn main() -> Result<(), String> {
         par_fill(&mut ai, w, threads, &|p| inputs.orography().aridity(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
         let by = |bit: u8| m.iter().filter(|&&v| (v as u8) & (1 << bit) != 0).count();
         println!(
-            "RG intended mark (lead #203, R23): {} of {} L cells marked; basin {} rift {} foreland {} back-arc {}",
-            m.iter().filter(|&&v| v != 0.0).count(),
-            m.len(),
+            "RG intended mark (lead #203, R23): {} of {} L cells marked (the basin term); recorded only: rift {} foreland {} back-arc {}",
             by(0),
+            m.len(),
             by(1),
             by(2),
             by(3)
@@ -3446,8 +3488,37 @@ fn main() -> Result<(), String> {
         let grid_d = Grid::new(w, h, dx_l).with_active(active.clone());
         // lead #203 (item 3): the marked depressions S0 already has, before any river stage (no field lowers the ground: R23 keeps only these)
         if intended_on {
-            let (it, _) = intended_select(&grid_d, &start, &outlet_d, &mark_l, &budget_l);
+            let (it, cells) = intended_select(&grid_d, &start, &outlet_d, &mark_l, &budget_l);
             println!("{}", intended_line(&format!("domain {d} on S0"), &it, &|c| ai_l[c]));
+            // the lead's back-arc question: closed arid depressions over the size floor that the mark misses, with the province terms at their floors
+            let missed = arid_missed(&grid_d, &start, &outlet_d, &ai_l, &cells);
+            let prov = inputs.lithology().provinces();
+            let mut t =
+                String::from("floor_cell,floor_m,spill_m,depth_m,area_km2,aridity,basin,rift,foreland,back_arc,craton,core,old_margin\n");
+            for &(c, fm, sm, a) in &missed {
+                let pr = prov.at(dir_of(x0 + (c % w) as i64, y0 + (c / w) as i64));
+                t += &format!(
+                    "{},{fm:.3},{sm:.3},{:.3},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4}\n",
+                    gid_l(c),
+                    sm - fm,
+                    a / 1e6,
+                    ai_l[c],
+                    pr.basin,
+                    pr.rift,
+                    pr.foreland,
+                    pr.back_arc,
+                    pr.craton,
+                    pr.core,
+                    pr.old_margin
+                );
+            }
+            std::fs::write(out_dir.join(format!("{tag}-arid-missed-d{d}.csv")), t).map_err(|e| e.to_string())?;
+            println!(
+                "RG intended basins (lead #203) domain {d}: {} closed arid depressions (>= {} km2, >= 2 m, P/PET < {ENDORHEIC_CANDIDATE_AI}) on S0 the mark misses, {:.2} km2",
+                missed.len(),
+                INTENDED_MIN_M2 / 1e6,
+                missed.iter().map(|m| m.3).sum::<f64>() / 1e6
+            );
         }
         let mut kept = vec![false; n_l];
         // lead #176a: each kept basin's rim (the cells beside its cells) at its recorded spill, a floor KV's cut and KC's breach keep (empty: no floor)
