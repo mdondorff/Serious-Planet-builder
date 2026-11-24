@@ -49,7 +49,8 @@ pub fn cell_solid_angle(n: i64, i: i64, j: i64) -> f64 {
     half * half * rows
 }
 
-/// The pairwise sum of `xs` (halves until at most 8 values, then in order): the fixed reduction of COORD-013's sums of cell areas.
+/// The pairwise sum of `xs` (halves until at most 8 values, then in order): the reduction of COORD-013's face and cube sums, over whole face rows. A sum
+/// that must not depend on a tile or region split (CON-30) uses an order-independent exact accumulation instead, pinned by its first caller.
 pub fn pairwise_sum(xs: &[f64]) -> f64 {
     if xs.len() <= 8 {
         return xs.iter().fold(0.0, |s, &x| s + x);
