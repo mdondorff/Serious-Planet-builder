@@ -1,0 +1,8 @@
+62895 profiles (every 4th curve point in the box); p50 / p90
+s0      slot depth   5.04 /  25.32 m; slots over 1 m  81.3 %, their half-depth width 2.91 / 5.08 cells ( 296 /  517 m); valley depth at +-8 cells   44.3 /  200.5 m; notch -1.94 / -0.08 m, over 2 m  0.3 %, over 5 m  0.0 %
+kh      slot depth   5.24 /  40.56 m; slots over 1 m  81.6 %, their half-depth width 2.93 / 4.78 cells ( 299 /  487 m); valley depth at +-8 cells   47.3 /  221.3 m; notch -2.46 / -0.05 m, over 2 m  0.3 %, over 5 m  0.2 %
+ks0     slot depth   5.22 /  40.79 m; slots over 1 m  81.1 %, their half-depth width 2.95 / 4.90 cells ( 300 /  499 m); valley depth at +-8 cells   47.6 /  221.6 m; notch -2.48 / -0.04 m, over 2 m  0.2 %, over 5 m  0.2 %
+ks1c    slot depth   5.31 /  40.94 m; slots over 1 m  81.8 %, their half-depth width 2.93 / 4.78 cells ( 298 /  487 m); valley depth at +-8 cells   47.5 /  221.6 m; notch -2.44 / -0.04 m, over 2 m  0.4 %, over 5 m  0.2 %
+band6c  slot depth   5.87 /  42.78 m; slots over 1 m  80.6 %, their half-depth width 2.85 / 4.62 cells ( 290 /  470 m); valley depth at +-8 cells   48.5 /  222.7 m; notch -2.29 /  0.00 m, over 2 m  1.5 %, over 5 m  0.6 %
+kv      slot depth   6.82 /  43.55 m; slots over 1 m  87.0 %, their half-depth width 2.82 / 4.28 cells ( 287 /  436 m); valley depth at +-8 cells   50.1 /  226.2 m; notch -2.44 /  0.01 m, over 2 m  2.0 %, over 5 m  0.8 %
+final   slot depth   6.73 /  42.90 m; slots over 1 m  86.1 %, their half-depth width 2.83 / 4.32 cells ( 288 /  440 m); valley depth at +-8 cells   49.9 /  225.4 m; notch -2.41 /  0.00 m, over 2 m  1.9 %, over 5 m  0.7 %

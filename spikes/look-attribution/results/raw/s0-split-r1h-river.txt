@@ -1,0 +1,8 @@
+r1h-def-crops river: crop 136 L cells at global L (66000, 8112); K5 delta at 17 x 17 H1 nodes: p50 -101.4 m, range -536.3 .. 20.0 m; high-pass window: x 8..72, y 8..72
+  B                    X8 +0.123 X6 +0.854 Xdiag +0.008; high-pass: dominant wavelength  32.0 L cells, crest at  90.0 deg, rms 1.62 m
+  B + K5 D NEAREST     X8 +3.000 X6 +0.179 Xdiag +0.136; high-pass: dominant wavelength  17.8 L cells, crest at 123.7 deg, rms 36.33 m
+  B + K5 D BILINEAR    X8 +2.988 X6 +0.148 Xdiag +0.430; high-pass: dominant wavelength  17.8 L cells, crest at 123.7 deg, rms 18.08 m
+  S0 = B + K7 READ     X8 +1.052 X6 +0.064 Xdiag +0.006; high-pass: dominant wavelength  17.8 L cells, crest at 123.7 deg, rms 23.92 m
+  K5 D NEAREST         X8 +3.000 X6 +0.179 Xdiag +0.136; high-pass: dominant wavelength  15.1 L cells, crest at 135.0 deg, rms 35.91 m
+  K5 D BILINEAR        X8 +3.000 X6 +0.151 Xdiag +0.436; high-pass: dominant wavelength  17.8 L cells, crest at 123.7 deg, rms 17.49 m
+  K7 READ (S0 - B)     X8 +1.062 X6 +0.071 Xdiag +0.006; high-pass: dominant wavelength  17.8 L cells, crest at 123.7 deg, rms 23.33 m
