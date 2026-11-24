@@ -166,6 +166,8 @@ fn main() -> Result<(), String> {
         inputs_id: class_inputs_key(&def, seed),
         height_bounds: (-11_000.0, 9_000.0),
         keep_channels: false,
+        // R24 (spike): the stage configs as a value of the spec; the default is the former process globals' default (B's bake as before)
+        stage: Default::default(),
     };
     let front = region_front(&spec, &base, &climate)?;
     let out = PathBuf::from(
