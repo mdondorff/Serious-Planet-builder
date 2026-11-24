@@ -41,6 +41,9 @@ pub struct Curve {
     pub offsets: Vec<(i8, i8)>,
     /// The share of the curve's points that meander (amplitude over zero).
     pub meander_share: f64,
+    /// Numerics review F1: 0 the curve's raster; 1 the base path's 4-connected raster, when a curve cell was sea, another node's anchor or above its point's room;
+    /// 2 the base path itself (8-connected), when that raster failed too.
+    pub fallback: u8,
 }
 
 fn dist(a: (f64, f64), b: (f64, f64)) -> f64 {
@@ -85,7 +88,17 @@ fn cell_of(q: (f64, f64), w: usize, h: usize) -> Option<usize> {
 
 /// The curve of a reach whose lowest path is `base` (window cells, up first): `water` is S0 with the ocean at the sea level, `width_m(f)` the river's width at the share `f`
 /// of the reach's length.
-pub fn build(base: &[usize], w: usize, h: usize, water: &[f64], ocean: &[bool], width_m: &dyn Fn(f64) -> f64, p: &CurveParams) -> Curve {
+/// `avoid(c)`: a cell no raster cell but the ends may take (other nodes' anchors).
+pub fn build(
+    base: &[usize],
+    w: usize,
+    h: usize,
+    water: &[f64],
+    ocean: &[bool],
+    avoid: &dyn Fn(usize) -> bool,
+    width_m: &dyn Fn(f64) -> f64,
+    p: &CurveParams,
+) -> Curve {
     let centre = |c: usize| ((c % w) as f64, (c / w) as f64);
     if base.len() < 2 {
         return Curve {
@@ -93,11 +106,13 @@ pub fn build(base: &[usize], w: usize, h: usize, water: &[f64], ocean: &[bool], 
             raster: base.to_vec(),
             offsets: vec![(0, 0); base.len()],
             meander_share: 0.0,
+            fallback: 0,
         };
     }
-    let ds = 0.5;
-    let raw = resample(&base.iter().map(|&c| centre(c)).collect::<Vec<_>>(), ds);
+    let raw = resample(&base.iter().map(|&c| centre(c)).collect::<Vec<_>>(), 0.5);
     let n = raw.len();
+    // numerics review F7: the samples' actual spacing (half a cell or a little less)
+    let ds = raw.windows(2).map(|s| dist(s[0], s[1])).sum::<f64>() / (n - 1) as f64;
     let zref: Vec<f64> = raw.iter().map(|&q| cell_of(q, w, h).map_or(f64::INFINITY, |c| water[c])).collect();
     let ok = |q: (f64, f64), i: usize, room: f64| cell_of(q, w, h).is_some_and(|c| !ocean[c] && water[c] <= zref[i] + room);
     // the smoothing: a symmetric Gaussian window, narrowed near the ends so both ends stay put
@@ -171,48 +186,83 @@ pub fn build(base: &[usize], w: usize, h: usize, water: &[f64], ocean: &[bool], 
         let mut wavy = 0usize;
         for i in 1..n - 1 {
             let q = disp(i, fm[i]);
-            pts[i] = if ok(q, i, p.room_m) { q } else { sm[i] };
+            // numerics review F6: a smoothed factor that leaves the room falls back to the point's own checked factor, not to no meander
+            pts[i] = if ok(q, i, p.room_m) {
+                q
+            } else if ok(disp(i, fac[i]), i, p.room_m) {
+                disp(i, fac[i])
+            } else {
+                sm[i]
+            };
             wavy += usize::from(wide[i] && fm[i] > 0.0);
         }
         share = wavy as f64 / n as f64;
     }
-    let (raster, offsets) = rasterise(&pts, w, h, water);
-    Curve { pts, raster, offsets, meander_share: share }
+    // numerics review F1: every raster cell but the ends is checked (not sea, no other node's anchor, within room_m of its point's path height); a failing curve falls
+    // back to its base path's 4-connected raster, then to the base path itself
+    let bad = |c: usize| ocean[c] || avoid(c);
+    let check = |cells: &[usize], at: &[usize], dn: usize, height: bool| {
+        let last = cells.len().saturating_sub(1);
+        cells.iter().enumerate().all(|(k, &c)| {
+            let i = if dn > 1 { (libm::round(at[k] as f64 / (dn - 1) as f64 * (n - 1) as f64) as usize).min(n - 1) } else { 0 };
+            k == 0 || k == last || (!bad(c) && (!height || water[c] <= zref[i] + p.room_m))
+        })
+    };
+    let (raster, offsets, at, dn) = rasterise(&pts, w, h, water, &bad);
+    if check(&raster, &at, dn, true) {
+        return Curve { pts, raster, offsets, meander_share: share, fallback: 0 };
+    }
+    let (r4, o4, a4, d4) = rasterise(&raw, w, h, water, &bad);
+    if check(&r4, &a4, d4, false) {
+        return Curve { pts: raw, raster: r4, offsets: o4, meander_share: 0.0, fallback: 1 };
+    }
+    Curve { pts: raw, raster: base.to_vec(), offsets: vec![(0, 0); base.len()], meander_share: 0.0, fallback: 2 }
 }
 
-/// The curve's 4-connected raster: the cells its points fall in, a diagonal step filled with the edge cell nearer the curve (ties the lower on `water`, then the lower id),
-/// loops cut at the first return to a cell; each cell's offset is the mean of its points' offsets from its centre, in 1/254 of a cell.
-pub fn rasterise(pts: &[(f64, f64)], w: usize, h: usize, water: &[f64]) -> (Vec<usize>, Vec<(i8, i8)>) {
+/// The curve's 4-connected raster: the cells its points fall in, a diagonal step filled with the edge cell not `bad` first, then the one nearer the curve (ties the lower on
+/// `water`, then the lower id), loops cut at the first return to a cell; each cell's offset is the mean of its points' offsets from its centre, in 1/254 of a cell (a fill
+/// cell has none: 0, 0). Also each cell's dense-sample index and the dense samples' count.
+pub fn rasterise(
+    pts: &[(f64, f64)],
+    w: usize,
+    h: usize,
+    water: &[f64],
+    bad: &dyn Fn(usize) -> bool,
+) -> (Vec<usize>, Vec<(i8, i8)>, Vec<usize>, usize) {
     let dense = resample(pts, 0.2);
+    let mut idx: Vec<usize> = Vec::new();
     let mut cells: Vec<usize> = Vec::new();
     let mut sums: Vec<(f64, f64, f64)> = Vec::new();
     let mut at: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
-    let mut push = |c: usize, q: Option<(f64, f64)>, cells: &mut Vec<usize>, sums: &mut Vec<(f64, f64, f64)>| {
-        if cells.last() == Some(&c) {
+    let mut push =
+        |c: usize, q: Option<(f64, f64)>, cells: &mut Vec<usize>, sums: &mut Vec<(f64, f64, f64)>, idx: &mut Vec<usize>, s: usize| {
+            if cells.last() == Some(&c) {
+                if let Some(q) = q {
+                    let s = sums.last_mut().expect("a cell");
+                    *s = (s.0 + q.0, s.1 + q.1, s.2 + 1.0);
+                }
+                return;
+            }
+            if let Some(&k) = at.get(&c) {
+                // a loop: back to the first visit
+                for d in cells.drain(k + 1..) {
+                    at.remove(&d);
+                }
+                sums.truncate(k + 1);
+                idx.truncate(k + 1);
+            } else {
+                at.insert(c, cells.len());
+                cells.push(c);
+                sums.push((0.0, 0.0, 0.0));
+                idx.push(s);
+            }
             if let Some(q) = q {
                 let s = sums.last_mut().expect("a cell");
                 *s = (s.0 + q.0, s.1 + q.1, s.2 + 1.0);
             }
-            return;
-        }
-        if let Some(&k) = at.get(&c) {
-            // a loop: back to the first visit
-            for d in cells.drain(k + 1..) {
-                at.remove(&d);
-            }
-            sums.truncate(k + 1);
-        } else {
-            at.insert(c, cells.len());
-            cells.push(c);
-            sums.push((0.0, 0.0, 0.0));
-        }
-        if let Some(q) = q {
-            let s = sums.last_mut().expect("a cell");
-            *s = (s.0 + q.0, s.1 + q.1, s.2 + 1.0);
-        }
-    };
+        };
     let mut prev: Option<(usize, (f64, f64))> = None;
-    for &q in &dense {
+    for (si, &q) in dense.iter().enumerate() {
         let Some(c) = cell_of(q, w, h) else { continue };
         if let Some((pc, pq)) = prev {
             let (mut cx, mut cy) = ((pc % w) as i64, (pc / w) as i64);
@@ -238,7 +288,10 @@ pub fn rasterise(pts: &[(f64, f64)], w: usize, h: usize, water: &[f64]) -> (Vec<
                     };
                     let (da, db) = (seg(ax, ay), seg(bx, by));
                     let (ia, ib) = (ay as usize * w + ax as usize, by as usize * w + bx as usize);
-                    if da < db || (da == db && (water[ia] < water[ib] || (water[ia] == water[ib] && ia < ib))) {
+                    let (ba, bb) = (bad(ia), bad(ib));
+                    if (!ba && bb)
+                        || (ba == bb && (da < db || (da == db && (water[ia] < water[ib] || (water[ia] == water[ib] && ia < ib)))))
+                    {
                         (ax, ay)
                     } else {
                         (bx, by)
@@ -246,13 +299,13 @@ pub fn rasterise(pts: &[(f64, f64)], w: usize, h: usize, water: &[f64]) -> (Vec<
                 };
                 (cx, cy) = step;
                 let sc = cy as usize * w + cx as usize;
-                push(sc, if sc == c { Some(q) } else { None }, &mut cells, &mut sums);
+                push(sc, if sc == c { Some(q) } else { None }, &mut cells, &mut sums, &mut idx, si);
             }
             if pc == c {
-                push(c, Some(q), &mut cells, &mut sums);
+                push(c, Some(q), &mut cells, &mut sums, &mut idx, si);
             }
         } else {
-            push(c, Some(q), &mut cells, &mut sums);
+            push(c, Some(q), &mut cells, &mut sums, &mut idx, si);
         }
         prev = Some((c, q));
     }
@@ -268,7 +321,7 @@ pub fn rasterise(pts: &[(f64, f64)], w: usize, h: usize, water: &[f64]) -> (Vec<
             (code(ox), code(oy))
         })
         .collect();
-    (cells, offsets)
+    (cells, offsets, idx, dense.len())
 }
 
 #[cfg(test)]
@@ -282,7 +335,7 @@ mod tests {
         let water = vec![0.0; w * h];
         // a diagonal line and a loop back
         let pts = vec![(2.0, 2.0), (20.0, 20.0), (25.0, 18.0), (21.0, 21.0), (35.0, 30.0)];
-        let (r, off) = rasterise(&pts, w, h, &water);
+        let (r, off, _, _) = rasterise(&pts, w, h, &water, &|_| false);
         assert_eq!(r[0], 2 * w + 2);
         assert_eq!(*r.last().unwrap(), 30 * w + 35);
         assert_eq!(r.len(), off.len());
@@ -302,8 +355,8 @@ mod tests {
         let ocean = vec![false; w * h];
         let base: Vec<usize> = (5..295).map(|x| 30 * w + x).collect();
         let p = CurveParams::standard(100.0, true);
-        let wide = build(&base, w, h, &water, &ocean, &|_| 100.0, &p);
-        let narrow = build(&base, w, h, &water, &ocean, &|_| 5.0, &p);
+        let wide = build(&base, w, h, &water, &ocean, &|_| false, &|_| 100.0, &p);
+        let narrow = build(&base, w, h, &water, &ocean, &|_| false, &|_| 5.0, &p);
         let len = |c: &Curve| c.pts.windows(2).map(|s| dist(s[0], s[1])).sum::<f64>();
         let chord = 289.0;
         let (sw, sn) = (len(&wide) / chord, len(&narrow) / chord);
@@ -317,7 +370,25 @@ mod tests {
                 walled[y * w + x] = 10.0;
             }
         }
-        let held = build(&base, w, h, &walled, &ocean, &|_| 100.0, &p);
+        let held = build(&base, w, h, &walled, &ocean, &|_| false, &|_| 100.0, &p);
         assert!(held.pts.iter().all(|&q| walled[cell_of(q, w, h).unwrap()] <= 20.0), "every point stays within room_m of the floor");
+        assert!(held.raster.iter().all(|&c| walled[c] <= 20.0), "and so does every raster cell (F1)");
+    }
+
+    // spec: lead #184 (spike; numerics review F1)
+    #[test]
+    fn a_diagonal_fill_takes_the_land_cell_and_no_raster_cell_is_sea_or_taken() {
+        let (w, h) = (40usize, 40usize);
+        let water = vec![0.0; w * h];
+        let pts = vec![(2.0, 2.0), (30.0, 30.0)];
+        // every cell below the diagonal is "sea": the fill must take the cells above it
+        let sea = |c: usize| (c / w) > (c % w);
+        let (r, _, _, _) = rasterise(&pts, w, h, &water, &sea);
+        assert!(r[1..r.len() - 1].iter().all(|&c| !sea(c)), "no fill cell is sea");
+        let ocean: Vec<bool> = (0..w * h).map(sea).collect();
+        let base: Vec<usize> = (2..=30).map(|i| i * w + i).collect();
+        let p = CurveParams::standard(100.0, false);
+        let c = build(&base, w, h, &water, &ocean, &|_| false, &|_| 5.0, &p);
+        assert!(c.raster[1..c.raster.len() - 1].iter().all(|&x| !ocean[x]), "fallback {}", c.fallback);
     }
 }

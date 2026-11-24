@@ -2786,7 +2786,8 @@ fn main() -> Result<(), String> {
                         let (base, _, _) = route_low(&ms0, &line, &[up, down], &taken)?;
                         let m = r.cells.len();
                         let qw_at = |f: f64| h1.hydro.qw[r.cells[(libm::round(f * (m - 1) as f64) as usize).min(m - 1)] as usize];
-                        let cv = curve::build(&base, w, h, &s0w, &ocean, &|f| law.width_m(qw_at(f)), &cp);
+                        let avoid = |c: usize| c != up && c != down && taken.contains(&c);
+                        let cv = curve::build(&base, w, h, &s0w, &ocean, &avoid, &|f| law.width_m(qw_at(f)), &cp);
                         // the bed along the curve: z_s along the reach's H1 cells at the same share of its length, never rising downstream
                         let n = cv.pts.len();
                         let mut zb = Vec::with_capacity(n);
@@ -2812,7 +2813,9 @@ fn main() -> Result<(), String> {
         let cell_m = grid.dx() / L as f64;
         let mut sin: Vec<f64> = Vec::new();
         let (mut pts_n, mut ras_n, mut wavy) = (0usize, 0usize, 0.0f64);
+        let mut fb = [0usize; 3];
         for (cv, _) in cs.iter().flatten() {
+            fb[cv.fallback as usize] += 1;
             pts_n += cv.pts.len();
             ras_n += cv.raster.len();
             wavy += cv.meander_share * cv.pts.len() as f64;
@@ -2825,9 +2828,12 @@ fn main() -> Result<(), String> {
         }
         sin.sort_by(f64::total_cmp);
         println!(
-            "RG trunk curves (lead #184): {} of {} H1 trunk reaches, {pts_n} points, {ras_n} raster cells; meander {} ({:.1} % of the points); curve sinuosity over 2 km p50 {:.3} ({} reaches); {:.1} s",
+            "RG trunk curves (lead #184): {} of {} H1 trunk reaches, {pts_n} points, {ras_n} raster cells (curve {}, base 4-connected {}, base 8-connected {}); meander {} ({:.1} % of the points); curve sinuosity over 2 km p50 {:.3} ({} reaches); {:.1} s",
             cs.iter().flatten().count(),
             reaches.len(),
+            fb[0],
+            fb[1],
+            fb[2],
             if cp.meander { "on" } else { "off" },
             100.0 * wavy / pts_n.max(1) as f64,
             sin.get(sin.len() / 2).copied().unwrap_or(f64::NAN),
@@ -2886,6 +2892,10 @@ fn main() -> Result<(), String> {
     // --regions 1 | 2
     // reading 25 (lead #168b): KH is h5 by default
     let kh = value(&args, "--kh").unwrap_or("h5");
+    // numerics review F4: the curve zone is h5's
+    if kh_zone == "curve" && !(kh == "h5" || kh == "h5d") {
+        return Err(format!("--kh-zone curve needs --kh h5 or h5d, not '{kh}'"));
+    }
     // spikes #147a: `h5d` is h5 plus h4c within 2 L cells of the D8 diagonal steps C1 dams (smoothstep to C1 by 4 L cells), the owner's decision-7 fallback
     if !["c1", "h2", "h4", "h4c", "h5", "h5d"].contains(&kh) {
         return Err(format!("--kh c1 | h2 | h4 | h4c | h5 | h5d, not '{kh}'"));
@@ -3122,21 +3132,32 @@ fn main() -> Result<(), String> {
             let r = 8i64;
             let mut d = vec![f32::INFINITY; n_l];
             let mut zb = vec![0f32; n_l];
+            // numerics review F2: the distance to the curve's segments (not to its points), less 0.71 L cells, so the raster's own cells (centres up to 0.71 cells from
+            // the curve) lie on the thalweg; the bed interpolated along the segment
             for (cv, z) in curves.as_ref().expect("curves").iter().flatten() {
-                for (i, &(px, py)) in cv.pts.iter().enumerate() {
-                    let (cx, cy) = (libm::round(px) as i64, libm::round(py) as i64);
-                    for y in (cy - r).max(0)..=(cy + r).min(h as i64 - 1) {
-                        for x in (cx - r).max(0)..=(cx + r).min(w as i64 - 1) {
-                            let dd = libm::hypot(x as f64 - px, y as f64 - py) as f32;
+                for i in 0..cv.pts.len().saturating_sub(1) {
+                    let ((ax, ay), (bx, by)) = (cv.pts[i], cv.pts[i + 1]);
+                    let (vx, vy) = (bx - ax, by - ay);
+                    let l2 = vx * vx + vy * vy;
+                    let (lx, hx) = ((ax.min(bx) - r as f64).floor() as i64, (ax.max(bx) + r as f64).ceil() as i64);
+                    let (ly, hy) = ((ay.min(by) - r as f64).floor() as i64, (ay.max(by) + r as f64).ceil() as i64);
+                    for y in ly.max(0)..=hy.min(h as i64 - 1) {
+                        for x in lx.max(0)..=hx.min(w as i64 - 1) {
+                            let t = if l2 > 0.0 { (((x as f64 - ax) * vx + (y as f64 - ay) * vy) / l2).clamp(0.0, 1.0) } else { 0.0 };
+                            let dd = ((libm::hypot(x as f64 - ax - t * vx, y as f64 - ay - t * vy) - 0.71).max(0.0)) as f32;
                             let c = y as usize * w + x as usize;
                             if dd <= r as f32 && dd < d[c] {
                                 d[c] = dd;
-                                zb[c] = z[i] as f32;
+                                zb[c] = (z[i] + t * (z[i + 1] - z[i])) as f32;
                             }
                         }
                     }
                 }
             }
+            // numerics review F5: the H1 channel cells no curve covers (their trunk reach has none: no anchor, up = down, no route, or unfed in a basin)
+            let bare =
+                (0..cells).filter(|&c| h1.hydro.channel[c] && !d[((c / rw) * L + L / 2) * w + (c % rw) * L + L / 2].is_finite()).count();
+            println!("RG KH curve zone: {bare} H1 channel cells outside every curve's zone (C1 there)");
             println!(
                 "RG KH curve zone (lead #184): {} L cells within 8 L cells of a trunk curve",
                 d.iter().filter(|v| v.is_finite()).count()
@@ -3168,8 +3189,9 @@ fn main() -> Result<(), String> {
                         let zb = f64::from(zb[p]);
                         let target = zb + s0_slope(p).max(curve_thalweg) * f64::from(d[p]) * cell_m;
                         if target < v {
-                            // width form 1 (#184a): only below the bed + 10 m, blended to C1 above (8 to 12 m)
-                            let s = ((target - zb - 8.0) / 4.0).clamp(0.0, 1.0);
+                            // width form 1 (#184a): only cells standing below the bed + 10 m, blended to C1 above (8 to 12 m; numerics review F3: the cell's own
+                            // height above the bed, so a terrace or spur by the curve is not cut)
+                            let s = ((v - zb - 8.0) / 4.0).clamp(0.0, 1.0);
                             v += (1.0 - s * s * (3.0 - 2.0 * s)) * (target - v);
                         }
                     }
