@@ -740,3 +740,316 @@ pub fn level_floor(z: &[f64], w: usize, h: usize, outlet: &[bool]) -> Vec<f64> {
     let level = fill_level(z, w, h, outlet);
     (0..w * h).map(|p| if level[p] > z[p] + TOL && level[p].is_finite() { level[p] } else { f64::NEG_INFINITY }).collect()
 }
+
+// ---- crusader #208 (spike only): the selective drain on any `Grid` (a face window, the cube grid, a region's domain on it) and its join hooks for the wave runner.
+// The functions above are untouched, so the chain keeps its bits. These repeat their rule with the neighbours of a `Grid`: on a plane `Grid` of `w x h` they are the same cells in the same
+// order (D8's order as `Grid::neighbour`'s directions), so the bits are the same (`the_drain_on_a_plane_grid_is_the_drain`). On the cube grid the index is the cube id, so the ties by the index are
+// ties by a partition-free id.
+
+/// D8's order (`D8`) as `Grid::neighbour`'s directions (`bake::NEIGHBOURS`).
+const D8_DIR: [usize; 8] = [4, 2, 5, 0, 1, 6, 3, 7];
+
+fn grid_neighbours(g: &super::Grid, p: usize) -> impl Iterator<Item = usize> + '_ {
+    D8_DIR.iter().filter_map(move |&d| g.neighbour(p, d))
+}
+
+/// [`fill_level`] on a `Grid`.
+pub fn fill_level_on(g: &super::Grid, z: &[f64], outlet: &[bool]) -> Vec<f64> {
+    let n = g.len();
+    let mut level = vec![f64::INFINITY; n];
+    let mut heap = BinaryHeap::new();
+    for p in (0..n).filter(|&p| outlet[p]) {
+        level[p] = z[p];
+        heap.push(Key(z[p], p as u32));
+    }
+    while let Some(Key(l, c)) = heap.pop() {
+        let c = c as usize;
+        if l > level[c] {
+            continue;
+        }
+        for q in grid_neighbours(g, c) {
+            let lq = z[q].max(l);
+            if lq < level[q] {
+                level[q] = lq;
+                heap.push(Key(lq, q as u32));
+            }
+        }
+    }
+    level
+}
+
+/// [`depressions`] on a `Grid`.
+pub fn depressions_on(g: &super::Grid, z: &[f64], level: &[f64]) -> (Vec<u32>, Vec<(Vec<u32>, usize)>) {
+    let n = g.len();
+    let mut label = vec![u32::MAX; n];
+    let mut comps = Vec::new();
+    let mut stack = Vec::new();
+    for s in 0..n {
+        if label[s] != u32::MAX || !(level[s] > z[s] + TOL) || !level[s].is_finite() {
+            continue;
+        }
+        let id = comps.len() as u32;
+        label[s] = id;
+        stack.push(s);
+        let mut cells = Vec::new();
+        let mut floor = s;
+        while let Some(c) = stack.pop() {
+            cells.push(c as u32);
+            if z[c] < z[floor] || (z[c] == z[floor] && c < floor) {
+                floor = c;
+            }
+            for q in grid_neighbours(g, c) {
+                if label[q] == u32::MAX && level[q] > z[q] + TOL && level[q] == level[s] {
+                    label[q] = id;
+                    stack.push(q);
+                }
+            }
+        }
+        cells.sort_unstable();
+        comps.push((cells, floor));
+    }
+    (label, comps)
+}
+
+/// The arguments of [`drain_selective_floors`] besides the grid, the surface and the outlets.
+pub struct SelParams<'a> {
+    pub keep: &'a dyn Fn(usize) -> bool,
+    pub area: &'a dyn Fn(usize) -> f64,
+    pub max_rounds: usize,
+    pub search: usize,
+    pub cut_cap: &'a dyn Fn(usize) -> f64,
+    pub fill_cap: &'a dyn Fn(usize) -> f64,
+    pub cell_lo: &'a dyn Fn(usize) -> f64,
+}
+
+/// One round's shared input: the fill level of the surface, its depressions and the active ones (none holds a kept cell). A partitioned run takes it from the planet-wide fill
+/// (GEN-121, GEN-191); here it is computed on the whole grid.
+pub struct SelRound {
+    pub level: Vec<f64>,
+    pub label: Vec<u32>,
+    pub comps: Vec<(Vec<u32>, usize)>,
+    pub active: Vec<usize>,
+}
+
+pub fn sel_round(g: &super::Grid, z: &[f64], outlet: &[bool], p: &SelParams) -> SelRound {
+    let level = fill_level_on(g, z, outlet);
+    let (label, comps) = depressions_on(g, z, &level);
+    let active = (0..comps.len()).filter(|&k| !comps[k].0.iter().any(|&c| (p.keep)(c as usize))).collect();
+    SelRound { level, label, comps, active }
+}
+
+/// A region's search domain: the cells a search may enter, and its border (the domain's cells with a neighbour outside it).
+pub struct SearchDomain<'a> {
+    pub inside: &'a [bool],
+    pub border: &'a [bool],
+}
+
+/// One depression's decision in a round.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SelDecision {
+    /// The path from the floor (its k-th cell lowered to `floor - DELTA k`), its deepest cut and its volume.
+    Breach {
+        path: Vec<u32>,
+        cut: f64,
+        volume: f64,
+    },
+    Fill,
+    /// Neither (both over their caps); its least cut (+inf when no path was found).
+    Deep {
+        cut: f64,
+    },
+    /// The search reached the domain's border before an exit: decided by the join, on the whole grid.
+    Candidate,
+}
+
+/// [`drain_selective_floors`]'s decision for active depression `k`, with the search restricted to `dom` when given. Exact in the domain: a search that pops a border cell, or reaches
+/// an exit while a border cell's tentative cost is not above the exit's, is a [`SelDecision::Candidate`]; otherwise every cell it popped has its unrestricted cost and parent, so
+/// the decision is the unrestricted one (the settle limit included: the pops are the same).
+pub fn sel_decide(
+    g: &super::Grid,
+    z: &[f64],
+    outlet: &[bool],
+    r: &SelRound,
+    k: usize,
+    p: &SelParams,
+    dom: Option<&SearchDomain>,
+) -> SelDecision {
+    let outlet_floors = OUTLET_FLOORS.load(std::sync::atomic::Ordering::Relaxed);
+    let outlet_free = |q: usize| outlet[q] && !outlet_floors;
+    let (cells, floor) = &r.comps[k];
+    let floor = *floor;
+    let zf = z[floor];
+    let lv = r.level[cells[0] as usize];
+    let fill_v: f64 = cells.iter().map(|&c| (lv - z[c as usize]) * (p.area)(c as usize)).sum();
+    let mut dist: std::collections::HashMap<usize, (f64, u32)> = std::collections::HashMap::new();
+    let mut heap = BinaryHeap::new();
+    dist.insert(floor, (0.0, u32::MAX));
+    heap.push(Key(0.0, floor as u32));
+    let limit = 4 * cells.len() + p.search;
+    let (mut settled, mut end, mut border_min) = (0usize, None, f64::INFINITY);
+    let by_length = BREACH_BY_LENGTH.load(std::sync::atomic::Ordering::Relaxed);
+    let square = BREACH_SQUARE.load(std::sync::atomic::Ordering::Relaxed);
+    let (w, _) = g.layout();
+    while let Some(Key(d, c)) = heap.pop() {
+        let c = c as usize;
+        if d > dist[&c].0 {
+            continue;
+        }
+        if dom.is_some_and(|m| m.border[c]) {
+            return SelDecision::Candidate;
+        }
+        if c != floor && r.label[c] != k as u32 && (outlet[c] || r.level[c] < zf - TOL) {
+            if border_min <= d {
+                return SelDecision::Candidate;
+            }
+            end = Some(c);
+            break;
+        }
+        settled += 1;
+        if settled > limit {
+            break;
+        }
+        for q in grid_neighbours(g, c) {
+            if dom.is_some_and(|m| !m.inside[q]) {
+                continue;
+            }
+            if !outlet_free(q) && z[q] > zf && zf < (p.cell_lo)(q) {
+                continue;
+            }
+            let nd = if square {
+                let cut = (z[q] - zf).max(0.0);
+                d + cut * cut
+            } else if by_length {
+                let len = if q % w != c % w && q / w != c / w { std::f64::consts::SQRT_2 } else { 1.0 };
+                d + len * ((z[q] - zf).max(0.0) + LENGTH_COST_M)
+            } else {
+                d + (z[q] - zf).max(0.0)
+            };
+            if dist.get(&q).is_none_or(|&(b, _)| nd < b) {
+                dist.insert(q, (nd, c as u32));
+                heap.push(Key(nd, q as u32));
+                if dom.is_some_and(|m| m.border[q]) {
+                    border_min = border_min.min(nd);
+                }
+            }
+        }
+    }
+    let mut path = Vec::new();
+    if let Some(e) = end {
+        let mut c = e;
+        path.push(c);
+        while dist[&c].1 != u32::MAX {
+            c = dist[&c].1 as usize;
+            path.push(c);
+        }
+        path.reverse();
+    }
+    let fill_ok = lv - zf <= (p.fill_cap)(floor);
+    let (breach_ok, breach_v, cut) = if path.is_empty() {
+        (false, f64::INFINITY, f64::INFINITY)
+    } else {
+        let v: f64 = path.iter().enumerate().map(|(i, &c)| (z[c] - z[c].min(zf - DELTA * i as f64)).max(0.0) * (p.area)(c)).sum();
+        let cut: f64 = path.iter().enumerate().map(|(i, &c)| z[c] - z[c].min(zf - DELTA * i as f64)).fold(0.0, f64::max);
+        let max_len = BREACH_MAX_LEN.load(std::sync::atomic::Ordering::Relaxed);
+        let floors_ok = path
+            .iter()
+            .enumerate()
+            .all(|(i, &c)| outlet_free(c) || z[c] <= zf - DELTA * i as f64 || zf - DELTA * i as f64 >= (p.cell_lo)(c));
+        (floors_ok && cut <= (p.cut_cap)(floor) && (max_len == 0 || path.len() <= max_len), v, cut)
+    };
+    let prefer_fill = PREFER_FILL.load(std::sync::atomic::Ordering::Relaxed);
+    let hump = HUMP_LIMIT_MICRO.load(std::sync::atomic::Ordering::Relaxed);
+    let breach_ok = breach_ok && (hump == 0 || cut <= hump as f64 * 1.0e-6);
+    if breach_ok && (!fill_ok || (!prefer_fill && breach_v <= fill_v)) {
+        SelDecision::Breach { path: path.iter().map(|&c| c as u32).collect(), cut, volume: breach_v }
+    } else if fill_ok {
+        SelDecision::Fill
+    } else {
+        SelDecision::Deep { cut }
+    }
+}
+
+/// Applies a round's decisions to the cells `owned` selects: every fill (to its level, by max), then every breach (to `floor - DELTA k`, by min), as [`drain_selective_floors`].
+pub fn sel_apply(z0: &[f64], z: &mut [f64], r: &SelRound, decisions: &[(usize, SelDecision)], owned: &dyn Fn(usize) -> bool) {
+    for (k, dec) in decisions {
+        if *dec == SelDecision::Fill {
+            let lv = r.level[r.comps[*k].0[0] as usize];
+            for &c in r.comps[*k].0.iter().filter(|&&c| owned(c as usize)) {
+                z[c as usize] = z[c as usize].max(lv);
+            }
+        }
+    }
+    for (k, dec) in decisions {
+        if let SelDecision::Breach { path, .. } = dec {
+            let zf = z0[r.comps[*k].1];
+            for (i, &c) in path.iter().enumerate().filter(|(_, &c)| owned(c as usize)) {
+                z[c as usize] = z[c as usize].min(zf - DELTA * i as f64);
+            }
+        }
+    }
+}
+
+/// [`drain_selective_floors`] on a `Grid`, composed of the hooks above (the unpartitioned run: every decision on the whole grid). No breach record.
+pub fn drain_selective_floors_on(g: &super::Grid, z0: &[f64], outlet: &[bool], p: &SelParams) -> (Vec<f64>, DrainStats) {
+    let mut z = z0.to_vec();
+    let mut st = DrainStats::default();
+    for round in 0..p.max_rounds {
+        let r = sel_round(g, &z, outlet, p);
+        st.rounds = round + 1;
+        if r.active.is_empty() {
+            st.kept = r.comps.len();
+            return (z, st);
+        }
+        st.depressions += r.active.len();
+        let decisions: Vec<(usize, SelDecision)> = r.active.iter().map(|&k| (k, sel_decide(g, &z, outlet, &r, k, p, None))).collect();
+        st.deep = decisions.iter().filter(|(_, d)| matches!(d, SelDecision::Deep { .. })).count();
+        let changed = decisions.iter().any(|(_, d)| matches!(d, SelDecision::Fill | SelDecision::Breach { .. }));
+        if !changed {
+            break;
+        }
+        st.filled += decisions.iter().filter(|(_, d)| *d == SelDecision::Fill).count();
+        st.breached += decisions.iter().filter(|(_, d)| matches!(d, SelDecision::Breach { .. })).count();
+        let zr = z.clone();
+        sel_apply(&zr, &mut z, &r, &decisions, &|_| true);
+    }
+    let level = fill_level_on(g, &z, outlet);
+    let (_, comps) = depressions_on(g, &z, &level);
+    let intended = comps.iter().filter(|(cells, _)| cells.iter().any(|&c| (p.keep)(c as usize))).count();
+    st.kept = intended;
+    st.left = comps.len() - intended;
+    (z, st)
+}
+
+#[cfg(test)]
+mod on_grid_tests {
+    use super::*;
+
+    // spike only (crusader #208): the generic drain on a plane grid is today's drain, bit for bit, on random relief with floors, kept cells and caps
+    #[test]
+    fn the_drain_on_a_plane_grid_is_the_drain() {
+        let (w, h) = (61usize, 47usize);
+        let mut z = vec![0.0f64; w * h];
+        let mut s = 0x1234_5678_9abc_def0u64;
+        for v in z.iter_mut() {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            *v = (s % 4000) as f64 / 40.0;
+        }
+        let outlet: Vec<bool> = (0..w * h).map(|p| p % w == 0 || z[p] < 2.0).collect();
+        let keep = |p: usize| p == 17 * w + 30;
+        let cap = |p: usize| 20.0 + (p % 7) as f64;
+        let lo = |p: usize| if p % 11 == 0 { 30.0 } else { f64::NEG_INFINITY };
+        let area = |p: usize| 1.0 + (p % 3) as f64 * 0.25;
+        let (a, sa, _) = drain_selective_floors(&z, w, h, &outlet, &keep, &area, 8, 4096, &cap, &cap, &lo);
+        let g = super::super::Grid::new(w, h, 1.0);
+        let p = SelParams { keep: &keep, area: &area, max_rounds: 8, search: 4096, cut_cap: &cap, fill_cap: &cap, cell_lo: &lo };
+        let (b, sb) = drain_selective_floors_on(&g, &z, &outlet, &p);
+        assert!(sa.breached > 0 && sa.filled > 0, "the relief has breaches and fills: {sa:?}");
+        assert!(a.iter().zip(&b).all(|(x, y)| x.to_bits() == y.to_bits()), "the same bits");
+        assert_eq!(
+            (sa.rounds, sa.depressions, sa.filled, sa.breached, sa.deep),
+            (sb.rounds, sb.depressions, sb.filled, sb.breached, sb.deep)
+        );
+    }
+}

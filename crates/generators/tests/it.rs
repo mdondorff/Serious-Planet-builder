@@ -192,5 +192,7 @@ mod uplift;
 mod water;
 #[path = "water_summary.rs"]
 mod water_summary;
+#[path = "wave_runner.rs"]
+mod wave_runner;
 #[path = "wet_floor.rs"]
 mod wet_floor;
