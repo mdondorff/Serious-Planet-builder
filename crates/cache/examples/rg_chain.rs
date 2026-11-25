@@ -1927,8 +1927,8 @@ struct Intended {
 
 /// lead #203 (R23): the intended basins of `z`: per marked floor the largest hierarchy node whose floor cell is marked, more than half of whose cells are marked, whose spill
 /// stays below `floor + INTENDED_BUDGETS x budget(floor)`, and which has basins-2's kept size (0.25 km2, 2 m); a closed tree (no spill) is none. Returns them by node id and the
-/// cells inside them. Single-threaded, the hierarchy's fixed order (CON-14).
-fn intended_select(grid: &Grid, z: &[f64], outlet: &[bool], mark: &[u8], budget: &[f64]) -> (Vec<Intended>, Vec<bool>) {
+/// cells inside them, as the index of their intended basin (`u32::MAX` outside). Single-threaded, the hierarchy's fixed order (CON-14).
+fn intended_select(grid: &Grid, z: &[f64], outlet: &[bool], mark: &[u8], budget: &[f64]) -> (Vec<Intended>, Vec<u32>) {
     use planet_generators::bake::basins_rg::hierarchy;
     let hy = hierarchy(grid, z, outlet);
     let nn = hy.nodes.len();
@@ -1966,20 +1966,27 @@ fn intended_select(grid: &Grid, z: &[f64], outlet: &[bool], mark: &[u8], budget:
         .collect();
     // parents have larger ids: one descending pass finds a qualifying ancestor
     let mut above = vec![false; nn];
-    let mut inside = vec![false; nn];
     for k in (0..nn).rev() {
         let par = hy.nodes[k].parent as usize;
         if par < nn {
             above[k] = qual[par] || above[par];
-            inside[k] = inside[par];
-        }
-        if qual[k] && !above[k] {
-            inside[k] = true;
         }
     }
-    let chosen: Vec<Intended> = (0..nn)
-        .filter(|&k| qual[k] && !above[k])
-        .map(|k| {
+    let picked: Vec<usize> = (0..nn).filter(|&k| qual[k] && !above[k]).collect();
+    // the intended basin each node lies in (its index in `picked`), top-down
+    let mut owner = vec![u32::MAX; nn];
+    for (i, &k) in picked.iter().enumerate() {
+        owner[k] = i as u32;
+    }
+    for k in (0..nn).rev() {
+        let par = hy.nodes[k].parent as usize;
+        if owner[k] == u32::MAX && par < nn {
+            owner[k] = owner[par];
+        }
+    }
+    let chosen: Vec<Intended> = picked
+        .iter()
+        .map(|&k| {
             let nd = &hy.nodes[k];
             let sp = nd.spill.expect("a qualifying node spills");
             Intended {
@@ -1994,7 +2001,7 @@ fn intended_select(grid: &Grid, z: &[f64], outlet: &[bool], mark: &[u8], budget:
             }
         })
         .collect();
-    let cells: Vec<bool> = hy.node_of.iter().map(|&k| (k as usize) < nn && inside[k as usize]).collect();
+    let cells: Vec<u32> = hy.node_of.iter().map(|&k| if (k as usize) < nn { owner[k as usize] } else { u32::MAX }).collect();
     (chosen, cells)
 }
 
@@ -2090,6 +2097,16 @@ fn main() -> Result<(), String> {
         "on" => true,
         v => return Err(format!("--intended-basins off | on, not '{v}'")),
     };
+    // lead #203b: `--intended-mark T` the basin term's threshold (default INTENDED_MARK); `--intended-scan T,T,...` prints the S0 table per threshold and stops before KH
+    let intended_mark: f64 = match value(&args, "--intended-mark") {
+        None => INTENDED_MARK,
+        Some(v) => v.parse().map_err(|_| format!("--intended-mark T, not '{v}'"))?,
+    };
+    let intended_scan: Vec<f64> = match value(&args, "--intended-scan") {
+        None => Vec::new(),
+        Some(v) => v.split(',').map(str::parse).collect::<Result<_, _>>().map_err(|_| format!("--intended-scan T,T,..., not '{v}'"))?,
+    };
+    let intended_on = intended_on || !intended_scan.is_empty();
     // lead #202 (O7): `--base fill` is the pit-reduced S0 proxy: stages 1 and 3 fill every depression to its spill (no breach), stage 6 as under aplus
     let base_form = value(&args, "--base").unwrap_or("aplus");
     if !["aplus", "today", "fill"].contains(&base_form) {
@@ -2552,31 +2569,26 @@ fn main() -> Result<(), String> {
     par_fill(&mut rl, w, threads, &|p| bl[p] - zb_field.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
     let mut start = vec![0f64; w * h];
     par_fill(&mut start, w, threads, &|p| bl[p] + regional_read.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
-    // lead #203 (R23): the tectonic mark per L cell, one bit per province term at or over INTENDED_MARK (bit 0 basin, 1 rift, 2 foreland, 3 back-arc), and the aridity for
-    // `endorheic_candidate`; empty when the switch is off
-    let (mark_l, ai_l): (Vec<u8>, Vec<f64>) = if intended_on {
+    // lead #203 (R23): the basin term per L cell (the mark: bit 0 where it is at or over `--intended-mark`), and the aridity for `endorheic_candidate`; empty when off
+    let (basin_l, ai_l): (Vec<f64>, Vec<f64>) = if intended_on {
         let prov = inputs.lithology().provinces();
-        let mut m = vec![0f64; w * h];
-        par_fill(&mut m, w, threads, &|p| {
-            let pr = prov.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64));
-            let bit = |v: f64, k: u8| if v >= INTENDED_MARK { 1u8 << k } else { 0 };
-            f64::from(bit(pr.basin, 0) | bit(pr.rift, 1) | bit(pr.foreland, 2) | bit(pr.back_arc, 3))
-        });
+        let mut b = vec![0f64; w * h];
+        par_fill(&mut b, w, threads, &|p| prov.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)).basin);
         let mut ai = vec![0f64; w * h];
         par_fill(&mut ai, w, threads, &|p| inputs.orography().aridity(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
-        let by = |bit: u8| m.iter().filter(|&&v| (v as u8) & (1 << bit) != 0).count();
-        println!(
-            "RG intended mark (lead #203, R23): {} of {} L cells marked (the basin term); recorded only: rift {} foreland {} back-arc {}",
-            by(0),
-            m.len(),
-            by(1),
-            by(2),
-            by(3)
-        );
-        (m.iter().map(|&v| v as u8).collect(), ai)
+        (b, ai)
     } else {
         (Vec::new(), Vec::new())
     };
+    let mark_of = |t: f64| -> Vec<u8> { basin_l.iter().map(|&v| u8::from(v >= t)).collect() };
+    let mark_l: Vec<u8> = if intended_on { mark_of(intended_mark) } else { Vec::new() };
+    if intended_on {
+        println!(
+            "RG intended mark (lead #203, R23): {} of {} L cells marked (basin term >= {intended_mark})",
+            mark_l.iter().filter(|&&v| v != 0).count(),
+            mark_l.len()
+        );
+    }
     {
         use std::sync::atomic::Ordering::Relaxed;
         let o = &planet_generators::bake::k7::REGION_OVERSHOOT;
@@ -3268,6 +3280,102 @@ fn main() -> Result<(), String> {
     // reading 28 (lead #170 item 7): the budget's size field relief10 on S0; the lowering it limits is measured against S_KH (reading 21)
     // lead #163 (B3, result-preserving): the budget field on `threads` threads (each block's value is computed alone, so the bits are the serial ones)
     let budget_l = planet_cache::rg_budget::budget_field_threads(&start, w, h, L, dx_l, 25_000.0, threads);
+    // lead #203b: the intended set is fixed on S0 (outlets: the sea and the window's edge, a single domain's) and every stage keeps it: an intended basin's interior stays as
+    // S0 has it, and its rim ring (its cells' 8-neighbours outside it) is never lowered below min(spill, S0); basins-2 keeps exactly this set (it ranks first)
+    let in_window_edge = |p: usize| p % w == 0 || p / w == 0 || p % w == w - 1 || p / w == h - 1;
+    let s0_set: Option<(Vec<Intended>, Vec<u32>)> = intended_on.then(|| {
+        if regions > 1 {
+            println!("RG intended basins (lead #203b): the S0 set uses the single-domain outlets; {regions} regions run on it as well");
+        }
+        let grid0 = Grid::new(w, h, dx_l);
+        let outlet0: Vec<bool> = (0..n_l).map(|p| is_sea(p) || in_window_edge(p)).collect();
+        if !intended_scan.is_empty() {
+            for &t in &intended_scan {
+                let m = mark_of(t);
+                let (it, own) = intended_select(&grid0, &start, &outlet0, &m, &budget_l);
+                let inside: Vec<bool> = own.iter().map(|&o| o != u32::MAX).collect();
+                let missed = arid_missed(&grid0, &start, &outlet0, &ai_l, &inside);
+                let km2 = |v: &[&Intended]| v.iter().map(|b| b.area_m2).sum::<f64>() / 1e6;
+                let arid: Vec<&Intended> = it.iter().filter(|b| ai_l[b.floor] < ENDORHEIC_CANDIDATE_AI).collect();
+                let humid: Vec<&Intended> = it.iter().filter(|b| ai_l[b.floor] >= ENDORHEIC_CANDIDATE_AI).collect();
+                println!(
+                    "RG intended scan (lead #203b) t={t:.2}: marked {} L cells; intended {} ({:.1} km2); arid caught {} ({:.1} km2); humid {} ({:.1} km2); arid missed {} ({:.1} km2)",
+                    m.iter().filter(|&&v| v != 0).count(),
+                    it.len(),
+                    km2(&it.iter().collect::<Vec<_>>()),
+                    arid.len(),
+                    km2(&arid),
+                    humid.len(),
+                    km2(&humid),
+                    missed.len(),
+                    missed.iter().map(|x| x.3).sum::<f64>() / 1e6
+                );
+            }
+        }
+        intended_select(&grid0, &start, &outlet0, &mark_l, &budget_l)
+    });
+    if !intended_scan.is_empty() {
+        println!("RG intended scan (lead #203b): done, stopping before KH");
+        return Ok(());
+    }
+    if let Some((it, _)) = &s0_set {
+        println!("{}", intended_line("on S0 (the fixed set)", it, &|c| ai_l[c]));
+    }
+    // the rim ring: per cell outside every intended basin, the highest min(spill, S0) of an intended basin among its 8 neighbours
+    let ring_floor: Vec<f64> = match &s0_set {
+        None => Vec::new(),
+        Some((it, own)) => (0..n_l)
+            .map(|p| {
+                if own[p] != u32::MAX {
+                    return f64::NEG_INFINITY;
+                }
+                let (x, y) = ((p % w) as i64, (p / w) as i64);
+                let mut lo = f64::NEG_INFINITY;
+                for dy in -1..=1i64 {
+                    for dx in -1..=1i64 {
+                        let (a, b) = (x + dx, y + dy);
+                        if (dx, dy) != (0, 0) && a >= 0 && b >= 0 && (a as usize) < w && (b as usize) < h {
+                            let o = own[b as usize * w + a as usize];
+                            if o != u32::MAX {
+                                lo = lo.max(it[o as usize].spill_m.min(start[p]));
+                            }
+                        }
+                    }
+                }
+                lo
+            })
+            .collect(),
+    };
+    // lead #203b: a stage's output with the intended set kept (interior back to S0, the ring not below its floor); prints what the stage would have changed
+    let protect = |mut z: Vec<f64>, what: &str| -> Vec<f64> {
+        let Some((it, own)) = &s0_set else { return z };
+        let mut touched = vec![false; it.len()];
+        let (mut cells, mut m3) = (0usize, 0f64);
+        for p in 0..n_l {
+            let o = own[p];
+            if o != u32::MAX {
+                if z[p] != start[p] {
+                    m3 += (start[p] - z[p]).abs() * dx_l * dx_l;
+                    z[p] = start[p];
+                    cells += 1;
+                    touched[o as usize] = true;
+                }
+            } else if z[p] < ring_floor[p] {
+                m3 += (ring_floor[p] - z[p]) * dx_l * dx_l;
+                z[p] = ring_floor[p];
+                cells += 1;
+            }
+        }
+        println!(
+            "RG intended protect (lead #203b) {what}: {} of {} intended basins kept intact ({} needed restoring); {cells} cells restored, {:.6} km3",
+            it.len(),
+            it.len(),
+            touched.iter().filter(|&&t| t).count(),
+            m3 / 1e9
+        );
+        z
+    };
+    let ks_base = protect(ks_base, "KH");
     let budget: Vec<f64> = (0..cells).map(|c| budget_l[((c / rw) * L) * w + (c % rw) * L]).collect();
     if args.iter().any(|a| a == "--dump-s0") {
         let b: Vec<u8> = ks_base.iter().flat_map(|v| v.to_le_bytes()).collect();
@@ -3317,6 +3425,7 @@ fn main() -> Result<(), String> {
         (z, res)
     };
     let (ks0, res0) = if ks_mode == "off" { (ks_base.clone(), Vec::new()) } else { ks(&hand_l) };
+    let ks0 = protect(ks0, "KS0");
     drop(hand_l);
     println!(
         "RG KS0 ({}): {} cells lowered, {} residuals",
@@ -3487,10 +3596,9 @@ fn main() -> Result<(), String> {
         let outlet_d: Vec<bool> = (0..n_l).map(|p| active[p] && (sea_l[p] || exit[p])).collect();
         let grid_d = Grid::new(w, h, dx_l).with_active(active.clone());
         // lead #203 (item 3): the marked depressions S0 already has, before any river stage (no field lowers the ground: R23 keeps only these)
-        if intended_on {
-            let (it, cells) = intended_select(&grid_d, &start, &outlet_d, &mark_l, &budget_l);
-            println!("{}", intended_line(&format!("domain {d} on S0"), &it, &|c| ai_l[c]));
+        if let Some((_, own)) = &s0_set {
             // the lead's back-arc question: closed arid depressions over the size floor that the mark misses, with the province terms at their floors
+            let cells: Vec<bool> = own.iter().map(|&o| o != u32::MAX).collect();
             let missed = arid_missed(&grid_d, &start, &outlet_d, &ai_l, &cells);
             let prov = inputs.lithology().provinces();
             let mut t =
@@ -3775,6 +3883,7 @@ fn main() -> Result<(), String> {
         // stage 6 (spikes #146, reading 23 post): the band drain after KS1, capped by the budget at the floor; the domain's outlets and the cells outside it are its outlets
         // lead #163 (B5): `--skip band6` leaves KS1's output undrained (no band drain, so no post-band6 connect pass either)
         // lead #178: KS1's surface before band6, the validator's ks stage
+        let ks_d = protect(ks_d, &format!("domain {d} KS1"));
         let ks1_d = ks_d.clone();
         let ks_d = if (base_form != "today" || census) && ks_mode != "off" && on("band6") {
             let t6 = Instant::now();
@@ -3832,13 +3941,10 @@ fn main() -> Result<(), String> {
             planet_generators::bake::drain::OUTLET_FLOORS
                 .store(BAND6_OUTLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed), std::sync::atomic::Ordering::Relaxed);
             // lead #180: the depressions of band6's input that basins-2 would keep (>= 0.25 km2 and >= 2 m deep) are band6's intended cells
-            // lead #203: band6 neither breaches nor fills an intended basin of its input
-            let int6: Vec<bool> = if intended_on {
-                let (it, cells) = intended_select(&grid_d, &ks_d, &outl, &mark_l, &budget_l);
-                println!("{} (protected from band6)", intended_line(&format!("domain {d} on band6's input"), &it, &|c| ai_l[c]));
-                cells
-            } else {
-                Vec::new()
+            // lead #203b: band6 neither breaches nor fills the fixed S0 set (interiors and rim rings)
+            let int6: Vec<bool> = match &s0_set {
+                Some((_, own)) => (0..n_l).map(|p| own[p] != u32::MAX || ring_floor[p].is_finite()).collect(),
+                None => Vec::new(),
             };
             let keep6: Vec<bool> = if BAND6_KEEP_RIMS.load(std::sync::atomic::Ordering::Relaxed) {
                 let level = planet_generators::bake::drain::fill_level(&ks_d, w, h, &outl);
@@ -4232,6 +4338,7 @@ fn main() -> Result<(), String> {
         } else {
             (ks_d, res_d)
         };
+        let ks_d = protect(ks_d, &format!("domain {d} band6 and its connect"));
         // the basins again, on the KS output with every L reach as spill receivers and inlets (reading 5: the L kept rule reads KS1; crusader's G1d order: the first pass on KS0 gave
         // KG-trib its kept set); the graph takes this pass's basins and nodes; its kept basins and H1's lake water are KV's and KC's protected cells
         if on("basins") && on("kg-trib") {
@@ -4279,13 +4386,13 @@ fn main() -> Result<(), String> {
                 };
                 // lead #203 (R23): the intended basins of basins-2's input are forced kept (the smallest depression holding the floor whose spill reaches the node's spill: the node),
                 // whatever reading 22 would do; they keep their spill and outlet (type intentional, an active outlet)
-                let intended2: Vec<Intended> = if intended_on {
-                    let (it, _) = intended_select(&grid_d, &ks_d, &outlet_d, &mark_l, &budget_l);
-                    println!("{}", intended_line(&format!("domain {d} at basins-2"), &it, &|c| ai_l[c]));
-                    forced.extend(it.iter().map(|b| (b.floor, b.spill_m + 0.5)));
-                    it
-                } else {
-                    Vec::new()
+                // lead #203b: exactly the fixed S0 set (it agrees with this pass by construction: it ranks first and every stage kept it)
+                let intended2: &[Intended] = match &s0_set {
+                    Some((it, _)) => {
+                        forced.extend(it.iter().map(|b| (b.floor, b.spill_m + 0.5)));
+                        it
+                    }
+                    None => &[],
                 };
                 let mut pb = produce_drain_avoiding_forced(
                     &grid_d,
@@ -4313,7 +4420,7 @@ fn main() -> Result<(), String> {
                         pb.basins.iter().map(|b| (b.floor_cell, b)).collect();
                     let mut t = String::from("basin_id,type,outlet,floor_cell,floor_m,spill_cell,spill_m,cells,area_km2,marked_share,terms,aridity,endorheic_candidate,represented\n");
                     let mut kept = 0usize;
-                    for b in &intended2 {
+                    for b in intended2 {
                         let k = kept_at.get(&gid_l(b.floor));
                         kept += usize::from(k.is_some());
                         t += &format!(
@@ -4883,6 +4990,8 @@ fn main() -> Result<(), String> {
             (ks_d.clone(), ks_d.clone(), Vec::new())
         };
         t_kvkc += t.elapsed().as_secs_f64();
+        let kv_d = protect(kv_d, &format!("domain {d} KV"));
+        let kc_d = protect(kc_d, &format!("domain {d} KC (final)"));
         // the domain's share: its core's cells and residuals, the items its core's tiles own
         if regions <= 1 && outs.is_none() {
             let (mut a0, mut a, mut b, mut c) = (ks1_d, ks_d, kv_d, kc_d);
