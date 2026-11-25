@@ -81,7 +81,7 @@ impl Ctx<'_> {
 }
 
 fn drivers<'a>(w: &'a World, d: &'a Derived) -> Drivers<'a> {
-    Drivers { k_scale: Some(&w.k), uplift: Some(&w.up), runoff: Some(&d.weight), level_floor: None }
+    Drivers { k_scale: Some(&w.k), uplift: Some(&w.up), runoff: Some(&d.weight), level_floor: None, sea_floor: None }
 }
 
 fn smooth(t: f64) -> f64 {

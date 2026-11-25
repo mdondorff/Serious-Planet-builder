@@ -223,9 +223,13 @@ fn sill_of(a: &[(f64, u32)], b: &[(f64, u32)], lw: usize, ax: usize, ay: usize, 
 /// before K5); the carve acts on `h` (r_min static, so a change of `h` is a change of `z_s`); the result is `z_s = h - r_min`. `zb` is the surface the rounds start
 /// from (`zb_in`: z_b after `--base aplus`'s stage-1 drain). No drivers (the default `--base aplus` has no clamp; asserted by the caller).
 #[allow(clippy::too_many_arguments)]
-fn rounds_k5p(grid: &Grid, zb: &[f64], outlet: &[bool], p: &CarveParams, rounds: usize, threads: usize, seed: u64, s: &Sills) -> Vec<f64> {
+/// `s = None` is the control: today's `route_rules` and r_min 0, which must reproduce `solve_region`'s rounds bit for bit (numerics review M3). Numerics review H1: the
+/// carve's sea floor is per cell, `r_min + sea + eps` (so it floors z_s, not h), and r_min is 0 on the outlets (their height and the exit base stay K5's).
+fn rounds_k5p(grid: &Grid, zb: &[f64], outlet: &[bool], p: &CarveParams, rounds: usize, threads: usize, seed: u64, s: Option<&Sills>) -> Vec<f64> {
     let n = grid.len();
-    let rmin: Vec<f64> = s.h.clone();
+    let rmin: Vec<f64> = (0..n).map(|c| if outlet[c] { 0.0 } else { s.map_or(0.0, |s| s.h[c]) }).collect();
+    let sea_floor: Vec<f64> = (0..n).map(|c| rmin[c] + p.sea_level + p.epsilon).collect();
+    let drivers = Drivers { sea_floor: s.map(|_| &sea_floor[..]), ..Drivers::default() };
     let mut z: Vec<f64> = (0..n).map(|c| zb[c] + rmin[c]).collect();
     let taper: Vec<f32> = if p.uplift_taper_m > 0.0 && p.u_over_k != 0.0 {
         zb.iter().map(|h| planet_core::smoothstep(0.0, p.uplift_taper_m, h - p.sea_level) as f32).collect()
@@ -234,10 +238,15 @@ fn rounds_k5p(grid: &Grid, zb: &[f64], outlet: &[bool], p: &CarveParams, rounds:
     };
     let ones = vec![1.0f32; n];
     for _ in 0..rounds {
-        let zz: Vec<f64> = (0..n).map(|c| z[c] - rmin[c]).collect();
-        let sill = |a: usize, d: usize, b: usize| (s.at(a, d, b) + zz[a].max(zz[b])).max(z[a]).max(z[b]);
-        let wl = flood(grid, &z, &sill, outlet, p.epsilon);
-        let r = route_sills(grid, &wl, &sill, outlet, seed, &ones, true);
+        let r = match s {
+            None => route_rules(grid, &z, outlet, p.epsilon, seed, p.max_area, None, p.round_rules),
+            Some(s) => {
+                let zz: Vec<f64> = (0..n).map(|c| z[c] - rmin[c]).collect();
+                let sill = |a: usize, d: usize, b: usize| (s.at(a, d, b) + zz[a].max(zz[b])).max(z[a]).max(z[b]);
+                let wl = flood(grid, &z, &sill, outlet, p.epsilon);
+                route_sills(grid, &wl, &sill, outlet, seed, &ones, true)
+            }
+        };
         let cuts = cut_in(Some(grid), &r);
         let mut queue: Vec<usize> = (0..cuts.members.len()).filter(|&k| cuts.members[k].len() > 1).collect();
         queue.sort_by_key(|&k| (std::cmp::Reverse(cuts.members[k].len()), k));
@@ -251,7 +260,7 @@ fn rounds_k5p(grid: &Grid, zb: &[f64], outlet: &[bool], p: &CarveParams, rounds:
                     if q >= queue.len() {
                         break;
                     }
-                    let mut inp = gather_with(grid, zr, outlet, &r, &cuts, &taper, &Drivers::default(), p, queue[q]);
+                    let mut inp = gather_with(grid, zr, outlet, &r, &cuts, &taper, &drivers, p, queue[q]);
                     catchment_round(&mut inp, p, p.reroute_every);
                     out.lock().expect("lock").push((q, inp.z));
                 });
@@ -2176,8 +2185,8 @@ fn main() -> Result<(), String> {
     planet_generators::bake::drain::BREACH_MAX_LEN.store(breach_max_len, std::sync::atomic::Ordering::Relaxed);
     // lead #184v (spike only): `--k5 k5p` routes K5's rounds on the sills of r = B - C1(z_b) (SPIKE-131's K5', form (a)) and implies `--h1 k6p`; `today` (default) K5 as is
     let k5_form = value(&args, "--k5").unwrap_or("today");
-    if !["today", "k5p"].contains(&k5_form) {
-        return Err(format!("--k5 today | k5p, not '{k5_form}'"));
+    if !["today", "k5p", "control"].contains(&k5_form) {
+        return Err(format!("--k5 today | k5p | control, not '{k5_form}'"));
     }
     let h1_form = if k5_form == "k5p" { "k6p" } else { h1_form };
     let base_today = h1_form == "k6";
@@ -2552,10 +2561,28 @@ fn main() -> Result<(), String> {
     // lead #184v (spike only): K5' (`--k5 k5p`): K5's rounds re-run from z_b_in on the sills of r = B - C1(z_b), then the spec's stage-3 drain; z_s and the
     // regional field (z_s - z_b) replaced, so S0, H1 (K6', implied) and every later stage read K5''s surface. The front's lakes and graph stay K5's (unused with
     // `--h1-lakes off`, the default).
-    if k5_form == "k5p" {
+    let mut k5p_keep: Option<(Sills, Vec<f64>)> = None;
+    if k5_form == "k5p" || k5_form == "control" {
         let t = Instant::now();
         if matches!(spec.stage.base_drain, planet_cache::region_bake::Drain::Selective { clamp: true, .. }) {
             return Err("--k5 k5p: the base drain's clamp (K5's level floor) is not ported".into());
+        }
+        // numerics review M2: the knobs K5' does not read are refused, not ignored
+        {
+            use std::sync::atomic::Ordering::Relaxed;
+            let k = spec.stage.k5;
+            if k.route != K5Route::D8 || k.kdt_scale != 1.0 || k.uok_scale != 1.0 {
+                return Err("--k5 k5p|control: --k5-route, --k5-kdt-scale and --k5-uok-scale are not ported".into());
+            }
+            if planet_generators::bake::round::K5_DIFFUSE.load(Relaxed) != 0 || planet_generators::bake::round::K5_PARITY.load(Relaxed) != 0 {
+                return Err("--k5 k5p|control: --k5-diffuse and --k5-parity are not ported".into());
+            }
+            if planet_cache::region_bake::K5_REGION_READ.load(Relaxed) != 0 {
+                return Err("--k5 k5p|control: the regional read variants are not ported".into());
+            }
+            if value(&args, "--h1-lakes") == Some("keep") {
+                return Err("--k5 k5p|control: --h1-lakes keep reads K5's front lakes".into());
+            }
         }
         let s = &front.solve;
         let (sri0, srj0, rw, rh) = (s.ri0, s.rj0, s.rw, s.rh);
@@ -2582,8 +2609,24 @@ fn main() -> Result<(), String> {
             ..CarveParams::default()
         };
         spec.precision().apply(&mut carve);
+        // numerics review M3: the control (today's routing, r_min 0) must equal solve_region's z_s bit for bit
+        if k5_form == "control" {
+            let mut c0 = rounds_k5p(&s.grid, &s.zb_in, &s.outlet, &carve, spec.rounds, threads, s.stream, None);
+            if spec.stage.post_drain != planet_cache::region_bake::Drain::Off {
+                c0 = planet_cache::region_bake::run_drain(&spec.stage.post_drain, &s.grid, &s.outlet, &c0, "3, control");
+            }
+            let differ = (0..c0.len()).filter(|&c| c0[c].to_bits() != s.zs[c].to_bits()).count();
+            println!("RG K5 control (lead #184v): this loop with today's routing against solve_region: {differ} of {} cells differ", c0.len());
+            if differ != 0 {
+                return Err(format!("--k5 control: {differ} cells differ from solve_region"));
+            }
+        }
+        // numerics review H1: the land cells that the old sea floor (sea + eps on h = z_s + r_min) would have moved: those starting at or under it
+        let sea_eps = carve.sea_level + carve.epsilon;
+        let hit = (0..s.zb_in.len()).filter(|&c| !s.outlet[c] && s.zb_in[c] + r_sills.h[c] <= sea_eps).count();
+        println!("RG K5' (lead #184v): {hit} land cells start at or under sea + eps in h = z_b_in + r_min (the per-cell sea floor keeps their z_s at the sea)");
         let t2 = Instant::now();
-        let mut zs2 = rounds_k5p(&s.grid, &s.zb_in, &s.outlet, &carve, spec.rounds, threads, s.stream, &r_sills);
+        let mut zs2 = rounds_k5p(&s.grid, &s.zb_in, &s.outlet, &carve, spec.rounds, threads, s.stream, Some(&r_sills));
         if spec.stage.post_drain != planet_cache::region_bake::Drain::Off {
             zs2 = planet_cache::region_bake::run_drain(&spec.stage.post_drain, &s.grid, &s.outlet, &zs2, "3, z_s after K5'");
         }
@@ -2598,8 +2641,11 @@ fn main() -> Result<(), String> {
             })
             .collect();
         let q = |mut v: Vec<f64>| {
+            if v.is_empty() {
+                return "no land".to_string();
+            }
             v.sort_by(f64::total_cmp);
-            let k = v.len().max(1);
+            let k = v.len();
             format!("p10 {:.1} p50 {:.1} p90 {:.1} mean {:.1}", v[k / 10], v[k / 2], v[k * 9 / 10], v.iter().sum::<f64>() / k as f64)
         };
         println!(
@@ -2609,8 +2655,12 @@ fn main() -> Result<(), String> {
             q(land.iter().map(|&c| s.zb[c] - zs2[c]).collect()),
             q(land.iter().map(|&c| zs2[c] - s.zs[c]).collect())
         );
-        front.regional_field = RegionField::new(face, REGIONAL, (sri0 as i64, srj0 as i64), rw, rh, (0..cells).map(|c| (zs2[c] - s.zb[c]) as f32).collect());
-        front.solve.zs = zs2;
+        if k5_form == "k5p" {
+            front.regional_field =
+                RegionField::new(face, REGIONAL, (sri0 as i64, srj0 as i64), rw, rh, (0..cells).map(|c| (zs2[c] - s.zb[c]) as f32).collect());
+            front.solve.zs = zs2.clone();
+            k5p_keep = Some((r_sills, zs2));
+        }
     }
     let solve = &front.solve;
     let (sri0, srj0, rw, rh) = (solve.ri0, solve.rj0, solve.rw, solve.rh);
@@ -2817,17 +2867,21 @@ fn main() -> Result<(), String> {
         (with, Some(h1_from(grid, hh, &f2, r2, outlet, &runoff, &evap, Some(&budget))))
     };
     // lead #184v: the K5-channel share (SPIKE-127/131): K6''s channel cells more than one 814 m cell (Chebyshev) from K5's own channel cells (today's K6 on z_s)
-    if k5_form == "k5p" {
-        let r0 = route_rules(grid, &solve.zs, outlet, eps, stream, 0.0, Some(&weight), RoundRules::ROUND);
-        let f0 = priority_flood_with(grid, &solve.zs, outlet, eps, true);
-        let own = h1_from(grid, &solve.zs, &f0, r0, outlet, &runoff, &evap, Some(&Vec::new())).hydro.channel;
+    if let Some((rs, zs2)) = &k5p_keep {
+        // numerics review M1: K5''s own channels, as SPIKE-131 (flood and routing on h = z_s' + r_min with sills s_r + max z_s'), against K6''s trunk cells
+        let hh: Vec<f64> = (0..cells).map(|c| zs2[c] + if outlet[c] { 0.0 } else { rs.h[c] }).collect();
+        let sill = |a: usize, d: usize, b: usize| (rs.at(a, d, b) + zs2[a].max(zs2[b])).max(hh[a]).max(hh[b]);
+        let wl = flood(grid, &hh, &sill, outlet, eps);
+        let r0 = route_sills(grid, &wl, &sill, outlet, stream, &weight, true);
+        let own = h1_from(grid, &hh, &wl, r0, outlet, &runoff, &evap, Some(&Vec::new())).hydro.channel;
+        let trunk: std::collections::BTreeSet<usize> = h1.trunk_cells.iter().flatten().map(|&c| c as usize).collect();
         let (i0, i1, j0, j1) = spec.region;
         let in_box = |c: usize| {
             let (i, j) = (sri0 + c % rw, srj0 + c / rw);
             i >= i0 && i <= i1 && j >= j0 && j <= j1
         };
         let (mut tot, mut exact, mut far) = (0usize, 0usize, 0usize);
-        for c in (0..cells).filter(|&c| h1.hydro.channel[c] && in_box(c)) {
+        for &c in trunk.iter().filter(|&&c| in_box(c)) {
             tot += 1;
             if !own[c] {
                 exact += 1;
@@ -2844,7 +2898,7 @@ fn main() -> Result<(), String> {
             }
         }
         println!(
-            "RG K5' (lead #184v): K6' channel cells in the box {tot}; off K5''s channel cells: exact {:.1} %, more than 1 cell {:.1} % (SPIKE-131 R1h: 29.2 / 3.3 %)",
+            "RG K5' (lead #184v): K6' trunk cells in the box {tot}; off K5''s channel cells: exact {:.1} %, more than 1 cell {:.1} % (SPIKE-131 R1h: 29.2 / 3.3 %)",
             100.0 * exact as f64 / tot.max(1) as f64,
             100.0 * far as f64 / tot.max(1) as f64
         );

@@ -74,7 +74,7 @@ fn the_round_solver_with_drivers_is_the_carve_of_the_same_drivers() {
             let z0 = terrain(3, terraced);
             let outlet = g.outlets(&z0, 0.0);
             let p = params(2);
-            let dr = Drivers { k_scale: Some(&f.k), uplift: Some(&f.uplift), runoff: Some(&f.runoff), level_floor: None };
+            let dr = Drivers { k_scale: Some(&f.k), uplift: Some(&f.uplift), runoff: Some(&f.runoff), level_floor: None, sea_floor: None };
             let mut want = z0.clone();
             let rock = Rock { par: &1usize, k: None, uplift: Some(&f.uplift), runoff: Some(&f.runoff) };
             carve_rock(&g, &mut want, &outlet, &p, Some(&f.k), &rock, 3);
@@ -132,7 +132,7 @@ fn a_memoised_re_solve_is_the_solve_of_the_edited_definition_with_the_work_of_th
         let z0 = terrain(5, true);
         let outlet = g.outlets(&z0, 0.0);
         let p = params(4);
-        let base_dr = Drivers { k_scale: Some(&f.k), uplift: Some(&f.uplift), runoff: Some(&f.runoff), level_floor: None };
+        let base_dr = Drivers { k_scale: Some(&f.k), uplift: Some(&f.uplift), runoff: Some(&f.runoff), level_floor: None, sea_floor: None };
         let tile = 12;
         let mut cache = RoundCache::default();
         let mut base = z0.clone();
@@ -203,7 +203,7 @@ fn a_memoised_re_solve_is_the_solve_of_the_edited_definition_with_the_work_of_th
                 u2[j * N + i] *= 2.0;
             }
         }
-        let dr_rock = Drivers { k_scale: Some(&k2), uplift: Some(&u2), runoff: Some(&f.runoff), level_floor: None };
+        let dr_rock = Drivers { k_scale: Some(&k2), uplift: Some(&u2), runoff: Some(&f.runoff), level_floor: None, sea_floor: None };
         let mut got = z0.clone();
         let (_, w4) = solve_rounds_memo(&g, &mut got, &outlet, &p, 4, &1usize, 3, &dr_rock, tile, &mut cache);
         assert_eq!(bits(&got), bits(&fresh(&g, &z0, &outlet, &p, &dr_rock, 4)), "G-EQ after a rock and uplift edit ({name})");
@@ -401,7 +401,7 @@ fn a_bridge_joins_two_landmasses_and_taking_it_away_gives_the_first_result_back(
         let z0 = islands();
         let outlet = g.outlets(&z0, 0.0);
         let p = params(4);
-        let dr = Drivers { k_scale: Some(&f.k), uplift: Some(&f.uplift), runoff: Some(&f.runoff), level_floor: None };
+        let dr = Drivers { k_scale: Some(&f.k), uplift: Some(&f.uplift), runoff: Some(&f.runoff), level_floor: None, sea_floor: None };
         let tile = 12;
         let mut cache = RoundCache::default();
         let mut base = z0.clone();
