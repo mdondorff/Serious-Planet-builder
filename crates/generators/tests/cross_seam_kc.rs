@@ -5,6 +5,7 @@
 //! - local: each region searches the depressions it owns (the canonical floor in its tiles' cores) inside its domain, the tiles' `CubePatch`es (cores plus halo);
 //! - join: the candidates in (spill level, floor `GlobalCell`) order, each searched over the whole grid;
 //! - apply: each region writes its own cells from all records.
+//!
 //! A search is a candidate when it pops a cell on the domain's border, or reaches an exit while a border cell's tentative cost is not above the exit's.
 //! Scope of the proof: the depressions (cells, level, fill volume) come from the planet-wide fill level, a shared input (GEN-121 and GEN-191 give it alike on any
 //! tiling); a constant 50 m budget and no protections. Off by default: nothing in the chain reads it.
