@@ -15,19 +15,19 @@ use planet_core::{CubePatch, Face, GlobalCell};
 use std::cmp::Reverse;
 use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet};
 
-pub(super) const N: i64 = L_N as i64;
+const N: i64 = L_N as i64;
 /// KC's budget for a cut or a fill (m), the contract's 50 m ceiling.
 const BUDGET_M: f64 = 50.0;
 /// KC's search cap (settled cells), `BREACH_CAP`.
 const CAP: usize = 20_000;
 const TOL: f64 = 1e-3;
 
-pub(super) fn cell(p: usize) -> GlobalCell {
+fn cell(p: usize) -> GlobalCell {
     let nn = L_N * L_N;
     GlobalCell::new(Face((p / nn) as u8), N, (p % L_N) as i64, ((p % nn) / L_N) as i64).unwrap()
 }
 
-pub(super) fn index(c: GlobalCell) -> usize {
+fn index(c: GlobalCell) -> usize {
     (c.face().0 as usize * L_N + c.j() as usize) * L_N + c.i() as usize
 }
 
@@ -41,18 +41,36 @@ pub(super) fn key(v: f64) -> u64 {
     }
 }
 
+/// The cube grid of `n` cells a face edge, in the fixture's order (face, row, column), with its 8-neighbourhood and `GlobalCell` ids.
 pub(super) struct Grid {
+    pub(super) n: usize,
     pub(super) nb: Vec<Vec<usize>>,
     pub(super) raw: Vec<u64>,
 }
 
 impl Grid {
+    /// The L grid.
     pub(super) fn new() -> Grid {
-        let n = 6 * L_N * L_N;
+        Grid::at(L_N)
+    }
+
+    pub(super) fn at(n: usize) -> Grid {
+        let g = Grid { n, nb: Vec::new(), raw: Vec::new() };
+        let len = 6 * n * n;
         Grid {
-            nb: (0..n).map(|p| cell(p).neighbours8(N).into_iter().map(index).collect()).collect(),
-            raw: (0..n).map(|p| cell(p).raw()).collect(),
+            nb: (0..len).map(|p| g.cell(p).neighbours8(n as i64).into_iter().map(|c| g.index(c)).collect()).collect(),
+            raw: (0..len).map(|p| g.cell(p).raw()).collect(),
+            ..g
         }
+    }
+
+    pub(super) fn cell(&self, p: usize) -> GlobalCell {
+        let nn = self.n * self.n;
+        GlobalCell::new(Face((p / nn) as u8), self.n as i64, (p % self.n) as i64, ((p % nn) / self.n) as i64).unwrap()
+    }
+
+    pub(super) fn index(&self, c: GlobalCell) -> usize {
+        (c.face().0 as usize * self.n + c.j() as usize) * self.n + c.i() as usize
     }
 }
 
@@ -251,14 +269,19 @@ const PLANTS: [Plant; 5] = [
 ];
 
 /// The cells within `r` degrees of a point (longitude scaled by the latitude's cosine).
-pub(super) fn disk(lon: f64, lat: f64, r: f64) -> BTreeSet<usize> {
+fn disk(lon: f64, lat: f64, r: f64) -> BTreeSet<usize> {
+    disk_n(L_N, lon, lat, r)
+}
+
+/// [`disk`] on the grid of `n` cells a face edge.
+pub(super) fn disk_n(n: usize, lon: f64, lat: f64, r: f64) -> BTreeSet<usize> {
     let mut out = BTreeSet::new();
     let k = (r / 0.05).ceil() as i64;
     for a in -k..=k {
         for b in -k..=k {
             let (dl, dt) = (a as f64 * 0.05, b as f64 * 0.05);
             if dl * dl + dt * dt <= r * r {
-                out.insert(cell_at(L_N, lon + dl / libm::cos((lat + dt).to_radians()), lat + dt));
+                out.insert(cell_at(n, lon + dl / libm::cos((lat + dt).to_radians()), lat + dt));
             }
         }
     }
