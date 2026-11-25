@@ -294,10 +294,21 @@ fn relief(n: usize) -> Vec<f64> {
         .collect()
 }
 
-// spike only (crusader, G3-6 / R13): wave 1 at 1/16 of the largest landmass, measured
+// spike only (crusader, G3-6 / R13): wave 1 at 1/16 of the largest landmass, measured on today's full cube grid
 #[test]
 #[ignore = "a measurement run (minutes, about 2 GB): cargo test --release -p planet-generators --test mem_stress -- --ignored --nocapture"]
 fn wave_1_at_one_sixteenth_scale_against_the_model() {
+    wave_1_measured(false);
+}
+
+// spike only (crusader, G3-6 layout step 1): the same on the compact grid of the land and its coastal sea (GEN-147)
+#[test]
+#[ignore = "a measurement run (minutes, about 1 GB): cargo test --release -p planet-generators --test mem_stress -- --ignored --nocapture"]
+fn wave_1_on_the_compact_grid_at_one_sixteenth_scale() {
+    wave_1_measured(true);
+}
+
+fn wave_1_measured(compact: bool) {
     use planet_generators::bake::carve::CarveParams;
     use planet_generators::bake::drain::{drain_selective_floors_on, SelParams, SelSwitches};
     use planet_generators::bake::flood::priority_flood_with;
@@ -306,12 +317,34 @@ fn wave_1_at_one_sixteenth_scale_against_the_model() {
     use planet_generators::bake::route::{RoundRules, NONE};
     use planet_generators::bake::Grid;
     let n = 1152;
-    let g = Grid::cube(n, 6_371_000.0);
-    let z0 = relief(n);
-    let outlet: Vec<bool> = z0.iter().map(|&h| h <= 0.0).collect();
+    let full = Grid::cube(n, 6_371_000.0);
+    let zf = relief(n);
+    let of: Vec<bool> = zf.iter().map(|&h| h <= 0.0).collect();
+    // the compact grid holds the land and the sea cells next to it (the outlets land drains to)
+    let (g, z0, outlet) = if compact {
+        let mut bits = vec![0u64; (6 * n * n).div_ceil(64)];
+        for p in 0..6 * n * n {
+            if !of[p] || (0..8).any(|d| full.neighbour(p, d).is_some_and(|q| !of[q])) {
+                bits[p / 64] |= 1 << (p % 64);
+            }
+        }
+        let g = Grid::compact_cube(n, 6_371_000.0, bits);
+        let ids: Vec<usize> = (0..g.len()).map(|p| g.cube_id_of(p)).collect();
+        let z: Vec<f64> = ids.iter().map(|&i| zf[i]).collect();
+        let o: Vec<bool> = ids.iter().map(|&i| of[i]).collect();
+        drop((zf, of));
+        (g, z, o)
+    } else {
+        (full, zf, of)
+    };
     let land = outlet.iter().filter(|&&o| !o).count();
     let (_, h1_full) = cells();
-    eprintln!("G3-6 1/16: cube n {n}, {} cells, {land} land ({:.3} of the largest landmass's H1 land)", z0.len(), land as f64 / h1_full);
+    eprintln!(
+        "G3-6 1/16 ({}): {} cells on the grid, {land} land ({:.3} of the largest landmass's H1 land)",
+        if compact { "compact grid" } else { "full cube" },
+        z0.len(),
+        land as f64 / h1_full
+    );
     let model = |name: &str| components().iter().filter(|c| c.name.starts_with(name)).map(|c| c.bytes_per_cell).sum::<f64>();
     let row = |stage: &str, t: f64, peak_b: usize, model_bpc: f64| {
         let (hwm, rss) = rss_mib();
@@ -390,6 +423,9 @@ fn wave_1_at_one_sixteenth_scale_against_the_model() {
     let recv_set = h1.routing.receiver.iter().filter(|&&r| r != NONE).count();
     drop(h1);
     row(&format!("K6 ({trunks} trunk reaches, {recv_set} routed cells)"), t.elapsed().as_secs_f64(), pk, model("K6"));
+    if compact {
+        return;
+    }
     // one worker's L buffer (1/16 of 16): band6's drain on a 3,328² plane grid of the same relief's character
     let side = 3328;
     let gl = Grid::new(side, side, 101.8);

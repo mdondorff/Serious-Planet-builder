@@ -15,7 +15,7 @@ use planet_generators::bake::drain::{sel_apply, sel_decide, sel_round, SearchDom
 use planet_generators::bake::flood::priority_flood_with;
 use planet_generators::bake::partition::{partitioned_route_weighted, PartCache};
 use planet_generators::bake::round::{solve_rounds_memo, solve_rounds_with, Drivers, RoundCache};
-use planet_generators::bake::route::{route_rules, RoundRules};
+use planet_generators::bake::route::{route_rules, RoundRules, NONE};
 use planet_generators::bake::Grid;
 use std::collections::BTreeMap;
 
@@ -48,14 +48,23 @@ impl Regions {
     pub fn new(g: &Grid, l: &PartitionLayout, per: usize, naive: bool) -> Regions {
         let n = g.layout().0;
         let (tile, halo) = (l.tile / per, l.halo / per);
-        let index = |c: GlobalCell| (c.face().0 as usize * n + c.j() as usize) * n + c.i() as usize;
-        let region_of: Vec<u8> = (0..6 * n * n)
+        let cube_id = |p: usize| if g.is_compact() { g.cube_id_of(p) } else { p };
+        let index = |c: GlobalCell| {
+            let id = (c.face().0 as usize * n + c.j() as usize) * n + c.i() as usize;
+            if g.is_compact() {
+                g.compact_index_of(id)
+            } else {
+                Some(id)
+            }
+        };
+        let region_of: Vec<u8> = (0..g.len())
             .map(|p| {
-                let (f, r) = (p / (n * n), p % (n * n));
+                let id = cube_id(p);
+                let (f, r) = (id / (n * n), id % (n * n));
                 l.region(f, (r % n) / tile, (r / n) / tile)
             })
             .collect();
-        let mut inside = vec![vec![false; 6 * n * n]; l.regions];
+        let mut inside = vec![vec![false; g.len()]; l.regions];
         for f in 0..6 {
             for tj in 0..n / tile {
                 for ti in 0..n / tile {
@@ -63,7 +72,9 @@ impl Regions {
                     let p =
                         CubePatch::new(Face(f as u8), n as i64, (ti * tile) as i64, (tj * tile) as i64, tile as i64, halo as i64).unwrap();
                     for &c in p.cells() {
-                        inside[r][index(c)] = true;
+                        if let Some(q) = index(c) {
+                            inside[r][q] = true;
+                        }
                     }
                 }
             }
@@ -181,7 +192,7 @@ impl Stage for Sel {
             }
             decided.sort_by_key(|&(k, _)| floor_of(k));
             for (k, d) in &decided {
-                st.trace.push(format!("{} round {round} floor {} {d:?}", self.name, floor_of(*k)));
+                st.trace.push(format!("{} round {round} floor {} {}", self.name, g.global_id(floor_of(*k)), by_id(g, d)));
             }
             if !decided.iter().any(|(_, d)| matches!(d, SelDecision::Fill | SelDecision::Breach { .. })) {
                 break;
@@ -197,6 +208,17 @@ impl Stage for Sel {
                 }
             }
         }
+    }
+}
+
+/// A decision with its cells as global ids (the same on the full and the compact cube grid).
+fn by_id(g: &Grid, d: &SelDecision) -> String {
+    match d {
+        SelDecision::Breach { path, cut, volume } => {
+            let ids: Vec<u64> = path.iter().map(|&c| g.global_id(c as usize)).collect();
+            format!("Breach {{ path: {ids:?}, cut: {cut:?}, volume: {volume:?} }}")
+        }
+        other => format!("{other:?}"),
     }
 }
 
@@ -293,12 +315,14 @@ impl Stage for K6 {
         let runoff = vec![self.runoff; g.len()];
         let evap = vec![0.0f32; g.len()];
         let h1 = planet_cache::rg_h1::h1_from(g, &st.z, &filled, routing, cx.outlet, &runoff, &evap, Some(&[]), false);
-        st.fields.insert("receiver", h1.routing.receiver.iter().map(|&v| u64::from(v)).collect());
+        st.fields
+            .insert("receiver", h1.routing.receiver.iter().map(|&v| if v == NONE { u64::MAX } else { g.global_id(v as usize) }).collect());
         st.fields.insert("area", h1.routing.area.iter().map(|v| v.to_bits()).collect());
         st.fields.insert("d8", h1.d8.iter().map(|v| v.to_bits()).collect());
         st.fields.insert("qw", h1.hydro.qw.iter().map(|v| v.to_bits()).collect());
         for (k, cells) in h1.trunk_cells.iter().enumerate() {
-            st.trace.push(format!("k6 trunk {} segment {} cells {cells:?}", k, h1.trunk_seg[k]));
+            let ids: Vec<u64> = cells.iter().map(|&c| g.global_id(c as usize)).collect();
+            st.trace.push(format!("k6 trunk {} segment {} cells {ids:?}", k, h1.trunk_seg[k]));
         }
         st.notes.push(format!("k6: {} basins, {} trunk reaches", h1.hydro.basins.len(), h1.trunk_cells.len()));
     }
@@ -446,7 +470,6 @@ impl Stage for KhH2 {
         use planet_generators::bake::h0::GlobalGrid;
         use planet_generators::bake::k7::RegionField;
         use planet_generators::bake::kh;
-        use planet_generators::bake::route::NONE;
         let nn = H1_N * H1_N;
         let gh = Grid::cube(H1_N, RADIUS_M);
         let outlet = gh.outlets(&self.zs, SEA_LEVEL_M);
@@ -528,4 +551,66 @@ fn wave_1_then_kh_is_the_same_bits_on_every_layout() {
         assert_eq!(differs(&la, &b), None, "{}: KH", l.name);
     }
     eprintln!("#208 wave 1 -> KH: bit-identical on all five layouts");
+}
+
+/// The compact grid of a cube surface's land (GEN-147): every land cell and every sea cell next to land (the outlets land drains to), indexed by the rank of its cube id. Returns the grid
+/// and each compact cell's cube id.
+pub fn compact_land(n: usize, outlet: &[bool]) -> (Grid, Vec<usize>) {
+    let full = Grid::cube(n, RADIUS_M);
+    let mut bits = vec![0u64; (6 * n * n).div_ceil(64)];
+    for p in 0..6 * n * n {
+        if !outlet[p] || (0..8).any(|d| full.neighbour(p, d).is_some_and(|q| !outlet[q])) {
+            bits[p / 64] |= 1 << (p % 64);
+        }
+    }
+    let g = Grid::compact_cube(n, RADIUS_M, bits);
+    let ids = (0..g.len()).map(|p| g.cube_id_of(p)).collect();
+    (g, ids)
+}
+
+// spike only (crusader, G3-6 layout step 1, lead 2026-11-25): wave 1 on the compact grid is today's wave 1 on the full cube, on every layout
+#[test]
+fn wave_1_on_the_compact_grid_is_today_s_wave_1() {
+    let inp = super::cross_seam_band6::input_h1();
+    let gh = Grid::cube(H1_N, RADIUS_M);
+    let z0 = inp.z0.clone();
+    let outlet: Vec<bool> = z0.iter().map(|&h| h <= SEA_LEVEL_M).collect();
+    let (gc, ids) = compact_land(H1_N, &outlet);
+    let zc0: Vec<f64> = ids.iter().map(|&i| z0[i]).collect();
+    let oc: Vec<bool> = ids.iter().map(|&i| outlet[i]).collect();
+    eprintln!("#G3-6.1 the fixture's H1: compact {} of {} cells ({:.1} %)", gc.len(), z0.len(), 100.0 * gc.len() as f64 / z0.len() as f64);
+    let wave = |g: &Grid| {
+        let n = g.len();
+        (
+            Sel::selective_50("base1", n),
+            K5 { rounds: 4, seed: 0x6b35 },
+            Sel::selective_50("sel-post", n),
+            K6 { seed: 0x6b35, runoff: 1.0e-6 },
+        )
+    };
+    let (fb, fk5, fp, fk6) = wave(&gh);
+    let (cb, ck5, cp, ck6) = wave(&gc);
+    let full_stages: [&dyn Stage; 4] = [&fb, &fk5, &fp, &fk6];
+    let comp_stages: [&dyn Stage; 4] = [&cb, &ck5, &cp, &ck6];
+    let layouts = partition_layouts();
+    for l in std::iter::once(None).chain(layouts.iter().map(Some)) {
+        let (rf, rc) = (l.map(|l| Regions::new(&gh, l, L_PER_H1, false)), l.map(|l| Regions::new(&gc, l, L_PER_H1, false)));
+        let full = run_wave(&full_stages, &Ctx { g: &gh, outlet: &outlet, regions: rf.as_ref(), threads: 4 }, &z0);
+        let comp = run_wave(&comp_stages, &Ctx { g: &gc, outlet: &oc, regions: rc.as_ref(), threads: 4 }, &zc0);
+        let name = l.map_or("unpartitioned", |l| l.name.as_str());
+        let mut held = vec![false; z0.len()];
+        for (k, &i) in ids.iter().enumerate() {
+            held[i] = true;
+            assert_eq!(comp.z[k].to_bits(), full.z[i].to_bits(), "{name}: z at cube cell {i}");
+            for (f, v) in &comp.fields {
+                assert_eq!(v[k], full.fields[f][i], "{name}: {f} at cube cell {i}");
+            }
+        }
+        assert!(
+            (0..z0.len()).all(|i| held[i] || full.z[i].to_bits() == z0[i].to_bits()),
+            "{name}: a cell the compact grid leaves out is unchanged in the full run"
+        );
+        assert_eq!(comp.trace, full.trace, "{name}: the decisions by global id");
+    }
+    eprintln!("#G3-6.1 wave 1 on the compact grid = today's wave 1 on the full cube: unpartitioned and on all five layouts");
 }
