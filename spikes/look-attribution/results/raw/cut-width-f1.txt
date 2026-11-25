@@ -1,0 +1,12 @@
+f1-kw-chain: 93124 land profiles; with a cut (> 0.5 m under S0 at the floor) 71922 (77.2 %)
+  top width rim to rim: p10 2.00 / p50 5.75 / p90 15.75 L cells (204 / 585 / 1603 m); a run reaching 24 cells: 0.0 %
+  top width under 3 L cells: 21.7 % of the cut curve length
+  cuts deeper than 10 m (29.4 % of the cut length): top width under 3 cells 0.0 %, p50 width 13.00 cells
+  cuts deeper than 20 m (9.9 % of the cut length): top width under 3 cells 0.0 %, p50 width 16.50 cells
+  cuts deeper than 50 m (0.1 % of the cut length): top width under 3 cells 0.0 %, p50 width 15.75 cells
+f1-def-chain: 93124 land profiles; with a cut (> 0.5 m under S0 at the floor) 67406 (72.4 %)
+  top width rim to rim: p10 1.50 / p50 5.25 / p90 10.50 L cells (153 / 534 / 1069 m); a run reaching 24 cells: 0.0 %
+  top width under 3 L cells: 27.0 % of the cut curve length
+  cuts deeper than 10 m (23.5 % of the cut length): top width under 3 cells 0.5 %, p50 width 7.25 cells
+  cuts deeper than 20 m (6.2 % of the cut length): top width under 3 cells 0.0 %, p50 width 7.75 cells
+  cuts deeper than 50 m (0.0 % of the cut length): top width under 3 cells 0.0 %, p50 width 8.75 cells

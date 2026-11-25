@@ -34,6 +34,7 @@ use planet_cache::rg_h1::{h1_from, EDGE_Q, H1};
 use planet_cache::river_gate::{commit_differences, lay_store_ground, LWindow, WindowIdentity};
 use planet_cache::river_suite::corridor_bar_m;
 use planet_core::{Face, TangentWarp, Vec3};
+use planet_generators::bake::carve::{narrow_f32_checked, CarveParams};
 use planet_generators::bake::channel_graph::{q_value, ChannelGraph};
 use planet_generators::bake::flood::priority_flood_with;
 use planet_generators::bake::hydro::{hydrology, id_hash, Hydro, HydroParams};
@@ -42,11 +43,15 @@ use planet_generators::bake::river_graph::{
     diff, node_id, rasterise, reach_id, validate, validate_raster, Attrs, Checks, Domain, Exception, Graph, Level, Marker, Node, NodeKind,
     Reach as GReach, Reason, Violation,
 };
+use planet_generators::bake::round::{catchment_round, cut_in, gather_with, Drivers};
 use planet_generators::bake::route::{catchment_roots, jitter, route_rules, RoundRules, Routing, MFD_EXPONENT, NONE};
 use planet_generators::bake::{Grid, NEIGHBOURS};
 use planet_generators::global::{read_elevation_c1, GlobalSample, LatticeSource, ReadError};
 use planet_generators::runoff::{discharge_weight, pet_mm, runoff_mm};
 use planet_world_def::WorldDefinition;
+
+#[path = "rg_parts/curve.rs"]
+mod curve;
 
 const R: f64 = 6_371_000.0;
 const LATTICE: usize = 16_384;
@@ -213,6 +218,76 @@ fn sill_of(a: &[(f64, u32)], b: &[(f64, u32)], lw: usize, ax: usize, ay: usize, 
 
 /// Node heights and forward sills over the H1 grid `rw` x `rh` (L window `rw L` x `rh L`), S0 read by `s0(L index)`; `sill_noise` adds a uniform +-amplitude
 /// per edge (then lifts the sill to its nodes).
+/// lead #184v (spike only; SPIKE-131's `rounds_k5p`, spike/k5p-sills a5a4ecc0, form (a) of k5-sills-scoping-2026-11-25.md): K5's rounds with each round's routing
+/// replaced by the flood and routing on node heights `h = z + r_min` and sill edges `s_r + max(z_p, z_q)` (r = B - C1(z_b) at L, its sills static, computed once
+/// before K5); the carve acts on `h` (r_min static, so a change of `h` is a change of `z_s`); the result is `z_s = h - r_min`. `zb` is the surface the rounds start
+/// from (`zb_in`: z_b after `--base aplus`'s stage-1 drain). No drivers (the default `--base aplus` has no clamp; asserted by the caller).
+#[allow(clippy::too_many_arguments)]
+/// `s = None` is the control: today's `route_rules` and r_min 0, which must reproduce `solve_region`'s rounds bit for bit (numerics review M3). Numerics review H1: the
+/// carve's sea floor is per cell, `r_min + sea + eps` (so it floors z_s, not h), and r_min is 0 on the outlets (their height and the exit base stay K5's).
+fn rounds_k5p(
+    grid: &Grid,
+    zb: &[f64],
+    outlet: &[bool],
+    p: &CarveParams,
+    rounds: usize,
+    threads: usize,
+    seed: u64,
+    s: Option<&Sills>,
+) -> Vec<f64> {
+    let n = grid.len();
+    let rmin: Vec<f64> = (0..n).map(|c| if outlet[c] { 0.0 } else { s.map_or(0.0, |s| s.h[c]) }).collect();
+    let sea_floor: Vec<f64> = (0..n).map(|c| rmin[c] + p.sea_level + p.epsilon).collect();
+    let drivers = Drivers { sea_floor: s.map(|_| &sea_floor[..]), ..Drivers::default() };
+    let mut z: Vec<f64> = (0..n).map(|c| zb[c] + rmin[c]).collect();
+    let taper: Vec<f32> = if p.uplift_taper_m > 0.0 && p.u_over_k != 0.0 {
+        zb.iter().map(|h| planet_core::smoothstep(0.0, p.uplift_taper_m, h - p.sea_level) as f32).collect()
+    } else {
+        Vec::new()
+    };
+    let ones = vec![1.0f32; n];
+    for _ in 0..rounds {
+        let r = match s {
+            None => route_rules(grid, &z, outlet, p.epsilon, seed, p.max_area, None, p.round_rules),
+            Some(s) => {
+                let zz: Vec<f64> = (0..n).map(|c| z[c] - rmin[c]).collect();
+                let sill = |a: usize, d: usize, b: usize| (s.at(a, d, b) + zz[a].max(zz[b])).max(z[a]).max(z[b]);
+                let wl = flood(grid, &z, &sill, outlet, p.epsilon);
+                route_sills(grid, &wl, &sill, outlet, seed, &ones, true)
+            }
+        };
+        let cuts = cut_in(Some(grid), &r);
+        let mut queue: Vec<usize> = (0..cuts.members.len()).filter(|&k| cuts.members[k].len() > 1).collect();
+        queue.sort_by_key(|&k| (std::cmp::Reverse(cuts.members[k].len()), k));
+        let zr: &[f64] = &z;
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let out = std::sync::Mutex::new(Vec::new());
+        std::thread::scope(|sc| {
+            for _ in 0..threads.max(1) {
+                sc.spawn(|| loop {
+                    let q = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if q >= queue.len() {
+                        break;
+                    }
+                    let mut inp = gather_with(grid, zr, outlet, &r, &cuts, &taper, &drivers, p, queue[q]);
+                    catchment_round(&mut inp, p, p.reroute_every);
+                    out.lock().expect("lock").push((q, inp.z));
+                });
+            }
+        });
+        // each catchment's cells are its own (cut_in partitions the grid), so the write-back order does not change the result
+        for (q, zk) in out.into_inner().expect("lock") {
+            for (&c, v) in cuts.members[queue[q]].iter().zip(zk) {
+                z[c as usize] = v;
+            }
+        }
+        if p.round_f32 {
+            narrow_f32_checked(&mut z, p.epsilon);
+        }
+    }
+    (0..n).map(|c| z[c] - rmin[c]).collect()
+}
+
 fn nodes_and_sills(s0: &(dyn Fn(usize) -> f64 + Sync), rw: usize, rh: usize, threads: usize, sill_noise: Option<(u64, f64)>) -> Sills {
     let lw = rw * L;
     let n = rw * rh;
@@ -1085,6 +1160,20 @@ fn route_through(m: &Measure, line: &[(f64, f64)], points: &[usize], avoid: &Has
 /// (`z_min` the corridor's lowest cell), steps from land only, a sea cell ends the route; ties by cell id. Returns the route, whether its largest rise above its
 /// running minimum exceeds `bar`, and that rise.
 fn route_low(m: &Measure, line: &[(f64, f64)], points: &[usize], avoid: &HashSet<usize>) -> Option<(Vec<usize>, bool, f64)> {
+    route_low_n(m, line, points, avoid, false, false)
+}
+
+/// [`route_low`] with 4-connected steps when `four` (lead #184b: the curves' last fallback), and minimax first when `minimax` (lead #184j): per leg the cost
+/// Dijkstra runs only on the cells at or below the leg's bottleneck B* (the lowest highest point over every corridor path to the leg's end set), so the route
+/// minimises its highest point first and the cost second (exact; a single Dijkstra on (max, cost) is not, its order is not kept under extension).
+fn route_low_n(
+    m: &Measure,
+    line: &[(f64, f64)],
+    points: &[usize],
+    avoid: &HashSet<usize>,
+    four: bool,
+    minimax: bool,
+) -> Option<(Vec<usize>, bool, f64)> {
     let (mut index, cells) = m.corridor(line)?;
     index.retain(|c, _| !avoid.contains(c) || points.contains(c));
     if points.iter().any(|p| !index.contains_key(p)) {
@@ -1093,8 +1182,48 @@ fn route_low(m: &Measure, line: &[(f64, f64)], points: &[usize], avoid: &HashSet
     let zmin = cells.iter().map(|&c| m.water[c]).fold(f64::INFINITY, f64::min);
     let w = m.w;
     let mut route = vec![points[0]];
+    let steps: Vec<(i64, i64)> = [(-1i64, -1i64), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+        .into_iter()
+        .filter(|&(dx, dy)| !(four && dx != 0 && dy != 0))
+        .collect();
+    let near = |c: usize| {
+        let (cx, cy) = ((c % w) as i64, (c / w) as i64);
+        steps.iter().filter_map(move |&(dx, dy)| {
+            let (nx, ny) = (cx + dx, cy + dy);
+            (nx >= 0 && ny >= 0 && nx < w as i64 && ny < m.h as i64).then(|| (ny as usize * w + nx as usize, dx, dy))
+        })
+    };
     for leg in points.windows(2) {
         let (from, to) = (leg[0], leg[1]);
+        // lead #184j: the leg's bottleneck B*, popped in order of the path's highest point (ties by cell id); the end set as below
+        let cap = if minimax {
+            let mut best = vec![f64::INFINITY; cells.len()];
+            let mut heap = BinaryHeap::new();
+            best[index[&from]] = m.water[from];
+            heap.push(Key(m.water[from], from as u32));
+            let mut bstar = None;
+            while let Some(Key(b, c)) = heap.pop() {
+                let c = c as usize;
+                if b > best[index[&c]] {
+                    continue;
+                }
+                if c == to || (c != from && !m.land(c)) {
+                    bstar = Some(b);
+                    break;
+                }
+                for (n, _, _) in near(c) {
+                    let Some(&ni) = index.get(&n) else { continue };
+                    let nb = b.max(m.water[n]);
+                    if nb < best[ni] {
+                        best[ni] = nb;
+                        heap.push(Key(nb, n as u32));
+                    }
+                }
+            }
+            bstar?
+        } else {
+            f64::INFINITY
+        };
         let mut dist = vec![f64::INFINITY; cells.len()];
         let mut parent = vec![usize::MAX; cells.len()];
         let mut heap = BinaryHeap::new();
@@ -1111,14 +1240,11 @@ fn route_low(m: &Measure, line: &[(f64, f64)], points: &[usize], avoid: &HashSet
                 end = Some(c);
                 break;
             }
-            let (cx, cy) = ((c % w) as i64, (c / w) as i64);
-            for (dx, dy) in [(-1i64, -1i64), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
-                let (nx, ny) = (cx + dx, cy + dy);
-                if nx < 0 || ny < 0 || nx >= w as i64 || ny >= m.h as i64 {
+            for (n, dx, dy) in near(c) {
+                let Some(&ni) = index.get(&n) else { continue };
+                if m.water[n] > cap {
                     continue;
                 }
-                let n = ny as usize * w + nx as usize;
-                let Some(&ni) = index.get(&n) else { continue };
                 let len = if dx != 0 && dy != 0 { std::f64::consts::SQRT_2 } else { 1.0 };
                 let nd = d + len * (1.0 + (m.water[n] - zmin).max(0.0) / 10.0);
                 if nd < dist[ni] {
@@ -1147,6 +1273,57 @@ fn route_low(m: &Measure, line: &[(f64, f64)], points: &[usize], avoid: &HashSet
         rise = rise.max(m.water[c] - bed);
     }
     Some((route, rise > m.bar, rise))
+}
+
+/// Lead #184d item 3b: the curve's points' mean spacing (L cells).
+fn cv_ds(pts: &[(f64, f64)]) -> f64 {
+    if pts.len() < 2 {
+        return 0.5;
+    }
+    pts.windows(2).map(|s| libm::hypot(s[1].0 - s[0].0, s[1].1 - s[0].1)).sum::<f64>() / (pts.len() - 1) as f64
+}
+
+/// Lead #184d item 3b: a bed that never rises downstream: the least-squares non-increasing fit of `z` (pool adjacent violators), a Gaussian of 4 L cells (edges held;
+/// a positive kernel keeps the fit monotone), then a slope floor of 1e-4 m/m along the points (`ds` L cells apart, `cell_m` m an L cell).
+fn monotone_bed(z: &[f64], ds: f64, cell_m: f64) -> Vec<f64> {
+    let n = z.len();
+    if n < 2 {
+        return z.to_vec();
+    }
+    let mut blocks: Vec<(f64, usize)> = Vec::with_capacity(n);
+    for &v in z {
+        blocks.push((v, 1));
+        while blocks.len() >= 2 {
+            let (s1, c1) = blocks[blocks.len() - 2];
+            let (s2, c2) = blocks[blocks.len() - 1];
+            if s1 / c1 as f64 >= s2 / c2 as f64 {
+                break;
+            }
+            blocks.pop();
+            *blocks.last_mut().expect("a block") = (s1 + s2, c1 + c2);
+        }
+    }
+    let mut fit = Vec::with_capacity(n);
+    for (s, c) in blocks {
+        fit.extend(std::iter::repeat_n(s / c as f64, c));
+    }
+    let sn = (4.0 / ds.max(1e-6)).max(1.0);
+    let half = (3.0 * sn).ceil() as i64;
+    let kern: Vec<f64> = (-half..=half).map(|k| libm::exp(-0.5 * (k as f64 / sn) * (k as f64 / sn))).collect();
+    let ksum: f64 = kern.iter().sum();
+    let mut sm: Vec<f64> = (0..n as i64)
+        .map(|i| (-half..=half).map(|k| kern[(k + half) as usize] * fit[(i + k).clamp(0, n as i64 - 1) as usize]).sum::<f64>() / ksum)
+        .collect();
+    let drop = 1e-4 * ds * cell_m;
+    for i in 1..n {
+        sm[i] = sm[i].min(sm[i - 1] - drop);
+    }
+    sm
+}
+
+/// Lead #184b: a trunk reach's seed for its meander's jitter, from its first and last H1 cells (window-local; GlobalCell order is a hygiene item after the sign-off).
+fn reach_id_seed(r: &H1Reach) -> u64 {
+    (u64::from(r.cells[0]) << 32) ^ u64::from(*r.cells.last().expect("cells")) ^ 0x4D45_414E_4445_5232
 }
 
 /// An H1 reach of the trunk graph before its L image: the H1 cells (up first), its up and down node kinds, its source segment.
@@ -1346,6 +1523,73 @@ fn budget_field(s0: &[f64], lw: usize, rw: usize, rh: usize, dx_h1: f64, stride:
     (0..rw * rh).map(|c| coarse[((c / rw) / stride).min(sh - 1) * sw + ((c % rw) / stride).min(sw - 1)]).collect()
 }
 
+/// The L anchors of the trunk graph's H1 nodes (contract §2.1: the lowest L cell of S0 within one H1 cell, ties by global cell id; land only for a non-outlet node, reading 2
+/// for outlets), snapped in order of descending q_w (reading 7); lead #184: out of `build_graph` so the curves (before KH) snap the same cells.
+fn trunk_anchors(
+    h1: &H1,
+    reaches: &[H1Reach],
+    grid: &Grid,
+    s0: &[f64],
+    window: (u64, u64, usize, usize, usize),
+    ocean: &[bool],
+) -> (HashMap<(u32, NodeKind), usize>, HashSet<usize>) {
+    let (x0, y0, w, h, rw) = window;
+    let h1_gid = |c: u32| grid.global_id(c as usize);
+    let l_gid = |c: usize| gid(x0 + (c % w) as u64, y0 + (c / w) as u64);
+    let to_local = |c: u32| {
+        let c = c as usize;
+        ((L * (c % rw)) as f64 + (L as f64 - 1.0) / 2.0, (L * (c / rw)) as f64 + (L as f64 - 1.0) / 2.0)
+    };
+    let anchor_of = |c: u32, outlet: bool, taken: &HashSet<usize>| -> Option<usize> {
+        let p = to_local(c);
+        let disc = |keep: &dyn Fn(usize) -> bool| -> Option<usize> {
+            let r = L as f64;
+            let (x0_, x1_) = (((p.0 - r).floor() as i64).max(0), ((p.0 + r).ceil() as i64).min(w as i64 - 1));
+            let (y0_, y1_) = (((p.1 - r).floor() as i64).max(0), ((p.1 + r).ceil() as i64).min(h as i64 - 1));
+            let mut best: Option<usize> = None;
+            for y in y0_..=y1_ {
+                for x in x0_..=x1_ {
+                    let cc = (y as usize) * w + x as usize;
+                    if libm::hypot(x as f64 - p.0, y as f64 - p.1) > r || !keep(cc) {
+                        continue;
+                    }
+                    if best.is_none_or(|b| s0[cc] < s0[b] || (s0[cc] == s0[b] && l_gid(cc) < l_gid(b))) {
+                        best = Some(cc);
+                    }
+                }
+            }
+            best
+        };
+        if outlet {
+            disc(&|cc| !taken.contains(&cc))
+        } else {
+            disc(&|cc| !ocean[cc] && !taken.contains(&cc)).or_else(|| disc(&|cc| !taken.contains(&cc)))
+        }
+    };
+    // reading 7: the H1 nodes snap in order of descending q_w, ties by H1 node id; a cell already taken is excluded
+    let mut h1_nodes: Vec<(u32, NodeKind)> =
+        reaches.iter().flat_map(|r| [(r.cells[0], r.up_kind), (*r.cells.last().expect("cells"), r.down_kind)]).collect();
+    h1_nodes.sort_by_key(|&(c, k)| (c, k));
+    h1_nodes.dedup();
+    h1_nodes.sort_by(|a, b| {
+        h1.hydro.qw[b.0 as usize].total_cmp(&h1.hydro.qw[a.0 as usize]).then(node_id(BODY, a.1, Level::H1, h1_gid(a.0)).cmp(&node_id(
+            BODY,
+            b.1,
+            Level::H1,
+            h1_gid(b.0),
+        )))
+    });
+    let mut taken: HashSet<usize> = HashSet::new();
+    let mut anchor: HashMap<(u32, NodeKind), usize> = HashMap::new();
+    for &(c, kind) in &h1_nodes {
+        if let Some(a) = anchor_of(c, kind == NodeKind::OutletSea, &taken) {
+            taken.insert(a);
+            anchor.insert((c, kind), a);
+        }
+    }
+    (anchor, taken)
+}
+
 /// The L trunk graph of the window: H1 trunk graph (level H1) and its L images (level L), all owned by the landmass.
 #[allow(clippy::too_many_arguments)]
 fn build_graph(
@@ -1365,6 +1609,7 @@ fn build_graph(
     ocean: &[bool],
     runoff_mean: f64,
     zs_h1: &[f64],
+    curves: Option<&[Option<(curve::Curve, Vec<f64>)>]>,
     intended: &[bool],
 ) -> (Graph, Vec<String>) {
     let (x0, y0, w, h, rw) = window;
@@ -1416,58 +1661,11 @@ fn build_graph(
             exceptions: Vec::new(),
         });
     }
-    // ---- L anchors (contract §2.1: the lowest L cell of S0 within one H1 cell, ties by global cell id; land only for a non-outlet node, reading 2 for outlets)
     let all_inside = vec![true; w * h];
     let ks_water: Vec<f64> = (0..ks0.len()).map(|c| if ocean[c] { ks0[c].max(sea) } else { ks0[c] }).collect();
     let mks =
         Measure { w, h, water: &ks_water, inside: &all_inside, region: &all_inside, sea, radius: K_C * L as f64, bar, ocean: Some(ocean) };
-    let anchor_of = |c: u32, outlet: bool, taken: &HashSet<usize>| -> Option<usize> {
-        let p = to_local(c);
-        let disc = |keep: &dyn Fn(usize) -> bool| -> Option<usize> {
-            let r = L as f64;
-            let (x0_, x1_) = (((p.0 - r).floor() as i64).max(0), ((p.0 + r).ceil() as i64).min(w as i64 - 1));
-            let (y0_, y1_) = (((p.1 - r).floor() as i64).max(0), ((p.1 + r).ceil() as i64).min(h as i64 - 1));
-            let mut best: Option<usize> = None;
-            for y in y0_..=y1_ {
-                for x in x0_..=x1_ {
-                    let cc = (y as usize) * w + x as usize;
-                    if libm::hypot(x as f64 - p.0, y as f64 - p.1) > r || !keep(cc) {
-                        continue;
-                    }
-                    if best.is_none_or(|b| s0[cc] < s0[b] || (s0[cc] == s0[b] && l_gid(cc) < l_gid(b))) {
-                        best = Some(cc);
-                    }
-                }
-            }
-            best
-        };
-        if outlet {
-            disc(&|cc| !taken.contains(&cc))
-        } else {
-            disc(&|cc| !ocean[cc] && !taken.contains(&cc)).or_else(|| disc(&|cc| !taken.contains(&cc)))
-        }
-    };
-    // reading 7: the H1 nodes snap in order of descending q_w, ties by H1 node id; a cell already taken is excluded
-    let mut h1_nodes: Vec<(u32, NodeKind)> =
-        reaches.iter().flat_map(|r| [(r.cells[0], r.up_kind), (*r.cells.last().expect("cells"), r.down_kind)]).collect();
-    h1_nodes.sort_by_key(|&(c, k)| (c, k));
-    h1_nodes.dedup();
-    h1_nodes.sort_by(|a, b| {
-        h1.hydro.qw[b.0 as usize].total_cmp(&h1.hydro.qw[a.0 as usize]).then(node_id(BODY, a.1, Level::H1, h1_gid(a.0)).cmp(&node_id(
-            BODY,
-            b.1,
-            Level::H1,
-            h1_gid(b.0),
-        )))
-    });
-    let mut taken: HashSet<usize> = HashSet::new();
-    let mut anchor: HashMap<(u32, NodeKind), usize> = HashMap::new();
-    for &(c, kind) in &h1_nodes {
-        if let Some(a) = anchor_of(c, kind == NodeKind::OutletSea, &taken) {
-            taken.insert(a);
-            anchor.insert((c, kind), a);
-        }
-    }
+    let (anchor, taken) = trunk_anchors(h1, reaches, grid, s0, window, ocean);
     // lead #174 (`--trunk-saddle-ortho on`, SPIKE-142): a diagonal H1 step whose two off-path H1 cells both stand above both of its ends on z_s (a saddle block) gets the
     // centre of the lower off-path cell as an extra line point, so the L image's corridor and its lowest path go round the col instead of across the corner; the H1
     // routing and the reach's H1 cells are unchanged
@@ -1518,7 +1716,17 @@ fn build_graph(
                 }
                 let (k, line, up, down) = &jobs[q];
                 let pts = if up == down { vec![*up] } else { vec![*up, *down] };
-                let r = if pts.len() < 2 {
+                // lead #184: with the curves, the reach's vertex cells are its curve's 4-connected raster (the rise on KS0 along it as route_low reports it)
+                let r = if let Some(cs) = curves {
+                    cs[*k].as_ref().map(|(cv, _)| {
+                        let (mut bed, mut rise) = (f64::INFINITY, 0.0f64);
+                        for &c in &cv.raster {
+                            bed = bed.min(ks_water[c]);
+                            rise = rise.max(ks_water[c] - bed);
+                        }
+                        (cv.raster.clone(), rise > bar, rise)
+                    })
+                } else if pts.len() < 2 {
                     Some((pts.clone(), false, 0.0))
                 } else if low_centre {
                     route_low(&mks, line, &pts, &taken)
@@ -1777,6 +1985,26 @@ static SEA17: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new
 /// lead #189: `--runoff-cell on` gives KG-trib's extract and the landmass pass a per-cell runoff (the H1 field at each L cell's parent, over the uniform mean), accumulated as
 /// area x runoff so a_run sums exactly at nodes; `off` (default until the rows) the uniform runoff.
 static RUNOFF_CELL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// lead #184 (O8 step 1, row 1; spike only): `--trunk-curve on` builds each H1 trunk reach's curve before KH (its lowest path on S0 in its corridor, smoothed; A4) and KG-trunk
+/// takes the curve's 4-connected raster as the reach's vertex cells; `off` (default) KG-trunk's lowest path on KS0, 8-connected.
+static TRUNK_CURVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// lead #184 (row 6): `--meander on` adds meanders to the curves of rivers wider than 10 m (wavelength 12 widths, sinuosity about 1.3, held to the valley floor).
+static MEANDER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// lead #184a (width form 1 with A2): `--kv-wall-s0 on` caps KV's wall grade per cell at S0's side slope (kv_kc::WALL_CAP); `off` (default) KV's s_wall alone.
+static KV_WALL_S0: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// lead #184c (a reversible call in the gate, the owner may overrule; not row 3): `--kh-keep-s0 on` protects the S0 depressions basins-2's default rule would keep
+/// (>= 0.25 km2, >= 2 m; no 10 m cap) from KH's curve correction: inside one KH leaves C1 as it is, and on its rim ring (the cells within 2 L cells outside it, its
+/// outlet path among them) the correction never lowers S0 below the depression's spill level; `off` (default) no mask.
+static KH_KEEP_S0: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// lead #184c (the corner-link trace): `--kh-curve-dams off` drops h4c at the dammed diagonals under 75 km2 from `--kh-zone curve`; `on` (default, #184's order) keeps it.
+static KH_CURVE_DAMS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+/// lead #184j (spike only): `--curve-minimax on` routes each trunk curve's base path minimax first: per leg the lowest reachable highest S0 point B* (a bottleneck
+/// Dijkstra in the corridor), then the lowest-path cost among the cells at or below B*; water takes the lowest pass. `off` (default) the cost alone.
+static CURVE_MINIMAX: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// lead #184j item 2 (spike only; A5's cap): `--kh-guard on` bounds KH's curve correction: in C1's space (S0 = C1 + r) a cell is lowered by at most
+/// max(C1 - the defaults' KH value there, 10 m), the defaults' KH being h5 on its h4c zone (C1 + w min(h4c - C1, 0)). Cells the cap holds are crossing
+/// candidates for row 3 (spill or around), counted and written as `<tag>-kh-guard.txt`; not a breach rule. `off` (default) no bound.
+static KH_GUARD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// lead #182a: `--trib-rerun on` runs KG-trib post once more with basins-2's kept set where a line-end lake inlet lost its basin, then basins-2 once more on the new lines; on by default since #182c (reading 44); `off` the one extraction.
 static TRIB_RERUN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 /// lead #179: `--inlet-floor on` floors the graph bed of every L vertex on or inside a kept basin's rim at its spill; `off` the beds as coded; on by default since #180a (reading 42).
@@ -2140,6 +2368,12 @@ fn main() -> Result<(), String> {
             std::fs::write(f, BREACH_CSV_HEADER).map_err(|e| format!("{f}: {e}"))?;
         }
     }
+    // lead #184v (spike only): `--k5 k5p` routes K5's rounds on the sills of r = B - C1(z_b) (SPIKE-131's K5', form (a)) and implies `--h1 k6p`; `today` (default) K5 as is
+    let k5_form = value(&args, "--k5").unwrap_or("today");
+    if !["today", "k5p", "control"].contains(&k5_form) {
+        return Err(format!("--k5 today | k5p | control, not '{k5_form}'"));
+    }
+    let h1_form = if k5_form == "k5p" { "k6p" } else { h1_form };
     let base_today = h1_form == "k6";
     // SPIKE-139 (lead #148 item 2, control): `--zs-read c1` (default) reads z_s at L by C1; `contour` first smooths z_s along its contour (5 taps [1 4 6 4 1]/16 at half-cell
     // steps, bilinear, perpendicular to the central-difference gradient) on every cell but H1's channel cells, so S0 = C1(z_s') + r and KH's C1 reads z_s'; K5, H1, HAND, KH's
@@ -2179,7 +2413,8 @@ fn main() -> Result<(), String> {
     }
     KS_CONNECT.store(ks_connect == "4", std::sync::atomic::Ordering::Relaxed);
     // lead #159: `--dump-ks-steps` writes KS's steps into the chain directory (ks0, ks1, ks1c after KS's connect, band6, band6c after its connect; one region only)
-    let dump_ks_steps = args.iter().any(|a| a == "--dump-ks-steps");
+    // lead #184: `--probe-crops` dumps the KS steps too (the look sheet's KS0, KS1+C and band6+C columns; only their crops without --chain)
+    let dump_ks_steps = args.iter().any(|a| a == "--dump-ks-steps") || value(&args, "--probe-crops").is_some();
     // lead #163 (B3, result-preserving): `--kh-self-check` reads KH three times (threads, two regions, serial) and prints the differences; off: one read
     let kh_self_check = args.iter().any(|a| a == "--kh-self-check");
     // lead #163 (B3): `--kv-vertices` writes <tag>-kv-vertices.csv (lead #175's census per vertex); off: not written
@@ -2220,8 +2455,47 @@ fn main() -> Result<(), String> {
     // split; h4 the same unclamped; line no triangulation: C1 lowered toward the straight line of every D8 step of KH's routing from an H1 channel cell (its linear
     // z_s between the two cell centres), full within 1.5 L cells of the line and smoothly to no change at 4 (spike only)
     let kh_zone = value(&args, "--kh-zone").unwrap_or("h4c");
-    if !["h4c", "h4", "line", "line8"].contains(&kh_zone) {
-        return Err(format!("--kh-zone h4c | h4 | line | line8, not '{kh_zone}'"));
+    // lead #184 (row 2): `--kh-zone curve`, KH's zone correction along the trunk curves (A2: a narrow thalweg or S0's wall, z_bed + s d with s at least
+    // `--curve-thalweg-slope`, default 0.05, and S0's side slope; only below the bed + 10 m, blended to C1 above; lower only), and h4c only on the dammed D8 diagonals of
+    // rivers under 75 km2 (h5d's dams); needs `--trunk-curve on`
+    let curve_thalweg: f64 = value(&args, "--curve-thalweg-slope").map_or(Ok(0.05), str::parse).map_err(|_| "--curve-thalweg-slope S")?;
+    // lead #184d item 3b: `--curve-bed zs` (default) the bed z_s along the reach; `fit` a monotone least-squares fit of it (pool adjacent violators, never rising
+    // downstream), smoothed by a 4 L cell Gaussian (which keeps it monotone) and held to a slope floor of 1e-4
+    let curve_bed = value(&args, "--curve-bed").unwrap_or("zs");
+    // lead #184d (the in-zone Xdiag item): `--curve-blend min` (default) KH's curve correction as min(C1, target); `smooth` a polynomial smooth minimum over 3 m,
+    // so the crease where the profile meets C1 is rounded
+    let curve_blend = value(&args, "--curve-blend").unwrap_or("min");
+    // lead #184f item 2 (the facets enter at KH: in-zone Xdiag S0 0.003 -> S_KH 0.037 on the dams-off row): `--curve-profile v` (default) the cross-section
+    // z_bed + s d; `round` a hyperbola z_bed + s (sqrt(d^2 + d0^2) - d0), d0 = 1.5 L cells: the same walls away from the thalweg, its tip rounded
+    let curve_profile = value(&args, "--curve-profile").unwrap_or("v");
+    // lead #184p (spike only): `--kh-weight dist` replaces the curve zone's height gate (8-12 m above the bed) by a weight on the distance to the curve: in S0's space
+    // z = S0 - w(d) max(0, S0 - target(d)), w = 1 on the floor falling by a C1 smoothstep to 0 at the zone's edge (8 L cells); `gate` (default) as before
+    let kh_weight = value(&args, "--kh-weight").unwrap_or("gate");
+    if !["gate", "dist"].contains(&kh_weight) {
+        return Err(format!("--kh-weight {kh_weight}: gate | dist"));
+    }
+    // lead #184p item 2 (spike only, with `--kh-weight dist`): `--kh-wall-cap DEG` caps the cut's wall: target(d) = max(bed + s d, S0 - (d_edge - d) tan(DEG)), the zone's
+    // edge widened to d_edge = max(8, (S0 at the curve - bed) / tan(DEG)) L cells (at most 24), so a wall never stands steeper than DEG; absent, no cap
+    let kh_wall_cap: Option<f64> = value(&args, "--kh-wall-cap").map(str::parse).transpose().map_err(|_| "--kh-wall-cap DEG")?;
+    if kh_wall_cap.is_some() && kh_weight != "dist" {
+        return Err("--kh-wall-cap needs --kh-weight dist".into());
+    }
+    // lead #184f item 2: the facets follow the curves' lattice-aligned headings (R1h: 54 % of the curve length within 5 degrees of 0 / 45 / 90 / 135, uniform 22 %);
+    // `--curve-sigma S` the smoothing's sigma (L cells, default 2)
+    let curve_sigma: f64 = value(&args, "--curve-sigma").map_or(Ok(2.0), str::parse).map_err(|_| "--curve-sigma S")?;
+    // lead #184n (spike only): `--meander-runmin R` holds meander points at or below the base path's running minimum + R m (no climbing); absent, the 10 m room
+    let meander_runmin: Option<f64> = value(&args, "--meander-runmin").map(str::parse).transpose().map_err(|_| "--meander-runmin R")?;
+    if !["v", "round"].contains(&curve_profile) {
+        return Err(format!("--curve-profile v | round, not '{curve_profile}'"));
+    }
+    if !["min", "smooth"].contains(&curve_blend) {
+        return Err(format!("--curve-blend min | smooth, not '{curve_blend}'"));
+    }
+    if !["zs", "fit"].contains(&curve_bed) {
+        return Err(format!("--curve-bed zs | fit, not '{curve_bed}'"));
+    }
+    if !["h4c", "h4", "line", "line8", "curve"].contains(&kh_zone) {
+        return Err(format!("--kh-zone h4c | h4 | line | line8 | curve, not '{kh_zone}'"));
     }
     let kh_saddle = value(&args, "--kh-saddle-split").unwrap_or("off");
     if !["off", "trunk", "all"].contains(&kh_saddle) {
@@ -2344,6 +2618,13 @@ fn main() -> Result<(), String> {
         ("--trunk-saddle-ortho", &TRUNK_SADDLE_ORTHO, "off"),
         ("--band6-keep-rims", &BAND6_KEEP_RIMS, "off"),
         ("--runoff-cell", &RUNOFF_CELL, "off"),
+        ("--trunk-curve", &TRUNK_CURVE, "off"),
+        ("--meander", &MEANDER, "off"),
+        ("--kv-wall-s0", &KV_WALL_S0, "off"),
+        ("--kh-keep-s0", &KH_KEEP_S0, "off"),
+        ("--kh-curve-dams", &KH_CURVE_DAMS, "on"),
+        ("--curve-minimax", &CURVE_MINIMAX, "off"),
+        ("--kh-guard", &KH_GUARD, "off"),
         ("--trunk-head-once", &planet_generators::bake::kg_trib::HEAD_ONCE, "on"),
         ("--strahler-junction", &planet_generators::bake::kg_trib::STRAHLER_JUNCTION, "on"),
         ("--band6-floors", &BAND6_FLOORS, "on"),
@@ -2461,7 +2742,121 @@ fn main() -> Result<(), String> {
         keep_channels: false,
         stage,
     };
-    let front = region_front(&spec, &base, &climate)?;
+    let mut front = region_front(&spec, &base, &climate)?;
+    // lead #184v (spike only): K5' (`--k5 k5p`): K5's rounds re-run from z_b_in on the sills of r = B - C1(z_b), then the spec's stage-3 drain; z_s and the
+    // regional field (z_s - z_b) replaced, so S0, H1 (K6', implied) and every later stage read K5''s surface. The front's lakes and graph stay K5's (unused with
+    // `--h1-lakes off`, the default).
+    let mut k5p_keep: Option<(Sills, Vec<f64>)> = None;
+    if k5_form == "k5p" || k5_form == "control" {
+        let t = Instant::now();
+        if matches!(spec.stage.base_drain, planet_cache::region_bake::Drain::Selective { clamp: true, .. }) {
+            return Err("--k5 k5p: the base drain's clamp (K5's level floor) is not ported".into());
+        }
+        // numerics review M2: the knobs K5' does not read are refused, not ignored
+        {
+            use std::sync::atomic::Ordering::Relaxed;
+            let k = spec.stage.k5;
+            if k.route != K5Route::D8 || k.kdt_scale != 1.0 || k.uok_scale != 1.0 {
+                return Err("--k5 k5p|control: --k5-route, --k5-kdt-scale and --k5-uok-scale are not ported".into());
+            }
+            if planet_generators::bake::round::K5_DIFFUSE.load(Relaxed) != 0 || planet_generators::bake::round::K5_PARITY.load(Relaxed) != 0
+            {
+                return Err("--k5 k5p|control: --k5-diffuse and --k5-parity are not ported".into());
+            }
+            if planet_cache::region_bake::K5_REGION_READ.load(Relaxed) != 0 {
+                return Err("--k5 k5p|control: the regional read variants are not ported".into());
+            }
+            if value(&args, "--h1-lakes") == Some("keep") {
+                return Err("--k5 k5p|control: --h1-lakes keep reads K5's front lakes".into());
+            }
+        }
+        let s = &front.solve;
+        let (sri0, srj0, rw, rh) = (s.ri0, s.rj0, s.rw, s.rh);
+        let (x0, y0, w, h) = ((sri0 * L) as i64, (srj0 * L) as i64, rw * L, rh * L);
+        let nl = spec.local() as f64;
+        let dir_of = |x: i64, y: i64| {
+            planet_core::cube::face_to_direction(&TangentWarp, face, 2.0 * (x as f64 + 0.5) / nl - 1.0, 2.0 * (y as f64 + 0.5) / nl - 1.0)
+        };
+        let mut bl = vec![0f64; w * h];
+        par_fill(&mut bl, w, threads, &|p| base(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
+        let zb_field = RegionField::new(face, REGIONAL, (sri0 as i64, srj0 as i64), rw, rh, s.zb.iter().map(|&v| v as f32).collect());
+        let mut rl = vec![0f64; w * h];
+        par_fill(&mut rl, w, threads, &|p| bl[p] - zb_field.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
+        drop(bl);
+        let r_sills = nodes_and_sills(&|c: usize| rl[c], rw, rh, threads, None);
+        drop(rl);
+        let t_sills = t.elapsed().as_secs_f64();
+        let mut carve = CarveParams {
+            steps: 5 * spec.rounds,
+            reroute_every: 5,
+            round_rules: RoundRules::ROUND,
+            cell_metric: true,
+            window_cut: true,
+            ..CarveParams::default()
+        };
+        spec.precision().apply(&mut carve);
+        // numerics review M3: the control (today's routing, r_min 0) must equal solve_region's z_s bit for bit
+        if k5_form == "control" {
+            let mut c0 = rounds_k5p(&s.grid, &s.zb_in, &s.outlet, &carve, spec.rounds, threads, s.stream, None);
+            if spec.stage.post_drain != planet_cache::region_bake::Drain::Off {
+                c0 = planet_cache::region_bake::run_drain(&spec.stage.post_drain, &s.grid, &s.outlet, &c0, "3, control", None);
+            }
+            let differ = (0..c0.len()).filter(|&c| c0[c].to_bits() != s.zs[c].to_bits()).count();
+            println!(
+                "RG K5 control (lead #184v): this loop with today's routing against solve_region: {differ} of {} cells differ",
+                c0.len()
+            );
+            if differ != 0 {
+                return Err(format!("--k5 control: {differ} cells differ from solve_region"));
+            }
+        }
+        // numerics review H1: the land cells that the old sea floor (sea + eps on h = z_s + r_min) would have moved: those starting at or under it
+        let sea_eps = carve.sea_level + carve.epsilon;
+        let hit = (0..s.zb_in.len()).filter(|&c| !s.outlet[c] && s.zb_in[c] + r_sills.h[c] <= sea_eps).count();
+        println!("RG K5' (lead #184v): {hit} land cells start at or under sea + eps in h = z_b_in + r_min (the per-cell sea floor keeps their z_s at the sea)");
+        let t2 = Instant::now();
+        let mut zs2 = rounds_k5p(&s.grid, &s.zb_in, &s.outlet, &carve, spec.rounds, threads, s.stream, Some(&r_sills));
+        if spec.stage.post_drain != planet_cache::region_bake::Drain::Off {
+            zs2 = planet_cache::region_bake::run_drain(&spec.stage.post_drain, &s.grid, &s.outlet, &zs2, "3, z_s after K5'", None);
+        }
+        s.precision.check_within_radius(&s.grid, &zs2, |c| s.grid.global_id(c)).map_err(|e| format!("after K5': {e}"))?;
+        // the reproduction measures (SPIKE-131: R1h mean erosion z_b - z_s 101 -> 78 m; z_s' - z_s p10 / p50 / p90 -32 / 7 / 107 m)
+        let (i0, i1, j0, j1) = spec.region;
+        let cells = rw * rh;
+        let land: Vec<usize> = (0..cells)
+            .filter(|&c| {
+                let (i, j) = (sri0 + c % rw, srj0 + c / rw);
+                i >= i0 && i <= i1 && j >= j0 && j <= j1 && !s.outlet[c]
+            })
+            .collect();
+        let q = |mut v: Vec<f64>| {
+            if v.is_empty() {
+                return "no land".to_string();
+            }
+            v.sort_by(f64::total_cmp);
+            let k = v.len();
+            format!("p10 {:.1} p50 {:.1} p90 {:.1} mean {:.1}", v[k / 10], v[k / 2], v[k * 9 / 10], v.iter().sum::<f64>() / k as f64)
+        };
+        println!(
+            "RG K5' (lead #184v): sills of r {t_sills:.1} s, rounds and drain {:.1} s; erosion z_b - z_s on the box's land: K5 {}; K5' {}; z_s' - z_s {}",
+            t2.elapsed().as_secs_f64(),
+            q(land.iter().map(|&c| s.zb[c] - s.zs[c]).collect()),
+            q(land.iter().map(|&c| s.zb[c] - zs2[c]).collect()),
+            q(land.iter().map(|&c| zs2[c] - s.zs[c]).collect())
+        );
+        if k5_form == "k5p" {
+            front.regional_field = RegionField::new(
+                face,
+                REGIONAL,
+                (sri0 as i64, srj0 as i64),
+                rw,
+                rh,
+                (0..cells).map(|c| (zs2[c] - s.zb[c]) as f32).collect(),
+            );
+            front.solve.zs = zs2.clone();
+            k5p_keep = Some((r_sills, zs2));
+        }
+    }
     let solve = &front.solve;
     let (sri0, srj0, rw, rh) = (solve.ri0, solve.rj0, solve.rw, solve.rh);
     let (x0, y0, w, h) = ((sri0 * L) as i64, (srj0 * L) as i64, rw * L, rh * L);
@@ -2715,6 +3110,46 @@ fn main() -> Result<(), String> {
             Some(h1_from(grid, hh, &f2, r2, outlet, &runoff, &evap, Some(&budget), HYDRO_TWICE.load(std::sync::atomic::Ordering::Relaxed))),
         )
     };
+    // lead #184v: the K5-channel share (SPIKE-127/131): K6''s channel cells more than one 814 m cell (Chebyshev) from K5's own channel cells (today's K6 on z_s)
+    if let Some((rs, zs2)) = &k5p_keep {
+        // numerics review M1: K5''s own channels, as SPIKE-131 (flood and routing on h = z_s' + r_min with sills s_r + max z_s'), against K6''s trunk cells
+        let hh: Vec<f64> = (0..cells).map(|c| zs2[c] + if outlet[c] { 0.0 } else { rs.h[c] }).collect();
+        let sill = |a: usize, d: usize, b: usize| (rs.at(a, d, b) + zs2[a].max(zs2[b])).max(hh[a]).max(hh[b]);
+        let wl = flood(grid, &hh, &sill, outlet, eps);
+        let r0 = route_sills(grid, &wl, &sill, outlet, stream, &weight, true);
+        let own =
+            h1_from(grid, &hh, &wl, r0, outlet, &runoff, &evap, Some(&Vec::new()), HYDRO_TWICE.load(std::sync::atomic::Ordering::Relaxed))
+                .hydro
+                .channel;
+        let trunk: std::collections::BTreeSet<usize> = h1.trunk_cells.iter().flatten().map(|&c| c as usize).collect();
+        let (i0, i1, j0, j1) = spec.region;
+        let in_box = |c: usize| {
+            let (i, j) = (sri0 + c % rw, srj0 + c / rw);
+            i >= i0 && i <= i1 && j >= j0 && j <= j1
+        };
+        let (mut tot, mut exact, mut far) = (0usize, 0usize, 0usize);
+        for &c in trunk.iter().filter(|&&c| in_box(c)) {
+            tot += 1;
+            if !own[c] {
+                exact += 1;
+                let (x, y) = ((c % rw) as i64, (c / rw) as i64);
+                let near = (-1..=1i64).any(|dy| {
+                    (-1..=1i64).any(|dx| {
+                        let (u, v) = (x + dx, y + dy);
+                        u >= 0 && v >= 0 && u < rw as i64 && v < rh as i64 && own[v as usize * rw + u as usize]
+                    })
+                });
+                if !near {
+                    far += 1;
+                }
+            }
+        }
+        println!(
+            "RG K5' (lead #184v): K6' trunk cells in the box {tot}; off K5''s channel cells: exact {:.1} %, more than 1 cell {:.1} % (SPIKE-131 R1h: 29.2 / 3.3 %)",
+            100.0 * exact as f64 / tot.max(1) as f64,
+            100.0 * far as f64 / tot.max(1) as f64
+        );
+    }
     // spikes #147: `--probe-base` stops after H1: the channel steps (H1's channel cells to their receivers, in the region box) by direction, the straight runs along each
     // segment (consecutive steps in one direction, in steps of 814 m), and the 814 m fields z_b, z_b_in, z_s and the channel mask for the sheets
     if args.iter().any(|a| a == "--probe-base") {
@@ -2926,12 +3361,222 @@ fn main() -> Result<(), String> {
         reaches.iter().filter(|r| r.down_kind == NodeKind::LakeInlet).count(),
         reaches.iter().filter(|r| r.up_kind == NodeKind::LakeSpill).count()
     );
+    // lead #184 (O8 step 1, rows 1, 2 and 6; spike only): the trunk curves before KH (A4): each H1 trunk reach's lowest path on S0 in its corridor, smoothed, with meanders
+    // (`--meander on`), rasterised 4-connected; KG-trunk takes the raster as the reach's vertex cells and KH (`--kh-zone curve`) lowers along the curve
+    let curves: Option<Vec<Option<(curve::Curve, Vec<f64>)>>> = if TRUNK_CURVE.load(std::sync::atomic::Ordering::Relaxed) {
+        let t = Instant::now();
+        let window = (x0 as u64, y0 as u64, w, h, rw);
+        let (anchor, taken) = trunk_anchors(&h1, &reaches, grid, &start, window, &ocean);
+        let s0w: Vec<f64> = (0..w * h).map(|c| if ocean[c] { start[c].max(sea) } else { start[c] }).collect();
+        let all_inside = vec![true; w * h];
+        let ms0 =
+            Measure { w, h, water: &s0w, inside: &all_inside, region: &all_inside, sea, radius: K_C * L as f64, bar, ocean: Some(&ocean) };
+        let cp = curve::CurveParams {
+            sigma: curve_sigma,
+            meander_runmin,
+            ..curve::CurveParams::standard(grid.dx() / L as f64, MEANDER.load(std::sync::atomic::Ordering::Relaxed))
+        };
+        let to_local = |c: u32| {
+            let c = c as usize;
+            ((L * (c % rw)) as f64 + (L as f64 - 1.0) / 2.0, (L * (c / rw)) as f64 + (L as f64 - 1.0) / 2.0)
+        };
+        let law = planet_generators::bake::k7::WidthLaw::STANDARD;
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let done = std::sync::Mutex::new(Vec::new());
+        std::thread::scope(|sc| {
+            for _ in 0..threads.max(1) {
+                sc.spawn(|| loop {
+                    let k = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if k >= reaches.len() {
+                        break;
+                    }
+                    let r = &reaches[k];
+                    let out = (|| {
+                        let up = *anchor.get(&(r.cells[0], r.up_kind))?;
+                        let down = *anchor.get(&(*r.cells.last()?, r.down_kind))?;
+                        if up == down {
+                            return None;
+                        }
+                        let line: Vec<(f64, f64)> = r.cells.iter().map(|&c| to_local(c)).collect();
+                        let mm = CURVE_MINIMAX.load(std::sync::atomic::Ordering::Relaxed);
+                        let (base, _, _) = route_low_n(&ms0, &line, &[up, down], &taken, false, mm)?;
+                        let m = r.cells.len();
+                        let qw_at = |f: f64| h1.hydro.qw[r.cells[(libm::round(f * (m - 1) as f64) as usize).min(m - 1)] as usize];
+                        let avoid = |c: usize| c != up && c != down && taken.contains(&c);
+                        let mut cv = curve::build(reach_id_seed(r), &base, w, h, &s0w, &ocean, &avoid, &|f| law.width_m(qw_at(f)), &cp);
+                        // #184b: the 8-connected fallback becomes a 4-connected lowest path where the corridor has one
+                        if cv.fallback == 2 {
+                            if let Some((b4, _, _)) = route_low_n(&ms0, &line, &[up, down], &taken, true, mm) {
+                                cv.offsets = vec![(0, 0); b4.len()];
+                                cv.raster = b4;
+                                cv.fallback = 3;
+                            }
+                        }
+                        // the bed along the curve: z_s along the reach's H1 cells at the same share of its length. Lead #184 (R1h): not a running minimum, which
+                        // cut every rim and col the trunk crosses down to the lowest bed upstream (kept basins 1,492 -> 564, hump cuts 2,480 -> 4,413); a rise stays
+                        let n = cv.pts.len();
+                        let mut zb = Vec::with_capacity(n);
+                        for i in 0..n {
+                            let f = if n > 1 { i as f64 / (n - 1) as f64 } else { 0.0 } * (m - 1) as f64;
+                            let a = (f.floor() as usize).min(m - 1);
+                            let b = (a + 1).min(m - 1);
+                            let (za, zbb) = (solve.zs[r.cells[a] as usize], solve.zs[r.cells[b] as usize]);
+                            zb.push(za + (f - a as f64) * (zbb - za));
+                        }
+                        if curve_bed == "fit" {
+                            zb = monotone_bed(&zb, cv_ds(&cv.pts), grid.dx() / L as f64);
+                        }
+                        Some((cv, zb))
+                    })();
+                    done.lock().expect("lock").push((k, out));
+                });
+            }
+        });
+        let mut v: Vec<(usize, Option<(curve::Curve, Vec<f64>)>)> = done.into_inner().expect("lock");
+        v.sort_by_key(|x| x.0);
+        let cs: Vec<Option<(curve::Curve, Vec<f64>)>> = v.into_iter().map(|x| x.1).collect();
+        // the curves' numbers: their sinuosity (length over chord) on reaches with a chord over 2 km, the meander share, the raster
+        let cell_m = grid.dx() / L as f64;
+        let mut sin: Vec<f64> = Vec::new();
+        let (mut pts_n, mut ras_n, mut wavy) = (0usize, 0usize, 0.0f64);
+        let mut fb = [0usize; 4];
+        for (cv, _) in cs.iter().flatten() {
+            fb[cv.fallback as usize] += 1;
+            pts_n += cv.pts.len();
+            ras_n += cv.raster.len();
+            wavy += cv.meander_share * cv.pts.len() as f64;
+            let len: f64 = cv.pts.windows(2).map(|s| libm::hypot(s[1].0 - s[0].0, s[1].1 - s[0].1)).sum();
+            let (a, b) = (cv.pts[0], cv.pts[cv.pts.len() - 1]);
+            let chord = libm::hypot(b.0 - a.0, b.1 - a.1);
+            if chord * cell_m > 2000.0 {
+                sin.push(len / chord);
+            }
+        }
+        sin.sort_by(f64::total_cmp);
+        println!(
+            "RG trunk curves (lead #184): {} of {} H1 trunk reaches, {pts_n} points, {ras_n} raster cells (curve {}, base 4-connected {}, base 8-connected {}, 4-connected lowest path {}); meander {} ({:.1} % of the points); curve sinuosity over 2 km p50 {:.3} ({} reaches); {:.1} s",
+            cs.iter().flatten().count(),
+            reaches.len(),
+            fb[0],
+            fb[1],
+            fb[2],
+            fb[3],
+            if cp.meander { "on" } else { "off" },
+            100.0 * wavy / pts_n.max(1) as f64,
+            sin.get(sin.len() / 2).copied().unwrap_or(f64::NAN),
+            sin.len(),
+            t.elapsed().as_secs_f64()
+        );
+        // the curves for the overlays and the measures: `TRC1`, then a reach a record (u32 reach, u32 points, f32 x y each, u32 raster cells, u32 cell + i8 dx + i8 dy each)
+        let mut b: Vec<u8> = b"TRC1".to_vec();
+        b.extend((cs.iter().flatten().count() as u32).to_le_bytes());
+        for (k, (cv, _)) in cs.iter().enumerate().filter_map(|(k, c)| c.as_ref().map(|c| (k, c))) {
+            b.extend((k as u32).to_le_bytes());
+            b.extend((cv.pts.len() as u32).to_le_bytes());
+            for &(x, y) in &cv.pts {
+                b.extend((x as f32).to_le_bytes());
+                b.extend((y as f32).to_le_bytes());
+            }
+            b.extend((cv.raster.len() as u32).to_le_bytes());
+            for (&c, &(dx, dy)) in cv.raster.iter().zip(&cv.offsets) {
+                b.extend((c as u32).to_le_bytes());
+                b.extend([dx as u8, dy as u8]);
+            }
+        }
+        std::fs::write(out_dir.join(format!("{tag}-trunk-curves.bin")), b).map_err(|e| e.to_string())?;
+        Some(cs)
+    } else {
+        None
+    };
+    if kh_zone == "curve" && curves.is_none() {
+        return Err("--kh-zone curve needs --trunk-curve on".into());
+    }
+    // lead #184c: the S0 keep mask for KH's curve correction (1 inside a kept-size S0 depression, 2 on its rim ring; the floor its spill level on S0)
+    let keep_s0: Option<(Vec<u8>, Vec<f32>)> = if KH_KEEP_S0.load(std::sync::atomic::Ordering::Relaxed) {
+        let outl: Vec<bool> = (0..w * h).map(|c| ocean[c] || c % w == 0 || c / w == 0 || c % w == w - 1 || c / w == h - 1).collect();
+        let level = planet_generators::bake::drain::fill_level(&start, w, h, &outl);
+        let (_, comps) = planet_generators::bake::drain::depressions(&start, &level, w, h);
+        let cm = grid.dx() / L as f64;
+        let mut kind = vec![0u8; w * h];
+        let mut floor = vec![f32::NEG_INFINITY; w * h];
+        let (mut kept, mut inside) = (0usize, 0usize);
+        for (cs, _) in &comps {
+            let area = cs.len() as f64 * cm * cm;
+            let depth = cs.iter().map(|&c| level[c as usize] - start[c as usize]).fold(0.0f64, f64::max);
+            if area >= 0.25e6 && depth >= 2.0 {
+                kept += 1;
+                inside += cs.len();
+                let spill = level[cs[0] as usize] as f32;
+                for &c in cs {
+                    kind[c as usize] = 1;
+                    floor[c as usize] = spill;
+                }
+            }
+        }
+        // the rim ring: within 2 L cells (Chebyshev) of a kept depression's cell, outside every one; the highest spill around it
+        let mut ring = 0usize;
+        let inside_cells: Vec<usize> = (0..w * h).filter(|&c| kind[c] == 1).collect();
+        for &c in &inside_cells {
+            let (x, y) = ((c % w) as i64, (c / w) as i64);
+            for dy in -2i64..=2 {
+                for dx in -2i64..=2 {
+                    let (nx, ny) = (x + dx, y + dy);
+                    if nx < 0 || ny < 0 || nx >= w as i64 || ny >= h as i64 {
+                        continue;
+                    }
+                    let q = ny as usize * w + nx as usize;
+                    if kind[q] == 1 {
+                        continue;
+                    }
+                    if kind[q] == 0 {
+                        ring += 1;
+                    }
+                    kind[q] = 2;
+                    floor[q] = floor[q].max(floor[c]);
+                }
+            }
+        }
+        println!("RG KH keep S0 (lead #184c): {kept} of {} S0 depressions kept-size (>= 0.25 km2, >= 2 m); {inside} cells inside, {ring} rim-ring cells", comps.len());
+        Some((kind, floor))
+    } else {
+        None
+    };
+    // lead #184 (spike only): `--stop-after-curves` ends the run after the curve stage (the curves' numbers alone)
+    if args.iter().any(|a| a == "--stop-after-curves") {
+        return Ok(());
+    }
+    if KV_WALL_S0.load(std::sync::atomic::Ordering::Relaxed) {
+        // lead #184a: S0's side slope per L cell (central differences), KV's wall grade cap
+        let cm = grid.dx() / L as f64;
+        let sl: Vec<f64> = (0..w * h)
+            .map(|p| {
+                let (x, y) = (p % w, p / w);
+                let at = |x: usize, y: usize| start[y * w + x];
+                let gx = (at((x + 1).min(w - 1), y) - at(x.saturating_sub(1), y)) / (2.0 * cm);
+                let gy = (at(x, (y + 1).min(h - 1)) - at(x, y.saturating_sub(1))) / (2.0 * cm);
+                libm::hypot(gx, gy)
+            })
+            .collect();
+        let mut s = sl.clone();
+        s.sort_by(f64::total_cmp);
+        println!(
+            "RG KV wall cap (lead #184a): S0's side slope p10 {:.3} p50 {:.3} p90 {:.3}; KV's s_wall 0.20",
+            s[s.len() / 10],
+            s[s.len() / 2],
+            s[s.len() * 9 / 10]
+        );
+        *planet_generators::bake::kv_kc::WALL_CAP.write().map_err(|_| "WALL_CAP")? = Some(Arc::new(sl));
+    }
     // ================================================================ the RG chain (explorer #166, G1f plumbing; no tuning, no judgement)
     // switches: --kh c1 | h2 | h4 | h4c, default h4c (spikes #139; KS starts from KH(z_s) + r: h2 the triangulation, reading 19, spikes #137; h4 Clough-Tocher on its split and h4c, h4 clamped to
     // its quad's corners, reading 20, spikes #138 and #139); --ks off | ks0 | ks1 (default ks1); --skip a,b,... of kg-trunk, basins, kg-trib, kv, kc;
     // --regions 1 | 2
     // reading 25 (lead #168b): KH is h5 by default
     let kh = value(&args, "--kh").unwrap_or("h5");
+    // numerics review F4: the curve zone is h5's
+    if kh_zone == "curve" && !(kh == "h5" || kh == "h5d") {
+        return Err(format!("--kh-zone curve needs --kh h5 or h5d, not '{kh}'"));
+    }
     // spikes #147a: `h5d` is h5 plus h4c within 2 L cells of the D8 diagonal steps C1 dams (smoothstep to C1 by 4 L cells), the owner's decision-7 fallback
     if !["c1", "h2", "h4", "h4c", "h5", "h5d"].contains(&kh) {
         return Err(format!("--kh c1 | h2 | h4 | h4c | h5 | h5d, not '{kh}'"));
@@ -3131,9 +3776,11 @@ fn main() -> Result<(), String> {
             RegionField::new(face, REGIONAL, (sri0 as i64, srj0 as i64), rw, rh, zs_l.iter().map(|&v| v as f32).collect()).with_read(r)
         });
         // h5d: the quads whose D8 diagonal step C1 dams (C1 at the quad's centre over the step line by more than 1 m); C1 at the centre is the mean of the four L cells there
-        let dams = (kh_form == "h5d").then(|| {
+        let dams = (kh_form == "h5d" || (kh_zone == "curve" && KH_CURVE_DAMS.load(std::sync::atomic::Ordering::Relaxed))).then(|| {
             let rcv = |c: usize| (recv[c] != NONE).then(|| recv[c] as usize);
-            let diag = |q: usize| -> Option<(usize, usize)> {
+            // lead #184: with `--kh-zone curve` only the diagonals of rivers under 75 km2 (neither end an H1 channel cell); the trunks have their curves
+            let small = |(a, b): (usize, usize)| kh_zone != "curve" || (!h1.hydro.channel[a] && !h1.hydro.channel[b]);
+            let diag_all = |q: usize| -> Option<(usize, usize)> {
                 let (a, b, c, d) = (q, q + 1, q + rw, q + rw + 1);
                 if rcv(a) == Some(d) {
                     Some((a, d))
@@ -3147,6 +3794,7 @@ fn main() -> Result<(), String> {
                     None
                 }
             };
+            let diag = |q: usize| diag_all(q).filter(|&s| small(s));
             let centre = |q: usize| {
                 let (cx, cy) = ((q % rw * L + L - 1) as i64, (q / rw * L + L - 1) as i64);
                 [(0, 0), (1, 0), (0, 1), (1, 1)]
@@ -3231,8 +3879,158 @@ fn main() -> Result<(), String> {
             }
             out
         };
+        // lead #184 (`--kh-zone curve`): each L cell's nearest trunk-curve point within 8 L cells (its distance in L cells, the curve's bed there); ties keep the first curve
+        let curve_cn: Option<(Vec<f32>, Vec<f32>, Vec<f32>)> = (kh_zone == "curve").then(|| {
+            // lead #184p item 2: a widened zone (24 L cells) under the wall cap
+            let r = if kh_wall_cap.is_some() { 24i64 } else { 8i64 };
+            let mut d = vec![f32::INFINITY; n_l];
+            let mut zb = vec![0f32; n_l];
+            // lead #184p item 2: S0 at the curve point (bilinear at the segment's projection), for the zone's local edge
+            let mut zc = vec![0f32; n_l];
+            let s0_at = |px: f64, py: f64| {
+                let (x0f, y0f) = (px.floor().clamp(0.0, (w - 2) as f64), py.floor().clamp(0.0, (h - 2) as f64));
+                let (i0, j0) = (x0f as usize, y0f as usize);
+                let (fx, fy) = ((px - x0f).clamp(0.0, 1.0), (py - y0f).clamp(0.0, 1.0));
+                let at = |i: usize, j: usize| start[j * w + i];
+                (1.0 - fy) * ((1.0 - fx) * at(i0, j0) + fx * at(i0 + 1, j0)) + fy * ((1.0 - fx) * at(i0, j0 + 1) + fx * at(i0 + 1, j0 + 1))
+            };
+            // numerics review F2: the distance to the curve's segments (not to its points), less 0.71 L cells, so the raster's own cells (centres up to 0.71 cells from
+            // the curve) lie on the thalweg; the bed interpolated along the segment
+            for (cv, z) in curves.as_ref().expect("curves").iter().flatten() {
+                for i in 0..cv.pts.len().saturating_sub(1) {
+                    let ((ax, ay), (bx, by)) = (cv.pts[i], cv.pts[i + 1]);
+                    let (vx, vy) = (bx - ax, by - ay);
+                    let l2 = vx * vx + vy * vy;
+                    let (lx, hx) = ((ax.min(bx) - r as f64).floor() as i64, (ax.max(bx) + r as f64).ceil() as i64);
+                    let (ly, hy) = ((ay.min(by) - r as f64).floor() as i64, (ay.max(by) + r as f64).ceil() as i64);
+                    for y in ly.max(0)..=hy.min(h as i64 - 1) {
+                        for x in lx.max(0)..=hx.min(w as i64 - 1) {
+                            let t = if l2 > 0.0 { (((x as f64 - ax) * vx + (y as f64 - ay) * vy) / l2).clamp(0.0, 1.0) } else { 0.0 };
+                            let dd = ((libm::hypot(x as f64 - ax - t * vx, y as f64 - ay - t * vy) - 0.71).max(0.0)) as f32;
+                            let c = y as usize * w + x as usize;
+                            if dd <= r as f32 && dd < d[c] {
+                                d[c] = dd;
+                                zb[c] = (z[i] + t * (z[i + 1] - z[i])) as f32;
+                                if kh_wall_cap.is_some() {
+                                    zc[c] = s0_at(ax + t * vx, ay + t * vy) as f32;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // numerics review F5: the H1 channel cells no curve covers (their trunk reach has none: no anchor, up = down, no route, or unfed in a basin)
+            let bare =
+                (0..cells).filter(|&c| h1.hydro.channel[c] && !d[((c / rw) * L + L / 2) * w + (c % rw) * L + L / 2].is_finite()).count();
+            println!("RG KH curve zone: {bare} H1 channel cells outside every curve's zone (C1 there)");
+            println!(
+                "RG KH curve zone (lead #184): {} L cells within {r} L cells of a trunk curve",
+                d.iter().filter(|v| v.is_finite()).count()
+            );
+            (d, zb, zc)
+        });
+        let (curve_near, curve_zc): (Option<(Vec<f32>, Vec<f32>)>, Option<Vec<f32>>) = match curve_cn {
+            Some((d, zb, zc)) => (Some((d, zb)), Some(zc)),
+            None => (None, None),
+        };
+        let cell_m = grid.dx() / L as f64;
+        let s0_slope = |p: usize| {
+            let (x, y) = (p % w, p / w);
+            let at = |x: usize, y: usize| start[y * w + x];
+            let gx = (at((x + 1).min(w - 1), y) - at(x.saturating_sub(1), y)) / (2.0 * cell_m);
+            let gy = (at(x, (y + 1).min(h - 1)) - at(x, y.saturating_sub(1))) / (2.0 * cell_m);
+            libm::hypot(gx, gy)
+        };
+        // lead #184j item 2: the KH guard's cap at a cell, in C1's space: max(C1 - the defaults' KH value (h5 on its h4c zone, no dams), 10 m)
+        let kh_guard = KH_GUARD.load(std::sync::atomic::Ordering::Relaxed) && kh_zone == "curve" && (kh_form == "h5" || kh_form == "h5d");
+        let guard_cap = |p: usize, c1: f64| {
+            let (fx, fy) = (((p % w) as f64 - (lr - 1.0) / 2.0) / lr, ((p / w) as f64 - (lr - 1.0) / 2.0) / lr);
+            let wgt = kh::zone_weight(zone.as_ref().expect("h5's zone"), rw, rh, fx, fy);
+            let h4c = kh::read_ct_clamped(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0;
+            let vdef = if kh_lower_only { c1 + wgt * (h4c - c1).min(0.0) } else { c1 + wgt * (h4c - c1) };
+            (c1 - vdef).max(10.0)
+        };
         let kval = |p: usize| {
             let (fx, fy) = (((p % w) as f64 - (lr - 1.0) / 2.0) / lr, ((p / w) as f64 - (lr - 1.0) / 2.0) / lr);
+            if kh_zone == "curve" && (kh_form == "h5" || kh_form == "h5d") {
+                let c1 = f64::from(zs_field.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
+                let mut v = c1;
+                if let Some(s) = &dams {
+                    let wd = kh::dam_weight(s, rw, rh, fx, fy, lr, 2.0, 4.0);
+                    if wd > 0.0 {
+                        let h4c = kh::read_ct_clamped(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0;
+                        v = c1 + wd * (h4c - c1).min(0.0);
+                    }
+                }
+                // lead #184c: inside a kept-size S0 depression KH leaves C1 as it is
+                if let Some((kind, _)) = &keep_s0 {
+                    if kind[p] == 1 {
+                        return c1;
+                    }
+                }
+                // lead #184p: the distance weight in S0's space, no per-cell height test
+                if kh_weight == "dist" {
+                    if let Some((d, zb)) = &curve_near {
+                        if d[p].is_finite() {
+                            let (zb, dc) = (f64::from(zb[p]), f64::from(d[p]));
+                            let s0p = c1 + rl[p];
+                            let edge = match (kh_wall_cap, &curve_zc) {
+                                (Some(deg), Some(zc)) => {
+                                    ((f64::from(zc[p]) - zb).max(0.0) / (libm::tan(deg.to_radians()) * cell_m)).clamp(8.0, 24.0)
+                                }
+                                _ => 8.0,
+                            };
+                            if dc < edge {
+                                let mut target = zb + s0_slope(p).max(curve_thalweg) * dc * cell_m;
+                                if let Some(deg) = kh_wall_cap {
+                                    target = target.max(s0p - (edge - dc) * cell_m * libm::tan(deg.to_radians()));
+                                }
+                                let x = dc / edge;
+                                let wgt = 1.0 - x * x * (3.0 - 2.0 * x);
+                                let z = s0p - wgt * (s0p - target).max(0.0);
+                                v = z - rl[p];
+                            }
+                        }
+                    }
+                    return v;
+                }
+                if let Some((d, zb)) = &curve_near {
+                    if d[p].is_finite() {
+                        let zb = f64::from(zb[p]);
+                        let dm = f64::from(d[p]) * cell_m;
+                        let reach = if curve_profile == "round" {
+                            let d0 = 1.5 * cell_m;
+                            libm::sqrt(dm * dm + d0 * d0) - d0
+                        } else {
+                            dm
+                        };
+                        let mut target = zb + s0_slope(p).max(curve_thalweg) * reach;
+                        if curve_blend == "smooth" {
+                            // a polynomial smooth minimum of v and the target over k = 3 m (never above v; the target where it lies k under v or more)
+                            let k = 3.0;
+                            let hh = (0.5 + 0.5 * (v - target) / k).clamp(0.0, 1.0);
+                            target = (v + hh * (target - v) - k * hh * (1.0 - hh)).min(v);
+                        }
+                        if target < v {
+                            // width form 1 (#184a): the correction holds the band below the bed + 10 m (the profile's target there), blended to C1 above (8 to 12 m).
+                            // Gated on the target's height, so every thalweg cell reaches the bed; the cell's own height (numerics review F3) left perched raster cells
+                            // uncut on R1h (KV/KC residuals 12,560 -> 1,298,042). A terrace within the band's reach is lowered to it (F3's design question, lead).
+                            let s = ((target - zb - 8.0) / 4.0).clamp(0.0, 1.0);
+                            v += (1.0 - s * s * (3.0 - 2.0 * s)) * (target - v);
+                            if kh_guard {
+                                v = v.max(c1 - guard_cap(p, c1));
+                            }
+                        }
+                    }
+                }
+                // lead #184c: on a kept depression's rim ring S0 (KH + r) stays at its spill level or above where C1 stood there
+                if let Some((kind, fl)) = &keep_s0 {
+                    if kind[p] == 2 {
+                        v = v.max(c1.min(f64::from(fl[p]) - rl[p]));
+                    }
+                }
+                return v;
+            }
             match kh_form {
                 "h2" => kh::read(&solve.zs, rw, rh, &split, fx, fy),
                 "h4" => kh::read_ct(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0,
@@ -3274,6 +4072,36 @@ fn main() -> Result<(), String> {
         };
         if let Some(z) = &zone {
             println!("RG KH h5: h4c on {} zone cells of 814 m, C1 elsewhere", z.iter().filter(|&&x| x).count());
+        }
+        // lead #184j item 2: the crossing candidates, the curve-zone cells the guard holds at its cap (C1 - v equal to the cap)
+        if kh_guard {
+            if let Some((d, _)) = &curve_near {
+                let mut held: Vec<usize> = Vec::new();
+                for p in 0..n_l {
+                    if d[p].is_finite() {
+                        let c1 = f64::from(zs_field.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
+                        let cap = guard_cap(p, c1);
+                        if (c1 - kval(p) - cap).abs() < 1e-9 {
+                            held.push(p);
+                        }
+                    }
+                }
+                let mut txt = String::from(
+                    "kh-guard 1
+# crossing candidates (lead #184j item 2): window x y, held at the cap
+",
+                );
+                for &p in &held {
+                    txt.push_str(&format!(
+                        "{} {}
+",
+                        p % w,
+                        p / w
+                    ));
+                }
+                std::fs::write(out_dir.join(format!("{tag}-kh-guard.txt")), txt).map_err(|e| e.to_string())?;
+                println!("RG KH guard (lead #184j item 2): {} curve-zone cells held at the cap (crossing candidates for row 3), {tag}-kh-guard.txt", held.len());
+            }
         }
         if census {
             let mut k = vec![0f64; n_l];
@@ -3483,6 +4311,7 @@ fn main() -> Result<(), String> {
             &ocean,
             runoff_mean,
             &solve.zs,
+            curves.as_deref(),
             &intended_l,
         )
         .0
@@ -5231,6 +6060,7 @@ fn main() -> Result<(), String> {
         t += &format!("commit {commit}{}\n", if dirty { "-dirty" } else { "" });
         for (k, v) in [
             ("h1", h1_form.to_string()),
+            ("k5", k5_form.to_string()),
             ("base", base_form.to_string()),
             ("kh", kh.to_string()),
             ("zs-read", zs_read.to_string()),
@@ -5260,6 +6090,21 @@ fn main() -> Result<(), String> {
             ("kv-cross", format!("{}", KV_CROSS_MICRO.load(std::sync::atomic::Ordering::Relaxed) as f64 * 1.0e-6)),
             ("trib-rerun", if TRIB_RERUN.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("runoff-cell", if RUNOFF_CELL.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("trunk-curve", if TRUNK_CURVE.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("meander", if MEANDER.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("kv-wall-s0", if KV_WALL_S0.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("kh-keep-s0", if KH_KEEP_S0.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("kh-curve-dams", if KH_CURVE_DAMS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("curve-minimax", if CURVE_MINIMAX.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("kh-guard", if KH_GUARD.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
+            ("curve-thalweg-slope", curve_thalweg.to_string()),
+            ("curve-bed", curve_bed.to_string()),
+            ("curve-blend", curve_blend.to_string()),
+            ("curve-profile", curve_profile.to_string()),
+            ("curve-sigma", curve_sigma.to_string()),
+            ("kh-weight", kh_weight.to_string()),
+            ("kh-wall-cap", kh_wall_cap.map_or("-".to_string(), |d| d.to_string())),
+            ("meander-runmin", meander_runmin.map_or("-".to_string(), |r| r.to_string())),
             ("inlet-floor", if INLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-floors", if BAND6_FLOORS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-outlet-floor", if BAND6_OUTLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),

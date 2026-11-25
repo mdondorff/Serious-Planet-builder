@@ -1,0 +1,2 @@
+final D8 (GLO-30 method): channel length 25169 km, in straight runs over 2 km 18.2 %; sinuosity of reaches over 2 km (1570): p50 1.185, length-weighted mean 1.281
+  straight share by drained area: 75-300 km2 10.1 % of 12475 km, 300-1000 km2 14.6 % of 6810 km, 1000-3000 km2 25.9 % of 2828 km, 3000+ km2 52.1 % of 3056 km

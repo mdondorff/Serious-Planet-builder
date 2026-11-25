@@ -33,6 +33,8 @@ pub struct CatchmentInputs {
     pub exit_window_cut: bool,
     /// SPIKE-138 (spike only): the breach's floor per member (a donor's level floor bounds its receiver's target), empty for none; from [`Drivers::level_floor`].
     pub level_floor: Vec<f64>,
+    /// lead #184v (spike only): the sea floor per member in place of `sea_level + epsilon`, empty for none; from [`Drivers::sea_floor`] (K5' carves `z_s + r_min`).
+    pub sea_floor: Vec<f64>,
 }
 
 /// What a carve reads besides the heights (the drivers of `carve_rock` without a layered rock): the class factor, the uplift per cell (the ratio `U / K` at K 1) and the runoff weights.
@@ -44,6 +46,9 @@ pub struct Drivers<'a> {
     /// SPIKE-138 (spikes #145, spike only; R24: an argument, no longer a process global): per region cell, the level K5's breach may not lower a receiver below when the donor
     /// lies in a basin the selective drain left (its fill level), -inf elsewhere. Read by [`gather_with`] when its length is the grid's.
     pub level_floor: Option<&'a [f64]>,
+    /// lead #184v (spike only): per region cell, the sea floor in place of `sea_level + epsilon` (K5' carves `h = z_s + r_min`, so its floor is `r_min + sea + eps`).
+    /// Read by [`gather_with`] when its length is the grid's.
+    pub sea_floor: Option<&'a [f64]>,
 }
 
 /// spikes #154 (spike branch only): the window edge as a free outflow boundary in K5's breach (see [`catchment_round`]); off by default (the edge outlet keeps its height).
@@ -53,6 +58,9 @@ pub static K5_EDGE_FREE: std::sync::atomic::AtomicBool = std::sync::atomic::Atom
 pub fn catchment_round(inp: &mut CatchmentInputs, p: &CarveParams, steps: usize) {
     let window_cut = inp.exit_window_cut;
     let floor = p.sea_level + p.epsilon;
+    // lead #184v (spike only): a member's own sea floor when given
+    let sf = std::mem::take(&mut inp.sea_floor);
+    let fl = |c: usize| sf.get(c).copied().unwrap_or(floor);
     let z = &mut inp.z;
     let base = if p.round_rules.clip_mfd != super::route::MfdClip::Local {
         None
@@ -69,7 +77,7 @@ pub fn catchment_round(inp: &mut CatchmentInputs, p: &CarveParams, steps: usize)
             continue;
         }
         let rec = rec as usize;
-        let mut want = (z[c] - p.breach_slope * inp.dist[c]).max(floor);
+        let mut want = (z[c] - p.breach_slope * inp.dist[c]).max(fl(rec));
         if let Some(b) = &base {
             want = want.max(b[rec]);
         }
@@ -93,7 +101,7 @@ pub fn catchment_round(inp: &mut CatchmentInputs, p: &CarveParams, steps: usize)
             let t = f64::from(inp.taper[c]);
             let up = inp.up_unit[c] * t;
             let hn = (z[c] + up + f * hr) / (1.0 + f);
-            let new = if p.keep_pits && !p.incise_only && z[c] < hr { (z[c] + up).max(floor) } else { hn.max(hr + p.epsilon).max(floor) };
+            let new = if p.keep_pits && !p.incise_only && z[c] < hr { (z[c] + up).max(fl(c)) } else { hn.max(hr + p.epsilon).max(fl(c)) };
             z[c] = if p.incise_only { new.min(z[c]) } else { new };
         }
     }
@@ -347,8 +355,10 @@ pub fn gather_with(
         up_unit: Vec::with_capacity(cells.len()),
         exit_window_cut: false,
         level_floor: Vec::new(),
+        sea_floor: Vec::new(),
     };
     let lf = drivers.level_floor.filter(|f| f.len() == z.len());
+    let sfl = drivers.sea_floor.filter(|f| f.len() == z.len());
     for &c in cells {
         let c = c as usize;
         let rec = r.receiver[c];
@@ -356,6 +366,9 @@ pub fn gather_with(
         inp.z.push(z[c]);
         if let Some(f) = lf {
             inp.level_floor.push(f[c]);
+        }
+        if let Some(f) = sfl {
+            inp.sea_floor.push(f[c]);
         }
         inp.area.push(r.area[c]);
         inp.taper.push(taper.get(c).copied().unwrap_or(1.0));

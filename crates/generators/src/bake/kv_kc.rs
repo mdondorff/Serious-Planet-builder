@@ -19,6 +19,10 @@ use super::Grid;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap};
 
+/// Lead #184a (width form 1 with A2; spike only, off by default): per cell a cap on KV's wall grade, S0's side slope there, so no carve makes a cell's 10 m cross-section
+/// narrower than S0's (a gentler wall lowers more of the side, never less); a field of another length than the grid is ignored. `None`: `s_wall` alone.
+pub static WALL_CAP: std::sync::RwLock<Option<std::sync::Arc<Vec<f64>>>> = std::sync::RwLock::new(None);
+
 /// The plan's KV parameters (section 3.4).
 #[derive(Clone, Copy, Debug)]
 pub struct KvParams {
@@ -267,6 +271,7 @@ pub fn run_with_rims(
     // the lowering budget left before KV (reading 21)
     let left_at = |c: usize| (budget[c] - reference.map_or(0.0, |r| (r[c] - s0[c]).max(0.0))).max(0.0);
     let law = WidthLaw::STANDARD;
+    let wall_cap = WALL_CAP.read().ok().and_then(|g| g.clone()).filter(|c| c.len() == n);
     let mut reaches: Vec<&Reach> = g.reaches.iter().filter(|r| r.level == Level::L).collect();
     reaches.sort_by_key(|r| r.id);
     // vertices: (cell, reach index, vertex index); the first claim of a cell by reach id order
@@ -354,7 +359,8 @@ pub fn run_with_rims(
         let r = reaches[ri];
         let half = 0.5 * p.w_floor_factor * law.width_m(r.attrs.q_w[k]);
         let bed = bed_m(r.attrs.bed[k]).max(p.bed_floor_m);
-        let v = bed + p.s_floor * dist[c].min(half) + p.s_wall * (dist[c] - half).max(0.0);
+        let s_wall = wall_cap.as_ref().map_or(p.s_wall, |cap| p.s_wall.min(cap[c]));
+        let v = bed + p.s_floor * dist[c].min(half) + s_wall * (dist[c] - half).max(0.0);
         let cone = (s0[c] - v).max(0.0);
         let floor = dist[c] <= half;
         let capped = if floor { cone } else { (s0[c].min(s0[src[c] as usize]) - v).max(0.0) };
