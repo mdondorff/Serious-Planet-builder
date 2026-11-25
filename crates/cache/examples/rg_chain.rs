@@ -1911,6 +1911,9 @@ const INTENDED_MIN_M2: f64 = 10e6;
 const INTENDED_BITS: u8 = 1;
 /// lead #203: aridity P / PET under this makes an intended basin an `endorheic_candidate` (an input for O9's water balance, not a decision; ADR 0111 point 5).
 const ENDORHEIC_CANDIDATE_AI: f64 = 0.2;
+/// lead #203c (frozen with INTENDED_MARK and INTENDED_MIN_M2 after the calibration sweep): the selection's aridity ceiling at the floor, P / PET under this. It equals
+/// the `endorheic_candidate` record's bound, but the two stay apart: one chooses the intended basins, the other is O9's input.
+const INTENDED_ARID: f64 = 0.2;
 
 /// lead #203: an intended basin, a depression of the hierarchy the tectonic mark names (type `intentional`, an active outlet: it spills like any kept lake).
 struct Intended {
@@ -2118,9 +2121,9 @@ fn main() -> Result<(), String> {
             Some(v) => v.split(',').map(str::parse).collect::<Result<_, _>>().map_err(|_| format!("{name} X,X,..., not '{v}'")),
         }
     };
-    // lead #203c: `--intended-arid A` the selection's aridity ceiling at the floor (P / PET < A; default none); `--intended-scan-arid A,A,...` sweeps it at the mark
+    // lead #203c: `--intended-arid A` the selection's aridity ceiling at the floor (P / PET < A; default INTENDED_ARID); `--intended-scan-arid A,A,...` sweeps it at the mark
     let intended_arid: f64 = match value(&args, "--intended-arid") {
-        None => f64::INFINITY,
+        None => INTENDED_ARID,
         Some(v) => v.parse().map_err(|_| format!("--intended-arid A, not '{v}'"))?,
     };
     // the scan's (threshold, aridity ceiling) rows
