@@ -15,24 +15,24 @@ use planet_core::{CubePatch, Face, GlobalCell};
 use std::cmp::Reverse;
 use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet};
 
-const N: i64 = L_N as i64;
+pub(super) const N: i64 = L_N as i64;
 /// KC's budget for a cut or a fill (m), the contract's 50 m ceiling.
 const BUDGET_M: f64 = 50.0;
 /// KC's search cap (settled cells), `BREACH_CAP`.
 const CAP: usize = 20_000;
 const TOL: f64 = 1e-3;
 
-fn cell(p: usize) -> GlobalCell {
+pub(super) fn cell(p: usize) -> GlobalCell {
     let nn = L_N * L_N;
     GlobalCell::new(Face((p / nn) as u8), N, (p % L_N) as i64, ((p % nn) / L_N) as i64).unwrap()
 }
 
-fn index(c: GlobalCell) -> usize {
+pub(super) fn index(c: GlobalCell) -> usize {
     (c.face().0 as usize * L_N + c.j() as usize) * L_N + c.i() as usize
 }
 
 /// An f64 as an order-preserving key.
-fn key(v: f64) -> u64 {
+pub(super) fn key(v: f64) -> u64 {
     let b = v.to_bits();
     if b >> 63 == 1 {
         !b
@@ -41,13 +41,13 @@ fn key(v: f64) -> u64 {
     }
 }
 
-struct Grid {
-    nb: Vec<Vec<usize>>,
-    raw: Vec<u64>,
+pub(super) struct Grid {
+    pub(super) nb: Vec<Vec<usize>>,
+    pub(super) raw: Vec<u64>,
 }
 
 impl Grid {
-    fn new() -> Grid {
+    pub(super) fn new() -> Grid {
         let n = 6 * L_N * L_N;
         Grid {
             nb: (0..n).map(|p| cell(p).neighbours8(N).into_iter().map(index).collect()).collect(),
@@ -57,7 +57,7 @@ impl Grid {
 }
 
 /// The planet-wide fill level: a priority flood from the sea over the cube's 8-neighbourhood, ties by `GlobalCell`.
-fn fill_level(g: &Grid, z: &[f64], outlet: &[bool]) -> Vec<f64> {
+pub(super) fn fill_level(g: &Grid, z: &[f64], outlet: &[bool]) -> Vec<f64> {
     let mut level = vec![f64::INFINITY; z.len()];
     let mut heap = BinaryHeap::new();
     for p in (0..z.len()).filter(|&p| outlet[p]) {
@@ -251,7 +251,7 @@ const PLANTS: [Plant; 5] = [
 ];
 
 /// The cells within `r` degrees of a point (longitude scaled by the latitude's cosine).
-fn disk(lon: f64, lat: f64, r: f64) -> BTreeSet<usize> {
+pub(super) fn disk(lon: f64, lat: f64, r: f64) -> BTreeSet<usize> {
     let mut out = BTreeSet::new();
     let k = (r / 0.05).ceil() as i64;
     for a in -k..=k {
