@@ -1,0 +1,12 @@
+f1-kw-chain: 7087 cols over 10 m on 954 reaches
+  around within  8 L cells of the reach (a way round at least 10 m under the crossing): 161 cols; spill 6926
+  around within 24 L cells of the reach (a way round at least 10 m under the crossing): 195 cols; spill 6892
+  kept-size depressions in the box (>= 0.25 km2, >= 2 m): final 608 (584.3 km2); with the spill cols held 3353 (12205.9 km2)
+  added kept-size lake area 11621.6 km2
+  spill cols with a kept-size lake behind them: 6050 of 6892; distinct lakes 2364
+    those lakes: area p50 2.20, p90 8.83, max 151.0 km2, sum 11418 km2; depth p50 13.7, p90 32.2, max 57 m
+    lakes of at least 0.25 km2: 2364 (11418 km2)
+    lakes of at least 1.0 km2: 1810 (11117 km2)
+    lakes of at least 5.0 km2: 531 (7937 km2)
+  trunk reaches with lakes behind spill cols: 899; with 1 lake 306, 2 205, 3 or more 388 (lake chains: 593)
+  spill cols with no kept-size lake behind them (a pond under 0.25 km2 or 2 m, or the held col drains round inside its zone): 842
