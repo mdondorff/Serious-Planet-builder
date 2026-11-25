@@ -1,0 +1,16 @@
+## Design
+- **Where:** `planet_cache::metric_calibration`, beside `river_suite` (the gate's metrics it calibrates live there). A library module, so the gate's later registrations and a future xtask command can run it; the tier-A test drives it.
+- **Cases:** built one at a time (`for_each_case`), never all held: 3 backgrounds x 2 profiles x 4 floors x 5 angles = 120 surfaces of 256 x 256.
+- **Valley:** surface = background + carve. The carve is 0 outside the valley, so reference-relative metrics (hump cuts, corner links added, M4 added) read the valley alone; absolute ones (Xdiag) read it with the background.
+  - The depth grows downstream (80 m at the centre, +0.004 a metre along the axis), so the floor falls at 0.004 and a path walk has a downstream end.
+- **Defects:**
+  - stair4 / stair8 read the carve at the distance to the axis's raster cells, so the floor is a lattice staircase.
+  - A raster of a lattice-straight line (stair4 at 0 and 90 degrees, stair8 at multiples of 45) is a shifted smooth floor: those cases are not counted as defects (`Floor::is_defect_at`).
+  - The sawtooth is locked to the x index (period 8 cells): the chainsaw's lattice-phase pattern. It is a defect at every angle.
+- **Channel path:** a constrained steepest-descent walk in the zone, monotone along the axis, standing in for the routed channel.
+  - The background S0 has 650 m of relief, so a free D8 path would leave a 60-80 m valley.
+  - The walk is what a router yields on a well-formed valley; path metrics (M4, sinuosity, straight runs) read it.
+- **fBm:** value noise on prime lattice spacings (37, 19, 11, 7 cells), so that no octave carries an 8-cell phase into Xdiag.
+- **S0 fixture:** R1h's S0 crop at an H1-aligned origin, so that its global 8-cell phase equals the local one (Xdiag reads local phases). The test pins its CRC32C (the crate has no SHA-256); the spec records the SHA-256 for provenance.
+- **Bands:** each entry's band is in BUILD-069's Detail. Reference-relative forms (corner links added, M4 added) keep the background's own reading out of the judgement.
+- **Report only:** `reported()` entries' verdicts are printed and written, never asserted (CON-31: a failing pre-existing column goes to the owner as O14's evidence). Only `registered()` entries must pass; the list starts empty.
