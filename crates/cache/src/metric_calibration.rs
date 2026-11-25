@@ -22,7 +22,7 @@ pub const BOX_MARGIN: usize = 16;
 /// The valley wall's slope (m/m) and its depth (m) at the grid's centre; the depth grows downstream by `GRADE` (m/m), so the floor falls at `GRADE`.
 pub const WALL: f64 = 0.12;
 pub const DEPTH_M: f64 = 80.0;
-pub const GRADE: f64 = 0.004;
+pub const GRADE: f64 = 0.002;
 /// The sawtooth: `SAW_M` times `(x mod SAW_PERIOD) / SAW_PERIOD` (the cell's x index) added on the cells within `SAW_HALF_WIDTH` cells of the axis.
 pub const SAW_M: f64 = 5.0;
 pub const SAW_PERIOD: usize = 8;
@@ -83,14 +83,13 @@ impl Floor {
         }
     }
 
-    /// Whether this floor is a defect at `angle_deg`: a staircase along a raster that is itself a straight line (stair4 at multiples of 90 degrees, stair8 at multiples
-    /// of 45) is a shifted smooth floor, not a defect.
+    /// Whether this floor is a defect at `angle_deg`: along a lattice direction (multiples of 45 degrees) a raster repeats with the lattice step along the axis, so its
+    /// floor is straight (a different cross-section, not a lattice defect; numerics review H1: stair4 at 45 degrees is two adjacent diagonals).
     pub fn is_defect_at(self, angle_deg: f64) -> bool {
-        let on = |step: f64| (angle_deg / step).fract() == 0.0;
+        let lattice = (angle_deg / 45.0).fract() == 0.0;
         match self {
             Floor::Smooth => false,
-            Floor::Stair4 => !on(90.0),
-            Floor::Stair8 => !on(45.0),
+            Floor::Stair4 | Floor::Stair8 => !lattice,
             Floor::Sawtooth => true,
         }
     }
@@ -233,8 +232,8 @@ pub struct Case {
     pub zone: Vec<bool>,
     /// The box's land cells (the reference above 0).
     pub inside: Vec<bool>,
-    /// The channel path, upstream first: from the box's zone cell nearest the axis with the least along-axis coordinate, each step to the 8-neighbour in the box's zone
-    /// with a larger along-axis coordinate and the steepest descent (drop over step length, possibly negative; ties by cell index), until it reaches the box's edge
+    /// The channel path, upstream first, walked on the carve (surface minus reference): from the box's zone cell within 0.75 cells of the axis with the least
+    /// along-axis coordinate, each step to the 8-neighbour in the box's zone with a larger along-axis coordinate and the steepest descent (drop over step length, possibly negative; ties by cell index), until it reaches the box's edge
     /// downstream of the centre or has no such neighbour.
     pub channel: Vec<usize>,
 }
@@ -252,7 +251,7 @@ pub fn grid() -> Grid {
 }
 
 /// The distance (cells) from each cell to the nearest raster cell; cells more than `ZONE_CELLS + 4` cells off the axis keep their distance to the true axis (their carve
-/// is 0 either way: the deepest valley reaches its wall top within `ZONE_CELLS`).
+/// is 0 either way: the grid's deepest valley, 117 m at its corner, reaches its wall top within 11 cells on the round profile).
 fn raster_distance(axis: &Axis, raster: &[(i64, i64)]) -> Vec<f64> {
     let rs: Vec<(f64, f64, f64)> = raster.iter().map(|&(x, y)| (x as f64, y as f64, axis.coords(x as f64, y as f64).0)).collect();
     (0..N * N)
@@ -292,6 +291,16 @@ impl AngleFloors {
     }
 }
 
+/// The floor distance (cells) of each cell for `floor` at `angle_deg` (the sawtooth reads the smooth floor's).
+pub fn floor_distance(angle_deg: f64, floor: Floor) -> Vec<f64> {
+    let af = AngleFloors::new(angle_deg);
+    match floor {
+        Floor::Smooth | Floor::Sawtooth => af.smooth,
+        Floor::Stair4 => af.stair4,
+        Floor::Stair8 => af.stair8,
+    }
+}
+
 /// The carve (m, at most 0) at a cell of along-axis coordinate `s` and floor distance `d` (cells).
 pub fn carve(profile: Profile, s: f64, d: f64) -> f64 {
     let depth = DEPTH_M + GRADE * CELL_M * s;
@@ -327,7 +336,9 @@ fn build_case(af: &AngleFloors, angle_deg: f64, profile: Profile, floor: Floor, 
         inside.push(in_box && zb > 0.0);
         along.push(s);
     }
-    let channel = channel_path(&surface, &zone, &inside, &along, axis);
+    // numerics review M2: the walk reads the carve alone (a router on a well-formed valley), so the background's own slopes do not pull it out of the valley
+    let cut: Vec<f64> = surface.iter().zip(&bg.z).map(|(s, r)| s - r).collect();
+    let channel = channel_path(&cut, &zone, &inside, &along, axis);
     Case { angle_deg, profile, floor, background: bg.name.clone(), reference: bg.z.clone(), surface, zone, inside, channel }
 }
 
@@ -454,7 +465,8 @@ fn in_band(band: (f64, f64), v: f64) -> bool {
     band.0 <= v && v <= band.1
 }
 
-/// The verdict on a set of readings: smooth cases inside the band, then defect cases outside it (a NaN reading is outside every band).
+/// The verdict on a set of readings: smooth cases inside the band, then defect cases outside it. A NaN smooth reading is outside the band; a NaN defect reading is not a
+/// detection.
 pub fn judge(band: Option<(f64, f64)>, readings: &[Reading]) -> Verdict {
     let Some(b) = band else {
         return Verdict::ReportOnly;
@@ -462,7 +474,8 @@ pub fn judge(band: Option<(f64, f64)>, readings: &[Reading]) -> Verdict {
     if let Some(r) = readings.iter().find(|r| r.floor == Floor::Smooth && !in_band(b, r.value)) {
         return Verdict::NotAngleInvariant(r.label());
     }
-    if let Some(r) = readings.iter().find(|r| r.floor.is_defect_at(r.angle_deg) && in_band(b, r.value)) {
+    // numerics review L2: a NaN on a defect is not a detection
+    if let Some(r) = readings.iter().find(|r| r.floor.is_defect_at(r.angle_deg) && (in_band(b, r.value) || r.value.is_nan())) {
         return Verdict::MissesItsDefect(r.label());
     }
     Verdict::Pass
@@ -536,7 +549,8 @@ impl Calibration {
 
 // --- The entries (BUILD-069's Detail holds each band). ---
 
-/// The gate's corner links added: `river_suite::corner_links` of the surface minus the reference's, over the counted cells.
+/// The gate's corner links added: the counted 2 x 2 blocks that are corner links (`river_suite::corner_link`) in the surface and not in the reference (numerics review
+/// M1: a difference of counts lets added and removed links cancel).
 pub struct CornerLinksAdded;
 /// The gate's hump cuts (`river_suite::hump_cuts`), reported only.
 pub struct HumpCuts;
@@ -544,6 +558,8 @@ pub struct HumpCuts;
 pub struct SpectrumSlopeChange;
 /// SPIKE-143's in-zone Xdiag: the diagonal kink energy's phase excess over the zone's counted cells.
 pub struct XdiagInZone;
+/// The same with each diagonal's share weighted by its kink energy (spikes #184f; numerics review M3: the registered form lets a near-empty diagonal decide).
+pub struct XdiagInZoneWeighted;
 /// M4 along the channel, added to the reference's (m).
 pub struct M4Added;
 /// The channel path's sinuosity: its length over its chord.
@@ -558,8 +574,18 @@ impl GeometricMetric for CornerLinksAdded {
     fn band(&self) -> Option<(f64, f64)> {
         Some((0.0, 0.0))
     }
-    fn measure(&self, g: &Grid, c: &Case) -> f64 {
-        river_suite::corner_links(g, &c.surface, &c.inside) as f64 - river_suite::corner_links(g, &c.reference, &c.inside) as f64
+    fn measure(&self, _g: &Grid, c: &Case) -> f64 {
+        let mut added = 0usize;
+        for y in 0..N - 1 {
+            for x in 0..N - 1 {
+                let q = [y * N + x, y * N + x + 1, (y + 1) * N + x, (y + 1) * N + x + 1];
+                if q.iter().all(|&k| c.inside[k]) {
+                    let link = |z: &[f64]| river_suite::corner_link(z[q[0]], z[q[1]], z[q[2]], z[q[3]]);
+                    added += usize::from(link(&c.surface) && !link(&c.reference));
+                }
+            }
+        }
+        added as f64
     }
 }
 
@@ -591,6 +617,18 @@ impl GeometricMetric for SpectrumSlopeChange {
 /// z(x+1, y-1)) / 2 against (x + y) mod 8; per diagonal the largest share of its squared energy held by two adjacent phases (cyclic); X_diag = the mean of the two over
 /// 2 / 8, minus 1. The phases are local: a background's origin is a multiple of 8.
 pub fn xdiag(z: &[f64], mask: &[bool]) -> f64 {
+    let (l1, _, l2, _) = xdiag_parts(z, mask);
+    (l1 + l2) / 2.0 / 0.25 - 1.0
+}
+
+/// The energy-weighted X_diag: `(e1 l1 + e2 l2) / (e1 + e2) / 0.25 - 1`, `e` each diagonal's squared energy, `l` its two-phase share.
+pub fn xdiag_weighted(z: &[f64], mask: &[bool]) -> f64 {
+    let (l1, e1, l2, e2) = xdiag_parts(z, mask);
+    (e1 * l1 + e2 * l2) / (e1 + e2).max(1e-30) / 0.25 - 1.0
+}
+
+/// Per diagonal: its largest two-adjacent-phase share and its energy.
+fn xdiag_parts(z: &[f64], mask: &[bool]) -> (f64, f64, f64, f64) {
     let (mut h1, mut h2) = ([0.0f64; 8], [0.0f64; 8]);
     for y in 1..N - 1 {
         for x in 1..N - 1 {
@@ -608,7 +646,20 @@ pub fn xdiag(z: &[f64], mask: &[bool]) -> f64 {
         let t = h.iter().sum::<f64>().max(1e-30);
         (0..8).map(|i| (h[i] + h[(i + 1) % 8]) / t).fold(0.0, f64::max)
     };
-    (ls(&h1) + ls(&h2)) / 2.0 / 0.25 - 1.0
+    (ls(&h1), h1.iter().sum(), ls(&h2), h2.iter().sum())
+}
+
+impl GeometricMetric for XdiagInZoneWeighted {
+    fn name(&self) -> &str {
+        "xdiag-in-zone-weighted"
+    }
+    fn band(&self) -> Option<(f64, f64)> {
+        Some((-1.0, 0.010))
+    }
+    fn measure(&self, _g: &Grid, c: &Case) -> f64 {
+        let mask: Vec<bool> = (0..N * N).map(|k| c.zone[k] && c.inside[k]).collect();
+        xdiag_weighted(&c.surface, &mask)
+    }
 }
 
 impl GeometricMetric for XdiagInZone {
@@ -715,7 +766,7 @@ impl GeometricMetric for D8Sinuosity {
         };
         let len: f64 = steps(c).into_iter().map(step_len).sum();
         let (dx, dy) = ((b % N) as f64 - (a % N) as f64, (b / N) as f64 - (a / N) as f64);
-        len / (dx * dx + dy * dy).sqrt()
+        (len / (dx * dx + dy * dy).sqrt()).max(1.0)
     }
 }
 
@@ -761,6 +812,7 @@ pub fn reported() -> Vec<Box<dyn GeometricMetric>> {
         Box::new(HumpCuts),
         Box::new(SpectrumSlopeChange),
         Box::new(XdiagInZone),
+        Box::new(XdiagInZoneWeighted),
         Box::new(M4Added),
         Box::new(D8Sinuosity),
         Box::new(StraightRunShare),
