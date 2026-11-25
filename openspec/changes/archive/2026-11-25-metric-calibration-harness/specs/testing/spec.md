@@ -30,7 +30,7 @@ Detail:
   - none: a flat 200 m;
   - fBm: 200 m plus integer-hashed value noise with a quintic fade, lattice spacings 37, 19, 11 and 7 cells, amplitudes 20, 10, 5 and 2.5 m, seed 155;
   - S0: `crates/cache/tests/support/s0-r1h-river-256.f32`:
-    - 256 x 256 little-endian f32 of r1h-def's S0 (R1h window `1,8056,8675,760,1379,14`, chain e3799ec5);
+    - 256 x 256 little-endian f32 of r1h-def's S0 (R1h window `1,8056,8675,760,1379,14`, chain e3799ec5, the commit that wrote r1h-def's dump);
     - its window cell (3088, 3576), global L (65936, 8056) on face 1; both multiples of 8, so its 8-cell phases are local;
     - SHA-256 `be1687ade107ebea9a52f9b874bf1bdf401470431617c69a14111264802ba09e`; the test pins its CRC32C;
     - derived project data: the generator chain's own start surface, no external dataset.

@@ -1,10 +1,10 @@
 ## ADDED Requirements
-### Requirement: BUILD-069 A geometric gate column is registered only with a passing calibration
-A geometric gate column SHALL be registered (added as a bar or a target) only with a calibration entry in `planet_cache::metric_calibration` that passes TEST-155. Each metric's band SHALL be stated in the Detail of its own requirement. A column registered before this requirement SHALL carry a calibration report: a failing report is an owner item, not a removal.
+### Requirement: BUILD-069 A geometric gate or look column is registered only with a passing calibration
+A geometric gate or look column SHALL be registered (added as a bar or a target) only with a calibration entry in `planet_cache::metric_calibration` that passes TEST-155. Each metric's band SHALL be stated in the Detail of its own requirement. A column registered before this requirement SHALL carry a calibration report: a failing report is an owner item, not a removal. The owner's visual sign-off is not a column and is not bound.
 
 Verify: A
 Status: active
-Source: Lead 2026-11-25 (the lead's rule after the owner's caution and the external process review), TEST-155, CON-31
+Source: Lead 2026-11-25 (the lead's rule after the owner's caution and the external process review; look bars included, the owner's visual sign-off not, lead's review of #1665), TEST-155, CON-31
 Detail:
 - `metric_calibration::registered()` lists the entries registered under this rule; the tier-A test fails if one of them fails its calibration; an entry without a band (report only) cannot be registered;
 - `metric_calibration::reported()` lists the entries that predate it; their calibration runs and writes its table, and its verdict is printed, not asserted;

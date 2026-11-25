@@ -11,7 +11,7 @@
     - smooth cases inside the band at every angle and background;
     - every defect case outside it.
   - The harness writes an angle x floor table per metric to `target/review/metric-calibration/`.
-- **BUILD-069:** a geometric gate column is registered only with a calibration entry that passes TEST-155. Each metric's band lives in its own requirement's Detail.
+- **BUILD-069:** a geometric gate or look column (a bar or a target; not the owner's visual sign-off) is registered only with a calibration entry that passes TEST-155. Each metric's band lives in its own requirement's Detail.
 - **The first entries, as a report only** (BUILD-069 binds new registrations):
   - the gate's corner links (added to the reference), hump cuts and spectrum slope change;
   - in-zone Xdiag (and its energy-weighted form), M4 along the channel, D8 sinuosity and the D8 straight-run share.
