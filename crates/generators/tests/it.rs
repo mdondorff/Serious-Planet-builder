@@ -144,6 +144,8 @@ mod line_stage;
 mod lithology;
 #[path = "manifest.rs"]
 mod manifest;
+#[path = "mem_model.rs"]
+mod mem_model;
 #[path = "mesh.rs"]
 mod mesh;
 #[path = "ocean.rs"]
