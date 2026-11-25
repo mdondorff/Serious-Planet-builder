@@ -22,11 +22,14 @@ pub struct CurveParams {
     pub room_m: f64,
     /// An L cell's side (m).
     pub cell_m: f64,
+    /// Lead #184n (spike only): `Some(r)` holds a meander point at or below the base path's running minimum (from its upstream end) plus `r` m, in place of `room_m`
+    /// above its own point: a meander never climbs a rise the path itself does not cross. `None` (default) the room as above.
+    pub meander_runmin: Option<f64>,
 }
 
 impl CurveParams {
     pub fn standard(cell_m: f64, meander: bool) -> CurveParams {
-        CurveParams { sigma: 2.0, lift_m: 5.0, meander, min_width_m: 10.0, wave_widths: 12.0, amp_wave: 0.174, room_m: 10.0, cell_m }
+        CurveParams { sigma: 2.0, lift_m: 5.0, meander, min_width_m: 10.0, wave_widths: 12.0, amp_wave: 0.174, room_m: 10.0, cell_m, meander_runmin: None }
     }
 }
 
@@ -117,6 +120,15 @@ pub fn build(
     let ds = raw.windows(2).map(|s| dist(s[0], s[1])).sum::<f64>() / (n - 1) as f64;
     let zref: Vec<f64> = raw.iter().map(|&q| cell_of(q, w, h).map_or(f64::INFINITY, |c| water[c])).collect();
     let ok = |q: (f64, f64), i: usize, room: f64| cell_of(q, w, h).is_some_and(|c| !ocean[c] && water[c] <= zref[i] + room);
+    // lead #184n: the base path's running minimum from its upstream end, the meander's ceiling under `meander_runmin`
+    let zrun: Vec<f64> = zref.iter().scan(f64::INFINITY, |m, &z| {
+        *m = m.min(z);
+        Some(*m)
+    }).collect();
+    let okm = |q: (f64, f64), i: usize| match p.meander_runmin {
+        Some(r) => cell_of(q, w, h).is_some_and(|c| !ocean[c] && water[c] <= zrun[i] + r),
+        None => ok(q, i, p.room_m),
+    };
     // the smoothing: a symmetric Gaussian window, narrowed near the ends so both ends stay put
     let sn = p.sigma / ds;
     let half = (3.0 * sn).ceil() as usize;
@@ -235,7 +247,7 @@ pub fn build(
         let mut share = 0.0;
         if p.meander {
             let fac: Vec<f64> = (0..n)
-                .map(|i| [1.0, 0.75, 0.5, 0.25, 0.0].into_iter().find(|&m| m == 0.0 || ok(disp(i, m), i, p.room_m)).unwrap_or(0.0))
+                .map(|i| [1.0, 0.75, 0.5, 0.25, 0.0].into_iter().find(|&m| m == 0.0 || okm(disp(i, m), i)).unwrap_or(0.0))
                 .collect();
             // a quarter wavelength's moving minimum, then its moving mean, so the amplitude changes smoothly
             let mn: Vec<f64> =
@@ -251,9 +263,9 @@ pub fn build(
             for i in 1..n - 1 {
                 let q = disp(i, fm[i]);
                 // numerics review F6: a smoothed factor that leaves the room falls back to the point's own checked factor, not to no meander
-                pts[i] = if ok(q, i, p.room_m) {
+                pts[i] = if okm(q, i) {
                     q
-                } else if ok(disp(i, fac[i]), i, p.room_m) {
+                } else if okm(disp(i, fac[i]), i) {
                     disp(i, fac[i])
                 } else {
                     smc[i]

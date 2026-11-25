@@ -2217,6 +2217,8 @@ fn main() -> Result<(), String> {
     // lead #184f item 2: the facets follow the curves' lattice-aligned headings (R1h: 54 % of the curve length within 5 degrees of 0 / 45 / 90 / 135, uniform 22 %);
     // `--curve-sigma S` the smoothing's sigma (L cells, default 2)
     let curve_sigma: f64 = value(&args, "--curve-sigma").map_or(Ok(2.0), str::parse).map_err(|_| "--curve-sigma S")?;
+    // lead #184n (spike only): `--meander-runmin R` holds meander points at or below the base path's running minimum + R m (no climbing); absent, the 10 m room
+    let meander_runmin: Option<f64> = value(&args, "--meander-runmin").map(str::parse).transpose().map_err(|_| "--meander-runmin R")?;
     if !["v", "round"].contains(&curve_profile) {
         return Err(format!("--curve-profile v | round, not '{curve_profile}'"));
     }
@@ -2902,6 +2904,7 @@ fn main() -> Result<(), String> {
             Measure { w, h, water: &s0w, inside: &all_inside, region: &all_inside, sea, radius: K_C * L as f64, bar, ocean: Some(&ocean) };
         let cp = curve::CurveParams {
             sigma: curve_sigma,
+            meander_runmin,
             ..curve::CurveParams::standard(grid.dx() / L as f64, MEANDER.load(std::sync::atomic::Ordering::Relaxed))
         };
         let to_local = |c: u32| {
@@ -5312,6 +5315,7 @@ fn main() -> Result<(), String> {
             ("curve-blend", curve_blend.to_string()),
             ("curve-profile", curve_profile.to_string()),
             ("curve-sigma", curve_sigma.to_string()),
+            ("meander-runmin", meander_runmin.map_or("-".to_string(), |r| r.to_string())),
             ("inlet-floor", if INLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-floors", if BAND6_FLOORS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-outlet-floor", if BAND6_OUTLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
