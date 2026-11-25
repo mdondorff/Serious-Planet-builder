@@ -4433,10 +4433,18 @@ fn main() -> Result<(), String> {
                     );
                 }
                 // lead #203: the intended basins' sidecar (the contract's Basin has no type field yet; the port adds `type intentional` and `endorheic_candidate`): one row per
-                // intended basin of basins-2's input, its kept basin's id when the producer kept it at that floor
+                // intended basin of the S0 set, its kept basin's id when a protected basin of this pass holds its S0 floor cell (interiors may change, so the floor moves;
+                // the smallest such basin)
                 if intended_on {
-                    let kept_at: HashMap<u64, &planet_generators::bake::river_graph::Basin> =
-                        pb.basins.iter().map(|b| (b.floor_cell, b)).collect();
+                    let mut kept_at: HashMap<u64, &planet_generators::bake::river_graph::Basin> = HashMap::new();
+                    for b in pb.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface) {
+                        for &c in &pb.cells[&b.id] {
+                            let g = gid_l(c);
+                            if kept_at.get(&g).is_none_or(|k| pb.cells[&k.id].len() > pb.cells[&b.id].len()) {
+                                kept_at.insert(g, b);
+                            }
+                        }
+                    }
                     let mut t = String::from("basin_id,type,outlet,floor_cell,floor_m,spill_cell,spill_m,cells,area_km2,marked_share,terms,aridity,endorheic_candidate,represented\n");
                     let mut kept = 0usize;
                     for b in intended2 {
