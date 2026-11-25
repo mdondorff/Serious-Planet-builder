@@ -27,11 +27,11 @@ const DELTA: f64 = 1e-4;
 const TOL: f64 = 1e-3;
 
 /// The stage's fixed inputs.
-struct Input {
+pub(super) struct Input {
     g: Grid,
     rounds: usize,
     search: usize,
-    z0: Vec<f64>,
+    pub(super) z0: Vec<f64>,
     outlet: Vec<bool>,
     keep: Vec<bool>,
     cell_lo: Vec<f64>,
@@ -178,9 +178,9 @@ fn decide(inp: &Input, z: &[f64], d: &Dep, path: Option<Vec<usize>>) -> Kind {
 }
 
 /// What a run gives: the records of every round, the surface, and per round the candidates (by plant name) and whether the round changed the surface.
-struct Run {
+pub(super) struct Run {
     records: Vec<Record>,
-    z: Vec<f64>,
+    pub(super) z: Vec<f64>,
     candidates: Vec<Vec<&'static str>>,
 }
 
@@ -190,7 +190,7 @@ fn plant_of(inp: &Input, c: usize) -> &'static str {
 }
 
 /// band6 over the cube. `layout` None: the reference (every search over the whole grid). `naive`: the region decides whatever its domain gives.
-fn run(inp: &Input, layout: Option<&PartitionLayout>, naive: bool) -> Run {
+pub(super) fn run(inp: &Input, layout: Option<&PartitionLayout>, naive: bool) -> Run {
     let g = &inp.g;
     let region_of = |p: usize| {
         layout.map_or(0, |l| {
@@ -482,7 +482,7 @@ const PITS_H1: [Pit; 2] = [
 ];
 
 /// base1's input: the fixture's `z_b` at H1 with [`PITS_H1`]. base1's rule is band6's without floors and kept depressions (`drain_selective`), 12 rounds, search 2^20.
-fn input_h1() -> Input {
+pub(super) fn input_h1() -> Input {
     let g = Grid::at(H1_N);
     let mut z = build(4).z_b;
     let n = z.len();

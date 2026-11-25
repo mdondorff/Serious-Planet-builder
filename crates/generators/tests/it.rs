@@ -100,6 +100,8 @@ mod coupled_lens;
 mod crease_band;
 #[path = "cross_seam_band6.rs"]
 mod cross_seam_band6;
+#[path = "cross_seam_k5.rs"]
+mod cross_seam_k5;
 #[path = "cross_seam_kc.rs"]
 mod cross_seam_kc;
 #[path = "descriptors.rs"]
