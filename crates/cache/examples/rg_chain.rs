@@ -3017,6 +3017,77 @@ fn main() -> Result<(), String> {
         }
         p
     };
+    // lead #203e: the budget, the intended S0 set and its rim floor come before KH, so that every lowering stage takes the rim floor as its own bound
+    let budget_l = planet_cache::rg_budget::budget_field_threads(&start, w, h, L, dx_l, 25_000.0, threads);
+    // lead #203b: the intended set is fixed on S0 (outlets: the sea and the window's edge, a single domain's) and every stage keeps it: an intended basin's interior stays as
+    // S0 has it, and its rim ring (its cells' 8-neighbours outside it) is never lowered below min(spill, S0); basins-2 keeps exactly this set (it ranks first)
+    let in_window_edge = |p: usize| p.is_multiple_of(w) || p / w == 0 || p % w == w - 1 || p / w == h - 1;
+    let s0_set: Option<(Vec<Intended>, Vec<u32>)> = intended_on.then(|| {
+        if regions > 1 {
+            println!("RG intended basins (lead #203b): the S0 set uses the single-domain outlets; {regions} regions run on it as well");
+        }
+        let grid0 = Grid::new(w, h, dx_l);
+        let outlet0: Vec<bool> = (0..n_l).map(|p| is_sea(p) || in_window_edge(p)).collect();
+        if !intended_scan.is_empty() {
+            for &(t, amax) in &intended_scan {
+                let m = mark_of(t);
+                let (it, own) = intended_select(&grid0, &start, &outlet0, &m, &budget_l, &ai_l, amax);
+                let inside: Vec<bool> = own.iter().map(|&o| o != u32::MAX).collect();
+                let missed = arid_missed(&grid0, &start, &outlet0, &ai_l, &inside);
+                let km2 = |v: &[&Intended]| v.iter().map(|b| b.area_m2).sum::<f64>() / 1e6;
+                let arid: Vec<&Intended> = it.iter().filter(|b| ai_l[b.floor] < ENDORHEIC_CANDIDATE_AI).collect();
+                let humid: Vec<&Intended> = it.iter().filter(|b| ai_l[b.floor] >= ENDORHEIC_CANDIDATE_AI).collect();
+                println!(
+                    "RG intended scan (lead #203c) t={t:.2} A={amax:.2}: marked {} L cells; intended {} ({:.1} km2); arid caught {} ({:.1} km2); humid {} ({:.1} km2); arid missed {} ({:.1} km2)",
+                    m.iter().filter(|&&v| v != 0).count(),
+                    it.len(),
+                    km2(&it.iter().collect::<Vec<_>>()),
+                    arid.len(),
+                    km2(&arid),
+                    humid.len(),
+                    km2(&humid),
+                    missed.len(),
+                    missed.iter().map(|x| x.3).sum::<f64>() / 1e6
+                );
+            }
+        }
+        intended_select(&grid0, &start, &outlet0, &mark_l, &budget_l, &ai_l, intended_arid)
+    });
+    if !intended_scan.is_empty() {
+        println!("RG intended scan (lead #203b): done, stopping before KH");
+        return Ok(());
+    }
+    if let Some((it, _)) = &s0_set {
+        println!("{}", intended_line("on S0 (the fixed set)", it, &|c| ai_l[c]));
+    }
+    // the rim ring (and the outlet path through the spill cell): per cell outside every intended basin, the highest min(spill, S0) of an intended basin among its 8
+    // neighbours, and that basin
+    let (ring_floor, ring_owner): (Vec<f64>, Vec<u32>) = match &s0_set {
+        None => (Vec::new(), Vec::new()),
+        Some((it, own)) => (0..n_l)
+            .map(|p| {
+                if own[p] != u32::MAX {
+                    return (f64::NEG_INFINITY, u32::MAX);
+                }
+                let (x, y) = ((p % w) as i64, (p / w) as i64);
+                let (mut lo, mut by) = (f64::NEG_INFINITY, u32::MAX);
+                for dy in -1..=1i64 {
+                    for dx in -1..=1i64 {
+                        let (a, b) = (x + dx, y + dy);
+                        if (dx, dy) != (0, 0) && a >= 0 && b >= 0 && (a as usize) < w && (b as usize) < h {
+                            let o = own[b as usize * w + a as usize];
+                            if o != u32::MAX && it[o as usize].spill_m.min(start[p]) > lo {
+                                (lo, by) = (it[o as usize].spill_m.min(start[p]), o);
+                            }
+                        }
+                    }
+                }
+                (lo, by)
+            })
+            .unzip(),
+    };
+    // lead #203e: the rim floor as each lowering stage's own per-cell bound (NEG_INFINITY off the rings and when the switch is off)
+    let rf = |p: usize| ring_floor.get(p).copied().unwrap_or(f64::NEG_INFINITY);
     // ---- KH (spikes #137, reading 19): the surface KS starts from. c1: S0 itself; h2: KH(z_s) + r, KH the flow-diagonal triangulation of z_s (planet_generators::bake::kh). S0 stays
     // the reference of the ocean, the sills, the budget and the measures (explorer, 2026-11-17).
     let t = Instant::now();
@@ -3206,7 +3277,8 @@ fn main() -> Result<(), String> {
         };
         let at = |p: usize| {
             let k = kval(p);
-            k + band(k, rl[p])
+            // lead #203e: KH never lowers an intended basin's rim below its floor
+            (k + band(k, rl[p])).max(rf(p))
         };
         if let Some(z) = &zone {
             println!("RG KH h5: h4c on {} zone cells of 814 m, C1 elsewhere", z.iter().filter(|&&x| x).count());
@@ -3286,6 +3358,10 @@ fn main() -> Result<(), String> {
                         }
                     }
                 }
+                // lead #203e: KH connect never cuts an intended basin's rim below its floor
+                for e in 0..n_l {
+                    want[e] = want[e].max(rf(e));
+                }
                 let cut = (0..n_l).filter(|&e| want[e] < one[e]).count();
                 for e in 0..n_l {
                     one[e] = one[e].min(want[e]);
@@ -3302,92 +3378,22 @@ fn main() -> Result<(), String> {
     // ---- the budget (G0 contracts section 6; BUILD-060's field, the one river-gate reads), per L cell and per H1 cell. Reading 21 (owner decision 3, 2026-11-17, lead #168):
     // budgets and the L stages' deltas are against S_KH = KH(z_s) + r' (ks_base), not S0; S0 stays the reference of the ocean and the sea tests; KH against S0 is its own field.
     let t = Instant::now();
-    // reading 28 (lead #170 item 7): the budget's size field relief10 on S0; the lowering it limits is measured against S_KH (reading 21)
-    // lead #163 (B3, result-preserving): the budget field on `threads` threads (each block's value is computed alone, so the bits are the serial ones)
-    let budget_l = planet_cache::rg_budget::budget_field_threads(&start, w, h, L, dx_l, 25_000.0, threads);
-    // lead #203b: the intended set is fixed on S0 (outlets: the sea and the window's edge, a single domain's) and every stage keeps it: an intended basin's interior stays as
-    // S0 has it, and its rim ring (its cells' 8-neighbours outside it) is never lowered below min(spill, S0); basins-2 keeps exactly this set (it ranks first)
-    let in_window_edge = |p: usize| p.is_multiple_of(w) || p / w == 0 || p % w == w - 1 || p / w == h - 1;
-    let s0_set: Option<(Vec<Intended>, Vec<u32>)> = intended_on.then(|| {
-        if regions > 1 {
-            println!("RG intended basins (lead #203b): the S0 set uses the single-domain outlets; {regions} regions run on it as well");
-        }
-        let grid0 = Grid::new(w, h, dx_l);
-        let outlet0: Vec<bool> = (0..n_l).map(|p| is_sea(p) || in_window_edge(p)).collect();
-        if !intended_scan.is_empty() {
-            for &(t, amax) in &intended_scan {
-                let m = mark_of(t);
-                let (it, own) = intended_select(&grid0, &start, &outlet0, &m, &budget_l, &ai_l, amax);
-                let inside: Vec<bool> = own.iter().map(|&o| o != u32::MAX).collect();
-                let missed = arid_missed(&grid0, &start, &outlet0, &ai_l, &inside);
-                let km2 = |v: &[&Intended]| v.iter().map(|b| b.area_m2).sum::<f64>() / 1e6;
-                let arid: Vec<&Intended> = it.iter().filter(|b| ai_l[b.floor] < ENDORHEIC_CANDIDATE_AI).collect();
-                let humid: Vec<&Intended> = it.iter().filter(|b| ai_l[b.floor] >= ENDORHEIC_CANDIDATE_AI).collect();
-                println!(
-                    "RG intended scan (lead #203c) t={t:.2} A={amax:.2}: marked {} L cells; intended {} ({:.1} km2); arid caught {} ({:.1} km2); humid {} ({:.1} km2); arid missed {} ({:.1} km2)",
-                    m.iter().filter(|&&v| v != 0).count(),
-                    it.len(),
-                    km2(&it.iter().collect::<Vec<_>>()),
-                    arid.len(),
-                    km2(&arid),
-                    humid.len(),
-                    km2(&humid),
-                    missed.len(),
-                    missed.iter().map(|x| x.3).sum::<f64>() / 1e6
-                );
-            }
-        }
-        intended_select(&grid0, &start, &outlet0, &mark_l, &budget_l, &ai_l, intended_arid)
-    });
-    if !intended_scan.is_empty() {
-        println!("RG intended scan (lead #203b): done, stopping before KH");
-        return Ok(());
-    }
-    if let Some((it, _)) = &s0_set {
-        println!("{}", intended_line("on S0 (the fixed set)", it, &|c| ai_l[c]));
-    }
-    // the rim ring (and the outlet path through the spill cell): per cell outside every intended basin, the highest min(spill, S0) of an intended basin among its 8
-    // neighbours, and that basin
-    let (ring_floor, ring_owner): (Vec<f64>, Vec<u32>) = match &s0_set {
-        None => (Vec::new(), Vec::new()),
-        Some((it, own)) => (0..n_l)
-            .map(|p| {
-                if own[p] != u32::MAX {
-                    return (f64::NEG_INFINITY, u32::MAX);
-                }
-                let (x, y) = ((p % w) as i64, (p / w) as i64);
-                let (mut lo, mut by) = (f64::NEG_INFINITY, u32::MAX);
-                for dy in -1..=1i64 {
-                    for dx in -1..=1i64 {
-                        let (a, b) = (x + dx, y + dy);
-                        if (dx, dy) != (0, 0) && a >= 0 && b >= 0 && (a as usize) < w && (b as usize) < h {
-                            let o = own[b as usize * w + a as usize];
-                            if o != u32::MAX && it[o as usize].spill_m.min(start[p]) > lo {
-                                (lo, by) = (it[o as usize].spill_m.min(start[p]), o);
-                            }
-                        }
-                    }
-                }
-                (lo, by)
-            })
-            .unzip(),
-    };
-    // lead #203c: the constraint every stage keeps: no stage lowers an intended basin's rim ring or outlet path below min(spill, S0); interiors may change (they are
-    // under water: KC fills them like any kept lake). Prints what each stage would have lowered.
-    let protect = |mut z: Vec<f64>, what: &str| -> Vec<f64> {
+    // (the budget field above, reading 28 and lead #163, now comes before KH: lead #203e)
+    // lead #203e: the rim floor is each lowering stage's own bound (KH, KS, band6 and their connects, KV, KC), so no stage output needs lifting; this only checks it
+    // after each stage and changes nothing: rim cells under their floor (expected 0)
+    let protect = |z: Vec<f64>, what: &str| -> Vec<f64> {
         let Some((it, _)) = &s0_set else { return z };
         let mut touched = vec![false; it.len()];
         let (mut cells, mut m3) = (0usize, 0f64);
         for p in 0..n_l {
-            if z[p] < ring_floor[p] {
+            if z[p] < ring_floor[p] - 1e-9 {
                 m3 += (ring_floor[p] - z[p]) * dx_l * dx_l;
-                z[p] = ring_floor[p];
                 cells += 1;
                 touched[ring_owner[p] as usize] = true;
             }
         }
         println!(
-            "RG intended rims (lead #203c) {what}: {} intended basins, {} whose rim the stage would have cut below the spill; {cells} rim cells held, {:.6} km3",
+            "RG intended rims (lead #203e) {what}: {} intended basins, {} with a rim cell under its floor; {cells} cells, {:.6} km3 (expected 0)",
             it.len(),
             touched.iter().filter(|&&t| t).count(),
             m3 / 1e9
@@ -3434,7 +3440,8 @@ fn main() -> Result<(), String> {
                 continue;
             }
             let want = (rl[p] - band[p]).max(0.0);
-            let avail = budget_l[p].min((ks_base[p] - (sea + 0.5)).max(0.0));
+            // lead #203e: nor below an intended basin's rim floor (a shortfall is a residual like any other)
+            let avail = budget_l[p].min((ks_base[p] - (sea + 0.5)).max(0.0)).min((ks_base[p] - rf(p)).max(0.0));
             let u = want.min(avail);
             z[p] = ks_base[p] - u;
             if want > avail + 1e-9 {
@@ -3875,7 +3882,7 @@ fn main() -> Result<(), String> {
                     continue;
                 }
                 let need = z[e] - want[e];
-                let avail = (budget_l[e] - (ks_base[e] - z[e])).max(0.0).min((z[e] - (sea + 0.5)).max(0.0));
+                let avail = (budget_l[e] - (ks_base[e] - z[e])).max(0.0).min((z[e] - (sea + 0.5)).max(0.0)).min((z[e] - rf(e)).max(0.0));
                 let u = need.min(avail);
                 if u > 0.0 {
                     z[e] -= u;
@@ -3955,7 +3962,8 @@ fn main() -> Result<(), String> {
             let cell_lo = |p: usize| {
                 let budget_lo = if band6_floors { ks_base[p] - budget_l[p] } else { f64::NEG_INFINITY };
                 let sea_lo = if sea17 && !is_sea(p) { ks_d[p].min(sea + 0.5) } else { f64::NEG_INFINITY };
-                budget_lo.max(sea_lo)
+                // lead #203e: band6 neither breaches nor cuts below an intended basin's rim floor
+                budget_lo.max(sea_lo).max(rf(p))
             };
             planet_generators::bake::drain::OUTLET_FLOORS
                 .store(BAND6_OUTLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed), std::sync::atomic::Ordering::Relaxed);
@@ -4116,7 +4124,8 @@ fn main() -> Result<(), String> {
                     continue;
                 }
                 let need = z[k] - want[k];
-                let avail = (budget_l[k] - (ks_base[k] - z[k]).max(0.0)).max(0.0).min((z[k] - (sea + 0.5)).max(0.0));
+                let avail =
+                    (budget_l[k] - (ks_base[k] - z[k]).max(0.0)).max(0.0).min((z[k] - (sea + 0.5)).max(0.0)).min((z[k] - rf(k)).max(0.0));
                 let u = need.min(avail);
                 if u > 0.0 {
                     z[k] -= u;
@@ -4165,6 +4174,14 @@ fn main() -> Result<(), String> {
                 for b in pk.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface) {
                     for &c in &pk.cells[&b.id] {
                         kept[c] = true;
+                    }
+                }
+                // lead #203e: the intended basins are kept for the lines too (they end at the inlet and leave at the spill, as at any kept lake)
+                if let Some((_, own)) = &s0_set {
+                    for p in 0..n_l {
+                        if own[p] != u32::MAX {
+                            kept[p] = true;
+                        }
                     }
                 }
                 println!(
@@ -4332,7 +4349,10 @@ fn main() -> Result<(), String> {
                         continue;
                     }
                     let need = z[e] - want[e];
-                    let avail = (budget_l[e] - (ks_base[e] - z[e]).max(0.0)).max(0.0).min((z[e] - (sea + 0.5)).max(0.0));
+                    let avail = (budget_l[e] - (ks_base[e] - z[e]).max(0.0))
+                        .max(0.0)
+                        .min((z[e] - (sea + 0.5)).max(0.0))
+                        .min((z[e] - rf(e)).max(0.0));
                     let u = need.min(avail);
                     if u > 0.0 {
                         z[e] -= u;
@@ -4778,6 +4798,14 @@ fn main() -> Result<(), String> {
                         kept[c] = true;
                     }
                 }
+                // lead #203e: the intended basins are kept for the lines too (they end at the inlet and leave at the spill, as at any kept lake)
+                if let Some((_, own)) = &s0_set {
+                    for p in 0..n_l {
+                        if own[p] != u32::MAX {
+                            kept[p] = true;
+                        }
+                    }
+                }
                 println!(
                     "RG domain {d} KG-trib post: kept set on the band6 output, {} kept basins of {}",
                     pk.basins.iter().filter(|b| b.represented == Represented::ProtectedSurface).count(),
@@ -4922,6 +4950,15 @@ fn main() -> Result<(), String> {
                     n: (REGIONAL * L) as i64,
                     origin: ((sri0 * L) as i64, (srj0 * L) as i64),
                 }));
+            }
+            // lead #203e: KV and KC take the intended rims' floor with the kept rims' (KV caps its want, KC never breaches below it)
+            if !ring_floor.is_empty() {
+                if rim_floor.is_empty() {
+                    rim_floor = vec![f64::NEG_INFINITY; n_l];
+                }
+                for (r, &f) in rim_floor.iter_mut().zip(&ring_floor) {
+                    *r = r.max(f);
+                }
             }
             let r = run_with_rims(
                 &gl,
