@@ -98,6 +98,8 @@ mod coupled_fill;
 mod coupled_lens;
 #[path = "crease_band.rs"]
 mod crease_band;
+#[path = "cross_seam_kc.rs"]
+mod cross_seam_kc;
 #[path = "descriptors.rs"]
 mod descriptors;
 #[path = "driver_channels.rs"]
