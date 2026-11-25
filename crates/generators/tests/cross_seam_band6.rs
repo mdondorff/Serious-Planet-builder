@@ -32,9 +32,9 @@ pub(super) struct Input {
     rounds: usize,
     search: usize,
     pub(super) z0: Vec<f64>,
-    outlet: Vec<bool>,
-    keep: Vec<bool>,
-    cell_lo: Vec<f64>,
+    pub(super) outlet: Vec<bool>,
+    pub(super) keep: Vec<bool>,
+    pub(super) cell_lo: Vec<f64>,
     area: Vec<f64>,
     /// The planted cases: name, pit cells, trench cells.
     plants: Vec<(&'static str, BTreeSet<usize>, Vec<usize>)>,
@@ -351,7 +351,7 @@ const PITS: [Pit; 8] = [
 ];
 const SILL_M: f64 = 40.0;
 
-fn input() -> Input {
+pub(super) fn input() -> Input {
     let g = Grid::new();
     let mut z = build(4).s0;
     let n = z.len();

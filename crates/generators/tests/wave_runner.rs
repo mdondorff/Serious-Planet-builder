@@ -11,7 +11,7 @@
 use super::g0_fixture::fixture::*;
 use planet_core::{CubePatch, Face, GlobalCell};
 use planet_generators::bake::carve::CarveParams;
-use planet_generators::bake::drain::{sel_apply, sel_decide, sel_round, SearchDomain, SelDecision, SelParams};
+use planet_generators::bake::drain::{sel_apply, sel_decide, sel_round, SearchDomain, SelDecision, SelParams, SelSwitches};
 use planet_generators::bake::flood::priority_flood_with;
 use planet_generators::bake::partition::{partitioned_route_weighted, PartCache};
 use planet_generators::bake::round::{solve_rounds_memo, solve_rounds_with, Drivers, RoundCache};
@@ -110,12 +110,22 @@ pub struct Sel {
     pub cap: Vec<f64>,
     /// The per-cell floor (none: empty).
     pub cell_lo: Vec<f64>,
+    /// The drain's switches, per call (R16).
+    pub switches: SelSwitches,
 }
 
 impl Sel {
     /// `Drain::SELECTIVE_50` on `n` cells: 12 rounds, search 2^20, caps 50 m, no kept cells, no floors.
     pub fn selective_50(name: &'static str, n: usize) -> Sel {
-        Sel { name, max_rounds: 12, search: 1 << 20, keep: Vec::new(), cap: vec![50.0; n], cell_lo: Vec::new() }
+        Sel {
+            name,
+            max_rounds: 12,
+            search: 1 << 20,
+            keep: Vec::new(),
+            cap: vec![50.0; n],
+            cell_lo: Vec::new(),
+            switches: SelSwitches::default(),
+        }
     }
 }
 
@@ -142,6 +152,7 @@ impl Stage for Sel {
             cut_cap: &cap,
             fill_cap: &cap,
             cell_lo: &lo,
+            switches: self.switches,
         };
         for round in 0..self.max_rounds {
             let r = sel_round(g, &st.z, cx.outlet, &p);
@@ -363,5 +374,49 @@ fn wave_1_is_the_same_bits_on_every_layout() {
         }
     }
     eprintln!("#208 wave 1 falsification: without the candidate rule the wave differs on {naive_differs:?}");
+    assert!(!naive_differs.is_empty(), "without the candidate rule some layout must differ");
+}
+
+// spike only (crusader #208 step 4): band6 at L through the drain library on #206's planted cases (a kept pit, a floor-blocked trench, an interacting pair across a seam)
+#[test]
+fn band6_through_the_drain_library_is_the_same_bits_on_every_layout() {
+    let inp = super::cross_seam_band6::input();
+    let g = Grid::cube(L_N, RADIUS_M);
+    let n = inp.z0.len();
+    // band6 as rg_chain runs it: 8 rounds, search 4096, the outlet floors on (lead #191), the per-cell floors, the kept cells; a constant 50 m budget (#206's scope)
+    let band6 = Sel {
+        name: "band6",
+        max_rounds: 8,
+        search: 4096,
+        keep: inp.keep.clone(),
+        cap: vec![50.0; n],
+        cell_lo: inp.cell_lo.clone(),
+        switches: SelSwitches { outlet_floors: true, ..SelSwitches::default() },
+    };
+    let stages: [&dyn Stage; 1] = [&band6];
+    let cx = Ctx { g: &g, outlet: &inp.outlet, regions: None, threads: 4 };
+    let reference = run_wave(&stages, &cx, &inp.z0);
+    let breaches = reference.trace.iter().filter(|t| t.contains("Breach")).count();
+    let rounds = reference
+        .trace
+        .iter()
+        .filter_map(|t| t.split(" round ").nth(1)?.split(' ').next()?.parse::<usize>().ok())
+        .max()
+        .map_or(0, |r| r + 1);
+    eprintln!("#208 band6 L reference: {} decisions, {breaches} breaches over {rounds} rounds", reference.trace.len());
+    assert!(breaches >= 6 && rounds >= 2, "the plants breach, the interacting pair in a later round");
+    let mut naive_differs = Vec::new();
+    for l in partition_layouts() {
+        let rg = Regions::new(&g, &l, 1, false);
+        let st = run_wave(&stages, &Ctx { g: &g, outlet: &inp.outlet, regions: Some(&rg), threads: 4 }, &inp.z0);
+        let cands: Vec<&String> = st.notes.iter().filter(|s| s.contains("candidates") && !s.contains(": 0 candidates")).collect();
+        eprintln!("#208 band6 L {}: rounds with candidates {cands:?}", rg.name);
+        assert_eq!(differs(&reference, &st), None, "{}: band6", rg.name);
+        let rn = Regions::new(&g, &l, 1, true);
+        if differs(&reference, &run_wave(&stages, &Ctx { g: &g, outlet: &inp.outlet, regions: Some(&rn), threads: 4 }, &inp.z0)).is_some() {
+            naive_differs.push(rn.name.clone());
+        }
+    }
+    eprintln!("#208 band6 L falsification: without the candidate rule band6 differs on {naive_differs:?}");
     assert!(!naive_differs.is_empty(), "without the candidate rule some layout must differ");
 }

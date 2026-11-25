@@ -811,6 +811,38 @@ pub fn depressions_on(g: &super::Grid, z: &[f64], level: &[f64]) -> (Vec<u32>, V
     (label, comps)
 }
 
+/// The drain's switches as one value, per call (R16: a stage carries its own; two stages or two regions in one process do not race on the statics).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct SelSwitches {
+    /// [`OUTLET_FLOORS`]: an outlet at a path's end keeps its floor (band6: on, lead #191).
+    pub outlet_floors: bool,
+    /// [`BREACH_BY_LENGTH`].
+    pub by_length: bool,
+    /// [`BREACH_SQUARE`].
+    pub square: bool,
+    /// [`PREFER_FILL`].
+    pub prefer_fill: bool,
+    /// [`HUMP_LIMIT_MICRO`] in metres (0: off).
+    pub hump_limit_m: f64,
+    /// [`BREACH_MAX_LEN`] (0: none).
+    pub max_len: usize,
+}
+
+impl SelSwitches {
+    /// The statics as they are set now (what `drain_selective_floors` reads).
+    pub fn from_statics() -> SelSwitches {
+        use std::sync::atomic::Ordering::Relaxed;
+        SelSwitches {
+            outlet_floors: OUTLET_FLOORS.load(Relaxed),
+            by_length: BREACH_BY_LENGTH.load(Relaxed),
+            square: BREACH_SQUARE.load(Relaxed),
+            prefer_fill: PREFER_FILL.load(Relaxed),
+            hump_limit_m: HUMP_LIMIT_MICRO.load(Relaxed) as f64 * 1.0e-6,
+            max_len: BREACH_MAX_LEN.load(Relaxed),
+        }
+    }
+}
+
 /// The arguments of [`drain_selective_floors`] besides the grid, the surface and the outlets.
 pub struct SelParams<'a> {
     pub keep: &'a dyn Fn(usize) -> bool,
@@ -820,6 +852,7 @@ pub struct SelParams<'a> {
     pub cut_cap: &'a dyn Fn(usize) -> f64,
     pub fill_cap: &'a dyn Fn(usize) -> f64,
     pub cell_lo: &'a dyn Fn(usize) -> f64,
+    pub switches: SelSwitches,
 }
 
 /// One round's shared input: the fill level of the surface, its depressions and the active ones (none holds a kept cell). A partitioned run takes it from the planet-wide fill
@@ -874,8 +907,8 @@ pub fn sel_decide(
     p: &SelParams,
     dom: Option<&SearchDomain>,
 ) -> SelDecision {
-    let outlet_floors = OUTLET_FLOORS.load(std::sync::atomic::Ordering::Relaxed);
-    let outlet_free = |q: usize| outlet[q] && !outlet_floors;
+    let sw = p.switches;
+    let outlet_free = |q: usize| outlet[q] && !sw.outlet_floors;
     let (cells, floor) = &r.comps[k];
     let floor = *floor;
     let zf = z[floor];
@@ -887,8 +920,7 @@ pub fn sel_decide(
     heap.push(Key(0.0, floor as u32));
     let limit = 4 * cells.len() + p.search;
     let (mut settled, mut end, mut border_min) = (0usize, None, f64::INFINITY);
-    let by_length = BREACH_BY_LENGTH.load(std::sync::atomic::Ordering::Relaxed);
-    let square = BREACH_SQUARE.load(std::sync::atomic::Ordering::Relaxed);
+    let (by_length, square) = (sw.by_length, sw.square);
     let (w, _) = g.layout();
     while let Some(Key(d, c)) = heap.pop() {
         let c = c as usize;
@@ -950,17 +982,15 @@ pub fn sel_decide(
     } else {
         let v: f64 = path.iter().enumerate().map(|(i, &c)| (z[c] - z[c].min(zf - DELTA * i as f64)).max(0.0) * (p.area)(c)).sum();
         let cut: f64 = path.iter().enumerate().map(|(i, &c)| z[c] - z[c].min(zf - DELTA * i as f64)).fold(0.0, f64::max);
-        let max_len = BREACH_MAX_LEN.load(std::sync::atomic::Ordering::Relaxed);
         let floors_ok = path
             .iter()
             .enumerate()
             .all(|(i, &c)| outlet_free(c) || z[c] <= zf - DELTA * i as f64 || zf - DELTA * i as f64 >= (p.cell_lo)(c));
-        (floors_ok && cut <= (p.cut_cap)(floor) && (max_len == 0 || path.len() <= max_len), v, cut)
+        (floors_ok && cut <= (p.cut_cap)(floor) && (sw.max_len == 0 || path.len() <= sw.max_len), v, cut)
     };
-    let prefer_fill = PREFER_FILL.load(std::sync::atomic::Ordering::Relaxed);
-    let hump = HUMP_LIMIT_MICRO.load(std::sync::atomic::Ordering::Relaxed);
-    let breach_ok = breach_ok && (hump == 0 || cut <= hump as f64 * 1.0e-6);
-    if breach_ok && (!fill_ok || (!prefer_fill && breach_v <= fill_v)) {
+    // the same comparison as the statics' `cut <= micro * 1e-6`: the metres are the micro count times 1e-6
+    let breach_ok = breach_ok && (sw.hump_limit_m == 0.0 || cut <= sw.hump_limit_m);
+    if breach_ok && (!fill_ok || (!sw.prefer_fill && breach_v <= fill_v)) {
         SelDecision::Breach { path: path.iter().map(|&c| c as u32).collect(), cut, volume: breach_v }
     } else if fill_ok {
         SelDecision::Fill
@@ -1043,7 +1073,16 @@ mod on_grid_tests {
         let area = |p: usize| 1.0 + (p % 3) as f64 * 0.25;
         let (a, sa, _) = drain_selective_floors(&z, w, h, &outlet, &keep, &area, 8, 4096, &cap, &cap, &lo);
         let g = super::super::Grid::new(w, h, 1.0);
-        let p = SelParams { keep: &keep, area: &area, max_rounds: 8, search: 4096, cut_cap: &cap, fill_cap: &cap, cell_lo: &lo };
+        let p = SelParams {
+            keep: &keep,
+            area: &area,
+            max_rounds: 8,
+            search: 4096,
+            cut_cap: &cap,
+            fill_cap: &cap,
+            cell_lo: &lo,
+            switches: SelSwitches::from_statics(),
+        };
         let (b, sb) = drain_selective_floors_on(&g, &z, &outlet, &p);
         assert!(sa.breached > 0 && sa.filled > 0, "the relief has breaches and fills: {sa:?}");
         assert!(a.iter().zip(&b).all(|(x, y)| x.to_bits() == y.to_bits()), "the same bits");
