@@ -1,0 +1,1 @@
+- 2026-11-25 metric-calibration-harness (lead, after the owner's caution): a geometric gate or look column is registered only with a calibration that passes TEST-155 on synthetic valleys and S0 (BUILD-069); the existing columns are reported, not asserted

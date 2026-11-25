@@ -1193,6 +1193,11 @@ pub fn hump_cuts(g: &Grid, reference: &[f64], surface: &[f64], inside: &[bool]) 
 /// the other pair, so the lower pair meets only at a corner.
 pub const CORNER_M: f64 = 5.0;
 
+/// Whether the 2 x 2 block `a b / c d` (row-major) is a corner-only link: one diagonal pair more than [`CORNER_M`] above both cells of the other.
+pub fn corner_link(a: f64, b: f64, c: f64, d: f64) -> bool {
+    b.min(c) - a.max(d) > CORNER_M || a.min(d) - b.max(c) > CORNER_M
+}
+
 /// The corner-only links of `z` over the blocks whose four cells are counted.
 pub fn corner_links(g: &Grid, z: &[f64], inside: &[bool]) -> usize {
     let (w, h) = (g.w(), g.h());
@@ -1203,8 +1208,7 @@ pub fn corner_links(g: &Grid, z: &[f64], inside: &[bool]) -> usize {
             if !(inside[ia] && inside[ib] && inside[ic] && inside[id]) {
                 continue;
             }
-            let (a, b, c, d) = (z[ia], z[ib], z[ic], z[id]);
-            count += usize::from(b.min(c) - a.max(d) > CORNER_M || a.min(d) - b.max(c) > CORNER_M);
+            count += usize::from(corner_link(z[ia], z[ib], z[ic], z[id]));
         }
     }
     count
