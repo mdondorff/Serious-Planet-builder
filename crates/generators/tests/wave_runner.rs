@@ -420,3 +420,112 @@ fn band6_through_the_drain_library_is_the_same_bits_on_every_layout() {
     eprintln!("#208 band6 L falsification: without the candidate rule band6 differs on {naive_differs:?}");
     assert!(!naive_differs.is_empty(), "without the candidate rule some layout must differ");
 }
+
+/// KH in the h2 form (`kh::read`, the flow-diagonal triangulation of z_s; G0 contracts reading 19) as a `Local { halo: 0 }` stage at L: each L cell reads z_s's H1 block of its own face
+/// (`kh_g0`'s reading) plus its residual `r = B - C1(z_b)`. Its H1 inputs (z_s, its routing and splits) are wave 1's outputs, read whole after wave 1's barrier. The chain's default h5 form
+/// (h2 plus the curve zone's blend) is glue in rg_chain's L-stage block and comes with its move (DEC crusader-49).
+pub struct KhH2 {
+    /// z_s at H1, wave 1's output.
+    pub zs: Vec<f64>,
+    /// z_b at H1 and B at L (the residual's inputs).
+    pub zb: Vec<f64>,
+    pub b: Vec<f64>,
+}
+
+impl Stage for KhH2 {
+    fn name(&self) -> &'static str {
+        "kh-h2"
+    }
+
+    fn form(&self) -> Form {
+        Form::Local { halo: 0 }
+    }
+
+    fn run(&self, cx: &Ctx, st: &mut State) {
+        use planet_core::Face;
+        use planet_generators::bake::h0::GlobalGrid;
+        use planet_generators::bake::k7::RegionField;
+        use planet_generators::bake::kh;
+        use planet_generators::bake::route::NONE;
+        let nn = H1_N * H1_N;
+        let gh = Grid::cube(H1_N, RADIUS_M);
+        let outlet = gh.outlets(&self.zs, SEA_LEVEL_M);
+        let (recv, area) = kh::routing(&gh, &self.zs, &outlet);
+        let splits: Vec<Vec<u8>> = (0..6)
+            .map(|f| {
+                let rv = |c: usize| {
+                    let r = recv[f * nn + c];
+                    (r != NONE && r as usize / nn == f).then(|| r as usize % nn)
+                };
+                kh::split(&self.zs[f * nn..(f + 1) * nn], H1_N, H1_N, &rv, &|c| area[f * nn + c]).0
+            })
+            .collect();
+        let l = GlobalGrid::new(L_N, RADIUS_M);
+        let zb: Vec<RegionField> = (0..6)
+            .map(|f| {
+                RegionField::new(Face(f as u8), H1_N, (0, 0), H1_N, H1_N, self.zb[f * nn..(f + 1) * nn].iter().map(|&x| x as f32).collect())
+            })
+            .collect();
+        let (ln, lr) = (L_N * L_N, L_PER_H1 as f64);
+        let cell = |p: usize| {
+            let (f, i, j) = (p / ln, p % L_N, (p % ln) / L_N);
+            let r = self.b[p] - zb[f].at(l.direction(p as u32));
+            kh::read(
+                &self.zs[f * nn..(f + 1) * nn],
+                H1_N,
+                H1_N,
+                &splits[f],
+                (i as f64 - (lr - 1.0) / 2.0) / lr,
+                (j as f64 - (lr - 1.0) / 2.0) / lr,
+            ) + r
+        };
+        let mut out = vec![f64::NAN; cx.g.len()];
+        // each region its own cells (a tile-local stage with no halo: a cell reads only the whole H1 fields)
+        match cx.regions {
+            None => (0..out.len()).for_each(|p| out[p] = cell(p)),
+            Some(rg) => {
+                for o in 0..rg.count as u8 {
+                    for p in (0..out.len()).filter(|&p| rg.region_of[p] == o) {
+                        out[p] = cell(p);
+                    }
+                }
+            }
+        }
+        st.z = out;
+    }
+}
+
+// spike only (crusader #208 step 4b): the first cross-wave composite, wave 1 at H1 then KH at L, on the five layouts
+#[test]
+fn wave_1_then_kh_is_the_same_bits_on_every_layout() {
+    let inp = super::cross_seam_band6::input_h1();
+    let fx = build(4);
+    let gh = Grid::cube(H1_N, RADIUS_M);
+    let gl = Grid::cube(L_N, RADIUS_M);
+    let outlet: Vec<bool> = inp.z0.iter().map(|&h| h <= SEA_LEVEL_M).collect();
+    let n = inp.z0.len();
+    let (base1, post) = (Sel::selective_50("base1", n), Sel::selective_50("sel-post", n));
+    let k5 = K5 { rounds: 4, seed: 0x6b35 };
+    let k6 = K6 { seed: 0x6b35, runoff: 1.0e-6 };
+    let wave1: [&dyn Stage; 4] = [&base1, &k5, &post, &k6];
+    let chain = |l: Option<&PartitionLayout>| {
+        let rh = l.map(|l| Regions::new(&gh, l, L_PER_H1, false));
+        let w1 = run_wave(&wave1, &Ctx { g: &gh, outlet: &outlet, regions: rh.as_ref(), threads: 4 }, &inp.z0);
+        // the barrier: L-A reads wave 1's outputs whole
+        let kh = KhH2 { zs: w1.z.clone(), zb: inp.z0.clone(), b: fx.b.clone() };
+        let rl = l.map(|l| Regions::new(&gl, l, 1, false));
+        let ol: Vec<bool> = fx.b.iter().map(|&h| h <= SEA_LEVEL_M).collect();
+        let la = run_wave(&[&kh], &Ctx { g: &gl, outlet: &ol, regions: rl.as_ref(), threads: 4 }, &fx.b);
+        (w1, la)
+    };
+    let (w1, la) = chain(None);
+    assert!(la.z.iter().all(|v| v.is_finite()), "every L cell read");
+    let dev = la.z.iter().zip(&fx.s0).map(|(a, b)| (a - b).abs()).fold(0.0, f64::max);
+    eprintln!("#208 wave 1 -> KH: {} wave-1 decisions; |S_KH - S0| max {dev:.2} m", w1.trace.len());
+    for l in partition_layouts() {
+        let (a, b) = chain(Some(&l));
+        assert_eq!(differs(&w1, &a), None, "{}: wave 1", l.name);
+        assert_eq!(differs(&la, &b), None, "{}: KH", l.name);
+    }
+    eprintln!("#208 wave 1 -> KH: bit-identical on all five layouts");
+}
