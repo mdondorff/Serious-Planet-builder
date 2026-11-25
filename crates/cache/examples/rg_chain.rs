@@ -2214,6 +2214,18 @@ fn main() -> Result<(), String> {
     // lead #184f item 2 (the facets enter at KH: in-zone Xdiag S0 0.003 -> S_KH 0.037 on the dams-off row): `--curve-profile v` (default) the cross-section
     // z_bed + s d; `round` a hyperbola z_bed + s (sqrt(d^2 + d0^2) - d0), d0 = 1.5 L cells: the same walls away from the thalweg, its tip rounded
     let curve_profile = value(&args, "--curve-profile").unwrap_or("v");
+    // lead #184p (spike only): `--kh-weight dist` replaces the curve zone's height gate (8-12 m above the bed) by a weight on the distance to the curve: in S0's space
+    // z = S0 - w(d) max(0, S0 - target(d)), w = 1 on the floor falling by a C1 smoothstep to 0 at the zone's edge (8 L cells); `gate` (default) as before
+    let kh_weight = value(&args, "--kh-weight").unwrap_or("gate");
+    if !["gate", "dist"].contains(&kh_weight) {
+        return Err(format!("--kh-weight {kh_weight}: gate | dist"));
+    }
+    // lead #184p item 2 (spike only, with `--kh-weight dist`): `--kh-wall-cap DEG` caps the cut's wall: target(d) = max(bed + s d, S0 - (d_edge - d) tan(DEG)), the zone's
+    // edge widened to d_edge = max(8, (S0 at the curve - bed) / tan(DEG)) L cells (at most 24), so a wall never stands steeper than DEG; absent, no cap
+    let kh_wall_cap: Option<f64> = value(&args, "--kh-wall-cap").map(str::parse).transpose().map_err(|_| "--kh-wall-cap DEG")?;
+    if kh_wall_cap.is_some() && kh_weight != "dist" {
+        return Err("--kh-wall-cap needs --kh-weight dist".into());
+    }
     // lead #184f item 2: the facets follow the curves' lattice-aligned headings (R1h: 54 % of the curve length within 5 degrees of 0 / 45 / 90 / 135, uniform 22 %);
     // `--curve-sigma S` the smoothing's sigma (L cells, default 2)
     let curve_sigma: f64 = value(&args, "--curve-sigma").map_or(Ok(2.0), str::parse).map_err(|_| "--curve-sigma S")?;
@@ -3340,10 +3352,20 @@ fn main() -> Result<(), String> {
             out
         };
         // lead #184 (`--kh-zone curve`): each L cell's nearest trunk-curve point within 8 L cells (its distance in L cells, the curve's bed there); ties keep the first curve
-        let curve_near: Option<(Vec<f32>, Vec<f32>)> = (kh_zone == "curve").then(|| {
-            let r = 8i64;
+        let curve_cn: Option<(Vec<f32>, Vec<f32>, Vec<f32>)> = (kh_zone == "curve").then(|| {
+            // lead #184p item 2: a widened zone (24 L cells) under the wall cap
+            let r = if kh_wall_cap.is_some() { 24i64 } else { 8i64 };
             let mut d = vec![f32::INFINITY; n_l];
             let mut zb = vec![0f32; n_l];
+            // lead #184p item 2: S0 at the curve point (bilinear at the segment's projection), for the zone's local edge
+            let mut zc = vec![0f32; n_l];
+            let s0_at = |px: f64, py: f64| {
+                let (x0f, y0f) = (px.floor().clamp(0.0, (w - 2) as f64), py.floor().clamp(0.0, (h - 2) as f64));
+                let (i0, j0) = (x0f as usize, y0f as usize);
+                let (fx, fy) = ((px - x0f).clamp(0.0, 1.0), (py - y0f).clamp(0.0, 1.0));
+                let at = |i: usize, j: usize| start[j * w + i];
+                (1.0 - fy) * ((1.0 - fx) * at(i0, j0) + fx * at(i0 + 1, j0)) + fy * ((1.0 - fx) * at(i0, j0 + 1) + fx * at(i0 + 1, j0 + 1))
+            };
             // numerics review F2: the distance to the curve's segments (not to its points), less 0.71 L cells, so the raster's own cells (centres up to 0.71 cells from
             // the curve) lie on the thalweg; the bed interpolated along the segment
             for (cv, z) in curves.as_ref().expect("curves").iter().flatten() {
@@ -3361,6 +3383,9 @@ fn main() -> Result<(), String> {
                             if dd <= r as f32 && dd < d[c] {
                                 d[c] = dd;
                                 zb[c] = (z[i] + t * (z[i + 1] - z[i])) as f32;
+                                if kh_wall_cap.is_some() {
+                                    zc[c] = s0_at(ax + t * vx, ay + t * vy) as f32;
+                                }
                             }
                         }
                     }
@@ -3371,11 +3396,15 @@ fn main() -> Result<(), String> {
                 (0..cells).filter(|&c| h1.hydro.channel[c] && !d[((c / rw) * L + L / 2) * w + (c % rw) * L + L / 2].is_finite()).count();
             println!("RG KH curve zone: {bare} H1 channel cells outside every curve's zone (C1 there)");
             println!(
-                "RG KH curve zone (lead #184): {} L cells within 8 L cells of a trunk curve",
+                "RG KH curve zone (lead #184): {} L cells within {r} L cells of a trunk curve",
                 d.iter().filter(|v| v.is_finite()).count()
             );
-            (d, zb)
+            (d, zb, zc)
         });
+        let (curve_near, curve_zc): (Option<(Vec<f32>, Vec<f32>)>, Option<Vec<f32>>) = match curve_cn {
+            Some((d, zb, zc)) => (Some((d, zb)), Some(zc)),
+            None => (None, None),
+        };
         let cell_m = grid.dx() / L as f64;
         let s0_slope = |p: usize| {
             let (x, y) = (p % w, p / w);
@@ -3410,6 +3439,30 @@ fn main() -> Result<(), String> {
                     if kind[p] == 1 {
                         return c1;
                     }
+                }
+                // lead #184p: the distance weight in S0's space, no per-cell height test
+                if kh_weight == "dist" {
+                    if let Some((d, zb)) = &curve_near {
+                        if d[p].is_finite() {
+                            let (zb, dc) = (f64::from(zb[p]), f64::from(d[p]));
+                            let s0p = c1 + rl[p];
+                            let edge = match (kh_wall_cap, &curve_zc) {
+                                (Some(deg), Some(zc)) => ((f64::from(zc[p]) - zb).max(0.0) / (libm::tan(deg.to_radians()) * cell_m)).clamp(8.0, 24.0),
+                                _ => 8.0,
+                            };
+                            if dc < edge {
+                                let mut target = zb + s0_slope(p).max(curve_thalweg) * dc * cell_m;
+                                if let Some(deg) = kh_wall_cap {
+                                    target = target.max(s0p - (edge - dc) * cell_m * libm::tan(deg.to_radians()));
+                                }
+                                let x = dc / edge;
+                                let wgt = 1.0 - x * x * (3.0 - 2.0 * x);
+                                let z = s0p - wgt * (s0p - target).max(0.0);
+                                v = z - rl[p];
+                            }
+                        }
+                    }
+                    return v;
                 }
                 if let Some((d, zb)) = &curve_near {
                     if d[p].is_finite() {
@@ -5315,6 +5368,8 @@ fn main() -> Result<(), String> {
             ("curve-blend", curve_blend.to_string()),
             ("curve-profile", curve_profile.to_string()),
             ("curve-sigma", curve_sigma.to_string()),
+            ("kh-weight", kh_weight.to_string()),
+            ("kh-wall-cap", kh_wall_cap.map_or("-".to_string(), |d| d.to_string())),
             ("meander-runmin", meander_runmin.map_or("-".to_string(), |r| r.to_string())),
             ("inlet-floor", if INLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
             ("band6-floors", if BAND6_FLOORS.load(std::sync::atomic::Ordering::Relaxed) { "on" } else { "off" }.to_string()),
