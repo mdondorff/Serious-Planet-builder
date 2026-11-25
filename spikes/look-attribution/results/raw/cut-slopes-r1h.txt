@@ -1,0 +1,6 @@
+r1h-def: wall slope across the curve (steepest 0.5-cell step within +-3 cells, 64423 profiles): p50 0.078, p90 0.403, p99 0.917, max 2.09 m/m
+   cells within 3 cells of a curve (860641): steepest neighbour slope p50 0.066, p90 0.359, p99 0.801, max 2.05 m/m (64 deg); over 1 m/m (45 deg) 2687 cells, over 0.58 (30 deg) 30249
+r1h-mm: wall slope across the curve (steepest 0.5-cell step within +-3 cells, 64423 profiles): p50 0.089, p90 0.489, p99 1.361, max 3.20 m/m
+   cells within 3 cells of a curve (860641): steepest neighbour slope p50 0.070, p90 0.407, p99 1.098, max 3.29 m/m (73 deg); over 1 m/m (45 deg) 10988 cells, over 0.58 (30 deg) 41938
+col at reach 5519 (curve point [3151.4 3743.6]): floor 452.3 m, lower rim within 12 cells 543.4 m, depth 91.0 m; width at half depth 1094 m (10.7 cells); depth-to-width 0.08; S0 there: centre 539.7 m
+  profile across (every cell, m): 543 526 506 485 465 456 454 454 459 475 489 462 453 475 561 580 585 587 588 587 586 585 585 587 590
