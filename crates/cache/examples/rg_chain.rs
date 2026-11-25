@@ -1450,6 +1450,7 @@ fn build_graph(
     ocean: &[bool],
     runoff_mean: f64,
     zs_h1: &[f64],
+    intended: &[bool],
 ) -> (Graph, Vec<String>) {
     let (x0, y0, w, h, rw) = window;
     let h1_gid = |c: u32| grid.global_id(c as usize);
@@ -1613,8 +1614,52 @@ fn build_graph(
             });
         }
     });
-    let mut routed: Vec<(usize, usize, usize, Option<(Vec<usize>, bool, f64)>)> = done.into_inner().expect("lock");
-    routed.sort_by_key(|x| x.0);
+    let mut routed0: Vec<(usize, usize, usize, Option<(Vec<usize>, bool, f64)>)> = done.into_inner().expect("lock");
+    routed0.sort_by_key(|x| x.0);
+    // lead #203f (R23): a trunk route that enters an intended basin ends at its first vertex inside (a lake inlet) and restarts where it leaves (a lake spill), as
+    // KG-trib's lines do at kept lakes; the pieces keep their H1 reach and their order (upstream first), and the restart's bed starts afresh at its first vertex
+    let (mut split, mut dropped) = (0usize, 0usize);
+    let mut routed: Vec<(usize, usize, usize, Option<(Vec<usize>, bool, f64)>, Option<NodeKind>, Option<NodeKind>)> = Vec::new();
+    for (k, up_c, down_c, r) in routed0 {
+        let inside = |c: usize| intended.get(c).copied().unwrap_or(false);
+        let Some((route, failed, rise)) = r.as_ref().filter(|x| x.0.iter().any(|&c| inside(c))) else {
+            routed.push((k, up_c, down_c, r, None, None));
+            continue;
+        };
+        split += 1;
+        let mut start: Option<usize> = (!inside(route[0])).then_some(0);
+        for v in 0..route.len() {
+            if inside(route[v]) {
+                if let Some(s) = start.take() {
+                    // the piece from s to this first vertex inside: it ends at the lake inlet
+                    let piece = route[s..=v].to_vec();
+                    if piece.len() >= 2 {
+                        let up = if s == 0 { None } else { Some(NodeKind::LakeSpill) };
+                        routed.push((k, piece[0], route[v], Some((piece, *failed, *rise)), up, Some(NodeKind::LakeInlet)));
+                    } else {
+                        dropped += 1;
+                    }
+                }
+            } else if start.is_none() {
+                start = Some(v);
+            }
+        }
+        if let Some(s) = start {
+            let piece = route[s..].to_vec();
+            if piece.len() >= 2 {
+                let up = if s == 0 { None } else { Some(NodeKind::LakeSpill) };
+                routed.push((k, piece[0], down_c, Some((piece, *failed, *rise)), up, None));
+            } else {
+                dropped += 1;
+            }
+        }
+    }
+    if !intended.is_empty() {
+        notes.push(format!(
+            "intended basins (lead #203f): {split} trunk routes split at intended basins, {dropped} one-vertex pieces dropped"
+        ));
+        println!("RG KG-trunk intended basins (lead #203f): {split} trunk routes split at intended basins (inlet, then spill), {dropped} one-vertex pieces dropped");
+    }
     // ---- L nodes and reaches, beds in topological order of the H1 reaches (upstream first: by the segments' order along the routing)
     let mut l_node: HashMap<(usize, NodeKind), u64> = HashMap::new();
     let mut l_parent: HashMap<u64, u32> = HashMap::new();
@@ -1633,7 +1678,7 @@ fn build_graph(
     let mut l_reaches: Vec<GReach> = Vec::new();
     let mut markers: Vec<Node> = Vec::new();
     for &i in &idx {
-        let (k, up_c, down_c, ref r) = routed[i];
+        let (k, up_c, down_c, ref r, up_over, down_over) = routed[i];
         let Some((route, failed, rise)) = r else {
             skipped += 1;
             continue;
@@ -1641,7 +1686,7 @@ fn build_graph(
         let hr = &reaches[k];
         let mut route = route.clone();
         let mut down_c = down_c;
-        let mut down_kind = hr.down_kind;
+        let mut down_kind = down_over.unwrap_or(hr.down_kind);
         if *route.last().expect("route") != down_c {
             // the route met the sea before the down node: the image ends at an outlet there
             down_c = *route.last().expect("route");
@@ -1692,7 +1737,7 @@ fn build_graph(
                 id
             })
         };
-        let up = mk(up_c, hr.up_kind, hr.cells[0]);
+        let up = mk(up_c, up_over.unwrap_or(hr.up_kind), hr.cells[0]);
         let down = mk(down_c, down_kind, *hr.cells.last().expect("cells"));
         let _ = up_c;
         // the bed: running minimum of KS0 from the up node's bed, the cut at most budget - KS_used; beyond it the bed follows the surface (rise_over_budget)
@@ -3471,6 +3516,8 @@ fn main() -> Result<(), String> {
         .load(std::sync::atomic::Ordering::Relaxed)
         .then(|| (0..w * h).map(|c| f64::from(runoff[((c / w) / L) * rw + (c % w) / L]) / runoff_mean).collect());
     let window = (x0 as u64, y0 as u64, w, h, rw);
+    // lead #203f: the intended interiors, where KG-trunk's routes end (empty when the switch is off)
+    let intended_l: Vec<bool> = s0_set.as_ref().map_or_else(Vec::new, |(_, own)| own.iter().map(|&o| o != u32::MAX).collect());
     let mut g = if on("kg-trunk") {
         build_graph(
             &h1,
@@ -3489,6 +3536,7 @@ fn main() -> Result<(), String> {
             &ocean,
             runoff_mean,
             &solve.zs,
+            &intended_l,
         )
         .0
     } else {
@@ -4465,13 +4513,33 @@ fn main() -> Result<(), String> {
                             }
                         }
                     }
-                    let mut t = String::from("basin_id,type,outlet,floor_cell,floor_m,spill_cell,spill_m,cells,area_km2,marked_share,terms,aridity,endorheic_candidate,represented\n");
+                    // lead #203f (the trace of floors lost before basins-2): the floor and spill cells' heights at each stage, and their sea and outlet flags
+                    let mut t = String::from(
+                        "basin_id,type,outlet,floor_cell,floor_m,spill_cell,spill_m,cells,area_km2,marked_share,terms,aridity,endorheic_candidate,represented,\
+                         floor_kh,floor_ks0,floor_ks1,floor_b2in,floor_sea,floor_outlet,spill_kh,spill_ks0,spill_ks1,spill_b2in,spill_sea,spill_outlet\n",
+                    );
                     let mut kept = 0usize;
                     for b in intended2 {
                         let k = kept_at.get(&gid_l(b.floor));
                         kept += usize::from(k.is_some());
+                        let (f, s) = (b.floor, b.spill_cell);
+                        let trace = format!(
+                            ",{:.3},{:.3},{:.3},{:.3},{},{},{:.3},{:.3},{:.3},{:.3},{},{}",
+                            ks_base[f],
+                            ks0[f],
+                            ks1_d[f],
+                            ks_d[f],
+                            sea_l[f],
+                            outlet_d[f],
+                            ks_base[s],
+                            ks0[s],
+                            ks1_d[s],
+                            ks_d[s],
+                            sea_l[s],
+                            outlet_d[s]
+                        );
                         t += &format!(
-                            "{},intentional,{},{},{:.3},{},{:.3},{},{:.4},{:.3},{},{:.4},{},{}\n",
+                            "{},intentional,{},{},{:.3},{},{:.3},{},{:.4},{:.3},{},{:.4},{},{}{trace}\n",
                             k.map_or("none".to_string(), |x| x.id.to_string()),
                             k.map_or("-".to_string(), |x| format!("{:?}", x.outlet).to_lowercase()),
                             gid_l(b.floor),
