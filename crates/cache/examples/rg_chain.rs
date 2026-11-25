@@ -4065,10 +4065,13 @@ fn main() -> Result<(), String> {
                 _ => kh::read_ct_clamped(&solve.zs, rw, rh, &split, &grad, &step, fx, fy).0,
             }
         };
+        // lead #203g (reading 17's exception): an intended basin's interior is land with a lake, also below the sea level, so the sea + 0.5 m band floor leaves it
+        let in_intended = |p: usize| s0_set.as_ref().is_some_and(|(_, own)| own[p] != u32::MAX);
         let at = |p: usize| {
             let k = kval(p);
             // lead #203e: KH never lowers an intended basin's rim below its floor
-            (k + band(k, rl[p])).max(rf(p))
+            let r = if in_intended(p) { rl[p] } else { band(k, rl[p]) };
+            (k + r).max(rf(p))
         };
         if let Some(z) = &zone {
             println!("RG KH h5: h4c on {} zone cells of 814 m, C1 elsewhere", z.iter().filter(|&&x| x).count());
@@ -4793,9 +4796,10 @@ fn main() -> Result<(), String> {
             planet_generators::bake::drain::OUTLET_FLOORS
                 .store(BAND6_OUTLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed), std::sync::atomic::Ordering::Relaxed);
             // lead #180: the depressions of band6's input that basins-2 would keep (>= 0.25 km2 and >= 2 m deep) are band6's intended cells
-            // lead #203c: band6 neither breaches nor fills the fixed S0 set's rim rings (interiors may change)
+            // lead #203g: band6 treats an intended basin as kept, as it does the protected depressions: not decided, so neither breached nor filled (its interior and
+            // rim ring), and it stays a depression for basins-2
             let int6: Vec<bool> = match &s0_set {
-                Some(_) => (0..n_l).map(|p| ring_floor[p].is_finite()).collect(),
+                Some((_, own)) => (0..n_l).map(|p| own[p] != u32::MAX || ring_floor[p].is_finite()).collect(),
                 None => Vec::new(),
             };
             let keep6: Vec<bool> = if BAND6_KEEP_RIMS.load(std::sync::atomic::Ordering::Relaxed) {
