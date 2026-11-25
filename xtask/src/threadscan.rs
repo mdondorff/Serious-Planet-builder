@@ -10,7 +10,7 @@ mod tests {
     const CALLS: [&str; 5] = ["thread::spawn(", "thread::Builder::new(", "thread::scope(", "spawn_named(", "spawn_scoped("];
 
     /// (file, calls, reason). Every other entry is the job system itself, a driver or a tool that stays.
-    const ALLOWED: [(&str, usize, &str); 20] = [
+    const ALLOWED: [(&str, usize, &str); 21] = [
         ("crates/app/src/cameraground.rs", 1, "driver: the free camera's ground read, one thread waiting on a queue (VIEW-061); stays"),
         ("crates/app/src/coupledworld.rs", 1, "driver: the coupled run's one thread; stays"),
         ("crates/app/src/horizonworld.rs", 1, "driver: the one-shot read of the stored coarse horizon; stays"),
@@ -18,6 +18,7 @@ mod tests {
         ("crates/app/src/previewjob.rs", 1, "driver: the level-1 preview's worker thread (VIEW-068): builds the base once and answers the newest ask; stays"),
         ("crates/app/src/streamperf.rs", 1, "driver: a perf scene's flight thread; stays"),
         ("crates/app/src/worldfield.rs", 1, "driver: the height warm-up thread, which waits on a queue; stays"),
+        ("crates/cache/src/rg_budget.rs", 1, "tool (spike branch only, never merged): rg_chain's budget field in row bands (budget_field_threads); offline, the caller gives the thread count"),
         ("crates/cache/src/river_gate.rs", 1, "tool: the river gate's store laying (BUILD-055, BUILD-057), row bands of a tile's B + L; offline, the caller gives the thread count; stays"),
         ("crates/core/src/par.rs", 4, "`run_scoped`: the scoped helper threads of a `Par`; `SharePar` takes them as permits of the terrain share first (the permit rule, BUDG-009)"),
         ("crates/core/src/thread.rs", 1, "the named scoped thread helper itself"),

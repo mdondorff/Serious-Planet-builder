@@ -245,3 +245,54 @@ pub fn cell_at(n: usize, lon: f64, lat: f64) -> usize {
     let k = |x: f64| ((((x + 1.0) * 0.5) * n as f64) as usize).min(n - 1);
     face.0 as usize * n * n + k(t) * n + k(s)
 }
+
+/// A partition layout as data (TEST-151): regions of whole tiles of GEN-182's grid on the L lattice, with its halo. Read from `g0_layouts.txt`.
+pub struct PartitionLayout {
+    pub name: String,
+    pub regions: usize,
+    pub tile: usize,
+    pub halo: usize,
+    /// The region of tile `(face, ti, tj)` at `(face * TILES_PER_FACE + tj) * TILES_PER_FACE + ti`.
+    pub region_of_tile: Vec<u8>,
+}
+
+impl PartitionLayout {
+    pub fn region(&self, face: usize, ti: usize, tj: usize) -> u8 {
+        self.region_of_tile[(face * TILES_PER_FACE + tj) * TILES_PER_FACE + ti]
+    }
+}
+
+/// The partition layouts of `g0_layouts.txt`, in file order: one, two and four regions, a shifted seam, a seam on a face edge.
+pub fn partition_layouts() -> Vec<PartitionLayout> {
+    let t = TILES_PER_FACE;
+    let mut out: Vec<PartitionLayout> = Vec::new();
+    for line in include_str!("g0_layouts.txt").lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+        let w: Vec<&str> = line.split_whitespace().collect();
+        if w[0] == "layout" {
+            assert_eq!((w.len(), w[2], w[4], w[6]), (8, "regions", "tile", "halo"), "a layout header: {line}");
+            let num = |s: &str| s.parse::<usize>().expect("a count");
+            out.push(PartitionLayout {
+                name: w[1].to_string(),
+                regions: num(w[3]),
+                tile: num(w[5]),
+                halo: num(w[7]),
+                region_of_tile: Vec::new(),
+            });
+            continue;
+        }
+        let l = out.last_mut().expect("a face line follows a layout header");
+        assert_eq!(w.len(), 1 + t, "a face line: the face and {t} rows: {line}");
+        assert_eq!(w[0].parse::<usize>().expect("a face"), l.region_of_tile.len() / (t * t), "faces in order: {line}");
+        for row in &w[1..] {
+            assert_eq!(row.len(), t, "{t} tiles a row: {line}");
+            for b in row.bytes() {
+                assert!(b.is_ascii_digit(), "a region digit: {line}");
+                l.region_of_tile.push(b - b'0');
+            }
+        }
+    }
+    for l in &out {
+        assert_eq!(l.region_of_tile.len(), 6 * t * t, "{}: every tile of the six faces", l.name);
+    }
+    out
+}

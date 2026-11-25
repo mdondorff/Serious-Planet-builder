@@ -105,6 +105,9 @@ pub enum Switch {
 
 /// The bound of KC's breach search (reading 22): settled cells per depression.
 const BREACH_CAP: usize = 20_000;
+/// crusader #198a (spike only): KC takes a breach only along a path of at most this many L cells (`--breach-max-len-l`); 0: no limit (the default). A depression
+/// whose path is longer is filled within its budget, else left, as when no path is found.
+pub static KC_BREACH_MAX_LEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// What a run made.
 pub struct KvKc {
@@ -654,6 +657,8 @@ pub fn run_with_rims(
                 } else {
                     breach(&|c| protected[c] || rim(c) > floor || sea_block(c))
                 };
+                let max_l = KC_BREACH_MAX_LEN.load(std::sync::atomic::Ordering::Relaxed);
+                let found = found.filter(|(_, path)| max_l == 0 || path.len() <= max_l);
                 if let Some((vol, path)) = found {
                     if vol < fill_vol || !fill_ok {
                         for &c in &path {
@@ -663,6 +668,18 @@ pub fn run_with_rims(
                         }
                         breaches += 1;
                         breach_volume += vol;
+                        // crusader #198 (spike only, diagnostic): the accepted breach, read and not changed
+                        super::drain::record_breach(|at| super::drain::BreachRecord {
+                            at,
+                            w: grid.w(),
+                            path: path.iter().map(|&c| c as u32).collect(),
+                            cut_max_m: path.iter().filter(|&&c| !outlet[c]).map(|&c| (kv[c] - floor).max(0.0)).fold(0.0, f64::max),
+                            cut_volume_m3: vol,
+                            depression_cells: cells.len(),
+                            depression_area_m2: cells.iter().map(|&c| grid.cell_area(c)).sum(),
+                            spill_m: level[cells[0]],
+                            floor_m: floor,
+                        });
                     }
                 }
             }

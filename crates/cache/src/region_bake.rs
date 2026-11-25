@@ -76,6 +76,8 @@ pub enum Drain {
     /// Only depressions with a breach cut within `cut_cap_m` or a fill within `fill_cap_m`; deeper basins stay. `drain::drain_selective`. Before K5, `clamp` also floors K5's
     /// breach at the fill level inside the basins left (`drain::level_floor`, passed to the rounds as `Drivers::level_floor`).
     Selective { cut_cap_m: f64, fill_cap_m: f64, rounds: usize, search: usize, clamp: bool },
+    /// Lead #202 (O7): every depression filled to its spill, no breach (`drain::fill_level`; a cell no outlet reaches keeps its height). The pit-reduced S0 proxy.
+    Fill,
 }
 
 impl Drain {
@@ -85,6 +87,7 @@ impl Drain {
     fn put(&self, b: &mut Vec<u8>) {
         match *self {
             Drain::Off => b.push(0),
+            Drain::Fill => b.push(3),
             Drain::Capped { cap_m, rounds, search } => {
                 b.push(1);
                 b.extend(cap_m.to_bits().to_le_bytes());
@@ -300,6 +303,10 @@ impl Drop for K5RouteSet {
     }
 }
 
+/// crusader #198 (spike only, diagnostic): the region's drains record their accepted breaches ([`planet_generators::bake::drain::record_breaches`]); rg_chain sets it with
+/// `PLANET_BREACH_DUMP`. Off: nothing is recorded.
+pub static BREACH_DUMP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 #[derive(Clone, Debug)]
 pub struct RegionSolve {
     pub face_spec: FaceSpec,
@@ -318,16 +325,39 @@ pub struct RegionSolve {
 }
 
 /// SPIKE-138 (spike only): the spec's drain on a regional surface, with its log line (`HO stage` + `what`). Public for rg_chain's K5' (lead #184v, spike only).
-pub fn run_drain(drain: &Drain, grid: &Grid, outlet: &[bool], z: &[f64], what: &str) -> Vec<f64> {
+pub fn run_drain(
+    drain: &Drain,
+    grid: &Grid,
+    outlet: &[bool],
+    z: &[f64],
+    what: &str,
+    at: Option<planet_generators::bake::drain::BreachStage>,
+) -> Vec<f64> {
     use planet_generators::bake::drain;
     let (w, h) = (grid.w(), grid.len() / grid.w());
     let area = |p: usize| grid.cell_area(p);
     let t = std::time::Instant::now();
     let (d, st) = match *drain {
         Drain::Off => return z.to_vec(),
+        Drain::Fill => {
+            let level = drain::fill_level(z, w, h, outlet);
+            let d: Vec<f64> = (0..z.len()).map(|p| if level[p].is_finite() { level[p].max(z[p]) } else { z[p] }).collect();
+            let raised = (0..z.len()).filter(|&p| d[p] > z[p]).count();
+            let km3: f64 = (0..z.len()).map(|p| (d[p] - z[p]) * grid.cell_area(p) / 1e9).sum();
+            println!("HO stage {what} (Fill): {raised} cells raised to their spill, {km3:.3} km3; {:.1} s", t.elapsed().as_secs_f64());
+            return d;
+        }
         Drain::Capped { cap_m, rounds, search } => drain::drain_capped(z, w, h, outlet, &|_| false, &area, rounds, search, cap_m),
         Drain::Selective { cut_cap_m, fill_cap_m, rounds, search, .. } => {
-            drain::drain_selective(z, w, h, outlet, &|_| false, &area, rounds, search, &|_| cut_cap_m, &|_| fill_cap_m)
+            // crusader #198 (spike only, diagnostic): this drain's accepted breaches, when the chain records them (`PLANET_BREACH_DUMP`)
+            if at.is_some() {
+                drain::record_breaches(at);
+            }
+            let r = drain::drain_selective(z, w, h, outlet, &|_| false, &area, rounds, search, &|_| cut_cap_m, &|_| fill_cap_m);
+            if at.is_some() {
+                drain::record_breaches(None);
+            }
+            r
         }
     };
     let (mut lo, mut hi) = (0.0f64, 0.0f64);
@@ -393,7 +423,15 @@ pub fn solve_region(spec: &RegionSpec, base: &(dyn Fn(Vec3) -> f64 + Sync)) -> R
     }
     let stream = face_spec.stream();
     // SPIKE-138 (spike only; R24: the spec's `stage.base_drain`): the drain of z_b before the rounds, and with `clamp` K5's breach floor at the fill level of the basins left
-    let zb_in = run_drain(&spec.stage.base_drain, &grid, &outlet, &zb, "1, z_b before K5");
+    let at = |stage: &'static str| {
+        BREACH_DUMP.load(std::sync::atomic::Ordering::Relaxed).then_some(planet_generators::bake::drain::BreachStage {
+            stage,
+            face: spec.face.0,
+            n: spec.regional as i64,
+            origin: (ri0 as i64, rj0 as i64),
+        })
+    };
+    let zb_in = run_drain(&spec.stage.base_drain, &grid, &outlet, &zb, "1, z_b before K5", at("base1"));
     let level_floor: Option<Vec<f64>> = match spec.stage.base_drain {
         Drain::Selective { clamp: true, .. } => {
             let lf = planet_generators::bake::drain::level_floor(&zb_in, grid.w(), grid.len() / grid.w(), &outlet);
@@ -427,7 +465,7 @@ pub fn solve_region(spec: &RegionSpec, base: &(dyn Fn(Vec3) -> f64 + Sync)) -> R
     }
     // SPIKE-138 (spike only; R24: the spec's `stage.post_drain`): the drain of z_s after the rounds
     if spec.stage.post_drain != Drain::Off {
-        zs = run_drain(&spec.stage.post_drain, &grid, &outlet, &zs, "3, z_s after K5");
+        zs = run_drain(&spec.stage.post_drain, &grid, &outlet, &zs, "3, z_s after K5", at("sel-post"));
     }
     precision.check_within_radius(&grid, &zs, |c| grid.global_id(c)).map_err(|e| format!("after the rounds of the region: {e}"))?;
     Ok(RegionSolve { face_spec, grid, outlet, zb, zb_in, zs, stream, ri0, rj0, rw, rh, precision })

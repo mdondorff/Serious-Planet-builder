@@ -30,6 +30,7 @@ use planet_cache::global_store::{class_inputs, class_inputs_key, GlobalWorld};
 use planet_cache::l_writer::Commit;
 use planet_cache::pack::TileStore;
 use planet_cache::region_bake::{lattice_direction, region_front, Drain, K5Knobs, K5Route, RegionSpec, StageConfig, LOCAL_PER_REGIONAL};
+use planet_cache::rg_h1::{h1_from, EDGE_Q, H1};
 use planet_cache::river_gate::{commit_differences, lay_store_ground, LWindow, WindowIdentity};
 use planet_cache::river_suite::corridor_bar_m;
 use planet_core::{Face, TangentWarp, Vec3};
@@ -57,7 +58,6 @@ const LATTICE: usize = 16_384;
 const REGIONAL: usize = 12_288;
 const SECONDS_PER_YEAR: f64 = 31_557_600.0;
 const L: usize = LOCAL_PER_REGIONAL;
-const EDGE_Q: f64 = 1.0;
 const K_C: f64 = 2.0;
 
 struct Lattice {
@@ -467,91 +467,6 @@ fn route_sills(
         }
     }
     Routing { receiver, order, area }
-}
-
-/// A routed H1: routing, filled levels, hydrology and graph, with the trunk reaches (q >= 1 m3/s, 2 cells or more) as segment indices.
-struct H1 {
-    routing: Routing,
-    hydro: Hydro,
-    graph: ChannelGraph,
-    trunk_seg: Vec<usize>,
-    trunk_cells: Vec<Vec<u32>>,
-    /// The D8 drainage area (true area, unweighted) of each cell along the receivers, m2.
-    d8: Vec<f64>,
-}
-
-fn h1_from(
-    grid: &Grid,
-    z: &[f64],
-    filled: &[f64],
-    routing: Routing,
-    outlet: &[bool],
-    runoff: &[f32],
-    evap: &[f32],
-    budget: Option<&[f64]>,
-) -> H1 {
-    // lead #163 (B3, result-preserving): with `budget` every basin is crossed (reading 24) and the second call only zeroed the open-water loss of the basins' cells,
-    // the one input `hydrology` reads it through (each basin's e_open); one call with a zero evaporation gives the same Hydro
-    let zeros: Vec<f32> = if budget.is_some() { vec![0.0; evap.len()] } else { Vec::new() };
-    let mut hydro = hydrology(
-        grid,
-        z,
-        filled,
-        &routing,
-        outlet,
-        Some(runoff),
-        Some(if budget.is_some() { &zeros } else { evap }),
-        &HydroParams::default(),
-    );
-    // spikes #142, reading 16: a kept basin deeper than the budget at its floor is crossed (reading 13), not a lake: no open-water loss there, so q_w = q through it.
-    // The basins are the same (the loss enters only the balance); the rerun changes q_w and the balance only.
-    // reading 24 (lead, 2026-11-17; owner decision 6 c): no H1 basin is a lake in the prototype, every one is crossed (q_w = q); `budget` only switches the rule on
-    if budget.is_some() {
-        let crossed: Vec<bool> = vec![true; hydro.basins.len()];
-        if HYDRO_TWICE.load(std::sync::atomic::Ordering::Relaxed) && crossed.iter().any(|&x| x) {
-            let ev2: Vec<f32> =
-                (0..evap.len()).map(|c| if hydro.label[c] != NONE && crossed[hydro.label[c] as usize] { 0.0 } else { evap[c] }).collect();
-            let again = hydrology(grid, z, filled, &routing, outlet, Some(runoff), Some(&ev2), &HydroParams::default());
-            assert_eq!(again.basins.len(), hydro.basins.len(), "the loss does not change the basins");
-            hydro = again;
-        }
-        // q_w as a running sum along the routing: q less the losses of the basins upstream (each basin's q_in - q_out, entered at its spill cell; zero for a crossed
-        // basin). The cascade's q_w inside a basin is no channel discharge (a basin's cells are taken in index order on its flat), so a trunk through a crossed basin reads this one.
-        let mut loss = vec![0f64; hydro.q.len()];
-        // entered where the routing leaves the basin (the first cell outside it on the floor's receiver chain), which need not be its spill cell
-        for (k, b) in hydro.basins.iter().enumerate() {
-            let mut c = b.floor_cell;
-            while hydro.label[c as usize] == k as u32 && routing.receiver[c as usize] != NONE {
-                c = routing.receiver[c as usize];
-            }
-            loss[c as usize] += b.q_in - b.q_out;
-        }
-        for &c in routing.order.iter().rev() {
-            let r = routing.receiver[c as usize];
-            if r != NONE {
-                loss[r as usize] += loss[c as usize];
-            }
-        }
-        hydro.qw = (0..hydro.q.len()).map(|c| (hydro.q[c] - loss[c]).max(0.0)).collect();
-    }
-    let graph = ChannelGraph::from_hydro(grid, &routing, &hydro, z);
-    let (mut trunk_seg, mut trunk_cells) = (Vec::new(), Vec::new());
-    graph.for_each(|s| {
-        let cells = s.cells(grid);
-        let q_max = s.q.iter().map(|&q| q_value(q)).fold(0.0, f64::max);
-        if cells.len() >= 2 && q_max >= EDGE_Q {
-            trunk_seg.push(s.index);
-            trunk_cells.push(cells);
-        }
-    });
-    let mut d8: Vec<f64> = (0..grid.len()).map(|p| grid.cell_area(p)).collect();
-    for &c in routing.order.iter().rev() {
-        let r = routing.receiver[c as usize];
-        if r != NONE {
-            d8[r as usize] += d8[c as usize];
-        }
-    }
-    H1 { routing, hydro, graph, trunk_seg, trunk_cells, d8 }
 }
 
 // ---------------------------------------------------------------- the corridor measure (land-only snap)
@@ -2119,6 +2034,114 @@ fn l_rivers(z: &[f64], w: usize, h: usize, dx: f64, sea: f64, a_min: f64) -> Vec
 }
 
 #[allow(clippy::type_complexity)]
+/// lead #203 (R23, owner decision 6(a)): a province term marks a cell from this value (the tectonic field's soft terms, 256 per face edge).
+const INTENDED_MARK: f64 = 0.5;
+/// lead #203: a marked node's spill stays below its floor plus this many budgets (the field cannot name a basin deeper than the stages could move).
+const INTENDED_BUDGETS: f64 = 10.0;
+/// lead #203: aridity P / PET under this makes an intended basin an `endorheic_candidate` (an input for O9's water balance, not a decision; ADR 0111 point 5).
+const ENDORHEIC_CANDIDATE_AI: f64 = 0.2;
+
+/// lead #203: an intended basin, a depression of the hierarchy the tectonic mark names (type `intentional`, an active outlet: it spills like any kept lake).
+struct Intended {
+    floor: usize,
+    floor_m: f64,
+    spill_cell: usize,
+    spill_m: f64,
+    cells: usize,
+    area_m2: f64,
+    marked: usize,
+    /// the province terms over the node's cells (bit 0 basin, 1 rift, 2 foreland, 3 back-arc)
+    terms: u8,
+}
+
+/// lead #203 (R23): the intended basins of `z`: per marked floor the largest hierarchy node whose floor cell is marked, more than half of whose cells are marked, whose spill
+/// stays below `floor + INTENDED_BUDGETS x budget(floor)`, and which has basins-2's kept size (0.25 km2, 2 m); a closed tree (no spill) is none. Returns them by node id and the
+/// cells inside them. Single-threaded, the hierarchy's fixed order (CON-14).
+fn intended_select(grid: &Grid, z: &[f64], outlet: &[bool], mark: &[u8], budget: &[f64]) -> (Vec<Intended>, Vec<bool>) {
+    use planet_generators::bake::basins_rg::hierarchy;
+    let hy = hierarchy(grid, z, outlet);
+    let nn = hy.nodes.len();
+    let (mut size, mut marked, mut area, mut terms) = (vec![0usize; nn], vec![0usize; nn], vec![0f64; nn], vec![0u8; nn]);
+    // children have smaller ids than their parent: one ascending pass sums the subtrees
+    for k in 0..nn {
+        let nd = &hy.nodes[k];
+        for &c in &nd.own {
+            size[k] += 1;
+            area[k] += grid.cell_area(c);
+            if mark[c] != 0 {
+                marked[k] += 1;
+                terms[k] |= mark[c];
+            }
+        }
+        for &kid in &nd.kids {
+            let kid = kid as usize;
+            size[k] += size[kid];
+            marked[k] += marked[kid];
+            area[k] += area[kid];
+            terms[k] |= terms[kid];
+        }
+    }
+    let qual: Vec<bool> = (0..nn)
+        .map(|k| {
+            let nd = &hy.nodes[k];
+            nd.spill.is_some_and(|sp| {
+                mark[nd.floor_cell] != 0
+                    && 2 * marked[k] > size[k]
+                    && sp.1 - nd.floor_m >= 2.0
+                    && area[k] >= 0.25e6
+                    && sp.1 < nd.floor_m + INTENDED_BUDGETS * budget[nd.floor_cell]
+            })
+        })
+        .collect();
+    // parents have larger ids: one descending pass finds a qualifying ancestor
+    let mut above = vec![false; nn];
+    let mut inside = vec![false; nn];
+    for k in (0..nn).rev() {
+        let par = hy.nodes[k].parent as usize;
+        if par < nn {
+            above[k] = qual[par] || above[par];
+            inside[k] = inside[par];
+        }
+        if qual[k] && !above[k] {
+            inside[k] = true;
+        }
+    }
+    let chosen: Vec<Intended> = (0..nn)
+        .filter(|&k| qual[k] && !above[k])
+        .map(|k| {
+            let nd = &hy.nodes[k];
+            let sp = nd.spill.expect("a qualifying node spills");
+            Intended {
+                floor: nd.floor_cell,
+                floor_m: nd.floor_m,
+                spill_cell: sp.0,
+                spill_m: sp.1,
+                cells: size[k],
+                area_m2: area[k],
+                marked: marked[k],
+                terms: terms[k],
+            }
+        })
+        .collect();
+    let cells: Vec<bool> = hy.node_of.iter().map(|&k| (k as usize) < nn && inside[k as usize]).collect();
+    (chosen, cells)
+}
+
+/// lead #203: one summary line of intended basins (count, km2, by term, endorheic candidates).
+fn intended_line(what: &str, it: &[Intended], ai: &dyn Fn(usize) -> f64) -> String {
+    let km2: f64 = it.iter().map(|b| b.area_m2).sum::<f64>() / 1e6;
+    let by = |bit: u8| it.iter().filter(|b| b.terms & (1 << bit) != 0).count();
+    let cand = it.iter().filter(|b| ai(b.floor) < ENDORHEIC_CANDIDATE_AI).count();
+    format!(
+        "RG intended basins (lead #203, R23) {what}: {} basins, {km2:.2} km2; terms basin {} rift {} foreland {} back-arc {}; endorheic candidates (P/PET < {ENDORHEIC_CANDIDATE_AI}) {cand}",
+        it.len(),
+        by(0),
+        by(1),
+        by(2),
+        by(3)
+    )
+}
+
 fn main() -> Result<(), String> {
     let t_all = Instant::now();
     // the commit and the tree's state at the run's start (lead #169: chain.txt names them; read now, since the worktree may change branch before the run ends)
@@ -2151,9 +2174,17 @@ fn main() -> Result<(), String> {
     // spikes #146 (SPIKE-138): `--base aplus` (the default) is stages 1 and 3, the selective drain of `z_b` before K5 and of `z_s` after it (a breach only within 50 m of
     // cut, a fill only within 50 m of depth; deeper basins stay), and stage 6, the same rule on the KS1 output with the budget at the floor as both caps (reading 23 post).
     // `--base today` is today's base, no drain.
+    // lead #203 (R23, owner decision 6(a)): `--intended-basins on` keeps the depressions the tectonic mark names (type `intentional`, an active outlet: they spill like any
+    // kept lake; protected through band6 and forced kept in basins-2 ahead of reading 22); `off` (default) is today's chain bit for bit
+    let intended_on = match value(&args, "--intended-basins").unwrap_or("off") {
+        "off" => false,
+        "on" => true,
+        v => return Err(format!("--intended-basins off | on, not '{v}'")),
+    };
+    // lead #202 (O7): `--base fill` is the pit-reduced S0 proxy: stages 1 and 3 fill every depression to its spill (no breach), stage 6 as under aplus
     let base_form = value(&args, "--base").unwrap_or("aplus");
-    if !["aplus", "today"].contains(&base_form) {
-        return Err(format!("--base aplus | today, not '{base_form}'"));
+    if !["aplus", "today", "fill"].contains(&base_form) {
+        return Err(format!("--base aplus | today | fill, not '{base_form}'"));
     }
     // spikes #147: `--base-stages 13` (stages 1 and 3, the default) or `3` (stage 3 only: no drain before K5); lead #178 (R16): `1` (stage 1 only: no drain of z_s after K5)
     let base_stages = value(&args, "--base-stages").unwrap_or("13");
@@ -2165,6 +2196,9 @@ fn main() -> Result<(), String> {
         ("aplus", "3") => (Drain::Off, Drain::SELECTIVE_50),
         ("aplus", "1") => (Drain::SELECTIVE_50, Drain::Off),
         ("aplus", _) => (Drain::SELECTIVE_50, Drain::SELECTIVE_50),
+        ("fill", "3") => (Drain::Off, Drain::Fill),
+        ("fill", "1") => (Drain::Fill, Drain::Off),
+        ("fill", _) => (Drain::Fill, Drain::Fill),
         _ => (Drain::Off, Drain::Off),
     };
     // spikes #147: `--breach-cost cell` (SPIKE-138) or `length` (the cut cost times the step's length, plus a length term)
@@ -2183,6 +2217,18 @@ fn main() -> Result<(), String> {
     // spikes #147: `--breach-max-len N` (cells of the grid the drain runs on; 0: none), the hybrid breach-fill's limit
     let breach_max_len: usize = value(&args, "--breach-max-len").map_or(Ok(0), str::parse).map_err(|_| "--breach-max-len cells")?;
     planet_generators::bake::drain::BREACH_MAX_LEN.store(breach_max_len, std::sync::atomic::Ordering::Relaxed);
+    // crusader #198a (spike only): `--breach-max-len-l N`, the L stages' breach cap (band6 and KC), in path cells as `--breach-max-len`; 0: none (the default)
+    let breach_max_len_l: usize = value(&args, "--breach-max-len-l").map_or(Ok(0), str::parse).map_err(|_| "--breach-max-len-l cells")?;
+    planet_generators::bake::kv_kc::KC_BREACH_MAX_LEN.store(breach_max_len_l, std::sync::atomic::Ordering::Relaxed);
+    // crusader #198 (spike only, diagnostic like PLANET_WIDTH_DUMP): PLANET_BREACH_DUMP=FILE writes every accepted breach of base1, sel-post, band6 and KC as one CSV
+    // row (write_breaches); recording reads the breaches and changes no cell
+    let breach_dump = std::env::var("PLANET_BREACH_DUMP").ok();
+    if breach_dump.is_some() {
+        planet_cache::region_bake::BREACH_DUMP.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(f) = &breach_dump {
+            std::fs::write(f, BREACH_CSV_HEADER).map_err(|e| format!("{f}: {e}"))?;
+        }
+    }
     // lead #184v (spike only): `--k5 k5p` routes K5's rounds on the sills of r = B - C1(z_b) (SPIKE-131's K5', form (a)) and implies `--h1 k6p`; `today` (default) K5 as is
     let k5_form = value(&args, "--k5").unwrap_or("today");
     if !["today", "k5p", "control"].contains(&k5_form) {
@@ -2613,7 +2659,7 @@ fn main() -> Result<(), String> {
         if k5_form == "control" {
             let mut c0 = rounds_k5p(&s.grid, &s.zb_in, &s.outlet, &carve, spec.rounds, threads, s.stream, None);
             if spec.stage.post_drain != planet_cache::region_bake::Drain::Off {
-                c0 = planet_cache::region_bake::run_drain(&spec.stage.post_drain, &s.grid, &s.outlet, &c0, "3, control");
+                c0 = planet_cache::region_bake::run_drain(&spec.stage.post_drain, &s.grid, &s.outlet, &c0, "3, control", None);
             }
             let differ = (0..c0.len()).filter(|&c| c0[c].to_bits() != s.zs[c].to_bits()).count();
             println!("RG K5 control (lead #184v): this loop with today's routing against solve_region: {differ} of {} cells differ", c0.len());
@@ -2628,7 +2674,7 @@ fn main() -> Result<(), String> {
         let t2 = Instant::now();
         let mut zs2 = rounds_k5p(&s.grid, &s.zb_in, &s.outlet, &carve, spec.rounds, threads, s.stream, Some(&r_sills));
         if spec.stage.post_drain != planet_cache::region_bake::Drain::Off {
-            zs2 = planet_cache::region_bake::run_drain(&spec.stage.post_drain, &s.grid, &s.outlet, &zs2, "3, z_s after K5'");
+            zs2 = planet_cache::region_bake::run_drain(&spec.stage.post_drain, &s.grid, &s.outlet, &zs2, "3, z_s after K5'", None);
         }
         s.precision.check_within_radius(&s.grid, &zs2, |c| s.grid.global_id(c)).map_err(|e| format!("after K5': {e}"))?;
         // the reproduction measures (SPIKE-131: R1h mean erosion z_b - z_s 101 -> 78 m; z_s' - z_s p10 / p50 / p90 -32 / 7 / 107 m)
@@ -2691,7 +2737,19 @@ fn main() -> Result<(), String> {
         }
         let r0 = route_rules(grid, &solve.zs, outlet, solve.precision.epsilon_w, solve.stream, 0.0, Some(&weight), RoundRules::ROUND);
         let f0 = priority_flood_with(grid, &solve.zs, outlet, solve.precision.epsilon_w, true);
-        let chan = h1_from(grid, &solve.zs, &f0, r0, outlet, &runoff, &evap, Some(&Vec::new())).hydro.channel;
+        let chan = h1_from(
+            grid,
+            &solve.zs,
+            &f0,
+            r0,
+            outlet,
+            &runoff,
+            &evap,
+            Some(&Vec::new()),
+            HYDRO_TWICE.load(std::sync::atomic::Ordering::Relaxed),
+        )
+        .hydro
+        .channel;
         let z = &solve.zs;
         let bil = |x: f64, y: f64| -> f64 {
             let (xf, yf) = (x.floor(), y.floor());
@@ -2757,6 +2815,32 @@ fn main() -> Result<(), String> {
     par_fill(&mut rl, w, threads, &|p| bl[p] - zb_field.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
     let mut start = vec![0f64; w * h];
     par_fill(&mut start, w, threads, &|p| bl[p] + regional_read.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
+    // lead #203 (R23): the tectonic mark per L cell, one bit per province term at or over INTENDED_MARK (bit 0 basin, 1 rift, 2 foreland, 3 back-arc), and the aridity for
+    // `endorheic_candidate`; empty when the switch is off
+    let (mark_l, ai_l): (Vec<u8>, Vec<f64>) = if intended_on {
+        let prov = inputs.lithology().provinces();
+        let mut m = vec![0f64; w * h];
+        par_fill(&mut m, w, threads, &|p| {
+            let pr = prov.at(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64));
+            let bit = |v: f64, k: u8| if v >= INTENDED_MARK { 1u8 << k } else { 0 };
+            f64::from(bit(pr.basin, 0) | bit(pr.rift, 1) | bit(pr.foreland, 2) | bit(pr.back_arc, 3))
+        });
+        let mut ai = vec![0f64; w * h];
+        par_fill(&mut ai, w, threads, &|p| inputs.orography().aridity(dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64)));
+        let by = |bit: u8| m.iter().filter(|&&v| (v as u8) & (1 << bit) != 0).count();
+        println!(
+            "RG intended mark (lead #203, R23): {} of {} L cells marked; basin {} rift {} foreland {} back-arc {}",
+            m.iter().filter(|&&v| v != 0.0).count(),
+            m.len(),
+            by(0),
+            by(1),
+            by(2),
+            by(3)
+        );
+        (m.iter().map(|&v| v as u8).collect(), ai)
+    } else {
+        (Vec::new(), Vec::new())
+    };
     {
         use std::sync::atomic::Ordering::Relaxed;
         let o = &planet_generators::bake::k7::REGION_OVERSHOOT;
@@ -2853,18 +2937,35 @@ fn main() -> Result<(), String> {
     let (h1, h1_nosill) = if base_today {
         let r0 = route_rules(grid, &solve.zs, outlet, eps, stream, 0.0, Some(&weight), RoundRules::ROUND);
         let f0 = priority_flood_with(grid, &solve.zs, outlet, eps, true);
-        (h1_from(grid, &solve.zs, &f0, r0, outlet, &runoff, &evap, Some(&budget)), None)
+        (
+            h1_from(
+                grid,
+                &solve.zs,
+                &f0,
+                r0,
+                outlet,
+                &runoff,
+                &evap,
+                Some(&budget),
+                HYDRO_TWICE.load(std::sync::atomic::Ordering::Relaxed),
+            ),
+            None,
+        )
     } else {
         let s = nodes_and_sills(&|c: usize| start[c], rw, rh, threads, None);
         let sill = |p: usize, d: usize, q: usize| s.at(p, d, q);
         let f = flood(grid, &s.h, &sill, outlet, eps);
         let r = route_sills(grid, &f, &sill, outlet, stream, &weight, true);
-        let with = h1_from(grid, &s.h, &f, r, outlet, &runoff, &evap, Some(&budget));
+        let with =
+            h1_from(grid, &s.h, &f, r, outlet, &runoff, &evap, Some(&budget), HYDRO_TWICE.load(std::sync::atomic::Ordering::Relaxed));
         let hh = &s.h;
         let plain = |p: usize, _d: usize, q: usize| hh[p].max(hh[q]);
         let f2 = flood(grid, hh, &plain, outlet, eps);
         let r2 = route_sills(grid, &f2, &plain, outlet, stream, &weight, true);
-        (with, Some(h1_from(grid, hh, &f2, r2, outlet, &runoff, &evap, Some(&budget))))
+        (
+            with,
+            Some(h1_from(grid, hh, &f2, r2, outlet, &runoff, &evap, Some(&budget), HYDRO_TWICE.load(std::sync::atomic::Ordering::Relaxed))),
+        )
     };
     // lead #184v: the K5-channel share (SPIKE-127/131): K6''s channel cells more than one 814 m cell (Chebyshev) from K5's own channel cells (today's K6 on z_s)
     if let Some((rs, zs2)) = &k5p_keep {
@@ -2873,7 +2974,7 @@ fn main() -> Result<(), String> {
         let sill = |a: usize, d: usize, b: usize| (rs.at(a, d, b) + zs2[a].max(zs2[b])).max(hh[a]).max(hh[b]);
         let wl = flood(grid, &hh, &sill, outlet, eps);
         let r0 = route_sills(grid, &wl, &sill, outlet, stream, &weight, true);
-        let own = h1_from(grid, &hh, &wl, r0, outlet, &runoff, &evap, Some(&Vec::new())).hydro.channel;
+        let own = h1_from(grid, &hh, &wl, r0, outlet, &runoff, &evap, Some(&Vec::new()), HYDRO_TWICE.load(std::sync::atomic::Ordering::Relaxed)).hydro.channel;
         let trunk: std::collections::BTreeSet<usize> = h1.trunk_cells.iter().flatten().map(|&c| c as usize).collect();
         let (i0, i1, j0, j1) = spec.region;
         let in_box = |c: usize| {
@@ -4089,6 +4190,11 @@ fn main() -> Result<(), String> {
         let exit: Vec<bool> = (0..n_l).map(|p| border[p] && !sea_l[p] && !entry[p]).collect();
         let outlet_d: Vec<bool> = (0..n_l).map(|p| active[p] && (sea_l[p] || exit[p])).collect();
         let grid_d = Grid::new(w, h, dx_l).with_active(active.clone());
+        // lead #203 (item 3): the marked depressions S0 already has, before any river stage (no field lowers the ground: R23 keeps only these)
+        if intended_on {
+            let (it, _) = intended_select(&grid_d, &start, &outlet_d, &mark_l, &budget_l);
+            println!("{}", intended_line(&format!("domain {d} on S0"), &it, &|c| ai_l[c]));
+        }
         let mut kept = vec![false; n_l];
         // lead #176a: each kept basin's rim (the cells beside its cells) at its recorded spill, a floor KV's cut and KC's breach keep (empty: no floor)
         let mut rim_floor: Vec<f64> = Vec::new();
@@ -4345,7 +4451,7 @@ fn main() -> Result<(), String> {
         // lead #163 (B5): `--skip band6` leaves KS1's output undrained (no band drain, so no post-band6 connect pass either)
         // lead #178: KS1's surface before band6, the validator's ks stage
         let ks1_d = ks_d.clone();
-        let ks_d = if (base_form == "aplus" || census) && ks_mode != "off" && on("band6") {
+        let ks_d = if (base_form != "today" || census) && ks_mode != "off" && on("band6") {
             let t6 = Instant::now();
             let outl: Vec<bool> = (0..n_l).map(|p| outlet_d[p] || !active[p]).collect();
             // spikes #147a: the drain switches (--breach-cost, --drain-rule, --breach-max-len) are the base stages' (1 and 3, at 814 m); band6 keeps SPIKE-138's rule
@@ -4355,7 +4461,8 @@ fn main() -> Result<(), String> {
                 dr::BREACH_BY_LENGTH.store(false, Relaxed);
                 dr::BREACH_SQUARE.store(false, Relaxed);
                 dr::PREFER_FILL.store(false, Relaxed);
-                dr::BREACH_MAX_LEN.store(0, Relaxed);
+                // crusader #198a (spike only): `--breach-max-len-l N` caps band6's breach paths at N L cells (0: none, the default)
+                dr::BREACH_MAX_LEN.store(breach_max_len_l, Relaxed);
             }
             // spikes #147: the census, the same drain on each earlier stage's surface (KH alone, S_KH = KH + r', KS0, KS1); band6's deep depressions are traced to the first
             // stage with a deep depression whose floor lies within 4 L cells
@@ -4401,6 +4508,14 @@ fn main() -> Result<(), String> {
             planet_generators::bake::drain::OUTLET_FLOORS
                 .store(BAND6_OUTLET_FLOOR.load(std::sync::atomic::Ordering::Relaxed), std::sync::atomic::Ordering::Relaxed);
             // lead #180: the depressions of band6's input that basins-2 would keep (>= 0.25 km2 and >= 2 m deep) are band6's intended cells
+            // lead #203: band6 neither breaches nor fills an intended basin of its input
+            let int6: Vec<bool> = if intended_on {
+                let (it, cells) = intended_select(&grid_d, &ks_d, &outl, &mark_l, &budget_l);
+                println!("{} (protected from band6)", intended_line(&format!("domain {d} on band6's input"), &it, &|c| ai_l[c]));
+                cells
+            } else {
+                Vec::new()
+            };
             let keep6: Vec<bool> = if BAND6_KEEP_RIMS.load(std::sync::atomic::Ordering::Relaxed) {
                 let level = planet_generators::bake::drain::fill_level(&ks_d, w, h, &outl);
                 let (_, comps) = planet_generators::bake::drain::depressions(&ks_d, &level, w, h);
@@ -4425,12 +4540,21 @@ fn main() -> Result<(), String> {
             } else {
                 Vec::new()
             };
+            let l_stage = |stage: &'static str| planet_generators::bake::drain::BreachStage {
+                stage,
+                face: face.0,
+                n: (REGIONAL * L) as i64,
+                origin: ((sri0 * L) as i64, (srj0 * L) as i64),
+            };
+            if breach_dump.is_some() {
+                planet_generators::bake::drain::record_breaches(Some(l_stage("band6")));
+            }
             let (d6, st, deep6) = planet_generators::bake::drain::drain_selective_floors(
                 &ks_d,
                 w,
                 h,
                 &outl,
-                &|p| !keep6.is_empty() && keep6[p],
+                &|p| (!keep6.is_empty() && keep6[p]) || (!int6.is_empty() && int6[p]),
                 &|_| dx_l * dx_l,
                 8,
                 4096,
@@ -4438,6 +4562,7 @@ fn main() -> Result<(), String> {
                 &|p| budget_l[p],
                 &cell_lo,
             );
+            planet_generators::bake::drain::record_breaches(None);
             planet_generators::bake::drain::HUMP_LIMIT_MICRO.store(0, std::sync::atomic::Ordering::Relaxed);
             planet_generators::bake::drain::OUTLET_FLOORS.store(false, std::sync::atomic::Ordering::Relaxed);
             let (mut lo, mut hi) = (0.0f64, 0.0f64);
@@ -4507,7 +4632,7 @@ fn main() -> Result<(), String> {
                 t6.elapsed().as_secs_f64()
             );
             // under `--base today` the census runs but band6 is not applied
-            if base_form == "aplus" {
+            if base_form != "today" {
                 d6
             } else {
                 ks_d
@@ -4816,7 +4941,7 @@ fn main() -> Result<(), String> {
                 let remaining: Vec<f64> = (0..n_l).map(|p| (budget_l[p] - (ks_base[p] - ks_d[p]).max(0.0)).max(0.0)).collect();
                 // crusader #172 (owner, 2026-11-20; --exception-lakes on): the hollow each over-budget rise of an L reach crosses is a kept lake; the cell the bed rises from and the
                 // bed it rises to
-                let forced: Vec<(usize, f64)> = if EXCEPTION_LAKES.load(std::sync::atomic::Ordering::Relaxed) {
+                let mut forced: Vec<(usize, f64)> = if EXCEPTION_LAKES.load(std::sync::atomic::Ordering::Relaxed) {
                     all.iter()
                         .filter(|r| r.has_exception(planet_generators::bake::river_graph::Reason::RiseOverBudget))
                         .flat_map(|r| {
@@ -4825,6 +4950,16 @@ fn main() -> Result<(), String> {
                                 .filter_map(move |k| to_local(r.vertices[k - 1]).map(|c| (c, f64::from(r.attrs.bed[k]) * 0.5)))
                         })
                         .collect()
+                } else {
+                    Vec::new()
+                };
+                // lead #203 (R23): the intended basins of basins-2's input are forced kept (the smallest depression holding the floor whose spill reaches the node's spill: the node),
+                // whatever reading 22 would do; they keep their spill and outlet (type intentional, an active outlet)
+                let intended2: Vec<Intended> = if intended_on {
+                    let (it, _) = intended_select(&grid_d, &ks_d, &outlet_d, &mark_l, &budget_l);
+                    println!("{}", intended_line(&format!("domain {d} at basins-2"), &it, &|c| ai_l[c]));
+                    forced.extend(it.iter().map(|b| (b.floor, b.spill_m + 0.5)));
+                    it
                 } else {
                     Vec::new()
                 };
@@ -4844,6 +4979,40 @@ fn main() -> Result<(), String> {
                     println!(
                         "RG domain {d} exception lakes (crusader #172): {} over-budget rises, {} hollows kept as lakes",
                         forced.len(),
+                        pb.forced
+                    );
+                }
+                // lead #203: the intended basins' sidecar (the contract's Basin has no type field yet; the port adds `type intentional` and `endorheic_candidate`): one row per
+                // intended basin of basins-2's input, its kept basin's id when the producer kept it at that floor
+                if intended_on {
+                    let kept_at: HashMap<u64, &planet_generators::bake::river_graph::Basin> =
+                        pb.basins.iter().map(|b| (b.floor_cell, b)).collect();
+                    let mut t = String::from("basin_id,type,outlet,floor_cell,floor_m,spill_cell,spill_m,cells,area_km2,marked_share,terms,aridity,endorheic_candidate,represented\n");
+                    let mut kept = 0usize;
+                    for b in &intended2 {
+                        let k = kept_at.get(&gid_l(b.floor));
+                        kept += usize::from(k.is_some());
+                        t += &format!(
+                            "{},intentional,{},{},{:.3},{},{:.3},{},{:.4},{:.3},{},{:.4},{},{}\n",
+                            k.map_or("none".to_string(), |x| x.id.to_string()),
+                            k.map_or("-".to_string(), |x| format!("{:?}", x.outlet).to_lowercase()),
+                            gid_l(b.floor),
+                            b.floor_m,
+                            gid_l(b.spill_cell),
+                            b.spill_m,
+                            b.cells,
+                            b.area_m2 / 1e6,
+                            b.marked as f64 / b.cells as f64,
+                            b.terms,
+                            ai_l[b.floor],
+                            ai_l[b.floor] < ENDORHEIC_CANDIDATE_AI,
+                            k.map_or("-".to_string(), |x| format!("{:?}", x.represented).to_lowercase()),
+                        );
+                    }
+                    std::fs::write(out_dir.join(format!("{tag}-intended-basins-d{d}.csv")), t).map_err(|e| e.to_string())?;
+                    println!(
+                        "RG domain {d} intended basins kept by basins-2 (lead #203): {kept} of {} (forced hollows {})",
+                        intended2.len(),
                         pb.forced
                     );
                 }
@@ -5288,6 +5457,14 @@ fn main() -> Result<(), String> {
             // crusader #161: the budget left is budget - max(0, S_KH - KS's output) inside run_with (reading 21); KC breaches before it fills (reading 22)
             // KV/KC's outlets: the sea, and the window's edge (as H1's; a window without sea, M1, has no other: the flood needs one)
             let outlet_kv: Vec<bool> = (0..n_l).map(|p| sea_l[p] || p % w == 0 || p % w == w - 1 || p / w == 0 || p / w == h - 1).collect();
+            if breach_dump.is_some() {
+                planet_generators::bake::drain::record_breaches(Some(planet_generators::bake::drain::BreachStage {
+                    stage: "kc",
+                    face: face.0,
+                    n: (REGIONAL * L) as i64,
+                    origin: ((sri0 * L) as i64, (srj0 * L) as i64),
+                }));
+            }
             let r = run_with_rims(
                 &gl,
                 &ks_d,
@@ -5310,6 +5487,10 @@ fn main() -> Result<(), String> {
                 (!rim_floor.is_empty()).then_some(&rim_floor[..]),
             );
             drop(outlet_kv);
+            planet_generators::bake::drain::record_breaches(None);
+            if let Some(f) = &breach_dump {
+                write_breaches(f, &planet_generators::bake::drain::take_breaches())?;
+            }
             println!("RG domain {d} KC breaches: {} ({:.4} km3)", r.breaches, r.breach_volume / 1.0e9);
             // reading 10 (crusader #165): the divide cells within W_floor/2 + d_buf of a graph line that put no buffer
             let (div, exempt) = (r.divide.iter().filter(|&&x| x).count(), r.divide_exempt.iter().filter(|&&x| x).count());
@@ -5628,6 +5809,7 @@ fn main() -> Result<(), String> {
             ("drain-rule", drain_rule.to_string()),
             ("breach-cost", breach_cost.to_string()),
             ("breach-max-len", breach_max_len.to_string()),
+            ("breach-max-len-l", breach_max_len_l.to_string()),
             ("centre", if low { "low" } else { "maximin" }.to_string()),
             ("threads", threads.to_string()),
             ("census", args.iter().any(|a| a == "--census").to_string()),
@@ -5640,7 +5822,19 @@ fn main() -> Result<(), String> {
         }
         let today = base_form == "today";
         for (step, stage, name, form) in [
-            (1, "1", "base1", if today { "off" } else { "sel" }.to_string()),
+            (
+                1,
+                "1",
+                "base1",
+                if today {
+                    "off"
+                } else if base_form == "fill" {
+                    "fill"
+                } else {
+                    "sel"
+                }
+                .to_string(),
+            ),
             (
                 2,
                 "2",
@@ -5652,7 +5846,19 @@ fn main() -> Result<(), String> {
                 }
                 .to_string(),
             ),
-            (3, "3", "base3", if today { "off" } else { "post" }.to_string()),
+            (
+                3,
+                "3",
+                "base3",
+                if today {
+                    "off"
+                } else if base_form == "fill" {
+                    "fill"
+                } else {
+                    "post"
+                }
+                .to_string(),
+            ),
             (4, "4", "h1", h1_form.to_string()),
             (5, "5", "kh", format!("{kh}, band floored at the sea + 0.5 m")),
             (6, "13", "budget", "relief10 on S0, lowering against S_KH".to_string()),
@@ -5809,4 +6015,65 @@ fn memory_mib() -> (u64, u64) {
     let s = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
     let kb = |k: &str| s.lines().find(|l| l.starts_with(k)).and_then(|l| l.split_whitespace().nth(1)?.parse::<u64>().ok()).unwrap_or(0);
     (kb("VmHWM:") >> 10, kb("VmRSS:") >> 10)
+}
+
+/// crusader #198: the columns of PLANET_BREACH_DUMP.
+const BREACH_CSV_HEADER: &str =
+    "stage,face,n,cells,len_cells,len_km,l_tiles,cut_max_m,cut_volume_m3,depression_cells,depression_area_km2,spill_m,floor_m,start_i,start_j,end_i,end_j\n";
+
+/// crusader #198 (spike only, diagnostic): appends the breaches `recs` to `f`, one row each.
+/// - `len_cells`: the path's steps, an axis step 1 and a diagonal one sqrt 2 (cells of its grid: H1 at n 12,288, L at 98,304);
+/// - `len_km`: each step times sqrt(GlobalCell::area) of its first cell, an approximation within the cell's aspect ratio (the cube is equiangular, its cells near square);
+///   a cell past its face (a window margin) takes the nearest cell of the face;
+/// - `l_tiles`: the tiles of GEN-182's production grid at L (3,072 L cells, 384 H1 cells, an edge) the path touches.
+fn write_breaches(f: &str, recs: &[planet_generators::bake::drain::BreachRecord]) -> Result<(), String> {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    for r in recs {
+        let at = r.at;
+        let cell = |c: u32| {
+            let (i, j) = (at.origin.0 + (c as usize % r.w) as i64, at.origin.1 + (c as usize / r.w) as i64);
+            (i.clamp(0, at.n - 1), j.clamp(0, at.n - 1))
+        };
+        let tile_edge = 3072 * at.n / (98_304);
+        let mut len_cells = 0.0f64;
+        let mut len_m = 0.0f64;
+        let mut tiles: std::collections::BTreeSet<(i64, i64)> = std::collections::BTreeSet::new();
+        for (k, &c) in r.path.iter().enumerate() {
+            let (i, j) = cell(c);
+            tiles.insert((i / tile_edge, j / tile_edge));
+            if let Some(&q) = r.path.get(k + 1) {
+                let (qi, qj) = cell(q);
+                let step = if qi != i && qj != j { std::f64::consts::SQRT_2 } else { 1.0 };
+                let gc = planet_core::GlobalCell::new(planet_core::Face(at.face), at.n, i, j).expect("a face cell");
+                len_cells += step;
+                len_m += step * libm::sqrt(gc.area(at.n, R));
+            }
+        }
+        let (s, e) = (cell(r.path[0]), cell(*r.path.last().unwrap()));
+        let _ = writeln!(
+            out,
+            "{},{},{},{},{:.3},{:.4},{},{:.4},{:.1},{},{:.6},{:.4},{:.4},{},{},{},{}",
+            at.stage,
+            at.face,
+            at.n,
+            r.path.len(),
+            len_cells,
+            len_m / 1000.0,
+            tiles.len(),
+            r.cut_max_m,
+            r.cut_volume_m3,
+            r.depression_cells,
+            r.depression_area_m2 / 1.0e6,
+            r.spill_m,
+            r.floor_m,
+            s.0,
+            s.1,
+            e.0,
+            e.1
+        );
+    }
+    use std::io::Write as _;
+    let mut file = std::fs::OpenOptions::new().append(true).open(f).map_err(|e| format!("{f}: {e}"))?;
+    file.write_all(out.as_bytes()).map_err(|e| format!("{f}: {e}"))
 }
