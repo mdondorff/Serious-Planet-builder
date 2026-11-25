@@ -4,5 +4,5 @@
 - [x] 3. `GeometricMetric`, `judge`, `calibrate`, the table and its file (TEST-155).
 - [x] 4. The harness's own checks: an oracle passes, a constant misses its defect, an angle reading is not angle-invariant (TEST-155).
 - [x] 5. The entries and `registered()` / `reported()`; the reported tables written to `target/review/metric-calibration/` (BUILD-069).
-- [ ] 6. Numerics review, spec-guardian, verifier.
+- [x] 6. Numerics review, spec-guardian (findings fixed), verifier.
 - [ ] 7. The reported verdicts to the lead (O14's evidence).

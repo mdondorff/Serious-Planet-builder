@@ -14,7 +14,7 @@
 - **BUILD-069:** a geometric gate column is registered only with a calibration entry that passes TEST-155. Each metric's band lives in its own requirement's Detail.
 - **The first entries, as a report only** (BUILD-069 binds new registrations):
   - the gate's corner links (added to the reference), hump cuts and spectrum slope change;
-  - in-zone Xdiag, M4 along the channel, D8 sinuosity and the D8 straight-run share.
+  - in-zone Xdiag (and its energy-weighted form), M4 along the channel, D8 sinuosity and the D8 straight-run share.
   - A column that fails is reported and becomes an owner item (O14's evidence). Nothing existing is removed or changed (CON-31).
 
 ## Expected golden changes:
@@ -27,6 +27,7 @@
 - Code:
   - `crates/cache/src/metric_calibration.rs` (new: surfaces, the `GeometricMetric` trait, the judge, the report, the entries);
   - `crates/cache/src/lib.rs` (the module);
+  - `crates/cache/src/river_suite.rs`: `corner_link`, the block predicate `corner_links` counts, made public (bit-identical);
   - `crates/cache/tests/metric_calibration.rs` and its entry in `tests/it.rs`;
   - the fixture `crates/cache/tests/support/s0-r1h-river-256.f32`.
 - No change to the gate's columns, bars or outputs.
