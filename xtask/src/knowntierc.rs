@@ -201,6 +201,92 @@ pub fn judge(log: &str, list: &[Known], status: &str, candidates: usize) -> Resu
     Ok(out)
 }
 
+/// The goldens a change declares it moves (BUILD-068): the names of the `- <name>: <reason>` lines of its proposal's `Expected golden changes:` section (up to the next
+/// `## ` heading), sorted, without repeats. A line that is not `- <name>:` (a note) is skipped. Refused: a proposal without the section.
+pub fn declared_goldens(proposal: &str) -> Result<Vec<String>, String> {
+    let mut lines = proposal.lines().skip_while(|l| l.trim() != "## Expected golden changes:");
+    if lines.next().is_none() {
+        return Err("the proposal has no `## Expected golden changes:` section".into());
+    }
+    let mut out: Vec<String> = lines
+        .take_while(|l| !l.starts_with("## "))
+        .filter_map(|l| l.trim().strip_prefix("- ")?.split_once(':').map(|(n, _)| n.trim().to_string()))
+        .filter(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+        .collect();
+    out.sort();
+    out.dedup();
+    Ok(out)
+}
+
+/// The `file:line` of the testkit's golden-check panic (`GoldenChecks`: "N golden check(s) failed"), from its source, so the declared mode tracks an edit of it.
+pub fn golden_panic_at(testkit_lib: &str) -> Option<String> {
+    let k = testkit_lib.lines().position(|l| l.contains("golden check(s) failed") && l.contains("panic!"))?;
+    Some(format!("crates/testkit/src/lib.rs:{}", k + 1))
+}
+
+/// The verdict on a failed local tier C under a declared change (BUILD-068): `Ok(summary lines)` when the written candidates' names are exactly the `declared`
+/// goldens, every failure is either a golden test's golden-check panic (at `golden_at`) or a listed class whose Tracked entry is in `status`, and the run ended;
+/// `Err(reason)` otherwise, naming the extra and the missing goldens. Writes and blesses nothing.
+pub fn judge_declared(
+    log: &str,
+    list: &[Known],
+    status: &str,
+    candidates: &[String],
+    declared: &[String],
+    golden_at: &str,
+) -> Result<Vec<String>, String> {
+    let mut written: Vec<String> = candidates.to_vec();
+    written.sort();
+    written.dedup();
+    let extra: Vec<&String> = written.iter().filter(|c| !declared.contains(c)).collect();
+    let missing: Vec<&String> = declared.iter().filter(|d| !written.contains(d)).collect();
+    if !extra.is_empty() || !missing.is_empty() {
+        return Err(format!(
+            "the candidates are not the declared golden changes: extra {extra:?}, missing {missing:?} ({} written, {} declared)",
+            written.len(),
+            declared.len()
+        ));
+    }
+    let Some(failed) = failures(log) else {
+        return Err("the tier C run did not end (no nextest Summary line): no known class covers it".into());
+    };
+    match summary_not_passed(log) {
+        Some(n) if n == failed.len() => {}
+        Some(n) => {
+            return Err(format!(
+            "the Summary counts {n} test(s) that did not pass, the log names {} failure(s): a failure of a kind this check does not read",
+            failed.len()
+        ))
+        }
+        None => return Err("the Summary line gives no `N tests run: M passed` counts: no known class covers the run".into()),
+    }
+    let tracked: Vec<&Known> = list.iter().filter(|k| status.contains(&format!("**{}**", k.tracked))).collect();
+    let (mut golden, mut known) = (Vec::new(), Vec::new());
+    for f in &failed {
+        if f.observed == Observed::Fail(Some(golden_at.to_string())) {
+            golden.push(format!("  {} (golden check, declared)", f.name));
+        } else if let Some(k) = tracked.iter().find(|k| accepts(k, f)) {
+            known.push(format!("  {} ({}; Tracked: {})", f.name, describe(&f.observed), k.tracked));
+        } else {
+            return Err(format!(
+                "{} ({}) is neither a declared golden check nor in a known class of {LIST}",
+                f.name,
+                describe(&f.observed)
+            ));
+        }
+    }
+    let mut out = vec![format!(
+        "tier C: {} declared golden candidate(s) (the proposal's list, exactly), {} golden test(s), {} known-class failure(s); copy these lines into the PR body:",
+        written.len(),
+        golden.len(),
+        known.len()
+    )];
+    out.push(format!("  declared: {}", written.join(", ")));
+    out.extend(golden);
+    out.extend(known);
+    Ok(out)
+}
+
 fn describe(o: &Observed) -> String {
     match o {
         Observed::Abort(c) => format!("abort {c}"),
@@ -229,7 +315,7 @@ pub fn newest_gpu_log(root: &Path, since: std::time::SystemTime) -> Option<std::
 }
 
 /// The tier C step of prepush: `test gpu`, and on its failure the known-class verdict (BUILD-056): a pass with the summary printed, or the step's own error.
-pub fn gpu_step(root: &Path) -> Result<(), String> {
+pub fn gpu_step(root: &Path, declared: Option<&Path>) -> Result<(), String> {
     let since = std::time::SystemTime::now();
     let Err(e) = crate::testcmd::test(root, &["gpu".to_string()]) else { return Ok(()) };
     let Some(log) = newest_gpu_log(root, since).and_then(|p| std::fs::read_to_string(p).ok()) else {
@@ -246,6 +332,31 @@ pub fn gpu_step(root: &Path) -> Result<(), String> {
     let status = std::fs::read_to_string(root.join("docs").join("status.md")).unwrap_or_default();
     for u in untracked(&list, &status) {
         eprintln!("prepush: warning: {LIST} line `{u}` cites no Tracked entry of docs/status.md: ignored (remove the line)");
+    }
+    // BUILD-068: with `--declared <proposal>` the candidates must be the proposal's declared golden changes, exactly
+    if let Some(p) = declared {
+        let decl = declared_goldens(&std::fs::read_to_string(p).map_err(|err| format!("{}: {err}", p.display()))?)?;
+        let lib = std::fs::read_to_string(root.join("crates").join("testkit").join("src").join("lib.rs")).unwrap_or_default();
+        let Some(at) = golden_panic_at(&lib) else {
+            eprintln!("prepush: the testkit's golden-check panic is not found: the failure is not judged against the declared goldens");
+            return Err(e);
+        };
+        let names: Vec<String> =
+            crate::testcmd::candidates(root).into_iter().map(|(_, n)| n.trim_end_matches(".png").to_string()).collect();
+        return match judge_declared(&log, &list, &status, &names, &decl, &at) {
+            Ok(summary) => {
+                eprintln!("prepush: ===== tier C passes on the declared golden changes and known local classes only (BUILD-068; the goldens wait for golden-review) =====");
+                for l in &summary {
+                    eprintln!("{l}");
+                }
+                eprintln!("prepush: =====");
+                Ok(())
+            }
+            Err(why) => {
+                eprintln!("prepush: tier C failed outside the declared golden changes and the known classes: {why}");
+                Err(e)
+            }
+        };
     }
     match judge(&log, &list, &status, crate::testcmd::candidates(root).len()) {
         Ok(summary) => {
@@ -375,5 +486,48 @@ mod tests {
         assert!(!glob("gpu_skeleton::the_pipelined_loop_*", "gpu_skeleton::a_terrain"));
         assert!(glob("a*c*e", "abcde") && !glob("a*c*e", "abde"));
         assert!(glob("exact", "exact") && !glob("exact", "exactly"));
+    }
+
+    // spec: BUILD-068, TEST-154
+    #[test]
+    fn a_proposals_declared_goldens_are_its_named_lines() {
+        let p = "## Why\n- x\n\n## Expected golden changes:\n- lit_a: REND-068\n- water_b: because\n- The hashes move too (a note).\n- lit_a: twice\n\n## Bound tests:\n- lit_c: t\n";
+        assert_eq!(declared_goldens(p).unwrap(), ["lit_a", "water_b"]);
+        assert!(declared_goldens("## Why\n").unwrap_err().contains("no `## Expected golden changes:`"));
+        assert_eq!(declared_goldens("## Expected golden changes:\n- none: additive code with no caller\n").unwrap(), ["none"]);
+        let lib = "fn a() {}\n        if !self.failures.is_empty() {\n            panic!(\"{} golden check(s) failed:\\n{}\", n, m);\n";
+        assert_eq!(golden_panic_at(lib).as_deref(), Some("crates/testkit/src/lib.rs:3"));
+        // the real testkit has it
+        let real = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../crates/testkit/src/lib.rs")).unwrap();
+        assert!(golden_panic_at(&real).is_some());
+    }
+
+    // spec: BUILD-068, TEST-154
+    #[test]
+    fn the_declared_mode_passes_exactly_the_declared_candidates_and_known_classes() {
+        let l = list();
+        let at = "crates/testkit/src/lib.rs:324";
+        let golden = "        FAIL [  19.7s] ( 61/236) planet-render::gpu_all gpu_lit::lit_frames_match_the_adapters_goldens\n    thread 'gpu_lit::lit_frames_match_the_adapters_goldens' (7) panicked at crates\\testkit\\src\\lib.rs:324:13:\n    2 golden check(s) failed:";
+        let body = format!("{golden}\n{ABORT}");
+        let decl = vec!["lit_a".to_string(), "lit_b".to_string()];
+        let cand = vec!["lit_b".to_string(), "lit_a".to_string(), "lit_a".to_string()];
+        let s = judge_declared(&log(&body), &l, STATUS, &cand, &decl, at).expect("declared candidates and a known class");
+        assert!(
+            s[0].starts_with("tier C: 2 declared golden candidate(s)") && s[0].contains("1 golden test(s), 1 known-class failure(s)"),
+            "{s:?}"
+        );
+        assert!(s.iter().any(|x| x.contains("gpu_lit::lit_frames_match_the_adapters_goldens (golden check, declared)")));
+        assert!(s.iter().any(|x| x.contains("declared: lit_a, lit_b")));
+        // an extra or a missing candidate fails, with the lists
+        let e = judge_declared(&log(&body), &l, STATUS, &["lit_a".into(), "lit_c".into()], &decl, at).unwrap_err();
+        assert!(e.contains("extra [\"lit_c\"]") && e.contains("missing [\"lit_b\"]"), "{e}");
+        // a test failing elsewhere than the golden check, and an unfinished run, fail
+        let other = golden.replace("lib.rs:324:13", "lib.rs:40:5");
+        assert!(judge_declared(&log(&format!("{other}\n{ABORT}")), &l, STATUS, &cand, &decl, at)
+            .unwrap_err()
+            .contains("neither a declared golden check"));
+        assert!(judge_declared(&body, &l, STATUS, &cand, &decl, at).unwrap_err().contains("did not end"));
+        // without the mode, the same run still fails on the candidates (behaviour unchanged)
+        assert!(judge(&log(&body), &l, STATUS, 2).unwrap_err().contains("candidate golden"));
     }
 }

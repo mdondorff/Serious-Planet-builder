@@ -52,7 +52,7 @@ const USAGE: &str = "cargo xtask <command>
   test gpu             tier C goldens and debug views (software adapter; --real for the GPU, which also runs the tier-B oracles)
   check                rustfmt --check, clippy -D warnings, layering
   gate [--small] [--site frame-N]... [--paths DIR] [--store DIR]   the no-degradation gate (TEST-061 to TEST-063): the editor window over the real store, a scripted 400 m hill and the camera path of each capture site of the owner test (outputs under target/gate/), judged on frames over 100 ms, held-back tiles no edit reaches, horizon maps, caught panics and the step between levels; --small is the same counters on a generated world on the software adapter
-  prepush              before every push to a PR branch: check, test fast, and test gpu when the diff against origin/main touches a golden-producing path (render, frame, shaders, generators, ...); prints each step's time and one verdict line (BUILD-016); refuses a working tree that differs from HEAD, since the push sends the commit (BUILD-037)
+  prepush              before every push to a PR branch: check, test fast, and test gpu when the diff against origin/main touches a golden-producing path (render, frame, shaders, generators, ...); prints each step's time and one verdict line (BUILD-016); refuses a working tree that differs from HEAD, since the push sends the commit (BUILD-037) `--declared <proposal.md>`: tier C also passes when its golden candidates are exactly the proposal's `Expected golden changes:` (BUILD-068)
   layering             crate layering and GPU-free dependency check (CON-02)
   k7-layout [--write-baseline]  the layout report of K7 (BUILD-052): the fixture's tile layout against an alternative, compared with docs/gates/k7-layout-baseline.txt; REVIEW above twice the baseline p99 or max; exit 0; prepush runs it when K7 files change
   river-gate <store dir | face,i0,i1,j0,j1,seed | r1h | r3a | r3b | m1 | f1 | grid=file,w,h,sea_level_m> [--window W] [--margin M] [--min-cells N] [--d D] [--threads T] [--network-km2 A,B] [--graph FILE] [--stages DIR] [--partition ONE,TWO] [--surface FILE] [--start FILE] [--noise axis|turned] [--corridor-bar PCT] [--no-key-check]   the river gate (BUILD-055): closed basins on river length (0.5 m, 16 cells), the valley depth (1-2 cells) and the burn (K7's cut), ring 2-4 and the erosion depth, lakes at D, relief at 200 m and 1 km against the start surface, edge agreement with H1, and the measurement suite (BUILD-057: gradient, valley width, asymmetry, drainage density, catchment ratio, seam, narrowness, slope-area, relief spectrum) and the channel network at two thresholds (BUILD-059: density, Strahler streams, R_b; default 1 and 75 km2), and with a canonical river graph, stage fields or a partition pair the G2 columns with their gate classes and the G2 bars, pass or fail (BUILD-060; the budget's relief on S0, reading 28; --corridor-bar default 97.5, 95 on m1), on a store (its commit's tiles), a window's start surface or a raw f64 grid of 101.8 m cells (a GLO-30 tile); release, under the heavy lock; exit 0
@@ -118,15 +118,35 @@ fn main() -> ExitCode {
         }
         Some("check") => testcmd::check(&root),
         Some("prepush") => {
-            if prepush::needs_slot(&testcmd::changed_paths(&root)) {
-                heavy::with("prepush", || {
-                    disk::check(&root, "prepush").and_then(|_| scratch::begin(&root)).and_then(|_| prepush::run(&root))
-                })
-            } else {
-                // A docs-only diff runs spec-lint alone, in seconds: it takes no heavy slot and waits for no bake (BUILD-026; lead #156). It does not
-                // prepare the scratch folder either: that empties `target/test-tmp`, which a heavy test of this worktree may be using.
-                eprintln!("prepush: spec-lint only, so no heavy slot is taken");
-                disk::check(&root, "prepush").and_then(|_| prepush::run(&root))
+            // BUILD-068: `--declared <proposal.md>`, the change's declared golden changes; any other argument is refused
+            let declared: Result<Option<std::path::PathBuf>, String> = match &args[1..] {
+                [] => Ok(None),
+                [flag, p] if flag == "--declared" => {
+                    let p = root.join(p);
+                    if p.is_file() {
+                        Ok(Some(p))
+                    } else {
+                        Err(format!("--declared {}: no such proposal", p.display()))
+                    }
+                }
+                other => Err(format!("prepush takes no argument but `--declared <proposal.md>`, not {other:?}")),
+            };
+            match declared {
+                Err(e) => Err(e),
+                Ok(declared) => {
+                    if prepush::needs_slot(&testcmd::changed_paths(&root)) {
+                        heavy::with("prepush", || {
+                            disk::check(&root, "prepush")
+                                .and_then(|_| scratch::begin(&root))
+                                .and_then(|_| prepush::run(&root, declared.as_deref()))
+                        })
+                    } else {
+                        // A docs-only diff runs spec-lint alone, in seconds: it takes no heavy slot and waits for no bake (BUILD-026; lead #156). It does not
+                        // prepare the scratch folder either: that empties `target/test-tmp`, which a heavy test of this worktree may be using.
+                        eprintln!("prepush: spec-lint only, so no heavy slot is taken");
+                        disk::check(&root, "prepush").and_then(|_| prepush::run(&root, declared.as_deref()))
+                    }
+                }
             }
         }
         // The gate times frames in a window: exclusive; `--small` runs headless on the software adapter in a slot.
