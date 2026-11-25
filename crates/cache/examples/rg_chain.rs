@@ -30,6 +30,7 @@ use planet_cache::global_store::{class_inputs, class_inputs_key, GlobalWorld};
 use planet_cache::l_writer::Commit;
 use planet_cache::pack::TileStore;
 use planet_cache::region_bake::{lattice_direction, region_front, Drain, K5Knobs, K5Route, RegionSpec, StageConfig, LOCAL_PER_REGIONAL};
+use planet_cache::rg_h1::{h1_from, EDGE_Q, H1};
 use planet_cache::river_gate::{commit_differences, lay_store_ground, LWindow, WindowIdentity};
 use planet_cache::river_suite::corridor_bar_m;
 use planet_core::{Face, TangentWarp, Vec3};
@@ -52,7 +53,6 @@ const LATTICE: usize = 16_384;
 const REGIONAL: usize = 12_288;
 const SECONDS_PER_YEAR: f64 = 31_557_600.0;
 const L: usize = LOCAL_PER_REGIONAL;
-const EDGE_Q: f64 = 1.0;
 const K_C: f64 = 2.0;
 
 struct Lattice {
@@ -401,91 +401,6 @@ fn route_sills(
         }
     }
     Routing { receiver, order, area }
-}
-
-/// A routed H1: routing, filled levels, hydrology and graph, with the trunk reaches (q >= 1 m3/s, 2 cells or more) as segment indices.
-struct H1 {
-    routing: Routing,
-    hydro: Hydro,
-    graph: ChannelGraph,
-    trunk_seg: Vec<usize>,
-    trunk_cells: Vec<Vec<u32>>,
-    /// The D8 drainage area (true area, unweighted) of each cell along the receivers, m2.
-    d8: Vec<f64>,
-}
-
-fn h1_from(
-    grid: &Grid,
-    z: &[f64],
-    filled: &[f64],
-    routing: Routing,
-    outlet: &[bool],
-    runoff: &[f32],
-    evap: &[f32],
-    budget: Option<&[f64]>,
-) -> H1 {
-    // lead #163 (B3, result-preserving): with `budget` every basin is crossed (reading 24) and the second call only zeroed the open-water loss of the basins' cells,
-    // the one input `hydrology` reads it through (each basin's e_open); one call with a zero evaporation gives the same Hydro
-    let zeros: Vec<f32> = if budget.is_some() { vec![0.0; evap.len()] } else { Vec::new() };
-    let mut hydro = hydrology(
-        grid,
-        z,
-        filled,
-        &routing,
-        outlet,
-        Some(runoff),
-        Some(if budget.is_some() { &zeros } else { evap }),
-        &HydroParams::default(),
-    );
-    // spikes #142, reading 16: a kept basin deeper than the budget at its floor is crossed (reading 13), not a lake: no open-water loss there, so q_w = q through it.
-    // The basins are the same (the loss enters only the balance); the rerun changes q_w and the balance only.
-    // reading 24 (lead, 2026-11-17; owner decision 6 c): no H1 basin is a lake in the prototype, every one is crossed (q_w = q); `budget` only switches the rule on
-    if budget.is_some() {
-        let crossed: Vec<bool> = vec![true; hydro.basins.len()];
-        if HYDRO_TWICE.load(std::sync::atomic::Ordering::Relaxed) && crossed.iter().any(|&x| x) {
-            let ev2: Vec<f32> =
-                (0..evap.len()).map(|c| if hydro.label[c] != NONE && crossed[hydro.label[c] as usize] { 0.0 } else { evap[c] }).collect();
-            let again = hydrology(grid, z, filled, &routing, outlet, Some(runoff), Some(&ev2), &HydroParams::default());
-            assert_eq!(again.basins.len(), hydro.basins.len(), "the loss does not change the basins");
-            hydro = again;
-        }
-        // q_w as a running sum along the routing: q less the losses of the basins upstream (each basin's q_in - q_out, entered at its spill cell; zero for a crossed
-        // basin). The cascade's q_w inside a basin is no channel discharge (a basin's cells are taken in index order on its flat), so a trunk through a crossed basin reads this one.
-        let mut loss = vec![0f64; hydro.q.len()];
-        // entered where the routing leaves the basin (the first cell outside it on the floor's receiver chain), which need not be its spill cell
-        for (k, b) in hydro.basins.iter().enumerate() {
-            let mut c = b.floor_cell;
-            while hydro.label[c as usize] == k as u32 && routing.receiver[c as usize] != NONE {
-                c = routing.receiver[c as usize];
-            }
-            loss[c as usize] += b.q_in - b.q_out;
-        }
-        for &c in routing.order.iter().rev() {
-            let r = routing.receiver[c as usize];
-            if r != NONE {
-                loss[r as usize] += loss[c as usize];
-            }
-        }
-        hydro.qw = (0..hydro.q.len()).map(|c| (hydro.q[c] - loss[c]).max(0.0)).collect();
-    }
-    let graph = ChannelGraph::from_hydro(grid, &routing, &hydro, z);
-    let (mut trunk_seg, mut trunk_cells) = (Vec::new(), Vec::new());
-    graph.for_each(|s| {
-        let cells = s.cells(grid);
-        let q_max = s.q.iter().map(|&q| q_value(q)).fold(0.0, f64::max);
-        if cells.len() >= 2 && q_max >= EDGE_Q {
-            trunk_seg.push(s.index);
-            trunk_cells.push(cells);
-        }
-    });
-    let mut d8: Vec<f64> = (0..grid.len()).map(|p| grid.cell_area(p)).collect();
-    for &c in routing.order.iter().rev() {
-        let r = routing.receiver[c as usize];
-        if r != NONE {
-            d8[r as usize] += d8[c as usize];
-        }
-    }
-    H1 { routing, hydro, graph, trunk_seg, trunk_cells, d8 }
 }
 
 // ---------------------------------------------------------------- the corridor measure (land-only snap)
@@ -2213,6 +2128,9 @@ fn main() -> Result<(), String> {
     // spikes #147: `--breach-max-len N` (cells of the grid the drain runs on; 0: none), the hybrid breach-fill's limit
     let breach_max_len: usize = value(&args, "--breach-max-len").map_or(Ok(0), str::parse).map_err(|_| "--breach-max-len cells")?;
     planet_generators::bake::drain::BREACH_MAX_LEN.store(breach_max_len, std::sync::atomic::Ordering::Relaxed);
+    // crusader #198a (spike only): `--breach-max-len-l N`, the L stages' breach cap (band6 and KC), in path cells as `--breach-max-len`; 0: none (the default)
+    let breach_max_len_l: usize = value(&args, "--breach-max-len-l").map_or(Ok(0), str::parse).map_err(|_| "--breach-max-len-l cells")?;
+    planet_generators::bake::kv_kc::KC_BREACH_MAX_LEN.store(breach_max_len_l, std::sync::atomic::Ordering::Relaxed);
     // crusader #198 (spike only, diagnostic like PLANET_WIDTH_DUMP): PLANET_BREACH_DUMP=FILE writes every accepted breach of base1, sel-post, band6 and KC as one CSV
     // row (write_breaches); recording reads the breaches and changes no cell
     let breach_dump = std::env::var("PLANET_BREACH_DUMP").ok();
@@ -2573,7 +2491,19 @@ fn main() -> Result<(), String> {
         }
         let r0 = route_rules(grid, &solve.zs, outlet, solve.precision.epsilon_w, solve.stream, 0.0, Some(&weight), RoundRules::ROUND);
         let f0 = priority_flood_with(grid, &solve.zs, outlet, solve.precision.epsilon_w, true);
-        let chan = h1_from(grid, &solve.zs, &f0, r0, outlet, &runoff, &evap, Some(&Vec::new())).hydro.channel;
+        let chan = h1_from(
+            grid,
+            &solve.zs,
+            &f0,
+            r0,
+            outlet,
+            &runoff,
+            &evap,
+            Some(&Vec::new()),
+            HYDRO_TWICE.load(std::sync::atomic::Ordering::Relaxed),
+        )
+        .hydro
+        .channel;
         let z = &solve.zs;
         let bil = |x: f64, y: f64| -> f64 {
             let (xf, yf) = (x.floor(), y.floor());
@@ -2755,18 +2685,35 @@ fn main() -> Result<(), String> {
     let (h1, h1_nosill) = if base_today {
         let r0 = route_rules(grid, &solve.zs, outlet, eps, stream, 0.0, Some(&weight), RoundRules::ROUND);
         let f0 = priority_flood_with(grid, &solve.zs, outlet, eps, true);
-        (h1_from(grid, &solve.zs, &f0, r0, outlet, &runoff, &evap, Some(&budget)), None)
+        (
+            h1_from(
+                grid,
+                &solve.zs,
+                &f0,
+                r0,
+                outlet,
+                &runoff,
+                &evap,
+                Some(&budget),
+                HYDRO_TWICE.load(std::sync::atomic::Ordering::Relaxed),
+            ),
+            None,
+        )
     } else {
         let s = nodes_and_sills(&|c: usize| start[c], rw, rh, threads, None);
         let sill = |p: usize, d: usize, q: usize| s.at(p, d, q);
         let f = flood(grid, &s.h, &sill, outlet, eps);
         let r = route_sills(grid, &f, &sill, outlet, stream, &weight, true);
-        let with = h1_from(grid, &s.h, &f, r, outlet, &runoff, &evap, Some(&budget));
+        let with =
+            h1_from(grid, &s.h, &f, r, outlet, &runoff, &evap, Some(&budget), HYDRO_TWICE.load(std::sync::atomic::Ordering::Relaxed));
         let hh = &s.h;
         let plain = |p: usize, _d: usize, q: usize| hh[p].max(hh[q]);
         let f2 = flood(grid, hh, &plain, outlet, eps);
         let r2 = route_sills(grid, &f2, &plain, outlet, stream, &weight, true);
-        (with, Some(h1_from(grid, hh, &f2, r2, outlet, &runoff, &evap, Some(&budget))))
+        (
+            with,
+            Some(h1_from(grid, hh, &f2, r2, outlet, &runoff, &evap, Some(&budget), HYDRO_TWICE.load(std::sync::atomic::Ordering::Relaxed))),
+        )
     };
     // spikes #147: `--probe-base` stops after H1: the channel steps (H1's channel cells to their receivers, in the region box) by direction, the straight runs along each
     // segment (consecutive steps in one direction, in steps of 814 m), and the 814 m fields z_b, z_b_in, z_s and the channel mask for the sheets
@@ -3969,7 +3916,8 @@ fn main() -> Result<(), String> {
                 dr::BREACH_BY_LENGTH.store(false, Relaxed);
                 dr::BREACH_SQUARE.store(false, Relaxed);
                 dr::PREFER_FILL.store(false, Relaxed);
-                dr::BREACH_MAX_LEN.store(0, Relaxed);
+                // crusader #198a (spike only): `--breach-max-len-l N` caps band6's breach paths at N L cells (0: none, the default)
+                dr::BREACH_MAX_LEN.store(breach_max_len_l, Relaxed);
             }
             // spikes #147: the census, the same drain on each earlier stage's surface (KH alone, S_KH = KH + r', KS0, KS1); band6's deep depressions are traced to the first
             // stage with a deep depression whose floor lies within 4 L cells
@@ -5358,6 +5306,7 @@ fn main() -> Result<(), String> {
             ("drain-rule", drain_rule.to_string()),
             ("breach-cost", breach_cost.to_string()),
             ("breach-max-len", breach_max_len.to_string()),
+            ("breach-max-len-l", breach_max_len_l.to_string()),
             ("centre", if low { "low" } else { "maximin" }.to_string()),
             ("threads", threads.to_string()),
             ("census", args.iter().any(|a| a == "--census").to_string()),
