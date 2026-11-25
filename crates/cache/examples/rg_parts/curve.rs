@@ -29,7 +29,17 @@ pub struct CurveParams {
 
 impl CurveParams {
     pub fn standard(cell_m: f64, meander: bool) -> CurveParams {
-        CurveParams { sigma: 2.0, lift_m: 5.0, meander, min_width_m: 10.0, wave_widths: 12.0, amp_wave: 0.174, room_m: 10.0, cell_m, meander_runmin: None }
+        CurveParams {
+            sigma: 2.0,
+            lift_m: 5.0,
+            meander,
+            min_width_m: 10.0,
+            wave_widths: 12.0,
+            amp_wave: 0.174,
+            room_m: 10.0,
+            cell_m,
+            meander_runmin: None,
+        }
     }
 }
 
@@ -121,10 +131,13 @@ pub fn build(
     let zref: Vec<f64> = raw.iter().map(|&q| cell_of(q, w, h).map_or(f64::INFINITY, |c| water[c])).collect();
     let ok = |q: (f64, f64), i: usize, room: f64| cell_of(q, w, h).is_some_and(|c| !ocean[c] && water[c] <= zref[i] + room);
     // lead #184n: the base path's running minimum from its upstream end, the meander's ceiling under `meander_runmin`
-    let zrun: Vec<f64> = zref.iter().scan(f64::INFINITY, |m, &z| {
-        *m = m.min(z);
-        Some(*m)
-    }).collect();
+    let zrun: Vec<f64> = zref
+        .iter()
+        .scan(f64::INFINITY, |m, &z| {
+            *m = m.min(z);
+            Some(*m)
+        })
+        .collect();
     let okm = |q: (f64, f64), i: usize| match p.meander_runmin {
         Some(r) => cell_of(q, w, h).is_some_and(|c| !ocean[c] && water[c] <= zrun[i] + r),
         None => ok(q, i, p.room_m),
@@ -246,9 +259,8 @@ pub fn build(
         let mut pts = smc.clone();
         let mut share = 0.0;
         if p.meander {
-            let fac: Vec<f64> = (0..n)
-                .map(|i| [1.0, 0.75, 0.5, 0.25, 0.0].into_iter().find(|&m| m == 0.0 || okm(disp(i, m), i)).unwrap_or(0.0))
-                .collect();
+            let fac: Vec<f64> =
+                (0..n).map(|i| [1.0, 0.75, 0.5, 0.25, 0.0].into_iter().find(|&m| m == 0.0 || okm(disp(i, m), i)).unwrap_or(0.0)).collect();
             // a quarter wavelength's moving minimum, then its moving mean, so the amplitude changes smoothly
             let mn: Vec<f64> =
                 (0..n).map(|i| (i.saturating_sub(win(i))..=(i + win(i)).min(n - 1)).map(|j| fac[j]).fold(1.0, f64::min)).collect();

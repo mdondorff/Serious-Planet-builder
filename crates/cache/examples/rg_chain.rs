@@ -34,6 +34,7 @@ use planet_cache::rg_h1::{h1_from, EDGE_Q, H1};
 use planet_cache::river_gate::{commit_differences, lay_store_ground, LWindow, WindowIdentity};
 use planet_cache::river_suite::corridor_bar_m;
 use planet_core::{Face, TangentWarp, Vec3};
+use planet_generators::bake::carve::{narrow_f32_checked, CarveParams};
 use planet_generators::bake::channel_graph::{q_value, ChannelGraph};
 use planet_generators::bake::flood::priority_flood_with;
 use planet_generators::bake::hydro::{hydrology, id_hash, Hydro, HydroParams};
@@ -42,9 +43,8 @@ use planet_generators::bake::river_graph::{
     diff, node_id, rasterise, reach_id, validate, validate_raster, Attrs, Checks, Domain, Exception, Graph, Level, Marker, Node, NodeKind,
     Reach as GReach, Reason, Violation,
 };
-use planet_generators::bake::route::{catchment_roots, jitter, route_rules, RoundRules, Routing, MFD_EXPONENT, NONE};
-use planet_generators::bake::carve::{narrow_f32_checked, CarveParams};
 use planet_generators::bake::round::{catchment_round, cut_in, gather_with, Drivers};
+use planet_generators::bake::route::{catchment_roots, jitter, route_rules, RoundRules, Routing, MFD_EXPONENT, NONE};
 use planet_generators::bake::{Grid, NEIGHBOURS};
 use planet_generators::global::{read_elevation_c1, GlobalSample, LatticeSource, ReadError};
 use planet_generators::runoff::{discharge_weight, pet_mm, runoff_mm};
@@ -225,7 +225,16 @@ fn sill_of(a: &[(f64, u32)], b: &[(f64, u32)], lw: usize, ax: usize, ay: usize, 
 #[allow(clippy::too_many_arguments)]
 /// `s = None` is the control: today's `route_rules` and r_min 0, which must reproduce `solve_region`'s rounds bit for bit (numerics review M3). Numerics review H1: the
 /// carve's sea floor is per cell, `r_min + sea + eps` (so it floors z_s, not h), and r_min is 0 on the outlets (their height and the exit base stay K5's).
-fn rounds_k5p(grid: &Grid, zb: &[f64], outlet: &[bool], p: &CarveParams, rounds: usize, threads: usize, seed: u64, s: Option<&Sills>) -> Vec<f64> {
+fn rounds_k5p(
+    grid: &Grid,
+    zb: &[f64],
+    outlet: &[bool],
+    p: &CarveParams,
+    rounds: usize,
+    threads: usize,
+    seed: u64,
+    s: Option<&Sills>,
+) -> Vec<f64> {
     let n = grid.len();
     let rmin: Vec<f64> = (0..n).map(|c| if outlet[c] { 0.0 } else { s.map_or(0.0, |s| s.h[c]) }).collect();
     let sea_floor: Vec<f64> = (0..n).map(|c| rmin[c] + p.sea_level + p.epsilon).collect();
@@ -2620,7 +2629,8 @@ fn main() -> Result<(), String> {
             if k.route != K5Route::D8 || k.kdt_scale != 1.0 || k.uok_scale != 1.0 {
                 return Err("--k5 k5p|control: --k5-route, --k5-kdt-scale and --k5-uok-scale are not ported".into());
             }
-            if planet_generators::bake::round::K5_DIFFUSE.load(Relaxed) != 0 || planet_generators::bake::round::K5_PARITY.load(Relaxed) != 0 {
+            if planet_generators::bake::round::K5_DIFFUSE.load(Relaxed) != 0 || planet_generators::bake::round::K5_PARITY.load(Relaxed) != 0
+            {
                 return Err("--k5 k5p|control: --k5-diffuse and --k5-parity are not ported".into());
             }
             if planet_cache::region_bake::K5_REGION_READ.load(Relaxed) != 0 {
@@ -2662,7 +2672,10 @@ fn main() -> Result<(), String> {
                 c0 = planet_cache::region_bake::run_drain(&spec.stage.post_drain, &s.grid, &s.outlet, &c0, "3, control", None);
             }
             let differ = (0..c0.len()).filter(|&c| c0[c].to_bits() != s.zs[c].to_bits()).count();
-            println!("RG K5 control (lead #184v): this loop with today's routing against solve_region: {differ} of {} cells differ", c0.len());
+            println!(
+                "RG K5 control (lead #184v): this loop with today's routing against solve_region: {differ} of {} cells differ",
+                c0.len()
+            );
             if differ != 0 {
                 return Err(format!("--k5 control: {differ} cells differ from solve_region"));
             }
@@ -2702,8 +2715,14 @@ fn main() -> Result<(), String> {
             q(land.iter().map(|&c| zs2[c] - s.zs[c]).collect())
         );
         if k5_form == "k5p" {
-            front.regional_field =
-                RegionField::new(face, REGIONAL, (sri0 as i64, srj0 as i64), rw, rh, (0..cells).map(|c| (zs2[c] - s.zb[c]) as f32).collect());
+            front.regional_field = RegionField::new(
+                face,
+                REGIONAL,
+                (sri0 as i64, srj0 as i64),
+                rw,
+                rh,
+                (0..cells).map(|c| (zs2[c] - s.zb[c]) as f32).collect(),
+            );
             front.solve.zs = zs2.clone();
             k5p_keep = Some((r_sills, zs2));
         }
@@ -2974,7 +2993,10 @@ fn main() -> Result<(), String> {
         let sill = |a: usize, d: usize, b: usize| (rs.at(a, d, b) + zs2[a].max(zs2[b])).max(hh[a]).max(hh[b]);
         let wl = flood(grid, &hh, &sill, outlet, eps);
         let r0 = route_sills(grid, &wl, &sill, outlet, stream, &weight, true);
-        let own = h1_from(grid, &hh, &wl, r0, outlet, &runoff, &evap, Some(&Vec::new()), HYDRO_TWICE.load(std::sync::atomic::Ordering::Relaxed)).hydro.channel;
+        let own =
+            h1_from(grid, &hh, &wl, r0, outlet, &runoff, &evap, Some(&Vec::new()), HYDRO_TWICE.load(std::sync::atomic::Ordering::Relaxed))
+                .hydro
+                .channel;
         let trunk: std::collections::BTreeSet<usize> = h1.trunk_cells.iter().flatten().map(|&c| c as usize).collect();
         let (i0, i1, j0, j1) = spec.region;
         let in_box = |c: usize| {
@@ -3758,7 +3780,9 @@ fn main() -> Result<(), String> {
                             let (zb, dc) = (f64::from(zb[p]), f64::from(d[p]));
                             let s0p = c1 + rl[p];
                             let edge = match (kh_wall_cap, &curve_zc) {
-                                (Some(deg), Some(zc)) => ((f64::from(zc[p]) - zb).max(0.0) / (libm::tan(deg.to_radians()) * cell_m)).clamp(8.0, 24.0),
+                                (Some(deg), Some(zc)) => {
+                                    ((f64::from(zc[p]) - zb).max(0.0) / (libm::tan(deg.to_radians()) * cell_m)).clamp(8.0, 24.0)
+                                }
                                 _ => 8.0,
                             };
                             if dc < edge {
@@ -3866,12 +3890,18 @@ fn main() -> Result<(), String> {
                         }
                     }
                 }
-                let mut txt = String::from("kh-guard 1
+                let mut txt = String::from(
+                    "kh-guard 1
 # crossing candidates (lead #184j item 2): window x y, held at the cap
-");
+",
+                );
                 for &p in &held {
-                    txt.push_str(&format!("{} {}
-", p % w, p / w));
+                    txt.push_str(&format!(
+                        "{} {}
+",
+                        p % w,
+                        p / w
+                    ));
                 }
                 std::fs::write(out_dir.join(format!("{tag}-kh-guard.txt")), txt).map_err(|e| e.to_string())?;
                 println!("RG KH guard (lead #184j item 2): {} curve-zone cells held at the cap (crossing candidates for row 3), {tag}-kh-guard.txt", held.len());
