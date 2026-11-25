@@ -1,0 +1,7 @@
+f1-mm-chain: (a) curve zone (land within 3 cells of a curve, in the box) 1342519 cells; 0.05 wins (|grad S0| < 0.05) on 81.5 %; |grad S0| p50 0.024
+  (b) S0 running minimum - bed along the curves (387302 points): p50 -0.9, p90 1.6, p99 7.4 m; over 10 m 0.5 %, over 20 m 0.0 %; under 0 (bed above S0 minimum) 69.7 %
+  reach 1835: 568 points, from [2675. 3580.] to [2936. 3578.]; at 12 stations: S0 / S0 running min / bed (m)
+   174/174/174; 170/170/170; 170/168/172; 169/166/174; 172/158/171; 167/158/170; 132/132/133; 126/124/124; 112/112/112; 96/96/97; 74/74/74; 43/43/40
+  reach 1835: S0 running min - bed p50 -1.4, max 9.0 m
+r1h-mm-chain: (a) curve zone (land within 3 cells of a curve, in the box) 789503 cells; 0.05 wins (|grad S0| < 0.05) on 53.2 %; |grad S0| p50 0.044
+  (b) S0 running minimum - bed along the curves (244457 points): p50 -3.2, p90 2.5, p99 24.7 m; over 10 m 3.5 %, over 20 m 1.5 %; under 0 (bed above S0 minimum) 79.4 %
