@@ -323,7 +323,10 @@ pub fn read_skeleton(
             let (ax, ay, bx, by) = ((a % w) as f64, (a / w) as f64, (b % w) as f64, (b / w) as f64);
             let (dx, dy) = (bx - ax, by - ay);
             let t = (((fx - ax) * dx + (fy - ay) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
-            let dist = ((fx - ax - t * dx).powi(2) + (fy - ay - t * dy).powi(2)).sqrt() * l;
+            let dist = {
+                let (u, v) = (fx - ax - t * dx, fy - ay - t * dy);
+                (u * u + v * v).sqrt()
+            } * l;
             if dist >= outer {
                 continue;
             }
@@ -413,7 +416,12 @@ pub fn dam_weight(steps: &[Option<(usize, usize)>], w: usize, h: usize, fx: f64,
             let (ax, ay, bx, by) = ((a % w) as f64, (a / w) as f64, (b % w) as f64, (b / w) as f64);
             let (dx, dy) = (bx - ax, by - ay);
             let t = (((fx - ax) * dx + (fy - ay) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
-            d = d.min(((fx - ax - t * dx).powi(2) + (fy - ay - t * dy).powi(2)).sqrt() * l);
+            d = d.min(
+                {
+                    let (u, v) = (fx - ax - t * dx, fy - ay - t * dy);
+                    (u * u + v * v).sqrt()
+                } * l,
+            );
         }
     }
     let s = ((d - full) / (outer - full)).clamp(0.0, 1.0);
