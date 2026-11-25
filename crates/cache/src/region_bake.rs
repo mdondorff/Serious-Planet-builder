@@ -317,8 +317,8 @@ pub struct RegionSolve {
     pub precision: WorldPrecision,
 }
 
-/// SPIKE-138 (spike only): the spec's drain on a regional surface, with its log line (`HO stage` + `what`).
-fn run_drain(drain: &Drain, grid: &Grid, outlet: &[bool], z: &[f64], what: &str) -> Vec<f64> {
+/// SPIKE-138 (spike only): the spec's drain on a regional surface, with its log line (`HO stage` + `what`). Public for rg_chain's K5' (lead #184v, spike only).
+pub fn run_drain(drain: &Drain, grid: &Grid, outlet: &[bool], z: &[f64], what: &str) -> Vec<f64> {
     use planet_generators::bake::drain;
     let (w, h) = (grid.w(), grid.len() / grid.w());
     let area = |p: usize| grid.cell_area(p);
