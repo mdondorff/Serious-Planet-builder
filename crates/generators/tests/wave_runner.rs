@@ -12,7 +12,8 @@ use super::g0_fixture::fixture::*;
 use planet_core::{CubePatch, Face, GlobalCell};
 use planet_generators::bake::carve::CarveParams;
 use planet_generators::bake::drain::{sel_apply, sel_decide, sel_round, SearchDomain, SelDecision, SelParams};
-use planet_generators::bake::partition::{partitioned_route, PartCache};
+use planet_generators::bake::flood::priority_flood_with;
+use planet_generators::bake::partition::{partitioned_route_weighted, PartCache};
 use planet_generators::bake::round::{solve_rounds_memo, solve_rounds_with, Drivers, RoundCache};
 use planet_generators::bake::route::{route_rules, RoundRules};
 use planet_generators::bake::Grid;
@@ -22,9 +23,13 @@ use std::collections::BTreeMap;
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[allow(dead_code)] // `Local` serves KH, KS and KV in L-A and L-B (the next steps)
 pub enum Form {
-    Local { halo: usize },
+    Local {
+        halo: usize,
+    },
     Join,
     Owner,
+    /// decided once over the whole grid (a wave's global decide; its production scale is G3-6's, R13)
+    Global,
 }
 
 /// A TEST-151 layout on a cube grid of `n` cells an edge: the region of each cell, each region's domain (its tiles' patches) and the domain's border.
@@ -235,31 +240,56 @@ impl Stage for K5 {
     }
 }
 
-/// The H1 routing of the surface (receivers and `A_d`, the trunks' input) as an `Owner` stage: partitioned, GEN-143's route at the layout's tile.
-pub struct Route {
+/// Today's K6 (`--h1 k6`, `planet_cache::rg_h1::h1_from`, the chain's code): the routing with the discharge weight (`Owner`: GEN-143's route when partitioned), then the hydrology,
+/// the channel graph and the trunks once over the whole H1 grid (`Global`). The fixture has no climate: a discharge weight of 1, a constant runoff and no evaporation.
+pub struct K6 {
     pub seed: u64,
+    /// Runoff (m/s) on every cell.
+    pub runoff: f32,
 }
 
-impl Stage for Route {
+impl Stage for K6 {
     fn name(&self) -> &'static str {
-        "h1-route"
+        "k6"
     }
 
     fn form(&self) -> Form {
-        Form::Owner
+        Form::Global
     }
 
     fn run(&self, cx: &Ctx, st: &mut State) {
+        let g = cx.g;
         let eps = k5_params(1).epsilon;
-        let r = match cx.regions {
-            None => route_rules(cx.g, &st.z, cx.outlet, eps, self.seed, 0.0, None, RoundRules::ROUND),
+        let weight = vec![1.0f32; g.len()];
+        let routing = match cx.regions {
+            None => route_rules(g, &st.z, cx.outlet, eps, self.seed, 0.0, Some(&weight), RoundRules::ROUND),
             Some(rg) => {
-                partitioned_route(cx.g, &st.z, cx.outlet, eps, self.seed, rg.tile, RoundRules::ROUND, &mut PartCache::without_memory())
-                    .routing
+                partitioned_route_weighted(
+                    g,
+                    &st.z,
+                    cx.outlet,
+                    eps,
+                    self.seed,
+                    rg.tile,
+                    RoundRules::ROUND,
+                    Some(&weight),
+                    &mut PartCache::without_memory(),
+                )
+                .routing
             }
         };
-        st.fields.insert("receiver", r.receiver.iter().map(|&v| u64::from(v)).collect());
-        st.fields.insert("area", r.area.iter().map(|v| v.to_bits()).collect());
+        let filled = priority_flood_with(g, &st.z, cx.outlet, eps, true);
+        let runoff = vec![self.runoff; g.len()];
+        let evap = vec![0.0f32; g.len()];
+        let h1 = planet_cache::rg_h1::h1_from(g, &st.z, &filled, routing, cx.outlet, &runoff, &evap, Some(&[]), false);
+        st.fields.insert("receiver", h1.routing.receiver.iter().map(|&v| u64::from(v)).collect());
+        st.fields.insert("area", h1.routing.area.iter().map(|v| v.to_bits()).collect());
+        st.fields.insert("d8", h1.d8.iter().map(|v| v.to_bits()).collect());
+        st.fields.insert("qw", h1.hydro.qw.iter().map(|v| v.to_bits()).collect());
+        for (k, cells) in h1.trunk_cells.iter().enumerate() {
+            st.trace.push(format!("k6 trunk {} segment {} cells {cells:?}", k, h1.trunk_seg[k]));
+        }
+        st.notes.push(format!("k6: {} basins, {} trunk reaches", h1.hydro.basins.len(), h1.trunk_cells.len()));
     }
 }
 
@@ -291,7 +321,7 @@ pub fn differs(a: &State, b: &State) -> Option<String> {
     None
 }
 
-// spike only (crusader #208 step 2): wave 1 at H1 through the runner on the five layouts
+// spike only (crusader #208 steps 2 and 3): wave 1 at H1 through the runner on the five layouts (base1, K5, sel-post, K6)
 #[test]
 fn wave_1_is_the_same_bits_on_every_layout() {
     let inp = super::cross_seam_band6::input_h1();
@@ -302,8 +332,8 @@ fn wave_1_is_the_same_bits_on_every_layout() {
     let base1 = Sel::selective_50("base1", n);
     let k5 = K5 { rounds: 4, seed: 0x6b35 };
     let post = Sel::selective_50("sel-post", n);
-    let route = Route { seed: 0x6b35 };
-    let stages: [&dyn Stage; 4] = [&base1, &k5, &post, &route];
+    let k6 = K6 { seed: 0x6b35, runoff: 1.0e-6 };
+    let stages: [&dyn Stage; 4] = [&base1, &k5, &post, &k6];
     let cx = Ctx { g: &g, outlet: &outlet, regions: None, threads: 4 };
     let t = std::time::Instant::now();
     let reference = run_wave(&stages, &cx, &z0);
@@ -315,6 +345,7 @@ fn wave_1_is_the_same_bits_on_every_layout() {
         reference.notes
     );
     assert!(reference.trace.iter().any(|t| t.starts_with("base1") && t.contains("Breach")), "base1 breaches the planted pits");
+    assert!(reference.trace.iter().any(|t| t.starts_with("k6 trunk")), "K6 finds trunks on the fixture");
     let mut naive_differs = Vec::new();
     for l in partition_layouts() {
         let rg = Regions::new(&g, &l, L_PER_H1, false);

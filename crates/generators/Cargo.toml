@@ -30,3 +30,5 @@ stress = []
 
 [dev-dependencies]
 planet-generators = { path = ".", features = ["stress"] }
+# spike only (crusader #208 step 3): the wave runner's K6 hook calls `planet_cache::rg_h1` (a dev-dependency cycle, allowed by Cargo)
+planet-cache.workspace = true
