@@ -197,7 +197,8 @@ pub fn require_committed(root: &Path) -> Res {
     ))
 }
 
-pub fn run(root: &Path) -> Res {
+/// The pre-push run; `declared` is the proposal of `--declared` (BUILD-068): tier C then passes on its declared golden changes too.
+pub fn run(root: &Path, declared: Option<&Path>) -> Res {
     require_committed(root)?;
     crate::worktrees::warn_if_crowded(root);
     let changed = testcmd::changed_paths(root);
@@ -222,7 +223,7 @@ pub fn run(root: &Path) -> Res {
             "check" => Box::new(|| testcmd::check(root)),
             "test fast" => Box::new(|| testcmd::test(root, &["fast".to_string()])),
             "gate --small" => Box::new(|| crate::gate::run_small(root)),
-            _ => Box::new(|| crate::knowntierc::gpu_step(root)),
+            _ => Box::new(move || crate::knowntierc::gpu_step(root, declared)),
         };
         plan.push((name, action));
     }
