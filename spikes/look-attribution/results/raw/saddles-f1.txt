@@ -12,3 +12,10 @@ f1-mm-chain: S0 ridge cells in the box 507913
   band6c  saddles  1095 (2985 cells); new on this stage 110; nearest curve cell <= 2 cells: 1079, 2-8: 16, > 8: 0
   kv      saddles  1354 (3565 cells); new on this stage 300; nearest curve cell <= 2 cells: 1343, 2-8: 11, > 8: 0
   final   saddles  1296 (3405 cells); new on this stage 15; nearest curve cell <= 2 cells: 1285, 2-8: 11, > 8: 0
+f1-mn-chain: S0 ridge cells in the box 507913
+  kh      saddles   868 (2563 cells); nearest curve cell <= 2 cells: 833, 2-8: 35, > 8: 0
+  ks0     saddles   870 (2561 cells); new on this stage 5; nearest curve cell <= 2 cells: 835, 2-8: 35, > 8: 0
+  ks1c    saddles   864 (2548 cells); new on this stage 15; nearest curve cell <= 2 cells: 835, 2-8: 29, > 8: 0
+  band6c  saddles   845 (2503 cells); new on this stage 53; nearest curve cell <= 2 cells: 819, 2-8: 26, > 8: 0
+  kv      saddles  1010 (2860 cells); new on this stage 185; nearest curve cell <= 2 cells: 995, 2-8: 15, > 8: 0
+  final   saddles  1009 (2872 cells); new on this stage 2; nearest curve cell <= 2 cells: 994, 2-8: 15, > 8: 0
