@@ -18,6 +18,11 @@ path = "tests/it.rs"
 name = "oracle_all"
 path = "tests/oracle_all.rs"
 
+# spike only (crusader, G3-6 / R13): the memory model and its 1/16-scale run, its own binary for the counting allocator
+[[test]]
+name = "mem_stress"
+path = "tests/mem_stress.rs"
+
 [dependencies]
 planet-core.workspace = true
 planet-world-def.workspace = true
