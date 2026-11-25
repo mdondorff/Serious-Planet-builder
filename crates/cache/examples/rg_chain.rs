@@ -3282,7 +3282,7 @@ fn main() -> Result<(), String> {
     let budget_l = planet_cache::rg_budget::budget_field_threads(&start, w, h, L, dx_l, 25_000.0, threads);
     // lead #203b: the intended set is fixed on S0 (outlets: the sea and the window's edge, a single domain's) and every stage keeps it: an intended basin's interior stays as
     // S0 has it, and its rim ring (its cells' 8-neighbours outside it) is never lowered below min(spill, S0); basins-2 keeps exactly this set (it ranks first)
-    let in_window_edge = |p: usize| p % w == 0 || p / w == 0 || p % w == w - 1 || p / w == h - 1;
+    let in_window_edge = |p: usize| p.is_multiple_of(w) || p / w == 0 || p % w == w - 1 || p / w == h - 1;
     let s0_set: Option<(Vec<Intended>, Vec<u32>)> = intended_on.then(|| {
         if regions > 1 {
             println!("RG intended basins (lead #203b): the S0 set uses the single-domain outlets; {regions} regions run on it as well");
