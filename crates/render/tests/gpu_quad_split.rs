@@ -45,7 +45,8 @@ impl HeightField for Scarp {
         H_M * libm::tanh(d / W_M)
     }
     fn seed(&self) -> u64 {
-        0x5ca_7900 + self.angle_deg as u64
+        // one seed for both angles: a seed-driven presentation term would otherwise break the quarter turn's symmetry
+        0x5ca_7900
     }
     fn implementation_id(&self) -> &'static str {
         "test-scarp"
@@ -58,8 +59,9 @@ impl HeightField for Scarp {
     }
 }
 
-/// The lit picture of the scarp at `angle_deg`, the sun 10 degrees high across it (from the side its normal points to).
-fn render(ctx: &GpuContext, angle_deg: f64) -> Image {
+/// The lit picture of the scarp at `angle_deg`, the sun 10 degrees high across it (from the side its normal points to); with `atmosphere` the
+/// lit-with-atmosphere stage, else the lit stage.
+fn render(ctx: &GpuContext, angle_deg: f64, atmosphere: bool) -> Image {
     let f = Face(0);
     let (n, u, v) = (f.normal(), f.u_axis(), f.v_axis());
     let field = Scarp { angle_deg };
@@ -77,6 +79,9 @@ fn render(ctx: &GpuContext, angle_deg: f64) -> Image {
     let mut lit = LitPlan::fixed(EV);
     lit.sun_dir = [sun.x as f32, sun.y as f32, sun.z as f32];
     lit.ground_detail = 0.0;
+    if atmosphere {
+        lit = lit.with_atmosphere(&planet_frame::look::file::LookParams::default(), R).unwrap();
+    }
     plan.lit = Some(lit);
     let slots = 24 * 24;
     let pool =
@@ -84,6 +89,9 @@ fn render(ctx: &GpuContext, angle_deg: f64) -> Image {
             .unwrap();
     let mut r = TerrainRenderer::with_pools(ctx, SIZE, CELLS, pool);
     r.enable_lit(ctx);
+    if atmosphere {
+        r.enable_atmosphere(ctx, &planet_frame::look::atmosphere::Atmosphere::earth(R));
+    }
     for node in &plan.nodes {
         if r.slot_of(node.tile).is_none() {
             r.upload_tile(ctx, &compact_tile_field(&field, &TangentWarp, node.tile, CELLS, R)).unwrap();
@@ -130,30 +138,44 @@ fn difference(a: &Image, b: &Image) -> (f64, f64, Image) {
     (mean, ds[ds.len() * 99 / 100], Image::new(w, h, diff))
 }
 
-// spec: TEST-153, REND-068
-#[test]
-fn a_scarp_across_the_cell_diagonal_is_lit_as_one_along_it() {
-    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
-    let along = render(&ctx, 45.0);
-    let across = render(&ctx, 135.0);
+/// The 45-degree picture against the 135-degree one turned back by a quarter turn; the pictures go to `target/review/quad-split/<tag>-*.png`.
+fn compare(ctx: &GpuContext, atmosphere: bool, tag: &str) -> (f64, f64) {
+    let along = render(ctx, 45.0, atmosphere);
+    let across = render(ctx, 135.0, atmosphere);
     // the 135-degree scarp turned back by a quarter turn lies where the 45-degree one does, with its sun
     let back = quarter_turn(&across, true);
     let (mean, p99, diff) = difference(&along, &back);
     let dir = repo_root().join("target").join("review").join("quad-split");
     std::fs::create_dir_all(&dir).unwrap();
-    write_png(&dir.join("scarp-045.png"), &along).unwrap();
-    write_png(&dir.join("scarp-135.png"), &across).unwrap();
-    write_png(&dir.join("scarp-135-turned.png"), &back).unwrap();
-    write_png(&dir.join("difference-x8.png"), &diff).unwrap();
-    eprintln!("TEST-153 quad split: luminance difference 45 against 135 turned back: mean {mean:.3}, p99 {p99:.3} (0-255)");
+    write_png(&dir.join(format!("{tag}scarp-045.png")), &along).unwrap();
+    write_png(&dir.join(format!("{tag}scarp-135.png")), &across).unwrap();
+    write_png(&dir.join(format!("{tag}scarp-135-turned.png")), &back).unwrap();
+    write_png(&dir.join(format!("{tag}difference-x8.png")), &diff).unwrap();
+    eprintln!("TEST-153 quad split{tag}: luminance difference 45 against 135 turned back: mean {mean:.3}, p99 {p99:.3} (0-255)");
     // the picture is not empty: the scarp is lit on one side and shaded on the other
     let (lo, hi) = along.rgba.chunks(4).fold((255u8, 0u8), |(lo, hi), p| (lo.min(p[1]), hi.max(p[1])));
-    assert!(hi > lo + 20, "the scarp shows: green {lo}..{hi}");
-    // REND-068: the two pictures are one up to rounding. With the vertex normals interpolated over each triangle (before the change, measured on
-    // WARP 2026-11-24) the difference was mean 1.94, p99 22.6 along the scarp's edges; with the bilinear texel normal it is mean 0.044, p99 0.93
+    assert!(hi > lo + 20, "the scarp shows{tag}: green {lo}..{hi}");
+    (mean, p99)
+}
+
+// spec: TEST-153, REND-068
+#[test]
+fn a_scarp_across_the_cell_diagonal_is_lit_as_one_along_it() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    // REND-068 on the lit stage: the two pictures are one up to rounding. With the vertex normals interpolated over each triangle (before the
+    // change, measured on WARP 2026-11-24) the difference was mean 1.94, p99 22.6 along the scarp's edges; with the bilinear texel normal it is
+    // mean 0.044, p99 0.93
+    let (mean, p99) = compare(&ctx, false, "");
     assert!(
         mean <= 0.3 && p99 <= 5.0,
-        "the shading shows the cell diagonal: mean {mean:.3}, p99 {p99:.3} (bounds 0.3 and 5); see {}",
-        dir.display()
+        "the lit shading shows the cell diagonal: mean {mean:.3}, p99 {p99:.3} (bounds 0.3 and 5); see target/review/quad-split"
+    );
+    // ... and on the lit-with-atmosphere stage, whose per-cell pattern beside the scarp goes the same way: mean 1.27 before, 0.435 after (WARP,
+    // 2026-11-24). A residual of single spots on the scarp's centre line, one a cell, is the same before and after (p99 15.3 and 14.8): it does
+    // not come from the normal, so only the mean is bounded here and the p99 is printed (reported to the lead, 2026-11-25)
+    let (mean, p99) = compare(&ctx, true, "atmosphere-");
+    assert!(
+        mean <= 0.6,
+        "the lit-with-atmosphere shading shows the cell diagonal: mean {mean:.3} (bound 0.6), p99 {p99:.3}; see target/review/quad-split"
     );
 }

@@ -3276,6 +3276,39 @@ mod one_shot_tests {
         assert!(!code.contains("radius") && !code.contains("6371"));
     }
 
+    // spec: REND-068
+    #[test]
+    fn the_lit_stages_shade_with_the_bilinear_texel_normal_and_the_debug_views_keep_the_vertex_normal() {
+        let body = |shader: &str, f: &str| -> String {
+            let at = shader.find(&format!("fn {f}(")).unwrap_or_else(|| panic!("{f} is in the shader"));
+            let rest = &shader[at..];
+            rest[..rest.find("\n}\n").map_or(rest.len(), |e| e + 3)].to_string()
+        };
+        let shader = crate::compact::compact_terrain_shader(16);
+        let lit = body(&shader, "fs_lit_view");
+        assert!(
+            lit.contains("tile_normal(in)") && !lit.contains("in.local, in.normal, up"),
+            "the lit stage reads the bilinear texel normal"
+        );
+        assert!(body(&shader, "relief").contains("let n = normalize(in.normal);"), "the relief view keeps the vertex normal");
+        assert!(body(&shader, "fs_view").contains("let n = normalize(in.normal) * 0.5"), "the normals view keeps the vertex normal");
+        let tile_normal = body(&shader, "tile_normal");
+        assert!(
+            tile_normal.contains("if (g.extra.w > 0.5 && nodes[in.node_index].morph.z > 0.5) {"),
+            "a previewed node keeps the vertex normal"
+        );
+        assert!(tile_normal.contains("normalize(mix(mix(n00, n10, wx), mix(n01, n11, wx), wy))"));
+        let atmo: Vec<String> = crate::atmosphere::atmosphere_shaders()
+            .into_iter()
+            .filter(|(_, s)| s.contains("fn fs_lit_atmo_view("))
+            .map(|(_, s)| body(&s, "fs_lit_atmo_view"))
+            .collect();
+        assert!(
+            !atmo.is_empty() && atmo.iter().all(|b| b.contains("tile_normal(in)") && !b.contains("in.local, in.normal, up")),
+            "the atmosphere stage reads it too"
+        );
+    }
+
     // spec: REND-030
     #[test]
     fn the_node_record_carries_no_ramp_so_the_same_ground_point_ramps_alike_under_a_tile_of_any_level() {
