@@ -1,0 +1,4 @@
+final D8 (GLO-30 method): channel length 13813 km, in straight runs over 2 km 10.3 %; sinuosity of reaches over 2 km (988): p50 1.172, length-weighted mean 1.240
+  straight share by drained area: 75-300 km2 8.6 % of 6992 km, 300-1000 km2 11.1 % of 3362 km, 1000-3000 km2 10.5 % of 2064 km, 3000+ km2 16.2 % of 1395 km
+  D8 channel cells (over 75 km2) on a curve raster cell: 58.3 % of 113223
+curves: length 14223 km, straight (heading within 5 degrees) over 2 km 14.2 %; sinuosity over 2 km (1347): p50 1.198, length-weighted mean 1.247
