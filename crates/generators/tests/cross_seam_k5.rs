@@ -123,3 +123,31 @@ fn k5_through_the_partitioned_route_is_the_resident_k5_on_the_cube() {
         tlp / (f.b.len() * ROUNDS) as f64 * 1e9
     );
 }
+
+// spike only (crusader, G3-6 layout step 2): K5 with the catchments in flight capped by cells is K5 without the cap, bit for bit
+#[test]
+fn k5_with_the_in_flight_cap_is_k5() {
+    let inp = input_h1();
+    let z0 = run(&inp, None, false).z;
+    let g = Grid::cube(H1_N, RADIUS_M);
+    let outlet: Vec<bool> = z0.iter().map(|&h| h <= SEA_LEVEL_M).collect();
+    let (zr, _) = partitioned(&g, &z0, &outlet, 4, 8);
+    for cap in [1, 7, 100, 10_000] {
+        let mut z = z0.clone();
+        let mut cache = RoundCache::without_memory().with_inflight_cap(cap);
+        solve_rounds_memo(&g, &mut z, &outlet, &params(), ROUNDS, &4usize, SEED, &Drivers::default(), 8, &mut cache);
+        assert!(same(&z, &zr), "cap {cap} cells: the same bits");
+    }
+    // and at L, where the catchments are larger than the small caps
+    let f = build(4);
+    let gl = Grid::cube(L_N, RADIUS_M);
+    let ol: Vec<bool> = f.b.iter().map(|&h| h <= SEA_LEVEL_M).collect();
+    let (zl, _) = partitioned(&gl, &f.b, &ol, 4, TILE_L);
+    for cap in [1, 5_000] {
+        let mut z = f.b.clone();
+        let mut cache = RoundCache::without_memory().with_inflight_cap(cap);
+        solve_rounds_memo(&gl, &mut z, &ol, &params(), ROUNDS, &4usize, SEED, &Drivers::default(), TILE_L, &mut cache);
+        assert!(same(&z, &zl), "L cube, cap {cap} cells: the same bits");
+    }
+    eprintln!("#G3-6.2 K5 with the in-flight cap = K5: H1 caps 1, 7, 100, 10,000 cells; L caps 1, 5,000");
+}

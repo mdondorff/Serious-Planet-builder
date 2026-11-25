@@ -407,6 +407,27 @@ fn wave_1_measured(compact: bool) {
     let (_, pk) =
         peak(|| solve_rounds_memo(&g, &mut zs, &outlet, &cp, 4, &16usize, 7, &Drivers::default(), 384, &mut RoundCache::without_memory()));
     row("K5 (solve_rounds_memo, tile 384, 16 workers)", t.elapsed().as_secs_f64(), pk, model("K5"));
+    // G3-6 layout step 2: the catchments in flight capped at 200,000 cells (the same bits)
+    if compact {
+        let mut zc = zb.clone();
+        let t = std::time::Instant::now();
+        let (_, pk) = peak(|| {
+            solve_rounds_memo(
+                &g,
+                &mut zc,
+                &outlet,
+                &cp,
+                4,
+                &16usize,
+                7,
+                &Drivers::default(),
+                384,
+                &mut RoundCache::without_memory().with_inflight_cap(200_000),
+            )
+        });
+        assert!(zc.iter().zip(&zs).all(|(a, b)| a.to_bits() == b.to_bits()), "the capped K5 is K5");
+        row("K5 with the in-flight cap at 200,000 cells (the same bits)", t.elapsed().as_secs_f64(), pk, model("K5"));
+    }
     // K6: the weighted route, the flood, hydrology and graph (planet_cache::rg_h1, the chain's code)
     let t = std::time::Instant::now();
     let (h1, pk) = peak(|| {
