@@ -6,7 +6,7 @@
 
 ## What changes
 - BUILD-070: the planet library's 23 bake tests of 10 s or more take `threads-required = 4` each, with the default limit and no test group. Tier A takes no test group (BUILD-003), so this is BUILD-045's form, not a group.
-- TEST-156: a tier-A test checks the override, the limit, the absence of a group, and that each named test is a test function of `crates/app/src`.
+- TEST-156: a tier-A test checks the override, the limit, the absence of a group, and that each named test is a `#[test]` function of `crates/app/src`.
 - No test body, limit, skip or retry changes.
 
 ## Expected golden changes:

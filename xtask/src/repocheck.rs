@@ -341,7 +341,19 @@ mod tests {
         for name in names {
             assert!(seen.insert(name), "{name} is named twice");
             let function = name.rsplit("::").next().unwrap();
-            assert!(sources.contains(&format!("fn {function}(")), "{name} is not a test function of crates/app/src");
+            // the function, with `#[test]` among the attribute and comment lines right above it
+            let is_test = sources.match_indices(&format!("fn {function}(")).any(|(i, _)| {
+                sources[..i]
+                    .lines()
+                    .rev()
+                    .skip(1)
+                    .take_while(|l| {
+                        let t = l.trim();
+                        t.starts_with("#[") || t.starts_with("//")
+                    })
+                    .any(|l| l.trim() == "#[test]")
+            });
+            assert!(is_test, "{name} is not a #[test] function of crates/app/src");
         }
     }
 

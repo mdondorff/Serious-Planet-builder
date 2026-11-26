@@ -2258,7 +2258,7 @@ Detail:
 - **THEN** it passes only if every smooth case is in the band and every defect case is out of it, and its table names each case's value and the first case that breaks the rule
 
 ### Requirement: TEST-156 The planet bake tests' slot rule is checked
-A tier-A test SHALL check BUILD-070's override: `threads-required = 4`, no slow-timeout, no test group, at least 20 names, no name twice, and each name's function a test function of `crates/app/src`.
+A tier-A test SHALL check BUILD-070's override: `threads-required = 4`, no slow-timeout, no test group, at least 20 names, no name twice, and each name's function a `#[test]` function of `crates/app/src`.
 
 Verify: A
 Status: active

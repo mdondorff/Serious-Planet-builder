@@ -1293,7 +1293,7 @@ Detail:
 | before (no override) | 106.5 s | 95.6 s (`generate_bakes_the_class_source...`) |
 | after (`threads-required = 4`) | 99.9 s | 68.1 s (`the_base_under_a_commit...`) |
 - Before, with other work on the machine, two to four of them ran past 180 s (2026-11-25).
-- A test group is not used: tier A and B are not capped by groups (BUILD-003's test).
+- A test group is not used: BUILD-003's software GPU tier rule keeps every test group to `gpu_all` tests, so tier A and B are not capped by groups.
 - The list is the planet tests of 10 s or more in the before run; a new heavy bake test joins it.
 
 #### Scenario: The override

@@ -108,11 +108,10 @@ priority = 50
 filter = 'package(=planet-cache) and binary(it) and test(/^class_source_store::/)'
 threads-required = 4
 
-# The planet library's bake tests take 4 slots each (BUILD-070; the lead's order, 2026-11-26; the form of BUILD-045, since tier A and B take no test group). Each runs a multi-threaded bake of the test world: alone the commit-base
-# and class-source tests take 40 s and 31 s, beside each other in the 816-test set of a render, editor and app change 94 s and 96 s on an idle machine and over the 180 s
-# limit with other work on the machine (four prepushes of #1662, 2026-11-25, nextest positions 738-816: the bake tests started together at the end of the run). In the
-# 3,233-test set of every crate they run early and take 59-114 s. With 4 slots each, at most a quarter of the slots hold bake tests at once; the other tests fill the rest. The slow-timeout stays 180 s
-# and no test body is changed; no test is skipped or retried. The list is the planet tests of 10 s or more in that run (TEST-156 checks each exists).
+# The planet library's bake tests take 4 slots each (BUILD-070; the lead's order, 2026-11-26; BUILD-045's form, since tier A and B take no test group). Each runs a
+# multi-threaded bake: 31-40 s alone, 94-96 s beside each other in the 816-test set of a render, editor and app change on an idle machine, over 180 s with other
+# work on the machine (#1662, 2026-11-25). BUILD-070's Detail has the before and after. The slow-timeout stays 180 s; no test is skipped, retried or changed.
+# The list is the planet tests of 10 s or more; TEST-156 checks each is a test of crates/app/src.
 [[profile.default.overrides]]
 filter = '''
 package(=planet) and kind(lib) and (
