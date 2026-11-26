@@ -306,6 +306,45 @@ mod tests {
         assert!(!block.contains("slow-timeout"), "the limit stays the default's: {block}");
     }
 
+    // spec: BUILD-070, TEST-156
+    #[test]
+    fn the_planet_bake_tests_take_four_slots_keep_the_default_limit_and_each_names_a_test_of_the_app() {
+        let toml = std::fs::read_to_string(repo_root().join(".config/nextest.toml")).expect(".config/nextest.toml");
+        let at = toml.find("package(=planet) and kind(lib) and (").expect("an override for the planet library's bake tests");
+        let block = &toml[at..];
+        let block = &block[..block
+            .find(
+                "
+
+",
+            )
+            .unwrap_or(block.len())];
+        assert!(block.contains("threads-required = 4"), "the override takes 4 slots: {block}");
+        assert!(!block.contains("slow-timeout"), "the limit stays the default's: {block}");
+        assert!(!block.contains("test-group"), "tier A takes no test group (BUILD-003): {block}");
+        let names: Vec<&str> = block.match_indices("test(=").map(|(i, _)| block[i + 6..].split(')').next().unwrap()).collect();
+        assert!(names.len() >= 20, "the bake tests of 10 s or more: {names:?}");
+        let mut seen = std::collections::BTreeSet::new();
+        // every name is `module::...::function` of a test function of the app's library (a renamed test would silently lose its slots)
+        let mut sources = String::new();
+        let mut dirs = vec![repo_root().join("crates/app/src")];
+        while let Some(d) = dirs.pop() {
+            for e in std::fs::read_dir(&d).expect("crates/app/src").flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    dirs.push(p);
+                } else if p.extension().is_some_and(|x| x == "rs") {
+                    sources.push_str(&std::fs::read_to_string(&p).unwrap_or_default());
+                }
+            }
+        }
+        for name in names {
+            assert!(seen.insert(name), "{name} is named twice");
+            let function = name.rsplit("::").next().unwrap();
+            assert!(sources.contains(&format!("fn {function}(")), "{name} is not a test function of crates/app/src");
+        }
+    }
+
     // spec: BUILD-049
     #[test]
     fn the_tests_over_sixty_seconds_on_the_windows_runner_share_the_one_at_a_time_group_and_keep_their_limits() {
