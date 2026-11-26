@@ -419,6 +419,30 @@ fn stale_tint(in: VsOut, rgb: vec3<f32>, factor: f32) -> vec3<f32> {
     return mix(tinted, hue * (0.8 * factor), tile_line);
 }
 
+// The normal at a fragment of a compact tile on the lit paths (REND-068, lead #200): the bilinear interpolation of the stored normals of the
+// fragment's cell's 4 texels at its tile coordinates (`aux`, interpolated from the vertices), normalised. The vertex stage interpolates its own
+// texel normal over each triangle, so the shading took the cell's a-c split; the bilinear blend is the same for every split and every quarter
+// turn of the grid. A previewed node (REND-033) keeps the vertex normal, which carries the preview's slope. The debug views keep `in.normal`.
+fn tile_normal(in: VsOut) -> vec3<f32> {
+    if (g.extra.w > 0.5 && nodes[in.node_index].morph.z > 0.5) {
+        return in.normal;
+    }
+    let base = tile_refs[in.node_index].x + TEXEL_WORD;
+    let x = clamp(in.aux.x, 0.0, 1.0) * f32(CELLS);
+    let y = clamp(in.aux.y, 0.0, 1.0) * f32(CELLS);
+    let a = min(i32(x), CELLS - 1);
+    let b = min(i32(y), CELLS - 1);
+    let wx = x - f32(a);
+    let wy = y - f32(b);
+    let k00 = base + u32(b * (CELLS + 1) + a) * 2u + 1u;
+    let k01 = k00 + u32(CELLS + 1) * 2u;
+    let n00 = texel_normal(vec2<u32>(0u, block[k00]));
+    let n10 = texel_normal(vec2<u32>(0u, block[k00 + 2u]));
+    let n01 = texel_normal(vec2<u32>(0u, block[k01]));
+    let n11 = texel_normal(vec2<u32>(0u, block[k01 + 2u]));
+    return normalize(mix(mix(n00, n10, wx), mix(n01, n11, wx), wy));
+}
+
 // The climate texel `idx` (row-major over the 9 x 9 texture) of the tile whose slot starts at word `base`: one word of the slot's
 // climate block, the temperature as f16 in the low half and the precipitation in the high half (GEN-021, GEN-025).
 fn climate_texel(base: u32, idx: i32) -> vec2<f32> {

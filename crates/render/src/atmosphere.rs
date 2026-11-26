@@ -854,7 +854,8 @@ fn fs_lit_atmo_view(in: VsOut) -> LitOut {
     let climate = tile_climate(in);
     let drv = tile_drivers(in);
     let chn = tile_channels(in);
-    let gd = ground_detail(in.node_index, in.local, in.normal, up, climate.x, climate.y, in.height - g.extra.x, drv, chn);
+    // REND-068: the lit paths shade with the cell's bilinear texel normal, so the triangulation does not show
+    let gd = ground_detail(in.node_index, in.local, tile_normal(in), up, climate.x, climate.y, in.height - g.extra.x, drv, chn);
     // The direct sun term is unshadowed here: the shadow of the march applies to `sun-direct` in the shadow-apply pass (REND-051).
     let parts = atm_shade_lit_parts(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), in.height, sun, g.range.z);
     let dm = detail_mul(gd, g.mode.x, g.albedo, climate.x, climate.y, clamp(dot(normalize(gd.normal), up), 0.0, 1.0), in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)));
