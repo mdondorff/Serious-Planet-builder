@@ -392,6 +392,9 @@ pub fn hydrology_with(
             qw[r as usize] += qw[c];
         }
     }
+    // spike (G3-6 step 3 (c)): the cascade's order and the components' flags are done; free them before the basins and segments (the peak)
+    drop(order);
+    drop(seen);
     let mut basins: Vec<Basin> = Vec::with_capacity(found.len());
     for (b, f) in found.iter().enumerate() {
         let (class, overflows, level, q_out) = solved[b].expect("every spill cell is reached");

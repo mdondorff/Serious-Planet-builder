@@ -124,7 +124,10 @@ fn main() {
     match std::env::args().nth(1).as_deref() {
         Some("full") => wave_1_measured(false),
         Some("compact") => wave_1_measured(true),
-        Some("real") => k6_on_a_real_window(std::env::args().nth(2).as_deref().unwrap_or(""), std::env::args().nth(3).as_deref().unwrap_or("8160")),
+        Some("lean") => wave_1_lean(std::env::args().nth(2).as_deref().unwrap_or(""), std::env::args().nth(3).as_deref().unwrap_or("8160")),
+        Some("real") => {
+            k6_on_a_real_window(std::env::args().nth(2).as_deref().unwrap_or(""), std::env::args().nth(3).as_deref().unwrap_or("8160"))
+        }
         _ => eprintln!("mem_stress full | compact"),
     }
 }
@@ -271,7 +274,8 @@ fn wave_1_measured(compact: bool) {
         use planet_generators::bake::hydro::{hydrology, HydroParams};
         let w = vec![1.0f32; g.len()];
         let (r, pr) = peak(|| {
-            partitioned_route_weighted(&g, &zs, &outlet, cp.epsilon, 7, 384, RoundRules::ROUND, Some(&w), &mut PartCache::without_memory()).routing
+            partitioned_route_weighted(&g, &zs, &outlet, cp.epsilon, 7, 384, RoundRules::ROUND, Some(&w), &mut PartCache::without_memory())
+                .routing
         });
         let (f, pf) = peak(|| priority_flood_with(&g, &zs, &outlet, cp.epsilon, true));
         let runoff = vec![1.0e-8f32; g.len()];
@@ -338,28 +342,32 @@ fn k6_on_a_real_window(path: &str, side: &str) {
     use planet_generators::bake::route::RoundRules;
     use planet_generators::bake::Grid;
     let lw: usize = side.parse().expect("the dump's side");
-    let bytes = std::fs::read(path).expect("an exit-s0 dump");
-    assert_eq!(bytes.len(), lw * lw * 8, "{path}: {lw}² f64");
-    let l = |i: usize| f64::from_le_bytes(bytes[8 * i..8 * i + 8].try_into().unwrap());
+    // read 8 L rows at a time, so the dump does not raise the process's peak RSS (the gate judges RSS)
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).expect("an exit-s0 dump");
+    assert_eq!(file.metadata().unwrap().len() as usize, lw * lw * 8, "{path}: {lw}² f64");
     let w = lw / 8;
-    let z: Vec<f64> = (0..w * w)
-        .map(|c| {
-            let (x, y) = (c % w, c / w);
+    let mut z = vec![0.0f64; w * w];
+    let mut band = vec![0u8; 8 * lw * 8];
+    for y in 0..w {
+        file.read_exact(&mut band).expect("a band of 8 rows");
+        let l = |r: usize, x: usize| f64::from_le_bytes(band[8 * (r * lw + x)..8 * (r * lw + x) + 8].try_into().unwrap());
+        for x in 0..w {
             let mut sum = 0.0;
             for dy in 0..8 {
                 for dx in 0..8 {
-                    sum += l((8 * y + dy) * lw + 8 * x + dx);
+                    sum += l(dy, 8 * x + dx);
                 }
             }
-            sum / 64.0
-        })
-        .collect();
-    drop(bytes);
+            z[y * w + x] = sum / 64.0;
+        }
+    }
+    drop(band);
     let g = Grid::new(w, w, 814.0);
     let outlet = g.outlets(&z, 0.0);
     let land = outlet.iter().filter(|&&o| !o).count();
     let eps = CarveParams::default().epsilon;
-    let tile = (1..=w).rev().find(|t| w % t == 0 && *t <= 384).unwrap();
+    let tile = (1..=w).rev().find(|t| w.is_multiple_of(*t) && *t <= 384).unwrap();
     // wave 1 in its order: base1 (Drain::SELECTIVE_50), K5 (4 rounds of 5 steps, GEN-143 at the tile; uncapped, then capped at 6 % of the land), then K6's parts on K5's output
     use planet_generators::bake::drain::{drain_selective_floors_on, SelParams, SelSwitches};
     use planet_generators::bake::round::{solve_rounds_memo, Drivers, RoundCache};
@@ -367,18 +375,48 @@ fn k6_on_a_real_window(path: &str, side: &str) {
     let area = |p: usize| g.cell_area(p);
     let cap = |_: usize| 50.0;
     let lo = |_: usize| f64::NEG_INFINITY;
-    let sp = SelParams { keep: &keep, area: &area, max_rounds: 12, search: 1 << 20, cut_cap: &cap, fill_cap: &cap, cell_lo: &lo, switches: SelSwitches::default() };
+    let sp = SelParams {
+        keep: &keep,
+        area: &area,
+        max_rounds: 12,
+        search: 1 << 20,
+        cut_cap: &cap,
+        fill_cap: &cap,
+        cell_lo: &lo,
+        switches: SelSwitches::default(),
+    };
     let t = std::time::Instant::now();
     let ((zb, st), pb) = peak(|| drain_selective_floors_on(&g, &z, &outlet, &sp));
     let tb = t.elapsed().as_secs_f64();
-    let cp = CarveParams { steps: 20, reroute_every: 5, round_rules: RoundRules::ROUND, cell_metric: true, window_cut: true, ..CarveParams::default() };
+    let cp = CarveParams {
+        steps: 20,
+        reroute_every: 5,
+        round_rules: RoundRules::ROUND,
+        cell_metric: true,
+        window_cut: true,
+        ..CarveParams::default()
+    };
     let mut zs = zb.clone();
     let t = std::time::Instant::now();
-    let (_, pk) = peak(|| solve_rounds_memo(&g, &mut zs, &outlet, &cp, 4, &16usize, 7, &Drivers::default(), tile, &mut RoundCache::without_memory()));
+    let (_, pk) =
+        peak(|| solve_rounds_memo(&g, &mut zs, &outlet, &cp, 4, &16usize, 7, &Drivers::default(), tile, &mut RoundCache::without_memory()));
     let tk = t.elapsed().as_secs_f64();
     let mut zc = zb.clone();
     let capc = (land * 6 / 100).max(1);
-    let (_, pkc) = peak(|| solve_rounds_memo(&g, &mut zc, &outlet, &cp, 4, &16usize, 7, &Drivers::default(), tile, &mut RoundCache::without_memory().with_inflight_cap(capc)));
+    let (_, pkc) = peak(|| {
+        solve_rounds_memo(
+            &g,
+            &mut zc,
+            &outlet,
+            &cp,
+            4,
+            &16usize,
+            7,
+            &Drivers::default(),
+            tile,
+            &mut RoundCache::without_memory().with_inflight_cap(capc),
+        )
+    });
     assert!(zc.iter().zip(&zs).all(|(a, b)| a.to_bits() == b.to_bits()), "the capped K5 is K5");
     let n = g.len() as f64;
     eprintln!(
@@ -391,8 +429,38 @@ fn k6_on_a_real_window(path: &str, side: &str) {
         pkc as f64 / n
     );
     let z = zs;
+    // G3-6 step 3 (a): the partitioned route's filled surface against priority_flood_with's canonical flood, bit for bit (weighted and unweighted)
+    {
+        let wt = vec![1.0f32; g.len()];
+        let pf = partitioned_route_weighted(&g, &z, &outlet, eps, 7, tile, RoundRules::ROUND, Some(&wt), &mut PartCache::without_memory())
+            .filled;
+        let ff = priority_flood_with(&g, &z, &outlet, eps, true);
+        let differ = pf.iter().zip(&ff).filter(|(a, b)| a.to_bits() != b.to_bits()).count();
+        eprintln!("G3-6 real {path}: (a) the route's filled against the canonical flood: {differ} cells differ of {}", ff.len());
+    }
+    // K6 whole, as the chain runs it (h1_from with its inputs allocated inside the one peak): the stage's true peak, the parts below being measured each with the earlier ones held
+    let (h1w, pw) = peak(|| {
+        let wt = vec![1.0f32; g.len()];
+        // (a): the route's filled surface is the canonical flood bit for bit, so hydrology takes it (no second flood)
+        let pr = partitioned_route_weighted(&g, &z, &outlet, eps, 7, tile, RoundRules::ROUND, Some(&wt), &mut PartCache::without_memory());
+        drop(wt);
+        let (r, f) = (pr.routing, pr.filled);
+        let runoff = vec![1.0e-8f32; g.len()];
+        let evap = vec![0.0f32; g.len()];
+        planet_cache::rg_h1::h1_from(&g, &z, &f, r, &outlet, &runoff, &evap, Some(&[]), false)
+    });
+    let (hwm, _) = rss_mib();
+    eprintln!(
+        "G3-6 real {path}: K6 whole with (a)-(c), h1_from and its inputs: peak heap {:.1} B a cell, {} trunk reaches; process peak RSS so far {hwm} MiB ({:.1} B a cell)",
+        pw as f64 / g.len() as f64,
+        h1w.trunk_cells.len(),
+        (hwm as f64 * 1048576.0) / g.len() as f64
+    );
+    drop(h1w);
     let wt = vec![1.0f32; g.len()];
-    let (r, pr) = peak(|| partitioned_route_weighted(&g, &z, &outlet, eps, 7, tile, RoundRules::ROUND, Some(&wt), &mut PartCache::without_memory()).routing);
+    let (r, pr) = peak(|| {
+        partitioned_route_weighted(&g, &z, &outlet, eps, 7, tile, RoundRules::ROUND, Some(&wt), &mut PartCache::without_memory()).routing
+    });
     let (f, pf) = peak(|| priority_flood_with(&g, &z, &outlet, eps, true));
     let runoff = vec![1.0e-8f32; g.len()];
     let zeros = vec![0.0f32; g.len()];
@@ -411,5 +479,118 @@ fn k6_on_a_real_window(path: &str, side: &str) {
         pf as f64 / n,
         ph as f64 / n,
         pg as f64 / n
+    );
+}
+
+/// An exit-s0 dump of `lw`² L cells as H1 by 8 x 8 means, read 8 L rows at a time (the dump does not raise the peak RSS).
+fn h1_of_dump(path: &str, lw: usize) -> Vec<f64> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).expect("an exit-s0 dump");
+    assert_eq!(file.metadata().unwrap().len() as usize, lw * lw * 8, "{path}: {lw}² f64");
+    let w = lw / 8;
+    let mut z = vec![0.0f64; w * w];
+    let mut band = vec![0u8; 8 * lw * 8];
+    for y in 0..w {
+        file.read_exact(&mut band).expect("a band of 8 rows");
+        let l = |r: usize, x: usize| f64::from_le_bytes(band[8 * (r * lw + x)..8 * (r * lw + x) + 8].try_into().unwrap());
+        for x in 0..w {
+            let mut sum = 0.0;
+            for dy in 0..8 {
+                for dx in 0..8 {
+                    sum += l(dy, 8 * x + dx);
+                }
+            }
+            z[y * w + x] = sum / 64.0;
+        }
+    }
+    z
+}
+
+/// G3-6 (the lead, 2026-11-26: the gate judges RSS, with K5 and K6 in the same process as wave 1 runs them): wave 1 lean in a fresh process, as a build would run it:
+/// base1 (its input freed after), K5 with the in-flight cap at 6 % of the land in place, then K6 with levers (a)-(c). Prints each stage's peak heap and, at the end, the
+/// process's peak RSS, all a cell; the landmass figure is the figure x 1.266e8 (the compact grid holds the land and its coastal ring).
+fn wave_1_lean(path: &str, side: &str) {
+    use planet_generators::bake::carve::CarveParams;
+    use planet_generators::bake::drain::{drain_selective_floors_on, SelParams, SelSwitches};
+    use planet_generators::bake::partition::{partitioned_route_weighted, PartCache};
+    use planet_generators::bake::round::{solve_rounds_memo, Drivers, RoundCache};
+    use planet_generators::bake::route::RoundRules;
+    use planet_generators::bake::Grid;
+    let lw: usize = side.parse().expect("the dump's side");
+    let z0 = h1_of_dump(path, lw);
+    let w = lw / 8;
+    let g = Grid::new(w, w, 814.0);
+    let outlet = g.outlets(&z0, 0.0);
+    let land = outlet.iter().filter(|&&o| !o).count();
+    let n = g.len() as f64;
+    let tile = (1..=w).rev().find(|t| w.is_multiple_of(*t) && *t <= 384).unwrap();
+    let keep = |_: usize| false;
+    let area = |p: usize| g.cell_area(p);
+    let cap = |_: usize| 50.0;
+    let lo = |_: usize| f64::NEG_INFINITY;
+    let sp = SelParams {
+        keep: &keep,
+        area: &area,
+        max_rounds: 12,
+        search: 1 << 20,
+        cut_cap: &cap,
+        fill_cap: &cap,
+        cell_lo: &lo,
+        switches: SelSwitches::default(),
+    };
+    let ((mut z, _), pb) = peak(|| drain_selective_floors_on(&g, &z0, &outlet, &sp));
+    drop(z0);
+    let cp = CarveParams {
+        steps: 20,
+        reroute_every: 5,
+        round_rules: RoundRules::ROUND,
+        cell_metric: true,
+        window_cut: true,
+        ..CarveParams::default()
+    };
+    let capc = (land * 6 / 100).max(1);
+    let (_, pk) = peak(|| {
+        solve_rounds_memo(
+            &g,
+            &mut z,
+            &outlet,
+            &cp,
+            4,
+            &16usize,
+            7,
+            &Drivers::default(),
+            tile,
+            &mut RoundCache::without_memory().with_inflight_cap(capc),
+        )
+    });
+    let (h1, p6) = peak(|| {
+        let wt = vec![1.0f32; g.len()];
+        let pr = partitioned_route_weighted(
+            &g,
+            &z,
+            &outlet,
+            cp.epsilon,
+            7,
+            tile,
+            RoundRules::ROUND,
+            Some(&wt),
+            &mut PartCache::without_memory(),
+        );
+        drop(wt);
+        let (r, f) = (pr.routing, pr.filled);
+        let runoff = vec![1.0e-8f32; g.len()];
+        let evap = vec![0.0f32; g.len()];
+        planet_cache::rg_h1::h1_from(&g, &z, &f, r, &outlet, &runoff, &evap, Some(&[]), false)
+    });
+    let trunks = h1.trunk_cells.len();
+    drop(h1);
+    let (hwm, _) = rss_mib();
+    let rss = hwm as f64 * 1048576.0 / n;
+    eprintln!(
+        "G3-6 lean {path}: H1 {w}², {land} land; peak heap a cell above the held surface (z, outlets: 9 B): base1 {:.1} B, K5 capped {:.1} B, K6 (a)-(c) {:.1} B ({trunks} trunks); process peak RSS {hwm} MiB = {rss:.1} B a cell, at the landmass {:.1} GB",
+        pb as f64 / n,
+        pk as f64 / n,
+        p6 as f64 / n,
+        rss * 1.266e8 / 1e9
     );
 }

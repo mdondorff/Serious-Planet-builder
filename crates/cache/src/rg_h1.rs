@@ -34,7 +34,6 @@ pub fn h1_from(
 ) -> H1 {
     // lead #163 (B3, result-preserving): with `budget` every basin is crossed (reading 24) and the second call only zeroed the open-water loss of the basins' cells,
     // the one input `hydrology` reads it through (each basin's e_open); one call with a zero evaporation gives the same Hydro
-    let zeros: Vec<f32> = if budget.is_some() { vec![0.0; evap.len()] } else { Vec::new() };
     let mut hydro = hydrology(
         grid,
         z,
@@ -42,7 +41,8 @@ pub fn h1_from(
         &routing,
         outlet,
         Some(runoff),
-        Some(if budget.is_some() { &zeros } else { evap }),
+        // spike (G3-6 step 3 (b)): with a budget every basin is crossed and its open-water loss is zero; `None` adds the same 0.0 a zero vector adds (`hydrology`), without the vector
+        if budget.is_some() { None } else { Some(evap) },
         &HydroParams::default(),
     );
     // spikes #142, reading 16: a kept basin deeper than the budget at its floor is crossed (reading 13), not a lake: no open-water loss there, so q_w = q through it.

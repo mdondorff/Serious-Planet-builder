@@ -294,10 +294,10 @@ impl Stage for K6 {
         let g = cx.g;
         let eps = k5_params(1).epsilon;
         let weight = vec![1.0f32; g.len()];
-        let routing = match cx.regions {
-            None => route_rules(g, &st.z, cx.outlet, eps, self.seed, 0.0, Some(&weight), RoundRules::ROUND),
+        let (routing, filled) = match cx.regions {
+            None => (route_rules(g, &st.z, cx.outlet, eps, self.seed, 0.0, Some(&weight), RoundRules::ROUND), None),
             Some(rg) => {
-                partitioned_route_weighted(
+                let pr = partitioned_route_weighted(
                     g,
                     &st.z,
                     cx.outlet,
@@ -307,11 +307,12 @@ impl Stage for K6 {
                     RoundRules::ROUND,
                     Some(&weight),
                     &mut PartCache::without_memory(),
-                )
-                .routing
+                );
+                // G3-6 step 3 (a): the route's filled surface is the canonical flood bit for bit, so the partitioned K6 takes it (no second flood)
+                (pr.routing, Some(pr.filled))
             }
         };
-        let filled = priority_flood_with(g, &st.z, cx.outlet, eps, true);
+        let filled = filled.unwrap_or_else(|| priority_flood_with(g, &st.z, cx.outlet, eps, true));
         let runoff = vec![self.runoff; g.len()];
         let evap = vec![0.0f32; g.len()];
         let h1 = planet_cache::rg_h1::h1_from(g, &st.z, &filled, routing, cx.outlet, &runoff, &evap, Some(&[]), false);
