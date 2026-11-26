@@ -458,6 +458,15 @@ unsafe impl GlobalAlloc for Counting {
 #[global_allocator]
 static ALLOC: Counting = Counting;
 
+/// The cell count the phase probe divides by (`wave1`).
+static ACTIVE: AtomicUsize = AtomicUsize::new(1);
+
+/// The phase probe of hydrology and H1 (`G36_K6_PHASES`): the live heap and the peak since the last reset, both absolute, a cell.
+fn print_phase(name: &str) {
+    let a = ACTIVE.load(Relaxed) as f64;
+    println!("PHASE {name}: live {:.1} B a cell, peak so far {:.1} B a cell", CUR.load(Relaxed) as f64 / a, PEAK.load(Relaxed) as f64 / a);
+}
+
 /// Runs `f` and returns its value with the peak heap above the start (bytes).
 fn heap_peak<T>(f: impl FnOnce() -> T) -> (T, usize) {
     let base = CUR.load(Relaxed);
@@ -512,15 +521,28 @@ fn wave1(grid: &Grid, z0: Vec<f64>, outlet: &[bool], inputs: &BakeInputs, n: usi
     let row = |name: &str, t: Instant, pk: usize| {
         let (hwm, now) = rss_mib();
         println!(
-            "WAVE1 {name}: {:.1} s; peak heap {:.1} B a cell ({:.2} GiB); process peak RSS so far {hwm} MiB ({:.2} GiB), now {now} MiB; {:.0} s since start",
+            "WAVE1 {name}: {:.1} s; peak heap {:.1} B a cell ({:.2} GiB); live heap after {:.1} B a cell; process peak RSS so far {hwm} MiB ({:.2} GiB), now {now} MiB; {:.0} s since start",
             t.elapsed().as_secs_f64(),
             pk as f64 / active as f64,
             gib(pk as f64),
+            CUR.load(Relaxed) as f64 / active as f64,
             hwm as f64 / 1024.0,
             t0.elapsed().as_secs_f64()
         );
     };
     println!("WAVE1 the grid: {active} cells ({land} land), the fixed RSS {fixed} MiB");
+    ACTIVE.store(active, Relaxed);
+    if std::env::var("G36_K6_PHASES").is_ok() {
+        let _ = planet_generators::bake::hydro::PHASE_PROBE.set(print_phase);
+    }
+    let mib = |b: usize| b as f64 / 1048576.0;
+    let surface = active * 9;
+    println!(
+        "WAVE1 live heap at the start: {:.0} MiB (z and the outlets {:.0} MiB; the grid, the inputs and the rest {:.0} MiB)",
+        mib(CUR.load(Relaxed)),
+        mib(surface),
+        mib(CUR.load(Relaxed).saturating_sub(surface))
+    );
     // base1
     let keep = |_: usize| false;
     let area = |p: usize| grid.cell_area(p);
@@ -541,6 +563,14 @@ fn wave1(grid: &Grid, z0: Vec<f64>, outlet: &[bool], inputs: &BakeInputs, n: usi
     drop(z0);
     row("base1 (SELECTIVE_50 floors)", t, pb);
     println!("WAVE1 base1 stats: {st:?}");
+    let mut h = 0xcbf2_9ce4_8422_2325u64;
+    for v in &z {
+        h = (h ^ v.to_bits()).wrapping_mul(0x100_0000_01b3);
+    }
+    println!("WAVE1 base1 surface hash {h:016x}");
+    if std::env::var("G36_BASE1_ONLY").is_ok() {
+        return;
+    }
     // K5
     let cp = CarveParams {
         steps: 20,
@@ -569,7 +599,42 @@ fn wave1(grid: &Grid, z0: Vec<f64>, outlet: &[bool], inputs: &BakeInputs, n: usi
     });
     row(&format!("K5 (4 rounds, tile {tile}, cap {capc} cells)"), t, pk);
     // K6: the orographic climate, the weighted route (the weights freed after it), then H1 on the owned route
+    if std::env::var("G36_K6_PHASES").is_ok() {
+        // K6's phases on their own (the same inputs): the route's output held, then hydrology alone (initiation bits, the area freed)
+        use planet_generators::bake::hydro::{hydrology_initiated, initiation_bits, HydroParams};
+        let w1 = vec![1.0f32; active];
+        let ro = vec![1.0e-8f32; active];
+        let pr = partitioned_route_weighted(
+            grid,
+            &z,
+            outlet,
+            cp.epsilon,
+            seed,
+            tile,
+            RoundRules::ROUND,
+            Some(&w1),
+            &mut PartCache::without_memory(),
+        );
+        drop(w1);
+        let (mut r, f) = (pr.routing, pr.filled);
+        let bits = initiation_bits(&r, &HydroParams::default());
+        r.area = Vec::new();
+        let held = CUR.load(Relaxed);
+        let (hy, ph) = heap_peak(|| hydrology_initiated(grid, &z, &f, &r, outlet, Some(&ro), None, &bits, &HydroParams::default()));
+        let kept = CUR.load(Relaxed) - held;
+        println!(
+            "WAVE1 K6 phases: live heap before hydrology (the surface, the routing without area, filled, bits, runoff) {:.1} B a cell; hydrology's peak above that {ph_b:.1} B, its result {:.1} B ({} segments, {} basins)",
+            held as f64 / active as f64,
+            kept as f64 / active as f64,
+            hy.segments.len(),
+            hy.basins.len(),
+            ph_b = ph as f64 / active as f64
+        );
+        drop((hy, r, f, bits, ro));
+    }
     let t = Instant::now();
+    let b6 = CUR.load(Relaxed);
+    let route_pk = AtomicUsize::new(0);
     let (h1, p6) = heap_peak(|| {
         let o = inputs.orography();
         let mut weight = vec![1.0f32; active];
@@ -598,11 +663,20 @@ fn wave1(grid: &Grid, z0: Vec<f64>, outlet: &[bool], inputs: &BakeInputs, n: usi
             &mut PartCache::without_memory(),
         );
         drop(weight);
+        // the split: the route's peak (with the climate fields), then the peak of what follows from here
+        route_pk.store(PEAK.load(Relaxed).saturating_sub(b6), Relaxed);
+        PEAK.store(CUR.load(Relaxed), Relaxed);
         let (r, f) = (pr.routing, pr.filled);
         // (d) no evaporation field, (f) the filled buffer becomes d8
         planet_cache::rg_h1::h1_from_owned(grid, &z, f, r, outlet, &runoff, &[], Some(&[]), false)
     });
-    row("K6 (climate, weighted route, h1_from_owned)", t, p6);
+    let rp = route_pk.load(Relaxed);
+    println!(
+        "WAVE1 K6 split: the route {:.1} B a cell, h1_from_owned {:.1} B a cell (both above the held surface)",
+        rp as f64 / active as f64,
+        p6 as f64 / active as f64
+    );
+    row("K6 (climate, weighted route, h1_from_owned)", t, p6.max(rp));
     let trunks = h1.trunk_cells.len();
     assert!(trunks > 0, "K6 found no trunk");
     drop(h1);

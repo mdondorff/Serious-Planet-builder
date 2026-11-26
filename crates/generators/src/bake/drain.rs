@@ -94,7 +94,7 @@ pub const TOL: f64 = 1e-3;
 /// The descent per cell of a breach path (m).
 pub const DELTA: f64 = 1e-4;
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct DrainStats {
     pub rounds: usize,
     /// Depressions met over all rounds; filled, breached, kept (intended).
@@ -845,13 +845,13 @@ impl SelSwitches {
 
 /// The arguments of [`drain_selective_floors`] besides the grid, the surface and the outlets.
 pub struct SelParams<'a> {
-    pub keep: &'a dyn Fn(usize) -> bool,
-    pub area: &'a dyn Fn(usize) -> f64,
+    pub keep: &'a (dyn Fn(usize) -> bool + Sync),
+    pub area: &'a (dyn Fn(usize) -> f64 + Sync),
     pub max_rounds: usize,
     pub search: usize,
-    pub cut_cap: &'a dyn Fn(usize) -> f64,
-    pub fill_cap: &'a dyn Fn(usize) -> f64,
-    pub cell_lo: &'a dyn Fn(usize) -> f64,
+    pub cut_cap: &'a (dyn Fn(usize) -> f64 + Sync),
+    pub fill_cap: &'a (dyn Fn(usize) -> f64 + Sync),
+    pub cell_lo: &'a (dyn Fn(usize) -> f64 + Sync),
     pub switches: SelSwitches,
 }
 
@@ -1019,19 +1019,74 @@ pub fn sel_apply(z0: &[f64], z: &mut [f64], r: &SelRound, decisions: &[(usize, S
     }
 }
 
+/// Every active depression's decision, in `r.active`'s order. Each decision reads only the round's surface and shared input, so the workers (spike, crusader G3-6: one per available core,
+/// depressions handed out one at a time) give the same list as one thread, whatever the count.
+fn sel_decide_all(g: &super::Grid, z: &[f64], outlet: &[bool], r: &SelRound, p: &SelParams, threads: usize) -> Vec<(usize, SelDecision)> {
+    use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+    let workers = threads.max(1).min(r.active.len().max(1));
+    if workers <= 1 {
+        return r.active.iter().map(|&k| (k, sel_decide(g, z, outlet, r, k, p, None))).collect();
+    }
+    let next = AtomicUsize::new(0);
+    let mut out: Vec<Option<SelDecision>> = vec![None; r.active.len()];
+    let parts: Vec<Vec<(usize, SelDecision)>> = std::thread::scope(|s| {
+        let hs: Vec<_> = (0..workers)
+            .map(|_| {
+                s.spawn(|| {
+                    let mut mine = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, Relaxed);
+                        if i >= r.active.len() {
+                            return mine;
+                        }
+                        mine.push((i, sel_decide(g, z, outlet, r, r.active[i], p, None)));
+                    }
+                })
+            })
+            .collect();
+        hs.into_iter().map(|h| h.join().expect("a decision worker")).collect()
+    });
+    for (i, d) in parts.into_iter().flatten() {
+        out[i] = Some(d);
+    }
+    r.active.iter().zip(out).map(|(&k, d)| (k, d.expect("every depression decided"))).collect()
+}
+
 /// [`drain_selective_floors`] on a `Grid`, composed of the hooks above (the unpartitioned run: every decision on the whole grid). No breach record.
 pub fn drain_selective_floors_on(g: &super::Grid, z0: &[f64], outlet: &[bool], p: &SelParams) -> (Vec<f64>, DrainStats) {
+    // one worker a core (`G36_BASE1_SERIAL=1`: one thread, the reference of the example's bit check)
+    let threads = if std::env::var("G36_BASE1_SERIAL").is_ok() { 1 } else { std::thread::available_parallelism().map_or(1, |n| n.get()) };
+    drain_selective_floors_threads(g, z0, outlet, p, threads)
+}
+
+/// [`drain_selective_floors_on`] with the decisions on `threads` workers: the same result for any count (CON-14, CON-30).
+fn drain_selective_floors_threads(g: &super::Grid, z0: &[f64], outlet: &[bool], p: &SelParams, threads: usize) -> (Vec<f64>, DrainStats) {
     let mut z = z0.to_vec();
     let mut st = DrainStats::default();
+    // spike only (crusader, G3-6, the lead 2026-11-26): `G36_BASE1_TIMES=1` prints each round's phases (the fill and depressions, the decisions, the apply)
+    let times = std::env::var("G36_BASE1_TIMES").is_ok();
     for round in 0..p.max_rounds {
+        let t = std::time::Instant::now();
         let r = sel_round(g, &z, outlet, p);
+        let t_round = t.elapsed().as_secs_f64();
         st.rounds = round + 1;
         if r.active.is_empty() {
             st.kept = r.comps.len();
             return (z, st);
         }
         st.depressions += r.active.len();
-        let decisions: Vec<(usize, SelDecision)> = r.active.iter().map(|&k| (k, sel_decide(g, &z, outlet, &r, k, p, None))).collect();
+        let t = std::time::Instant::now();
+        let decisions = sel_decide_all(g, &z, outlet, &r, p, threads);
+        let t_decide = t.elapsed().as_secs_f64();
+        if times {
+            let cells: usize = r.active.iter().map(|&k| r.comps[k].0.len()).sum();
+            let big = r.active.iter().map(|&k| r.comps[k].0.len()).max().unwrap_or(0);
+            eprintln!(
+                "G36 base1 round {}: {} active depressions ({cells} cells, the largest {big}); fill and depressions {t_round:.1} s, decisions {t_decide:.1} s",
+                round + 1,
+                r.active.len()
+            );
+        }
         st.deep = decisions.iter().filter(|(_, d)| matches!(d, SelDecision::Deep { .. })).count();
         let changed = decisions.iter().any(|(_, d)| matches!(d, SelDecision::Fill | SelDecision::Breach { .. }));
         if !changed {
@@ -1053,6 +1108,47 @@ pub fn drain_selective_floors_on(g: &super::Grid, z0: &[f64], outlet: &[bool], p
 #[cfg(test)]
 mod on_grid_tests {
     use super::*;
+
+    // spike only (crusader, G3-6; the lead 2026-11-26, CON-14 and CON-30): base1's decisions on 1, 2 and every core give the same surface and counts, on a relief with many
+    // depressions of every outcome (fills, breaches and deep ones left)
+    #[test]
+    fn the_decisions_give_the_same_drain_on_any_thread_count() {
+        let (w, h) = (160usize, 120usize);
+        let mut z = vec![0.0f64; w * h];
+        let mut s = 0x0bad_5eed_1234_5678u64;
+        for (i, v) in z.iter_mut().enumerate() {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            let (x, y) = ((i % w) as f64, (i / w) as f64);
+            *v = 40.0 + 30.0 * libm::sin(x / 9.0) * libm::cos(y / 7.0) + (s % 2000) as f64 / 100.0;
+        }
+        let outlet: Vec<bool> = (0..w * h).map(|p| p % w == 0 || p % w == w - 1 || z[p] < 14.0).collect();
+        let g = super::super::Grid::new(w, h, 1.0);
+        let keep = |p: usize| p == 60 * w + 80;
+        let cap = |p: usize| 6.0 + (p % 5) as f64;
+        let lo = |_: usize| f64::NEG_INFINITY;
+        let area = |p: usize| g.cell_area(p);
+        let p = SelParams {
+            keep: &keep,
+            area: &area,
+            max_rounds: 12,
+            search: 1 << 14,
+            cut_cap: &cap,
+            fill_cap: &cap,
+            cell_lo: &lo,
+            switches: SelSwitches::default(),
+        };
+        let all = std::thread::available_parallelism().map_or(1, |n| n.get()).max(3);
+        let (z1, s1) = drain_selective_floors_threads(&g, &z, &outlet, &p, 1);
+        assert!(s1.filled > 0 && s1.breached > 0 && s1.depressions > 50, "the relief has fills, breaches and many depressions: {s1:?}");
+        for t in [2, all] {
+            let (zt, st) = drain_selective_floors_threads(&g, &z, &outlet, &p, t);
+            let differ = z1.iter().zip(&zt).filter(|(a, b)| a.to_bits() != b.to_bits()).count();
+            assert_eq!(differ, 0, "{t} threads: {differ} cells differ in bits from 1 thread");
+            assert_eq!(s1, st, "{t} threads: the counts differ from 1 thread");
+        }
+    }
 
     // spike only (crusader #208): the generic drain on a plane grid is today's drain, bit for bit, on random relief with floors, kept cells and caps
     #[test]

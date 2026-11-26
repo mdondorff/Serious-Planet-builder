@@ -58,7 +58,9 @@ pub fn h1_from_owned(
     let (routing, hydro, graph, trunk_seg, trunk_cells) =
         h1_body(grid, z, &filled, routing, outlet, runoff, evap, budget, hydro_twice, Some(&bits));
     drop(bits);
+    planet_generators::bake::hydro::phase("h1: after the trunks");
     let d8 = d8_into(grid, &routing, filled);
+    planet_generators::bake::hydro::phase("h1: after d8");
     H1 { routing, hydro, graph, trunk_seg, trunk_cells, d8 }
 }
 
@@ -103,6 +105,7 @@ fn h1_body(
     };
     // spike (G3-6 step 3 (b)): with a budget every basin is crossed and its open-water loss is zero; `None` adds the same 0.0 a zero vector adds (`hydrology`), without the vector
     let mut hydro = run(if budget.is_some() { None } else { Some(evap) });
+    planet_generators::bake::hydro::phase("h1: after hydrology");
     // spikes #142, reading 16: a kept basin deeper than the budget at its floor is crossed (reading 13), not a lake: no open-water loss there, so q_w = q through it.
     // The basins are the same (the loss enters only the balance); the rerun changes q_w and the balance only.
     // reading 24 (lead, 2026-11-17; owner decision 6 c): no H1 basin is a lake in the prototype, every one is crossed (q_w = q); `budget` only switches the rule on
@@ -117,7 +120,10 @@ fn h1_body(
         }
         // q_w as a running sum along the routing: q less the losses of the basins upstream (each basin's q_in - q_out, entered at its spill cell; zero for a crossed
         // basin). The cascade's q_w inside a basin is no channel discharge (a basin's cells are taken in index order on its flat), so a trunk through a crossed basin reads this one.
-        let mut loss = vec![0f64; hydro.q.len()];
+        // (h) spike G3-6: the old q_w buffer holds the loss, then the new q_w in place (the same values, one buffer instead of three)
+        let mut loss = std::mem::take(&mut hydro.qw);
+        loss.clear();
+        loss.resize(hydro.q.len(), 0.0);
         // entered where the routing leaves the basin (the first cell outside it on the floor's receiver chain), which need not be its spill cell
         for (k, b) in hydro.basins.iter().enumerate() {
             let mut c = b.floor_cell;
@@ -132,9 +138,14 @@ fn h1_body(
                 loss[r as usize] += loss[c as usize];
             }
         }
-        hydro.qw = (0..hydro.q.len()).map(|c| (hydro.q[c] - loss[c]).max(0.0)).collect();
+        for (l, &q) in loss.iter_mut().zip(&hydro.q) {
+            *l = (q - *l).max(0.0);
+        }
+        hydro.qw = loss;
     }
+    planet_generators::bake::hydro::phase("h1: after the budget step");
     let graph = ChannelGraph::from_hydro(grid, &routing, &hydro, z);
+    planet_generators::bake::hydro::phase("h1: after the graph");
     let (mut trunk_seg, mut trunk_cells) = (Vec::new(), Vec::new());
     graph.for_each(|s| {
         let cells = s.cells(grid);
