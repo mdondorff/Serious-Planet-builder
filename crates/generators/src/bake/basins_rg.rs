@@ -757,6 +757,9 @@ pub struct InletFloor {
     pub rises: usize,
     /// Lead #203j: stopped carries whose upstream vertex was itself lifted (two kept floors meeting along a reach), recorded since #203j.
     pub both_lifted: usize,
+    /// Lead #203j (b): carries stopped because a reach ending at the vertex (a tributary at its junction, or a reach into a node) carries a lower bed there; each is a
+    /// residual like any stopped carry.
+    pub junction_stops: usize,
 }
 
 /// Lead #179 and #179a (A3, owner decision 2, 2026-11-21; spike): every L vertex's graph bed on a kept basin's rim (the cells beside its cells, 8-connected) or inside it is
@@ -782,9 +785,12 @@ pub fn floor_inlet_beds(
         }
     }
     let mut out = InletFloor::default();
+    // the floor first, on every L reach (a per-vertex rule, so the order of reaches does not matter); the carries below then see every reach's floored last bed
+    let mut befores = Vec::new();
+    let mut lifts = Vec::new();
     for r in reaches.iter_mut().filter(|r| r.level == Level::L) {
         let n = r.vertices.len();
-        let before = r.attrs.bed.clone();
+        befores.push(r.attrs.bed.clone());
         let mut lifted = vec![false; n];
         for k in 0..n {
             let Some(&fl) = local(r.vertices[k]).and_then(|c| floor.get(&c)) else { continue };
@@ -793,12 +799,29 @@ pub fn floor_inlet_beds(
                 lifted[k] = true;
             }
         }
+        lifts.push(lifted);
+    }
+    // lead #203j (b): the lowest floored last bed of the L reaches ending at each vertex (a tributary at its junction, or the reaches into a node); the carry never lifts a
+    // vertex above it, the carry stops there with a residual instead, so the beds at a junction or node stay shared
+    let mut ends: BTreeMap<u64, (i32, u64)> = BTreeMap::new();
+    for r in reaches.iter().filter(|r| r.level == Level::L) {
+        if let (Some(&v), Some(&b)) = (r.vertices.last(), r.attrs.bed.last()) {
+            let e = ends.entry(v).or_insert((b, r.id));
+            *e = (*e).min((b, r.id));
+        }
+    }
+    for (r, (before, mut lifted)) in reaches.iter_mut().filter(|r| r.level == Level::L).zip(befores.into_iter().zip(lifts)) {
+        let n = r.vertices.len();
         // the carry: upstream of a lifted vertex, a lower bed inside a kept depression takes the one below it; outside the depression it stops with a residual
         for k in (0..n.saturating_sub(1)).rev() {
             if !lifted[k + 1] || r.attrs.bed[k] >= r.attrs.bed[k + 1] {
                 continue;
             }
-            if local(r.vertices[k]).is_some_and(|c| inside.contains_key(&c)) {
+            let joined_lower = ends.get(&r.vertices[k]).is_some_and(|&(b, id)| id != r.id && b < r.attrs.bed[k + 1]);
+            let in_depression = local(r.vertices[k]).is_some_and(|c| inside.contains_key(&c));
+            // counted only where it changes the carry (outside a depression the carry stops anyway)
+            out.junction_stops += usize::from(joined_lower && in_depression);
+            if in_depression && !joined_lower {
                 r.attrs.bed[k] = r.attrs.bed[k + 1];
                 lifted[k] = true;
             } else {

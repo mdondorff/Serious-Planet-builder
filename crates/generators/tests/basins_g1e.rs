@@ -725,3 +725,67 @@ fn where_two_kept_floors_meet_along_a_line_every_rise_left_is_a_recorded_residua
     assert!(fl.both_lifted >= 1, "the line meets a lifted vertex upstream of a higher one: {fl:?}");
     assert_eq!(fl.rises, fl.residuals.len(), "every rise left is a recorded residual: {fl:?} beds {:?}", reaches[0].attrs.bed);
 }
+
+/// An L reach along `cells` with every attribute flat and every bed coded 0 m.
+fn line_reach(id: u64, up: u64, down: u64, cells: Vec<u64>) -> Reach {
+    let k = cells.len();
+    Reach {
+        id,
+        level: Level::L,
+        up,
+        down,
+        vertices: cells,
+        parent: None,
+        owner: Domain::Tile { face: 0, ti: 0, tj: 0 },
+        attrs: Attrs {
+            a_geo: vec![1.0e6; k],
+            a_ext: vec![0.0; k],
+            a_run: vec![1.0e6; k],
+            a_run_no_ext: vec![1.0e6; k],
+            q: vec![0.01; k],
+            q_w: vec![0.01; k],
+            strahler: vec![1; k],
+            bed: vec![0; k],
+        },
+        exceptions: Vec::new(),
+    }
+}
+
+// SPIKE-130 (spike prototype; not a spec requirement)
+#[test]
+fn a_carry_never_lifts_a_line_above_a_tributary_joining_it() {
+    // lead #203j (b): the higher basin's rim touches the lower basin's cells, so the carry from the higher floor lifts a vertex inside the lower depression; a
+    // tributary joining the line there (its last vertex on that cell) is floored only to its cell's floor. The carry stops at the junction with a residual, so the
+    // beds there stay shared and every rise left is recorded
+    let mut z = base(false);
+    cone(&mut z, 15.5, 12.0, 2.5, 6.0);
+    cone(&mut z, 10.0, 12.0, 2.5, 6.0);
+    let (g, p) = run(&z, &[]);
+    let (a, b) = (basin_at(&p, cell(15, 12)), basin_at(&p, cell(10, 12)));
+    assert!(a.id != b.id && a.spill_m < b.spill_m, "two kept basins, the eastern one lower: {} against {}", a.spill_m, b.spill_m);
+    let cells: Vec<u64> = (3..=20).rev().map(|i| cell(i, 12) as u64).collect();
+    let k = cells.len();
+    let a_cells: std::collections::BTreeSet<usize> = p.cells[&a.id].iter().copied().collect();
+    let a_code = (2.0 * a.spill_m).ceil() as i32;
+    // the line alone: the carry lifts a vertex inside the lower depression to the higher floor
+    let mut alone = vec![line_reach(9, 90, 91, cells.clone())];
+    floor_inlet_beds(&g, &p.basins, &p.cells, &mut alone, &|id| Some(id as usize));
+    let j = (0..k - 1).find(|&i| a_cells.contains(&(cells[i] as usize)) && alone[0].attrs.bed[i] > a_code).unwrap_or_else(|| {
+        panic!("the carry lifts a vertex inside the lower depression: beds {:?}, A code {a_code}, B {}", alone[0].attrs.bed, b.spill_m)
+    });
+    let junction = cells[j];
+    let (ji, jj) = (junction as usize % N, junction as usize / N);
+    let mut joined = vec![line_reach(9, 90, 91, cells.clone()), line_reach(10, 92, 93, vec![cell(ji, jj - 1) as u64, junction])];
+    let fj = floor_inlet_beds(&g, &p.basins, &p.cells, &mut joined, &|id| Some(id as usize));
+    assert!(fj.junction_stops >= 1, "the carry stops at the junction: {fj:?}");
+    assert_eq!(
+        joined[0].attrs.bed[j],
+        *joined[1].attrs.bed.last().unwrap(),
+        "the line and the tributary share the bed at the junction: {:?}",
+        joined[0].attrs.bed
+    );
+    assert!(fj.residuals.iter().any(|x| x.0 == 9 && x.1 == j && x.2 > 0.0), "the stopped carry is a residual at the junction: {fj:?}");
+    assert_eq!(fj.rises, fj.residuals.len(), "every rise left is a recorded residual: {fj:?}");
+    // without the tributary the line is carried as before
+    assert_eq!(&joined[0].attrs.bed[j + 1..], &alone[0].attrs.bed[j + 1..], "downstream of the junction nothing changes");
+}

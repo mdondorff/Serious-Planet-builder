@@ -5573,6 +5573,10 @@ fn main() -> Result<(), String> {
                     "RG domain {d} inlet floor (lead #203j): {} stopped carries whose upstream vertex was itself lifted (two kept floors meeting), recorded as residuals",
                     fl.both_lifted
                 );
+                println!(
+                    "RG domain {d} inlet floor (lead #203j b): {} carries stopped at a vertex where a lower reach ends (a tributary's junction or a node), recorded as residuals",
+                    fl.junction_stops
+                );
                 // lead #179b: where each stopped carry's upstream vertex lies (another depression, the window's edge, or open land), listed per window
                 let in_basin: HashSet<usize> = pb.basins.iter().flat_map(|b| pb.cells[&b.id].iter().copied()).collect();
                 let mut classes = [0usize; 3];
