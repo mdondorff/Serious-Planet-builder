@@ -108,6 +108,40 @@ priority = 50
 filter = 'package(=planet-cache) and binary(it) and test(/^class_source_store::/)'
 threads-required = 4
 
+# The planet library's bake tests take 4 slots each (BUILD-070; the lead's order, 2026-11-26; BUILD-045's form, since tier A and B take no test group). Each runs a
+# multi-threaded bake: 31-40 s alone, 94-96 s beside each other in the 816-test set of a render, editor and app change on an idle machine, over 180 s with other
+# work on the machine (#1662, 2026-11-25). BUILD-070's Detail has the before and after. The slow-timeout stays 180 s; no test is skipped, retried or changed.
+# The list is the planet tests of 10 s or more; TEST-156 checks each is a test of crates/app/src.
+[[profile.default.overrides]]
+filter = '''
+package(=planet) and kind(lib) and (
+test(=manifest::tests::the_manifest_carries_the_persistent_known_answers_pinned_in_the_cache_tests)
+or test(=manifest::tests::the_region_bake_fixture_gives_one_hash_at_one_thread_twice_and_at_eight_threads)
+or test(=skeleton::tests::a_bundle_of_a_stored_bake_replays_from_the_store_and_a_bake_beyond_the_memory_limit_without_one_says_so)
+or test(=skeleton::tests::a_guarded_field_over_a_bake_builds_the_tile_and_key_of_the_unguarded_field_with_the_bakes_climate)
+or test(=skeleton::tests::a_tile_job_computes_the_water_of_its_tile_and_the_plan_then_asks_the_field_nothing)
+or test(=streamperf::tests::the_source_is_logged_with_the_store_path_and_cells_and_an_in_memory_bake_is_labelled)
+or test(=tests::a_pre_filled_tile_read_by_the_streamer_equals_the_generated_one_bit_for_bit_and_a_cold_reader_ignores_the_pack)
+or test(=tests::generate_bakes_the_class_source_with_class_source_and_a_verify_without_it_compares_nothing)
+or test(=tests::generate_manifest_writes_the_determinism_manifest)
+or test(=tests::generate_prefills_from_the_render_floor_says_so_when_the_depth_is_below_it_and_refuses_a_floor_above_the_finest_level)
+or test(=tests::generate_prefills_the_coarse_tiles_after_the_bake_or_into_an_existing_bake_and_a_second_run_writes_nothing)
+or test(=tests::generate_writes_the_arid_preview_maps_the_shares_and_the_sites_and_refuses_what_it_excludes)
+or test(=tests::generate_writes_the_climate_preview_maps_the_regions_and_the_numbers_and_refuses_what_it_excludes)
+or test(=tests::generate_writes_the_ice_preview_maps_and_numbers_and_refuses_what_it_excludes)
+or test(=tests::generate_writes_the_lithology_preview_maps_a_cross_section_and_the_numbers_and_refuses_what_it_excludes)
+or test(=tests::generate_writes_the_shelf_preview_maps_and_numbers_and_refuses_what_it_excludes)
+or test(=tests::generate_writes_the_uplift_preview_maps_a_section_and_the_numbers_and_refuses_what_it_excludes)
+or test(=tests::plan_check_and_the_coarse_horizon_open_the_world_the_store_records)
+or test(=tests::the_base_under_a_commit_is_the_bakes_base_bit_for_bit_and_carries_the_commits_base_id)
+or test(=tests::the_erosion_layer_is_drawn_over_a_stored_world_under_the_keys_of_its_bake_and_refuses_anything_else)
+or test(=tests::the_erosion_layer_of_a_commit_of_the_new_chain_is_read_through_its_commit_and_refuses_the_old_channels)
+or test(=tests::the_viewer_opens_the_world_a_store_records_and_the_layer_by_its_manifest)
+or test(=window::site_tests::the_option_wins_then_the_worlds_site_then_a_land_default_found_by_the_shore_walk)
+)
+'''
+threads-required = 4
+
 # The relief-band gate of the class source (TEST-082; `oracle_world_preview::seeds_1_to_5_pass_the_relief_bands_of_spike_93_in_the_gate_form`) computes six
 # whole-planet previews of 1,440 x 720 pixels, 8 threads each, about 117 CPU-seconds (15.5 us a pixel: the class source 8 us, the global stage 4 us; the
 # same per-sample cost on main and on round 3). It is a whole-planet gate that holds every core; WARP, the CPU rasteriser of the Windows runner, shares those cores: beside it the gate took 169 s and starved

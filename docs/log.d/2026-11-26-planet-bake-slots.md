@@ -1,0 +1,1 @@
+- 2026-11-26 planet-bake-slots (lead, after #1662): the planet library's 23 bake tests take 4 nextest slots each, no limit change; the 816-test set 106.5 s to 99.9 s, its slowest bake test 95.6 s to 68.1 s (BUILD-070, TEST-156)
