@@ -403,6 +403,386 @@ fn dam_selftest() {
     let _ = std::fs::remove_file(&path);
 }
 
+// ---- the counting allocator and the process RSS (as `mem_stress`; G3-6's `wave1` mode reads them, the other modes only pay two relaxed atomics an allocation)
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+
+/// Counts the live heap bytes and their peak.
+struct Counting;
+static CUR: AtomicUsize = AtomicUsize::new(0);
+static PEAK: AtomicUsize = AtomicUsize::new(0);
+
+// SAFETY: every call forwards to the system allocator with the same layout; the counters only observe sizes.
+unsafe impl GlobalAlloc for Counting {
+    unsafe fn alloc(&self, l: Layout) -> *mut u8 {
+        // SAFETY: the caller's layout contract is passed through unchanged.
+        let p = unsafe { System.alloc(l) };
+        if !p.is_null() {
+            let c = CUR.fetch_add(l.size(), Relaxed) + l.size();
+            PEAK.fetch_max(c, Relaxed);
+        }
+        p
+    }
+
+    unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
+        // SAFETY: as above.
+        unsafe { System.dealloc(p, l) };
+        CUR.fetch_sub(l.size(), Relaxed);
+    }
+
+    unsafe fn alloc_zeroed(&self, l: Layout) -> *mut u8 {
+        // SAFETY: as above.
+        let p = unsafe { System.alloc_zeroed(l) };
+        if !p.is_null() {
+            let c = CUR.fetch_add(l.size(), Relaxed) + l.size();
+            PEAK.fetch_max(c, Relaxed);
+        }
+        p
+    }
+
+    unsafe fn realloc(&self, p: *mut u8, l: Layout, new: usize) -> *mut u8 {
+        // SAFETY: as above.
+        let q = unsafe { System.realloc(p, l, new) };
+        if !q.is_null() {
+            if new >= l.size() {
+                let c = CUR.fetch_add(new - l.size(), Relaxed) + (new - l.size());
+                PEAK.fetch_max(c, Relaxed);
+            } else {
+                CUR.fetch_sub(l.size() - new, Relaxed);
+            }
+        }
+        q
+    }
+}
+
+#[global_allocator]
+static ALLOC: Counting = Counting;
+
+/// The cell count the phase probe divides by (`wave1`).
+static ACTIVE: AtomicUsize = AtomicUsize::new(1);
+
+/// The phase probe of hydrology and H1 (`G36_K6_PHASES`): the live heap and the peak since the last reset, both absolute, a cell.
+fn print_phase(name: &str) {
+    let a = ACTIVE.load(Relaxed) as f64;
+    println!("PHASE {name}: live {:.1} B a cell, peak so far {:.1} B a cell", CUR.load(Relaxed) as f64 / a, PEAK.load(Relaxed) as f64 / a);
+}
+
+/// Runs `f` and returns its value with the peak heap above the start (bytes).
+fn heap_peak<T>(f: impl FnOnce() -> T) -> (T, usize) {
+    let base = CUR.load(Relaxed);
+    PEAK.store(base, Relaxed);
+    let t = f();
+    (t, PEAK.load(Relaxed).saturating_sub(base))
+}
+
+/// The process's peak working set and working set (MiB).
+fn rss_mib() -> (u64, u64) {
+    let (peak, now, _) = mem_mib();
+    (peak, now)
+}
+
+/// The process's peak working set, working set and peak commit (MiB). Windows trims working sets under memory pressure; the commit is not trimmed (the lead's condition, 2026-11-26).
+#[cfg(windows)]
+fn mem_mib() -> (u64, u64, u64) {
+    #[repr(C)]
+    struct Counters {
+        cb: u32,
+        page_fault_count: u32,
+        peak_working_set: usize,
+        working_set: usize,
+        rest: [usize; 6],
+    }
+    extern "system" {
+        fn GetCurrentProcess() -> isize;
+        fn K32GetProcessMemoryInfo(process: isize, counters: *mut Counters, cb: u32) -> i32;
+    }
+    let mut c =
+        Counters { cb: core::mem::size_of::<Counters>() as u32, page_fault_count: 0, peak_working_set: 0, working_set: 0, rest: [0; 6] };
+    // SAFETY: `c` is a writable PROCESS_MEMORY_COUNTERS of the size it declares; the pseudo handle needs no closing.
+    let ok = unsafe { K32GetProcessMemoryInfo(GetCurrentProcess(), &mut c, c.cb) };
+    if ok == 0 {
+        return (0, 0, 0);
+    }
+    // rest: the four pool quotas, the pagefile usage (the commit), the peak pagefile usage (the peak commit)
+    ((c.peak_working_set >> 20) as u64, (c.working_set >> 20) as u64, (c.rest[5] >> 20) as u64)
+}
+
+#[cfg(not(windows))]
+fn mem_mib() -> (u64, u64, u64) {
+    let s = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+    let kb = |k: &str| s.lines().find(|l| l.starts_with(k)).and_then(|l| l.split_whitespace().nth(1)?.parse::<u64>().ok()).unwrap_or(0);
+    (kb("VmHWM:") >> 10, kb("VmRSS:") >> 10, kb("VmPeak:") >> 10)
+}
+
+/// The machine's free physical memory (MiB).
+#[cfg(windows)]
+fn free_phys_mib() -> u64 {
+    #[repr(C)]
+    struct Status {
+        length: u32,
+        load: u32,
+        total_phys: u64,
+        avail_phys: u64,
+        rest: [u64; 5],
+    }
+    extern "system" {
+        fn GlobalMemoryStatusEx(status: *mut Status) -> i32;
+    }
+    let mut st = Status { length: core::mem::size_of::<Status>() as u32, load: 0, total_phys: 0, avail_phys: 0, rest: [0; 5] };
+    // SAFETY: `st` is a writable MEMORYSTATUSEX whose length field says its size.
+    let ok = unsafe { GlobalMemoryStatusEx(&mut st) };
+    if ok == 0 {
+        return 0;
+    }
+    st.avail_phys >> 20
+}
+
+#[cfg(not(windows))]
+fn free_phys_mib() -> u64 {
+    let s = std::fs::read_to_string("/proc/meminfo").unwrap_or_default();
+    s.lines().find(|l| l.starts_with("MemAvailable:")).and_then(|l| l.split_whitespace().nth(1)?.parse::<u64>().ok()).unwrap_or(0) >> 10
+}
+
+/// The window's guard (the lead's conditions, 2026-11-26): every 2 s, stop the process when its peak working set or peak commit passes `stop_mib`, or the machine's free
+/// physical memory falls under `floor_mib`, so the machine never pages.
+fn start_guard(stop_mib: u64, floor_mib: u64) {
+    std::thread::spawn(move || loop {
+        let (ws, _, commit) = mem_mib();
+        let free = free_phys_mib();
+        if ws.max(commit) > stop_mib || free < floor_mib {
+            println!("G36 STOP: peak working set {ws} MiB, peak commit {commit} MiB, free physical {free} MiB (the stop is {stop_mib} MiB of the process or under {floor_mib} MiB free)");
+            std::process::exit(3);
+        }
+        std::thread::sleep(std::time::Duration::from_secs(2));
+    });
+}
+
+/// G3-6's full count (the lead's order, 2026-11-26): wave 1 as a build runs it, on the landmass in this process. base1 (`SELECTIVE_50`'s floors), K5 (4 rounds of 5 steps on GEN-143's route,
+/// the in-flight cap at 6 % of the land), then K6 (`h1_from_owned`, levers (a)-(g)) with the orographic runoff, each stage's input freed when it is done. Prints per stage the wall time,
+/// the peak heap and the process's peak RSS so far, then the gate line against 10.8 GB.
+#[allow(clippy::too_many_arguments)]
+fn wave1(grid: &Grid, z0: Vec<f64>, outlet: &[bool], inputs: &BakeInputs, n: usize, seed: u64, fixed: u64, t0: Instant) {
+    use planet_generators::bake::drain::{drain_selective_floors_on, SelParams, SelSwitches};
+    use planet_generators::bake::partition::{partitioned_route_weighted, PartCache};
+    let nn = n * n;
+    let active = grid.len();
+    let land = outlet.iter().filter(|&&o| !o).count();
+    let gib = |b: f64| b / 1073741824.0;
+    let row = |name: &str, t: Instant, pk: usize| {
+        let (hwm, now, commit) = mem_mib();
+        println!("MARK {name}: working set {now} MiB now, peak {hwm} MiB, peak commit {commit} MiB, free physical {} MiB", free_phys_mib());
+        println!(
+            "WAVE1 {name}: {:.1} s; peak heap {:.1} B a cell ({:.2} GiB); live heap after {:.1} B a cell; process peak RSS so far {hwm} MiB ({:.2} GiB), now {now} MiB; {:.0} s since start",
+            t.elapsed().as_secs_f64(),
+            pk as f64 / active as f64,
+            gib(pk as f64),
+            CUR.load(Relaxed) as f64 / active as f64,
+            hwm as f64 / 1024.0,
+            t0.elapsed().as_secs_f64()
+        );
+    };
+    println!("WAVE1 the grid: {active} cells ({land} land), the fixed RSS {fixed} MiB");
+    println!(
+        "WAVE1 levers: the compact grid (GEN-147), K5 on GEN-143's route with the in-flight cap at 6 % of the land, (a)-(h), base1's decisions in parallel; commit {}",
+        std::env::var("G36_COMMIT").unwrap_or_else(|_| "not given (G36_COMMIT)".into())
+    );
+    ACTIVE.store(active, Relaxed);
+    if std::env::var("G36_K6_PHASES").is_ok() {
+        let _ = planet_generators::bake::hydro::PHASE_PROBE.set(print_phase);
+    }
+    let mib = |b: usize| b as f64 / 1048576.0;
+    let surface = active * 9;
+    println!(
+        "WAVE1 live heap at the start: {:.0} MiB (z and the outlets {:.0} MiB; the grid, the inputs and the rest {:.0} MiB)",
+        mib(CUR.load(Relaxed)),
+        mib(surface),
+        mib(CUR.load(Relaxed).saturating_sub(surface))
+    );
+    // base1
+    let keep = |_: usize| false;
+    let area = |p: usize| grid.cell_area(p);
+    let cap = |_: usize| 50.0;
+    let lo = |_: usize| f64::NEG_INFINITY;
+    let sp = SelParams {
+        keep: &keep,
+        area: &area,
+        max_rounds: 12,
+        search: 1 << 20,
+        cut_cap: &cap,
+        fill_cap: &cap,
+        cell_lo: &lo,
+        switches: SelSwitches::default(),
+    };
+    let t = Instant::now();
+    let ((mut z, st), pb) = heap_peak(|| drain_selective_floors_on(grid, &z0, outlet, &sp));
+    drop(z0);
+    row("base1 (SELECTIVE_50 floors)", t, pb);
+    println!("WAVE1 base1 stats: {st:?}");
+    let mut h = 0xcbf2_9ce4_8422_2325u64;
+    for v in &z {
+        h = (h ^ v.to_bits()).wrapping_mul(0x100_0000_01b3);
+    }
+    println!("WAVE1 base1 surface hash {h:016x}");
+    if std::env::var("G36_BASE1_ONLY").is_ok() {
+        return;
+    }
+    // K5
+    let cp = CarveParams {
+        steps: 20,
+        reroute_every: 5,
+        round_rules: RoundRules::ROUND,
+        cell_metric: true,
+        window_cut: true,
+        ..CarveParams::default()
+    };
+    let capc = (land * 6 / 100).max(1);
+    let tile = 384;
+    let t = Instant::now();
+    let (_, pk) = heap_peak(|| {
+        solve_rounds_memo(
+            grid,
+            &mut z,
+            outlet,
+            &cp,
+            4,
+            &16usize,
+            seed,
+            &Drivers::default(),
+            tile,
+            &mut RoundCache::without_memory().with_inflight_cap(capc),
+        )
+    });
+    row(&format!("K5 (4 rounds, tile {tile}, cap {capc} cells)"), t, pk);
+    println!("HASH z after K5 (the sediment rounds) {:016x}", fnv(z.iter().map(|v| v.to_bits())));
+    // K6: the orographic climate, the weighted route (the weights freed after it), then H1 on the owned route
+    if std::env::var("G36_K6_PHASES").is_ok() {
+        // K6's phases on their own (the same inputs): the route's output held, then hydrology alone (initiation bits, the area freed)
+        use planet_generators::bake::hydro::{hydrology_initiated, initiation_bits, HydroParams};
+        let w1 = vec![1.0f32; active];
+        let ro = vec![1.0e-8f32; active];
+        let pr = partitioned_route_weighted(
+            grid,
+            &z,
+            outlet,
+            cp.epsilon,
+            seed,
+            tile,
+            RoundRules::ROUND,
+            Some(&w1),
+            &mut PartCache::without_memory(),
+        );
+        drop(w1);
+        let (mut r, f) = (pr.routing, pr.filled);
+        let bits = initiation_bits(&r, &HydroParams::default());
+        r.area = Vec::new();
+        let held = CUR.load(Relaxed);
+        let (hy, ph) = heap_peak(|| hydrology_initiated(grid, &z, &f, &r, outlet, Some(&ro), None, &bits, &HydroParams::default()));
+        let kept = CUR.load(Relaxed) - held;
+        println!(
+            "WAVE1 K6 phases: live heap before hydrology (the surface, the routing without area, filled, bits, runoff) {:.1} B a cell; hydrology's peak above that {ph_b:.1} B, its result {:.1} B ({} segments, {} basins)",
+            held as f64 / active as f64,
+            kept as f64 / active as f64,
+            hy.segments.len(),
+            hy.basins.len(),
+            ph_b = ph as f64 / active as f64
+        );
+        drop((hy, r, f, bits, ro));
+    }
+    let t = Instant::now();
+    let b6 = CUR.load(Relaxed);
+    let route_pk = AtomicUsize::new(0);
+    let (h1, p6) = heap_peak(|| {
+        let o = inputs.orography();
+        let mut weight = vec![1.0f32; active];
+        let mut runoff = vec![0.0f32; active];
+        for p in 0..active {
+            if z[p] <= 0.0 {
+                continue;
+            }
+            let g = grid.cube_id_of(p);
+            let spec = FaceSpec { face: Face((g / nn) as u8), cells: n, radius_m: R, sea_level: 0.0, seed, halo: 0 };
+            let d: Vec3 = spec.halo_direction(((g % nn) % n) as i64, ((g % nn) / n) as i64);
+            let (pm, tc) = (o.precipitation_mm(d), o.temperature_c(d));
+            let ro = runoff_mm(pm, tc);
+            weight[p] = discharge_weight(ro) as f32;
+            runoff[p] = (ro / 1000.0 / 31_557_600.0) as f32;
+        }
+        let pr = partitioned_route_weighted(
+            grid,
+            &z,
+            outlet,
+            cp.epsilon,
+            seed,
+            tile,
+            RoundRules::ROUND,
+            Some(&weight),
+            &mut PartCache::without_memory(),
+        );
+        drop(weight);
+        // the split: the route's peak (with the climate fields), then the peak of what follows from here
+        route_pk.store(PEAK.load(Relaxed).saturating_sub(b6), Relaxed);
+        PEAK.store(CUR.load(Relaxed), Relaxed);
+        let (r, f) = (pr.routing, pr.filled);
+        // (d) no evaporation field, (f) the filled buffer becomes d8
+        planet_cache::rg_h1::h1_from_owned(grid, &z, f, r, outlet, &runoff, &[], Some(&[]), false)
+    });
+    let rp = route_pk.load(Relaxed);
+    println!(
+        "WAVE1 K6 split: the route {:.1} B a cell, h1_from_owned {:.1} B a cell (both above the held surface)",
+        rp as f64 / active as f64,
+        p6 as f64 / active as f64
+    );
+    row("K6 (climate, weighted route, h1_from_owned)", t, p6.max(rp));
+    let trunks = h1.trunk_cells.len();
+    assert!(trunks > 0, "K6 found no trunk");
+    let hy = &h1.hydro;
+    println!("HASH H1 label {:016x}", fnv(hy.label.iter().map(|&v| u64::from(v))));
+    println!("HASH H1 channel {:016x}", fnv(hy.channel.iter().map(|&v| u64::from(v))));
+    println!(
+        "HASH H1 segments {:016x} ({} segments)",
+        fnv(hy.segments.iter().flat_map(|g| [
+            g.id,
+            u64::from(g.up),
+            u64::from(g.down),
+            u64::from(g.cells),
+            g.q_up.to_bits(),
+            g.q_down.to_bits(),
+            u64::from(g.downstream)
+        ])),
+        hy.segments.len()
+    );
+    println!(
+        "HASH H1 lakes (basins) {:016x} ({} basins)",
+        fnv(hy.basins.iter().flat_map(|b| {
+            let class = format!("{:?}", b.class).bytes().fold(0u64, |h, c| (h ^ u64::from(c)).wrapping_mul(0x100_0000_01b3));
+            [b.id, u64::from(b.floor_cell), u64::from(b.spill_cell), u64::from(b.cells), b.q_in.to_bits(), class, u64::from(b.overflows)]
+        })),
+        hy.basins.len()
+    );
+    drop(h1);
+    let (hwm, _, commit) = mem_mib();
+    let gb = hwm as f64 * 1048576.0 / 1e9;
+    let commit_gb = commit as f64 * 1048576.0 / 1e9;
+    let over_ws = commit as f64 > hwm as f64 * 1.1;
+    println!(
+        "G3-6 wave1 peak commit {commit} MiB = {commit_gb:.2} GB against the peak working set {hwm} MiB: {}",
+        if over_ws { "MORE THAN 10 % ABOVE: not a clean pass until explained" } else { "within 10 %" }
+    );
+    let verdict = if gb > 10.8 {
+        "over"
+    } else if gb > 10.26 {
+        "within 5 %"
+    } else {
+        "pass"
+    };
+    println!(
+        "G3-6 wave1 full count: {land} land cells ({active} with the ring), peak RSS {hwm} MiB = {gb:.2} GB ({:.2} GiB; the fixed part {fixed} MiB; {:.1} B a cell above it), the gate 10.8 GB: {verdict}; {trunks} trunk cells; {:.0} s",
+        hwm as f64 / 1024.0,
+        (hwm - fixed) as f64 * 1048576.0 / active as f64,
+        t0.elapsed().as_secs_f64()
+    );
+}
+
 fn main() {
     let a: Vec<String> = std::env::args().collect();
     if a.get(3).is_some_and(|m| m == "damtest") {
@@ -416,6 +796,20 @@ fn main() {
     let t0 = Instant::now();
     cpu_phase("start");
     let seed = 14u64;
+    // the fixed RSS for `wave1` (binary, runtime, the workers' stacks once started), before the base is read
+    let fixed = if a.get(3).is_some_and(|m| m == "wave1") {
+        let free = free_phys_mib();
+        println!("WAVE1 free physical memory at the start: {free} MiB");
+        if std::env::var("G36_WINDOW").is_ok() {
+            assert!(free >= 16 * 1024, "the window needs 16 GB of free physical memory at the start: {free} MiB");
+            start_guard(10_260_000_000 / 1_048_576, 4 * 1024);
+            println!("WAVE1 the guard is on: stop above 9,784 MiB (10.26 GB) of peak working set or commit, or under 4,096 MiB free");
+        }
+        let _: usize = (0..16usize).map(|i| std::thread::spawn(move || i).join().unwrap()).sum();
+        rss_mib().0
+    } else {
+        0
+    };
 
     // ---- the coarse landmass and its ring, from the 3,072-cell base cache
     let bytes = std::fs::read(format!("target/landmass_base_{COARSE}.f32")).expect("run landmass_region first (it makes the base cache)");
@@ -590,6 +984,11 @@ fn main() {
         "memory after the landmass is built (heights f64, outlets): peak {peak:.0} MiB, now {now:.0} MiB; {:.1} s",
         t0.elapsed().as_secs_f64()
     );
+
+    if a.get(3).is_some_and(|m| m == "wave1") {
+        wave1(&grid, z, &outlet, &inputs, n, seed, fixed, t0);
+        return;
+    }
 
     // ---- the rounds, resident
     let mut z_start =

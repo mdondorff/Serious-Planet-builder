@@ -294,10 +294,10 @@ impl Stage for K6 {
         let g = cx.g;
         let eps = k5_params(1).epsilon;
         let weight = vec![1.0f32; g.len()];
-        let routing = match cx.regions {
-            None => route_rules(g, &st.z, cx.outlet, eps, self.seed, 0.0, Some(&weight), RoundRules::ROUND),
+        let (routing, filled) = match cx.regions {
+            None => (route_rules(g, &st.z, cx.outlet, eps, self.seed, 0.0, Some(&weight), RoundRules::ROUND), None),
             Some(rg) => {
-                partitioned_route_weighted(
+                let pr = partitioned_route_weighted(
                     g,
                     &st.z,
                     cx.outlet,
@@ -307,17 +307,28 @@ impl Stage for K6 {
                     RoundRules::ROUND,
                     Some(&weight),
                     &mut PartCache::without_memory(),
-                )
-                .routing
+                );
+                // G3-6 step 3 (a): the route's filled surface is the canonical flood bit for bit, so the partitioned K6 takes it (no second flood)
+                (pr.routing, Some(pr.filled))
             }
         };
-        let filled = priority_flood_with(g, &st.z, cx.outlet, eps, true);
+        drop(weight);
         let runoff = vec![self.runoff; g.len()];
-        let evap = vec![0.0f32; g.len()];
-        let h1 = planet_cache::rg_h1::h1_from(g, &st.z, &filled, routing, cx.outlet, &runoff, &evap, Some(&[]), false);
+        // the reference is today's form (a second flood, a zero evaporation field, a new d8 field); the partitioned run takes the route's filled surface (a), no evaporation
+        // field (d) and the filled buffer as d8 (f): the layouts' bit-identity checks them against it
+        // the area before K6 frees it ((g): `h1_from_owned` keeps the initiation as bits and drops the area)
+        let area: Vec<u64> = routing.area.iter().map(|v| v.to_bits()).collect();
+        let h1 = match filled {
+            None => {
+                let filled = priority_flood_with(g, &st.z, cx.outlet, eps, true);
+                let evap = vec![0.0f32; g.len()];
+                planet_cache::rg_h1::h1_from(g, &st.z, &filled, routing, cx.outlet, &runoff, &evap, Some(&[]), false)
+            }
+            Some(filled) => planet_cache::rg_h1::h1_from_owned(g, &st.z, filled, routing, cx.outlet, &runoff, &[], Some(&[]), false),
+        };
         st.fields
             .insert("receiver", h1.routing.receiver.iter().map(|&v| if v == NONE { u64::MAX } else { g.global_id(v as usize) }).collect());
-        st.fields.insert("area", h1.routing.area.iter().map(|v| v.to_bits()).collect());
+        st.fields.insert("area", area);
         st.fields.insert("d8", h1.d8.iter().map(|v| v.to_bits()).collect());
         st.fields.insert("qw", h1.hydro.qw.iter().map(|v| v.to_bits()).collect());
         for (k, cells) in h1.trunk_cells.iter().enumerate() {

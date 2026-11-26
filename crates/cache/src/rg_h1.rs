@@ -2,7 +2,7 @@
 //! the chain's code. The switch `HYDRO_TWICE` is a per-call parameter (R16). rg_chain calls this with its switch, so its bits do not change.
 
 use planet_generators::bake::channel_graph::{q_value, ChannelGraph};
-use planet_generators::bake::hydro::{hydrology, Hydro, HydroParams};
+use planet_generators::bake::hydro::{hydrology, hydrology_initiated, initiation_bits, Hydro, HydroParams};
 use planet_generators::bake::route::{Routing, NONE};
 use planet_generators::bake::Grid;
 
@@ -32,19 +32,80 @@ pub fn h1_from(
     budget: Option<&[f64]>,
     hydro_twice: bool,
 ) -> H1 {
+    let (routing, hydro, graph, trunk_seg, trunk_cells) =
+        h1_body(grid, z, filled, routing, outlet, runoff, evap, budget, hydro_twice, None);
+    let d8 = d8_into(grid, &routing, vec![0.0; grid.len()]);
+    H1 { routing, hydro, graph, trunk_seg, trunk_cells, d8 }
+}
+
+/// [`h1_from`] taking the filled surface by value (spike, G3-6 step 3 (f)): after the last hydrology call its buffer holds the D8 area, the same values in the same order, so no
+/// new field is allocated. With a budget and no `hydro_twice`, `evap` may be empty ((d): only the rerun reads it).
+#[allow(clippy::too_many_arguments)]
+pub fn h1_from_owned(
+    grid: &Grid,
+    z: &[f64],
+    filled: Vec<f64>,
+    mut routing: Routing,
+    outlet: &[bool],
+    runoff: &[f32],
+    evap: &[f32],
+    budget: Option<&[f64]>,
+    hydro_twice: bool,
+) -> H1 {
+    // (g): the MFD area is read only by hydrology's channel initiation; keep that test as a bitset and free the area (`H1.routing.area` is then empty)
+    let bits = initiation_bits(&routing, &HydroParams::default());
+    routing.area = Vec::new();
+    let (routing, hydro, graph, trunk_seg, trunk_cells) =
+        h1_body(grid, z, &filled, routing, outlet, runoff, evap, budget, hydro_twice, Some(&bits));
+    drop(bits);
+    planet_generators::bake::hydro::phase("h1: after the trunks");
+    let d8 = d8_into(grid, &routing, filled);
+    planet_generators::bake::hydro::phase("h1: after d8");
+    H1 { routing, hydro, graph, trunk_seg, trunk_cells, d8 }
+}
+
+/// The D8 drainage area (true area, unweighted) of each cell along the receivers, written into `buf` (its old values are overwritten).
+fn d8_into(grid: &Grid, routing: &Routing, mut buf: Vec<f64>) -> Vec<f64> {
+    assert_eq!(buf.len(), grid.len(), "one value per cell");
+    for (p, v) in buf.iter_mut().enumerate() {
+        *v = grid.cell_area(p);
+    }
+    for &c in routing.order.iter().rev() {
+        let r = routing.receiver[c as usize];
+        if r != NONE {
+            buf[r as usize] += buf[c as usize];
+        }
+    }
+    buf
+}
+
+type Body = (Routing, Hydro, ChannelGraph, Vec<usize>, Vec<Vec<u32>>);
+
+#[allow(clippy::too_many_arguments)]
+fn h1_body(
+    grid: &Grid,
+    z: &[f64],
+    filled: &[f64],
+    routing: Routing,
+    outlet: &[bool],
+    runoff: &[f32],
+    evap: &[f32],
+    budget: Option<&[f64]>,
+    hydro_twice: bool,
+    initiated: Option<&[u64]>,
+) -> Body {
+    // (d): the evaporation is read only without a budget or by the rerun
+    assert!((budget.is_some() && !hydro_twice) || evap.len() == grid.len(), "one evaporation per cell where it is read");
     // lead #163 (B3, result-preserving): with `budget` every basin is crossed (reading 24) and the second call only zeroed the open-water loss of the basins' cells,
     // the one input `hydrology` reads it through (each basin's e_open); one call with a zero evaporation gives the same Hydro
-    let zeros: Vec<f32> = if budget.is_some() { vec![0.0; evap.len()] } else { Vec::new() };
-    let mut hydro = hydrology(
-        grid,
-        z,
-        filled,
-        &routing,
-        outlet,
-        Some(runoff),
-        Some(if budget.is_some() { &zeros } else { evap }),
-        &HydroParams::default(),
-    );
+    // (g): with the initiation bits the area is not read (it may be empty)
+    let run = |ev: Option<&[f32]>| match initiated {
+        Some(b) => hydrology_initiated(grid, z, filled, &routing, outlet, Some(runoff), ev, b, &HydroParams::default()),
+        None => hydrology(grid, z, filled, &routing, outlet, Some(runoff), ev, &HydroParams::default()),
+    };
+    // spike (G3-6 step 3 (b)): with a budget every basin is crossed and its open-water loss is zero; `None` adds the same 0.0 a zero vector adds (`hydrology`), without the vector
+    let mut hydro = run(if budget.is_some() { None } else { Some(evap) });
+    planet_generators::bake::hydro::phase("h1: after hydrology");
     // spikes #142, reading 16: a kept basin deeper than the budget at its floor is crossed (reading 13), not a lake: no open-water loss there, so q_w = q through it.
     // The basins are the same (the loss enters only the balance); the rerun changes q_w and the balance only.
     // reading 24 (lead, 2026-11-17; owner decision 6 c): no H1 basin is a lake in the prototype, every one is crossed (q_w = q); `budget` only switches the rule on
@@ -53,13 +114,16 @@ pub fn h1_from(
         if hydro_twice && crossed.iter().any(|&x| x) {
             let ev2: Vec<f32> =
                 (0..evap.len()).map(|c| if hydro.label[c] != NONE && crossed[hydro.label[c] as usize] { 0.0 } else { evap[c] }).collect();
-            let again = hydrology(grid, z, filled, &routing, outlet, Some(runoff), Some(&ev2), &HydroParams::default());
+            let again = run(Some(&ev2));
             assert_eq!(again.basins.len(), hydro.basins.len(), "the loss does not change the basins");
             hydro = again;
         }
         // q_w as a running sum along the routing: q less the losses of the basins upstream (each basin's q_in - q_out, entered at its spill cell; zero for a crossed
         // basin). The cascade's q_w inside a basin is no channel discharge (a basin's cells are taken in index order on its flat), so a trunk through a crossed basin reads this one.
-        let mut loss = vec![0f64; hydro.q.len()];
+        // (h) spike G3-6: the old q_w buffer holds the loss, then the new q_w in place (the same values, one buffer instead of three)
+        let mut loss = std::mem::take(&mut hydro.qw);
+        loss.clear();
+        loss.resize(hydro.q.len(), 0.0);
         // entered where the routing leaves the basin (the first cell outside it on the floor's receiver chain), which need not be its spill cell
         for (k, b) in hydro.basins.iter().enumerate() {
             let mut c = b.floor_cell;
@@ -74,9 +138,14 @@ pub fn h1_from(
                 loss[r as usize] += loss[c as usize];
             }
         }
-        hydro.qw = (0..hydro.q.len()).map(|c| (hydro.q[c] - loss[c]).max(0.0)).collect();
+        for (l, &q) in loss.iter_mut().zip(&hydro.q) {
+            *l = (q - *l).max(0.0);
+        }
+        hydro.qw = loss;
     }
+    planet_generators::bake::hydro::phase("h1: after the budget step");
     let graph = ChannelGraph::from_hydro(grid, &routing, &hydro, z);
+    planet_generators::bake::hydro::phase("h1: after the graph");
     let (mut trunk_seg, mut trunk_cells) = (Vec::new(), Vec::new());
     graph.for_each(|s| {
         let cells = s.cells(grid);
@@ -86,12 +155,5 @@ pub fn h1_from(
             trunk_cells.push(cells);
         }
     });
-    let mut d8: Vec<f64> = (0..grid.len()).map(|p| grid.cell_area(p)).collect();
-    for &c in routing.order.iter().rev() {
-        let r = routing.receiver[c as usize];
-        if r != NONE {
-            d8[r as usize] += d8[c as usize];
-        }
-    }
-    H1 { routing, hydro, graph, trunk_seg, trunk_cells, d8 }
+    (routing, hydro, graph, trunk_seg, trunk_cells)
 }
