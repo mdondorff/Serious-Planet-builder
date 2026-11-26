@@ -476,8 +476,14 @@ fn heap_peak<T>(f: impl FnOnce() -> T) -> (T, usize) {
 }
 
 /// The process's peak working set and working set (MiB).
-#[cfg(windows)]
 fn rss_mib() -> (u64, u64) {
+    let (peak, now, _) = mem_mib();
+    (peak, now)
+}
+
+/// The process's peak working set, working set and peak commit (MiB). Windows trims working sets under memory pressure; the commit is not trimmed (the lead's condition, 2026-11-26).
+#[cfg(windows)]
+fn mem_mib() -> (u64, u64, u64) {
     #[repr(C)]
     struct Counters {
         cb: u32,
@@ -495,17 +501,62 @@ fn rss_mib() -> (u64, u64) {
     // SAFETY: `c` is a writable PROCESS_MEMORY_COUNTERS of the size it declares; the pseudo handle needs no closing.
     let ok = unsafe { K32GetProcessMemoryInfo(GetCurrentProcess(), &mut c, c.cb) };
     if ok == 0 {
-        return (0, 0);
+        return (0, 0, 0);
     }
-    ((c.peak_working_set >> 20) as u64, (c.working_set >> 20) as u64)
+    // rest: the four pool quotas, the pagefile usage (the commit), the peak pagefile usage (the peak commit)
+    ((c.peak_working_set >> 20) as u64, (c.working_set >> 20) as u64, (c.rest[5] >> 20) as u64)
 }
 
 #[cfg(not(windows))]
-fn rss_mib() -> (u64, u64) {
+fn mem_mib() -> (u64, u64, u64) {
     let s = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
     let kb = |k: &str| s.lines().find(|l| l.starts_with(k)).and_then(|l| l.split_whitespace().nth(1)?.parse::<u64>().ok()).unwrap_or(0);
-    (kb("VmHWM:") >> 10, kb("VmRSS:") >> 10)
+    (kb("VmHWM:") >> 10, kb("VmRSS:") >> 10, kb("VmPeak:") >> 10)
 }
+
+/// The machine's free physical memory (MiB).
+#[cfg(windows)]
+fn free_phys_mib() -> u64 {
+    #[repr(C)]
+    struct Status {
+        length: u32,
+        load: u32,
+        total_phys: u64,
+        avail_phys: u64,
+        rest: [u64; 5],
+    }
+    extern "system" {
+        fn GlobalMemoryStatusEx(status: *mut Status) -> i32;
+    }
+    let mut st = Status { length: core::mem::size_of::<Status>() as u32, load: 0, total_phys: 0, avail_phys: 0, rest: [0; 5] };
+    // SAFETY: `st` is a writable MEMORYSTATUSEX whose length field says its size.
+    let ok = unsafe { GlobalMemoryStatusEx(&mut st) };
+    if ok == 0 {
+        return 0;
+    }
+    st.avail_phys >> 20
+}
+
+#[cfg(not(windows))]
+fn free_phys_mib() -> u64 {
+    let s = std::fs::read_to_string("/proc/meminfo").unwrap_or_default();
+    s.lines().find(|l| l.starts_with("MemAvailable:")).and_then(|l| l.split_whitespace().nth(1)?.parse::<u64>().ok()).unwrap_or(0) >> 10
+}
+
+/// The window's guard (the lead's conditions, 2026-11-26): every 2 s, stop the process when its peak working set or peak commit passes `stop_mib`, or the machine's free
+/// physical memory falls under `floor_mib`, so the machine never pages.
+fn start_guard(stop_mib: u64, floor_mib: u64) {
+    std::thread::spawn(move || loop {
+        let (ws, _, commit) = mem_mib();
+        let free = free_phys_mib();
+        if ws.max(commit) > stop_mib || free < floor_mib {
+            println!("G36 STOP: peak working set {ws} MiB, peak commit {commit} MiB, free physical {free} MiB (the stop is {stop_mib} MiB of the process or under {floor_mib} MiB free)");
+            std::process::exit(3);
+        }
+        std::thread::sleep(std::time::Duration::from_secs(2));
+    });
+}
+
 
 /// G3-6's full count (the lead's order, 2026-11-26): wave 1 as a build runs it, on the landmass in this process. base1 (`SELECTIVE_50`'s floors), K5 (4 rounds of 5 steps on GEN-143's route,
 /// the in-flight cap at 6 % of the land), then K6 (`h1_from_owned`, levers (a)-(g)) with the orographic runoff, each stage's input freed when it is done. Prints per stage the wall time,
@@ -519,7 +570,8 @@ fn wave1(grid: &Grid, z0: Vec<f64>, outlet: &[bool], inputs: &BakeInputs, n: usi
     let land = outlet.iter().filter(|&&o| !o).count();
     let gib = |b: f64| b / 1073741824.0;
     let row = |name: &str, t: Instant, pk: usize| {
-        let (hwm, now) = rss_mib();
+        let (hwm, now, commit) = mem_mib();
+        println!("MARK {name}: working set {now} MiB now, peak {hwm} MiB, peak commit {commit} MiB, free physical {} MiB", free_phys_mib());
         println!(
             "WAVE1 {name}: {:.1} s; peak heap {:.1} B a cell ({:.2} GiB); live heap after {:.1} B a cell; process peak RSS so far {hwm} MiB ({:.2} GiB), now {now} MiB; {:.0} s since start",
             t.elapsed().as_secs_f64(),
@@ -531,6 +583,10 @@ fn wave1(grid: &Grid, z0: Vec<f64>, outlet: &[bool], inputs: &BakeInputs, n: usi
         );
     };
     println!("WAVE1 the grid: {active} cells ({land} land), the fixed RSS {fixed} MiB");
+    println!(
+        "WAVE1 levers: the compact grid (GEN-147), K5 on GEN-143's route with the in-flight cap at 6 % of the land, (a)-(h), base1's decisions in parallel; commit {}",
+        std::env::var("G36_COMMIT").unwrap_or_else(|_| "not given (G36_COMMIT)".into())
+    );
     ACTIVE.store(active, Relaxed);
     if std::env::var("G36_K6_PHASES").is_ok() {
         let _ = planet_generators::bake::hydro::PHASE_PROBE.set(print_phase);
@@ -598,6 +654,7 @@ fn wave1(grid: &Grid, z0: Vec<f64>, outlet: &[bool], inputs: &BakeInputs, n: usi
         )
     });
     row(&format!("K5 (4 rounds, tile {tile}, cap {capc} cells)"), t, pk);
+    println!("HASH z after K5 (the sediment rounds) {:016x}", fnv(z.iter().map(|v| v.to_bits())));
     // K6: the orographic climate, the weighted route (the weights freed after it), then H1 on the owned route
     if std::env::var("G36_K6_PHASES").is_ok() {
         // K6's phases on their own (the same inputs): the route's output held, then hydrology alone (initiation bits, the area freed)
@@ -679,9 +736,39 @@ fn wave1(grid: &Grid, z0: Vec<f64>, outlet: &[bool], inputs: &BakeInputs, n: usi
     row("K6 (climate, weighted route, h1_from_owned)", t, p6.max(rp));
     let trunks = h1.trunk_cells.len();
     assert!(trunks > 0, "K6 found no trunk");
+    let hy = &h1.hydro;
+    println!("HASH H1 label {:016x}", fnv(hy.label.iter().map(|&v| u64::from(v))));
+    println!("HASH H1 channel {:016x}", fnv(hy.channel.iter().map(|&v| u64::from(v))));
+    println!(
+        "HASH H1 segments {:016x} ({} segments)",
+        fnv(hy.segments.iter().flat_map(|g| [
+            g.id,
+            u64::from(g.up),
+            u64::from(g.down),
+            u64::from(g.cells),
+            g.q_up.to_bits(),
+            g.q_down.to_bits(),
+            u64::from(g.downstream)
+        ])),
+        hy.segments.len()
+    );
+    println!(
+        "HASH H1 lakes (basins) {:016x} ({} basins)",
+        fnv(hy.basins.iter().flat_map(|b| {
+            let class = format!("{:?}", b.class).bytes().fold(0u64, |h, c| (h ^ u64::from(c)).wrapping_mul(0x100_0000_01b3));
+            [b.id, u64::from(b.floor_cell), u64::from(b.spill_cell), u64::from(b.cells), b.q_in.to_bits(), class, u64::from(b.overflows)]
+        })),
+        hy.basins.len()
+    );
     drop(h1);
-    let (hwm, _) = rss_mib();
+    let (hwm, _, commit) = mem_mib();
     let gb = hwm as f64 * 1048576.0 / 1e9;
+    let commit_gb = commit as f64 * 1048576.0 / 1e9;
+    let over_ws = commit as f64 > hwm as f64 * 1.1;
+    println!(
+        "G3-6 wave1 peak commit {commit} MiB = {commit_gb:.2} GB against the peak working set {hwm} MiB: {}",
+        if over_ws { "MORE THAN 10 % ABOVE: not a clean pass until explained" } else { "within 10 %" }
+    );
     let verdict = if gb > 10.8 {
         "over"
     } else if gb > 10.26 {
@@ -712,6 +799,13 @@ fn main() {
     let seed = 14u64;
     // the fixed RSS for `wave1` (binary, runtime, the workers' stacks once started), before the base is read
     let fixed = if a.get(3).is_some_and(|m| m == "wave1") {
+        let free = free_phys_mib();
+        println!("WAVE1 free physical memory at the start: {free} MiB");
+        if std::env::var("G36_WINDOW").is_ok() {
+            assert!(free >= 16 * 1024, "the window needs 16 GB of free physical memory at the start: {free} MiB");
+            start_guard(10_260_000_000 / 1_048_576, 4 * 1024);
+            println!("WAVE1 the guard is on: stop above 9,784 MiB (10.26 GB) of peak working set or commit, or under 4,096 MiB free");
+        }
         let _: usize = (0..16usize).map(|i| std::thread::spawn(move || i).join().unwrap()).sum();
         rss_mib().0
     } else {
