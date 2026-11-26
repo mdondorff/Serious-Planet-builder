@@ -34,6 +34,8 @@ mod bake_k7_beds;
 mod bake_kernels;
 #[path = "bake_lakes.rs"]
 mod bake_lakes;
+#[path = "bake_lean_memory.rs"]
+mod bake_lean_memory;
 #[path = "bake_metric.rs"]
 mod bake_metric;
 #[path = "bake_partition.rs"]
