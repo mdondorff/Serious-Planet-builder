@@ -552,6 +552,31 @@ fn wave_1_lean(path: &str, side: &str) {
         ..CarveParams::default()
     };
     let capc = (land * 6 / 100).max(1);
+    // the K5 phase breakdown (the lead's record, 2026-11-26): the partitioned route alone, then one capped round, on the same surface
+    if std::env::var("G36_K5_PHASES").is_ok() {
+        let (r, prt) = peak(|| {
+            partitioned_route_weighted(&g, &z, &outlet, cp.epsilon, 7, tile, RoundRules::ROUND, None, &mut PartCache::without_memory())
+        });
+        drop(r);
+        let mut z1 = z.clone();
+        let cp1 = CarveParams { steps: 5, ..cp.clone() };
+        let (_, p1) = peak(|| {
+            solve_rounds_memo(
+                &g,
+                &mut z1,
+                &outlet,
+                &cp1,
+                1,
+                &16usize,
+                7,
+                &Drivers::default(),
+                tile,
+                &mut RoundCache::without_memory().with_inflight_cap(capc),
+            )
+        });
+        drop(z1);
+        eprintln!("G3-6 K5 phases {path}: the route alone {:.1} B a cell, one capped round {:.1} B a cell", prt as f64 / n, p1 as f64 / n);
+    }
     let (_, pk) = peak(|| {
         solve_rounds_memo(
             &g,
