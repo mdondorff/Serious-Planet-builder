@@ -23,7 +23,7 @@ Evidence (non-normative):
 
 | Measured | Stages | Cells with the ring | Peak working set | Per cell |
 |---|---|---|---|---|
-| B, `landmass_scale 1 16 bwave1` (2026-11-26) | K5, K6 | 9.409e6 | 677 MiB (peak commit 690 MiB) | 74.9 B above a fixed 5 MiB |
+| B, `landmass_scale 1 16 bwave1` under Earth's precision (2026-11-26) | K5, K6 | 9.409e6 | 681 MiB (peak commit 694 MiB) | 75.4 B above a fixed 4 MiB |
 | RG's wave 1 on the spike, k = 4 (tag `archive/rg-parked-2026-11-26`, commit d9c320dd7) | base1, K5, K6 | 1.4934e8 (1.489e8 land) | 8,834 MiB = 9.26 GB | 61.0 B a cell plus 136 MiB (the k = 1, 2, 4 fit) |
 - B's figure is a measurement at k = 1; it is not extrapolated to the landmass.
 - Not on main: base1's parallel decide (base1 is an RG stage) and RG's K6 levers of the budget mode; both stay on the tag.
