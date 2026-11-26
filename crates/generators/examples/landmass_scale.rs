@@ -557,7 +557,6 @@ fn start_guard(stop_mib: u64, floor_mib: u64) {
     });
 }
 
-
 /// G3-6's full count (the lead's order, 2026-11-26): wave 1 as a build runs it, on the landmass in this process. base1 (`SELECTIVE_50`'s floors), K5 (4 rounds of 5 steps on GEN-143's route,
 /// the in-flight cap at 6 % of the land), then K6 (`h1_from_owned`, levers (a)-(g)) with the orographic runoff, each stage's input freed when it is done. Prints per stage the wall time,
 /// the peak heap and the process's peak RSS so far, then the gate line against 10.8 GB.
