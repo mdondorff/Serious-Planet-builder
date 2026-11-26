@@ -2,7 +2,9 @@
 //! (the hills 5 m higher again), written by `CropWriter::stage`; one sheet a crop and azimuth, a row a stage beside its step from the previous stage.
 use std::path::{Path, PathBuf};
 
-use planet_cache::look_sheet::{read_stages, read_store, step_sheet_px, write_steps, Crop, CropWriter, LABEL_CHARS, SHEET_LIMIT, STEP_M};
+use planet_cache::look_sheet::{
+    read_stages, read_store, step_sheet_px, write_steps, Crop, CropWriter, LABEL_CHARS, MAX_CROP, SHEET_LIMIT, STEP_M,
+};
 use planet_cache::stage_sheet::{Manifest, LOWER, RAISE};
 use planet_generators::preview::{TEXT_CELL_W, TEXT_ROW_H};
 
@@ -131,16 +133,18 @@ fn a_run_of_three_stages_gives_a_sheet_a_crop_and_azimuth_with_a_row_a_stage_and
     assert!(near(rgb_at(&hill, pw, x + 30, y + 30), RAISE), "a raising step is full blue: {:?}", rgb_at(&hill, pw, x + 30, y + 30));
     let (x, y) = panel(64, 1, 0);
     assert!(near(rgb_at(&hill, pw, x + 32, y + 32), [0.35; 3]), "the first row has no step: grey");
-    // the flat crop: no stage changes it, so every step pixel is its stage pixel
+    // the flat crop: no stage changes its cells, so its step panels are its stage panels, pixel for pixel
     let (_, _, flat) = png_rgb(&out.join("flat-step-az315.png"));
     for r in 1..3 {
         let ((sx, sy), (dx, dy)) = (panel(64, 0, r), panel(64, 1, r));
-        for (cx, cy) in [(10, 20), (32, 32), (60, 50)] {
-            assert_eq!(
-                rgb_at(&flat, pw, sx + cx, sy + cy),
-                rgb_at(&flat, pw, dx + cx, dy + cy),
-                "row {r}: an unchanged cell's step pixel is its stage pixel"
-            );
+        for cy in 0..64 {
+            for cx in 0..64 {
+                assert_eq!(
+                    rgb_at(&flat, pw, sx + cx, sy + cy),
+                    rgb_at(&flat, pw, dx + cx, dy + cy),
+                    "row {r} cell ({cx}, {cy}): an unchanged cell's step pixel is its stage pixel"
+                );
+            }
         }
     }
     // steps.txt: one line a crop and step, with the signed mean
@@ -202,8 +206,44 @@ fn a_missing_stage_a_single_stage_a_wrong_size_and_a_repeated_name_are_refused()
     let e = w.stage("k6", "K6", &[0.0; 10]).unwrap_err();
     assert!(e.contains("k6") && e.contains("10"), "{e}");
     assert!(w.stage("k5", "K5", &field(0.0)).unwrap_err().contains("twice"));
+    assert!(w.stage("K5", "K5", &field(0.0)).unwrap_err().contains("twice"), "names differing only in case are one file on Windows");
     assert!(w.stage("k8", "K 8", &field(0.0)).unwrap_err().contains("whitespace"));
     assert!(w.stage("../k9", "K9", &field(0.0)).unwrap_err().contains("letters, digits"));
+    // a list naming a stage twice
+    let twice = dir("twice");
+    store(&twice);
+    std::fs::write(twice.join("stages.txt"), "look-stages 1\nstage k5 K5\nstage k6 K6\nstage k5 K5\n").unwrap();
+    assert!(read_stages(&twice, &read_store(&twice).unwrap()).unwrap_err().contains("k5 listed twice"));
+    // a new writer at a store's root removes the earlier run's list
+    CropWriter::new(&twice, W, H, K, &crops()).unwrap();
+    assert!(!twice.join("stages.txt").exists(), "a new writer leaves no stale stage list");
+    for d in [root, one, twice] {
+        let _ = std::fs::remove_dir_all(d);
+    }
+}
+
+// spec: BUILD-071, TEST-158
+#[test]
+fn a_step_sheet_over_the_per_sheet_cap_is_refused_and_not_written() {
+    // 48 stages of hashed noise on one crop of the largest side: the stage panels do not compress
+    let noise = |p: usize, stage: u64| {
+        let mut h = ((stage << 48) | p as u64).wrapping_add(0x9E37_79B9_7F4A_7C15);
+        h = (h ^ (h >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        h = (h ^ (h >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        h ^= h >> 31;
+        100.0 + (h % 4096) as f32 / 16.0
+    };
+    let root = dir("cap");
+    let mut w = CropWriter::new(&root, W, H, K, &[Crop { name: "n".into(), x: 16, y: 16, size: MAX_CROP }]).unwrap();
+    for k in 0..48u64 {
+        let z: Vec<f32> = (0..W * H).map(|p| noise(p, k)).collect();
+        w.stage(&format!("s{k}"), &format!("S{k}"), &z).unwrap();
+    }
+    w.manifest(&manifest("cap").text()).unwrap();
+    let out = dir("cap-out");
+    let e = write_steps(&root, &[315.0], &out).unwrap_err();
+    assert!(e.contains("over the per-sheet limit") && e.contains(&SHEET_LIMIT.to_string()), "{e}");
+    assert!(!out.join("n-step-az315.png").exists(), "a sheet over the cap is not written");
     let _ = std::fs::remove_dir_all(&root);
-    let _ = std::fs::remove_dir_all(&one);
+    let _ = std::fs::remove_dir_all(&out);
 }

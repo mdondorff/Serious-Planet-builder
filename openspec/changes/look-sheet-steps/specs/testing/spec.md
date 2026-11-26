@@ -9,11 +9,14 @@ Detail:
 - the fixture: TEST-150's 256 x 192 window and three crops; the stages `k5`, `k6` and `k7`, where `k6` lowers the hills by 5 m and `k7` raises them by 5 m;
 - `stages.txt` lists the stages in the order written;
 - each crop and azimuth has one sheet named `<crop>-step-az<A>.png`, of the fixed size of three rows;
-- a step past 2 m is the full lower colour when it lowers and the full raise colour when it raises; an unchanged cell's difference pixel is its stage pixel; the first row's difference panel is grey;
+- a step past 2 m is the full lower colour when it lowers and the full raise colour when it raises; the first row's difference panel is grey;
+- in a crop no stage changes, each difference panel equals its stage panel, pixel for pixel;
 - `steps.txt` has one line a crop and step, with the step's signed mean;
 - the same store gives the same bytes;
 - a store without `stages.txt` takes BUILD-067's columns that it holds;
-- a listed stage missing from a crop, a store of one stage, a surface of another size and a name given twice are refused;
+- refused: a listed stage missing from a crop, a store of one stage, a surface of another size, a name given twice (also in another case), and a list naming a stage twice;
+- a new writer at a store's root leaves no `stages.txt`;
+- a step sheet of 48 noise stages on one crop of the largest side is refused, naming the limit, and is not written;
 - xtask refuses `--steps` with `--against`.
 
 #### Scenario: The step rows' fixtures

@@ -161,7 +161,8 @@ impl CropWriter {
         if label.is_empty() || label.chars().any(char::is_whitespace) {
             return Err(format!("stage {name}: the label `{label}` is empty or holds whitespace"));
         }
-        if self.stages.iter().any(|(n, _)| n == name) {
+        // NAME is the file `NAME.f32`: names differing only in case are one file on Windows
+        if self.stages.iter().any(|(n, _)| n.eq_ignore_ascii_case(name)) {
             return Err(format!("stage name `{name}` given twice"));
         }
         if z.len() != self.w * self.h {
@@ -510,7 +511,7 @@ pub fn write_sheets(run: &Path, against: Option<&Path>, azimuths: &[f64], out: &
 pub const STEP_M: f64 = 2.0;
 
 /// A store's stages in the pipeline's order, `(name, label)` (BUILD-071): its `stages.txt` (`look-stages 1`, then `stage NAME LABEL` a stage), or, for a store without one,
-/// BUILD-067's columns that its first crop holds. A listed stage that a crop does not hold is refused, naming both.
+/// BUILD-067's columns that its first crop holds. A stage listed twice (ignoring case) and a listed stage that a crop does not hold are refused, naming them.
 pub fn read_stages(root: &Path, crops: &[StoredCrop]) -> Result<Vec<(String, String)>, String> {
     let p = root.join("stages.txt");
     let stages: Vec<(String, String)> = if p.exists() {
@@ -529,6 +530,11 @@ pub fn read_stages(root: &Path, crops: &[StoredCrop]) -> Result<Vec<(String, Str
         let first = crops.first().ok_or(format!("{}: no crop", root.display()))?;
         STAGES.iter().filter(|(s, _)| first.dir.join(format!("{s}.f32")).exists()).map(|(s, l)| (s.to_string(), l.to_string())).collect()
     };
+    for (i, (s, _)) in stages.iter().enumerate() {
+        if stages[..i].iter().any(|(n, _)| n.eq_ignore_ascii_case(s)) {
+            return Err(format!("{}: the stage {s} listed twice", p.display()));
+        }
+    }
     for c in crops {
         for (s, _) in &stages {
             if !c.dir.join(format!("{s}.f32")).exists() {
