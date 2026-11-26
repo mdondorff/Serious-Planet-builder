@@ -54,4 +54,5 @@ Answer: `DEC <lane>-<n>: <letter>. <condition>`. `DEC` numbers live only in the 
 5. No production PR for a look direction the owner has not seen. Look work stays in spike code until the owner picks a variant (ADR 0120).
 6. A new generator stage, or a rule that changes results, lands switched off. A separate PR switches it on after its gate measure passes on the production path (ADR 0118).
 7. A lane may restate a test's guard, the assertion that the test exercises its case, when a fix removes what it counted, if every property assertion is unchanged; the PR body says so. A raised tolerance or a changed property assertion goes to the lead (ADR 0118, CON-31).
-8. One heavy machine job at a time (a k=4 run, a region bake, a prepush with GPU tests). Perf runs only in a window the lead authorises.
+8. A change that moves goldens runs `cargo xtask prepush --declared <proposal.md>` (BUILD-068): it passes only on exactly the proposal's declared candidates, and the candidates still go through golden-review.
+9. One heavy machine job at a time (a k=4 run, a region bake, a prepush with GPU tests). Perf runs only in a window the lead authorises.

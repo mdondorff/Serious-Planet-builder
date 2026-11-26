@@ -52,6 +52,8 @@ mod layer_tiles;
 mod look_sheet;
 #[path = "meshpack.rs"]
 mod meshpack;
+#[path = "metric_calibration.rs"]
+mod metric_calibration;
 #[path = "pack.rs"]
 mod pack;
 #[path = "region_bake.rs"]

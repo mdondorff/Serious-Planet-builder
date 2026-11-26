@@ -1226,3 +1226,57 @@ Detail:
 #### Scenario: A switch row's sheet
 - **WHEN** a defaults run and a switch run of one window write crop stores of the same crops and `cargo xtask look-sheet SWITCH --against DEFAULTS` runs
 - **THEN** each crop has one sheet an azimuth with the defaults, switch and difference rows at one L cell a pixel, a stage the switch did not change has a difference panel equal to its switch panel, and `look.txt` names each stage's RMS and largest difference
+
+### Requirement: BUILD-068 Prepush passes a change's declared golden candidates
+`cargo xtask prepush --declared <proposal.md>` SHALL pass a failed tier C when the run ended, the names of the golden candidates it wrote are exactly the goldens of the proposal's `Expected golden changes:` section, and every failed test either panicked at the testkit's golden check (`GoldenChecks`, "N golden check(s) failed") or matches a known class of BUILD-056 by name; otherwise it SHALL fail the step, naming the extra and the missing goldens or the uncovered test.
+
+Verify: A
+Status: active
+Source: Lead 2026-11-25 (#204: the gap PR #1662 hit, pushed under a stated exception), BUILD-056, ADR 0017
+Detail:
+- the declared goldens are the names of the section's `- <name>: <reason>` lines up to the next `## ` heading; a line that is not `- <name>:` (a note) is skipped; a proposal without the section is refused;
+- the golden check's panic location is read from `crates/testkit/src/lib.rs`, so it tracks an edit of the testkit;
+- the candidates are the local adapter's (`target/review/candidates/`), counted by name once whatever the adapter; CI's adapters are golden-review's concern;
+- without `--declared`, BUILD-056 is unchanged: any written candidate fails the step;
+- the mode writes, copies and blesses no golden: the candidates go to golden-review (ADR 0017, 0061, 0096), and lit, sky and water views to the owner's `/bless`;
+- any other argument to `prepush` is refused.
+
+#### Scenario: Exactly the declared candidates
+- **WHEN** tier C fails on a golden test's golden check and a known WARP abort, and the candidates are the proposal's declared goldens
+- **THEN** the step passes and prints the declared list, the golden tests and the known classes for the PR body
+
+#### Scenario: An extra or a missing candidate
+- **WHEN** a candidate is not declared, or a declared golden wrote no candidate
+- **THEN** the step fails, naming both lists
+
+### Requirement: BUILD-069 A geometric gate or look column is registered only with a passing calibration
+A geometric gate or look column SHALL be registered (added as a bar or a target) only with a calibration entry in `planet_cache::metric_calibration` that passes TEST-155. Each metric's band SHALL be stated in the Detail of its own requirement. A column registered before this requirement SHALL carry a calibration report: a failing report is an owner item, not a removal. The owner's visual sign-off is not a column and is not bound.
+
+Verify: A
+Status: active
+Source: Lead 2026-11-25 (the lead's rule after the owner's caution and the external process review; look bars included, the owner's visual sign-off not, lead's review of #1665), TEST-155, CON-31
+Detail:
+- `metric_calibration::registered()` lists the entries registered under this rule; the tier-A test fails if one of them fails its calibration; an entry without a band (report only) cannot be registered;
+- `metric_calibration::reported()` lists the entries that predate it; their calibration runs and writes its table, and its verdict is printed, not asserted;
+- the first reported entries and their bands (a band holds a defect-free valley's reading):
+
+| entry | reading | band |
+|---|---|---|
+| `corner-links-added` | the counted 2 x 2 blocks that are corner links (`river_suite::corner_link`, the predicate `corner_links` counts) in the surface and not in the reference | 0 to 0 |
+| `hump-cuts` | `river_suite::hump_cuts` | none (report only: the count depends on the background's humps) |
+| `spectrum-slope-change` | `river_suite::spectrum`'s beta, the surface's minus the reference's | none (report only: a valley on a flat background has its own spectrum) |
+| `xdiag-in-zone` | SPIKE-143's M1 X_diag over the zone's counted cells (the grid's border cells left out): d1 = (z(x+1, y+1) - 2 z + z(x-1, y-1)) / 2 binned by (x - y) mod 8, d2 = (z(x-1, y+1) - 2 z + z(x+1, y-1)) / 2 binned by (x + y) mod 8; per diagonal the largest share of its squared energy in two adjacent bins (cyclic); X_diag = their mean / 0.25 - 1 | -1 to 0.010 (the chainsaw target) |
+| `xdiag-in-zone-weighted` | the same per-diagonal shares, weighted by each diagonal's energy: `(e1 l1 + e2 l2) / (e1 + e2) / 0.25 - 1` | -1 to 0.010 |
+| `m4-along-added` | M4 along the channel path (zone cells within 4 cells of its segments; k = z(p + t) - 2 z(p) + z(p - t), bilinear, t the nearest segment's unit direction; RMS), the surface's minus the reference's (m) | -0.5 to 0.5 |
+| `d8-sinuosity` | the channel path's length over its chord, at least 1 (a rounding below 1 reads 1) | 1.00 to 1.02 |
+| `straight-run-share` | the share of the channel path's length in runs of one repeated step longer than 2 km | 0 to 0.5 |
+
+- a reported entry that fails is not changed or removed by the calibration (CON-31); its report goes to the owner.
+
+#### Scenario: A new metric without a passing calibration
+- **WHEN** an entry is added to `registered()` and its calibration fails
+- **THEN** the tier-A test fails, naming the metric and the first case that breaks TEST-155's rule
+
+#### Scenario: A column that predates the rule
+- **WHEN** a `reported()` entry's calibration fails
+- **THEN** the test passes, the table and verdict are written for the owner, and the gate's column is unchanged
