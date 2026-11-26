@@ -446,12 +446,12 @@ fn k6_on_a_real_window(path: &str, side: &str) {
         drop(wt);
         let (r, f) = (pr.routing, pr.filled);
         let runoff = vec![1.0e-8f32; g.len()];
-        let evap = vec![0.0f32; g.len()];
-        planet_cache::rg_h1::h1_from(&g, &z, &f, r, &outlet, &runoff, &evap, Some(&[]), false)
+        // (d) no evaporation field, (f) the filled buffer becomes d8
+        planet_cache::rg_h1::h1_from_owned(&g, &z, f, r, &outlet, &runoff, &[], Some(&[]), false)
     });
     let (hwm, _) = rss_mib();
     eprintln!(
-        "G3-6 real {path}: K6 whole with (a)-(c), h1_from and its inputs: peak heap {:.1} B a cell, {} trunk reaches; process peak RSS so far {hwm} MiB ({:.1} B a cell)",
+        "G3-6 real {path}: K6 whole with (a)-(f), h1_from and its inputs: peak heap {:.1} B a cell, {} trunk reaches; process peak RSS so far {hwm} MiB ({:.1} B a cell)",
         pw as f64 / g.len() as f64,
         h1w.trunk_cells.len(),
         (hwm as f64 * 1048576.0) / g.len() as f64
@@ -517,6 +517,9 @@ fn wave_1_lean(path: &str, side: &str) {
     use planet_generators::bake::route::RoundRules;
     use planet_generators::bake::Grid;
     let lw: usize = side.parse().expect("the dump's side");
+    // the process's fixed RSS (binary, runtime, the workers' stacks once started): it does not grow with the landmass, so the per-cell figure counts only what lies above it
+    let warm: usize = (0..16usize).map(|i| std::thread::spawn(move || i).join().unwrap()).sum();
+    let (base, _) = rss_mib();
     let z0 = h1_of_dump(path, lw);
     let w = lw / 8;
     let g = Grid::new(w, w, 814.0);
@@ -579,15 +582,15 @@ fn wave_1_lean(path: &str, side: &str) {
         drop(wt);
         let (r, f) = (pr.routing, pr.filled);
         let runoff = vec![1.0e-8f32; g.len()];
-        let evap = vec![0.0f32; g.len()];
-        planet_cache::rg_h1::h1_from(&g, &z, &f, r, &outlet, &runoff, &evap, Some(&[]), false)
+        // (d) no evaporation field, (f) the filled buffer becomes d8
+        planet_cache::rg_h1::h1_from_owned(&g, &z, f, r, &outlet, &runoff, &[], Some(&[]), false)
     });
     let trunks = h1.trunk_cells.len();
     drop(h1);
     let (hwm, _) = rss_mib();
-    let rss = hwm as f64 * 1048576.0 / n;
+    let rss = (hwm - base) as f64 * 1048576.0 / n;
     eprintln!(
-        "G3-6 lean {path}: H1 {w}², {land} land; peak heap a cell above the held surface (z, outlets: 9 B): base1 {:.1} B, K5 capped {:.1} B, K6 (a)-(c) {:.1} B ({trunks} trunks); process peak RSS {hwm} MiB = {rss:.1} B a cell, at the landmass {:.1} GB",
+        "G3-6 lean {path}: H1 {w}², {land} land; peak heap a cell above the held surface (z, outlets: 9 B): base1 {:.1} B, K5 capped {:.1} B, K6 (a)-(f) {:.1} B ({trunks} trunks); process peak RSS {hwm} MiB, fixed {base} MiB ({warm} warm), the rest {rss:.1} B a cell; at the landmass {:.1} GB plus the fixed part",
         pb as f64 / n,
         pk as f64 / n,
         p6 as f64 / n,

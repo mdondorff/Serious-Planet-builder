@@ -312,10 +312,18 @@ impl Stage for K6 {
                 (pr.routing, Some(pr.filled))
             }
         };
-        let filled = filled.unwrap_or_else(|| priority_flood_with(g, &st.z, cx.outlet, eps, true));
+        drop(weight);
         let runoff = vec![self.runoff; g.len()];
-        let evap = vec![0.0f32; g.len()];
-        let h1 = planet_cache::rg_h1::h1_from(g, &st.z, &filled, routing, cx.outlet, &runoff, &evap, Some(&[]), false);
+        // the reference is today's form (a second flood, a zero evaporation field, a new d8 field); the partitioned run takes the route's filled surface (a), no evaporation
+        // field (d) and the filled buffer as d8 (f): the layouts' bit-identity checks them against it
+        let h1 = match filled {
+            None => {
+                let filled = priority_flood_with(g, &st.z, cx.outlet, eps, true);
+                let evap = vec![0.0f32; g.len()];
+                planet_cache::rg_h1::h1_from(g, &st.z, &filled, routing, cx.outlet, &runoff, &evap, Some(&[]), false)
+            }
+            Some(filled) => planet_cache::rg_h1::h1_from_owned(g, &st.z, filled, routing, cx.outlet, &runoff, &[], Some(&[]), false),
+        };
         st.fields
             .insert("receiver", h1.routing.receiver.iter().map(|&v| if v == NONE { u64::MAX } else { g.global_id(v as usize) }).collect());
         st.fields.insert("area", h1.routing.area.iter().map(|v| v.to_bits()).collect());

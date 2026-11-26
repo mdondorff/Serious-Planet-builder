@@ -32,6 +32,61 @@ pub fn h1_from(
     budget: Option<&[f64]>,
     hydro_twice: bool,
 ) -> H1 {
+    let (routing, hydro, graph, trunk_seg, trunk_cells) = h1_body(grid, z, filled, routing, outlet, runoff, evap, budget, hydro_twice);
+    let d8 = d8_into(grid, &routing, vec![0.0; grid.len()]);
+    H1 { routing, hydro, graph, trunk_seg, trunk_cells, d8 }
+}
+
+/// [`h1_from`] taking the filled surface by value (spike, G3-6 step 3 (f)): after the last hydrology call its buffer holds the D8 area, the same values in the same order, so no
+/// new field is allocated. With a budget and no `hydro_twice`, `evap` may be empty ((d): only the rerun reads it).
+#[allow(clippy::too_many_arguments)]
+pub fn h1_from_owned(
+    grid: &Grid,
+    z: &[f64],
+    filled: Vec<f64>,
+    routing: Routing,
+    outlet: &[bool],
+    runoff: &[f32],
+    evap: &[f32],
+    budget: Option<&[f64]>,
+    hydro_twice: bool,
+) -> H1 {
+    let (routing, hydro, graph, trunk_seg, trunk_cells) = h1_body(grid, z, &filled, routing, outlet, runoff, evap, budget, hydro_twice);
+    let d8 = d8_into(grid, &routing, filled);
+    H1 { routing, hydro, graph, trunk_seg, trunk_cells, d8 }
+}
+
+/// The D8 drainage area (true area, unweighted) of each cell along the receivers, written into `buf` (its old values are overwritten).
+fn d8_into(grid: &Grid, routing: &Routing, mut buf: Vec<f64>) -> Vec<f64> {
+    assert_eq!(buf.len(), grid.len(), "one value per cell");
+    for (p, v) in buf.iter_mut().enumerate() {
+        *v = grid.cell_area(p);
+    }
+    for &c in routing.order.iter().rev() {
+        let r = routing.receiver[c as usize];
+        if r != NONE {
+            buf[r as usize] += buf[c as usize];
+        }
+    }
+    buf
+}
+
+type Body = (Routing, Hydro, ChannelGraph, Vec<usize>, Vec<Vec<u32>>);
+
+#[allow(clippy::too_many_arguments)]
+fn h1_body(
+    grid: &Grid,
+    z: &[f64],
+    filled: &[f64],
+    routing: Routing,
+    outlet: &[bool],
+    runoff: &[f32],
+    evap: &[f32],
+    budget: Option<&[f64]>,
+    hydro_twice: bool,
+) -> Body {
+    // (d): the evaporation is read only without a budget or by the rerun
+    assert!((budget.is_some() && !hydro_twice) || evap.len() == grid.len(), "one evaporation per cell where it is read");
     // lead #163 (B3, result-preserving): with `budget` every basin is crossed (reading 24) and the second call only zeroed the open-water loss of the basins' cells,
     // the one input `hydrology` reads it through (each basin's e_open); one call with a zero evaporation gives the same Hydro
     let mut hydro = hydrology(
@@ -86,12 +141,5 @@ pub fn h1_from(
             trunk_cells.push(cells);
         }
     });
-    let mut d8: Vec<f64> = (0..grid.len()).map(|p| grid.cell_area(p)).collect();
-    for &c in routing.order.iter().rev() {
-        let r = routing.receiver[c as usize];
-        if r != NONE {
-            d8[r as usize] += d8[c as usize];
-        }
-    }
-    H1 { routing, hydro, graph, trunk_seg, trunk_cells, d8 }
+    (routing, hydro, graph, trunk_seg, trunk_cells)
 }
