@@ -403,6 +403,226 @@ fn dam_selftest() {
     let _ = std::fs::remove_file(&path);
 }
 
+// ---- the counting allocator and the process RSS (as `mem_stress`; G3-6's `wave1` mode reads them, the other modes only pay two relaxed atomics an allocation)
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+
+/// Counts the live heap bytes and their peak.
+struct Counting;
+static CUR: AtomicUsize = AtomicUsize::new(0);
+static PEAK: AtomicUsize = AtomicUsize::new(0);
+
+// SAFETY: every call forwards to the system allocator with the same layout; the counters only observe sizes.
+unsafe impl GlobalAlloc for Counting {
+    unsafe fn alloc(&self, l: Layout) -> *mut u8 {
+        // SAFETY: the caller's layout contract is passed through unchanged.
+        let p = unsafe { System.alloc(l) };
+        if !p.is_null() {
+            let c = CUR.fetch_add(l.size(), Relaxed) + l.size();
+            PEAK.fetch_max(c, Relaxed);
+        }
+        p
+    }
+
+    unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
+        // SAFETY: as above.
+        unsafe { System.dealloc(p, l) };
+        CUR.fetch_sub(l.size(), Relaxed);
+    }
+
+    unsafe fn alloc_zeroed(&self, l: Layout) -> *mut u8 {
+        // SAFETY: as above.
+        let p = unsafe { System.alloc_zeroed(l) };
+        if !p.is_null() {
+            let c = CUR.fetch_add(l.size(), Relaxed) + l.size();
+            PEAK.fetch_max(c, Relaxed);
+        }
+        p
+    }
+
+    unsafe fn realloc(&self, p: *mut u8, l: Layout, new: usize) -> *mut u8 {
+        // SAFETY: as above.
+        let q = unsafe { System.realloc(p, l, new) };
+        if !q.is_null() {
+            if new >= l.size() {
+                let c = CUR.fetch_add(new - l.size(), Relaxed) + (new - l.size());
+                PEAK.fetch_max(c, Relaxed);
+            } else {
+                CUR.fetch_sub(l.size() - new, Relaxed);
+            }
+        }
+        q
+    }
+}
+
+#[global_allocator]
+static ALLOC: Counting = Counting;
+
+/// Runs `f` and returns its value with the peak heap above the start (bytes).
+fn heap_peak<T>(f: impl FnOnce() -> T) -> (T, usize) {
+    let base = CUR.load(Relaxed);
+    PEAK.store(base, Relaxed);
+    let t = f();
+    (t, PEAK.load(Relaxed).saturating_sub(base))
+}
+
+/// The process's peak working set and working set (MiB).
+#[cfg(windows)]
+fn rss_mib() -> (u64, u64) {
+    #[repr(C)]
+    struct Counters {
+        cb: u32,
+        page_fault_count: u32,
+        peak_working_set: usize,
+        working_set: usize,
+        rest: [usize; 6],
+    }
+    extern "system" {
+        fn GetCurrentProcess() -> isize;
+        fn K32GetProcessMemoryInfo(process: isize, counters: *mut Counters, cb: u32) -> i32;
+    }
+    let mut c =
+        Counters { cb: core::mem::size_of::<Counters>() as u32, page_fault_count: 0, peak_working_set: 0, working_set: 0, rest: [0; 6] };
+    // SAFETY: `c` is a writable PROCESS_MEMORY_COUNTERS of the size it declares; the pseudo handle needs no closing.
+    let ok = unsafe { K32GetProcessMemoryInfo(GetCurrentProcess(), &mut c, c.cb) };
+    if ok == 0 {
+        return (0, 0);
+    }
+    ((c.peak_working_set >> 20) as u64, (c.working_set >> 20) as u64)
+}
+
+#[cfg(not(windows))]
+fn rss_mib() -> (u64, u64) {
+    let s = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+    let kb = |k: &str| s.lines().find(|l| l.starts_with(k)).and_then(|l| l.split_whitespace().nth(1)?.parse::<u64>().ok()).unwrap_or(0);
+    (kb("VmHWM:") >> 10, kb("VmRSS:") >> 10)
+}
+
+/// G3-6's full count (the lead's order, 2026-11-26): wave 1 as a build runs it, on the landmass in this process. base1 (`SELECTIVE_50`'s floors), K5 (4 rounds of 5 steps on GEN-143's route,
+/// the in-flight cap at 6 % of the land), then K6 (`h1_from_owned`, levers (a)-(g)) with the orographic runoff, each stage's input freed when it is done. Prints per stage the wall time,
+/// the peak heap and the process's peak RSS so far, then the gate line against 10.8 GB.
+#[allow(clippy::too_many_arguments)]
+fn wave1(grid: &Grid, z0: Vec<f64>, outlet: &[bool], inputs: &BakeInputs, n: usize, seed: u64, fixed: u64, t0: Instant) {
+    use planet_generators::bake::drain::{drain_selective_floors_on, SelParams, SelSwitches};
+    use planet_generators::bake::partition::{partitioned_route_weighted, PartCache};
+    let nn = n * n;
+    let active = grid.len();
+    let land = outlet.iter().filter(|&&o| !o).count();
+    let gib = |b: f64| b / 1073741824.0;
+    let row = |name: &str, t: Instant, pk: usize| {
+        let (hwm, now) = rss_mib();
+        println!(
+            "WAVE1 {name}: {:.1} s; peak heap {:.1} B a cell ({:.2} GiB); process peak RSS so far {hwm} MiB ({:.2} GiB), now {now} MiB; {:.0} s since start",
+            t.elapsed().as_secs_f64(),
+            pk as f64 / active as f64,
+            gib(pk as f64),
+            hwm as f64 / 1024.0,
+            t0.elapsed().as_secs_f64()
+        );
+    };
+    println!("WAVE1 the grid: {active} cells ({land} land), the fixed RSS {fixed} MiB");
+    // base1
+    let keep = |_: usize| false;
+    let area = |p: usize| grid.cell_area(p);
+    let cap = |_: usize| 50.0;
+    let lo = |_: usize| f64::NEG_INFINITY;
+    let sp = SelParams {
+        keep: &keep,
+        area: &area,
+        max_rounds: 12,
+        search: 1 << 20,
+        cut_cap: &cap,
+        fill_cap: &cap,
+        cell_lo: &lo,
+        switches: SelSwitches::default(),
+    };
+    let t = Instant::now();
+    let ((mut z, st), pb) = heap_peak(|| drain_selective_floors_on(grid, &z0, outlet, &sp));
+    drop(z0);
+    row("base1 (SELECTIVE_50 floors)", t, pb);
+    println!("WAVE1 base1 stats: {st:?}");
+    // K5
+    let cp = CarveParams {
+        steps: 20,
+        reroute_every: 5,
+        round_rules: RoundRules::ROUND,
+        cell_metric: true,
+        window_cut: true,
+        ..CarveParams::default()
+    };
+    let capc = (land * 6 / 100).max(1);
+    let tile = 384;
+    let t = Instant::now();
+    let (_, pk) = heap_peak(|| {
+        solve_rounds_memo(
+            grid,
+            &mut z,
+            outlet,
+            &cp,
+            4,
+            &16usize,
+            seed,
+            &Drivers::default(),
+            tile,
+            &mut RoundCache::without_memory().with_inflight_cap(capc),
+        )
+    });
+    row(&format!("K5 (4 rounds, tile {tile}, cap {capc} cells)"), t, pk);
+    // K6: the orographic climate, the weighted route (the weights freed after it), then H1 on the owned route
+    let t = Instant::now();
+    let (h1, p6) = heap_peak(|| {
+        let o = inputs.orography();
+        let mut weight = vec![1.0f32; active];
+        let mut runoff = vec![0.0f32; active];
+        for p in 0..active {
+            if z[p] <= 0.0 {
+                continue;
+            }
+            let g = grid.cube_id_of(p);
+            let spec = FaceSpec { face: Face((g / nn) as u8), cells: n, radius_m: R, sea_level: 0.0, seed, halo: 0 };
+            let d: Vec3 = spec.halo_direction(((g % nn) % n) as i64, ((g % nn) / n) as i64);
+            let (pm, tc) = (o.precipitation_mm(d), o.temperature_c(d));
+            let ro = runoff_mm(pm, tc);
+            weight[p] = discharge_weight(ro) as f32;
+            runoff[p] = (ro / 1000.0 / 31_557_600.0) as f32;
+        }
+        let pr = partitioned_route_weighted(
+            grid,
+            &z,
+            outlet,
+            cp.epsilon,
+            seed,
+            tile,
+            RoundRules::ROUND,
+            Some(&weight),
+            &mut PartCache::without_memory(),
+        );
+        drop(weight);
+        let (r, f) = (pr.routing, pr.filled);
+        // (d) no evaporation field, (f) the filled buffer becomes d8
+        planet_cache::rg_h1::h1_from_owned(grid, &z, f, r, outlet, &runoff, &[], Some(&[]), false)
+    });
+    row("K6 (climate, weighted route, h1_from_owned)", t, p6);
+    let trunks = h1.trunk_cells.len();
+    assert!(trunks > 0, "K6 found no trunk");
+    drop(h1);
+    let (hwm, _) = rss_mib();
+    let gb = hwm as f64 * 1048576.0 / 1e9;
+    let verdict = if gb > 10.8 {
+        "over"
+    } else if gb > 10.26 {
+        "within 5 %"
+    } else {
+        "pass"
+    };
+    println!(
+        "G3-6 wave1 full count: {land} land cells ({active} with the ring), peak RSS {hwm} MiB = {gb:.2} GB ({:.2} GiB; the fixed part {fixed} MiB; {:.1} B a cell above it), the gate 10.8 GB: {verdict}; {trunks} trunk cells; {:.0} s",
+        hwm as f64 / 1024.0,
+        (hwm - fixed) as f64 * 1048576.0 / active as f64,
+        t0.elapsed().as_secs_f64()
+    );
+}
+
 fn main() {
     let a: Vec<String> = std::env::args().collect();
     if a.get(3).is_some_and(|m| m == "damtest") {
@@ -416,6 +636,13 @@ fn main() {
     let t0 = Instant::now();
     cpu_phase("start");
     let seed = 14u64;
+    // the fixed RSS for `wave1` (binary, runtime, the workers' stacks once started), before the base is read
+    let fixed = if a.get(3).is_some_and(|m| m == "wave1") {
+        let _: usize = (0..16usize).map(|i| std::thread::spawn(move || i).join().unwrap()).sum();
+        rss_mib().0
+    } else {
+        0
+    };
 
     // ---- the coarse landmass and its ring, from the 3,072-cell base cache
     let bytes = std::fs::read(format!("target/landmass_base_{COARSE}.f32")).expect("run landmass_region first (it makes the base cache)");
@@ -590,6 +817,11 @@ fn main() {
         "memory after the landmass is built (heights f64, outlets): peak {peak:.0} MiB, now {now:.0} MiB; {:.1} s",
         t0.elapsed().as_secs_f64()
     );
+
+    if a.get(3).is_some_and(|m| m == "wave1") {
+        wave1(&grid, z, &outlet, &inputs, n, seed, fixed, t0);
+        return;
+    }
 
     // ---- the rounds, resident
     let mut z_start =
