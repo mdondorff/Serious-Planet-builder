@@ -202,3 +202,15 @@ Scope: project (the GLO-30 benchmark, SPIKE-108's frozen pools, P3 E1)
 Scope: project (river graph, GEN-189)
 - A marker shares a cell only with its reach's up node (contract reading 1); validators follow a chain through a marker's reach, or cycles and outlet-less chains through junctions go unseen.
 - Obsolete when: never.
+
+## 2026-11-26 River-graph fixes ran only downstream; S0, the base and the climate were treated as fixed
+Scope: project (any pipeline gated on a look or on bars measured against a stage's own input)
+What happened: from G2 (2026-11-22) to 2026-11-26, at least 10 river-graph fix rows moved a defect to another stage or bar. The attribution (2026-11-25) then traced 88-93 % of the residual look pattern, plus the blocky beds and the straight valleys, to S0, the start surface (K5 and the base), which no row changed. Causes:
+- The plan defined S0 as the reference of every delta measure (budget, relief lost, saddles, crests), so changing S0 looked like moving the yardstick.
+- The plan listed the base and the climate (K0-K4) as unchanged inputs, with a one-direction rule.
+- G3 let main take only changes that move no stored output, which ruled out base fixes.
+- The lead generalised the owner's remark "M1's look stays after G3; base changes need no river-graph change" (2026-11-23) into a test for every parked item, kept the items parked although the owner asked to reconsider them, and deferred the owner's 2026-11-25 pointer to fix the straight rivers in S0.
+- Kept lakes came from a geometric rule (an early keep reading plus a 10 m hump cap), not from water balance (ADR 0111 point 5), so too many lakes could never be traced to precipitation or evaporation.
+Assumption it changes: ADR 0120's lead role (attribution and sequencing); ADR 0111 point 5 (lakes by water balance) was not applied in the prototype.
+Proposed follow-up: routing rule 10 (attribute before fixing; upstream stages and world parameters included); gate measures against an outside reference (GLO-30 statistics) as well as against the stage's input; kept lakes by water balance when the work resumes.
+Obsolete when: never.
