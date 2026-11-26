@@ -559,7 +559,7 @@ fn wave_1_lean(path: &str, side: &str) {
         });
         drop(r);
         let mut z1 = z.clone();
-        let cp1 = CarveParams { steps: 5, ..cp.clone() };
+        let cp1 = CarveParams { steps: 5, ..cp };
         let (_, p1) = peak(|| {
             solve_rounds_memo(
                 &g,
