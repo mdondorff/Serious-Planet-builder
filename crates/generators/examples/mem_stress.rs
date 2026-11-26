@@ -124,6 +124,7 @@ fn main() {
     match std::env::args().nth(1).as_deref() {
         Some("full") => wave_1_measured(false),
         Some("compact") => wave_1_measured(true),
+        Some("real") => k6_on_a_real_window(std::env::args().nth(2).as_deref().unwrap_or(""), std::env::args().nth(3).as_deref().unwrap_or("8160")),
         _ => eprintln!("mem_stress full | compact"),
     }
 }
@@ -264,6 +265,33 @@ fn wave_1_measured(compact: bool) {
     let recv_set = h1.routing.receiver.iter().filter(|&&r| r != NONE).count();
     drop(h1);
     row(&format!("K6 ({trunks} trunk reaches, {recv_set} routed cells)"), t.elapsed().as_secs_f64(), pk, model("K6"));
+    // G3-6 layout step 3: K6's parts, each peak measured on its own with the others' results held (which part holds the bytes)
+    if compact {
+        use planet_generators::bake::channel_graph::ChannelGraph;
+        use planet_generators::bake::hydro::{hydrology, HydroParams};
+        let w = vec![1.0f32; g.len()];
+        let (r, pr) = peak(|| {
+            partitioned_route_weighted(&g, &zs, &outlet, cp.epsilon, 7, 384, RoundRules::ROUND, Some(&w), &mut PartCache::without_memory()).routing
+        });
+        let (f, pf) = peak(|| priority_flood_with(&g, &zs, &outlet, cp.epsilon, true));
+        let runoff = vec![1.0e-8f32; g.len()];
+        let zeros = vec![0.0f32; g.len()];
+        let (hy, ph) = peak(|| hydrology(&g, &zs, &f, &r, &outlet, Some(&runoff), Some(&zeros), &HydroParams::default()));
+        let channel = hy.channel.iter().filter(|&&c| c).count();
+        let (gr, pg) = peak(|| ChannelGraph::from_hydro(&g, &r, &hy, &zs));
+        let mut segs = 0usize;
+        gr.for_each(|_| segs += 1);
+        let n = g.len() as f64;
+        eprintln!(
+            "G3-6 1/16 | K6 parts, peak heap a cell: weighted route {:.1} B, flood {:.1} B, hydrology {:.1} B ({} basins, {channel} channel cells = {:.1} %), graph {:.1} B ({segs} segments)",
+            pr as f64 / n,
+            pf as f64 / n,
+            ph as f64 / n,
+            hy.basins.len(),
+            100.0 * channel as f64 / land as f64,
+            pg as f64 / n
+        );
+    }
     if compact {
         return;
     }
@@ -296,5 +324,92 @@ fn wave_1_measured(compact: bool) {
         t.elapsed().as_secs_f64(),
         pk as f64 / 1e9,
         pk as f64 / (side * side) as f64
+    );
+}
+
+/// G3-6 layout step 3: K6's parts on a real window's S0 (an `exit-s0` dump of 8,160² L cells), downsampled to H1 by 8 x 8 means, outlets the sea and the window edge
+/// (`Grid::outlets`), today's hydrology defaults (initiation 75 km²): the channel share, the segments and each part's peak heap a cell.
+fn k6_on_a_real_window(path: &str, side: &str) {
+    use planet_generators::bake::carve::CarveParams;
+    use planet_generators::bake::channel_graph::ChannelGraph;
+    use planet_generators::bake::flood::priority_flood_with;
+    use planet_generators::bake::hydro::{hydrology, HydroParams};
+    use planet_generators::bake::partition::{partitioned_route_weighted, PartCache};
+    use planet_generators::bake::route::RoundRules;
+    use planet_generators::bake::Grid;
+    let lw: usize = side.parse().expect("the dump's side");
+    let bytes = std::fs::read(path).expect("an exit-s0 dump");
+    assert_eq!(bytes.len(), lw * lw * 8, "{path}: {lw}² f64");
+    let l = |i: usize| f64::from_le_bytes(bytes[8 * i..8 * i + 8].try_into().unwrap());
+    let w = lw / 8;
+    let z: Vec<f64> = (0..w * w)
+        .map(|c| {
+            let (x, y) = (c % w, c / w);
+            let mut sum = 0.0;
+            for dy in 0..8 {
+                for dx in 0..8 {
+                    sum += l((8 * y + dy) * lw + 8 * x + dx);
+                }
+            }
+            sum / 64.0
+        })
+        .collect();
+    drop(bytes);
+    let g = Grid::new(w, w, 814.0);
+    let outlet = g.outlets(&z, 0.0);
+    let land = outlet.iter().filter(|&&o| !o).count();
+    let eps = CarveParams::default().epsilon;
+    let tile = (1..=w).rev().find(|t| w % t == 0 && *t <= 384).unwrap();
+    // wave 1 in its order: base1 (Drain::SELECTIVE_50), K5 (4 rounds of 5 steps, GEN-143 at the tile; uncapped, then capped at 6 % of the land), then K6's parts on K5's output
+    use planet_generators::bake::drain::{drain_selective_floors_on, SelParams, SelSwitches};
+    use planet_generators::bake::round::{solve_rounds_memo, Drivers, RoundCache};
+    let keep = |_: usize| false;
+    let area = |p: usize| g.cell_area(p);
+    let cap = |_: usize| 50.0;
+    let lo = |_: usize| f64::NEG_INFINITY;
+    let sp = SelParams { keep: &keep, area: &area, max_rounds: 12, search: 1 << 20, cut_cap: &cap, fill_cap: &cap, cell_lo: &lo, switches: SelSwitches::default() };
+    let t = std::time::Instant::now();
+    let ((zb, st), pb) = peak(|| drain_selective_floors_on(&g, &z, &outlet, &sp));
+    let tb = t.elapsed().as_secs_f64();
+    let cp = CarveParams { steps: 20, reroute_every: 5, round_rules: RoundRules::ROUND, cell_metric: true, window_cut: true, ..CarveParams::default() };
+    let mut zs = zb.clone();
+    let t = std::time::Instant::now();
+    let (_, pk) = peak(|| solve_rounds_memo(&g, &mut zs, &outlet, &cp, 4, &16usize, 7, &Drivers::default(), tile, &mut RoundCache::without_memory()));
+    let tk = t.elapsed().as_secs_f64();
+    let mut zc = zb.clone();
+    let capc = (land * 6 / 100).max(1);
+    let (_, pkc) = peak(|| solve_rounds_memo(&g, &mut zc, &outlet, &cp, 4, &16usize, 7, &Drivers::default(), tile, &mut RoundCache::without_memory().with_inflight_cap(capc)));
+    assert!(zc.iter().zip(&zs).all(|(a, b)| a.to_bits() == b.to_bits()), "the capped K5 is K5");
+    let n = g.len() as f64;
+    eprintln!(
+        "G3-6 real {path}: base1 {} depressions ({} breached, {} filled) {tb:.0} s, peak {:.1} B a cell; K5 {tk:.0} s, peak {:.1} B a cell, capped at {capc} cells {:.1} B a cell (the same bits)",
+        st.depressions,
+        st.breached,
+        st.filled,
+        pb as f64 / n,
+        pk as f64 / n,
+        pkc as f64 / n
+    );
+    let z = zs;
+    let wt = vec![1.0f32; g.len()];
+    let (r, pr) = peak(|| partitioned_route_weighted(&g, &z, &outlet, eps, 7, tile, RoundRules::ROUND, Some(&wt), &mut PartCache::without_memory()).routing);
+    let (f, pf) = peak(|| priority_flood_with(&g, &z, &outlet, eps, true));
+    let runoff = vec![1.0e-8f32; g.len()];
+    let zeros = vec![0.0f32; g.len()];
+    let (hy, ph) = peak(|| hydrology(&g, &z, &f, &r, &outlet, Some(&runoff), Some(&zeros), &HydroParams::default()));
+    let channel = hy.channel.iter().filter(|&&c| c).count();
+    let (gr, pg) = peak(|| ChannelGraph::from_hydro(&g, &r, &hy, &z));
+    let mut segs = 0usize;
+    gr.for_each(|_| segs += 1);
+    let (hwm, _) = rss_mib();
+    eprintln!(
+        "G3-6 real {path}: H1 {w}², {land} land; channel {channel} cells = {:.2} % of land, {} segments ({segs} in the graph), {} basins; peak heap a cell: route {:.1} B, flood {:.1} B, hydrology {:.1} B, graph {:.1} B; peak RSS {hwm} MiB",
+        100.0 * channel as f64 / land as f64,
+        hy.segments.len(),
+        hy.basins.len(),
+        pr as f64 / n,
+        pf as f64 / n,
+        ph as f64 / n,
+        pg as f64 / n
     );
 }
