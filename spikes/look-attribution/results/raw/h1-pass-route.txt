@@ -1,0 +1,16 @@
+r1h-kw-chain: land H1 cells in the box 266467; trunk cells (>= 75 km2): A 14799, B 16942; the chain's own H1 channel cells there 13754, of them A trunks 80.5 %
+  agreement proxy: of A's trunk cells, B keeps 67.8 % as trunks and 43.3 % with the same receiver
+  changed trunk cells (in one tree only, or a different receiver): 15305 (14315 km of H1 trunk)
+  deep trunk cells (depth over 10 m, in L terms): A 9191, B 8381; B's deep cells that are also A's 5190
+  deep trunk cells (depth over 50 m, in L terms): A 5275, B 3980; B's deep cells that are also A's 2330
+  basin flips: 203385 land H1 cells (76.3 % of land, 134900 km2) drain to another outlet under B
+  of them, outlets more than 10 H1 cells (8 km) apart: 120801 cells (45.3 % of land, 80124 km2); of the trunk cells 48.1 %
+  the chain's cols over 50 m: 1409 in 1271 H1 cells; removed under B 1044 (609 no longer a trunk, 435 drain another way), remaining 365
+f1-kw-chain: land H1 cells in the box 384316; trunk cells (>= 75 km2): A 24792, B 28253; the chain's own H1 channel cells there 20244, of them A trunks 97.3 %
+  agreement proxy: of A's trunk cells, B keeps 80.6 % as trunks and 58.3 % with the same receiver
+  changed trunk cells (in one tree only, or a different receiver): 18594 (17092 km of H1 trunk)
+  deep trunk cells (depth over 10 m, in L terms): A 12292, B 10612; B's deep cells that are also A's 8964
+  deep trunk cells (depth over 50 m, in L terms): A 23, B 19; B's deep cells that are also A's 19
+  basin flips: 75832 land H1 cells (19.7 % of land, 50297 km2) drain to another outlet under B
+  of them, outlets more than 10 H1 cells (8 km) apart: 63817 cells (16.6 % of land, 42328 km2); of the trunk cells 15.9 %
+  the chain's cols over 50 m: 39 in 39 H1 cells; removed under B 37 (31 no longer a trunk, 6 drain another way), remaining 2

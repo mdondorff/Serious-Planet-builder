@@ -1,0 +1,8 @@
+f1-def-chain: wall slope across the curve (96425 profiles) p50 0.045, p90 0.123, p99 0.233, max 0.43 m/m
+  cells within 3 cells of a curve (1457154): steepest neighbour slope p50 0.037, p90 0.109, p99 0.204, max 0.40 m/m (22 deg)
+  over 45 deg: 0 cells; at a col over 10 m 0, elsewhere 0
+  over 30 deg: 0 cells; at a col over 10 m 0, elsewhere 0
+f1-kw-chain: wall slope across the curve (96425 profiles) p50 0.050, p90 0.117, p99 0.199, max 0.34 m/m
+  cells within 3 cells of a curve (1457154): steepest neighbour slope p50 0.038, p90 0.102, p99 0.182, max 0.38 m/m (21 deg)
+  over 45 deg: 0 cells; at a col over 10 m 0, elsewhere 0
+  over 30 deg: 0 cells; at a col over 10 m 0, elsewhere 0

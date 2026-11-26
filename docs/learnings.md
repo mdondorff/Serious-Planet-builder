@@ -100,82 +100,6 @@ Assumption it changes: CLAUDE.md "Before every push to a PR branch run `cargo xt
 Proposed follow-up: `cargo xtask prepush && git push`, with no pipe before `&&` (or `set -o pipefail`).
 Obsolete when: a git pre-push hook runs the prepush.
 
-## 2026-11-14 The L basins come from the 814 m to L hand-over, not from B
-Scope: project (hand-over 814 m to L; P3 E1)
-- The solved 814 m surface drains at its grid (5.9 % of river length on closed basins); read at L it has 74.5 %: a D8 diagonal between two higher cells is a saddle in any bilinear or C1 read. Five B-stage variants leave 61-70 % against 71 % (spikes/drain-base/results/results.md, #1498).
-
-## 2026-11-14 The basin metric decides a river verdict
-Scope: project (river gate, BUILD-055)
-- "Any pit over 5 cm" fails SPIKE-115's flat windows (29.1 %, 13.7 %); basins of 0.5 m and 16 cells under a 1e-7 m fill give 0-4.6 % on the same kind of surface (spikes/combo-117/results/results.md). State the metric with every share.
-
-## 2026-11-14 K7 beds are not monotone
-Scope: K7 (GEN-169, GEN-176, GEN-185)
-- The burn only lowers, so line heights rise downstream: on r3a-e1 (R1h window) 63,167 of 219,390 line cells rise over 0.25 m (max 44.7 m). Cuts over 50 m come from H1 lines crossing L ridges (gprofile-read-2026-11-11.md; crusader's outbox).
-
-## 2026-11-14 A stored channel level bounds the bed from above
-Scope: project (K7 levels, river drawing)
-- The drawn ground lies below it at 83 % of channel points (median -3.8 m, p5 -30 m); on r3a-p2 the line is a raised one-cell line beside the carved low (SPIKE-113). It is no water surface.
-
-## 2026-11-14 Name a window by face, box and seed
-Scope: project (spike and gate reports)
-- SPIKE-114/115 called face 1, 8056-8675 x 760-1379, seed 14 "R3a"; the spikes lane called it R1h and used R3a for face 4, seed 15. Canonical: R1h, R3a, R3b (lead, 2026-11-14; #1506).
-
-## 2026-11-14 A 4-neighbour hand-over aligns rivers to the grid
-Scope: project (hand-over, ADR 0123 draft)
-- 66.5-68.6 % of channel steps run along an axis, against 47 % for B alone or one round at L (spikes/combo-117/results/results.md).
-
-## 2026-11-14 The river network cannot be rebuilt from B
-Scope: project (store format, river geometry)
-- Only 8.0 % of channel cells agree with routing on B + regional: store the L geometry (about 0.9 MB a region) or the regional change (spikes/rivers-at-l/results/results.md).
-
-## 2026-11-14 One regional-kernel round at L is the optimum
-Scope: project (regional kernel at L; K7 flood)
-- Three rounds raise the relief to 156/143 %, ten to 521/358 %; Schott 2024 multi-scale with unchanged parameters gives about 3x. K7's canonical flood refuses flats of an eroded surface (spikes/erosion-at-l/results/results.md).
-
-## 2026-11-14 Rounds and routing at L are not tile-bounded
-Scope: project (partitioning, CON-30)
-- The largest catchment holds 5.07 M cells against 0.59 M in a tile, with 27,636 pits; a region stage, or Barnes 2016's exact tiled flood (spikes/erosion-at-l/results/results.md).
-
-## 2026-11-14 The layer read's clamp made steps at L cell-centre lines
-Scope: project (layer read GEN-188; the bake's reads)
-- Max 12.5 m, 1.5 % of crossings over 0.1 m (0.001 m without the clamp); the bake's twin reads clamp the same way. SPIKE-114's "41 % steps" counted curvature too (spikes' outbox; rivers-at-l results).
-
-## 2026-11-14 No solver path keeps an inland lake
-Scope: project (edits and lakes, GEN-162, ADR 0113)
-- The breach cuts every basin; a 400 m dome keeps about 188 m after the rounds (SPIKE-112).
-
-## 2026-11-14 Memoised rounds recompute the serial area sweep
-Scope: project (regional solver, edit path)
-- About 80 % of a round, so memoised rounds take 2x resident ones (159 s a round at 1.42e8 land cells); a per-catchment parallel sweep: 69 s on 8 threads, bit-equal (spikes' outbox).
-
-## 2026-11-14 Later-stage start-surface fixes failed
-Scope: project (start surface; GEN-180 removed)
-- The coast tilt made R3a worse at every setting (12.0-15.6 % against 9.9 %); the band's crest rings dam a basin each (SPIKE-109, SPIKE-111; #1500).
-
-## 2026-11-14 A probe that copies library code goes stale
-Scope: project (gates and probes)
-- G-LOCAL's L1 mismatch (437,249 cells, up to 691 m) was the probe missing GEN-173's graded flood; with it, 0 of 1,040,400 differ (glocal-f32-2026-11-12.md). Probes call the library.
-
-## 2026-11-14 K7's seam difference opens in the carve
-Scope: K7 (ADR 0119)
-- Under both tilings the burn and breach are bit-identical; the carve differs on 7,032 cells (at most 0.012 m), deposition adds the 0.087 m maximum (k7-seam-2026-11-11.md).
-
-## 2026-11-14 gpu_skeleton times out only under CPU oversubscription
-Scope: project (tier C, prepush)
-- The two pipelined loops take 2.8 s alone and 28-69 s with 20-80 busy processes on WARP; the RTX is unaffected (spikes/gpu-skeleton/results/results.md).
-
-## 2026-11-14 The CPU latch recurs
-Scope: project (perf windows, Rasierklinge)
-- About 15-17 % `PercentProcessorPerformance` under load on 2026-10-29 and 2026-11-13; an EC reset (power button 30 s) cleared both; SPIKE-113's timings were void. Check under load before a window. Obsolete when a BIOS update removes it.
-
-## 2026-11-14 Messages pause after 10 sends, and order files wake nobody
-Scope: project (lane process)
-- Without an owner message the app pauses a lane's sends; an idle lane does not read its order file (explorer idle about 5 h on 2026-11-14; ADR 0118).
-
-## 2026-11-14 A default-on stage after one measurement made its defect worse
-Scope: project (generators, process)
-- The round-0 breach needed a second PR to switch off; three later-stage basin fixes were dropped (ADR 0118, ADR 0120).
-
 ## 2026-11-15 GLO-30 is a surface model: its basins and flat-ground relief are canopy
 Scope: project (the GLO-30 benchmark, SPIKE-108's frozen pools, P3 E1)
 - Against USGS 3DEP bare earth on 4 tiles (SPIKE-119): GLO-30 stands 0.8-9.7 m above it at p50; basins on river length 1.3-2.9x (Appalachians 64.9 % against 22.1 %); floodplain relief over 10 x 10 cells 15.2 m against 4.7 m.
@@ -192,3 +116,38 @@ Scope: project (any pipeline gated on a look or on bars measured against a stage
 - G2 to G3 (2026-11-22 to 11-26): at least 10 fix rows moved a defect to another stage. The attribution then traced 88-93 % of the residual look to S0 (K5 and the base), which no row changed.
 - Causes: S0 was every bar's reference; the plan held the base and climate fixed; G3 allowed only output-neutral main changes; the lead widened an owner remark about M1 to every parked item; kept lakes came from a geometric rule, not water balance (ADR 0111 point 5), so precipitation was never a suspect.
 - Follow-up: routing rule 10. Obsolete when: never.
+
+## 2026-11-26 A gate closed with its own criteria unmet turns later gates into renegotiation
+Scope: project (gates, process)
+- G2 (2026-11-22) closed with cost, tile-locality, the edit, widths and the owner's flight unmet; G3 then added seven bars and withdrew five within two days. Close a gate only on its own criteria, or record the miss as a stated exception (record: `docs/archive/P3/river-graph/`).
+- Obsolete when: never.
+
+## 2026-11-26 A decision adopted before its row runs is reopened within two days
+Scope: project (owner decisions)
+- The 10 m col cap (adopted 11-23) flooded both windows by 11-25; step 1 (11-23) failed the owner's look on 11-25; the look bars (11-24) failed calibration on 11-26. Adopt a rule after its row, not before.
+- Obsolete when: never.
+
+## 2026-11-26 An authority at 814 m drawn at 101.8 m crosses ridges only the fine grid sees
+Scope: project (hand-over between grids; H1, K5)
+- RG's trunks crossed 3,771 (R1h) and 7,087 (F1) cols over 10 m. Routing H1 on the fine passes needs the erosion re-solved on the same passes: K6' on today's K5 raised bed rises 44 to 902, and K5' sills failed 8/18.
+- Obsolete when: H1 and K5 route on the same sills.
+
+## 2026-11-26 Whole-cube allocation is the memory, not the landmass
+Scope: project (planet bake memory; GEN-147, GEN-192)
+- Wave 1's kernels allocated for the whole cube, 7.2x the landmass: 72-89 GB. The compact grid, capped K5 catchments and lean K6 buffers took the full count (1.489e8 land cells) to 9.26 GB peak RSS, about 61 B a cell, bit-identical.
+- Obsolete when: never.
+
+## 2026-11-26 The editor's budgets are checked by arithmetic before a below-erosion stage is designed
+Scope: project (editor; BUDG-003, BUDG-005, ADR 0112, 0113)
+- Wave 1 alone takes 4.4 h and 9.26 GB at 16 threads on one landmass, against a 4.0 GB terrain share and 6 threads in the editor. A landmass re-solve is a bake, not an edit.
+- Obsolete when: an ADR decides the edit model below erosion.
+
+## 2026-11-26 Three autonomous lanes outrun one part-time owner
+Scope: project (lane process; routing rules 11-13)
+- 95 lead orders in four days (11-22 to 11-26), eight open owner decisions at once, three planned flights unflown. Cap the queue to the owner's review rate, not the lanes' speed.
+- Obsolete when: never.
+
+## 2026-11-26 Window-edge rules inside a stage make the result depend on where the window is cut
+Scope: project (window and region stages; CON-30)
+- Moving R1h by 200 cells turned a 691 km2 lake into 191 km2 (spikes #153). Edges as outlets, exits or seeds belong to the partition layer, never to a stage's rule.
+- Obsolete when: never.
