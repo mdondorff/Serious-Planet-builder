@@ -76,7 +76,7 @@ fn same(a: &[f64], b: &[f64]) -> usize {
 }
 
 #[test]
-// spec: GEN-192
+// spec: GEN-192, TEST-157
 fn k5_with_the_in_flight_cap_is_k5() {
     for (name, (g, z0, outlet), tile) in [("compact cube", landmass(), TILE), ("plane", plane(), 16)] {
         let runoff: Vec<f32> = (0..g.len()).map(|p| 0.5 + (p % 7) as f32 * 0.1).collect();
@@ -126,7 +126,7 @@ fn assert_same_hydro(name: &str, a: &Hydro, b: &Hydro) {
 }
 
 #[test]
-// spec: GEN-192
+// spec: GEN-192, TEST-157
 fn hydrology_on_initiation_bits_with_the_area_freed_is_hydrology() {
     for (name, (g, z, outlet)) in [("compact cube", landmass()), ("plane", plane())] {
         let runoff: Vec<f32> = (0..g.len()).map(|p| 1.0e-8 * (1.0 + (p % 5) as f32)).collect();

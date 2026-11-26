@@ -288,7 +288,7 @@ fn varied_climate(d: Vec3) -> (f64, f64, f64) {
     (1.0e-8 * (0.5 + t), 4.0e-9 * (1.0 - t), 0.7 + 0.6 * t)
 }
 
-// spec: GEN-192
+// spec: GEN-192, TEST-157
 #[test]
 fn the_region_front_on_the_lean_paths_is_the_resident_pipeline() {
     use planet_cache::region_bake::region_front;

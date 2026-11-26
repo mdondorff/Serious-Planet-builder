@@ -1,0 +1,1 @@
+- 2026-11-26 wave1-memory-levers (RG park plan step 3): B's regional bake on the lean wave-1 paths (K5 in-flight cap, the route's filled surface, hydrology on initiation bits with the area freed), bit-identical; B at k = 1: 677 MiB peak working set, 74.9 B a cell (GEN-192, TEST-157)
