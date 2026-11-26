@@ -117,6 +117,8 @@ Everything goes through `cargo xtask`:
 | `cargo xtask cache-verify <dir>`, `cache-compact <dir>` | check or compact a tile store |
 | `cargo xtask det-diff <a> <b>` | compare two determinism manifests (Windows against Linux in CI) |
 | `cargo xtask capture flights` | the coastal flights as PNG sequences for the owner's look review |
+| `cargo xtask look-sheet RUN [--against DEFAULTS] [--az A,B]` | a crop store's look sheets at one L cell a pixel under a fixed low sun; `--against`: beside the defaults run and their difference (`target/review/look/<run>/`) |
+| `cargo xtask look-sheet RUN --steps [--az A,B]` | per crop, each pipeline stage of the run beside its difference to the previous stage (`<crop>-step-azNNN.png`, `steps.txt`) |
 | `cargo xtask ci-stats` | CI job times against the budget |
 | `cargo xtask cockpit [--help]` | offline HTML pipeline DAG, switch simulator, Global Authoring preview runner and pin/probe ledger (`target/review/cockpit/index.html`) |
 | `cargo xtask heavy <command>` | run a command under the machine-wide heavy-run lock |

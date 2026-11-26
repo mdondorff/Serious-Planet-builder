@@ -50,6 +50,8 @@ mod layer_store;
 mod layer_tiles;
 #[path = "look_sheet.rs"]
 mod look_sheet;
+#[path = "look_steps.rs"]
+mod look_steps;
 #[path = "meshpack.rs"]
 mod meshpack;
 #[path = "metric_calibration.rs"]

@@ -113,6 +113,13 @@ pub struct CropWriter {
     h: usize,
     coarse: usize,
     crops: Vec<(Crop, (usize, usize, usize, usize))>,
+    /// The stages written by [`CropWriter::stage`], in order (BUILD-071's `stages.txt`).
+    stages: Vec<(String, String)>,
+}
+
+/// A crop or stage name: letters, digits, '-' and '_' (a file name in every crop directory).
+fn plain_name(n: &str) -> bool {
+    !n.is_empty() && n.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
 }
 
 impl CropWriter {
@@ -124,7 +131,7 @@ impl CropWriter {
         let mut boxed = Vec::new();
         let mut text = String::from("look-crops 1\n");
         for c in crops {
-            if c.name.is_empty() || !c.name.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_') {
+            if !plain_name(&c.name) {
                 return Err(format!("crop name `{}`: letters, digits, '-' and '_' only", c.name));
             }
             if boxed.iter().any(|(b, _): &(Crop, _)| b.name == c.name) {
@@ -136,7 +143,39 @@ impl CropWriter {
             boxed.push((c.clone(), b));
         }
         std::fs::write(root.join("crops.txt"), text).map_err(|e| format!("{}: {e}", root.display()))?;
-        Ok(CropWriter { root: root.to_path_buf(), w, h, coarse, crops: boxed })
+        // a stage list of an earlier store at this root is not this run's
+        let stages = root.join("stages.txt");
+        if stages.exists() {
+            std::fs::remove_file(&stages).map_err(|e| format!("{}: {e}", stages.display()))?;
+        }
+        Ok(CropWriter { root: root.to_path_buf(), w, h, coarse, crops: boxed, stages: Vec::new() })
+    }
+
+    /// Cuts a stage's L surface (`w x h` cells) into every crop as `NAME.f32` and rewrites the store's `stages.txt` with `stage NAME LABEL` appended (BUILD-071), so the step rows
+    /// read the pipeline's stages in the order written. `name` takes letters, digits, '-' and '_', `label` no whitespace; a name given twice and a surface of another size are
+    /// refused.
+    pub fn stage(&mut self, name: &str, label: &str, z: &[f32]) -> Result<(), String> {
+        if !plain_name(name) {
+            return Err(format!("stage name `{name}`: letters, digits, '-' and '_' only"));
+        }
+        if label.is_empty() || label.chars().any(char::is_whitespace) {
+            return Err(format!("stage {name}: the label `{label}` is empty or holds whitespace"));
+        }
+        if self.stages.iter().any(|(n, _)| n == name) {
+            return Err(format!("stage name `{name}` given twice"));
+        }
+        if z.len() != self.w * self.h {
+            return Err(format!("stage {name}: {} cells, the window's L surface has {}", z.len(), self.w * self.h));
+        }
+        let bytes: Vec<u8> = z.iter().flat_map(|v| v.to_le_bytes()).collect();
+        self.field(&format!("{name}.f32"), &bytes)?;
+        self.stages.push((name.to_string(), label.to_string()));
+        let mut text = String::from("look-stages 1\n");
+        for (n, l) in &self.stages {
+            text.push_str(&format!("stage {n} {l}\n"));
+        }
+        let p = self.root.join("stages.txt");
+        std::fs::write(&p, text).map_err(|e| format!("{}: {e}", p.display()))
     }
 
     /// Cuts one field of the chain (`name` as in the chain layout, such as `s0.f32` or `stages/kv-lower.u16`) into every crop: an L field of 1, 2, 4 or 8 bytes a cell, or an H1 field
@@ -237,12 +276,21 @@ struct Row {
 
 /// The sheet's size in pixels for `rows` rows of `size`-cell crops: two title rows, the stage labels, then the rows, each with its label in a column of [`LABEL_CHARS`] glyphs.
 pub fn sheet_px(size: usize, rows: usize) -> (usize, usize) {
-    (GAP + LABEL_CHARS * TEXT_CELL_W + GAP + STAGES.len() * (size + GAP), 2 * TEXT_ROW_H + GAP + TEXT_ROW_H + 4 + rows * (size + GAP))
+    grid_px(size, STAGES.len(), rows)
 }
 
-/// The sheet's pixels, RGB.
-fn compose(title: &[String], size: usize, rows: &[Row]) -> Vec<u8> {
-    let (w, h) = sheet_px(size, rows.len());
+/// The step sheet's size in pixels (BUILD-071): [`sheet_px`]'s layout with two columns, the stage and its step.
+pub fn step_sheet_px(size: usize, rows: usize) -> (usize, usize) {
+    grid_px(size, 2, rows)
+}
+
+fn grid_px(size: usize, cols: usize, rows: usize) -> (usize, usize) {
+    (GAP + LABEL_CHARS * TEXT_CELL_W + GAP + cols * (size + GAP), 2 * TEXT_ROW_H + GAP + TEXT_ROW_H + 4 + rows * (size + GAP))
+}
+
+/// The sheet's pixels, RGB: `columns` labels the panel columns, and `empty` is written on a panel with no pixels.
+fn compose(title: &[String], size: usize, columns: &[&str], rows: &[Row], empty: &str) -> Vec<u8> {
+    let (w, h) = grid_px(size, columns.len(), rows.len());
     let mut img = Rgba { width: w as u32, height: h as u32, data: [24u8, 24, 28, 255].repeat(w * h) };
     // a title longer than the sheet is cut at its width; the crops' places and the scale are also in `look.txt` and the store
     let title_chars = (w - 2 * GAP) / TEXT_CELL_W;
@@ -254,7 +302,7 @@ fn compose(title: &[String], size: usize, rows: &[Row]) -> Vec<u8> {
     let x0 = GAP + LABEL_CHARS * TEXT_CELL_W + GAP;
     // a stage label longer than its panel is cut at the panel's width
     let fit_chars = (size / TEXT_CELL_W).max(1);
-    for (s, (_, label)) in STAGES.iter().enumerate() {
+    for (s, label) in columns.iter().enumerate() {
         let fit: String = label.chars().take(fit_chars).collect();
         put_text(&mut img, x0 + s * (size + GAP), top, &fit, [230, 230, 230]);
     }
@@ -275,7 +323,7 @@ fn compose(title: &[String], size: usize, rows: &[Row]) -> Vec<u8> {
                 }
             }
             if p.is_none() {
-                put_text(&mut img, ox + 2, oy + 2, &"NOT DUMPED".chars().take(fit_chars).collect::<String>(), [200, 200, 200]);
+                put_text(&mut img, ox + 2, oy + 2, &empty.chars().take(fit_chars).collect::<String>(), [200, 200, 200]);
             }
         }
     }
@@ -320,6 +368,30 @@ pub struct Written {
     pub numbers: Option<PathBuf>,
 }
 
+/// Composes a sheet and writes it to `p` as an 8-bit RGB PNG, or refuses it, naming it, when it is over [`SHEET_LIMIT`] bytes (BUILD-048), and does not write it.
+fn emit_sheet(
+    p: &Path,
+    title: &[String],
+    size: usize,
+    columns: &[&str],
+    rows: &[Row],
+    empty: &str,
+    written: &mut Written,
+) -> Result<(), String> {
+    let (w, h) = grid_px(size, columns.len(), rows.len());
+    let png = png_rgb(&compose(title, size, columns, rows, empty), w, h)?;
+    if png.len() as u64 > SHEET_LIMIT {
+        return Err(format!(
+            "{}: {} bytes, over the per-sheet limit of {SHEET_LIMIT} (BUILD-048): fewer or smaller crops",
+            p.display(),
+            png.len()
+        ));
+    }
+    std::fs::write(p, &png).map_err(|e| format!("{}: {e}", p.display()))?;
+    written.sheets.push((p.to_path_buf(), (w, h), png.len() as u64));
+    Ok(())
+}
+
 /// The look sheets of a run's crop store into `out`. Without `against`: one sheet an azimuth (`azNNN.png`), a row a crop. With `against` (the defaults run's store, the same crops):
 /// one sheet a crop and azimuth (`<crop>-azNNN.png`) with the rows defaults, switch, and the switch's shade tinted by its difference to the defaults (red lower, blue higher,
 /// saturating at [`DIFF_M`]), and `look.txt`: per crop and stage the cells, the RMS and the largest absolute difference (m). A sheet over [`SHEET_LIMIT`] bytes is refused, naming
@@ -353,20 +425,9 @@ pub fn write_sheets(run: &Path, against: Option<&Path>, azimuths: &[f64], out: &
     let label = |m: &Manifest| m.label.rsplit_once(' ').map_or(m.label.clone(), |(l, _)| l.to_string());
     let run_label = label(&crops[0].manifest);
     let mut written = Written::default();
+    let columns = STAGES.map(|(_, l)| l);
     let mut emit = |name: String, title: Vec<String>, rows: Vec<Row>| -> Result<(), String> {
-        let (w, h) = sheet_px(size, rows.len());
-        let png = png_rgb(&compose(&title, size, &rows), w, h)?;
-        let p = out.join(name);
-        if png.len() as u64 > SHEET_LIMIT {
-            return Err(format!(
-                "{}: {} bytes, over the per-sheet limit of {SHEET_LIMIT} (BUILD-048): fewer or smaller crops",
-                p.display(),
-                png.len()
-            ));
-        }
-        std::fs::write(&p, &png).map_err(|e| format!("{}: {e}", p.display()))?;
-        written.sheets.push((p, (w, h), png.len() as u64));
-        Ok(())
+        emit_sheet(&out.join(name), &title, size, &columns, &rows, "NOT DUMPED", &mut written)
     };
     let sun = |az: f64| format!("SUN AZ {az:.0} ALT {SUN_ALT_DEG:.0}  1 PX = 1 L CELL  NORTH UP");
     match &base {
@@ -443,6 +504,123 @@ pub fn write_sheets(run: &Path, against: Option<&Path>, azimuths: &[f64], out: &
         }
     }
     Ok(written)
+}
+
+/// The step rows' scale (m, BUILD-071): a step's tint saturates there.
+pub const STEP_M: f64 = 2.0;
+
+/// A store's stages in the pipeline's order, `(name, label)` (BUILD-071): its `stages.txt` (`look-stages 1`, then `stage NAME LABEL` a stage), or, for a store without one,
+/// BUILD-067's columns that its first crop holds. A listed stage that a crop does not hold is refused, naming both.
+pub fn read_stages(root: &Path, crops: &[StoredCrop]) -> Result<Vec<(String, String)>, String> {
+    let p = root.join("stages.txt");
+    let stages: Vec<(String, String)> = if p.exists() {
+        let text = std::fs::read_to_string(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+        let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty());
+        if lines.next() != Some("look-stages 1") {
+            return Err(format!("{}: the first line is not `look-stages 1`", p.display()));
+        }
+        lines
+            .map(|l| match l.split_whitespace().collect::<Vec<_>>()[..] {
+                ["stage", n, label] if plain_name(n) => Ok((n.to_string(), label.to_string())),
+                _ => Err(format!("{}: `{l}`: stage NAME LABEL", p.display())),
+            })
+            .collect::<Result<_, _>>()?
+    } else {
+        let first = crops.first().ok_or(format!("{}: no crop", root.display()))?;
+        STAGES.iter().filter(|(s, _)| first.dir.join(format!("{s}.f32")).exists()).map(|(s, l)| (s.to_string(), l.to_string())).collect()
+    };
+    for c in crops {
+        for (s, _) in &stages {
+            if !c.dir.join(format!("{s}.f32")).exists() {
+                return Err(format!("{}: crop {} does not hold the stage {s} (`{s}.f32`)", root.display(), c.crop.name));
+            }
+        }
+    }
+    Ok(stages)
+}
+
+/// The step rows of a run's crop store into `out` (BUILD-071): one sheet a crop and azimuth, `<crop>-step-azNNN.png`, with a row a stage in the pipeline's order
+/// ([`read_stages`]): the stage under the chain sheet's shade beside that shade tinted by the stage minus the previous stage (red lower, blue higher, saturating at
+/// [`STEP_M`]; the first row's step panel grey). `steps.txt` holds per crop and step the cells, the signed mean, the RMS and the largest absolute step (m). A sheet over
+/// [`SHEET_LIMIT`] bytes is refused, naming it, and is not written.
+pub fn write_steps(run: &Path, azimuths: &[f64], out: &Path) -> Result<Written, String> {
+    let crops = read_store(run)?;
+    let stages = read_stages(run, &crops)?;
+    if stages.len() < 2 {
+        return Err(format!("{}: {} stage(s), fewer than two stages: no step to draw", run.display(), stages.len()));
+    }
+    let size = crops[0].crop.size;
+    if crops.iter().any(|c| c.crop.size != size) {
+        return Err(format!("{}: the crops are not all {size} cells", run.display()));
+    }
+    if azimuths.is_empty() {
+        return Err("no azimuth".into());
+    }
+    std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
+    let m0 = &crops[0].manifest;
+    let run_label = m0.label.rsplit_once(' ').map_or(m0.label.clone(), |(l, _)| l.to_string());
+    let mut written = Written::default();
+    let mut numbers = format!("look-steps 1\nrun {run_label}\n");
+    for c in &crops {
+        let z: Vec<Vec<f32>> = stages
+            .iter()
+            .map(|(s, _)| surface(c, s)?.ok_or(format!("{}: crop {} does not hold the stage {s}", run.display(), c.crop.name)))
+            .collect::<Result<_, _>>()?;
+        // the step of stage i over the box: stage i minus stage i - 1; its crop cells give the numbers
+        let steps: Vec<Vec<f64>> =
+            (1..z.len()).map(|i| z[i].iter().zip(&z[i - 1]).map(|(a, b)| f64::from(*a) - f64::from(*b)).collect()).collect();
+        for (i, step) in steps.iter().enumerate() {
+            let d: Vec<f64> = cells_f64(step, c);
+            let n = d.len() as f64;
+            let mean = d.iter().sum::<f64>() / n;
+            let rms = (d.iter().map(|v| v * v).sum::<f64>() / n).sqrt();
+            let max = d.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+            numbers.push_str(&format!(
+                "{} {} {} cells {} mean_m {mean:.3} rms_m {rms:.3} max_abs_m {max:.3}\n",
+                c.crop.name,
+                stages[i + 1].0,
+                stages[i].0,
+                d.len()
+            ));
+        }
+        for &az in azimuths {
+            let rows: Vec<Row> = z
+                .iter()
+                .enumerate()
+                .map(|(i, zi)| {
+                    let rgb = shaded(zi, c, az);
+                    let step = (i > 0).then(|| {
+                        let mut t = rgb.clone();
+                        tint_change(&mut t, &cells_f64(&steps[i - 1], c), STEP_M);
+                        t
+                    });
+                    Row { label: stages[i].1.clone(), panels: vec![Some(rgb), step] }
+                })
+                .collect();
+            // two columns are narrow, so the titles are short: the crop's place is in the store, the sun's altitude and the scale are BUILD-071's fixed ones
+            let title = vec![format!("{run_label} {}", c.crop.name), format!("AZ {az:.0} RED- BLUE+ {STEP_M:.0}M")];
+            emit_sheet(
+                &out.join(format!("{}-step-az{az:03.0}.png", c.crop.name)),
+                &title,
+                size,
+                &["STAGE", "STEP"],
+                &rows,
+                "FIRST",
+                &mut written,
+            )?;
+        }
+    }
+    let p = out.join("steps.txt");
+    std::fs::write(&p, numbers).map_err(|e| format!("{}: {e}", p.display()))?;
+    written.numbers = Some(p);
+    Ok(written)
+}
+
+/// The crop's cells of a box field of f64, row-major.
+fn cells_f64(f: &[f64], c: &StoredCrop) -> Vec<f64> {
+    let v = &c.view;
+    let w = c.manifest.w;
+    (0..v.size_y).flat_map(|y| (0..v.size_x).map(move |x| f[(v.y + y) * w + v.x + x])).collect()
 }
 
 /// The default output: `target/review/look/<the run directory's name>/`.
