@@ -316,6 +316,8 @@ impl Stage for K6 {
         let runoff = vec![self.runoff; g.len()];
         // the reference is today's form (a second flood, a zero evaporation field, a new d8 field); the partitioned run takes the route's filled surface (a), no evaporation
         // field (d) and the filled buffer as d8 (f): the layouts' bit-identity checks them against it
+        // the area before K6 frees it ((g): `h1_from_owned` keeps the initiation as bits and drops the area)
+        let area: Vec<u64> = routing.area.iter().map(|v| v.to_bits()).collect();
         let h1 = match filled {
             None => {
                 let filled = priority_flood_with(g, &st.z, cx.outlet, eps, true);
@@ -326,7 +328,7 @@ impl Stage for K6 {
         };
         st.fields
             .insert("receiver", h1.routing.receiver.iter().map(|&v| if v == NONE { u64::MAX } else { g.global_id(v as usize) }).collect());
-        st.fields.insert("area", h1.routing.area.iter().map(|v| v.to_bits()).collect());
+        st.fields.insert("area", area);
         st.fields.insert("d8", h1.d8.iter().map(|v| v.to_bits()).collect());
         st.fields.insert("qw", h1.hydro.qw.iter().map(|v| v.to_bits()).collect());
         for (k, cells) in h1.trunk_cells.iter().enumerate() {

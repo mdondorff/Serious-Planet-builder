@@ -716,6 +716,11 @@ pub fn solve_rounds_memo(
                         z[c as usize] = v;
                     }
                 }
+                // G3-6: written back and, in a cache that keeps nothing, never memoised, so a chunk's heights are dropped (the write loop below then has nothing to write again)
+                if cache.forget {
+                    done.extend(got.into_iter().map(|(key, _, hit)| (key, Arc::new(Vec::new()), hit)));
+                    continue;
+                }
             }
             done.extend(got);
         }

@@ -203,10 +203,55 @@ pub fn hydrology_with(
     intentional: Option<&[bool]>,
     params: &HydroParams,
 ) -> Hydro {
+    hydrology_core(grid, z, filled, routing, outlet, runoff, open_evap, intentional, None, params)
+}
+
+/// The initiation bitset of [`hydrology_initiated`]: bit `p` set where `routing.area[p] >= params.initiation_m2` (the test `hydrology` makes), so the area can be freed.
+pub fn initiation_bits(routing: &Routing, params: &HydroParams) -> Vec<u64> {
+    let mut bits = vec![0u64; routing.area.len().div_ceil(64)];
+    for (p, &a) in routing.area.iter().enumerate() {
+        if a >= params.initiation_m2 {
+            bits[p / 64] |= 1 << (p % 64);
+        }
+    }
+    bits
+}
+
+/// Spike (G3-6 step 3 (g)): [`hydrology`] with the channel initiation given as [`initiation_bits`] instead of read from `routing.area`, which may then be empty (freed): the
+/// area is read nowhere else, so the result is the same bits.
+#[allow(clippy::too_many_arguments)]
+pub fn hydrology_initiated(
+    grid: &Grid,
+    z: &(impl Heights + ?Sized),
+    filled: &[f64],
+    routing: &Routing,
+    outlet: &[bool],
+    runoff: Option<&[f32]>,
+    open_evap: Option<&[f32]>,
+    initiated: &[u64],
+    params: &HydroParams,
+) -> Hydro {
+    assert_eq!(initiated.len(), grid.len().div_ceil(64), "one initiation bit per cell");
+    hydrology_core(grid, z, filled, routing, outlet, runoff, open_evap, None, Some(initiated), params)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn hydrology_core(
+    grid: &Grid,
+    z: &(impl Heights + ?Sized),
+    filled: &[f64],
+    routing: &Routing,
+    outlet: &[bool],
+    runoff: Option<&[f32]>,
+    open_evap: Option<&[f32]>,
+    intentional: Option<&[bool]>,
+    initiated: Option<&[u64]>,
+    params: &HydroParams,
+) -> Hydro {
     let n = grid.len();
     assert!(z.len() == n && filled.len() == n && outlet.len() == n && routing.receiver.len() == n, "one value per cell");
     assert!(params.initiation_m2 > 0.0 && params.pit_min_m >= 0.0, "initiation is positive, the pit limit not negative");
-    assert!(routing.area.len() == n, "one area per cell");
+    assert!(initiated.is_some() || routing.area.len() == n, "one area per cell");
     assert!(
         runoff.is_none_or(|r| r.len() == n) && open_evap.is_none_or(|e| e.len() == n),
         "one runoff and one open-water evaporation per cell"
@@ -214,7 +259,11 @@ pub fn hydrology_with(
     assert!(open_evap.is_none() || runoff.is_some(), "an evaporation (m/s) needs the runoff in m/s: without it Q is an area");
     assert!(open_evap.is_none_or(|e| e.iter().all(|v| *v >= 0.0 && v.is_finite())), "E_open = PET - (P - r) is finite and not negative");
     assert!(intentional.is_none_or(|f| f.len() == n), "one intentional flag per cell");
-    let (receiver, area) = (&routing.receiver, &routing.area);
+    let receiver = &routing.receiver;
+    let initiates = |p: usize| match initiated {
+        Some(b) => b[p / 64] >> (p % 64) & 1 == 1,
+        None => routing.area[p] >= params.initiation_m2,
+    };
     for c in 0..n {
         if grid.is_active(c) && !outlet[c] && receiver[c] != NONE {
             assert!(
@@ -241,7 +290,7 @@ pub fn hydrology_with(
     // ---- channel cells: initiated, then downstream
     let mut channel = vec![false; n];
     for p in 0..n {
-        channel[p] = grid.is_active(p) && !outlet[p] && area[p] >= params.initiation_m2;
+        channel[p] = grid.is_active(p) && !outlet[p] && initiates(p);
     }
     for &c in routing.order.iter().rev() {
         let c = c as usize;

@@ -2,7 +2,7 @@
 //! the chain's code. The switch `HYDRO_TWICE` is a per-call parameter (R16). rg_chain calls this with its switch, so its bits do not change.
 
 use planet_generators::bake::channel_graph::{q_value, ChannelGraph};
-use planet_generators::bake::hydro::{hydrology, Hydro, HydroParams};
+use planet_generators::bake::hydro::{hydrology, hydrology_initiated, initiation_bits, Hydro, HydroParams};
 use planet_generators::bake::route::{Routing, NONE};
 use planet_generators::bake::Grid;
 
@@ -32,7 +32,8 @@ pub fn h1_from(
     budget: Option<&[f64]>,
     hydro_twice: bool,
 ) -> H1 {
-    let (routing, hydro, graph, trunk_seg, trunk_cells) = h1_body(grid, z, filled, routing, outlet, runoff, evap, budget, hydro_twice);
+    let (routing, hydro, graph, trunk_seg, trunk_cells) =
+        h1_body(grid, z, filled, routing, outlet, runoff, evap, budget, hydro_twice, None);
     let d8 = d8_into(grid, &routing, vec![0.0; grid.len()]);
     H1 { routing, hydro, graph, trunk_seg, trunk_cells, d8 }
 }
@@ -44,14 +45,19 @@ pub fn h1_from_owned(
     grid: &Grid,
     z: &[f64],
     filled: Vec<f64>,
-    routing: Routing,
+    mut routing: Routing,
     outlet: &[bool],
     runoff: &[f32],
     evap: &[f32],
     budget: Option<&[f64]>,
     hydro_twice: bool,
 ) -> H1 {
-    let (routing, hydro, graph, trunk_seg, trunk_cells) = h1_body(grid, z, &filled, routing, outlet, runoff, evap, budget, hydro_twice);
+    // (g): the MFD area is read only by hydrology's channel initiation; keep that test as a bitset and free the area (`H1.routing.area` is then empty)
+    let bits = initiation_bits(&routing, &HydroParams::default());
+    routing.area = Vec::new();
+    let (routing, hydro, graph, trunk_seg, trunk_cells) =
+        h1_body(grid, z, &filled, routing, outlet, runoff, evap, budget, hydro_twice, Some(&bits));
+    drop(bits);
     let d8 = d8_into(grid, &routing, filled);
     H1 { routing, hydro, graph, trunk_seg, trunk_cells, d8 }
 }
@@ -84,22 +90,19 @@ fn h1_body(
     evap: &[f32],
     budget: Option<&[f64]>,
     hydro_twice: bool,
+    initiated: Option<&[u64]>,
 ) -> Body {
     // (d): the evaporation is read only without a budget or by the rerun
     assert!((budget.is_some() && !hydro_twice) || evap.len() == grid.len(), "one evaporation per cell where it is read");
     // lead #163 (B3, result-preserving): with `budget` every basin is crossed (reading 24) and the second call only zeroed the open-water loss of the basins' cells,
     // the one input `hydrology` reads it through (each basin's e_open); one call with a zero evaporation gives the same Hydro
-    let mut hydro = hydrology(
-        grid,
-        z,
-        filled,
-        &routing,
-        outlet,
-        Some(runoff),
-        // spike (G3-6 step 3 (b)): with a budget every basin is crossed and its open-water loss is zero; `None` adds the same 0.0 a zero vector adds (`hydrology`), without the vector
-        if budget.is_some() { None } else { Some(evap) },
-        &HydroParams::default(),
-    );
+    // (g): with the initiation bits the area is not read (it may be empty)
+    let run = |ev: Option<&[f32]>| match initiated {
+        Some(b) => hydrology_initiated(grid, z, filled, &routing, outlet, Some(runoff), ev, b, &HydroParams::default()),
+        None => hydrology(grid, z, filled, &routing, outlet, Some(runoff), ev, &HydroParams::default()),
+    };
+    // spike (G3-6 step 3 (b)): with a budget every basin is crossed and its open-water loss is zero; `None` adds the same 0.0 a zero vector adds (`hydrology`), without the vector
+    let mut hydro = run(if budget.is_some() { None } else { Some(evap) });
     // spikes #142, reading 16: a kept basin deeper than the budget at its floor is crossed (reading 13), not a lake: no open-water loss there, so q_w = q through it.
     // The basins are the same (the loss enters only the balance); the rerun changes q_w and the balance only.
     // reading 24 (lead, 2026-11-17; owner decision 6 c): no H1 basin is a lake in the prototype, every one is crossed (q_w = q); `budget` only switches the rule on
@@ -108,7 +111,7 @@ fn h1_body(
         if hydro_twice && crossed.iter().any(|&x| x) {
             let ev2: Vec<f32> =
                 (0..evap.len()).map(|c| if hydro.label[c] != NONE && crossed[hydro.label[c] as usize] { 0.0 } else { evap[c] }).collect();
-            let again = hydrology(grid, z, filled, &routing, outlet, Some(runoff), Some(&ev2), &HydroParams::default());
+            let again = run(Some(&ev2));
             assert_eq!(again.basins.len(), hydro.basins.len(), "the loss does not change the basins");
             hydro = again;
         }
