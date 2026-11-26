@@ -218,7 +218,7 @@ pub fn initiation_bits(routing: &Routing, params: &HydroParams) -> Vec<u64> {
 }
 
 /// [`hydrology`] with the channel initiation given as [`initiation_bits`] instead of read from `routing.area`, which may then be empty (freed; GEN-192). The area is read nowhere
-/// else, so the result is the same bits.
+/// else, so the result is the same bits. [`verify`] and [`verify_with_area`] read the area: run them before it is freed.
 #[allow(clippy::too_many_arguments)]
 pub fn hydrology_initiated(
     grid: &Grid,

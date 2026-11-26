@@ -35,7 +35,7 @@ pub const LOCAL_PER_REGIONAL: usize = 8;
 /// The tile of the region's partitioned rounds and route (GEN-143, GEN-192): a tile size changes no bit (G-PART), only what one step touches.
 pub const REGION_TILE: usize = 256;
 
-/// K5's catchments in flight, as a share of the region's land cells (GEN-192): about the measured 6 % of the spike's wave 1.
+/// K5's catchments in flight, as a share of the region's cells that are not outlets (GEN-192 holds the value).
 pub const INFLIGHT_SHARE: f64 = 0.06;
 
 /// The runoff, open-water evaporation (both m/s) and discharge weight at a direction of land.

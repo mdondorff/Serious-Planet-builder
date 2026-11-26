@@ -2695,8 +2695,10 @@ Detail:
 
 | B's region bake | Value |
 |---|---|
-| K5 | `solve_rounds_memo`, tile `REGION_TILE` (256), cap `INFLIGHT_SHARE` (0.06) of the land cells, a cache that keeps nothing |
+| K5 | `solve_rounds_memo`, tile `REGION_TILE` (256), cap `INFLIGHT_SHARE` (0.06) of the cells that are not outlets, a cache that keeps nothing |
 | the front | the partitioned route with the weights, its filled surface, the initiation bits, the area freed, `hydrology_initiated` |
+
+Evidence (non-normative):
 
 | Measured | Stages | Cells with the ring | Peak working set | Per cell |
 |---|---|---|---|---|
@@ -2707,12 +2709,16 @@ Detail:
 
 #### Scenario: K5 capped
 - **WHEN** K5 runs 3 rounds on a compact landmass of the cube and on a plane, with and without runoff drivers, capped at 1 and 7 cells, a sixteenth and a third of the land, with a cache that keeps nothing and with the memo
-- **THEN** the surface equals K5 uncapped bit for bit
+- **THEN** the surface equals K5 uncapped on one thread bit for bit, at 1 and 8 threads; a second solve on the memoising capped cache hits the memo and gives the same bits
 
 #### Scenario: Hydrology on the initiation bits
 - **WHEN** hydrology runs on the compact landmass and the plane, with and without open-water evaporation, once on the MFD area and once on its initiation bits with the area freed
 - **THEN** q, q_w, the channel cells, the basin labels, the segments, the basins and the counts are the same
 
+#### Scenario: The route's filled surface across tiles
+- **WHEN** a window of 72 x 60 cells of a cube face of 2,048 cells (an origin and the face's metric) is routed with runoff weights, resident and in tiles of 8, 13 and 25 cells
+- **THEN** the partitioned route's filled surface is the canonical flood's, and its receivers, order and weighted area are the resident route's, bit for bit
+
 #### Scenario: B's region front
 - **WHEN** the region front runs on faces of 64 and 2,048 cells a face edge with a climate that varies over the region, at 1 and 3 threads
-- **THEN** the solved surface, the hydrology's counts, the lakes, the channel graph and the segment ids equal the resident pipeline's (`solve_rounds`, `route_rules`, `priority_flood_with`, `hydrology`)
+- **THEN** the solved surface (against the resident rounds on one thread), the hydrology's counts, the lakes, the channel graph and the segment ids equal the resident pipeline's (`solve_rounds`, `route_rules`, `priority_flood_with`, `hydrology`)

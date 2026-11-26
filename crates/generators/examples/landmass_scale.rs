@@ -472,7 +472,7 @@ fn rss_mib() -> (u64, u64) {
     (peak, now)
 }
 
-/// The process's peak working set, working set and peak commit (MiB). Windows trims working sets under memory pressure; the commit is not trimmed (the lead's condition, 2026-11-26).
+/// The process's peak working set, working set and peak commit (MiB; on Linux the third is VmPeak, the peak virtual size, not the commit). Windows trims working sets under memory pressure; the commit is not trimmed (the lead's condition, 2026-11-26).
 #[cfg(windows)]
 fn mem_mib() -> (u64, u64, u64) {
     #[repr(C)]
@@ -576,8 +576,8 @@ fn bwave1(grid: &Grid, mut z: Vec<f64>, outlet: &[bool], inputs: &BakeInputs, n:
         "BWAVE1 the grid: {active} cells ({land} land), the fixed RSS {fixed} MiB, live heap {:.0} MiB",
         CUR.load(Relaxed) as f64 / 1048576.0
     );
-    // K5: B's rounds
-    let cp = CarveParams {
+    // K5: B's rounds, under Earth's precision as B's bake applies it (GEN-175: the f32 round surface and the world's epsilon)
+    let mut cp = CarveParams {
         steps: 20,
         reroute_every: 5,
         round_rules: RoundRules::ROUND,
@@ -585,6 +585,8 @@ fn bwave1(grid: &Grid, mut z: Vec<f64>, outlet: &[bool], inputs: &BakeInputs, n:
         window_cut: true,
         ..CarveParams::default()
     };
+    planet_generators::bake::precision::WorldPrecision::new(-11_000.0, 9_000.0, 1e-3, planet_generators::bake::precision::EPSILON_MAX_M)
+        .apply(&mut cp);
     let capc = (land * 6 / 100).max(1);
     let tile = 384;
     let t = Instant::now();

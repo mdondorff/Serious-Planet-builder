@@ -81,34 +81,29 @@ fn k5_with_the_in_flight_cap_is_k5() {
     for (name, (g, z0, outlet), tile) in [("compact cube", landmass(), TILE), ("plane", plane(), 16)] {
         let runoff: Vec<f32> = (0..g.len()).map(|p| 0.5 + (p % 7) as f32 * 0.1).collect();
         for drivers in [Drivers::default(), Drivers { runoff: Some(&runoff), ..Drivers::default() }] {
+            // the reference: uncapped, on one thread
             let mut want = z0.clone();
-            solve_rounds_memo(&g, &mut want, &outlet, &params(), 3, &3usize, 5, &drivers, tile, &mut RoundCache::without_memory());
+            solve_rounds_memo(&g, &mut want, &outlet, &params(), 3, &1usize, 5, &drivers, tile, &mut RoundCache::without_memory());
             assert!(same(&want, &z0) > 0, "{name}: the rounds change the surface");
             let land = outlet.iter().filter(|&&o| !o).count();
+            let runoff_on = drivers.runoff.is_some();
             for cap in [1, 7, land / 16, land / 3] {
-                // the cache that keeps nothing (the chunk's heights dropped once written back), and the memoising cache
-                for forget in [true, false] {
+                // the cache that keeps nothing (the chunk's heights dropped once written back) and the memoising cache, on 1 and 8 threads
+                for (forget, threads) in [(true, 1usize), (true, 8), (false, 1), (false, 8)] {
                     let mut z = z0.clone();
                     let cache = if forget { RoundCache::without_memory() } else { RoundCache::default() };
-                    solve_rounds_memo(
-                        &g,
-                        &mut z,
-                        &outlet,
-                        &params(),
-                        3,
-                        &3usize,
-                        5,
-                        &drivers,
-                        tile,
-                        &mut cache.with_inflight_cap(cap.max(1)),
-                    );
+                    let mut cache = cache.with_inflight_cap(cap.max(1));
+                    solve_rounds_memo(&g, &mut z, &outlet, &params(), 3, &threads, 5, &drivers, tile, &mut cache);
                     let differ = same(&z, &want);
-                    assert_eq!(
-                        differ,
-                        0,
-                        "{name}, runoff {}, cap {cap} cells, forget {forget}: {differ} cells differ in bits",
-                        drivers.runoff.is_some()
-                    );
+                    let at = format!("{name}, runoff {runoff_on}, cap {cap} cells, forget {forget}, {threads} threads");
+                    assert_eq!(differ, 0, "{at}: {differ} cells differ in bits");
+                    if !forget {
+                        // the same surface again on the same capped cache: the catchments from the memo, the same bits
+                        let mut again = z0.clone();
+                        let (_, work) = solve_rounds_memo(&g, &mut again, &outlet, &params(), 3, &threads, 5, &drivers, tile, &mut cache);
+                        assert!(work.iter().map(|w| w.memo_hits).sum::<usize>() > 0, "{at}: the second solve hits the memo");
+                        assert_eq!(same(&again, &want), 0, "{at}: the memo's second solve differs in bits");
+                    }
                 }
             }
         }
@@ -144,5 +139,39 @@ fn hydrology_on_initiation_bits_with_the_area_freed_is_hydrology() {
             let got = hydrology_initiated(&g, &z, &filled, &freed, &outlet, Some(&runoff), ev, &bits, &hp);
             assert_same_hydro(&format!("{name}, {tag}"), &got, &want);
         }
+    }
+}
+
+#[test]
+// spec: GEN-192, TEST-157
+fn the_partitioned_route_s_filled_surface_and_weighted_routing_are_the_resident_ones_on_b_s_grid() {
+    use planet_generators::bake::metric::Metric;
+    use planet_generators::bake::partition::{partitioned_route_weighted, PartCache};
+    // B's grid form: a window of a cube face of 2,048 cells an edge, with its origin and the face's metric (region_bake::solve_region), much wider than the tiles
+    let (w, h, origin) = (72usize, 60usize, (996u32, 1003u32));
+    let (_, z, outlet) = plane();
+    let z: Vec<f64> = (0..w * h).map(|p| z[(p / w) % 48 * 64 + (p % w) % 64] + 0.25 * (p % 11) as f64).collect();
+    let outlet: Vec<bool> = (0..w * h)
+        .map(|p| p % w == 0 || p % w == w - 1 || p / w == 0 || p / w == h - 1 || outlet[(p / w) % 48 * 64 + (p % w) % 64] && p % 5 == 0)
+        .collect();
+    let g = Grid::new(w, h, 2_445.0).with_origin(origin).with_metric(Metric::cube_face(
+        2048,
+        R,
+        (i64::from(origin.0), i64::from(origin.1)),
+        w,
+        h,
+    ));
+    let weight: Vec<f32> = (0..w * h).map(|p| 0.3 + (p % 9) as f32 * 0.2).collect();
+    let eps = 2e-3;
+    let want = route_rules(&g, &z, &outlet, eps, 5, 0.0, Some(&weight), RoundRules::ROUND);
+    let flood = priority_flood_with(&g, &z, &outlet, eps, true);
+    for tile in [8, 13, 25] {
+        let got =
+            partitioned_route_weighted(&g, &z, &outlet, eps, 5, tile, RoundRules::ROUND, Some(&weight), &mut PartCache::without_memory());
+        assert!(got.stats.tiles >= 9, "tile {tile}: many tiles ({})", got.stats.tiles);
+        assert_eq!(same(&got.filled, &flood), 0, "tile {tile}: the filled surface is the canonical flood's");
+        assert_eq!(got.routing.receiver, want.receiver, "tile {tile}: the receivers");
+        assert_eq!(got.routing.order, want.order, "tile {tile}: the order");
+        assert_eq!(same(&got.routing.area, &want.area), 0, "tile {tile}: the weighted area");
     }
 }

@@ -318,7 +318,8 @@ fn the_region_front_on_the_lean_paths_is_the_resident_pipeline() {
         };
         s.precision.apply(&mut carve);
         let mut zs = s.zb.clone();
-        solve_rounds(&s.grid, &mut zs, &s.outlet, &carve, sp.rounds, &threads, s.stream);
+        // the reference on one thread: the lean paths at any thread count give its bits (CON-14)
+        solve_rounds(&s.grid, &mut zs, &s.outlet, &carve, sp.rounds, &1usize, s.stream);
         let differ = zs.iter().zip(&s.zs).filter(|(a, b)| a.to_bits() != b.to_bits()).count();
         assert_eq!(
             differ, 0,

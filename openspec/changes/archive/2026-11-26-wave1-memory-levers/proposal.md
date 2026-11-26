@@ -18,8 +18,7 @@
   - base1's parallel decide: base1, the selective drain, is an RG stage, and the park puts no RG stage on main;
   - RG's K6 levers of `rg_h1`'s budget mode (every basin crossed, no evaporation).
 
-## Expected golden changes:
-- none: generator memory paths, bit-identical
+Expected golden changes: none (generator memory paths, bit-identical).
 
 ## Impact
 - `crates/generators/src/bake/round.rs`, `hydro.rs`; `crates/cache/src/region_bake.rs`; `crates/generators/examples/landmass_scale.rs`.
