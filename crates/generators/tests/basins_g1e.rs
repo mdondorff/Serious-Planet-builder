@@ -686,3 +686,42 @@ fn an_inflowing_lines_bed_is_floored_at_the_spill_from_the_kept_rim_inward() {
         low2[0].exceptions
     );
 }
+
+// SPIKE-130 (spike prototype; not a spec requirement)
+#[test]
+fn where_two_kept_floors_meet_along_a_line_every_rise_left_is_a_recorded_residual() {
+    // lead #203j: two cone basins on the eastward slope, the upstream one (east, lower spill) and the downstream one (west, higher spill); an L line coded 0 m runs
+    // from east to west through both. Each basin's rim and inside rise to its spill; where the lower floor's lifted vertex meets the higher floor's, the rise is a
+    // stopped carry like any other and is recorded, so no rise is left without a residual
+    let mut z = base(false);
+    cone(&mut z, 15.5, 12.0, 2.5, 6.0);
+    cone(&mut z, 9.0, 12.0, 2.5, 6.0);
+    let (g, p) = run(&z, &[]);
+    let (a, b) = (basin_at(&p, cell(15, 12)), basin_at(&p, cell(9, 12)));
+    assert!(a.id != b.id && a.spill_m < b.spill_m, "two kept basins, the eastern one lower: {} against {}", a.spill_m, b.spill_m);
+    let cells: Vec<u64> = (3..=20).rev().map(|i| cell(i, 12) as u64).collect();
+    let k = cells.len();
+    let mut reaches = vec![Reach {
+        id: 9,
+        level: Level::L,
+        up: 90,
+        down: 91,
+        vertices: cells,
+        parent: None,
+        owner: Domain::Tile { face: 0, ti: 0, tj: 0 },
+        attrs: Attrs {
+            a_geo: vec![1.0e6; k],
+            a_ext: vec![0.0; k],
+            a_run: vec![1.0e6; k],
+            a_run_no_ext: vec![1.0e6; k],
+            q: vec![0.01; k],
+            q_w: vec![0.01; k],
+            strahler: vec![1; k],
+            bed: vec![0; k],
+        },
+        exceptions: Vec::new(),
+    }];
+    let fl = floor_inlet_beds(&g, &p.basins, &p.cells, &mut reaches, &|id| Some(id as usize));
+    assert!(fl.both_lifted >= 1, "the line meets a lifted vertex upstream of a higher one: {fl:?}");
+    assert_eq!(fl.rises, fl.residuals.len(), "every rise left is a recorded residual: {fl:?} beds {:?}", reaches[0].attrs.bed);
+}

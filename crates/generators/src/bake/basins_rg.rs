@@ -755,6 +755,8 @@ pub struct InletFloor {
     pub raised_m: f64,
     pub residuals: Vec<(u64, usize, f64)>,
     pub rises: usize,
+    /// Lead #203j: stopped carries whose upstream vertex was itself lifted (two kept floors meeting along a reach), recorded since #203j.
+    pub both_lifted: usize,
 }
 
 /// Lead #179 and #179a (A3, owner decision 2, 2026-11-21; spike): every L vertex's graph bed on a kept basin's rim (the cells beside its cells, 8-connected) or inside it is
@@ -799,7 +801,10 @@ pub fn floor_inlet_beds(
             if local(r.vertices[k]).is_some_and(|c| inside.contains_key(&c)) {
                 r.attrs.bed[k] = r.attrs.bed[k + 1];
                 lifted[k] = true;
-            } else if !lifted[k] {
+            } else {
+                // lead #203j: also when vertex k was itself lifted (by a lower floor where two kept floors meet): the rise to k + 1 is a stopped carry like any other,
+                // recorded so that it is flagged, never left as a silent bed rise
+                out.both_lifted += usize::from(lifted[k]);
                 out.residuals.push((r.id, k, 0.5 * f64::from(r.attrs.bed[k + 1] - r.attrs.bed[k])));
             }
         }
