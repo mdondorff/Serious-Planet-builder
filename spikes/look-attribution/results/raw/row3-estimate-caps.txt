@@ -1,0 +1,42 @@
+== r1h T=25
+  held (spill) cols at the cap T = 25 m: 2318
+  kept-size depressions in the box (>= 0.25 km2, >= 2 m): final 539 (895.9 km2); with the spill cols held 1513 (7658.8 km2)
+  added kept-size lake area 6762.9 km2
+  spill cols with a kept-size lake behind them: 1843 of 2318; distinct lakes 848
+  trunk reaches with lakes behind spill cols: 451; with 1 lake 238, 2 95, 3 or more 118 (lake chains: 213)
+  spill cols with no kept-size lake behind them (a pond under 0.25 km2 or 2 m, or the held col drains round inside its zone): 475
+== r1h T=50
+  held (spill) cols at the cap T = 50 m: 1252
+  kept-size depressions in the box (>= 0.25 km2, >= 2 m): final 539 (895.9 km2); with the spill cols held 1149 (6603.8 km2)
+  added kept-size lake area 5707.9 km2
+  spill cols with a kept-size lake behind them: 988 of 1252; distinct lakes 516
+  trunk reaches with lakes behind spill cols: 304; with 1 lake 173, 2 68, 3 or more 63 (lake chains: 131)
+  spill cols with no kept-size lake behind them (a pond under 0.25 km2 or 2 m, or the held col drains round inside its zone): 264
+== r1h T=100
+  held (spill) cols at the cap T = 100 m: 414
+  kept-size depressions in the box (>= 0.25 km2, >= 2 m): final 539 (895.9 km2); with the spill cols held 812 (5035.7 km2)
+  added kept-size lake area 4139.9 km2
+  spill cols with a kept-size lake behind them: 342 of 414; distinct lakes 232
+  trunk reaches with lakes behind spill cols: 154; with 1 lake 105, 2 23, 3 or more 26 (lake chains: 49)
+  spill cols with no kept-size lake behind them (a pond under 0.25 km2 or 2 m, or the held col drains round inside its zone): 72
+== f1 T=25
+  held (spill) cols at the cap T = 25 m: 1494
+  kept-size depressions in the box (>= 0.25 km2, >= 2 m): final 608 (584.3 km2); with the spill cols held 1298 (5304.8 km2)
+  added kept-size lake area 4720.5 km2
+  spill cols with a kept-size lake behind them: 1363 of 1494; distinct lakes 635
+  trunk reaches with lakes behind spill cols: 277; with 1 lake 106, 2 66, 3 or more 105 (lake chains: 171)
+  spill cols with no kept-size lake behind them (a pond under 0.25 km2 or 2 m, or the held col drains round inside its zone): 131
+== f1 T=50
+  held (spill) cols at the cap T = 50 m: 26
+  kept-size depressions in the box (>= 0.25 km2, >= 2 m): final 608 (584.3 km2); with the spill cols held 638 (883.1 km2)
+  added kept-size lake area 298.8 km2
+  spill cols with a kept-size lake behind them: 25 of 26; distinct lakes 24
+  trunk reaches with lakes behind spill cols: 19; with 1 lake 14, 2 4, 3 or more 1 (lake chains: 5)
+  spill cols with no kept-size lake behind them (a pond under 0.25 km2 or 2 m, or the held col drains round inside its zone): 1
+== f1 T=100
+  held (spill) cols at the cap T = 100 m: 0
+  kept-size depressions in the box (>= 0.25 km2, >= 2 m): final 608 (584.3 km2); with the spill cols held 608 (584.3 km2)
+  added kept-size lake area 0.0 km2
+  spill cols with no kept-size lake behind them (a pond under 0.25 km2 or 2 m, or the held col drains round inside its zone): 0
+
+[exited with code 0]

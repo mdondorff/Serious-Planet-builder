@@ -2,6 +2,16 @@
 
 Owner, 2026-11-12 (ADR 0120). These items are outside the current milestone, one line each. Nobody works on them. Only the owner moves an item into a milestone; when one moves in, another moves out or the date moves. New owner ideas land here by default. Each line ends with its source and, where useful, its trigger.
 
+## River graphs and hydrology (parked 2026-11-26, ADR 0129)
+- River graphs (RG): the chain on tag `archive/rg-parked-2026-11-26`; the record in `docs/archive/P3/river-graph/`. Restart only under ADR 0129 point 4.
+- K5's diagonal washboard: a hillslope term coupling the two cell parities, calibrated against GLO-30 (4-7 lane-days, open-ended; `o16-base-fixes-scoping` fix 2).
+- K5's straight trunks: a km-scale planform bias (1-2 lane-days to build, 5-10 to calibrate; fix 3).
+- K7's C2 read of K5's change: about 60 % less of the H1 pattern for 2.5-6.4 % of relief; an owner trade (fix 1).
+- Look bars that pass TEST-155 (chainsaw, sinuosity, straightness); until then the owner judges by eye on fixed crops.
+- The world parameters that feed hydrology (precipitation, runoff, sea level, relief scale) in the attribution of any river or lake defect (routing rule 10; ADR 0108, GEN-184).
+- Lakes by water balance (ADR 0111 point 5), not by a geometric keep rule.
+- The editor's edit model below erosion within BUDG-003/005 (amends ADR 0112, 0113); wave 1 alone takes 4.4 h and 9.26 GB at 16 threads.
+
 ## Terrain prototype (P2 and the A/B gate)
 - CP2: rivers and lakes drawn on the stored region, G-RT frame time, the thermal-dam options brief; then the A/B gate (`docs/briefings/terrain-prototype.md`).
 - G-RT river-flight smoke (the 2,048-slot atlas, dropped == 0), then a G-RT perf window (crusader's next after river-frames; handover 2026-11-12).

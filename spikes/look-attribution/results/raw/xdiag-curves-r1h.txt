@@ -1,0 +1,7 @@
+3870065 curve points (0.1-cell spacing), 420668 raster cells, 1255661 cells near a curve
+S0            in the zone: Xdiag +0.003  X8 +0.964  X6 +0.083  (kink 21.59 m2)
+KH (dump)     in the zone: Xdiag +0.036  X8 +0.378  X6 +0.021  (kink 166.44 m2)
+smooth carve  in the zone: Xdiag +0.241  X8 +0.348  X6 +0.050  (kink 168.76 m2)
+stair4 carve  in the zone: Xdiag +0.118  X8 +0.405  X6 +0.045  (kink 164.88 m2)
+smooth flat   in the zone: Xdiag +0.042  X8 +0.385  X6 +0.023  (kink 164.13 m2)
+stair4 flat   in the zone: Xdiag +0.062  X8 +0.187  X6 +0.024  (kink 150.24 m2)

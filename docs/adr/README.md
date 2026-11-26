@@ -132,3 +132,4 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0121 | [Two data roots: the repository and SeriousPlanetData](0121-two-data-roots.md) | accepted (owner, 2026-11-13) | process; `CLAUDE.md`, `docs/routing.md` |
 | 0122 | [Fine detail pinned to the stored samples and off on river lines](0122-fine-detail-pinned-to-the-stored-samples.md) | accepted (owner, 2026-11-13) | generator field, render; amends 0098 point 2 |
 | 0128 | [Multi-harness companion lane (`ag2`) alongside Claude Code](0128-multi-harness-companion-lane.md) | proposed (ag2-antigravity, 2026-11-19) | process, tooling; `.agents/`, `GEMINI.md`, `BUILD-062` |
+| 0129 | [River graphs parked](0129-river-graphs-parked.md) | proposed (lead, 2026-11-26; the park is the owner's decision of 2026-11-26) | P3 E4-E6; closes the drafts 0123 (#1499, superseded) and 0125-0127 (parked, lanes digest `review-v4/`); 0124 stays proposed as B's path; `docs/archive/P3/river-graph/` |

@@ -21,10 +21,8 @@ Dormant items moved to `docs/parking.md` (2026-11-12).
 G2 closed (owner, 2026-11-22): the river-graph chain (RG, `spike/rg-prototype`) is the candidate over B. G3 is the pre-production gate (owner, 2026-11-23): rows G3-1 to G3-9 and the risk register R1-R27 in the lanes digest `river-graph/g3-gate-2026-11-23.md`; no RG stage merges to main before G3 passes; main takes gate fixes, spike reports, docs and output-neutral planet primitives. The post-G3 port plan: `g3-seam-cube-reconciliation-2026-11-22.md` §5.
 | Exit | Step | Lane |
 |---|---|---|
-| E6 | **Parked (owner, 2026-11-26).** No RG work runs. Next: the park plan's execution (what moves to main, the parking ADR, the component record, the dispositions of ADRs 0123 and 0125-0127). G3-6 wave 1's result is kept as evidence: 9.26 GB on the full count | lead |
+| E6 | **Parked with record (owner, 2026-11-26; ADR 0129, proposed).** The park: lanes digest `review/rg-park-plan-merged-2026-11-26.md`. Open: PR A, wave 1's memory levers on B's bake (GEN-192, crusader); PR B, stage sheets with diffs (BUILD-071, spikes); then P3's closure with housekeeping | crusader, spikes, lead |
 | E6 | Housekeeping coder pass (P3 closure): stale references in specs and comments to the readings and switches of 2026-11-21/22; the 43 open OpenSpec changes listed as done, superseded or still wanted | crusader |
-| E4 | ADRs 0125, 0126 proposed (review v4); G3 decides their fate | lead |
-| E5 | ADR 0127 proposed; G1e builds the basin topology; G3 decides | lead |
 
 ## Tracked
 - **Sea not meeting the coast; a coastal fade at river mouths** (owner, 2026-11-15; seen on a flight about 2026-11-13, not reported then): the sea did not start where the terrain ended. Candidate cause: the runtime fades the erosion change toward 0 within 3 m above sea level (`COAST_FADE_M`, `erosion_layer.rs`), so the drawn coast and river mouths differ from the store (adversarial review F3). Owner re-tests on a flight with the P4 E2 flights; the fade is decided with D-2.

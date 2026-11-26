@@ -1,0 +1,10 @@
+r1h-kw-chain: land in the box 16959405 cells
+  (a) the line, d = 0                        1.1 % of land; moved > 0.5 m  63.5 %; rms  29.06 m, max |.|  365.9 m
+      in the H1 zone  (  178079 cells): S_KH X8 +0.115 Xdiag +0.213 | S0 X8 +1.517 Xdiag +0.248
+      outside it: 515 cells, too few
+  (a') the zone off the line, 0 < d <= 8    10.7 % of land; moved > 0.5 m  24.4 %; rms  12.82 m, max |.|  340.1 m
+      in the H1 zone  ( 1802318 cells): S_KH X8 +0.532 Xdiag +0.043 | S0 X8 +0.874 Xdiag +0.040
+      outside it      (   15432 cells): S_KH X8 +0.594 Xdiag +0.115 | S0 X8 +0.755 Xdiag +0.154
+  (c) outside every curve zone              88.2 % of land; moved > 0.5 m   3.6 %; rms   0.83 m, max |.|   53.7 m
+      in the H1 zone  ( 1195533 cells): S_KH X8 +0.961 Xdiag +0.019 | S0 X8 +0.936 Xdiag +0.019
+      outside it      (13767528 cells): S_KH X8 +0.658 Xdiag +0.017 | S0 X8 +0.584 Xdiag +0.004

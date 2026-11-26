@@ -1,0 +1,4 @@
+valley at  45.0 deg, smooth floor: registered Xdiag +0.094
+valley at  45.0 deg, stair4 floor: registered Xdiag +0.084
+valley at 135.0 deg, smooth floor: registered Xdiag +0.089
+valley at 135.0 deg, stair4 floor: registered Xdiag +0.092
