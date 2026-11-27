@@ -1,5 +1,6 @@
 //! `cargo xtask next-id` (BUILD-062): pure-std allocator for the next contiguous `max + 1` requirement, ADR, or spike ID
-//! across `openspec/`, `docs/adr/`, `docs/spikes.md`, and optional sibling lane files.
+//! across `openspec/`, `docs/adr/`, `docs/spikes.md`, and optional sibling lane files. Requirement IDs come from `openspec/` without the change
+//! archive, plus the retired IDs of `openspec/retired-ids.txt` (BUILD-073), so deleting the archive issues no ID again.
 
 use crate::heavy;
 use crate::util::{capture, Res};
@@ -25,6 +26,10 @@ fn scan_files(dir: &Path, out: &mut Vec<PathBuf>) {
     for e in rd.flatten() {
         let p = e.path();
         if p.is_dir() {
+            // BUILD-073: the change archive is not read; its retired IDs are in openspec/retired-ids.txt
+            if p.file_name().is_some_and(|n| n == "archive") && p.parent().is_some_and(|d| d.file_name().is_some_and(|n| n == "changes")) {
+                continue;
+            }
             scan_files(&p, out);
         } else if p.extension().is_some_and(|x| x == "md") {
             out.push(p);
@@ -91,6 +96,10 @@ pub fn next_id(root: &Path, raw_prefix: &str, lanes_dir: Option<&Path>, extra_te
         }
         IdKind::Requirement => {
             scan_files(&root.join("openspec"), &mut files);
+            let retired = root.join(crate::retiredids::FILE);
+            if retired.is_file() {
+                files.push(retired);
+            }
         }
     }
     if let Some(ld) = lanes_dir {
@@ -250,6 +259,42 @@ mod tests {
         assert_eq!(adr.max_found, 127);
 
         assert!(next_id(&base, "bad-1", None, "").is_err());
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    // spec: BUILD-073, TEST-160
+    #[test]
+    fn next_id_counts_the_retired_file_and_not_the_change_archive() {
+        let base = std::env::temp_dir().join(format!("xtask-nextid-retired-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(base.join("openspec/specs/viewer")).unwrap();
+        fs::create_dir_all(base.join("openspec/changes/archive/old/specs/viewer")).unwrap();
+        fs::write(
+            base.join("openspec/specs/viewer/spec.md"),
+            "### Requirement: VIEW-072 X
+",
+        )
+        .unwrap();
+        fs::write(
+            base.join("openspec/retired-ids.txt"),
+            "# retired
+VIEW-080
+",
+        )
+        .unwrap();
+        // the archive's VIEW-090 no longer counts (the archive may be deleted); the retired VIEW-080 is never issued again
+        fs::write(
+            base.join("openspec/changes/archive/old/specs/viewer/spec.md"),
+            "### Requirement: VIEW-090 Archived
+",
+        )
+        .unwrap();
+        let v = next_id(&base, "view", None, "").unwrap();
+        assert_eq!(v.formatted, "VIEW-081");
+        assert_eq!(v.source.as_deref().map(|s| s.replace('\\', "/")), Some("openspec/retired-ids.txt".to_string()));
+        // without the file, the main spec alone: VIEW-073 (the retired VIEW-080 would be issued again, which the file prevents)
+        fs::remove_file(base.join("openspec/retired-ids.txt")).unwrap();
+        assert_eq!(next_id(&base, "view", None, "").unwrap().formatted, "VIEW-073");
         let _ = fs::remove_dir_all(&base);
     }
 }

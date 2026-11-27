@@ -707,6 +707,9 @@ pub fn run(root: &Path) -> Res {
     let files: Vec<(String, Vec<u8>)> =
         tracked.split('\0').filter(|p| !p.is_empty()).filter_map(|p| Some((p.to_string(), std::fs::read(root.join(p)).ok()?))).collect();
     report.errors.extend(conflict_marker_errors(&files));
+    // BUILD-073: the retired requirement IDs: the file's form, no reuse, and every requirement of the change archive in a main spec or in the file
+    let retired = std::fs::read_to_string(root.join(crate::retiredids::FILE)).ok();
+    report.errors.extend(crate::retiredids::errors(&specs, &crate::retiredids::archived_specs(root), retired.as_deref()));
     // BUILD-023: the hot files stay within their caps (ADR 0075).
     let sizes: Vec<(String, usize)> =
         HOT_FILE_CAPS.iter().filter_map(|(path, _)| Some((path.to_string(), lf_size(&std::fs::read(root.join(path)).ok()?)))).collect();
