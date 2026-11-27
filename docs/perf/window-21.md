@@ -44,3 +44,5 @@ The cost of the march over the volume lookup, measured: about 0.87 to 0.89 ms by
 ## Files
 
 `docs/perf/window-21/*.txt` hold the complete output of the six runs, `preflight.md` the machine report and `twilight.look.toml` the twilight look.
+
+The raw output named above was deleted on 2026-11-27 (owner, D4); it is in git history at commit a179884d1.

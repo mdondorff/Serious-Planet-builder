@@ -56,3 +56,5 @@ Rasierklinge, main ab23639 (lattice normals ADR 0073 merged; STRM-031 settle 25 
 
 - The harness could not write `edit-latency.md` (the `--out` directory did not exist); the complete stdout is `docs/perf/window-19/edit-latency.txt`.
 - The brush rows finish the half-refresh at 510 ms (150 m) and 1,107 ms (1 km) at 200 m altitude: 1,816 and 3,857 tiles refresh, against 291 for a 150 m stamp. The brush stroke is the one case over its budget.
+
+The raw output named above was deleted on 2026-11-27 (owner, D4); it is in git history at commit a179884d1.

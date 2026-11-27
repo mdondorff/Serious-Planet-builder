@@ -37,3 +37,5 @@ Rasierklinge, main 80e1418 (#474: the footprint and the refresh find of a brush 
 - The brush still refreshes about twice the tiles of a stamp of the same radius at 200 m (601 against 291): the stroke is 712 m long, so its capsule is larger than a 150 m disc.
 - The 150 m brush has 14 ms of headroom against its budget (286.1 against 300); the 1 km brush has 600 ms.
 - Raw output: `docs/perf/window-20/edit-latency.txt`; the harness wrote `edit-latency.md` into the new `--out` directory (target only); `docs/perf/window-20/preflight.md`.
+
+The raw output named above was deleted on 2026-11-27 (owner, D4); it is in git history at commit a179884d1.

@@ -23,7 +23,7 @@
 | Every experiment, one line each | `docs/spikes.md` (register) |
 | An experiment's report, numbers and pictures | `spikes/<name>/results/` |
 | Pictures of SPIKE-03 to 07 that accepted ADRs link to | `docs/spikes/` (frozen) |
-| Performance windows and CI history | `docs/perf/` up to M7; M8's in `docs/archive/M8/perf/` and `docs/milestones/M8/`; later ones in `docs/milestones/<M>/` |
+| Performance windows and CI history | `docs/perf/` up to M7 (the one-page verdicts and `ci-history.tsv`; the raw dumps deleted on 2026-11-27, in git history at a179884d1); M8's in `docs/milestones/M8/`; later ones in `docs/milestones/<M>/` |
 | Surprises and corrected assumptions still in force | `docs/learnings.md` |
 | Progress screenshots | `docs/dev_screenshots/` |
 | Sample look files for the owner's review (proposals, not defaults) | `docs/looks/` |
