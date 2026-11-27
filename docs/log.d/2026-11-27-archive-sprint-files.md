@@ -1,0 +1,1 @@
+- 2026-11-27 archive-sprint-files (lead, the sprint process plan item 7): `cargo xtask archive-milestone <M>` also moves a closed sprint file, its report and its records into `docs/archive/<M>/`, refuses a move onto an existing file and names the live files still pointing at them (BUILD-077, TEST-164)

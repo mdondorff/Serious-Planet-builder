@@ -42,7 +42,7 @@ Sprint: <M> (<Opened> to <closed date>)   Signed off: <owner, date | pending>
 
 **3. Sign-off.** The owner reads the report (about 15 minutes) and writes `decision: close <M>; open <next>` (or `close <M>` alone). Set the sprint file's `Status: closed (owner, <date>)`, fill its `## Close` line, and the report's `Signed off:`.
 
-**4. Archive.** Run `cargo xtask archive-milestone <M> --dry-run`, read the plan, then `cargo xtask archive-milestone <M>`. Commit the result with steps 1-3 in one docs-only PR, merged by the lead.
+**4. Archive.** Run `cargo xtask archive-milestone <M> --dry-run`, read the plan, then `cargo xtask archive-milestone <M>`. It merges the log fragments, moves the closed spike rows, and moves the closed sprint file, its report and its records folder into `docs/archive/<M>/` (BUILD-077). Update every live file it prints as still naming a moved path. Commit the result with steps 1-3 in one docs-only PR, merged by the lead.
 
 **5. Session reset.**
 - Every lane writes `lanes/<lane>-state.md` (its role, what is done, what is open, its worktree) and a line in its outbox.
