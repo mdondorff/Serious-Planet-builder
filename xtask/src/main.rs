@@ -33,6 +33,7 @@ mod retiredids;
 mod rivergate;
 mod scratch;
 mod speclint;
+mod sprintfile;
 mod stages;
 mod storecmd;
 mod terrainscore;
@@ -94,7 +95,7 @@ const USAGE: &str = "cargo xtask <command>
   terrain-score [--store DIR] [--dem DIR] [--sites FILE] [--out DIR] [--maps]   the terrain scorecard (TEST-079, BUILD-029): seven descriptors on nine GLO-30 tiles and the generator's two matched sites each (world.field() of the store, read only), distances and a phone-readable report.md and report.json in target/review/terrain-score/<date>/ with the Copernicus notice; CPU only, about 1 minute; --maps adds one 512 px PNG per descriptor per raster
   pr-body-check        the pr-gate check (BUILD-044): reads PR_BODY, BASE_SHA and HEAD_SHA; a PR with a non-docs path needs `Verifier: PASS <sha>` of a commit of the PR in its body
   lanes                per lane of docs/tools/lanes.txt the last commit and its age, the open PR, the latest inbox number and the running cargo or example processes (BUILD-043)
-  plan                 the current milestone's exit items (docs/milestones/, Status line `active`) with their state, queue rows (docs/status.md) and open PRs naming them; fails for a queue row off the milestone and for an open item without a row (BUILD-053)
+  plan [--pr TITLE [--branch B] [--body-file F] [--files F] PATH...]   the current milestone's exit items (docs/milestones/, Status line `active`; a `draft` between sprints) with their state, queue rows (docs/status.md) and open PRs naming them; fails for a queue row off the milestone and for an open item without a row (BUILD-053); a sprint file (an `Opened:` line, ADR 0130) is checked for its header, at most 7 days and 5 exits with every cell, its records, at most 3 open decisions and A1's safe defaults, and prints `overdue`; --pr checks one PR against the R/P firewall and the overdue rule, with the exits its title and its body's `Exit:` lines name and the paths given or listed one a line in --files (BUILD-074)
   stages [--update]    the stage manifest (BUILD-047): runs the stage probe's fixture and checks docs/tools/stages/manifest.txt against it (a stale manifest fails naming the stage, field and column); --update rewrites it from the run; the sheets go to target/review/stages/ci/
   stages --chain DIR [--step S] [--view X,Y,SX,SY] [--out FILE]   the chain sheet (BUILD-060): one PNG of a chain directory's twelve stage panels (base, z_s, H1 rivers, S0, KH, KS, trunks, tributaries and basins, KV, KC, final, final - S0) at a 10-degree sun and one fixed scale; default the whole window at 12 L cells per pixel to target/review/stages/chain/<label>.png
   look-sheet RUN [--against DEFAULTS] [--az A,B] [--out DIR]   the look sheet (BUILD-067): a chain run's crop store (--probe-crops) at one L cell a pixel under a fixed 10-degree sun, beside the defaults run and their difference; target/review/look/<run>/
@@ -186,7 +187,7 @@ fn main() -> ExitCode {
         Some("terrain-score") => heavy::with("terrain-score", || terrainscore::run_cmd(&root, &args[1..])),
         Some("pr-body-check") => prbody::run(&root),
         Some("lanes") => lanes::run(&root),
-        Some("plan") => plancmd::run(&root),
+        Some("plan") => plancmd::run(&root, &args[1..]),
         Some("gates") => gates::run(&root),
         Some("stages") => heavy::with(&format!("stages {}", args[1..].join(" ")), || stages::run_cmd(&root, &args[1..])),
         Some("look-sheet") => heavy::with(&format!("look-sheet {}", args[1..].join(" ")), || looksheet::run_cmd(&root, &args[1..])),
