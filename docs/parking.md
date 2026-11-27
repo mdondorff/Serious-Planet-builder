@@ -5,7 +5,7 @@ Owner, 2026-11-12 (ADR 0120). These items are outside the current milestone, one
 ## Owner items moved from docs/status.md at P3's closure (2026-11-27)
 - For later planning: owner test 2026-10-27 groups F and G scope, the 1 m / 500 m exception (`docs/milestones/M8/owner-test-2026-10-27/README.md`).
 - Sunset shadow look: the sky ambient as a hemisphere average is dark at a 7 degree sun; options: sky light plus a lift, sky light as is, or the old term. Every lit and sky golden moves with it; SPIKE-96 follows. The ADR 0095 draft never reached the repo.
-- Architecture re-plan and the A/B gate (owner, 2026-11-08; SPIKE-104, SPIKE-105): phases and gates in `docs/briefings/terrain-prototype.md`; deferred with no date (owner, 2026-11-15).
+- Architecture re-plan and the A/B gate (owner, 2026-11-08; SPIKE-104, SPIKE-105): phases, items and the A/B gate in `docs/archive/P3/briefings/terrain-prototype.md` (archived 2026-11-27; its gate contract lines are in `docs/design/terrain-target.md` section 14); deferred with no date (owner, 2026-11-15).
 - Smooth base as default (GEN-107, `cpu-erosion-v2`): draft #1137 switches the default; decide with the base work (river graphs and hydrology section).
 - World-build share values (ADR 0097, BUDG-014): terrain 40 %, future content 40 %, margin 20 % of a 24 h day, proposed.
 - Cliffs (SPIKE-94, #1082): asset library or procedural only; the Alps' 4.3 % of area above 45 degrees as the v1 coverage.
@@ -22,7 +22,7 @@ Owner, 2026-11-12 (ADR 0120). These items are outside the current milestone, one
 - The editor's edit model below erosion within BUDG-003/005 (amends ADR 0112, 0113); wave 1 alone takes 4.4 h and 9.26 GB at 16 threads.
 
 ## Terrain prototype (P2 and the A/B gate)
-- CP2: rivers and lakes drawn on the stored region, G-RT frame time, the thermal-dam options brief; then the A/B gate (`docs/briefings/terrain-prototype.md`).
+- CP2: rivers and lakes drawn on the stored region, G-RT frame time, the thermal-dam options brief; then the A/B gate (`docs/archive/P3/briefings/terrain-prototype.md`).
 - G-RT river-flight smoke (the 2,048-slot atlas, dropped == 0), then a G-RT perf window (crusader's next after river-frames; handover 2026-11-12).
 - River look frames over R3a for the owner's river look review (the straight river; shape below H1 resolution).
 - G-PROFILE re-run on tiles R1h (21, 2), R3a (1, 12), R3b (26, 22) after the starting-surface decision.

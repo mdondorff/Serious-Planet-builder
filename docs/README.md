@@ -7,7 +7,7 @@
 | What a term means (tile, patch, field, stage...) and the pictures of the model | `docs/domain.md` |
 | What is happening now, what waits for the owner | `docs/status.md` |
 | Who does what, who merges, where a lane reports (read at session start) | `docs/routing.md`; lane names and worktrees: `docs/lanes.txt` |
-| The current work block's plan: items, phases, exit list | `docs/briefings/terrain-prototype.md` |
+| The terrain prototype's plan (P1 to P3: items, phases, the A/B gate; archived) | `docs/archive/P3/briefings/terrain-prototype.md` |
 | The target architecture and its gate table | `docs/design/terrain-target.md` (A3) |
 | Downstream (`M10`–`M13` / game) producer seams for `G3` & `P4` | `docs/design/hydrology-downstream-seams.md` |
 | Every gate reading with its commit and verdict | `docs/gates/ledger.md` |
