@@ -1988,7 +1988,7 @@ Tier-A fixtures SHALL check the river gate (BUILD-055): a draining valley has no
 
 Verify: A
 Status: active
-Source: Lead 2026-11-14 (explorer #143), BUILD-055
+Source: Lead 2026-11-14, BUILD-055
 
 #### Scenario: The pit limits
 - **WHEN** a 25-cell pit 3 m deep lies on the river
@@ -2003,7 +2003,7 @@ Tier-A fixtures SHALL check each metric of the suite (BUILD-057) against a fixtu
 
 Verify: A
 Status: active
-Source: Lead 2026-11-15 (explorer #151), BUILD-057, lead 2026-11-15 (explorer #152), BUILD-059 (lead 2026-11-16, explorer #163), BUILD-060 (lead 2026-11-17, explorer #165; lead, owner 2026-11-18: kept interiors and cells above a head)
+Source: Lead 2026-11-15, BUILD-057, lead 2026-11-15, BUILD-059 (lead 2026-11-16), BUILD-060 (lead 2026-11-17, lead, owner 2026-11-18: kept interiors and cells above a head)
 Detail: a draining valley has no uphill step and a 3 m pit on its river has one; the width at 10 m of a valley with sides of 2 m a cell is 1,000 m, narrower for 4 m a cell and capped on a flat floor; a symmetric valley has asymmetry 0 and sides of 4 and 2 m a cell 1/3; the density is the river length over the land area; an H1 crossing matched at the region's edge gives one catchment pair and ratio 1, a seam of 1 m steps reads 40 pairs against 2 m inside, and a 50 m step at the edge shows in the seam only; edge pairs take the nearest crossing of the direction within 2 km; the narrowness is under 0.7 for a V and over 0.85 for a trench; a small baked store read through the reader lays B plus each tile's change at its cells, on any thread count and without the key check, and gives the report of the same surface laid by hand, a window short of a tile column leaves its tiles outside and another face reads none and is refused; every number is one named field with a count before every percentage; the table's rows parse from the fields line and render to markdown and CSV; a trunk down a draining floor needs no burn, one over a 60 m dam needs 59 m at the dam, not counted at a 60 m bar or outside the counted cells; a 2-cell corridor cannot pass a 60 m dam across the valley floor (57 m, stepping onto it from beside the floor), a 6-cell one routes around it over the side, a dam across the whole valley stays over in any corridor; a corridor of 4 cells bypasses a pit on the line whose low minimum would make a later 45 m ridge a 105 m burn, one of 1 cell cannot, and the same input gives the same bits; the corridor bar of a relief of 54.9, 5 and 400 m is 27.45, 10 and 50 m; a raw end on a 170 m spike fails and snapped to the plateau passes; a wall along the region's edge with a gap 5 cells off the line passes raw in a 6-cell corridor and fails snapped (60 m), the crossing held to the edge cells within 3 cells; a crossing carries the running minimum into the next leg (a pit before it makes a ridge after it an 85 m rise, not 45 m), a corridor holds counted cells only: a reach ending outside them is not counted, and a wall whose one gap is not counted is crossed at 60 m; a reach from the sea floor at -45 m onto land at 5 m passes the 10 m bar, the rise taken above the water surface; the bar reads the start relief over the region's box, not the counted cells; a surface lowered 60 m everywhere has every land cell lowered, one lowered 40 m none; the slope-area exponent is 0 for a ramp and positive for a profile steeper upstream; a sinusoid of period 8 cells peaks at octave 2 and of 16 cells at octave 1, and a flat surface has no power; one line per metric is printed and the same input gives the same report; the network (BUILD-059) of four heads pairing into two order-2 streams that meet in an order-3 trunk, with a fifth head joining it, counts 5 / 2 / 1 Strahler streams and gives R_b 2.5 over orders 1 and 2, its density the step length over the land area; at 75 km2 only the trunk below the confluence is a channel (one order-1 stream, no R_b); an outlet under the sea drops its inflowing steps and keeps the counts; counted over the top two rows only, 4 / 2 streams and their 6 diagonal steps; a raw grid target becomes the gate's grid input and a table row labelled by its file's stem; a raw grid argument splits from the right (a path may hold commas) and refuses a grid within twice the 10-cell border or a missing part, its heights are read as little-endian f64 and a wrong byte count is refused, and a 25 x 23 grid counts the 5 x 3 cells at least 10 cells from each edge; the G2 columns (BUILD-060) on a hand graph in a 12 x 12 window (two sources meeting at a confluence that runs to the sea, a tributary ending at a junction marker on it): no violation, three of three sources reach the outlet through the marker, Strahler streams 3 / 1 with no R_b, the length 5 diagonals and 6 straight steps over 1.44 km2, a bed rise of one code a 0.5 m residual, an exception counted by its reason; agreement 6 of 7 routed and 8 of 12 graph cells within 1 cell; a step 4 cells from two block centres gives a 50 m budget, a flat start the 10 m floor, and stage fields of 12 m and 10 + 0.1 m on a 10 m budget two overruns, a 15 m fill one fill over; one region against itself is identical, a changed q_w one attribute change named by reach and field, a removed reach a topology change; a row without G2 inputs prints no G2 column or classes line, one with them prints each column with one class; the stage reader refuses a directory without a lowering field and a field of another size, reads a stage without a fill file as lowering only and counts the residual records under the header, and the graph reader round-trips the canonical form and refuses another header; the surface reader reads the window's f64 cells and refuses a wrong size or a non-finite height, and a row's `#surface=` suffix becomes the gate's `--surface`; a kept basin's floor in a depression of nine cells makes them its interior whose four river steps and two uphill ones leave the uphill bar, and routed cells above a graph head and in a kept interior leave both agreement shares
 
 ### Requirement: TEST-138 The corridor measure at the coast
@@ -2011,7 +2011,7 @@ A tier-A fixture SHALL check that the corridor measure (BUILD-057) snaps a non-m
 
 Verify: A
 Status: active
-Source: Lead 2026-11-16 (explorer #163; review B F2), BUILD-057
+Source: Lead 2026-11-16 (review B F2), BUILD-057
 Detail: on land falling to an open sea with a 0 m bay 450 m from a confluence (node radius and corridor 800 m, bar 5 m), the sea-blind measure snaps the confluence into the bay and records a false rise of the 10 m shore on the reach below; at sea level 0 the confluence keeps a land cell and both reaches pass with no vertex over; a raw reach crossing a 0 m strait onto land rising to 29.5 m is over by 29.5 m sea-blind and passes at sea level 0, its route ending at the strait.
 
 ### Requirement: TEST-139 The G0 minimum fixture
@@ -2019,7 +2019,7 @@ A tier-A fixture SHALL provide the G0 minimum landscape of the river-graph plan 
 
 Verify: A
 Status: active
-Source: Lead 2026-11-16 (crusader #154, #155), owner 2026-11-16 (G0 approved; G0 contracts agreed)
+Source: Lead 2026-11-16, owner 2026-11-16 (G0 approved; G0 contracts agreed)
 Detail: the features are one trunk and two tributaries, one explicit confluence, one antecedent river crossing a ridge that `z_s` cuts and `B` keeps, one closed basin meant as a protected lake (at least 2 m deep and 0.25 km2 at L), one divide on a tile line, one tributary crossing that tile line (64 L cells a tile; a trunk reach is never cut at tiles) and one reach crossing a cube-face edge; they are checked with the round-rules routing and the graded flood, never with graph code; the recorded values (outlets, confluences, crossings, the basin's floor, spill and cells, the ridge's rise in `S0`) match within 0.006; the one-region layout puts every H1 cell in region 0 and the two-region layout is whole tiles cut along the tile line through the divide and the tributary's crossing (the G0 contract's fixture section).
 
 #### Scenario: Same bits, recorded features
@@ -2031,7 +2031,7 @@ Tier-A tests SHALL check each validator of GEN-189 with an injected failure, the
 
 Verify: A
 Status: active
-Source: Lead 2026-11-16 (crusader #155), the river-graph plan's G0 contracts (agreed, owner 2026-11-16) sections 8 and 11, lead 2026-11-17 (crusader #158: readings 8 and 9); lead 2026-11-23 (#182a: the orphan lake inlet)
+Source: Lead 2026-11-16, the river-graph plan's G0 contracts (agreed, owner 2026-11-16) sections 8 and 11, lead 2026-11-17; lead 2026-11-23 (the orphan lake inlet)
 Detail: injected, each found: a cycle; a duplicate id, a kind changed under a kept id, and a basin's spill moved under a kept id (a parent on its deepest child's floor has its own id, no spill cell is not cell 0, a basin with a spill of +inf validates, and a NaN or -inf spill or a NaN floor is not finite); two nodes on one anchor, two junctions on one vertex of one reach, two junctions with inflows on one anchor on two reaches, a junction on its reach's last vertex (exception markers on one anchor on two reaches pass, and a junction without inflow beside the one with it), a marker at an inflow's end on a node's anchor (a junction at vertex 0 and an exception beside a junction pass); a marker off its reach, out of range, on another vertex, a marker kind without and a non-marker with the field; a `lake_inlet` that no reach ends at and no basin spills to (one a basin spills to, one a reach ends at, and an open slice pass); an unresolved endpoint; a chain without an outlet, followed through a junction; a confluence with one inflow, two inflows into a tile crossing; a node with zero or two outgoing reaches; an edge from an outlet, from a marker, into a source, into an exception marker, at another level at either end; a chain not 8-connected, not starting or ending at its nodes' anchors, an empty reach (reported, no panic); a tributary leaving its tile core (a trunk image passes); a bed rise (passing at an exception marker), a bed not shared at a confluence, and a tributary off the trunk's bed at its junction; `a_geo`, `a_run`, `q` and `q_w` each falling along a reach; a confluence below its inflows, `a_run` and `q_w` not shared there; a NaN; a cell owned twice; a lowering overrun reported once and never excused, a fill overrun excused only by its residual, a raise in KS, a clamp without its residual, a residual whose feature is not flagged, a residual with the clamp's or the fill's numbers wrong, one where nothing clamped, one naming a stage that did not run or a cell outside the surface, and a duplicate; one cell clamping and over-filling in one stage passes with one residual for each event, and fails with the clamp's record alone or twice (the fill unrecorded) or the fill's alone; a residual where the stage's output is not finite, NaN and short inputs; a fill held under its wanted fill without its residual, with the wanted fill or the budget wrong, or recorded twice, while a fill that reached its wanted fill needs none and a fill overrun under a larger wanted fill is one event, a wanted fill NaN, negative or short, a wanted fill on a stage that may not fill, and a stage with a bad wanted value whose lowering still counts toward a later overrun; a residual's feature carrying `rise_over_budget` and `budget_residual` passes, one carrying `rise_over_budget` alone does not; a reason twice on one reach, an exception value NaN. Also: the canonical form parses back to the same bytes in any input order and the parser refuses an unknown outlet, representation or face; a reach's exceptions are written by the reason's name in any list order, the graph parsed back equals the sorted graph, a signed zero is written as +0.0, and the parser refuses an unknown reason, an exception without its value, exceptions out of order, and short or upper-case hex; an attribute change is one named field, a kind change retires the node and its reach, and with them a junction on that reach and the tributary ending there; a marker's id is `marker_id` (its plain node hash, or another reach's, is an id mismatch); every vertex cell is rasterised, a junction cell goes to the downstream reach whatever the `q_w`, otherwise the larger `q_w` and on a tie (also -0.0 against +0.0, either way round) the lower id, the same for any input order; an open slice validates and names its missing owners. The fixture's graph holds one H1 trunk reach; its L image's exceptions are `rise_over_budget` alone, across the ridge, with exception markers where its bed rises, over two faces, and is the only exceptional reach; it holds the explicit confluence, tributaries cut at tile lines, two sea outlets, and the protected basin at both levels. Under each layout every tile-owned item lies in one slice, the landmass items lie in every slice with the same bytes, every slice validates open and names only items the other region holds, and a tributary crosses the two-region cut at a `tile_crossing`.
 
 #### Scenario: One injected failure, one violation
@@ -2043,7 +2043,7 @@ Tier-A fixtures SHALL check the cross-section sheet's measures (BUILD-061) again
 
 Verify: A
 Status: active
-Source: Lead 2026-11-19 (spikes #150, #150a), BUILD-061
+Source: Lead 2026-11-19, BUILD-061
 Detail: a V valley of 10 m a cell on 100 m cells, crossed over 56 L cells: 113 samples from -2,800 to 2,800 m, river level 0 at `d = 0`, depth 280 m, widths 200 m and 1,000 m, not stale at a stored relief of 300 m; a profile flat on one side has an open 10 m width and depth 0, stale at 300 m, and no verdict without `S0`; with a stored pick depth of 20 m a depth of 3 m is not stale and 0 m is, and a pick depth of 0 m gives no verdict; a GLO-30 profile of five samples (40, 20, 0, 5, 30 m) has depth 30 m and a 10 m width of 170 m; the sheet and table are written for the one transect inside face 3's window, the final surface's river 5 m lower, and the label's space written as `-`; a flat `S0` makes the transect stale in the table and a missing `final.f32` is tabled as missing; no face line without `--face` is refused, a face holding no transect is refused naming it, an `s0.f32` of 12 bytes is refused naming it, and a csv without a column or with a non-number names it; the command passes `--chain`, `--face` and `--out` to the example and refuses an unknown option, a missing value, a second `--chain` and no `--chain`.
 
 ### Requirement: TEST-142 The runtime height-field chain matches its declared catalog
@@ -2102,7 +2102,7 @@ Tier-A fixtures SHALL check the window draw (BUILD-066): its strata rules on box
 
 Verify: A
 Status: active
-Source: Lead 2026-11-23 (#186a), BUILD-066
+Source: Lead 2026-11-23, BUILD-066
 Detail: the rules at their bounds (a corner box at 19 % and 20 % land, an edge box classed by its band before its relief, mountain, arid, flat coast before mixed, no stratum at 10 degrees or at full land); a face's candidates cover both far edges; a draw over every candidate of two faces meets each quota, overlaps none of the five windows and no earlier drawn window, is the same for the same seed and differs for another, refuses a stratum with no candidate, and its data file names the seeds and every window.
 
 #### Scenario: The draw's fixtures
@@ -2114,7 +2114,7 @@ Tier-A fixtures SHALL check the look sheet (BUILD-067): a crop store's bytes and
 
 Verify: A
 Status: active
-Source: Lead 2026-11-23 (#183), BUILD-067
+Source: Lead 2026-11-23, BUILD-067
 Detail:
 - the fixture: a 256 x 192 chain window with H1 cells of 8 L cells and three crops, at the window's corner, inside it and at its far corner;
 - every L, H1 and `stages/` field of a crop is the full field's cut of the box, byte for byte;
@@ -2138,7 +2138,7 @@ TEST-139's fixture SHALL carry its partition layouts as a data file (`crates/gen
 
 Verify: A
 Status: active
-Source: Lead 2026-11-24 (#195, owner O2; the G3 port order's C1 and C2, reconciliation rows 1 and 2; DEC on the halo: 24, lead 2026-11-24), TEST-139, GEN-182, COORD-012
+Source: Lead 2026-11-24 (owner O2; DEC on the halo: 24, lead 2026-11-24), TEST-139, GEN-182, COORD-012
 Detail:
 | Layout | Regions | Seam |
 |---|---|---|
@@ -2158,7 +2158,7 @@ Tier-A tests SHALL check COORD-013's solid angle against references independent 
 
 Verify: A
 Status: active
-Source: Lead 2026-11-24 (#197, the plan's references), COORD-013
+Source: Lead 2026-11-24 (the plan's references), COORD-013
 Detail:
 | Check | Reference | Levels |
 |---|---|---|
