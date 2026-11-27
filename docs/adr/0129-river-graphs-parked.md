@@ -13,7 +13,7 @@ Source: P3 E6, `docs/archive/P3/river-graph/` (snapshot, both feasibility review
 1. RG stops. `spike/rg-prototype` is frozen at the tag `archive/rg-parked-2026-11-26`; no RG stage is ported to main.
 2. B stays the production chain. Its known defects are B's (crest p95 loss 15-316 m and saddles 40-27,108 on the five windows; R3a's undrained pits under the connected sea) and are not reasons to resume RG.
 3. What lands on main from the work:
-   - wave 1's memory levers and base1's parallel decide, bit-identical (GEN-192);
+   - wave 1's memory levers that live in B's own bake, bit-identical (GEN-192); base1's parallel decide and the K6 levers of RG's hydrology stay on the tag (base1 is an RG stage);
    - the stage sheets with diffs (BUILD-071);
    - the gate integrity work, the planet primitives and the calibration harness already merged;
    - the record in `docs/archive/P3/river-graph/`.
