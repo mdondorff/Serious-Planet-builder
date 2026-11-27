@@ -17,8 +17,8 @@ Does thermal erosion make the pits and dams that remain after the rounds, and wh
 ## Evidence
 | Run | Grid | Thermal's effect | Source |
 |---|---|---|---|
-| Prototype landmass, sediment pass | 3,072 cells a face edge (k = 1) | pit share 1.024 → 1.038 %; p99 depth 5.4 → 29.8 m; deepest 5.5 → 609.7 m; the deposition fills them to at most 5 m | `openspec/changes/sediment-wiring/design.md` |
-| Same, k = 2 | 6,144 cells | deepest after thermal 920 m; 344.5 m remain after the deposition; 6.5 % of the final pit cells were made by the pass (thermal, deposition and spreading together) | `openspec/changes/sediment-flood/design.md` |
+| Prototype landmass, sediment pass | 3,072 cells a face edge (k = 1) | pit share 1.024 → 1.038 %; p99 depth 5.4 → 29.8 m; deepest 5.5 → 609.7 m; the deposition fills them to at most 5 m | `openspec/changes/archive/2026-11-23-sediment-wiring/proposal.md` (its design notes in git history, removed at the archive by ADR 0055) |
+| Same, k = 2 | 6,144 cells | deepest after thermal 920 m; 344.5 m remain after the deposition; 6.5 % of the final pit cells were made by the pass (thermal, deposition and spreading together) | `openspec/changes/archive/2026-11-23-sediment-flood/proposal.md` (its design notes in git history, removed at the archive by ADR 0055) |
 | Mechanism (k = 1, deepest pit) | 3,072 cells | a one-cell canyon floor between walls of 1.5-2 km; thermal lowers the walls onto the floor cells by unequal amounts (79-108 m) and leaves a dam | same |
 | R3a and R3b windows, sediment pass at pass-2 parameters | 101.8 m | moved nothing: volume change 0, pits 4.55 → 4.55 % and 3.67 → 3.67 % | `spikes/prototype-gates/results/results.md` |
 | Terrain pipeline review, pass 2 | 101.8 m | 0.58 M cells still moving at the pass cap | `spikes/terrain-pipeline-review/results/results.md` |

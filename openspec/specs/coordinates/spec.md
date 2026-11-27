@@ -124,7 +124,7 @@ Source: CON-13
 
 Verify: A
 Status: active
-Source: Lead 2026-11-24 (#193, owner O2 2026-11-23: planet primitives on main during G3, additive and output-neutral; the G3 port order's C1), GEN-139, COORD-007
+Source: Lead 2026-11-24 (owner O2 2026-11-23: planet primitives on main during G3, additive and output-neutral), GEN-139, COORD-007
 Detail:
 - bits: face in bits 60-62, `j` in bits 30-59, `i` in bits 0-29; 30 bits an axis hold 2^30 cells per face edge (`MAX_CELLS_PER_EDGE`), above the runtime's deepest level; bit 63 stays reserved (0); a cell outside `0..n`, a face over 5 or an `n` over 2^30 is refused; the id is private, built only by `new` or `from_raw` (which refuses a face over 5 or bit 63), and read by `raw`;
 - order: the `u64` order is (face, j, i); it is the canonical tie key of the seam-pair spill engine (GEN-191);
@@ -142,7 +142,7 @@ Detail:
 
 Verify: A
 Status: active
-Source: Lead 2026-11-24 (#195, owner O2 2026-11-23: planet primitives on main during G3, additive and output-neutral; the G3 port order's C2, reconciliation rows 1, 2 and 7), COORD-011, GEN-139, CON-30
+Source: Lead 2026-11-24 (owner O2 2026-11-23: planet primitives on main during G3, additive and output-neutral), COORD-011, GEN-139, CON-30
 Detail:
 | Patch cell `(i, j) = (i0 + u, j0 + v)` | Its `GlobalCell` |
 |---|---|
@@ -167,7 +167,7 @@ Detail:
 
 Verify: A
 Status: active
-Source: Lead 2026-11-24 (#197, owner O2 2026-11-23: planet primitives on main during G3, additive and output-neutral; G3-5's quadrature metric; the plan with the lead's four changes, 2026-11-24), contract §3 (`a_geo` conserved to 1e-9), GEN-138, COORD-011, CON-14
+Source: Lead 2026-11-24 (owner O2 2026-11-23: planet primitives on main during G3, additive and output-neutral; G3-5's quadrature metric; the plan with the lead's four changes, 2026-11-24), contract §3 (`a_geo` conserved to 1e-9), GEN-138, COORD-011, CON-14
 Detail:
 - projection: the cube is equiangular (`TangentWarp`): face coordinate `s` in `[-1, 1]` is the angle `alpha = pi/4 s` and the tangent coordinate `x = tan(alpha)`; a level's cells are equal steps of `alpha`, `pi / (2 n)`;
 - integrand: `d Omega = sec^2(alpha) sec^2(beta) / (1 + tan^2(alpha) + tan^2(beta))^(3/2) d alpha d beta`, even in each angle and symmetric under their swap (the face square's eight symmetries);

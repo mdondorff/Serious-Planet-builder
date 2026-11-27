@@ -1,1 +1,0 @@
-- 2026-11-21 xtask-pipeline-cockpit (BUILD-064): `std`-only `cargo xtask cockpit` offline HTML assembler, self-tested `-h`/`--help` living CLI docs (plus `README.md`/`docs/README.md` hints), `--run` Global Authoring/stage-sheet batch runner (`xtask/src/cockpit/`), and `bake::probe::Stage::ALL_KINDS` variant check (ag2-antigravity).

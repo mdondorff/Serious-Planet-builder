@@ -81,7 +81,7 @@ pub struct G2Input<'a> {
     pub residual_records: Option<usize>,
     /// The canonical graphs of one region and of two regions (the partition diff).
     pub partition: Option<(&'a Graph, &'a Graph)>,
-    /// KC's patches written with the stages (`kc-patches.csv`, lead #172): their count and total volume (m3), when given.
+    /// KC's patches written with the stages (`kc-patches.csv`, BUILD-060): their count and total volume (m3), when given.
     pub kc_patches: Option<(usize, f64)>,
     /// The f64 budget validator's overruns and raises written with the stages (`budget-violations.csv`, lead 2026-11-21), when given.
     pub validator: Option<usize>,
@@ -108,7 +108,7 @@ pub struct GraphReport {
     /// Trunk reaches (H1, or L with a parent) and those whose `down` node is held, neither an outlet nor left by a reach (a break).
     pub trunk_reaches: usize,
     pub trunk_breaks: usize,
-    /// G3-1 (lead #186, A6): trunk reaches flagged `rise_over_budget` or `budget_residual` (the trunk profile's exceptions).
+    /// BUILD-060: trunk reaches flagged `rise_over_budget` or `budget_residual` (the trunk profile's exceptions).
     pub trunk_exceptions: usize,
     /// Bed profile: reaches whose bed rises above its running minimum somewhere (exception vertices included), the largest such rise (m), and the validator's rises outside exceptions.
     pub bed_rise_reaches: usize,
@@ -139,7 +139,7 @@ pub struct GraphReport {
 }
 
 /// Graph/raster agreement at one channel threshold (contract section 5): routed river cells (land inside, drained area at least the threshold) with a rasterised graph cell within one cell
-/// (Chebyshev), and rasterised cells inside with a routed river cell within one cell. Counted apart, outside both shares (lead #166): cells inside a kept basin's interior
+/// (Chebyshev), and rasterised cells inside with a routed river cell within one cell. Counted apart, outside both shares: cells inside a kept basin's interior
 /// (`routed_kept`, `graph_kept`), and routed cells upstream of a graph head (`routed_above_head`: a miss whose downstream path first comes within one cell of the graph near a source).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Agreement {
@@ -151,13 +151,13 @@ pub struct Agreement {
     pub routed_kept: usize,
     pub routed_above_head: usize,
     pub graph_kept: usize,
-    /// G3-1 (diagnostic): the graph cells of the share (`graph`) that lie on no land of the measured surface (at or under the sea: a bed cut under the sea, a reach's mouth), and
+    /// BUILD-060 (diagnostic): the graph cells of the share (`graph`) that lie on no land of the measured surface (at or under the sea: a bed cut under the sea, a reach's mouth), and
     /// those of them without a routed cell within 1 cell; the routed side counts land only.
     pub graph_sea: usize,
     pub graph_sea_missed: usize,
 }
 
-/// The river steps inside kept-basin interiors (lead #166): a kept basin (`protected_surface`) whose floor cell lies in a depression of the measured surface holds that depression. Its river steps (BUILD-057's, either end inside the interior) and their uphill ones are counted apart from the uphill bar.
+/// The river steps inside kept-basin interiors: a kept basin (`protected_surface`) whose floor cell lies in a depression of the measured surface holds that depression. Its river steps (BUILD-057's, either end inside the interior) and their uphill ones are counted apart from the uphill bar.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct KeptReport {
     pub basins: usize,
@@ -182,7 +182,7 @@ pub struct StageUse {
     pub over_cut: usize,
 }
 
-/// A stage's lowering counted as deep (metres): the plan's "ground lowered > 50 m" per stage (lead #172).
+/// A stage's lowering counted as deep (metres): the plan's "ground lowered > 50 m" per stage.
 pub const OVER_CUT_M: f64 = 50.0;
 
 /// The budget report (BUILD-060 item 3).
@@ -193,7 +193,7 @@ pub struct BudgetReport {
     /// Cells whose summed lowering exceeds the budget by more than the fields' rounding (a field's step per stage); cells at 95 % of the budget or more.
     pub overrun: usize,
     pub at_95: usize,
-    /// The same with stage `kh`'s lowering added (reading 21: the use against `S0`; equal to the above without a `kh` field).
+    /// The same with stage `kh`'s lowering added (the use against `S0`; equal to the above without a `kh` field).
     pub overrun_s0: usize,
     pub at_95_s0: usize,
     pub residual_records: Option<usize>,
@@ -427,7 +427,7 @@ fn dilate(m: &[bool], w: usize, h: usize) -> Vec<bool> {
     out
 }
 
-/// The kept-basin interiors on the window (lead #166, #186; G3-1, #182c; [`KeptReport`]): a kept basin's (`protected_surface`) lake is the cells of the measured surface `z`
+/// The kept-basin interiors on the window (BUILD-060; [`KeptReport`]): a kept basin's (`protected_surface`) lake is the cells of the measured surface `z`
 /// under its recorded spill (`spill_m`) joined (8-connected) to its floor cell inside the depression that holds the floor (`label`, the gate's basin flood; `u32::MAX` dry):
 /// a rim cut under the spill, or a drained or outlet cell, does not let the lake run on; a floor at or above its spill, or in no depression, holds no lake. Returns per cell
 /// whether it lies in one, and the number of kept basins whose floor lies in the window under its spill and in a depression.
@@ -463,7 +463,7 @@ pub fn kept_interiors(g: &Graph, window: &Window, z: &[f64], label: &[u32]) -> (
     (kept, basins)
 }
 
-/// BUILD-060 (lead #182a, 2026-11-23): the `lake_inlet` nodes inside the window by origin (a line's end, some reach's `down`; a basin's spill target, some basin's `spill_node`),
+/// BUILD-060 (2026-11-23): the `lake_inlet` nodes inside the window by origin (a line's end, some reach's `down`; a basin's spill target, some basin's `spill_node`),
 /// and the ones the gate holds to a kept basin: a line-end inlet whose anchor lies in no kept-basin lake on `z` ([`kept_interiors`]). A spill target between
 /// reported basins is a hierarchy record and is not held to it; an inlet that is neither is an orphan (GEN-189's graph rule).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -554,7 +554,7 @@ pub fn kept_steps(kept: &[bool], basins: usize, receiver: &[u32], river: &[bool]
 }
 
 /// The graph/raster agreement at `threshold_m2` (contract section 5): `area` the gate's drained area (m2), `land` above the sea, `inside` the counted cells; `kept` the kept-basin interiors
-/// and `receiver` the gate's routing (lead #166: both counted apart, [`Agreement`]).
+/// and `receiver` the gate's routing (BUILD-060: both counted apart, [`Agreement`]).
 #[allow(clippy::too_many_arguments)]
 pub fn agreement(
     g: &Graph,
@@ -567,7 +567,7 @@ pub fn agreement(
     threshold_m2: f64,
 ) -> Agreement {
     let n = window.w * window.h;
-    // every rasterised cell (the routed side's match), and those whose reach drains at least the threshold there (the graph side's cells, G3-1: a 75 km2 share counts
+    // every rasterised cell (the routed side's match), and those whose reach drains at least the threshold there (the graph side's cells, BUILD-060: a 75 km2 share counts
     // the graph's 75 km2 network, not its 1 km2 tributaries)
     let by_id: BTreeMap<u64, &planet_generators::bake::river_graph::Reach> = g.reaches.iter().map(|r| (r.id, r)).collect();
     let mut graph = vec![false; n];
@@ -704,7 +704,7 @@ pub fn budget_report(
     };
     let cells: Vec<usize> = (0..n).filter(|&c| inside[c] && land[c]).collect();
     r.land = cells.len();
-    // reading 21: ks, kv and kc are against S_KH; kh (S0 against KH) only enters the use against S0
+    // ks, kv and kc are against S_KH; kh (S0 against KH) only enters the use against S0
     let mut used = vec![0.0f64; n];
     let mut used_kh = vec![0.0f64; n];
     for st in stages {
@@ -967,7 +967,7 @@ impl G2Report {
     }
 }
 
-/// The H1 trunk reaches of a canonical graph as the gate's trunks (BUILD-060 `--start`, lead #171): each H1-level reach's vertices, upstream first, as the window's L cell coordinates
+/// The H1 trunk reaches of a canonical graph as the gate's trunks (BUILD-060 `--start`): each H1-level reach's vertices, upstream first, as the window's L cell coordinates
 /// of the H1 cell centres (`coarse` L cells per H1 cell; an H1 id is `(gy << 32) | gx` in global H1 cells). A reach with a vertex outside the window is cut there; a reach left with fewer than
 /// two vertices is dropped.
 pub fn h1_trunks(g: &Graph, window: &Window, coarse: usize) -> Vec<Vec<(f64, f64)>> {
@@ -1011,7 +1011,7 @@ pub fn read_graph(path: &str) -> Result<Graph, String> {
     Graph::parse(&text).map_err(|e| format!("{path}: {e}"))
 }
 
-/// KC's patches of a stage directory (lead #172): `kc-patches.csv`, a header `cells,volume_m3` and one line per patch; none when the file is missing. A line that is not two numbers
+/// KC's patches of a stage directory: `kc-patches.csv`, a header `cells,volume_m3` and one line per patch; none when the file is missing. A line that is not two numbers
 /// is refused naming the file and the line.
 pub fn read_kc_patches(dir: &Path) -> Result<Option<(usize, f64)>, String> {
     let p = dir.join("kc-patches.csv");
@@ -1032,7 +1032,7 @@ pub fn read_kc_patches(dir: &Path) -> Result<Option<(usize, f64)>, String> {
     Ok(Some((count, volume)))
 }
 
-/// The chain's ocean of a stage directory (lead #185a): `ocean.u8`, one byte per window cell in row order (0 not ocean; 1 reached, 2 an H1 sea-cell seed, 3 an edge seed);
+/// The chain's ocean of a stage directory: `ocean.u8`, one byte per window cell in row order (0 not ocean; 1 reached, 2 an H1 sea-cell seed, 3 an edge seed);
 /// none when the file is missing. Another length, or a byte above 3, is refused naming the file.
 pub fn read_chain_ocean(dir: &Path, n: usize) -> Result<Option<Vec<bool>>, String> {
     let p = dir.join("ocean.u8");
@@ -1072,7 +1072,7 @@ pub fn read_validator(dir: &Path) -> Result<Option<usize>, String> {
     Ok(Some(count))
 }
 
-/// The spectrum bars (plan section 4.1, lead #172): the relief spectrum slope `beta` within the benchmark's range ([`BETA_MIN`] to [`BETA_MAX`], SPIKE-119's 25 GLO-30 and 3DEP
+/// The spectrum bars (plan section 4.1, BUILD-060): the relief spectrum slope `beta` within the benchmark's range ([`BETA_MIN`] to [`BETA_MAX`], SPIKE-119's 25 GLO-30 and 3DEP
 /// tiles), as two bars (too steep, too rough), geomorphology. The comparison with B's loss is the table's (BUILD-060).
 pub fn spectrum_bars(beta: f64) -> Vec<Bar> {
     vec![
@@ -1124,13 +1124,13 @@ pub fn read_stages(dir: &Path, n: usize) -> Result<(Vec<StageField>, Option<usiz
     Ok((out, records))
 }
 
-/// The G2 bars (owner decision 1, 2026-11-17; lead #168): the trunk corridor share (k_c 2, snapped), uphill river steps, graph/raster agreement at each threshold, graph violations and
+/// The G2 bars (owner decision 1, 2026-11-17; BUILD-060): the trunk corridor share (k_c 2, snapped), uphill river steps, graph/raster agreement at each threshold, graph violations and
 /// missing basin spill nodes, each pass or fail.
 pub const UPHILL_MAX_PCT: f64 = 1.0;
 pub const AGREE_MIN_PCT: f64 = 90.0;
-/// The share of trunk reaches flagged `rise_over_budget` or `budget_residual`, at most this (percent; G3-1, lead #186, A6: proposed for the owner, O10).
+/// The share of trunk reaches flagged `rise_over_budget` or `budget_residual`, at most this (percent; BUILD-060: proposed for the owner, O10).
 pub const TRUNK_EXCEPTIONS_MAX_PCT: f64 = 1.0;
-/// The share of routed river cells above a graph head (`routed_above_head` over the routed cells with them), at most this (percent; G3-1, lead #186: proposed for the owner, O10).
+/// The share of routed river cells above a graph head (`routed_above_head` over the routed cells with them), at most this (percent; BUILD-060: proposed for the owner, O10).
 pub const ABOVE_HEAD_MAX_PCT: f64 = 10.0;
 /// The corridor bar outside mountain windows, and on a mountain window (M1).
 pub const CORRIDOR_MIN_PCT: f64 = 97.5;
@@ -1171,7 +1171,7 @@ pub fn g2_bars(g2: &G2Report, uphill_pct: f64, corridor_pct: f64, corridor_min_p
         bar("bar_uphill".into(), uphill_pct, UPHILL_MAX_PCT, true, Correctness),
     ];
     for a in &g2.agreement {
-        // G3-1 (lead #186, A4): the lower of the routed and the graph share; a side with no cells has nothing to miss
+        // BUILD-060: the lower of the routed and the graph share; a side with no cells has nothing to miss
         let share = |hit: usize, all: usize| if all == 0 { 100.0 } else { 100.0 * hit as f64 / all as f64 };
         let pct = share(a.routed_agree, a.routed).min(share(a.graph_agree, a.graph));
         out.push(bar(format!("bar_agree_{}km2", a.threshold_km2), pct, AGREE_MIN_PCT, false, Correctness));
@@ -1182,13 +1182,13 @@ pub fn g2_bars(g2: &G2Report, uphill_pct: f64, corridor_pct: f64, corridor_min_p
     let validator = g2.budget.as_ref().and_then(|b| b.validator_overrun).unwrap_or(0);
     out.push(bar("bar_violations".into(), (g.violations.values().sum::<usize>() + validator) as f64, 0.0, true, Correctness));
     out.push(bar("bar_spill_missing".into(), g.basin_spill_missing as f64, 0.0, true, Correctness));
-    // G3-1 (A6): the trunk profile's exceptions as a share of the trunk reaches, beside the corridor
+    // BUILD-060: the trunk profile's exceptions as a share of the trunk reaches, beside the corridor
     let exc = 100.0 * g.trunk_exceptions as f64 / g.trunk_reaches.max(1) as f64;
     out.push(bar("bar_trunk_exceptions".into(), exc, TRUNK_EXCEPTIONS_MAX_PCT, true, Correctness));
     out
 }
 
-/// The bars' line: `RIVER-GATE bars [lead #168]: name PASS value (<= or >= limit); ...; n of m pass`.
+/// The bars' line: `RIVER-GATE bars [owner decision 1]: name PASS value (<= or >= limit); ...; n of m pass`.
 pub fn bars_line(bars: &[Bar]) -> Option<String> {
     if bars.is_empty() {
         return None;

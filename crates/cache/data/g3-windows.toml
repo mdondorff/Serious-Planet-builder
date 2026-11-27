@@ -1,4 +1,4 @@
-# G3-8's out-of-sample windows (BUILD-066, lead #186a): a seeded stratified draw over the coarse field of the seed-14 world, by `cargo xtask windows-draw`.
+# G3-8's out-of-sample windows (BUILD-066): a seeded stratified draw over the coarse field of the seed-14 world, by `cargo xtask windows-draw`.
 # Pre-registered: no RG or B run happens on them before G3-8. A window is `face,i0,i1,j0,j1,seed` in regional cells.
 world_seed = 14
 draw_seed = 539365667

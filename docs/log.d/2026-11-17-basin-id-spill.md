@@ -1,1 +1,0 @@
-- 2026-11-17 basin-id-spill (GEN-189, TEST-140): a river-graph basin's id holds its spill anchor, so nested basins sharing a floor have distinct ids (G0 contracts reading 4).

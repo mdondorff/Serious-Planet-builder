@@ -1,1 +1,0 @@
-- 2026-11-24 look-sheet (lead #183, owner 2026-11-23): BUILD-067's look sheet, a chain run's crops beside the defaults at one L cell a pixel under BUILD-060's fixed sun (`cargo xtask look-sheet`, `planet_cache::look_sheet`), TEST-150; the cockpit indexes target/review/look/

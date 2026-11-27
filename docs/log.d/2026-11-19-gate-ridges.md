@@ -1,1 +1,0 @@
-- 2026-11-19 gate-ridges (BUILD-060): river-gate measures cut-through saddles at 1 and 5 km2 and crest rounding on one ridge mask, against S_KH and S0, with the crest bar and saddles at most B's (lead #172).

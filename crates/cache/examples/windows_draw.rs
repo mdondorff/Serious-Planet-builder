@@ -1,4 +1,4 @@
-//! BUILD-066 (lead #186a): G3-8's out-of-sample windows, a seeded stratified draw over the seed-14 world's coarse field (`cargo xtask windows-draw`). Each candidate window
+//! BUILD-066: G3-8's out-of-sample windows, a seeded stratified draw over the seed-14 world's coarse field (`cargo xtask windows-draw`). Each candidate window
 //! (`planet_cache::window_draw::candidates`) is sampled on a 16 x 16 grid of its regional cells' centres: the class inputs' base elevation (land above 0 m), the orography's
 //! precipitation and temperature (runoff by `runoff_mm`), and the latitude of the box's centre; then classed and drawn by `window_draw`. Writes the data file (TOML).
 //! Usage: `windows_draw [--out FILE] [--threads N]`.

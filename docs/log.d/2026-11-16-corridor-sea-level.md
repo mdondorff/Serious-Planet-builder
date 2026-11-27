@@ -1,1 +1,0 @@
-- 2026-11-16 corridor-sea-level (BUILD-057, TEST-137): the corridor trunk measure routes and snaps on the water surface; a coastal node no longer sits on the sea floor (DEC explorer-5).

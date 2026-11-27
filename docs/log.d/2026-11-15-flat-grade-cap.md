@@ -1,1 +1,0 @@
-- 2026-11-15 flat-grade-cap (GEN-173, TEST-119): no graded flat cell stands above its chessboard level; a cell the cap binds keeps its chessboard parent as a lower neighbour (#1508; K7 on the L-eroded surface no longer refuses a flat); kernel versions 8 and 10.

@@ -1,1 +1,0 @@
-- 2026-11-13 **two-data-roots** (ADR 0121): data only in the repository or `C:/DEV/SeriousPlanetData` (`worlds/`, `lanes/`, `tmp/`); lane files move to `SeriousPlanetData/lanes`.

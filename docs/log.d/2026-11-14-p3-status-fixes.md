@@ -1,1 +1,0 @@
-- 2026-11-14 P3 state after the closure report (#1507): E1's source corrected (the hand-over, not B), finished queue rows and the accepted ADRs 0110-0115 removed from status.

@@ -1,1 +1,0 @@
-- 2026-11-01 gate-decodes-not-known: the gate's KNOWN list no longer holds main-thread bake-block decodes (0 in 3 real-store runs after #1047), so a regression fails it (VIEW-061, TEST-063)

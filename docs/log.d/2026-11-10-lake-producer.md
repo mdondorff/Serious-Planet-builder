@@ -1,1 +1,0 @@
-- 2026-11-10 lake-producer: lakes_from_hydro turns H1's kept basins into lake records and drops the channel cells inside them from the river pieces; build_resident runs it (GEN-163, TEST-108).

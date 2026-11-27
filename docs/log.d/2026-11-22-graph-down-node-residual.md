@@ -1,1 +1,0 @@
-- 2026-11-22 graph-down-node-residual (GEN-189, BUILD-060): a bed rise into a reach's own down node excused by its budget_residual (reading 41), printed in its own gate columns (lead, 2026-11-22).

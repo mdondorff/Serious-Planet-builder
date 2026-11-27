@@ -1,1 +1,0 @@
-- 2026-11-08 cube-landmass: the six cube faces as one grid for the kernels; the prototype landmass (9.3e6 land cells over four faces) routed whole, G-PART and the rounds on it (GEN-144).

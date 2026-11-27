@@ -1,1 +1,0 @@
-- 2026-11-01 spec-lint-ignored-tests: an `#[ignore]`d test's `// spec:` citation counts for no tier; no requirement loses coverage (TEST-001)

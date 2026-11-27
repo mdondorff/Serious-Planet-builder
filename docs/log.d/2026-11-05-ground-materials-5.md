@@ -1,1 +1,0 @@
-- 2026-11-05 ground-materials-5: the detail octaves' per-material coefficients are look data (`ground.crack`, `ground.octave.<name>`, LOOK-013, look schema 7), the Earth default the former shader constants (#1176)

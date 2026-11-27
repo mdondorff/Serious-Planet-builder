@@ -149,7 +149,7 @@ fn main() -> Result<(), String> {
         }
         k += 2;
     }
-    // reading 30 (lead #173): the base's band and crease noise with GEN-140's per-octave lattice turn (`turned`) (the default, main's bakes since 2026-11-19, GEN-140) or axis-aligned (`axis`, the base before); the window's
+    // the base's band and crease noise with GEN-140's per-octave lattice turn (`turned`) (the default, main's bakes since 2026-11-19, GEN-140) or axis-aligned (`axis`, the base before); the window's
     // start surface and a store's reading follow it, so a turned run is measured on a turned start
     let noise = value(&args, "--noise").unwrap_or("turned");
     if !["axis", "turned"].contains(&noise) {
@@ -186,7 +186,7 @@ fn main() -> Result<(), String> {
         basin_cells: parsed(&args, "--min-cells", GateParams::default().basin_cells)?,
         lake_depth_m: parsed(&args, "--d", 20.0)?,
         network_km2,
-        // G3-1 (lead #186, A5): the corridor, crest and kept-river bars are relief-indexed by the row's start relief (no window literal); `--corridor-bar` fixes the corridor bar by hand
+        // BUILD-060: the corridor, crest and kept-river bars are relief-indexed by the row's start relief (no window literal); `--corridor-bar` fixes the corridor bar by hand
         corridor_min_pct: parsed(&args, "--corridor-bar", CORRIDOR_MIN_PCT)?,
         corridor_fixed: value(&args, "--corridor-bar").is_some(),
         ..GateParams::default()
@@ -261,7 +261,7 @@ fn main() -> Result<(), String> {
         let d = dir_of(x0 + (p % w) as i64, y0 + (p / w) as i64);
         base(d) + front.regional_field.at(d)
     });
-    // BUILD-060 `--start` (lead #171): the run's own start surface on the window's L grid (a chain that conditions its base, as A+, has another S0 than main's); every delta and the
+    // BUILD-060 `--start`: the run's own start surface on the window's L grid (a chain that conditions its base, as A+, has another S0 than main's); every delta and the
     // corridor are then measured against it, and the trunks come from the run's own graph (`--graph`'s H1 reaches); the H1 edge-agreement check still reads main's H1
     let own_start = value(&args, "--start");
     let (bi0, bi1, bj0, bj1) = ((region.0 * l) as i64, ((region.1 + 1) * l) as i64, (region.2 * l) as i64, ((region.3 + 1) * l) as i64);
@@ -271,7 +271,7 @@ fn main() -> Result<(), String> {
             gx >= bi0 && gx < bi1 && gy >= bj0 && gy < bj1
         })
         .collect();
-    // G3-1 (lead review of #1648): the relief index is the window's own, main's S0 over the region's box, the same for every candidate; a run's own start replaces S0 after it
+    // BUILD-060: the relief index is the window's own, main's S0 over the region's box, the same for every candidate; a run's own start replaces S0 after it
     let relief_index_m = planet_cache::river_gate::relief_index(
         &planet_generators::bake::Grid::new(w, h, front.solve.grid.dx() / l as f64),
         &start,
@@ -372,7 +372,7 @@ fn main() -> Result<(), String> {
         front.solve.zb[hc] <= sea_level_m && !front.solve.grid.is_edge(hc)
     };
     let outlet = planet_cache::river_gate::connected_sea_outlets(&grid, &start, &surface, sea_level_m, &h1_sea);
-    // lead #185b: the gate builds its own ocean (a candidate does not supply the gate's rule, CON-31); a chain's `ocean.u8` beside the stage fields is a cross-check only, both counts 0 on a chain row
+    // BUILD-055: the gate builds its own ocean (a candidate does not supply the gate's rule, CON-31); a chain's `ocean.u8` beside the stage fields is a cross-check only, both counts 0 on a chain row
     let chain_ocean = match value(&args, "--stages") {
         Some(dir) => planet_cache::river_gate_graph::read_chain_ocean(Path::new(dir), w * h)?,
         None => None,
@@ -412,7 +412,7 @@ fn main() -> Result<(), String> {
             "--stages: the budget field reads H1 blocks of {l} L cells, and the window's origin ({x0}, {y0}) is not on an H1 corner"
         ));
     }
-    // lead #172: KC's patches written beside the stage fields
+    // BUILD-060: KC's patches written beside the stage fields
     let kc_patches = match value(&args, "--stages") {
         Some(dir) => read_kc_patches(Path::new(dir))?,
         None => None,

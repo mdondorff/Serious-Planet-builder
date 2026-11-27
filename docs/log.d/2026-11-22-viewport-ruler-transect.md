@@ -1,1 +1,0 @@
-- 2026-11-22 viewport-ruler-transect (ag2 companion 1A): `planet_editor::ruler` cursor readout & great-circle transect model, off-thread `HoverPicker` slope sampling, `Tool::Ruler` inline elevation/slope plot (`ADR 0091` 45° marker) & 3D overlay (VIEW-076)
