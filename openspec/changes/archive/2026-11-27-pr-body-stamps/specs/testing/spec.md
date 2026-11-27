@@ -1,6 +1,6 @@
 ## ADDED Requirements
 ### Requirement: TEST-162 The PR-body review lines on fixture bodies and paths
-Tier-A tests SHALL check BUILD-075's table row by row on fixture bodies, commit lists and changed paths: each line missing, naming no commit of the PR, and present; a docs-only PR; a record, a promoting and a rejecting research package, a deleted and an archived record; the `Sprint:` line with no, the wrong and the active sprint; and the active sprint found only in the sprint form.
+Tier-A tests SHALL check BUILD-075's table row by row on fixture bodies, commit lists and changed paths: each line missing, naming no commit of the PR, and present; a docs-only PR; a record, a promoting and a rejecting research package, a deleted and an archived record; the `Sprint:` line with no, the wrong and the active sprint; the active sprint found only in the sprint form; and every problem listed together with the active sprint's firewall refusal (`plan --pr`) on a fixture sprint.
 
 Verify: A
 Status: active

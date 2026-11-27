@@ -1440,11 +1440,11 @@ Detail:
 | `Numerics: PASS <sha>` | a PR with a non-docs path changes `crates/core/`, `crates/generators/` or a `*.wgsl` | the sha (7 to 64 hex digits) a commit of the PR, as BUILD-044's verifier line |
 | `Spec-Guardian: PASS <sha>` | a PR with a non-docs path changes `openspec/` | as above |
 | `Research-Review: READY <sha>` | a PR adds or changes a record: `docs/milestones/<M>/<E>-record.md`, or a `spikes/<name>/results/results.md` whose `Decision:` line says `promote` (the file at the PR's head) | as above |
-| `Owner-Look: yes` or `Owner-Look: no` | as `Research-Review` | the verdict, then the date and the sheet |
+| `Owner-Look: yes` or `Owner-Look: no` | as `Research-Review` | the verdict as the first word (`yesterday` is none); the date and the sheet follow |
 | `Sprint: <M>` | a sprint file is active: `docs/milestones/<M>.md` with `Status: active` in the sprint form (an `Opened:` line); not in the old milestone form, a draft or between sprints | `<M>` the active sprint's name |
 - A docs-only PR (BUILD-044's paths) needs no path line, `openspec/` included; it still needs the record lines and the `Sprint:` line.
 - A record deleted at the PR's head (moved to the archive) and a file under `docs/archive/` are not records.
-- Every problem is one line naming the path and the reviewer to run; the check lists them all, then fails.
+- Every problem is one line naming the path and the reviewer to run; the check lists them all (the verifier line, the review lines, the firewall's), then fails.
 - The PR's title and head branch come from `PR_TITLE` and `HEAD_REF` in the environment, like the body.
 
 #### Scenario: A generator PR without its numerics line

@@ -40,8 +40,11 @@ pub fn verifier_sha(body: &str) -> Option<String> {
     stamp_sha(body, "Verifier: PASS ")
 }
 
-/// The review stamps by path (BUILD-075): (the stamp's prefix, which changed path needs it, the reviewer to run).
-const PATH_STAMPS: [(&str, fn(&str) -> bool, &str); 2] = [
+/// A review stamp by path: the stamp's prefix, which changed path needs it, the reviewer to run.
+type PathStamp = (&'static str, fn(&str) -> bool, &'static str);
+
+/// The review stamps by path (BUILD-075).
+const PATH_STAMPS: [PathStamp; 2] = [
     (
         "Numerics: PASS ",
         |p| p.starts_with("crates/core/") || p.starts_with("crates/generators/") || p.ends_with(".wgsl"),
@@ -63,16 +66,15 @@ pub fn is_record(path: &str, text: Option<&str>) -> bool {
         && text.lines().any(|l| l.trim_start().strip_prefix("Decision:").is_some_and(|d| d.trim_start().starts_with("promote")))
 }
 
-/// The `Owner-Look:` verdict of a PR body: `yes` or `no` (followed by the date and the sheet).
+/// The `Owner-Look:` verdict of a PR body: `yes` or `no` as the first word (the date and the sheet follow).
 pub fn owner_look(body: &str) -> Option<&'static str> {
     body.lines().find_map(|l| {
         let v = l.trim().strip_prefix("Owner-Look:")?.trim_start();
-        if v.starts_with("yes") {
-            Some("yes")
-        } else if v.starts_with("no") {
-            Some("no")
-        } else {
-            None
+        let word: String = v.chars().take_while(char::is_ascii_alphabetic).collect();
+        match word.as_str() {
+            "yes" => Some("yes"),
+            "no" => Some("no"),
+            _ => None,
         }
     })
 }
@@ -185,23 +187,44 @@ pub fn run(root: &Path) -> Res {
         println!("pr-body-check: no changed path, nothing to check");
         return Ok(());
     }
+    let read = |p: &str| capture(root, "git", &["show", &format!("{head}:{p}")]).ok();
+    let branch = std::env::var("HEAD_REF").ok();
+    let problems = problems(root, &body, &commits, &changed, &title, branch.as_deref(), &read)?;
+    if problems.is_empty() {
+        let sprint = active_sprint(root);
+        println!("pr-body-check: review lines ok ({})", sprint.map_or("no active sprint".to_string(), |m| format!("sprint {m}")));
+        Ok(())
+    } else {
+        Err(format!("pr-body-check: {} problem(s):\n  {}", problems.len(), problems.join("\n  ")))
+    }
+}
+
+/// Every problem of a PR, one line each: the verifier line (BUILD-044), the review lines (BUILD-075), then the active sprint's R/P firewall
+/// (`plan --pr`, BUILD-074) on the title, the branch, the body and the changed paths.
+pub fn problems(
+    root: &Path,
+    body: &str,
+    commits: &[String],
+    changed: &[String],
+    title: &str,
+    branch: Option<&str>,
+    read: &dyn Fn(&str) -> Option<String>,
+) -> Res<Vec<String>> {
     let mut problems = Vec::new();
-    match check(&body, &commits, &changed) {
+    match check(body, commits, changed) {
         Ok(note) => println!("pr-body-check: {note}"),
         Err(e) => problems.push(e),
     }
-    // BUILD-075: the review lines by path and for records, the `Sprint:` line, then the R/P firewall of the active sprint (`plan --pr`)
-    let sprint = active_sprint(root);
-    let read = |p: &str| capture(root, "git", &["show", &format!("{head}:{p}")]).ok();
-    problems.extend(review_errors(&body, &commits, &changed, sprint.as_deref(), &read));
+    problems.extend(review_errors(body, commits, changed, active_sprint(root).as_deref(), read));
+    static CALL: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let tag = format!("{}-{}", std::process::id(), CALL.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
     let tmp = std::env::temp_dir();
-    let (body_file, files_file) =
-        (tmp.join(format!("pr-body-{}.md", std::process::id())), tmp.join(format!("pr-files-{}.txt", std::process::id())));
-    std::fs::write(&body_file, &body).map_err(|e| format!("{}: {e}", body_file.display()))?;
+    let (body_file, files_file) = (tmp.join(format!("pr-body-{tag}.md")), tmp.join(format!("pr-files-{tag}.txt")));
+    std::fs::write(&body_file, body).map_err(|e| format!("{}: {e}", body_file.display()))?;
     std::fs::write(&files_file, changed.join("\n")).map_err(|e| format!("{}: {e}", files_file.display()))?;
-    let mut args = vec![title];
-    if let Ok(b) = std::env::var("HEAD_REF") {
-        args.extend(["--branch".to_string(), b]);
+    let mut args = vec![title.to_string()];
+    if let Some(b) = branch {
+        args.extend(["--branch".to_string(), b.to_string()]);
     }
     args.extend(["--body-file".to_string(), body_file.display().to_string(), "--files".to_string(), files_file.display().to_string()]);
     let firewall = crate::plancmd::pr_check(root, &args);
@@ -209,12 +232,7 @@ pub fn run(root: &Path) -> Res {
     if let Err(e) = firewall {
         problems.push(e);
     }
-    if problems.is_empty() {
-        println!("pr-body-check: review lines ok ({})", sprint.map_or("no active sprint".to_string(), |m| format!("sprint {m}")));
-        Ok(())
-    } else {
-        Err(format!("pr-body-check: {} problem(s):\n  {}", problems.len(), problems.join("\n  ")))
-    }
+    Ok(problems)
 }
 
 #[cfg(test)]
@@ -342,6 +360,9 @@ mod tests {
         assert!(
             review_errors(&format!("Research-Review: READY {A}\nOwner-Look: maybe"), &commits, &rec, None, &files("x", &[])).len() == 1
         );
+        assert_eq!(owner_look("Owner-Look: yesterday"), None, "the verdict is a whole word");
+        assert_eq!(owner_look("Owner-Look: no: R1h faceted (2026-12-01)"), Some("no"));
+        assert_eq!(owner_look("Owner-Look: yes"), Some("yes"));
         // a research package that promotes is a record; one that rejects, a deleted record and an archived record are not
         let res = paths(&["spikes/s/results/results.md"]);
         assert_eq!(review_errors("", &commits, &res, None, &files(promote, &[])).len(), 2);
@@ -372,6 +393,40 @@ mod tests {
         assert_eq!(active_sprint(&d), None, "the old milestone form and a draft are no active sprint");
         w("S1.md", "# S1\nStatus: active (owner, 2026-11-28)\nOpened: 2026-11-28   Closes by: 2026-12-04\n");
         assert_eq!(active_sprint(&d).as_deref(), Some("S1"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: BUILD-075, TEST-162
+    #[test]
+    fn all_problems_are_listed_together_and_the_active_sprints_firewall_runs_on_the_pr() {
+        let d = std::env::temp_dir().join(format!("xtask-prbody-fw-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("docs/milestones")).unwrap();
+        std::fs::write(d.join("docs/milestones/S-Test.md"), include_str!("fixtures/sprint-good.md")).unwrap();
+        let commits = paths(&[B, A]);
+        let none = |_: &str| None;
+        // not past `Closes by` problems only (the fixture's date is fixed; `today` is not)
+        let live = |v: Vec<String>| v.into_iter().filter(|e| !e.contains("overdue")).collect::<Vec<_>>();
+        // an R exit's PR touching a crate: the firewall refuses it, beside the missing verifier, numerics and sprint lines
+        let gen = paths(&["crates/generators/src/a.rs"]);
+        let p = live(problems(&d, "", &commits, &gen, "E3: hump survey", Some("spike/hump"), &none).unwrap());
+        assert_eq!(p.len(), 4, "{p:?}");
+        assert!(
+            p[0].contains("Verifier: PASS <sha>") && p[1].contains("Numerics: PASS <sha>") && p[2].contains("`Sprint: S-Test`"),
+            "{p:?}"
+        );
+        assert!(p[3].contains("exit E3 is mode R") && p[3].contains("crates/generators/src/a.rs"), "{p:?}");
+        // an X exit's change PR with every line passes
+        let body = format!("Sprint: S-Test\nVerifier: PASS {}\n", &B[..8]);
+        let p = live(problems(&d, &body, &commits, &paths(&["xtask/src/x.rs"]), "E1: region file", Some("change/e1"), &none).unwrap());
+        assert!(p.is_empty(), "{p:?}");
+        // a change/* PR that names no X or M exit is refused by the firewall
+        let p = live(problems(&d, &body, &commits, &paths(&["xtask/src/x.rs"]), "tidy", Some("change/tidy"), &none).unwrap());
+        assert!(p.len() == 1 && p[0].contains("names none"), "{p:?}");
+        // no milestone file at all: the firewall's own error is listed
+        std::fs::remove_file(d.join("docs/milestones/S-Test.md")).unwrap();
+        let p = problems(&d, "", &commits, &paths(&["docs/a.md"]), "docs", None, &none).unwrap();
+        assert!(p.len() == 1 && p[0].contains("no milestone file"), "{p:?}");
         let _ = std::fs::remove_dir_all(&d);
     }
 }
