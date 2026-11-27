@@ -15,12 +15,8 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 
 Older owner items moved to `docs/parking.md` (2026-11-12 and 2026-11-27).
 
-## Queue (2026-11-27, milestone P3 closing: `docs/milestones/P3.md`)
-P3's exits are done; E4-E6 parked with record (owner, 2026-11-26; ADR 0129). Only the closure runs.
-| Exit | Step | Lane |
-|---|---|---|
-| E6 | Closure coder pass: log.d and closed spikes to `docs/archive/P3/`; stale river-graph text in main's comments and specs; `shadow-clipmap-march` synced and archived; dead links; the README key list | crusader |
-| E6 | Closure curation: this status, P3's report, the ADR index, the agent memory, the run note | lead |
+## Queue (2026-11-27, milestone P3: `docs/milestones/P3.md`)
+P3's exits and its closure are done (#1672-#1677); E4-E6 parked with record (owner, 2026-11-26; ADR 0129). No queue rows: the lanes are idle until the owner signs off P3 and names the next milestone's topic.
 
 ## Tracked
 - **Sea not meeting the coast; a coastal fade at river mouths** (owner, 2026-11-15; seen on a flight about 2026-11-13, not reported then): the sea did not start where the terrain ended. Candidate cause: the runtime fades the erosion change toward 0 within 3 m above sea level (`COAST_FADE_M`, `erosion_layer.rs`), so the drawn coast and river mouths differ from the store (adversarial review F3). Owner re-tests on a flight; the fade is decided with the next river or coast work (D-2 is parked, ADR 0129).
