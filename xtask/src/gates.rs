@@ -1,4 +1,4 @@
-//! The gate ledger (BUILD-041): `docs/gates/ledger.md` holds one row per measurement of a gate of `docs/design/terrain-target.md` section 12.1.
+//! The gate ledger (BUILD-041): `docs/tools/gates/ledger.md` holds one row per measurement of a gate of `docs/design/terrain-target.md` section 12.1.
 //! `cargo xtask gates` prints it per gate; spec-lint rejects a gate with no row, a row of a gate that does not exist, and a measured row whose
 //! commit does not resolve. A gate that was not measured has a `not run` row with `-` as commit.
 
@@ -7,7 +7,7 @@ use crate::util::{capture, Res};
 use std::collections::BTreeSet;
 use std::path::Path;
 
-pub const LEDGER: &str = "docs/gates/ledger.md";
+pub const LEDGER: &str = "docs/tools/gates/ledger.md";
 pub const VERDICTS: [&str; 5] = ["pass", "fail", "partial", "reported", "not run"];
 
 /// One ledger row: `gate | seed | region | resolution | commit | value | verdict | lane`.

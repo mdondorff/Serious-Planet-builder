@@ -85,7 +85,7 @@ pub fn group(lines: &[String]) -> BTreeMap<String, Vec<f64>> {
 }
 
 /// Where `--record` keeps the per-job CI evidence (BUILD-020), relative to the repository root.
-pub const HISTORY: &str = "docs/perf/ci-history.tsv";
+pub const HISTORY: &str = "docs/tools/perf/ci-history.tsv";
 /// The most runs one `gh run list` call returns for `--record`; a range that reaches it is cut off and the tool says so.
 const RECORD_LIMIT: usize = 1000;
 const HISTORY_HEADER: &str = "run\tcreated\tevent\tbranch\tjob\tconclusion\tseconds\tfailed_steps";

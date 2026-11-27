@@ -41,8 +41,8 @@ fn stamp_item(id: u128, layer: &str, height_m: f64) -> ItemSpec {
 fn catalog_json_writes_to_target_review_and_is_deterministic() {
     let root = repo_root();
     assert!(
-        !root.join("docs/stages/pipeline.json").exists(),
-        "docs/stages/pipeline.json should not be committed; generate into target/review/stages/pipeline.json or via --pipeline-json"
+        !root.join("docs/tools/stages/pipeline.json").exists(),
+        "docs/tools/stages/pipeline.json should not be committed; generate into target/review/stages/pipeline.json or via --pipeline-json"
     );
     let json = to_canonical_json();
     assert_eq!(json, to_canonical_json(), "catalog JSON must be deterministic");
@@ -166,13 +166,13 @@ fn bake_stage_hooks_match_probe_registry_and_committed_stage_manifest() {
         );
     }
 
-    // 2. The ordered `(stage_kind, field)` pairs declared on `stages()` match `docs/stages/manifest.txt`.
+    // 2. The ordered `(stage_kind, field)` pairs declared on `stages()` match `docs/tools/stages/manifest.txt`.
     let declared_pairs: Vec<(String, String)> = stage_list
         .iter()
         .flat_map(|s| s.probe_hooks.iter().flat_map(|h| h.fields.iter().map(move |f| (h.stage.kind_id().to_string(), (*f).to_string()))))
         .collect();
 
-    let manifest_path = repo_root().join("docs/stages/manifest.txt");
+    let manifest_path = repo_root().join("docs/tools/stages/manifest.txt");
     let manifest = std::fs::read_to_string(&manifest_path).unwrap_or_else(|e| panic!("reading {}: {e}", manifest_path.display()));
     let mut manifest_pairs: Vec<(String, String)> = Vec::new();
     for line in manifest.lines().filter(|l| !l.trim().is_empty()) {
@@ -191,7 +191,7 @@ fn bake_stage_hooks_match_probe_registry_and_committed_stage_manifest() {
             manifest_pairs.push(pair);
         }
     }
-    assert_eq!(declared_pairs, manifest_pairs, "pipeline_catalog probe_hooks drifted from docs/stages/manifest.txt");
+    assert_eq!(declared_pairs, manifest_pairs, "pipeline_catalog probe_hooks drifted from docs/tools/stages/manifest.txt");
 }
 
 // spec: BUILD-063

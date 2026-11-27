@@ -44,7 +44,7 @@ impl Stage {
         Stage::K7 { face: 0, ti: 0, tj: 0 },
     ];
 
-    /// Canonical stage-family stem matching `docs/stages/manifest.txt` (`round` for `round-NN`, `k7` for `k7-fF-tI-J`).
+    /// Canonical stage-family stem matching `docs/tools/stages/manifest.txt` (`round` for `round-NN`, `k7` for `k7-fF-tI-J`).
     pub fn kind_id(self) -> &'static str {
         match self {
             Stage::Landmass => "landmass",

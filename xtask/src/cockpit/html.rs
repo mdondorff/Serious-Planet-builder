@@ -281,7 +281,7 @@ tr:hover td { background: rgba(255, 255, 255, 0.025); }
 
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:8px;">
-        <h2 style="margin:0;">Committed Stage Manifest Probes (<span class="mono">docs/stages/manifest.txt</span>)</h2>
+        <h2 style="margin:0;">Committed Stage Manifest Probes (<span class="mono">docs/tools/stages/manifest.txt</span>)</h2>
         <span class="muted" id="manifest-count"></span>
       </div>
       <div style="overflow-x:auto;">
@@ -659,7 +659,7 @@ tr:hover td { background: rgba(255, 255, 255, 0.025); }
 
     if (s.probe_hooks && s.probe_hooks.length) {
       const matched = probesForStage(s.id);
-      h += '<h3>Probe Hooks (<span class="mono">docs/stages/manifest.txt</span>)</h3>';
+      h += '<h3>Probe Hooks (<span class="mono">docs/tools/stages/manifest.txt</span>)</h3>';
       h += '<div class="badges" style="margin-bottom:6px;">' + s.probe_hooks.map((hk) => '<span class="badge probe">' + esc(hk.kind_id) + ': ' + esc((hk.fields || []).join(", ")) + '</span>').join("") + '</div>';
       if (matched.length) {
         h += '<div class="code-box">' + matched.map((r) => esc(r.stage + ' | ' + r.field + ' | cells ' + r.cells + ' | min ' + r.min + ' | p50 ' + r.p50 + ' | max ' + r.max + ' | hash ' + r.hash)).join("\n") + '</div>';

@@ -7,7 +7,7 @@
 //!   from window cell `(BX, BY)` aligned to the H1 grid and one H1 cell larger on each side (held inside the window), so the shade reads the crop's border cells as the full window does;
 //! - one chain directory a crop, `NAME/`, with the chain's `chain.txt` (its window line the box's) and the box's cut of every field the chain wrote (L fields, H1 fields and `stages/`).
 //!
-//! Sheets go to `target/review/look/<run>/` and are committed only at a gate, under `docs/stages/sheets/<gate>/` (BUILD-048's caps).
+//! Sheets go to `target/review/look/<run>/` and are committed only at a gate, under `docs/tools/stages/sheets/<gate>/` (BUILD-048's caps).
 
 use std::path::{Path, PathBuf};
 

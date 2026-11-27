@@ -899,7 +899,7 @@ pub fn validate_and_normalize_pipeline(raw: &str) -> Result<JsonVal, String> {
     Ok(normalized)
 }
 
-/// One parsed line of `docs/stages/manifest.txt`.
+/// One parsed line of `docs/tools/stages/manifest.txt`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ManifestRow {
     pub stage: String,
@@ -926,7 +926,7 @@ fn normalize_manifest_kind_id(stage: &str) -> String {
     }
 }
 
-/// Parses `docs/stages/manifest.txt` into structured probe rows and attaches catalog `stage_id` links.
+/// Parses `docs/tools/stages/manifest.txt` into structured probe rows and attaches catalog `stage_id` links.
 pub fn parse_stage_manifest(text: &str, catalog: &JsonVal) -> Vec<ManifestRow> {
     let mut hook_map: BTreeMap<(String, String), String> = BTreeMap::new();
     if let Some(stages) = catalog.get("stages").and_then(JsonVal::as_arr) {
@@ -1206,7 +1206,7 @@ fn discover_artifacts(root: &Path, out_dir: &Path, chain: Option<&str>, catalog:
         root.join("target/preview"),
         root.join("target/review/stages"),
         root.join("target/review/look"),
-        root.join("docs/stages/sheets"),
+        root.join("docs/tools/stages/sheets"),
     ];
     let chain_path = chain.map(|c| lexically_absolutize(root, Path::new(c)));
     if let Some(cp) = &chain_path {
@@ -1321,7 +1321,7 @@ pub fn assemble_cockpit(root: &Path, pipeline_json_raw: &str, out_dir: &Path, ch
     let stage_count = catalog.get("stages").and_then(JsonVal::as_arr).map_or(0, |a| a.len());
     let pin_count = catalog.get("version_pins").and_then(JsonVal::as_arr).map_or(0, |a| a.len());
 
-    let manifest_rows = match fs::read_to_string(root.join("docs/stages/manifest.txt")) {
+    let manifest_rows = match fs::read_to_string(root.join("docs/tools/stages/manifest.txt")) {
         Ok(txt) => parse_stage_manifest(&txt, catalog),
         Err(_) => Vec::new(),
     };
@@ -1607,13 +1607,13 @@ mod tests {
       "scope": "tile",
       "summary": "Local tile refinement",
       "reads": ["k5-landmass-and-window-cut"],
-      "outputs": ["docs/stages/manifest.txt"],
+      "outputs": ["docs/tools/stages/manifest.txt"],
       "version_pins": [],
       "probe_hooks": [{{"kind_id": "k7", "fields": ["z"]}}],
       "active_when": "erosion_mode == k5-k7-commit",
       "edit_preview_level": "L2",
       "spec_ids": ["BUILD-047"],
-      "preview": {{"command_template": "cargo xtask stages", "files": ["docs/stages/manifest.txt"], "optional_files": []}}
+      "preview": {{"command_template": "cargo xtask stages", "files": ["docs/tools/stages/manifest.txt"], "optional_files": []}}
     }}
   ],
   "switch_matrix": [
@@ -1787,9 +1787,9 @@ mod tests {
     #[test]
     fn manifest_parser_png_header_and_offline_assembler_index_previews_into_self_contained_html() {
         let root = temp_workspace("assemble");
-        fs::create_dir_all(root.join("docs/stages")).unwrap();
+        fs::create_dir_all(root.join("docs/tools/stages")).unwrap();
         fs::write(
-            root.join("docs/stages/manifest.txt"),
+            root.join("docs/tools/stages/manifest.txt"),
             "landmass | z | cells 1408 | min -1.0e2 | p5 0.0 | p50 1.2e2 | p95 5.0e2 | max 9.0e2 | below_scale 0 | above_scale 0 | hash 26a251fd07de1f70 | pit_cells 29\nk7-f1-t3-4 | z | cells 4096 | min 4.0e2 | p5 4.1e2 | p50 4.2e2 | p95 4.3e2 | max 4.4e2 | below_scale 0 | above_scale 0 | hash 3a78b8893d8f388e\n",
         )
         .unwrap();

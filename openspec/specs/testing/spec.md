@@ -877,7 +877,7 @@ A perf scene SHALL record the CPU calibration of STRM-022 (a fixed kernel timed 
 
 Verify: A
 Status: active
-Source: ADR 0065, ADR 0093 (SPIKE-95), STRM-022, TEST-012, TEST-021, perf windows 7 and 11 and the desktop-app smoke (`docs/perf/smoke-desktop-app.md`), owner (2026-10-19)
+Source: ADR 0065, ADR 0093 (SPIKE-95), STRM-022, TEST-012, TEST-021, perf windows 7 and 11 and the desktop-app smoke (`docs/archive/M5/perf/smoke-desktop-app.md`), owner (2026-10-19)
 
 Scope: the limits are the reference machine's calibration (Rasierklinge, ADR 0065), and they give no verdict on another machine (ADR 0092 point 5): readings logged on another adapter than the reference one (by the readiness gate's rule; a log names its adapter) are recorded and judged `no verdict (not the reference machine)`, neither a session cause nor `cpu_calibration_valid` false; on the reference machine the parallel limits apply at its 18 threads (TEST-089).
 
@@ -2047,7 +2047,7 @@ Source: Lead 2026-11-19, BUILD-061
 Detail: a V valley of 10 m a cell on 100 m cells, crossed over 56 L cells: 113 samples from -2,800 to 2,800 m, river level 0 at `d = 0`, depth 280 m, widths 200 m and 1,000 m, not stale at a stored relief of 300 m; a profile flat on one side has an open 10 m width and depth 0, stale at 300 m, and no verdict without `S0`; with a stored pick depth of 20 m a depth of 3 m is not stale and 0 m is, and a pick depth of 0 m gives no verdict; a GLO-30 profile of five samples (40, 20, 0, 5, 30 m) has depth 30 m and a 10 m width of 170 m; the sheet and table are written for the one transect inside face 3's window, the final surface's river 5 m lower, and the label's space written as `-`; a flat `S0` makes the transect stale in the table and a missing `final.f32` is tabled as missing; no face line without `--face` is refused, a face holding no transect is refused naming it, an `s0.f32` of 12 bytes is refused naming it, and a csv without a column or with a non-number names it; the command passes `--chain`, `--face` and `--out` to the example and refuses an unknown option, a missing value, a second `--chain` and no `--chain`.
 
 ### Requirement: TEST-142 The runtime height-field chain matches its declared catalog
-Tier-A contract tests SHALL instantiate `field_chain_erosion` across every `HeightFieldKind`, `ErosionSwitch` option (both M9 layer and K5-K7 commit), ADR 0007 stamp stack, and `WaterBounded` combination and SHALL assert that walking `HeightField::upstream()` equals `pipeline_catalog::resolve_runtime_chain`, while unsupported `--erosion` combinations fail on both paths. Tier-A checks SHALL also verify live `openspec/specs/` resolution of every catalog `spec_ids`, 1-to-1 `probe::Stage` and `docs/stages/manifest.txt` hook parity, preview filename parity, deterministic emission to `target/review/stages/pipeline.json`, and absence of a committed `docs/stages/pipeline.json`.
+Tier-A contract tests SHALL instantiate `field_chain_erosion` across every `HeightFieldKind`, `ErosionSwitch` option (both M9 layer and K5-K7 commit), ADR 0007 stamp stack, and `WaterBounded` combination and SHALL assert that walking `HeightField::upstream()` equals `pipeline_catalog::resolve_runtime_chain`, while unsupported `--erosion` combinations fail on both paths. Tier-A checks SHALL also verify live `openspec/specs/` resolution of every catalog `spec_ids`, 1-to-1 `probe::Stage` and `docs/tools/stages/manifest.txt` hook parity, preview filename parity, deterministic emission to `target/review/stages/pipeline.json`, and absence of a committed `docs/tools/stages/pipeline.json`.
 
 Verify: A
 Status: active
@@ -2350,3 +2350,14 @@ Source: Lead 2026-11-27, BUILD-074
 #### Scenario: The selection
 - **WHEN** the tests select one active file, one active and one draft (also an old-form draft), a draft alone (with and without a queue row), two drafts and two actives
 - **THEN** each passes or fails as BUILD-053 states
+
+### Requirement: TEST-164 The sprint files' archive move on a fixture docs tree
+Tier-A tests SHALL run BUILD-077 on a fixture docs tree: a closed sprint with a report and records, a sprint that is not closed, the old milestone form, and a move onto an existing file. A refused run SHALL leave every file of the tree unchanged.
+
+Verify: A
+Status: active
+Source: Lead 2026-11-27 (the combined sprint process plan's item 7), BUILD-077
+
+#### Scenario: A sprint not closed, then closed
+- **WHEN** the fixture's `P3.md` says `Status: active, closing`, then `Status: closed`, and later `docs/archive/P3/P3-report.md` already exists
+- **THEN** the first run keeps both files and says why, the second plans both moves, and the third is refused naming both paths with no file changed

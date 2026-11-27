@@ -1,7 +1,8 @@
 # 0060 A power-capped P0 clock is valid; coast-3m water budget 2.2 ms
 Status: accepted (owner, 2026-10-18, opus-planner session; M5 gate decisions 11 and 12). Amends ADR 0036 point 2 and ADR 0057 point 2.
 Date: 2026-10-18
-Source: perf window 9 (`docs/perf/window-9.md`), `docs/perf/water-attribution.md`, M5 report section 5; ADR 0036 point 1 (the software power cap is normal)
+Maintained: 2026-11-27, links: the paths of moved files (docs/tools/, docs/archive/<M>/perf/; owner, 2026-11-27, the docs strategy).
+Source: perf window 9 (`docs/archive/M5/perf/window-9.md`), `docs/archive/M5/perf/water-attribution.md`, M5 report section 5; ADR 0036 point 1 (the software power cap is normal)
 
 ## Context
 - Under the coast views' load the GPU holds P0 at 1,245-1,365 MHz with the software power cap (`0x4`) as its only throttle reason, after the cool start (ADR 0057). That is the laptop's sustained clock, below the 1,400 MHz floor.
