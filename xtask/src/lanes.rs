@@ -1,12 +1,12 @@
 //! `cargo xtask lanes` (BUILD-043): per lane the last commit of its worktree and its age, the open PR of its branch, the latest number in its
-//! inbox file and the cargo or example processes that run for it. The lane list is `docs/lanes.txt` (names and worktree directory prefixes, no
+//! inbox file and the cargo or example processes that run for it. The lane list is `docs/tools/lanes.txt` (names and worktree directory prefixes, no
 //! machine paths). A missing piece prints `-`; the command never fails for one.
 
 use crate::util::{capture, Res};
 use crate::worktrees::{list, norm, Entry};
 use std::path::{Path, PathBuf};
 
-pub const LANES_FILE: &str = "docs/lanes.txt";
+pub const LANES_FILE: &str = "docs/tools/lanes.txt";
 
 /// A lane of the config: its name and the prefix of its worktree directory.
 #[derive(Debug, Clone, PartialEq)]
@@ -15,7 +15,7 @@ pub struct Lane {
     pub prefix: String,
 }
 
-/// The lanes of `docs/lanes.txt`: `name | prefix` lines; `#` lines and blank lines are skipped.
+/// The lanes of `docs/tools/lanes.txt`: `name | prefix` lines; `#` lines and blank lines are skipped.
 pub fn parse_lanes(text: &str) -> Vec<Lane> {
     text.lines()
         .map(str::trim)

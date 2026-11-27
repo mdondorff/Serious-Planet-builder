@@ -119,8 +119,10 @@ fn main() {
             erosion_m: Some((2.5 * flank) as f32),
         }
     };
-    let d1_look =
-        parse_look(include_str!("../../../docs/looks/ground-channels-d1.look.toml")).expect("the sample look").body(BodyId::PLANET).ground;
+    let d1_look = parse_look(include_str!("../../../crates/frame/tests/data/ground-channels-d1.look.toml"))
+        .expect("the sample look")
+        .body(BodyId::PLANET)
+        .ground;
     let aspect = f64::from(SIZE.0) / f64::from(SIZE.1);
     let look = LookParams::default();
     for (eye, pitch_deg) in [(1.8, 5.0), (0.5, 10.0), (30.0, 14.0)] {
