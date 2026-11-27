@@ -10,6 +10,7 @@
 | The terrain prototype's plan (P1 to P3: items, phases, the A/B gate; archived) | `docs/archive/P3/briefings/terrain-prototype.md` |
 | The target architecture and its gate table | `docs/design/terrain-target.md` (A3) |
 | Downstream (`M10`–`M13` / game) producer seams for `G3` & `P4` | `docs/design/hydrology-downstream-seams.md` |
+| A proposed later river project (assisted rivers after erosion) and the seams it needs | `docs/design/rivers-after-erosion.md` (proposal, non-normative) |
 | Every gate reading with its commit and verdict | `docs/gates/ledger.md` |
 | The stage previews' committed manifest | `docs/stages/manifest.txt` |
 | Interactive offline pipeline DAG, step previews and version pins | `cargo xtask cockpit --help` (`target/review/cockpit/index.html`; brief: `docs/design/pipeline-cockpit.md`) |

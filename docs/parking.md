@@ -12,6 +12,7 @@ Owner, 2026-11-12 (ADR 0120). These items are outside the current milestone, one
 - Optional: the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); excluding the repo's `target` folders from Windows Search indexing.
 
 ## River graphs and hydrology (parked 2026-11-26, ADR 0129)
+- Rivers after erosion (proposed project): terrain-assisted river and lake authoring above erosion (ADR 0113 point 2, ADR 0072, WDEF-012) over B's stabilized rivers; design sketch and seam rules in `docs/design/rivers-after-erosion.md` (ADR 0129). Trigger: after the landform erosion sign-off.
 - River graphs (RG): the chain on tag `archive/rg-parked-2026-11-26`; the record in `docs/archive/P3/river-graph/`. Restart only under ADR 0129 point 4.
 - K5's diagonal washboard: a hillslope term coupling the two cell parities, calibrated against GLO-30 (4-7 lane-days, open-ended; `o16-base-fixes-scoping` fix 2).
 - K5's straight trunks: a km-scale planform bias (1-2 lane-days to build, 5-10 to calibrate; fix 3).

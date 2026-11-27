@@ -3,20 +3,20 @@
 Forward state only (owner, 2026-10-16): open owner items, the current queue's open items, the current unanswered stop report, tracked items and quarantines. History goes to the log (`cargo xtask log`). When a change is archived the coder deletes its queue item's text (the log line is the record); when the architect answers a stop report it deletes it. A Tracked entry has at most 3 lines; a finished one is deleted (ADR 0075). Cap: 15 KB. Earlier states: `docs/archive/M4/status-at-m4-acceptance.md`, `docs/archive/M6/status-at-m6-close.md`. M8 closed 2026-10-30: `docs/milestones/M8-report.md`. New requirement IDs, ADR and SPIKE numbers are reserved through the lead (ADR 0120).
 
 ## Waiting for the owner
-- **P3 closure sign-off** (`docs/milestones/P3-report.md`): E1-E6 done, with E4-E6 parked with record (ADR 0129). Also yours:
-  - accept ADR 0129, and the other proposed ADRs 0045, 0117 and 0128;
-  - the simplify-and-delete proposal (lanes digest `review/p3-closure-plan-2026-11-27.md` part 2: D1-D11 deletions, S1-S5 structure; the lead's picks are given);
-  - whether the river-graph data module (GEN-189, TEST-139/140) stays on main (the lead recommends keeping it).
-- **The next milestone's topic:** the P4 draft is built on RG and is superseded by the park. Candidates are in `docs/parking.md`.
-- **Your flight on the fly1126 stores** (optional; lanes digest `flight-playbook-fly1126-2026-11-27.md`). The stores and stills are in `C:/DEV/SeriousPlanetData/flights/fly1126/`.
-- **Data and worktrees after the park** (both plans propose; they can't be undone): about 100 GB of field dumps in `C:/DEV/SeriousPlanetData/tmp`, and six lane worktrees to prune. The `.md`, `.txt`, `.csv` and `.png` files and the flight stores are kept either way.
+- **M-Erosion's one-page plan** (lanes digest `review/m-erosion-plan-draft-2026-11-27.md`): M1 in or out, exits E1-E5, sprints S0-S6, the R&D lane. Your sign-off comes before any heavy run.
+- **Your flight on the fly1126 stores** (optional; lanes digest `flight-playbook-fly1126-2026-11-27.md`; stores and stills in `C:/DEV/SeriousPlanetData/flights/fly1126/`).
 - **/bless: `water_class_lake_mask_stripes`** (TEST-133, #1459): the first lake golden; nothing waits on it.
-- **A new global store for the default world, seed 14**: every store on disk is refused by its keys; E1 ran on the in-memory production base (VIEW-069). Bake it with ADR 0117's format when a milestone needs it.
+- **A new global store for the default world, seed 14**: every store on disk is refused by its keys; E1 ran on the in-memory production base (VIEW-069). Its format waits for ADR 0117, which is still proposed.
 
 Older owner items moved to `docs/parking.md` (2026-11-12 and 2026-11-27).
 
-## Queue (2026-11-27, milestone P3: `docs/milestones/P3.md`)
-P3's exits and its closure are done (#1672-#1677); E4-E6 parked with record (owner, 2026-11-26; ADR 0129). No queue rows: the lanes are idle until the owner signs off P3 and names the next milestone's topic.
+## Queue (2026-11-27, milestone P3 closing: `docs/milestones/P3.md`)
+P3 signed off (owner, 2026-11-27); E4-E6 parked with record (ADR 0129, accepted 2026-11-27). The owner's block 1 decisions of 2026-11-27 run as the closure's last items (lanes digest `tonight-2026-11-27-agenda.md`, "Block 1 decided").
+| Exit | Step | Lane |
+|---|---|---|
+| E6 | The D rows (D3, D4, D5, D8, D9, D10 with BUILD-042 retired and BUILD-040 decoupled) and `shadow-clipmap-march` narrowed to its built half; then the docs restructure under the adopted strategy | crusader |
+| E6 | 25 uncited examples retired; 109 merged or closed remote branches pruned (the list with tip SHAs kept) | spikes |
+| E6 | `tmp/` field dumps deleted (kept: `.md/.txt/.csv/.png`, `tmp/ag2/`, `flights/`); 6 parked lane worktrees pruned | explorer |
 
 ## Tracked
 - **Sea not meeting the coast; a coastal fade at river mouths** (owner, 2026-11-15; seen on a flight about 2026-11-13, not reported then): the sea did not start where the terrain ended. Candidate cause: the runtime fades the erosion change toward 0 within 3 m above sea level (`COAST_FADE_M`, `erosion_layer.rs`), so the drawn coast and river mouths differ from the store (adversarial review F3). Owner re-tests on a flight; the fade is decided with the next river or coast work (D-2 is parked, ADR 0129).

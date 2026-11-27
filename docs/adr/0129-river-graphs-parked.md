@@ -1,5 +1,5 @@
 # 0129 River graphs parked
-Status: proposed (lead, 2026-11-26; the decision to park is the owner's, 2026-11-26; this record waits for the owner's acceptance)
+Status: accepted (owner, 2026-11-27; the park itself decided 2026-11-26)
 Date: 2026-11-26
 Source: P3 E6, `docs/archive/P3/river-graph/` (snapshot, both feasibility reviews, both park plans), ADR 0112, ADR 0113, ADR 0118, ADR 0119, ADR 0120
 
@@ -17,12 +17,12 @@ Source: P3 E6, `docs/archive/P3/river-graph/` (snapshot, both feasibility review
    - the stage sheets with diffs (BUILD-071);
    - the gate integrity work, the planet primitives and the calibration harness already merged;
    - the record in `docs/archive/P3/river-graph/`.
-   Everything else is reference on the tags.
-4. A restart needs all of these:
+   GEN-189, TEST-139/140, BUILD-060, REND-059/061 and WDEF-012 stay on main as producer-neutral infrastructure. Everything else is reference on the tags.
+4. Restarting procedural river-graph generation needs all of these:
    - the base is signed off with rivers off, including the world parameters that feed hydrology;
    - an ADR decides the editor's edit model below erosion, within BUDG-003/005;
    - one lane, and about an hour a day of owner time;
-   - a pre-set H1-on-sills test passes on the new K5 before any L stage is written;
+   - cols resolved upstream by any of: H1 on sills, L-corridor pathfinding, or single-scale routing; L carving tile-local (ADR 0119) in at most 3 stages;
    - gates are calibrated (TEST-155) and set before any row runs, with the owner's flight at every look gate;
    - rivers and lakes are gated on discharge, not on a dry-ground drainage raster.
 5. ADR 0123's draft (#1499) is closed as superseded by this record. ADR 0124 stays proposed, as B's path. The drafts of ADRs 0125-0127 (lanes digest `review-v4/`) are parked with RG.
@@ -32,3 +32,4 @@ Source: P3 E6, `docs/archive/P3/river-graph/` (snapshot, both feasibility review
 - Lane time returns to topics the owner names next. The base work (K5's hillslope and planform, K7's read) waits in `docs/parking.md` with RG.
 - A restart starts from the record's restart forms and dead ends, not from the tagged chain.
 - Routing rules 10-13 (`docs/routing.md`) carry the process lessons to any later work.
+- Rivers after erosion (terrain-assisted river and lake authoring above erosion) is an unscheduled proposal in `docs/parking.md`, with its design sketch in `docs/design/rivers-after-erosion.md`; it needs its own ADR when scheduled.
