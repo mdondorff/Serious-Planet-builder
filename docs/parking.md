@@ -65,6 +65,7 @@ Owner, 2026-11-12 (ADR 0120). These items are outside the current milestone, one
 - All stores on disk are refused by keys since #1218/#1225 (read-only references); in-memory `--world` runs only until a new store.
 
 ## Later milestones (moved from `docs/status.md` "Dormant", 2026-11-12)
+- Horizon removal (`shadow-clipmap-march` PRs 7-8; owner, 2026-11-27): the horizon jobs and generators go, with their requirements (GEN-044 to 046, 085, 086; STRM-045, 048 to 050, 057, 059, 061, 064; TEST-065, 066) and STRM-060's and TEST-054's new text (no horizon jobs). Its spec delta, not synced: `openspec/changes/archive/2026-11-27-shadow-clipmap-march/specs/` (streaming-cache, testing, generator-pipeline). Its PRs 4 and 5b (the resolve's perf window, the real visibility) and the perf window of REND-052 are open too.
 - Region mask mode 1, "clip outside" (owner, 2026-10-19): a mode-1 region cuts every delta of its layer outside its polygon; global layer items and a fifth read-record kind (ADR 0066). The proposal and design stay in `openspec/changes/region-mode1/` (parked 2026-11-27, D9).
 - Volcanoes (SPIKE-102 D5; owner, 2026-11-05: after M9). Young edifices as an additive layer; old ones in the base. Trigger: terrain round 2.
 - Isostatic rebound (GEN-124): dropped from M9; a flexural version is the candidate. Trigger: hypsometry tuning, rifts, escarpments.

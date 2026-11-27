@@ -29,3 +29,9 @@ ADR 0085 (accepted, owner, 2026-10-30) replaces the horizon-map shadows with a p
 - Goldens: every lit golden changes once (shadow source); the debug views do not. Per adapter, through `golden-review`; first lit goldens of the new shadow go to the owner's `/bless` (ADR 0017).
 - Stores: the coarse horizon channel in `C:/DEV/SeriousPlanetData/global16384` is no longer read; the store is not rebuilt (its definition hash is unchanged).
 - Owner: a look review of the shadows (stills and a short drag video) before the horizon maps are deleted (tasks.md, PR 6).
+
+## Archived (owner, 2026-11-27, option (a))
+- Synced: REND-046 to 051 and 053 as active, REND-052 as planned (its perf window is open), BUDG-002's new text as planned.
+- Not synced, parked with the horizon removal (PRs 7-8, `docs/parking.md`): STRM-060's and TEST-054's MODIFIED text and every REMOVED requirement of `specs/streaming-cache`, `specs/testing` and `specs/generator-pipeline`. They stay on main as before until those PRs.
+- Left open: PR 4 (the resolve's perf window), PR 5b (the real visibility and its goldens), PRs 6-9.
+
