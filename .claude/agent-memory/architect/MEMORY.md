@@ -1,6 +1,6 @@
 # Architect memory
 
-Refreshed 2026-11-22 (G2 closed). Confirm against `main`, `docs/routing.md` and `docs/status.md` before acting. The repo records decisions (ADRs, specs, log, ledger); this file keeps only what it does not.
+Refreshed 2026-11-27 (river graphs parked, ADR 0129; P3 closing). Confirm against `main`, `docs/routing.md` and `docs/status.md` before acting. The repo records decisions (ADRs, specs, log, ledger); this file keeps only what it does not.
 
 ## Sessions
 - **opus-architect**: the lead (ADR 0120): what, how and when; milestone exit list, queue, lane orders, IDs, perf windows, ledger, verdicts, ADRs, the daily digest. Only one lead session at a time: an older one is archived by the owner, or lanes see two leads.
@@ -10,8 +10,9 @@ Refreshed 2026-11-22 (G2 closed). Confirm against `main`, `docs/routing.md` and 
 
 ## Where the work lives (outside the repo)
 - `C:/DEV/SeriousPlanetData/lanes/`: order files `<lane>.md`, outboxes `<lane>-outbox.md`, `id-reservations.md`.
-- `lanes/digest/`: daily `<date>-morning.md`, `lead-handoff-<date>.md` (read it first in a fresh session), and `river-graph/` (contract `g0-contracts.md` §12 readings, reviews, the G2 report, the G3 execution briefs).
-- `tmp/g1fNN/`: chain runs and `gate-table-main.*` per record run; flight stores in explorer's worktree `target/stores/`.
+- `lanes/digest/`: daily `<date>-morning.md`, `lead-handoff-<date>.md` (read it first in a fresh session), `decisions/`, `review/` (feasibility reviews, park plans, the housekeeping survey and the P3 closure plan).
+- River graphs: parked. The frozen record is `docs/archive/P3/river-graph/` on main; the code is on the tags `archive/rg-*`.
+- The owner's flight material: `C:/DEV/SeriousPlanetData/flights/fly1126/` (stores, binary, poses, stills).
 
 ## Practice
 - A loop tick checks each lane's last session activity (`get_session`), not only its outbox: a lane silent over 60 min has lost its loop (2026-11-22: explorer stopped for 2.5 h unnoticed).
@@ -24,3 +25,7 @@ Refreshed 2026-11-22 (G2 closed). Confirm against `main`, `docs/routing.md` and 
 - Check the units of every input (2026-11-11: an area passed as a discharge).
 - A merge a lane's permission check refused goes to the owner, never to another session.
 - Escalate gate failures of architecture gates and constitution matters to the owner; decide reversible design questions and say so.
+- Attribute a defect to its stage before ordering any fix, upstream stages and world parameters included (routing rule 10). An owner remark keeps its stated scope (2026-11-26: an M1-only remark was widened into a rule for every parked item).
+- Before closing a gate, check its own criteria; a gate closed with misses turns later gates into renegotiation (G2, 2026-11-22).
+- Queue no faster than the owner reviews (rules 11, 13). Run heavy work one job at a time; a queuing script outlives a killed wrapper, so check every PID.
+- A learning or status edit counts toward its cap: check `wc -c` before the PR (2026-11-26: #1670 broke the 20 KB cap and blocked every prepush).

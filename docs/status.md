@@ -3,35 +3,34 @@
 Forward state only (owner, 2026-10-16): open owner items, the current queue's open items, the current unanswered stop report, tracked items and quarantines. History goes to the log (`cargo xtask log`). When a change is archived the coder deletes its queue item's text (the log line is the record); when the architect answers a stop report it deletes it. A Tracked entry has at most 3 lines; a finished one is deleted (ADR 0075). Cap: 15 KB. Earlier states: `docs/archive/M4/status-at-m4-acceptance.md`, `docs/archive/M6/status-at-m6-close.md`. M8 closed 2026-10-30: `docs/milestones/M8-report.md`. New requirement IDs, ADR and SPIKE numbers are reserved through the lead (ADR 0120).
 
 ## Waiting for the owner
-- **River graphs (RG) parked (owner, 2026-11-26):** all further RG research halts; the way to execute the park is to be defined: the park plan, set by the owner from Fable's and Carbon's park plans (in work: what moves to main, the parking ADR and record, learnings, dead ends, ways to un-park). B stays the production chain. Basis: two independent feasibility reviews (`review/fable-rg-merged-feasibility-2026-11-26.md`) and the snapshot `river-graph/g3-snapshot-2026-11-26.md`.
-- **/bless: `water_class_lake_mask_stripes`** (TEST-133, #1459): the first lake golden, a class view; escalated as the first of its class and for a WARP driver difference. Nothing waits on it.
-- **A new global store for the default world, seed 14**: every store on disk is refused by its keys; E1 runs on the in-memory production base (VIEW-069). Lead's recommendation: bake it after the flight, with ADR 0117's format.
-- **For later planning**: owner test 2026-10-27 groups F and G scope, the 1 m / 500 m exception (`docs/milestones/M8/owner-test-2026-10-27/README.md`). Group E (where edits sit) is settled by ADR 0113.
-- **Sunset shadow look** (ADR 0095 draft, crusader): the sky ambient as a hemisphere average is physically consistent and dark at a 7° sun; options: sky light plus a lift (planner's pick), sky light as is, or the old term. Every lit and sky golden moves with it. SPIKE-96 (sky visibility) follows the choice.
-- **Architecture re-plan** (owner, 2026-11-08; SPIKE-104, SPIKE-105): D1 = option A, conditional on a prototype and a switch-to-B gate (S1-S5); phases and gates in `docs/briefings/terrain-prototype.md`; the owner decides at the A/B gate.
-- **Smooth base as default** (GEN-107, `cpu-erosion-v2` on main): removes the 611 m "pyramid" facets; draft #1137 switches the default (no golden moves; two count pins and the water-cut range re-pinned with reasons). Decide with the erosion preview.
-- **World-build share values** (ADR 0097, BUDG-014): terrain 40 %, future content 40 %, margin 20 % of a 24 h day, proposed; confirm or change.
-- **Ocean square at orbit** (owner test 2026-11-03, `docs/dev_screenshots/2026-11-03-ocean-square-*.jpg`): press F9 when it shows again; the bundle lets crusader replay it (Tracked).
-- **Cliffs** (SPIKE-94, #1082): asset library or procedural only; the Alps' 4.3 % of area above 45° as the v1 coverage. Trigger: after M9's generator rounds.
-- **Optional, when convenient:** the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); excluding the repo's `target` folders from Windows Search indexing.
+- **P3 closure sign-off** (`docs/milestones/P3-report.md`): E1-E6 done, with E4-E6 parked with record (ADR 0129). Also yours:
+  - accept ADR 0129, and the other proposed ADRs 0045, 0117 and 0128;
+  - the simplify-and-delete proposal (lanes digest `review/p3-closure-plan-2026-11-27.md` part 2: D1-D11 deletions, S1-S5 structure; the lead's picks are given);
+  - whether the river-graph data module (GEN-189, TEST-139/140) stays on main (the lead recommends keeping it).
+- **The next milestone's topic:** the P4 draft is built on RG and is superseded by the park. Candidates are in `docs/parking.md`.
+- **Your flight on the fly1126 stores** (optional; lanes digest `flight-playbook-fly1126-2026-11-27.md`). The stores and stills are in `C:/DEV/SeriousPlanetData/flights/fly1126/`.
+- **Data and worktrees after the park** (both plans propose; they can't be undone): about 100 GB of field dumps in `C:/DEV/SeriousPlanetData/tmp`, and six lane worktrees to prune. The `.md`, `.txt`, `.csv` and `.png` files and the flight stores are kept either way.
+- **/bless: `water_class_lake_mask_stripes`** (TEST-133, #1459): the first lake golden; nothing waits on it.
+- **A new global store for the default world, seed 14**: every store on disk is refused by its keys; E1 ran on the in-memory production base (VIEW-069). Bake it with ADR 0117's format when a milestone needs it.
 
-Dormant items moved to `docs/parking.md` (2026-11-12).
+Older owner items moved to `docs/parking.md` (2026-11-12 and 2026-11-27).
 
-## Queue (2026-11-23, milestone P3: `docs/milestones/P3.md`; E6 river graphs, owner 2026-11-16)
-G2 closed (owner, 2026-11-22): the river-graph chain (RG, `spike/rg-prototype`) is the candidate over B. G3 is the pre-production gate (owner, 2026-11-23): rows G3-1 to G3-9 and the risk register R1-R27 in the lanes digest `river-graph/g3-gate-2026-11-23.md`; no RG stage merges to main before G3 passes; main takes gate fixes, spike reports, docs and output-neutral planet primitives. The post-G3 port plan: `g3-seam-cube-reconciliation-2026-11-22.md` §5.
+## Queue (2026-11-27, milestone P3 closing: `docs/milestones/P3.md`)
+P3's exits are done; E4-E6 parked with record (owner, 2026-11-26; ADR 0129). Only the closure runs.
 | Exit | Step | Lane |
 |---|---|---|
-| E6 | **Parked with record (owner, 2026-11-26; ADR 0129, proposed).** The park: lanes digest `review/rg-park-plan-merged-2026-11-26.md`. Open: PR A, wave 1's memory levers on B's bake (GEN-192, crusader); PR B, stage sheets with diffs (BUILD-071, spikes); then P3's closure with housekeeping | crusader, spikes, lead |
-| E6 | Housekeeping coder pass (P3 closure): stale references in specs and comments to the readings and switches of 2026-11-21/22; the 43 open OpenSpec changes listed as done, superseded or still wanted | crusader |
+| E6 | Closure coder pass: log.d and closed spikes to `docs/archive/P3/`; stale river-graph text in main's comments and specs; `shadow-clipmap-march` synced and archived; dead links; the README key list | crusader |
+| E6 | Closure curation: this status, P3's report, the ADR index, the agent memory, the run note | lead |
 
 ## Tracked
-- **Sea not meeting the coast; a coastal fade at river mouths** (owner, 2026-11-15; seen on a flight about 2026-11-13, not reported then): the sea did not start where the terrain ended. Candidate cause: the runtime fades the erosion change toward 0 within 3 m above sea level (`COAST_FADE_M`, `erosion_layer.rs`), so the drawn coast and river mouths differ from the store (adversarial review F3). Owner re-tests on a flight with the P4 E2 flights; the fade is decided with D-2.
+- **Sea not meeting the coast; a coastal fade at river mouths** (owner, 2026-11-15; seen on a flight about 2026-11-13, not reported then): the sea did not start where the terrain ended. Candidate cause: the runtime fades the erosion change toward 0 within 3 m above sea level (`COAST_FADE_M`, `erosion_layer.rs`), so the drawn coast and river mouths differ from the store (adversarial review F3). Owner re-tests on a flight; the fade is decided with the next river or coast work (D-2 is parked, ADR 0129).
 - **Runtime read of L flattens trenches** (quarantine, lead 2026-11-15): up to 2.9 m from the bake between centres near channels (G-SURF-I, review F3); fix at the source, the runtime read (GEN-188); owner decides the look. Quarantined: `bake_k7::the_runtime_surface_is_the_bake_surface_at_the_centres_and_within_a_step_at_the_lattice_nodes`, assertions unchanged.
 - **River at a cube face edge** (REND-059, 2026-11-12): the store holds a segment crossing a face edge as two runs with a gap of about the H1 ratio in cells (a dry notch); the burn has the same dam, so drawn river and burned trench agree; the charts shear (x1.22 mid-edge, x1.41 at the corner). Fix (B): overlapping runs read by drawing and burn, width in metres through each face's metric: a store format change for the owner, with the face-seam work before the planet bake (REND-063 reserved).
 - **Rock K residual** (#1216, seed 14 face 2): mountain 3 km relief p50 483 against 534 m (the band edge is 2/3 of it), elevation p50 +170-225 m from the K spread (f/(1+f) is concave), not the K mean; tune in the preview round. The carve adds about 1.55 GB at 12,288 cells: measure the peak against 8 GB (CON-21) on the next pass-1 run.
 - **CI flake `gpu_stream_perf` lit-scene smoke** (2026-11-10): 240 s limit hit on Windows WARP C 6 times (11-06 to 11-17; the 5th at 254 s on #1472, the 6th at 258 s on #1582), each further one adds to the count, no limit change; times 130-240 s since the step at a600c56b (ground-detail-patch): slowness fits. TEST-106 adds times and phase marks: read them next time.
 - **Flake: a 0xc0000005 abort in `planet tests::the_erosion_options_are_viewer_options...`** (2026-11-26, crusader #1667's runs): seen once; it passed in every other run. On a recurrence, keep the full output.
-- **Flake `gpu_lit_stream_flicker`** (2026-11-24): the 300 s settle limit was hit once in a local prepush under three lanes' load (crusader #195). It passed on the rerun. Each further hit adds to the count, with no limit change.
+- **Flake `gpu_lit_stream_flicker`** (2026-11-24): the 300 s settle limit was hit twice in local prepushes under three lanes' load (crusader #195; spikes #1674, 2026-11-27). It passed on the reruns. Each further hit adds to the count, with no limit change.
+- **Load timeout `gpu_world_field` streamed against sync** (2026-11-27, spikes #1674): 300 s in a local prepush under three lanes' load; 24 s alone. Not a known class yet; on a recurrence keep the full output.
 - **Older flakes** (WARP, loaded runner): `oracle_stream_smoke` (`load_running_max` 1, at least 2 expected, once; tighten its precondition, never weaken); `gpu_horizon` `a_slot_written_through_set_horizon_reads_back_as_written` (once, passes alone and on CI); `gpu_window` flight test (once, 7.5 s). On a recurrence keep the full output.
 - **Fill depth across a mountain cube edge** (keep-pits-seams, #1201): the seam gate passed on a tile seam; no mountain cube edge was in the stored faces. Blocks the planet bake (I6); run with the integrated-preview re-run.
 - **`test fast` 220-330 s** (BUILD-014): 320-329 s measured 2026-11-10 after the restart, machine busy.
