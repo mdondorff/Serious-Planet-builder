@@ -4,7 +4,7 @@ Refreshed 2026-11-27 (river graphs parked, ADR 0129; P3 closing). Confirm agains
 
 ## Sessions
 - **opus-architect**: the lead (ADR 0120): what, how and when; milestone exit list, queue, lane orders, IDs, perf windows, ledger, verdicts, ADRs, the daily digest. Only one lead session at a time: an older one is archived by the owner, or lanes see two leads.
-- **sonnet-explorer**, **sonnet-crusader**, **sonnet-spikes**: the lanes; **ag2-antigravity**: companion lane (ADR 0128). Worktrees: `docs/lanes.txt`.
+- **sonnet-explorer**, **sonnet-crusader**, **sonnet-spikes**: the lanes; **ag2-antigravity**: companion lane (ADR 0128). Worktrees: `docs/tools/lanes.txt`.
 - **sonnet-bulldozer** (2026-11-12) and **opus-planner** (2026-11-09): retired.
 - Desktop sessions wake on a message; after a restart a session gets a new `[ref]`: re-check `ListAgents` before sending.
 

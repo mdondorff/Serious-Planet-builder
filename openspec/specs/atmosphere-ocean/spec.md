@@ -416,7 +416,7 @@ Known limit: the blocking surface is the sphere `R + W` less `s`, so dry ground 
 
 Verify: A, B, C
 Status: active
-Source: ADR 0056, ADR 0058, ATMO-012, ATMO-016, ATMO-019, docs/perf/water-attribution.md, CON-11, LOD-011, ADR 0062
+Source: ADR 0056, ADR 0058, ATMO-012, ATMO-016, ATMO-019, docs/archive/M5/perf/water-attribution.md, CON-11, LOD-011, ADR 0062
 
 #### Scenario: The horizon at its boundary
 - **WHEN** a tile lies 0.5 m inside and 0.5 m beyond the visible distance, for cameras 1 m, 3 m, 2 km and 20,000 km above the level, at levels of -140 m, 0 and 37.5 m

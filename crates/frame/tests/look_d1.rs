@@ -1,4 +1,4 @@
-//! Tier A, LOOK-008 and LOOK-011 (slice 2b PR 3): the sample ground look on the baked channels (`docs/looks/ground-channels-d1.look.toml`, SPIKE-100 D1) parses, and its curves give the ground
+//! Tier A, LOOK-008 and LOOK-011 (slice 2b PR 3): the sample ground look on the baked channels (`crates/frame/tests/data/ground-channels-d1.look.toml`, SPIKE-100 D1) parses, and its curves give the ground
 //! materials the owner asked for at characteristic points: rock on a bare steep flank, scree where it carries deposits, wet ground in a hollow with a large drainage area, soil and grass on the
 //! gentle ground between. A proposal for the owner's look, never the default.
 
@@ -6,7 +6,7 @@ use planet_frame::look::file::parse_look;
 use planet_frame::look::materials::{Input, MaterialParams, INPUTS, MATERIAL_NAMES};
 use planet_world_def::BodyId;
 
-const LOOK: &str = include_str!("../../../docs/looks/ground-channels-d1.look.toml");
+const LOOK: &str = include_str!("../../../crates/frame/tests/data/ground-channels-d1.look.toml");
 
 /// The weights at a ground point: the slope's cosine, the deposited depth in metres, the moisture (the drainage area's ramp) and the annual precipitation in mm.
 fn weights(m: &MaterialParams, slope_cos: f64, soil_m: f64, moisture: f64, precipitation_mm: f64) -> Vec<(String, f64)> {

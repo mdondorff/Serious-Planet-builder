@@ -73,7 +73,7 @@ pub struct PreviewSpec {
     pub optional_files: &'static [&'static str],
 }
 
-/// Binding between a catalog stage and [`crate::bake::probe::Stage`] outputs in `docs/stages/manifest.txt`.
+/// Binding between a catalog stage and [`crate::bake::probe::Stage`] outputs in `docs/tools/stages/manifest.txt`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProbeHook {
     pub stage: Stage,
@@ -728,7 +728,7 @@ pub fn stages() -> Vec<StageDef> {
             scope: StageScope::Tile,
             summary: "Starts each L tile from `B + C1(dR)`, burns width-law K6 channels (`w = a Q_w^b`), breaches, carves, runs K7 sediment, and writes `L` + basin tables (`GEN-177`).",
             reads: &["global-bake-lattice", "k5-regional-rounds", "k6-h1-hydrology-and-lakes", "k6-regional-sediment"],
-            outputs: &["Kind-13 L delta tiles", "Commit tables & channel graph", "docs/stages/manifest.txt", "stage probe: k7/z"],
+            outputs: &["Kind-13 L delta tiles", "Commit tables & channel graph", "docs/tools/stages/manifest.txt", "stage probe: k7/z"],
             version_pins: &["pass2_kernel", "lakes", "erosion_layer_read", "pinned_detail"],
             probe_hooks: &HOOKS_K7,
             active_when: "erosion_mode == k5-k7-commit (--commit DIR)",
@@ -751,7 +751,7 @@ pub fn stages() -> Vec<StageDef> {
             ],
             preview: Some(PreviewSpec {
                 command_template: "cargo xtask stages",
-                files: &["docs/stages/manifest.txt"],
+                files: &["docs/tools/stages/manifest.txt"],
                 optional_files: &["target/review/stages/pipeline.json", "target/review/stages/ci/r1h.png", "target/review/stages/ci/m1.png"],
             }),
         },

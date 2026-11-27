@@ -1,7 +1,8 @@
 # 0072 Edit visible: the drawn tiles are exact, drawn tiles refresh first, stale refreshes are pre-empted
 Status: accepted (owner decision 2026-10-20; opus-planner, 2026-10-20; drafted by sonnet-explorer). Reads the M6 exit criterion "edit visible" (SPIKE-13, SPIKE-14); extends STRM-026 (refresh of resident tiles).
 Date: 2026-10-20
-Source: owner (2026-10-20, `docs/status.md`); windows 13 to 16 (`docs/perf/`, `docs/perf/window-16-17.md`); STRM-026; TEST-041; ADR 0066 point 7
+Maintained: 2026-11-27, links: the paths of moved files (docs/tools/, docs/archive/<M>/perf/; owner, 2026-11-27, the docs strategy).
+Source: owner (2026-10-20, `docs/status.md`); windows 13 to 16 (`docs/archive/M5/perf/`, `docs/archive/M6/perf/window-16-17.md`); STRM-026; TEST-041; ADR 0066 point 7
 
 ## Context
 - The M6 criterion asks for the exact result within 300 ms (stamps up to 150 m) or 1 s (up to 500 m, or the camera at 1 m). Window 16 measured the time until every resident tile touched is refreshed ("all exact") at 371 to 1,290 ms, and the time until every tile the plan draws is refreshed ("drawn exact") at 93 to 956 ms: within budget in 8 of 9 cases (200 m altitude, 150 m stamp: 525 ms against 300).

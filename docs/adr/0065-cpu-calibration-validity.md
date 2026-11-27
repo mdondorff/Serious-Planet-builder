@@ -1,7 +1,8 @@
 # 0065 CPU calibration decides whether a perf scene counts
 Status: accepted (opus-planner, 2026-10-19, under the owner's delegation of 2026-10-17; easy to reverse). Extends ADR 0020 (readiness gate) and ADR 0036 (validity).
 Date: 2026-10-19
-Source: perf windows 7 and 11, the desktop-app smoke (`docs/perf/smoke-desktop-app.md`), the planner-terminal window logs; sonnet-crusader's analysis of 2026-10-19
+Maintained: 2026-11-27, links: the paths of moved files (docs/tools/, docs/archive/<M>/perf/; owner, 2026-11-27, the docs strategy).
+Source: perf windows 7 and 11, the desktop-app smoke (`docs/archive/M5/perf/smoke-desktop-app.md`), the planner-terminal window logs; sonnet-crusader's analysis of 2026-10-19
 
 ## Context
 - Each streaming scene records a fixed CPU kernel's time alone and on the pool's threads, before and after the case (STRM-022); nothing judges it.

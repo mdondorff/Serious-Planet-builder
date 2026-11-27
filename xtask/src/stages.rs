@@ -1,4 +1,4 @@
-//! `cargo xtask stages [--update]` (BUILD-047): the stage manifest `docs/stages/manifest.txt`, the data hashes and key numbers of the stage probe's fixture. Without `--update` it runs the check
+//! `cargo xtask stages [--update]` (BUILD-047): the stage manifest `docs/tools/stages/manifest.txt`, the data hashes and key numbers of the stage probe's fixture. Without `--update` it runs the check
 //! (a stale manifest fails, naming the stage, field and column); with `--update` it rewrites the file from the run, which is the one place the manifest changes. The fixture and the check are the
 //! tier-A test `stage_manifest::the_manifest_is_the_run_of_the_fixture` of `planet-generators`; the sheets are written to `target/review/stages/ci/`.
 //! `cargo xtask stages --chain DIR` (BUILD-060) renders a chain directory as one sheet of the river-graph chain's stages (the `stage_sheet` example of `planet-cache`).
@@ -55,9 +55,9 @@ pub fn run_cmd(root: &Path, args: &[String]) -> Res {
     if cargo.iter().any(|a| a == "stage_sheet") {
         // the example printed the sheet's path
     } else if env.is_empty() {
-        println!("stages: docs/stages/manifest.txt is the run of the fixture; the sheets are in target/review/stages/ci/");
+        println!("stages: docs/tools/stages/manifest.txt is the run of the fixture; the sheets are in target/review/stages/ci/");
     } else {
-        println!("stages: docs/stages/manifest.txt rewritten from the run; review the diff and commit it");
+        println!("stages: docs/tools/stages/manifest.txt rewritten from the run; review the diff and commit it");
     }
     Ok(())
 }
@@ -68,7 +68,7 @@ pub const SHEET_LIMIT: u64 = 1_000_000;
 pub const GATE_LIMIT: u64 = 5_000_000;
 
 /// BUILD-048: one error per sheet over `SHEET_LIMIT` and per gate whose sheets total over `GATE_LIMIT`, naming the file or gate, its size and the limit.
-/// `sheets` is `(gate, file, bytes)`; every file under `docs/stages/sheets/<gate>/` counts.
+/// `sheets` is `(gate, file, bytes)`; every file under `docs/tools/stages/sheets/<gate>/` counts.
 pub fn sheet_size_errors(sheets: &[(String, String, u64)]) -> Vec<String> {
     let mut errors = Vec::new();
     let mut totals: std::collections::BTreeMap<&str, u64> = std::collections::BTreeMap::new();
@@ -83,17 +83,17 @@ pub fn sheet_size_errors(sheets: &[(String, String, u64)]) -> Vec<String> {
     for (gate, total) in totals {
         if total > GATE_LIMIT {
             errors.push(format!(
-                "docs/stages/sheets/{gate}/: the sheets total {total} B, over the limit of {GATE_LIMIT} B per gate (BUILD-048): commit fewer sheets"
+                "docs/tools/stages/sheets/{gate}/: the sheets total {total} B, over the limit of {GATE_LIMIT} B per gate (BUILD-048): commit fewer sheets"
             ));
         }
     }
     errors
 }
 
-/// The committed sheets under `docs/stages/sheets/<gate>/`, as `(gate, path, bytes)`; none when the folder does not exist.
+/// The committed sheets under `docs/tools/stages/sheets/<gate>/`, as `(gate, path, bytes)`; none when the folder does not exist.
 pub fn committed_sheets(root: &Path) -> Vec<(String, String, u64)> {
     let mut out = Vec::new();
-    let Ok(gates) = std::fs::read_dir(root.join("docs/stages/sheets")) else { return out };
+    let Ok(gates) = std::fs::read_dir(root.join("docs/tools/stages/sheets")) else { return out };
     for g in gates.flatten().filter(|g| g.path().is_dir()) {
         let gate = g.file_name().to_string_lossy().to_string();
         let mut stack = vec![g.path()];
@@ -119,7 +119,7 @@ mod tests {
     // spec: BUILD-048
     #[test]
     fn a_sheet_over_one_megabyte_or_a_gate_over_five_fails_naming_file_size_and_limit() {
-        let s = |g: &str, f: &str, b: u64| (g.to_string(), format!("docs/stages/sheets/{g}/{f}"), b);
+        let s = |g: &str, f: &str, b: u64| (g.to_string(), format!("docs/tools/stages/sheets/{g}/{f}"), b);
         assert!(sheet_size_errors(&[]).is_empty());
         assert!(sheet_size_errors(&[s("g1", "a.png", SHEET_LIMIT), s("g1", "b.png", SHEET_LIMIT)]).is_empty(), "at the limits passes");
         let e = sheet_size_errors(&[s("g1", "a.png", SHEET_LIMIT + 1)]);
@@ -148,15 +148,15 @@ mod tests {
     fn the_collector_reads_every_file_under_a_gate_folder() {
         let dir = std::env::temp_dir().join(format!("sheets-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let sub = dir.join("docs/stages/sheets/g9/sub");
+        let sub = dir.join("docs/tools/stages/sheets/g9/sub");
         std::fs::create_dir_all(&sub).unwrap();
-        std::fs::write(dir.join("docs/stages/sheets/g9/a.png"), vec![0u8; 10]).unwrap();
+        std::fs::write(dir.join("docs/tools/stages/sheets/g9/a.png"), vec![0u8; 10]).unwrap();
         std::fs::write(sub.join("b.png"), vec![0u8; 20]).unwrap();
         let mut got = committed_sheets(&dir);
         got.sort();
         assert_eq!(got.len(), 2);
-        assert_eq!(got[0], ("g9".to_string(), "docs/stages/sheets/g9/a.png".to_string(), 10));
-        assert_eq!(got[1].1, "docs/stages/sheets/g9/sub/b.png");
+        assert_eq!(got[0], ("g9".to_string(), "docs/tools/stages/sheets/g9/a.png".to_string(), 10));
+        assert_eq!(got[1].1, "docs/tools/stages/sheets/g9/sub/b.png");
         assert!(committed_sheets(&dir.join("none")).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -190,7 +190,8 @@ mod tests {
     // spec: BUILD-047
     #[test]
     fn the_committed_manifest_exists_with_a_line_for_every_stage() {
-        let text = std::fs::read_to_string(crate::util::repo_root().join("docs/stages/manifest.txt")).expect("docs/stages/manifest.txt");
+        let text = std::fs::read_to_string(crate::util::repo_root().join("docs/tools/stages/manifest.txt"))
+            .expect("docs/tools/stages/manifest.txt");
         for stage in ["landmass", "round-00", "round-01", "h1", "thermal", "deposition", "pit-spreading", "k7-f1-t3-4"] {
             assert!(text.lines().any(|l| l.starts_with(&format!("{stage} | "))), "no line for {stage}");
         }
