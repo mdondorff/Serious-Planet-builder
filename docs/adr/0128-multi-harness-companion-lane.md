@@ -1,5 +1,5 @@
 # 0128 Multi-harness companion lane (`ag2`) alongside Claude Code
-Status: proposed (ag2-antigravity, 2026-11-19)
+Status: accepted (owner, 2026-11-27); proposed by ag2-antigravity, 2026-11-19
 Date: 2026-11-19
 Source: `docs/constitution.md` (`c0d6f479`, owner 2026-11-19), `ADR 0005`, `ADR 0120`, `ADR 0121`, `BUILD-062`
 
