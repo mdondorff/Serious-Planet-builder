@@ -1,1 +1,0 @@
-- 2026-11-22 openspec-sync-non-gen (ag2 companion 3A-2): sync and archive 5 completed OpenSpec changes (`build-env-pin` `BUILD-050`, `viewer-class-store` `VIEW-065`, `layer-manifest` `STRM-074`, `g-store-2` `STRM-079`, `rm-horizon-render` `REND-038`/`041`/`043`/`044`/`TEST-048`/`050`/`VIEW-054`; ADR 0055)

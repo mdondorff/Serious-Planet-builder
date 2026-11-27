@@ -1,1 +1,0 @@
-- 2026-11-03 tier-c-archive: the Windows tier-C parts run one shared nextest archive built once (`test gpu --archive-out/--archive-file`, BUILD-018); no part builds on its own

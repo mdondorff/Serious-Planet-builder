@@ -1,1 +1,0 @@
-- 2026-11-14 The heavy-run lock and the quiet flag live in SeriousPlanetData/tmp/heavy (BUILD-026): the desktop app redirects %LOCALAPPDATA% for its sessions, so a terminal and the lanes saw two locks.

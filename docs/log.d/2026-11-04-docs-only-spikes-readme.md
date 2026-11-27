@@ -1,1 +1,0 @@
-- 2026-11-04 docs-only-spikes-readme: `spikes/README.md` (the spike catalogue) is a docs-only path in ci.yml, docs.yml, the repository check, BUILD-005 and CLAUDE.md

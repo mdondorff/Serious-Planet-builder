@@ -1,1 +1,0 @@
-- 2026-11-15 river-gate-table (BUILD-057, TEST-137): the suite's store path is tested on a small baked store, and `cargo xtask river-gate --table` writes every gate and suite number of many runs to one markdown and CSV table.

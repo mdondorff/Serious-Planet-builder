@@ -1,1 +1,0 @@
-- 2026-11-17 basin-readings-residuals (GEN-189, TEST-140): kept L basins read KS1 and a spill to the sea receives an outlet_sea (readings 5, 6); a residual names a stage that ran and one event, and a duplicate fails.

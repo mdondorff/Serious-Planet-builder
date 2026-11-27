@@ -1,1 +1,0 @@
-- 2026-11-17 river-gate-surface (BUILD-060, TEST-137): river-gate --surface measures a candidate's surface on the window against its start surface (lead #166a).

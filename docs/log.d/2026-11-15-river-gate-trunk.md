@@ -1,1 +1,0 @@
-- 2026-11-15 river-gate-trunk (BUILD-057, TEST-137): the river gate counts the H1 trunk reaches whose surface stands more than 50 m above their running minimum (the burn KR would need), with the deepest vertex, for every E3 variant.

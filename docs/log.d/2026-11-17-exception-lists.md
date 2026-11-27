@@ -1,1 +1,0 @@
-- 2026-11-17 exception-lists (GEN-189, TEST-140): a reach carries a list of exceptions; a fill held under its wanted fill needs a residual (reading 9); KV's divide buffer exempts the valley floor near graph lines (reading 10).

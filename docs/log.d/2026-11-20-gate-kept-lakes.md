@@ -1,1 +1,0 @@
-- 2026-11-20 gate-kept-lakes (BUILD-060): on a row with a graph, ponds and kept river length with their own bars (bar_ponds <= 10 %, bar_kept_river <= 5 %, 10 % on M1) and the spill mismatch in bar_violations; BUILD-055's basin_pct untouched (owner's option C and its conditions, 2026-11-20).

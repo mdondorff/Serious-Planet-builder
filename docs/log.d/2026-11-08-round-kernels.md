@@ -1,1 +1,0 @@
-- 2026-11-08 round-kernels: MFD clipped to the D8 catchment and the canonical flood tie rule behind RoundRules, per-catchment schedule, G-ROUND exact (GEN-141, PR pending).

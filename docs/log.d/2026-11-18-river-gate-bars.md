@@ -1,1 +1,0 @@
-- 2026-11-18 river-gate-bars (BUILD-060): the river gate prints the owner's G2 bars pass or fail and reads the budget against S_KH, KH against S0 apart (lead #168).

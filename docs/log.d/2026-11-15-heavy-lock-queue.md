@@ -1,1 +1,0 @@
-- 2026-11-15 heavy-lock-queue (BUILD-026): a docs-only prepush takes no heavy slot; an unopenable ticket keeps its waiter's place; a holder note without a slot is named as an xtask older than the queue.

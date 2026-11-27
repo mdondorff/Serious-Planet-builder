@@ -1,1 +1,0 @@
-- 2026-11-15 surf-runtime-read (GEN-148, GEN-154; review F3, #1542): G-SURF reads the stored change with the runtime read (GEN-188); G-SURF-I rises to 6,806 of 28,900 vertices over 0.25 m on tile (65, 7) (the runtime read flattens trenches; Tracked, owner).

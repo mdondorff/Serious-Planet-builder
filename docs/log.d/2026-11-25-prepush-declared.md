@@ -1,1 +1,0 @@
-- 2026-11-25 prepush-declared (lead #204): `cargo xtask prepush --declared <proposal.md>` passes tier C on exactly the declared golden candidates and known classes (BUILD-068, TEST-154); without it nothing changes

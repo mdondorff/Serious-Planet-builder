@@ -1,1 +1,0 @@
-- 2026-11-25 bilinear-normals (lead #200, G3-9): the lit paths shade with the cell's bilinear texel normal, so the a-c split no longer shows (REND-068); a scarp at 45 and 135 degrees through the real renderer (TEST-153); lit goldens to the owner's /bless

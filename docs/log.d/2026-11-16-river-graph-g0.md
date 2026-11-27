@@ -1,1 +1,0 @@
-- 2026-11-16 river-graph-g0 (GEN-189, TEST-140): the canonical river graph: types, ids, canonical form, diff, rasterisation, validators with injected failures, the budget validator, and the G0 fixture's expected graph under both layouts.

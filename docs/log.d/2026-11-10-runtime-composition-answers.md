@@ -1,1 +1,0 @@
-- 2026-11-10 runtime-composition-answers: the architect's five answers (2026-11-10) folded into the item 15 design notes

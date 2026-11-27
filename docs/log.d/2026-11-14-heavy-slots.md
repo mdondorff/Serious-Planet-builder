@@ -1,1 +1,0 @@
-- 2026-11-14 heavy-slots (BUILD-026): the heavy lock has 2 slots for ordinary jobs (PLANET_HEAVY_SLOTS); perf, gate, repro --window and `heavy --exclusive` hold every slot; the prepush tier-C trigger was checked and kept (bake kernels reach the goldens through test-render).
