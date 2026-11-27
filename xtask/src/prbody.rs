@@ -363,6 +363,9 @@ mod tests {
         assert_eq!(owner_look("Owner-Look: yesterday"), None, "the verdict is a whole word");
         assert_eq!(owner_look("Owner-Look: no: R1h faceted (2026-12-01)"), Some("no"));
         assert_eq!(owner_look("Owner-Look: yes"), Some("yes"));
+        // a body with Windows line ends reads the same
+        let crlf = format!("Sprint: S1\r\nResearch-Review: READY {}\r\nOwner-Look: yes (2026-12-01)\r\n", &B[..7]);
+        assert!(review_errors(&crlf, &commits, &rec, Some("S1"), &files("x", &[])).is_empty(), "CRLF body");
         // a research package that promotes is a record; one that rejects, a deleted record and an archived record are not
         let res = paths(&["spikes/s/results/results.md"]);
         assert_eq!(review_errors("", &commits, &res, None, &files(promote, &[])).len(), 2);
