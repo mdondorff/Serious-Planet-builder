@@ -59,8 +59,11 @@ fn files_under(root: &Path, dir: &str) -> Vec<String> {
     out
 }
 
+/// (from, to) moves, and why the sprint file stays when it does.
+type SprintMoves = (Vec<(String, String)>, Option<String>);
+
 /// The moves of a closed sprint `m` into `docs/archive/<m>/` (its file, its report, its records), or why its sprint file stays.
-fn sprint_moves(root: &Path, m: &str) -> Res<(Vec<(String, String)>, Option<String>)> {
+fn sprint_moves(root: &Path, m: &str) -> Res<SprintMoves> {
     let file = format!("docs/milestones/{m}.md");
     let Ok(text) = std::fs::read_to_string(root.join(&file)) else { return Ok((Vec::new(), None)) };
     let status = text.lines().find_map(|l| l.strip_prefix("Status:")).map(str::trim).unwrap_or("");
