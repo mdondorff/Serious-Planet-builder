@@ -2,6 +2,15 @@
 
 Owner, 2026-11-12 (ADR 0120). These items are outside the current milestone, one line each. Nobody works on them. Only the owner moves an item into a milestone; when one moves in, another moves out or the date moves. New owner ideas land here by default. Each line ends with its source and, where useful, its trigger.
 
+## Owner items moved from docs/status.md at P3's closure (2026-11-27)
+- For later planning: owner test 2026-10-27 groups F and G scope, the 1 m / 500 m exception (`docs/milestones/M8/owner-test-2026-10-27/README.md`).
+- Sunset shadow look: the sky ambient as a hemisphere average is dark at a 7 degree sun; options: sky light plus a lift, sky light as is, or the old term. Every lit and sky golden moves with it; SPIKE-96 follows. The ADR 0095 draft never reached the repo.
+- Architecture re-plan and the A/B gate (owner, 2026-11-08; SPIKE-104, SPIKE-105): phases and gates in `docs/briefings/terrain-prototype.md`; deferred with no date (owner, 2026-11-15).
+- Smooth base as default (GEN-107, `cpu-erosion-v2`): draft #1137 switches the default; decide with the base work (river graphs and hydrology section).
+- World-build share values (ADR 0097, BUDG-014): terrain 40 %, future content 40 %, margin 20 % of a 24 h day, proposed.
+- Cliffs (SPIKE-94, #1082): asset library or procedural only; the Alps' 4.3 % of area above 45 degrees as the v1 coverage.
+- Optional: the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); excluding the repo's `target` folders from Windows Search indexing.
+
 ## River graphs and hydrology (parked 2026-11-26, ADR 0129)
 - River graphs (RG): the chain on tag `archive/rg-parked-2026-11-26`; the record in `docs/archive/P3/river-graph/`. Restart only under ADR 0129 point 4.
 - K5's diagonal washboard: a hillslope term coupling the two cell parities, calibrated against GLO-30 (4-7 lane-days, open-ended; `o16-base-fixes-scoping` fix 2).
