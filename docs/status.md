@@ -1,9 +1,10 @@
 # Status
 
-Forward state only (owner, 2026-10-16): open owner items, the current queue's open items, the current unanswered stop report, tracked items and quarantines. History goes to the log (`cargo xtask log`). When a change is archived the coder deletes its queue item's text (the log line is the record); when the architect answers a stop report it deletes it. A Tracked entry has at most 3 lines; a finished one is deleted (ADR 0075). Cap: 15 KB. Earlier states: `docs/archive/M4/status-at-m4-acceptance.md`, `docs/archive/M6/status-at-m6-close.md`. M8 closed 2026-10-30: `docs/milestones/M8-report.md`. New requirement IDs, ADR and SPIKE numbers are reserved through the lead (ADR 0120).
+Forward state only (owner, 2026-10-16): open owner items, the current queue's open items, the current unanswered stop report, tracked items and quarantines. History goes to the log (`cargo xtask log`). When a change is archived the coder deletes its queue item's text (the log line is the record); when the architect answers a stop report it deletes it. A Tracked entry has at most 3 lines; a finished one is deleted (ADR 0075). Cap: 15 KB. Earlier states: git history (the M4 and M6 snapshots were deleted in #1683, owner, 2026-11-27). M8 closed 2026-10-30: `docs/milestones/M8-report.md`. New requirement IDs, ADR and SPIKE numbers are reserved through the lead (ADR 0120).
 
 ## Waiting for the owner
 - **The sprint process** (ADR 0130, proposed; applied on your word while proposed): your four decisions in the lanes digest `review/sprint-process-plan-combined-2026-11-27.md` §8. Your acceptance can come at any time.
+- **Open the pilot S-Region-Authoring** (`docs/milestones/S-Region-Authoring.md`): `decision: open S-Region-Authoring`, with D1 (the `regions.toml` format) and the proposed E5 (crusader's docs restructure PR 3, carried from P3's block 1).
 - **M-Erosion** (lanes digest `review/m-erosion-plan-draft-2026-11-27.md`): it becomes separate sprint files after the pilot S-Region-Authoring. M1 in or out is your call before M-E1 opens.
 - **Your flight on the fly1126 stores** (optional; lanes digest `flight-playbook-fly1126-2026-11-27.md`; stores and stills in `C:/DEV/SeriousPlanetData/flights/fly1126/`).
 - **/bless: `water_class_lake_mask_stripes`** (TEST-133, #1459): the first lake golden; nothing waits on it.
@@ -11,14 +12,8 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 
 Older owner items moved to `docs/parking.md` (2026-11-12 and 2026-11-27).
 
-## Queue (2026-11-27, milestone P3 closing: `docs/milestones/P3.md`)
-P3 signed off (owner, 2026-11-27); E4-E6 parked with record (ADR 0129, accepted 2026-11-27). The owner's block 1 decisions of 2026-11-27 run as the closure's last items (lanes digest `tonight-2026-11-27-agenda.md`, "Block 1 decided").
-| Exit | Step | Lane |
-|---|---|---|
-| E6 | The D rows (D3, D4, D5, D8, D9, D10 with BUILD-042 retired and BUILD-040 decoupled) and `shadow-clipmap-march` narrowed to its built half; then the docs restructure under the adopted strategy | crusader |
-| E6 | 25 uncited examples retired; 109 merged or closed remote branches pruned (the list with tip SHAs kept) | spikes |
-| E6 | `tmp/` field dumps deleted (kept: `.md/.txt/.csv/.png`, `tmp/ag2/`, `flights/`); 6 parked lane worktrees pruned | explorer |
-| E6 | The sprint process's core checks (ADR 0130, proposed, applied on the owner's word): `plan` v2 core (BUILD-074), the firewall and PR review lines (BUILD-075), the spec-lint shapes and caps (BUILD-076), `archive-milestone` for sprint files (BUILD-077), the templates. Then P3 closes and S-Region-Authoring opens as the first sprint file | explorer, crusader, spikes, lead |
+## Queue (2026-11-28, no active sprint)
+None. P3 closed on 2026-11-28 (`docs/archive/P3/`). `docs/milestones/S-Region-Authoring.md` is a draft and waits for the owner's `decision: open`; nothing runs before it (ADR 0130, `cargo xtask plan`).
 
 ## Tracked
 - **Sea not meeting the coast; a coastal fade at river mouths** (owner, 2026-11-15; seen on a flight about 2026-11-13, not reported then): the sea did not start where the terrain ended. Candidate cause: the runtime fades the erosion change toward 0 within 3 m above sea level (`COAST_FADE_M`, `erosion_layer.rs`), so the drawn coast and river mouths differ from the store (adversarial review F3). Owner re-tests on a flight; the fade is decided with the next river or coast work (D-2 is parked, ADR 0129).
@@ -27,6 +22,7 @@ P3 signed off (owner, 2026-11-27); E4-E6 parked with record (ADR 0129, accepted 
 - **Rock K residual** (#1216, seed 14 face 2): mountain 3 km relief p50 483 against 534 m (the band edge is 2/3 of it), elevation p50 +170-225 m from the K spread (f/(1+f) is concave), not the K mean; tune in the preview round. The carve adds about 1.55 GB at 12,288 cells: measure the peak against 8 GB (CON-21) on the next pass-1 run.
 - **CI flake `gpu_stream_perf` lit-scene smoke** (2026-11-10): 240 s limit hit on Windows WARP C 6 times (11-06 to 11-17; the 5th at 254 s on #1472, the 6th at 258 s on #1582), each further one adds to the count, no limit change; times 130-240 s since the step at a600c56b (ground-detail-patch): slowness fits. TEST-106 adds times and phase marks: read them next time.
 - **Flake: a 0xc0000005 abort in `planet tests::the_erosion_options_are_viewer_options...`** (2026-11-26, crusader #1667's runs): seen once; it passed in every other run. On a recurrence, keep the full output.
+- **Near-limit `water_cut::the_exact_minimum_cuts_a_node_at_its_bound`** (planet-frame, 2026-11-27, spikes #1684): 180 s timeout hit in two full-thread local prepushes; 3 s alone, 9.8 s at 10 test threads. Each further hit adds to the count, with no limit change.
 - **Flake `gpu_lit_stream_flicker`** (2026-11-24): the 300 s settle limit was hit twice in local prepushes under three lanes' load (crusader #195; spikes #1674, 2026-11-27). It passed on the reruns. Each further hit adds to the count, with no limit change.
 - **Load timeout `gpu_world_field` streamed against sync** (2026-11-27, spikes #1674): 300 s in a local prepush under three lanes' load; 24 s alone. Not a known class yet; on a recurrence keep the full output.
 - **Older flakes** (WARP, loaded runner): `oracle_stream_smoke` (`load_running_max` 1, at least 2 expected, once; tighten its precondition, never weaken); `gpu_horizon` `a_slot_written_through_set_horizon_reads_back_as_written` (once, passes alone and on CI); `gpu_window` flight test (once, 7.5 s). On a recurrence keep the full output.

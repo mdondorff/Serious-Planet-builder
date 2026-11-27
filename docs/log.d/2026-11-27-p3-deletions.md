@@ -1,1 +1,0 @@
-- 2026-11-27 p3-deletions (owner, block 1): D3 the change archive deleted (next-id unchanged), D4 the raw perf dumps, D5 the M4 and M6 snapshots and learnings, D8 spikes/README fixed, D9 isostasy-rebound deleted and region-mode1 parked, D10 the terrain prototype briefing archived (BUILD-040 decoupled, BUILD-042 retired), shadow-clipmap-march synced in part and archived

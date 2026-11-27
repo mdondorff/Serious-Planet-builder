@@ -1,6 +1,6 @@
 # P3 report: rivers across scales, measured and decided
 
-Status: closure report (lead, 2026-11-27); the owner's sign-off is pending. P3 ran from 2026-11-14 to 2026-11-27. Its river-graph exit was parked with record on 2026-11-26 (owner; ADR 0129, proposed).
+Status: closure report (lead, 2026-11-27); signed off (owner, 2026-11-27). P3 ran from 2026-11-14 to 2026-11-28, its last closure row being ADR 0130's core build. Its river-graph exit was parked with record on 2026-11-26 (owner; ADR 0129, accepted 2026-11-27).
 Not run: `cargo xtask accept P3`. Its perf wall-clock step needs a perf window (ADR 0020), and none is authorised. P3's exits are not perf exits, so this report closes them on their own evidence.
 
 ## Summary

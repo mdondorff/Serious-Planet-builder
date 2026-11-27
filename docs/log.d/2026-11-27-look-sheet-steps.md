@@ -1,1 +1,0 @@
-- 2026-11-27 look-sheet-steps (lead, river-graph park plan step 4): `cargo xtask look-sheet RUN --steps` draws each pipeline stage of a crop store beside its step from the previous stage, from the store's own stage list, so B's stages and a chain run's alike (BUILD-071, TEST-158)
