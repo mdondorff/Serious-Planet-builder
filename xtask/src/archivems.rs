@@ -6,7 +6,8 @@
 //! - The pointers in the headers of `docs/log.md` and `docs/spikes.md` are added when missing, so a second run adds none.
 //!
 //! Every new file text is computed before anything is written; a malformed fragment or a missing header sentence refuses the run. Nothing else is
-//! deleted: no change archive, no image, no ADR. `--dry-run` prints the plan and writes nothing.
+//! deleted: no change archive, no image, no ADR. `--dry-run` prints the plan and writes nothing. An existing log archive is rewritten as its header
+//! (the lines before its first entry) and its entries; files are written with LF line ends (`.gitattributes` keeps the docs LF).
 
 use crate::logcmd::{merge, parse_fragment, parse_log, read_fragments, Entry, FRAGMENT_DIR};
 use crate::util::Res;
@@ -111,10 +112,19 @@ pub fn plan(root: &Path, m: &str, before: Option<&str>) -> Res<Plan> {
         let spike_archive = format!("docs/archive/{m}/spikes.md");
         let archived = match std::fs::read_to_string(root.join(&spike_archive)) {
             Ok(t) => {
-                // the rows go after the archive's last table row
+                // the rows go after the archive's last table row (a table header first when it has none); a row it already holds is not added again
                 let mut al: Vec<String> = t.lines().map(str::to_string).collect();
-                let at = al.iter().rposition(|l| l.starts_with('|')).map_or(al.len(), |k| k + 1);
-                for (k, r) in rows.iter().enumerate() {
+                let at = match al.iter().rposition(|l| l.starts_with('|')) {
+                    Some(k) => k + 1,
+                    None => {
+                        al.push(String::new());
+                        al.push("| Id | Title | Status | Results |".into());
+                        al.push("|---|---|---|---|".into());
+                        al.len()
+                    }
+                };
+                let new: Vec<&str> = rows.iter().copied().filter(|r| !al.iter().any(|l| l == r)).collect();
+                for (k, r) in new.iter().enumerate() {
                     al.insert(at + k, (*r).to_string());
                 }
                 al.join("\n") + "\n"
@@ -325,5 +335,76 @@ mod tests {
         // a bad milestone name and an unknown option are refused
         assert!(run(&d, &["../x".into()]).is_err() && run(&d, &["M2".into(), "--all".into()]).is_err());
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: BUILD-072, TEST-159
+    #[test]
+    fn the_edges_a_fragment_on_the_date_an_archive_without_a_table_a_row_already_archived_a_register_without_a_pointer_line() {
+        let d = tmp("edges");
+        fixture(&d);
+        // a fragment dated on `--before` stays (before is strict)
+        std::fs::write(
+            d.join("docs/log.d/2026-02-01-on.md"),
+            "- 2026-02-01 **on**: the boundary
+",
+        )
+        .unwrap();
+        let p = plan(&d, "M2", Some("2026-02-01")).unwrap();
+        assert!(!p.deletes.contains(&"2026-02-01-on.md".to_string()) && p.entries == 2, "{:?}", p.deletes);
+        // an existing spike archive without a table gets one, and a row it already holds is not added twice
+        std::fs::create_dir_all(d.join("docs/archive/M2")).unwrap();
+        std::fs::write(
+            d.join("docs/archive/M2/spikes.md"),
+            "# Closed spikes of M2
+
+SPIKE-11 was archived by hand: | SPIKE-11 | Eleven | closed 01-25: no | w |
+",
+        )
+        .unwrap();
+        apply(&d, &plan(&d, "M2", Some("2026-02-01")).unwrap()).unwrap();
+        let sp = std::fs::read_to_string(d.join("docs/archive/M2/spikes.md")).unwrap();
+        assert!(
+            sp.contains(
+                "
+| Id | Title | Status | Results |
+|---|---|---|---|
+| SPIKE-8 | Eight | closed 01-15: done | y |"
+            ),
+            "{sp}"
+        );
+        assert_eq!(sp.matches("| SPIKE-8 |").count(), 1, "{sp}");
+        std::fs::write(
+            d.join("docs/archive/M2/spikes.md"),
+            "# M2
+
+| Id | Title | Status | Results |
+|---|---|---|---|
+| SPIKE-11 | Eleven | closed 01-25: no | w |
+",
+        )
+        .unwrap();
+        let reg = std::fs::read_to_string(d.join("docs/spikes.md")).unwrap();
+        std::fs::write(
+            d.join("docs/spikes.md"),
+            reg.replace(
+                "| SPIKE-7 | Seven | open | x |",
+                "| SPIKE-7 | Seven | open | x |
+| SPIKE-11 | Eleven | closed 01-25: no | w |",
+            ),
+        )
+        .unwrap();
+        apply(&d, &plan(&d, "M2", None).unwrap()).unwrap();
+        let sp = std::fs::read_to_string(d.join("docs/archive/M2/spikes.md")).unwrap();
+        assert_eq!(sp.matches("| SPIKE-11 |").count(), 1, "a row the archive holds is not added again: {sp}");
+        // a register whose header names no archive refuses the run when a closed row moves (the pointer has no line)
+        let e = tmp("edges2");
+        fixture(&e);
+        let reg = std::fs::read_to_string(e.join("docs/spikes.md")).unwrap();
+        std::fs::write(e.join("docs/spikes.md"), reg.replace("Closed spikes of M1: `docs/archive/M1/spikes.md`.", "No archive yet."))
+            .unwrap();
+        let err = plan(&e, "M2", None).unwrap_err();
+        assert!(err.contains("docs/spikes.md"), "{err}");
+        let _ = std::fs::remove_dir_all(&d);
+        let _ = std::fs::remove_dir_all(&e);
     }
 }
