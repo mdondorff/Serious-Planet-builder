@@ -360,13 +360,13 @@ R  a.md -> docs/b.md
     #[test]
     fn an_example_a_bench_and_a_test_other_than_the_gpu_tiers_do_not_need_the_gpu_tier() {
         for p in [
-            "crates/app/examples/field_probe.rs",
+            "crates/app/examples/long_flight_path.rs",
             "crates/cache/examples/bake_layer.rs",
             "crates/render/benches/draw.rs",
             "crates/generators/tests/runtime_layer.rs",
             "crates/frame/tests/lookfile.rs",
             "crates/frame/tests/data/look_v6_patch.toml",
-            r"crates\app\examples\base_gap.rs",
+            r"crates\app\examples\terrain_score.rs",
         ] {
             assert!(!touches_goldens(p), "{p}");
         }
