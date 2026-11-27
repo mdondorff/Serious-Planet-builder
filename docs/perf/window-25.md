@@ -53,3 +53,5 @@ The old build is as slow today as main: no code regression since window 23 (#521
 
 - The detail in the aerial and orbit views, and with the editor UI open.
 - The sweep with the detail off.
+
+The raw output named above was deleted on 2026-11-27 (owner, D4); it is in git history at commit a179884d1.

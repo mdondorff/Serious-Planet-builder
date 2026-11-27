@@ -945,8 +945,7 @@ Status: active
 Source: ADR 0085 point 2, SPIKE-56 finding 2 and P5, REND-016, REND-033, REND-045
 Detail:
 - It SHALL then rebuild the max-height mips of the touched region, each texel the maximum over the 3x3-dilated footprint of its parent's texels.
-- Where blocks overlap, the finest block (the last in the plan's order)
-- SHALL win whichever order the adapter runs the dispatches in, and a texel within a quarter texel of a tile's edge MAY be taken from either tile.
+- Where blocks overlap, the finest block (the last in the plan's order) SHALL win whichever order the adapter runs the dispatches in, and a texel within a quarter texel of a tile's edge MAY be taken from either tile.
 - The stamps are applied at plane positions around the clipmap's anchor (distances in that plane, which differ from the vertex stage's tangent-plane distances by a term of the order of the reach squared over the planet radius).
 - An incremental update SHALL write the same bytes as a full rebuild of the same plan.
 

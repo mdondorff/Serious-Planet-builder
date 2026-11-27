@@ -30,7 +30,7 @@ Housekeeping is split (owner, 2026-10-16): the **architect** curates, deciding w
 
    An entry disproved by a later one is moved or deleted, never left beside it without a mark.
 4. **ADR status index.** Check every ADR's status line against later ADRs. When a later ADR decided an open point, edit only the earlier ADR's status line to say so (allowed for accepted ADRs). Then refresh the table in `docs/adr/README.md`: number, title, status, open points (with the milestone or trigger that decides them).
-5. **Briefings.** Replace or delete `docs/briefings/*` for the finished milestone; the next milestone's briefing is written when its queue starts.
+5. **Briefings.** Archive a finished milestone's briefing to `docs/archive/<M>/briefings/` (the folder `docs/briefings/` holds only a running milestone's; the terrain prototype's is in `docs/archive/P3/briefings/` since 2026-11-27).
 6. **Owner items.** List the dormant ones (an open question with no near trigger) with their trigger in the status file; do not ask the owner about them now.
 6a. **Domain glossary** (owner, 2026-10-30: the architect's job). Walk `docs/domain.md` against the milestone's ADRs, specs and removals: every term has a status (proposed, accepted, retiring); a term whose code is gone moves to section 8 (non-normative) and the coder's list gets the renames of identifiers, flags, file names and comments that still use it.
 7. **Documentation model (ADR 0055).** Check that every current number lives in a spec, not only in an ADR amendment chain; that no new readings ADR appeared; and that archived changes hold only `proposal.md` and spec deltas. Fix the cause in the skill or CLAUDE.md if any of these drifted.

@@ -313,7 +313,7 @@ Both change the bake's output slightly; they carry no kernel version bump, but a
 
 Result: a catchment's round depends only on the inputs of its key (§6.5): its members, receivers, `A_d`, surface, drivers and the round rules. **[gate G-LOCAL]** verifies that on the new kernels (the round is a pure function of its key inputs; G-ROUND is the exactness test). Both rules are behind switches (`RoundRules`, default off; a key byte only when on).
 
-Measured (GEN-141, `openspec/changes/archive/2026-11-23-round-kernels/proposal.md` (its design notes in git history, removed at the archive by ADR 0055); four 96 x 96 lands, about 820 catchments; a catchment **routed alone** is the grid masked to its members with its outlet the only outlet):
+Measured (GEN-141, the archived change `2026-11-23-round-kernels` (in git history at commit d9de674fa, before the change archive was deleted (owner, 2026-11-27, D3)); four 96 x 96 lands, about 820 catchments; a catchment **routed alone** is the grid masked to its members with its outlet the only outlet):
 - Member areas that differ from the region routing, smooth land: today's kernels 26,041 of 26,265; clip to the receiver 23,939; local clip 0; local clip with the canonical flood 0.
 - Terraced land (flats): 27,090 of 27,942; 25,043; 45; 7. Receivers that differ: 0 to 1.
 - The remainder is the flood: a member on a near-sea-level flat is first reached from a lower neighbour in another catchment, its filled level moves by 0.4 mm, a neighbouring receiver flips.

@@ -39,3 +39,5 @@ Round 1 agrees (C 510, 1568, 431, 969). R's job is the same size in all builds. 
 
 - aerial-20km and ground-1m as separate stream scenes (the dive covers the descent).
 - Frame time after the cost fix (to follow in the re-measure).
+
+The raw output named above was deleted on 2026-11-27 (owner, D4); it is in git history at commit a179884d1.

@@ -696,7 +696,7 @@ Source: Owner 2026-11-08 (41 worktrees, many forgotten inside other worktrees' `
 - **THEN** the first passes, the second warns and the third refuses, naming the free space, the largest folders and `cargo xtask worktrees --prune`
 
 ### Requirement: BUILD-040 A change of a gate leaves a contract-change line
-Spec-lint SHALL fail a branch that adds, removes or changes a row of the gate table under `### 12.1` of `docs/design/terrain-target.md`, against the merge base with `origin/main`, unless the same branch adds to that document's `## 14. Contract changes` list a line `- YYYY-MM-DD | gate or section | what changed | who decided` that names the changed row.
+Spec-lint SHALL fail a branch that adds, removes or changes a row of the gate table under `### 12.1` of `docs/design/terrain-target.md`, against the merge base with `origin/main`, unless the same branch adds to that document's `## 14. Contract changes` list a line `- YYYY-MM-DD | gate or section | what changed | who decided` that names the changed row. A malformed line covers nothing, and a branch that removes the target document with its gate table fails.
 
 Verify: A
 Status: active
