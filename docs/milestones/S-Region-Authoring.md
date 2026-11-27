@@ -17,7 +17,7 @@ Out of scope:
 ## Decisions (at most 3 open)
 | # | Decision | Lead's recommendation | Default | By | State |
 |---|---|---|---|---|---|
-| D1 | The `regions.toml` format (a new file format, the owner's) | in the world folder beside its definition; one `[[region]]` per box: `name`, `face`, L tile range `i0 j0 i1 j1`; the panel state derived from the commits, not stored | pauses E1 and E2 (a format; ADR 0130 point 5) | the open | open |
+| D1 | The `regions.toml` format (a new file format, the owner's) | in the world folder beside its definition; one `[[region]]` per box: `name`, `face`, L tile range `i0 j0 i1 j1`; the panel state derived from the commits, not stored | pauses E1 and E2 (a format; ADR 0130 point 5) | 2026-11-28 | open |
 ## Changes
 - 2026-11-28 | file | the local draft of 2026-11-27 -> the sprint format | lead
 ## Close
