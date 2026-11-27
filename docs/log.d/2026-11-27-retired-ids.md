@@ -1,0 +1,1 @@
+- 2026-11-27 retired-ids (lead, the P3 closure plan: D3's precondition): the 55 retired requirement IDs in openspec/retired-ids.txt; next-id reads it instead of the change archive, spec-lint checks form, reuse and completeness; nothing deleted (BUILD-073, TEST-160)

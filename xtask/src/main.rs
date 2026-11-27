@@ -28,6 +28,7 @@ mod preview;
 mod process;
 mod repocheck;
 mod retired;
+mod retiredids;
 mod rivergate;
 mod scratch;
 mod speclint;
