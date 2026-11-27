@@ -55,7 +55,7 @@ cargo run --release -p planet -- test-render --scene terrain --view normals --ou
 | G | globe overview: drag turns, wheel zooms, a click on a marker or the surface flies there and lands |
 | L | lit path (atmosphere) or debug path |
 | V | next debug view (debug path) |
-| J | shade view: normal, horizon, shadow, soil, moisture, insolation (lit path; horizon and shadow need a store with a coupled run) |
+| J | shade view: normal, shadow, soil, moisture, insolation (the sun's shadow, and the tile's soil depth, moisture and insolation; lit path; the drivers need a chunk stage) |
 | [ / ] | the sun half an hour earlier / later in local solar time at the camera (the title shows the time) |
 | `\` | back to the look's sun |
 | H | editing light: a sun fixed over your shoulder, so no slope is black (off by default) |
@@ -107,6 +107,10 @@ Everything goes through `cargo xtask`:
 | `cargo xtask check` | rustfmt, clippy `-D warnings`, crate layering |
 | `cargo xtask layering` | crate layering and the GPU-free dependency check |
 | `cargo xtask spec-lint` | requirement IDs, tiers, coverage, retired terms and the documentation size caps |
+| `cargo xtask next-id <PREFIX\|ADR\|SPIKE>` | the next free requirement, ADR or spike number |
+| `cargo xtask plan`, `lanes`, `gates` | the current milestone's exit items with their state; each lane's last commit, open PR and running processes; the gate ledger |
+| `cargo xtask worktrees [--prune]` | every git worktree with its size, branch and merged PR; `--prune` removes the clean merged ones |
+| `cargo xtask pr-body-check` | the pr-gate check: a PR with code names the commit the verifier passed |
 | `cargo xtask log [--since D] [--limit N]` | the project log, newest first |
 | `cargo xtask accept <milestone>` | milestone acceptance |
 | `cargo xtask gate [--small] [--site frame-N] [--store DIR]` | the no-degradation gate: the editor window over the real store, a scripted hill and the owner test's camera paths (`--small`: a generated world on the software adapter) |
@@ -116,14 +120,26 @@ Everything goes through `cargo xtask`:
 | `cargo xtask bless` | list candidate goldens; the owner's `/bless` applies what the owner approved |
 | `cargo xtask cache-verify <dir>`, `cache-compact <dir>` | check or compact a tile store |
 | `cargo xtask det-diff <a> <b>` | compare two determinism manifests (Windows against Linux in CI) |
-| `cargo xtask capture flights` | the coastal flights as PNG sequences for the owner's look review |
+| `cargo xtask capture flights`, `capture stills --poses FILE` | the coastal flights as PNG sequences, or one still per pose, for the owner's look review |
+| `cargo xtask package` | the owner package: the look-review stills and flights with a report, in `target/review/owner-package/<date>/` |
+| `cargo xtask preview world [--seed N]` | the whole-planet preview of the class source (equirectangular PNGs and a report; CPU only) |
+| `cargo xtask bake layer`, `bake pass1` | the erosion layer's passes into a layer store (checkpointed; a full bake needs the lead's go) |
+| `cargo xtask terrain-score` | the terrain scorecard against nine GLO-30 tiles (report in `target/review/terrain-score/<date>/`) |
+| `cargo xtask river-gate <window\|store\|grid> [options]`, `river-gate --table ...` | the river gate's numbers of a region, the measurement suite and the river-graph columns; `--table`: one row per run |
+| `cargo xtask k7-layout` | K7's layout report (the fixture's tile layout against an alternative, compared with the baseline; prepush runs it when K7 files change) |
+| `cargo xtask stages [--update]`, `stages --chain DIR` | the stage manifest check against the probe's fixture; the chain sheet of a chain directory |
+| `cargo xtask transects --chain DIR` | the cross-section sheet: S0, the final surface and the matched GLO-30 valley per transect |
+| `cargo xtask windows-draw` | the seeded stratified draw of G3-8's out-of-sample windows into `crates/cache/data/g3-windows.toml` |
 | `cargo xtask look-sheet RUN [--against DEFAULTS] [--az A,B]` | a crop store's look sheets at one L cell a pixel under a fixed low sun; `--against`: beside the defaults run and their difference (`target/review/look/<run>/`) |
 | `cargo xtask look-sheet RUN --steps [--az A,B]` | per crop, each pipeline stage of the run beside its difference to the previous stage (`<crop>-step-azNNN.png`, `steps.txt`) |
 | `cargo xtask ci-stats` | CI job times against the budget |
 | `cargo xtask cockpit [--help]` | offline HTML pipeline DAG, switch simulator, Global Authoring preview runner and pin/probe ledger (`target/review/cockpit/index.html`) |
-| `cargo xtask heavy <command>` | run a command under the machine-wide heavy-run lock |
+| `cargo xtask heavy [--exclusive] <command>` | run a command under the machine-wide heavy-run lock (`--exclusive`: every slot, for timing and window runs) |
 | `cargo xtask quiet on\|off\|status` | the owner's flag: while it is up every heavy command waits |
-| `cargo xtask perf [stream\|lit\|preflight\|envelope\|coupled\|global-bake]` | performance harness on the reference machine; it measures readiness and refuses otherwise; runs only on the architect's go |
+| `cargo xtask perf [stream\|lit\|preflight\|envelope\|coupled\|global-bake\|preview\|wallclock\|window\|reserve\|--ab]` | performance harness on the reference machine; it measures readiness and refuses otherwise; runs only in a window the lead authorizes |
+| `cargo xtask agent-guard` | the agent tool guardrail hook (reads a hook's JSON on stdin) |
+
+Measuring tools outside xtask: `cargo run --release -p planet-generators --example landmass_scale -- K THREADS MODE` runs the prototype landmass at `3072 K` cells a face edge (needs `target/landmass_base_3072.f32` from the `landmass_region` example). Modes include `plan` (the production phase plan), `h1`, `full`, `sed`, `part` and `bwave1` (B's wave 1 measured: peak heap, peak working set and commit per stage; `G36_WINDOW=1` adds the 16 GB start check and the 10.26 GB guard).
 
 Failure output goes to `target/review/` (diff images, numeric deltas, crash reports).
 
