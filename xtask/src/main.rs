@@ -2,6 +2,7 @@
 
 mod accept;
 mod agentguard;
+mod archivems;
 mod bakecmd;
 mod blesscmd;
 mod cistats;
@@ -60,6 +61,7 @@ const USAGE: &str = "cargo xtask <command>
   river-gate --table <window | store dir@window | store dir | grid=file,w,h,sea>[#graph=F][#stages=D][#partition=A,B][#surface=F][#start=F][#noise=N][#timing=F][#chain=F]... [--windows W,W...] [options]   one row per run of every gate and suite number, counts beside percentages (BUILD-057); target/review/river-gate-table.md and .csv
   spec-lint            trace IDs, tiers, requirement coverage (CON-16)
   log [--since YYYY-MM-DD] [--limit N]   the project log: fragments of docs/log.d/ and the entries of docs/log.md, newest first (BUILD-010)
+  archive-milestone <M> [--before YYYY-MM-DD] [--dry-run]   housekeeping's mechanical archive steps (BUILD-072): the fragments of docs/log.d/ (before the date) into docs/archive/<M>/log.md in the log's order, then deleted; the closed spikes' rows of docs/spikes.md into docs/archive/<M>/spikes.md; the header pointers; nothing else deleted; --dry-run prints the plan only
   accept <milestone>   run milestone acceptance, e.g. M0; M4 also judges the perf logs of a streaming window (--logs DIR, default perf/logs) and refuses without a valid one
   store [--res N] [--relief-scale S] [--link DIR]   build the production store (default 16384 cells, into target/stores/global<N>) and point the editor at it, or only link an existing one (VIEW-052); with --relief-scale S (1 to 4) an exaggerated world into its own store, and the editor command line for it (WDEF-017)
   repro <bundle> [--real] [--every N] [--store DIR]   replay a repro bundle or an F9 path; --store DIR replays a bundle of a stored bake read-only (TEST-071)
@@ -164,6 +166,7 @@ fn main() -> ExitCode {
         Some("river-gate") => heavy::with(&format!("river-gate {}", args[1..].join(" ")), || rivergate::run_gate(&root, &args[1..])),
         Some("spec-lint") => speclint::run(&root),
         Some("log") => logcmd::run(&root, &args[1..]),
+        Some("archive-milestone") => archivems::run(&root, &args[1..]),
         Some("accept") => {
             heavy::with(&format!("accept {}", args[1..].join(" ")), || scratch::begin(&root).and_then(|_| accept::run(&root, &args[1..])))
         }

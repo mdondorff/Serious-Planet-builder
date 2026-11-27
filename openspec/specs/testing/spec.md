@@ -2310,6 +2310,17 @@ Detail:
 - **WHEN** the tests of `look_steps` and xtask's `looksheet` tests run
 - **THEN** each check above has an assertion that cites BUILD-071 and TEST-158
 
+### Requirement: TEST-159 The milestone archive command on a fixture docs tree
+Tier-A tests SHALL run BUILD-072 on a fixture docs tree and check its table's steps. A dry run, a malformed fragment and a header without its pointer sentence SHALL leave every file of the tree unchanged.
+
+Verify: A
+Status: active
+Source: Lead 2026-11-27, BUILD-072
+
+#### Scenario: Refused before any write
+- **WHEN** the fixture holds a malformed fragment, or `docs/log.md` has no sentence listing the archives
+- **THEN** the command fails naming the file, and every file of the tree is byte for byte as before
+
 ### Requirement: TEST-160 The retired IDs are checked and never issued again
 Tier-A tests SHALL check BUILD-073: next-id on a fixture with an ID only in the file and one only in the change archive, each of spec-lint's three failures and its passes, and the repository's own file against its specs and archive.
 
