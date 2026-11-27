@@ -722,6 +722,8 @@ pub fn run(root: &Path) -> Res {
     report.errors.extend(crate::process::contract_errors_against_base(root));
     // BUILD-053: the queue and the active milestone's exit items agree.
     report.errors.extend(crate::plancmd::lint_errors(root));
+    // BUILD-076: the sprint process's files (caps, the archive rule, routing's Check column, the research header, the exit-cell diff check)
+    report.errors.extend(crate::sprintlint::errors(root));
     // BUILD-041: every gate of A3 12.1 has a ledger row and every measured row a commit.
     report.errors.extend(crate::gates::ledger_errors_in(root));
     // BUILD-010: every log fragment is one well-formed entry.

@@ -34,6 +34,7 @@ mod rivergate;
 mod scratch;
 mod speclint;
 mod sprintfile;
+mod sprintlint;
 mod stages;
 mod storecmd;
 mod terrainscore;
