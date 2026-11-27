@@ -65,6 +65,7 @@ Owner, 2026-11-12 (ADR 0120). These items are outside the current milestone, one
 - All stores on disk are refused by keys since #1218/#1225 (read-only references); in-memory `--world` runs only until a new store.
 
 ## Later milestones (moved from `docs/status.md` "Dormant", 2026-11-12)
+- Region mask mode 1, "clip outside" (owner, 2026-10-19): a mode-1 region cuts every delta of its layer outside its polygon; global layer items and a fifth read-record kind (ADR 0066). The proposal and design stay in `openspec/changes/region-mode1/` (parked 2026-11-27, D9).
 - Volcanoes (SPIKE-102 D5; owner, 2026-11-05: after M9). Young edifices as an additive layer; old ones in the base. Trigger: terrain round 2.
 - Isostatic rebound (GEN-124): dropped from M9; a flexural version is the candidate. Trigger: hypsometry tuning, rifts, escarpments.
 - Glacial erosion (ADR 0106) and coastal erosion (ADR 0107): out of the prototype's scope (replan, 2026-11-08).
