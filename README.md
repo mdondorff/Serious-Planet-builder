@@ -110,7 +110,7 @@ Everything goes through `cargo xtask`:
 | `cargo xtask next-id <PREFIX\|ADR\|SPIKE>` | the next free requirement, ADR or spike number |
 | `cargo xtask plan`, `lanes`, `gates` | the current milestone's exit items with their state; each lane's last commit, open PR and running processes; the gate ledger |
 | `cargo xtask worktrees [--prune]` | every git worktree with its size, branch and merged PR; `--prune` removes the clean merged ones |
-| `cargo xtask pr-body-check` | the pr-gate check: a PR with code names the commit the verifier passed |
+| `cargo xtask pr-body-check` | the pr-gate check: a PR with code names the commit the verifier passed, plus the numerics and spec-guardian reviews by path; a record names its research review and the owner's look; an active sprint needs `Sprint: <M>` and passes `plan --pr` |
 | `cargo xtask log [--since D] [--limit N]` | the project log, newest first |
 | `cargo xtask archive-milestone <M> [--before D] [--dry-run]` | a finished milestone's log fragments, closed spike rows, and a closed sprint file with its report and records into `docs/archive/<M>/`, with the header pointers (housekeeping's archive steps) |
 | `cargo xtask accept <milestone>` | milestone acceptance |
