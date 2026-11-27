@@ -1,6 +1,7 @@
 //! Tier C: the lit look of the ground at eye height (M7 GT, REND-034, REND-035, REND-037): the steep stamped site of the review stills
-//! (`examples/look_stills.rs`) on the lit path with the atmosphere, the natural materials at the window's strength, at an eye height of
-//! 1.8 m and 0.5 m. The owner approved this look as the floor (2026-10-23); a change of it is the owner's to bless.
+//! (`examples/look_stills.rs`, retired 2026-11-27, last on main at d9de674fa) on the lit path with the atmosphere, the natural
+//! materials at the window's strength, at an eye height of 1.8 m and 0.5 m.
+//! The owner approved this look as the floor (2026-10-23); a change of it is the owner's to bless.
 
 use std::sync::{Arc, RwLock};
 
