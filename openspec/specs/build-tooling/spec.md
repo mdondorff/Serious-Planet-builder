@@ -382,7 +382,7 @@ Source: opus-planner (2026-10-19), BUILD-014, BUILD-012, BUILD-003
 - **THEN** the series file holds `2026-10-19T17:25:38Z`, `planet-frame+planet-render`, `12.0`, `9.5`, `21.5`, `pass` and then a line with `every crate`, `1.3`, `35.1`, `36.4`, `fail`, and rotating the logs of `test-fast` removes neither
 
 ### Requirement: BUILD-020 CI evidence is recorded per job
-`cargo xtask ci-stats --record --since YYYY-MM-DD [--until YYYY-MM-DD]` SHALL read, with `gh`, every completed run created in the range (pull requests and pushes, every branch) and append one tab-separated row per job that ended `success` or `failure` to `docs/perf/ci-history.tsv`: the run id, the creation time, the event, the branch, the job name, the conclusion, the duration in seconds and the names of the job's failed steps joined by `+` (empty for a success). A run whose id is already in the file SHALL be skipped, so that a repeated call adds nothing. The file SHALL start with a header row. A missing `--since` SHALL be an error.
+`cargo xtask ci-stats --record --since YYYY-MM-DD [--until YYYY-MM-DD]` SHALL read, with `gh`, every completed run created in the range (pull requests and pushes, every branch) and append one tab-separated row per job that ended `success` or `failure` to `docs/tools/perf/ci-history.tsv`: the run id, the creation time, the event, the branch, the job name, the conclusion, the duration in seconds and the names of the job's failed steps joined by `+` (empty for a success). A run whose id is already in the file SHALL be skipped, so that a repeated call adds nothing. The file SHALL start with a header row. A missing `--since` SHALL be an error.
 
 Verify: A
 Status: active
@@ -707,7 +707,7 @@ Source: Owner 2026-11-09 (management rules become checks), planner inbox #94; ow
 - **THEN** the first three are refused naming G-SURF and the last passes; a line already on the base covers no new change
 
 ### Requirement: BUILD-041 A gate ledger holds every measurement of a gate
-`docs/gates/ledger.md` SHALL hold one row per measurement of a gate of `docs/design/terrain-target.md` 12.1: gate, seed, region, resolution, commit, value, verdict (`pass`, `fail`, `partial`, `reported`, `not run`) and the lane that measured it. Spec-lint SHALL fail a gate of 12.1 with no row, a row of a gate not in 12.1, a bad verdict or an empty cell, and a measured row whose commit does not resolve; a `not run` row SHALL have `-` as commit. `cargo xtask gates` SHALL print per gate the newest verdict, the rows and the lanes, and name the gates measured by one lane only. CI SHALL check out the history spec-lint reads (BUILD-040).
+`docs/tools/gates/ledger.md` SHALL hold one row per measurement of a gate of `docs/design/terrain-target.md` 12.1: gate, seed, region, resolution, commit, value, verdict (`pass`, `fail`, `partial`, `reported`, `not run`) and the lane that measured it. Spec-lint SHALL fail a gate of 12.1 with no row, a row of a gate not in 12.1, a bad verdict or an empty cell, and a measured row whose commit does not resolve; a `not run` row SHALL have `-` as commit. `cargo xtask gates` SHALL print per gate the newest verdict, the rows and the lanes, and name the gates measured by one lane only. CI SHALL check out the history spec-lint reads (BUILD-040).
 
 Verify: A
 Status: active
@@ -718,7 +718,7 @@ Source: Owner 2026-11-09 (management rules become checks), planner inbox #94 (#1
 - **THEN** the first three are refused naming the gate or commit and the last passes; the summary names the gates measured by one lane
 
 ### Requirement: BUILD-043 The lanes are listed with their state
-`cargo xtask lanes` SHALL print, for each lane of `docs/lanes.txt` (a lane name and the prefix of its worktree directory under `.claude/worktrees/`; no machine paths), the last commit of its worktree with its age, the open PR of its branch, the highest `## #N` heading of its inbox file (`PLANET_INBOX_DIR`, else `SeriousPlanetData/lanes` beside the main checkout) and the running `cargo`, `rustc`, `nextest` or `target/` executables whose path lies in its worktree; other build processes SHALL be listed as not attributed. A missing piece SHALL print `-` and the command SHALL NOT fail for it.
+`cargo xtask lanes` SHALL print, for each lane of `docs/tools/lanes.txt` (a lane name and the prefix of its worktree directory under `.claude/worktrees/`; no machine paths), the last commit of its worktree with its age, the open PR of its branch, the highest `## #N` heading of its inbox file (`PLANET_INBOX_DIR`, else `SeriousPlanetData/lanes` beside the main checkout) and the running `cargo`, `rustc`, `nextest` or `target/` executables whose path lies in its worktree; other build processes SHALL be listed as not attributed. A missing piece SHALL print `-` and the command SHALL NOT fail for it.
 
 Verify: A
 Status: active
@@ -762,7 +762,7 @@ Source: Architect order 2026-11-09 (inbox #100, briefing item 18: the gate margi
 - **THEN** the sheet has at most 10,000 bins with the aspect kept, the value has one colour on both sheets, the percentiles are within a bin of the exact ones, and the data hash differs
 
 ### Requirement: BUILD-047 The stage manifest is committed and required up to date
-`docs/stages/manifest.txt` SHALL hold, for the stage probe's fixture (a compact landmass of 24 cells a face edge through the rounds, H1 and the sediment pass), one line per stage and field: the cells, minimum, 5th, 50th and 95th percentile, maximum, the scale counts, the hash of the data (never of a PNG) and the stage's numbers, without the probe's cost fields. A tier-A test SHALL run the fixture and fail when the file differs, naming the stage, the field and the first differing column. `cargo xtask stages` SHALL run that check and `cargo xtask stages --update` SHALL rewrite the file. The fixture's sheets SHALL be written to `target/review/stages/ci/`, which CI's review artifact carries.
+`docs/tools/stages/manifest.txt` SHALL hold, for the stage probe's fixture (a compact landmass of 24 cells a face edge through the rounds, H1 and the sediment pass), one line per stage and field: the cells, minimum, 5th, 50th and 95th percentile, maximum, the scale counts, the hash of the data (never of a PNG) and the stage's numbers, without the probe's cost fields. A tier-A test SHALL run the fixture and fail when the file differs, naming the stage, the field and the first differing column. `cargo xtask stages` SHALL run that check and `cargo xtask stages --update` SHALL rewrite the file. The fixture's sheets SHALL be written to `target/review/stages/ci/`, which CI's review artifact carries.
 
 Verify: A
 Status: active
@@ -773,7 +773,7 @@ Source: Owner 2026-11-09 (stage previews: a committed text manifest; images in t
 - **THEN** the test fails naming the stage, the field and the column, and says to run `cargo xtask stages --update`
 
 ### Requirement: BUILD-048 The stage reviewer advises on a manifest change and the committed sheets stay small
-`.claude/agents/stage-reviewer.md` SHALL define a read-only agent (tools Read, Glob, Grep, Bash). When a PR changes `docs/stages/manifest.txt`, the PR's author SHALL run it before the push and paste its report, unedited, into the PR body. No CI step runs it and its report never blocks a merge. It judges the manifest diff and the before and after sheets against the declared intent, never the author's assessment; a sheet it cannot open gives `cannot judge`; `consistent` means matching the intent, not right terrain. Sheets are committed only at a gate, under `docs/stages/sheets/<gate>/`. `cargo xtask spec-lint` SHALL fail when a sheet is over 1,000,000 bytes or one gate's sheets total over 5,000,000 bytes, naming the file or gate, its size and the limit.
+`.claude/agents/stage-reviewer.md` SHALL define a read-only agent (tools Read, Glob, Grep, Bash). When a PR changes `docs/tools/stages/manifest.txt`, the PR's author SHALL run it before the push and paste its report, unedited, into the PR body. No CI step runs it and its report never blocks a merge. It judges the manifest diff and the before and after sheets against the declared intent, never the author's assessment; a sheet it cannot open gives `cannot judge`; `consistent` means matching the intent, not right terrain. Sheets are committed only at a gate, under `docs/tools/stages/sheets/<gate>/`. `cargo xtask spec-lint` SHALL fail when a sheet is over 1,000,000 bytes or one gate's sheets total over 5,000,000 bytes, naming the file or gate, its size and the limit.
 
 Verify: A
 Status: active
@@ -1152,7 +1152,7 @@ Source: owner (2026-11-20, Global Authoring & pipeline debugger MVP), ag2-antigr
 - **THEN** `--pipeline-json` emits valid JSON naming `base_node_hash`, `definition_hash`, `erosion_mode`, active `implementation_id`s, and the embedded catalog, and clashing options are refused
 
 ### Requirement: BUILD-064 The offline pipeline cockpit and preview batch runner
-`cargo xtask cockpit` SHALL print living usage documentation and verified examples via `-h` or `--help` (and inside the HTML report), validate schema-v2 pipeline JSON (`BUILD-063`), parse probe rows from `docs/stages/manifest.txt`, index existing PNG headers and text reports across preview and stage directories, and write a single-file offline `index.html` containing a live switch simulator, side-by-side preview comparator, and searchable version-pin and probe ledger using `std`-only code without external assets or network requests (`CON-02`, `CON-06`). With `--run <world|drivers|stages|all>`, `--compare-seed`, or `--chain`, it SHALL plan and execute matching CPU preview, stage-manifest, and transect commands sequentially under the shared heavy lock (`BUILD-026`) before assembling the report.
+`cargo xtask cockpit` SHALL print living usage documentation and verified examples via `-h` or `--help` (and inside the HTML report), validate schema-v2 pipeline JSON (`BUILD-063`), parse probe rows from `docs/tools/stages/manifest.txt`, index existing PNG headers and text reports across preview and stage directories, and write a single-file offline `index.html` containing a live switch simulator, side-by-side preview comparator, and searchable version-pin and probe ledger using `std`-only code without external assets or network requests (`CON-02`, `CON-06`). With `--run <world|drivers|stages|all>`, `--compare-seed`, or `--chain`, it SHALL plan and execute matching CPU preview, stage-manifest, and transect commands sequentially under the shared heavy lock (`BUILD-026`) before assembling the report.
 
 Verify: A
 Status: active
@@ -1212,7 +1212,7 @@ Detail:
 - a pair needs the same crops of the same window (each box's place, size and H1 grid);
 - output: `target/review/look/<run>/`, 8-bit RGB PNG;
 - a sheet over BUILD-048's per-sheet limit is refused, naming it, its size and the limit, and is not written;
-- sheets are committed only at a gate, under `docs/stages/sheets/<gate>/`;
+- sheets are committed only at a gate, under `docs/tools/stages/sheets/<gate>/`;
 - the cockpit (BUILD-064) indexes `target/review/look/` with the stage sheets, the run as the variant;
 - the lanes: every switch row reported carries its look sheet pair beside its gate table.
 
@@ -1433,3 +1433,26 @@ Source: ADR 0130 point 6 (proposed, applied while proposed; owner 2026-11-27); A
 #### Scenario: The exit-cell diff check
 - **WHEN** an exit row of the active sprint file was added, removed or changed in its Item, Mode, Done when, Gate, Park or Lane cell since the merge base, and no added `## Changes` line `- YYYY-MM-DD | <cell> | <old -> new> | <who decided>` names its exit ID
 - **THEN** spec-lint names the exit and fails; a malformed added line fails; State and Result move without a line; a draft and a sprint file not at the base are not checked
+
+### Requirement: BUILD-077 The milestone archive command also moves a closed sprint's file, report and records
+`cargo xtask archive-milestone <M>` (BUILD-072) SHALL also move the sprint file `docs/milestones/<M>.md`, when its first `Status:` line starts with `closed`, together with its report `docs/milestones/<M>-report.md` and the files of its records folder `docs/milestones/<M>/`, into `docs/archive/<M>/`.
+
+Verify: A
+Status: active
+Source: ADR 0130 point 7 (proposed, applied on the owner's word of 2026-11-27); the combined sprint process plan's item 7 (lead, 2026-11-27); BUILD-072
+Detail:
+| From | To |
+|---|---|
+| `docs/milestones/<M>.md` | `docs/archive/<M>/<M>.md` |
+| `docs/milestones/<M>-report.md` (when it exists) | `docs/archive/<M>/<M>-report.md` |
+| `docs/milestones/<M>/<path>` (every file, at any depth) | `docs/archive/<M>/<path>` |
+- The old milestone form moves the same way (P3: `P3.md` and `P3-report.md`, once `P3.md`'s status says closed).
+- A sprint file that is not closed, or has no `Status:` line, stays with its report and records; the run prints why, and its log and spike steps still run.
+- A move onto an existing file, onto a file the same run writes (the log or spike archive), or onto another move's destination refuses the run before any write or move.
+- The emptied records folder is removed; `docs/milestones/` stays.
+- The live files that still name a moved path (`docs/` outside the archive, `openspec/specs/`, `.claude/`, `xtask/src/`, the root `*.md`) are printed as `<file>: <old path>`, not rewritten.
+- `--dry-run` prints the moves and writes nothing; a second run has nothing to move.
+
+#### Scenario: A closed sprint archived
+- **WHEN** the command runs for a closed sprint with a report, a record and a nested records file, while `docs/status.md` names the sprint file
+- **THEN** the four files are under `docs/archive/<M>/` byte for byte, the records folder is gone, `docs/status.md` is printed and unchanged, and a second run moves nothing

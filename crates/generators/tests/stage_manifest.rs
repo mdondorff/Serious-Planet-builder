@@ -1,6 +1,6 @@
 //! Tier A, BUILD-047, TEST-103, TEST-104 (briefing item 18, PR 2): the committed stage manifest. A small fixture, a compact landmass of 24 cells a face edge, runs the new chain through the production
 //! functions (the rounds, H1, the sediment pass) with a `SheetProbe` installed; every stage's field gives a line of the probe's numbers (cells, percentiles, the data hash, the stage's numbers) and the lines
-//! are `docs/stages/manifest.txt`. The test fails when the file is not what the run produces, naming the stage, the field and the first differing column; `cargo xtask stages --update` (the variable
+//! are `docs/tools/stages/manifest.txt`. The test fails when the file is not what the run produces, naming the stage, the field and the first differing column; `cargo xtask stages --update` (the variable
 //! `PLANET_UPDATE_STAGES=1`) rewrites it. The sheets go to `target/review/stages/ci/`, where CI picks them up as an artifact. The data is hashed, never the PNG bytes.
 
 use planet_generators::bake::carve::CarveParams;
@@ -39,7 +39,7 @@ fn repo() -> PathBuf {
 }
 
 fn manifest_path() -> PathBuf {
-    repo().join("docs").join("stages").join("manifest.txt")
+    repo().join("docs").join("tools").join("stages").join("manifest.txt")
 }
 
 /// The fixture landmass: a cap of the cube at 24 cells a face edge on a small body, with a sea on its edge.
@@ -192,7 +192,7 @@ fn the_manifest_is_the_run_of_the_fixture() {
     }
     let want = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}; run `cargo xtask stages --update`", path.display()));
     if let Some(d) = first_difference(&want.replace("\r\n", "\n"), &r.lines) {
-        panic!("the stage manifest is stale: {d}. If the change is meant, run `cargo xtask stages --update` and commit docs/stages/manifest.txt.");
+        panic!("the stage manifest is stale: {d}. If the change is meant, run `cargo xtask stages --update` and commit docs/tools/stages/manifest.txt.");
     }
     // The sheets are there for the artifact.
     assert!(dir.join("round-00-z.png").is_file() && dir.join("h1-q.png").is_file() && dir.join("pit-spreading-delta.png").is_file());

@@ -1,11 +1,11 @@
 //! `cargo xtask k7-layout` (BUILD-052): the layout report of K7. Runs the `k7_layout` example of `planet-cache` (the fixture's tile layout against an alternative), prints its `LAYOUT` lines and compares the p99 and the
-//! maximum of the all-cell and line-cell rows with `docs/gates/k7-layout-baseline.txt`. A figure above twice the baseline prints `REVIEW`. The exit status is 0 either way: the report informs the change's review.
+//! maximum of the all-cell and line-cell rows with `docs/tools/gates/k7-layout-baseline.txt`. A figure above twice the baseline prints `REVIEW`. The exit status is 0 either way: the report informs the change's review.
 //! `--write-baseline` writes the current lines as the baseline. Prepush runs it when the diff touches K7.
 
 use crate::util::{capture, Res};
 use std::path::Path;
 
-pub const BASELINE: &str = "docs/gates/k7-layout-baseline.txt";
+pub const BASELINE: &str = "docs/tools/gates/k7-layout-baseline.txt";
 
 /// Whether a changed path is one of the K7 files whose change the report covers.
 pub fn touches_k7(path: &str) -> bool {

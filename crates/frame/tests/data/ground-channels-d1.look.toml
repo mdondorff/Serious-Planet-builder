@@ -1,5 +1,5 @@
 # A sample ground look on the baked channels (SPIKE-100 D1, material thresholds; slice 2b PR 3): a proposal for the owner's review, not a decision, and not the default. Every other table is the Earth default.
-# Use: `planet editor --store <dir> --erosion on --channels on --look docs/looks/ground-channels-d1.look.toml`, then F8 switches between the default ground look and this one. Without `--channels on` the two
+# Use: `planet editor --store <dir> --erosion on --channels on --look crates/frame/tests/data/ground-channels-d1.look.toml`, then F8 switches between the default ground look and this one. Without `--channels on` the two
 # driver inputs below read the neutral values (soil 1 m, moisture 0.5) and the picture is not what this file is for.
 #
 # The inputs (LOOK-008): `slope_cos` is the cosine of the slope; `soil_depth` is the deposited depth of the layer in metres (the soil code of the driver block, GEN-119: about 0.03 m a step,

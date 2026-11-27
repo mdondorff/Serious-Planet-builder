@@ -4,9 +4,12 @@
 //!   order (an existing archive's entries merged in), then deleted.
 //! - The rows of `docs/spikes.md`'s index whose status starts with `closed` move to `docs/archive/<M>/spikes.md` (appended to an existing table).
 //! - The pointers in the headers of `docs/log.md` and `docs/spikes.md` are added when missing, so a second run adds none.
+//! - A closed sprint file `docs/milestones/<M>.md` (its `Status:` line starts with `closed`), its report `<M>-report.md` and its records folder
+//!   `docs/milestones/<M>/` move into `docs/archive/<M>/` (BUILD-077), the folder's files at their paths below it. A sprint file that is not
+//!   closed stays, with its report and records, and the run says so. The live files that still name a moved path are listed, not rewritten.
 //!
-//! Every new file text is computed before anything is written; a malformed fragment or a missing header sentence refuses the run. Nothing else is
-//! deleted: no change archive, no image, no ADR. `--dry-run` prints the plan and writes nothing. An existing log archive is rewritten as its header
+//! Every new file text and every move is computed before anything is written; a malformed fragment, a missing header sentence or a move onto an
+//! existing file refuses the run. Nothing else is deleted: no change archive, no image, no ADR. `--dry-run` prints the plan and writes nothing. An existing log archive is rewritten as its header
 //! (the lines before its first entry) and its entries; files are written with LF line ends (`.gitattributes` keeps the docs LF).
 
 use crate::logcmd::{merge, parse_fragment, parse_log, read_fragments, Entry, FRAGMENT_DIR};
@@ -26,6 +29,83 @@ pub struct Plan {
     /// The log entries moved and the spike ids moved.
     pub entries: usize,
     pub spikes: Vec<String>,
+    /// (from, to) of the sprint file, its report and its records, relative to the root (BUILD-077).
+    pub moves: Vec<(String, String)>,
+    /// Why the sprint file stays: it exists and is not closed (its `Status:` line).
+    pub kept: Option<String>,
+    /// The live files that still name a moved path, as `<file>: <old path>`.
+    pub stale: Vec<String>,
+}
+
+/// The folders a moved path may still be named in: `docs/` outside the archive, the specs, `.claude/` and `xtask/src/` (and the root `*.md`).
+const LIVE: [&str; 4] = ["docs", "openspec/specs", ".claude", "xtask/src"];
+
+/// Every file under `dir` (relative to `root`, `/`-separated), sorted.
+fn files_under(root: &Path, dir: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut stack = vec![dir.to_string()];
+    while let Some(d) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(root.join(&d)) else { continue };
+        for e in rd.flatten() {
+            let rel = format!("{d}/{}", e.file_name().to_string_lossy());
+            if e.path().is_dir() {
+                stack.push(rel);
+            } else {
+                out.push(rel);
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+/// (from, to) moves, and why the sprint file stays when it does.
+type SprintMoves = (Vec<(String, String)>, Option<String>);
+
+/// The moves of a closed sprint `m` into `docs/archive/<m>/` (its file, its report, its records), or why its sprint file stays.
+fn sprint_moves(root: &Path, m: &str) -> Res<SprintMoves> {
+    let file = format!("docs/milestones/{m}.md");
+    let Ok(text) = std::fs::read_to_string(root.join(&file)) else { return Ok((Vec::new(), None)) };
+    let status = text.lines().find_map(|l| l.strip_prefix("Status:")).map(str::trim).unwrap_or("");
+    if !status.starts_with("closed") {
+        let shown: String = status.chars().take(60).collect();
+        let shown = if shown.is_empty() { "none".to_string() } else { shown };
+        return Ok((Vec::new(), Some(format!("{file} is not closed (Status: {shown})"))));
+    }
+    let to = format!("docs/archive/{m}");
+    let mut moves = vec![(file, format!("{to}/{m}.md"))];
+    let report = format!("docs/milestones/{m}-report.md");
+    if root.join(&report).is_file() {
+        moves.push((report, format!("{to}/{m}-report.md")));
+    }
+    let records = format!("docs/milestones/{m}");
+    for f in files_under(root, &records) {
+        let below = f[records.len()..].to_string();
+        moves.push((f, format!("{to}{below}")));
+    }
+    if let Some((from, to)) = moves.iter().find(|(_, to)| root.join(to).exists()) {
+        return Err(format!("archive-milestone: {from} would move onto the existing {to}; move or remove {to} first (BUILD-077)"));
+    }
+    Ok((moves, None))
+}
+
+/// The live files (not moved, not in the archive) that name a moved path, as `<file>: <old path>`; the records folder is matched as `<folder>/`.
+fn stale_pointers(root: &Path, m: &str, moves: &[(String, String)]) -> Vec<String> {
+    let names = [format!("docs/milestones/{m}.md"), format!("docs/milestones/{m}-report.md"), format!("docs/milestones/{m}/")];
+    let moved: Vec<&str> = moves.iter().map(|(f, _)| f.as_str()).collect();
+    let names: Vec<&String> = names.iter().filter(|n| moved.iter().any(|f| f.starts_with(n.as_str()))).collect();
+    let mut files: Vec<String> = LIVE.iter().flat_map(|d| files_under(root, d)).collect();
+    if let Ok(rd) = std::fs::read_dir(root) {
+        files.extend(
+            rd.flatten().filter(|e| e.path().is_file()).map(|e| e.file_name().to_string_lossy().to_string()).filter(|n| n.ends_with(".md")),
+        );
+    }
+    let mut out = Vec::new();
+    for f in files.iter().filter(|f| !f.starts_with("docs/archive/") && !moved.contains(&f.as_str())) {
+        let Ok(t) = std::fs::read_to_string(root.join(f)) else { continue };
+        out.extend(names.iter().filter(|n| t.contains(n.as_str())).map(|n| format!("{f}: {n}")));
+    }
+    out
 }
 
 /// A milestone name: letters, digits and `-` only (it becomes a folder name).
@@ -147,6 +227,21 @@ pub fn plan(root: &Path, m: &str, before: Option<&str>) -> Res<Plan> {
         }
         out.writes.push(("docs/spikes.md".into(), kept.join("\n") + if spikes_md.ends_with('\n') { "\n" } else { "" }));
     }
+
+    // ---- the sprint file, its report and its records (BUILD-077)
+    let (moves, kept) = sprint_moves(root, m)?;
+    // a move onto a file this run writes, or onto another move's destination, would overwrite it
+    let mut seen = std::collections::HashSet::new();
+    for (from, to) in &moves {
+        if out.writes.iter().any(|(w, _)| w == to) || !seen.insert(to.as_str()) {
+            return Err(format!(
+                "archive-milestone: {from} would move onto {to}, which this run also writes or moves; rename it first (BUILD-077)"
+            ));
+        }
+    }
+    out.stale = stale_pointers(root, m, &moves);
+    out.moves = moves;
+    out.kept = kept;
     Ok(out)
 }
 
@@ -162,6 +257,25 @@ pub fn apply(root: &Path, p: &Plan) -> Res {
     for name in &p.deletes {
         let f = root.join(FRAGMENT_DIR).join(name);
         std::fs::remove_file(&f).map_err(|e| format!("{}: {e}", f.display()))?;
+    }
+    for (from, to) in &p.moves {
+        let dest = root.join(to);
+        if let Some(dir) = dest.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        }
+        std::fs::rename(root.join(from), &dest).map_err(|e| format!("{from} -> {to}: {e}"))?;
+    }
+    // the records folders the moves emptied, deepest first, never `docs/milestones/` itself
+    let milestones = root.join("docs/milestones");
+    let mut dirs: Vec<std::path::PathBuf> = p.moves.iter().filter_map(|(f, _)| root.join(f).parent().map(Path::to_path_buf)).collect();
+    dirs.sort_by_key(|d| std::cmp::Reverse(d.components().count()));
+    dirs.dedup();
+    for d in dirs {
+        let mut d = d.as_path();
+        while d != milestones && d.starts_with(&milestones) && std::fs::remove_dir(d).is_ok() {
+            let Some(up) = d.parent() else { break };
+            d = up;
+        }
     }
     Ok(())
 }
@@ -190,11 +304,12 @@ pub fn run(root: &Path, args: &[String]) -> Res {
     let m = m.ok_or(usage)?;
     let p = plan(root, &m, before.as_deref())?;
     println!(
-        "archive-milestone {m}: {} log entries from {} fragments, {} spike rows ({}){}",
+        "archive-milestone {m}: {} log entries from {} fragments, {} spike rows ({}), {} sprint files moved{}",
         p.entries,
         p.deletes.len(),
         p.spikes.len(),
         p.spikes.join(", "),
+        p.moves.len(),
         if dry { "; dry run, nothing written" } else { "" }
     );
     for (path, _) in &p.writes {
@@ -203,7 +318,16 @@ pub fn run(root: &Path, args: &[String]) -> Res {
     for name in &p.deletes {
         println!("  delete {FRAGMENT_DIR}/{name}");
     }
-    if p.writes.is_empty() && p.deletes.is_empty() {
+    for (from, to) in &p.moves {
+        println!("  move   {from} -> {to}");
+    }
+    if let Some(why) = &p.kept {
+        println!("  kept   {why}: it, its report and its records stay");
+    }
+    for s in &p.stale {
+        println!("  still names a moved path (update it): {s}");
+    }
+    if p.writes.is_empty() && p.deletes.is_empty() && p.moves.is_empty() {
         println!("  nothing to archive");
     }
     if !dry {
@@ -406,5 +530,140 @@ SPIKE-11 was archived by hand: | SPIKE-11 | Eleven | closed 01-25: no | w |
         assert!(err.contains("docs/spikes.md"), "{err}");
         let _ = std::fs::remove_dir_all(&d);
         let _ = std::fs::remove_dir_all(&e);
+    }
+
+    /// Writes `text` at `p` under `dir`, creating the folders.
+    fn put(dir: &Path, p: &str, text: &str) {
+        let f = dir.join(p);
+        std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+        std::fs::write(f, text).unwrap();
+    }
+
+    // spec: BUILD-077, TEST-164
+    #[test]
+    fn a_closed_sprint_moves_its_file_report_and_records_into_the_archive_once_and_names_the_live_pointers() {
+        let d = tmp("sprint");
+        fixture(&d);
+        put(&d, "docs/milestones/S1.md", "# S1: a sprint\nStatus: closed (owner, 2026-02-10)\nOpened: 2026-02-03\n");
+        put(&d, "docs/milestones/S1-report.md", "# S1 report\n");
+        put(&d, "docs/milestones/S1/E1-record.md", "# E1 record\n");
+        put(&d, "docs/milestones/S1/sheets/e1.txt", "crop table\n");
+        put(&d, "docs/milestones/S2.md", "# S2: the next one\nStatus: draft (lead, 2026-02-10)\n");
+        put(&d, "docs/status.md", "Queue: `docs/milestones/S1.md`, records in `docs/milestones/S1/`.\n");
+        put(&d, "docs/archive/S0/S0.md", "an older sprint naming `docs/milestones/S1.md`\n");
+        let p = plan(&d, "S1", Some("2026-01-01")).unwrap();
+        let to: Vec<&str> = p.moves.iter().map(|(_, t)| t.as_str()).collect();
+        assert_eq!(
+            to,
+            vec!["docs/archive/S1/S1.md", "docs/archive/S1/S1-report.md", "docs/archive/S1/E1-record.md", "docs/archive/S1/sheets/e1.txt"]
+        );
+        assert_eq!(p.kept, None);
+        // a live file naming a moved path is listed; the archive and the moved files are not
+        assert_eq!(p.stale, vec!["docs/status.md: docs/milestones/S1.md".to_string(), "docs/status.md: docs/milestones/S1/".to_string()]);
+        apply(&d, &p).unwrap();
+        let r = |f: &str| std::fs::read_to_string(d.join(f)).unwrap();
+        assert_eq!(r("docs/archive/S1/S1.md"), "# S1: a sprint\nStatus: closed (owner, 2026-02-10)\nOpened: 2026-02-03\n");
+        assert_eq!(r("docs/archive/S1/sheets/e1.txt"), "crop table\n");
+        assert!(!d.join("docs/milestones/S1.md").exists() && !d.join("docs/milestones/S1-report.md").exists());
+        assert!(!d.join("docs/milestones/S1").exists(), "the emptied records folder is removed");
+        assert!(d.join("docs/milestones/S2.md").exists() && d.join("docs/milestones").is_dir(), "the next sprint and the folder stay");
+        assert_eq!(
+            r("docs/status.md"),
+            "Queue: `docs/milestones/S1.md`, records in `docs/milestones/S1/`.\n",
+            "pointers are listed, not rewritten"
+        );
+        // a second run moves nothing
+        let again = plan(&d, "S1", Some("2026-01-01")).unwrap();
+        assert!(again.moves.is_empty() && again.stale.is_empty() && again.kept.is_none(), "{again:?}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: BUILD-077, TEST-164
+    #[test]
+    fn a_sprint_not_closed_stays_an_old_format_file_moves_once_closed_and_a_move_onto_an_existing_file_is_refused_before_any_write() {
+        let d = tmp("sprint2");
+        fixture(&d);
+        // P3's form: an old milestone file, a report, no records folder; `active, closing` is not closed
+        put(&d, "docs/milestones/P3.md", "# P3: rivers\n\nStatus: active, closing (lead, 2026-11-27)\nRule: one exit per row.\n");
+        put(&d, "docs/milestones/P3-report.md", "# P3 report\n\nStatus: closure report\n");
+        let p = plan(&d, "P3", None).unwrap();
+        assert!(p.moves.is_empty(), "{:?}", p.moves);
+        assert_eq!(p.kept.as_deref(), Some("docs/milestones/P3.md is not closed (Status: active, closing (lead, 2026-11-27))"));
+        assert!(p.entries == 3 && p.spikes.len() == 2, "the log and spikes steps still run: {p:?}");
+        // once its status says closed, the file and the report move; the first `Status:` line is the file's
+        put(&d, "docs/milestones/P3.md", "# P3: rivers\n\nStatus: closed (owner, 2026-11-27)\nRule: one exit per row.\n");
+        let p = plan(&d, "P3", None).unwrap();
+        assert_eq!(
+            p.moves,
+            vec![
+                ("docs/milestones/P3.md".to_string(), "docs/archive/P3/P3.md".to_string()),
+                ("docs/milestones/P3-report.md".to_string(), "docs/archive/P3/P3-report.md".to_string())
+            ]
+        );
+        // a destination that exists refuses the whole run, and no file changes
+        put(&d, "docs/archive/P3/P3-report.md", "an earlier copy\n");
+        let snapshot = |d: &Path| {
+            let mut v: Vec<(String, String)> =
+                files_under(d, "docs").into_iter().map(|f| (f.clone(), std::fs::read_to_string(d.join(&f)).unwrap())).collect();
+            v.sort();
+            v
+        };
+        let before = snapshot(&d);
+        let e = run(&d, &["P3".into()]).unwrap_err();
+        assert!(e.contains("docs/milestones/P3-report.md") && e.contains("docs/archive/P3/P3-report.md"), "{e}");
+        assert_eq!(snapshot(&d), before, "a refused run changes no file");
+        // a sprint file without a Status line is not closed
+        put(&d, "docs/milestones/S9.md", "# S9\n");
+        assert_eq!(plan(&d, "S9", None).unwrap().kept.as_deref(), Some("docs/milestones/S9.md is not closed (Status: none)"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: BUILD-077, TEST-164
+    #[test]
+    fn a_dry_run_moves_nothing_and_a_record_named_like_a_file_the_run_writes_or_moves_is_refused_before_any_write() {
+        let d = tmp("sprint3");
+        fixture(&d);
+        put(&d, "docs/milestones/S1.md", "# S1\nStatus: closed (owner, 2026-02-10)\n");
+        put(&d, "docs/milestones/S1/E1-record.md", "# E1 record\n");
+        put(&d, "README.md", "See `docs/milestones/S1.md`.\n");
+        put(&d, ".claude/skills/x/SKILL.md", "records: `docs/milestones/S1/`\n");
+        let snapshot = |d: &Path| {
+            let mut v: Vec<(String, String)> = ["docs", ".claude"]
+                .iter()
+                .flat_map(|r| files_under(d, r))
+                .chain(std::iter::once("README.md".to_string()))
+                .map(|f| (f.clone(), std::fs::read_to_string(d.join(&f)).unwrap()))
+                .collect();
+            v.sort();
+            v
+        };
+        // the root *.md and .claude/ pointers are named
+        let p = plan(&d, "S1", None).unwrap();
+        assert_eq!(
+            p.stale,
+            vec![".claude/skills/x/SKILL.md: docs/milestones/S1/".to_string(), "README.md: docs/milestones/S1.md".to_string()]
+        );
+        // a dry run with moves changes no file
+        let before = snapshot(&d);
+        run(&d, &["S1".into(), "--dry-run".into()]).unwrap();
+        assert_eq!(snapshot(&d), before, "a dry run moves nothing");
+        // a record named like the log archive this run writes is refused, and no file changes
+        put(&d, "docs/milestones/S1/log.md", "a record named log.md\n");
+        let before = snapshot(&d);
+        let e = run(&d, &["S1".into()]).unwrap_err();
+        assert!(e.contains("docs/milestones/S1/log.md") && e.contains("docs/archive/S1/log.md"), "{e}");
+        assert_eq!(snapshot(&d), before, "a refused run changes no file");
+        std::fs::remove_file(d.join("docs/milestones/S1/log.md")).unwrap();
+        // a record named like the sprint file moves onto the sprint file's destination: refused
+        put(&d, "docs/milestones/S1/S1.md", "a copy\n");
+        let e = plan(&d, "S1", None).unwrap_err();
+        assert!(e.contains("docs/milestones/S1/S1.md") && e.contains("docs/archive/S1/S1.md"), "{e}");
+        std::fs::remove_file(d.join("docs/milestones/S1/S1.md")).unwrap();
+        // the run applied through `run`, then a second `run` has nothing to move
+        run(&d, &["S1".into()]).unwrap();
+        assert!(d.join("docs/archive/S1/E1-record.md").exists() && !d.join("docs/milestones/S1").exists());
+        let again = plan(&d, "S1", None).unwrap();
+        assert!(again.moves.is_empty() && again.writes.is_empty() && again.deletes.is_empty(), "{again:?}");
+        let _ = std::fs::remove_dir_all(&d);
     }
 }
