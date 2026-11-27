@@ -1,0 +1,6 @@
+r1h-kw-chain: final D8 channel cells over 75 km2 in the box 113223
+  in the H1 channel zone of r1h-kw-chain: 78.1 %
+  in the H1 channel zone of r1h-def-chain: 78.1 %
+r1h-kk-chain: final D8 channel cells over 75 km2 in the box 114236
+  in the H1 channel zone of r1h-kk-chain: 76.7 %
+  in the H1 channel zone of r1h-kw-chain: 77.0 %

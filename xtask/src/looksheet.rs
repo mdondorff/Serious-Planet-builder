@@ -1,9 +1,10 @@
-//! `cargo xtask look-sheet RUN [--against DEFAULTS] [--az A,B] [--out DIR]` (BUILD-067): the look sheets of a chain run's crop store (the `look_sheet` example of `planet-cache`).
+//! `cargo xtask look-sheet RUN [--against DEFAULTS | --steps] [--az A,B] [--out DIR]` (BUILD-067, BUILD-071): the look sheets of a crop store (the `look_sheet` example of
+//! `planet-cache`); `--steps` draws the run's stages each beside its step from the previous stage.
 
 use crate::util::{run, Res};
 use std::path::Path;
 
-const USAGE: &str = "usage: cargo xtask look-sheet RUN [--against DEFAULTS] [--az A,B] [--out DIR]";
+const USAGE: &str = "usage: cargo xtask look-sheet RUN [--against DEFAULTS | --steps] [--az A,B] [--out DIR]";
 
 /// The `cargo` arguments of the command.
 pub fn plan(args: &[String]) -> Result<Vec<String>, String> {
@@ -19,9 +20,18 @@ pub fn plan(args: &[String]) -> Result<Vec<String>, String> {
                 }
                 tail.extend([a.clone(), v.clone()]);
             }
+            "--steps" => {
+                if tail.contains(a) {
+                    return Err(format!("{a} given twice ({USAGE})"));
+                }
+                tail.push(a.clone());
+            }
             other if other.starts_with("--") => return Err(format!("unknown option '{other}' ({USAGE})")),
             other => runs.push(other.to_string()),
         }
+    }
+    if tail.iter().any(|a| a == "--steps") && tail.iter().any(|a| a == "--against") {
+        return Err(format!("--steps draws one run's stages; a pair is --against's, not both ({USAGE})"));
     }
     let run_dir = match &runs[..] {
         [r] => r.clone(),
@@ -62,5 +72,14 @@ mod tests {
         assert!(plan(&s(&["a", "--against", "b", "--against", "c"])).unwrap_err().contains("twice"));
         assert!(plan(&s(&["a", "--step", "3"])).unwrap_err().contains("unknown option '--step'"));
         assert!(plan(&s(&["a", "--az"])).unwrap_err().contains("needs a value"));
+    }
+
+    // spec: BUILD-071, TEST-158
+    #[test]
+    fn the_step_rows_pass_steps_to_the_example_and_refuse_a_pair() {
+        let c = plan(&s(&["runs/b", "--steps", "--az", "315"])).unwrap();
+        assert_eq!(&c[8..], &s(&["runs/b", "--steps", "--az", "315"])[..]);
+        assert!(plan(&s(&["runs/b", "--steps", "--against", "runs/def"])).unwrap_err().contains("not both"));
+        assert!(plan(&s(&["runs/b", "--steps", "--steps"])).unwrap_err().contains("twice"));
     }
 }

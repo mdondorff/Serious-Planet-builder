@@ -1,0 +1,6 @@
+f1-kw-chain: 7087 cols on 954 reaches, 31977 raster cells (3255 km)
+  deepest final cut over  10 m:  7087 cols on  954 reaches (31977 raster cells)
+  deepest final cut over  25 m:  1613 cols on  336 reaches (11942 raster cells)
+  deepest final cut over  50 m:    39 cols on   29 reaches (629 raster cells)
+  deepest final cut over 100 m:     0 cols on    0 reaches (0 raster cells)
+  deepest final cut over 150 m:     0 cols on    0 reaches (0 raster cells)

@@ -1,0 +1,18 @@
+r1h-def-chain: 58669 land profiles; with a cut (> 0.5 m under S0 at the floor) 37607 (64.1 %)
+  top width rim to rim: p10 1.75 / p50 6.25 / p90 14.85 L cells (178 / 636 / 1512 m); a run reaching 24 cells: 0.0 %
+  top width under 3 L cells: 21.5 % of the cut curve length
+  cuts deeper than 10 m (47.0 % of the cut length): top width under 3 cells 2.7 %, p50 width 8.75 cells
+  cuts deeper than 20 m (30.1 % of the cut length): top width under 3 cells 0.7 %, p50 width 9.50 cells
+  cuts deeper than 50 m (11.2 % of the cut length): top width under 3 cells 0.0 %, p50 width 10.50 cells
+r1h-mm-chain: 58669 land profiles; with a cut (> 0.5 m under S0 at the floor) 37824 (64.5 %)
+  top width rim to rim: p10 1.75 / p50 4.25 / p90 7.50 L cells (178 / 433 / 764 m); a run reaching 24 cells: 0.0 %
+  top width under 3 L cells: 23.8 % of the cut curve length
+  cuts deeper than 10 m (44.8 % of the cut length): top width under 3 cells 4.0 %, p50 width 5.25 cells
+  cuts deeper than 20 m (28.2 % of the cut length): top width under 3 cells 2.8 %, p50 width 5.00 cells
+  cuts deeper than 50 m (9.9 % of the cut length): top width under 3 cells 3.7 %, p50 width 4.25 cells
+r1h-kw-chain: 58669 land profiles; with a cut (> 0.5 m under S0 at the floor) 37435 (63.8 %)
+  top width rim to rim: p10 1.75 / p50 5.50 / p90 16.50 L cells (178 / 560 / 1680 m); a run reaching 24 cells: 0.0 %
+  top width under 3 L cells: 23.1 % of the cut curve length
+  cuts deeper than 10 m (45.5 % of the cut length): top width under 3 cells 1.4 %, p50 width 11.50 cells
+  cuts deeper than 20 m (29.2 % of the cut length): top width under 3 cells 0.4 %, p50 width 13.00 cells
+  cuts deeper than 50 m (11.2 % of the cut length): top width under 3 cells 0.0 %, p50 width 16.75 cells
