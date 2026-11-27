@@ -1,1 +1,0 @@
-- 2026-11-27 pr-body-stamps (lead, the sprint process plan item 6): `pr-body-check` also needs `Numerics:` and `Spec-Guardian:` lines by path on code PRs, `Research-Review:` and `Owner-Look:` on record PRs, `Sprint: <M>` while a sprint is active, and runs `plan --pr` (BUILD-075, TEST-162)

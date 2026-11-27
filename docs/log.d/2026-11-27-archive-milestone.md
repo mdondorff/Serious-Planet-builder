@@ -1,1 +1,0 @@
-- 2026-11-27 archive-milestone (lead, the P3 closure plan S1): `cargo xtask archive-milestone <M>` merges the log fragments into the milestone archive, moves the closed spike rows and adds the header pointers, with a dry run; nothing else deleted (BUILD-072, TEST-159)

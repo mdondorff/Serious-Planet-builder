@@ -1,1 +1,0 @@
-- 2026-11-27 docs-restructure (owner, the docs strategy): the tool-owned files in docs/tools/ (gate ledger, K7 baseline, stage manifest, CI history, lanes), the perf verdicts in docs/archive/M5-M7/perf/, the sample look in crates/frame/tests/data/; every reader rewritten; docs/README.md rewritten as one page
