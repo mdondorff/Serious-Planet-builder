@@ -1428,7 +1428,7 @@ Source: ADR 0130 point 6 (proposed, applied while proposed; owner 2026-11-27); A
 
 #### Scenario: The research package header
 - **WHEN** a `spikes/<name>/results/results.md` opened on or after 2026-11-27 (its `Opened:` date) or titled `# SPIKE-<n>` with n from 145 lacks a value on any of `Opened`, `Exit`, `Question`, `Hypothesis`, `Constraints`, `Out of scope`, `Evaluation (quantitative)`, `Evaluation (visual)`, `Falsifier`, `Code location`; or, once it has a `Decision:` line, lacks `Finding:`, has a decision other than continue, revise, reject or promote, or promotes without `Research-Review: ready (...)`
-- **THEN** spec-lint names the file and the label and fails; older spikes are exempt
+- **THEN** spec-lint names the file and the label and fails; older spikes are exempt; a package without a `Decision:` line is read as open, so a close that omits it is not caught
 
 #### Scenario: The exit-cell diff check
 - **WHEN** an exit row of the active sprint file was added, removed or changed in its Item, Mode, Done when, Gate, Park or Lane cell since the merge base, and no added `## Changes` line `- YYYY-MM-DD | <cell> | <old -> new> | <who decided>` names its exit ID

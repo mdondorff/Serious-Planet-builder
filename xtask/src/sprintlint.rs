@@ -59,7 +59,7 @@ pub fn file_errors(files: &[(String, String)]) -> Vec<String> {
 }
 
 /// The table of `docs/routing.md`'s `## Rules` section: every row needs a `Check` cell (a check's name, or `judgement`). The section must be a
-/// table with the columns `#`, `Rule` and `Check`.
+/// table with the columns `#` and `Check` (beside the rule's text).
 pub fn routing_errors(text: &str) -> Vec<String> {
     let body: Vec<&str> = text.lines().skip_while(|l| !l.starts_with("## Rules")).skip(1).take_while(|l| !l.starts_with("## ")).collect();
     if body.is_empty() {
@@ -71,7 +71,7 @@ pub fn routing_errors(text: &str) -> Vec<String> {
         .map(|l| l.trim().trim_matches('|').split('|').map(|c| c.trim().to_string()).collect())
         .collect();
     let Some(head) = rows.first() else {
-        return vec!["docs/routing.md: `## Rules` is not a table with the columns #, Rule, Check (BUILD-076)".into()];
+        return vec!["docs/routing.md: `## Rules` is not a table with the columns # and Check (BUILD-076)".into()];
     };
     let low: Vec<String> = head.iter().map(|h| h.to_lowercase()).collect();
     let (Some(id), Some(check)) = (low.iter().position(|h| h == "#"), low.iter().position(|h| h == "check")) else {
@@ -86,7 +86,14 @@ pub fn routing_errors(text: &str) -> Vec<String> {
             ));
         }
     }
-    let loose = body.iter().filter(|l| l.split('.').next().is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))).count();
+    // `14. A rule` is a numbered rule line; `10.5 s` is not
+    let loose = body
+        .iter()
+        .filter(|l| {
+            let digits = l.chars().take_while(char::is_ascii_digit).count();
+            digits > 0 && l[digits..].starts_with(". ")
+        })
+        .count();
     if loose > 0 {
         e.push(format!("docs/routing.md: {loose} numbered rule lines outside the `## Rules` table: every rule is a table row with a Check cell (BUILD-076)"));
     }
@@ -290,6 +297,10 @@ mod tests {
         assert!(routing_errors(&empty).iter().any(|m| m.contains("rule 1") && m.contains("Check cell is empty")));
         let list = "## Rules\n1. Orders in files.\n2. Exit items.\n";
         assert!(routing_errors(list).iter().any(|m| m.contains("not a table")));
+        assert!(
+            routing_errors(&ROUTING.replace("\n\n## Git", "\n10.5 s is not a rule\n\n## Git")).is_empty(),
+            "a decimal is not a numbered rule"
+        );
         let mixed = ROUTING.replace("\n\n## Git", "\n14. A loose rule.\n\n## Git");
         assert!(routing_errors(&mixed).iter().any(|m| m.contains("1 numbered rule lines outside")), "{:?}", routing_errors(&mixed));
         assert!(routing_errors(&ROUTING.replace("| Check |", "| Note |")).iter().any(|m| m.contains("columns # and Check")));
@@ -342,6 +353,8 @@ mod tests {
         assert!(change_errors("S-Test", Some(SPRINT), &logged).is_empty(), "{:?}", change_errors("S-Test", Some(SPRINT), &logged));
         let state = SPRINT.replace("| explorer | running | - |", "| explorer | done 2026-12-03 | bakes |");
         assert!(change_errors("S-Test", Some(SPRINT), &state).is_empty(), "State and Result move without a line");
+        let removed: String = SPRINT.lines().filter(|l| !l.starts_with("| E3 |")).map(|l| format!("{l}\n")).collect();
+        assert!(change_errors("S-Test", Some(SPRINT), &removed).iter().any(|m| m.contains("exit E3")), "a removed row needs a line too");
         let added = SPRINT.replacen("| E4 |", "| E5 | New | X | x | fun: BUILD-001 (2026-12-02) | - | lead | open | - |\n| E4 |", 1);
         assert!(change_errors("S-Test", Some(SPRINT), &added).iter().any(|m| m.contains("exit E5")));
         let malformed = gate.replace(
