@@ -303,12 +303,23 @@ pub struct RoundCache {
     budget: Option<usize>,
     /// While a solve runs: the tick of the catchment memo from which its entries are pinned.
     pin: Option<u64>,
+    /// The most cells of catchments in flight at once (GEN-192; none: the whole queue). The largest-first queue runs in chunks of at most this many cells (a larger catchment alone),
+    /// each chunk written back before the next gathers; a catchment's round reads and writes only its own cells, so the bits do not change.
+    inflight_cells: Option<usize>,
 }
 
 impl RoundCache {
     /// A cache that keeps nothing between solves (GEN-149): the partitioned rounds of a build that is not edited again, at the memory of one solve.
     pub fn without_memory() -> RoundCache {
         RoundCache { part: PartCache::without_memory(), forget: true, ..RoundCache::default() }
+    }
+
+    /// Caps the catchments in flight at `cells` cells (GEN-192, see `inflight_cells`). In a cache that keeps nothing ([`RoundCache::without_memory`]), a chunk's heights are dropped once
+    /// written back, so the solve holds at most about `cells` carved heights at once.
+    pub fn with_inflight_cap(mut self, cells: usize) -> RoundCache {
+        assert!(cells > 0, "a cap of at least one cell");
+        self.inflight_cells = Some(cells);
+        self
     }
 
     /// A cache with a budget of `bytes` for everything it holds (GEN-153, A3 6.6): after every round of a solve and at its end what is over it is evicted, previous results first, then the tile
@@ -431,20 +442,57 @@ pub fn solve_rounds_memo(
         let cuts = cut_in(Some(grid), &r);
         let mut queue: Vec<usize> = (0..cuts.members.len()).filter(|&k| cuts.members[k].len() > 1).collect();
         queue.sort_by_key(|&k| (std::cmp::Reverse(cuts.members[k].len()), k));
-        let zr: &[f64] = z;
-        let held = &cache.catchments;
-        let done = par::map(par, queue.len(), &|q| {
-            let k = queue[q];
-            let mut inp = gather_with(grid, zr, outlet, &r, &cuts, &taper, drivers, p, k);
-            let key = catchment_key(grid, &cuts.members[k], &inp, p);
-            match held.peek(&key).filter(|v| v.len() == inp.z.len()) {
-                Some(v) => (key, Arc::clone(v), true),
-                None => {
-                    catchment_round(&mut inp, p, p.reroute_every);
-                    (key, Arc::new(inp.z), false)
+        // the chunks of the largest-first queue under the in-flight cap (one chunk without a cap)
+        let mut chunks: Vec<std::ops::Range<usize>> = Vec::new();
+        match cache.inflight_cells {
+            None => chunks.push(0..queue.len()),
+            Some(cap) => {
+                let (mut start, mut cells) = (0, 0usize);
+                for (i, &k) in queue.iter().enumerate() {
+                    let m = cuts.members[k].len();
+                    if i > start && cells + m > cap {
+                        chunks.push(start..i);
+                        (start, cells) = (i, 0);
+                    }
+                    cells += m;
+                }
+                if start < queue.len() {
+                    chunks.push(start..queue.len());
                 }
             }
-        });
+        }
+        let mut done = Vec::with_capacity(queue.len());
+        for ch in &chunks {
+            let zr: &[f64] = z;
+            let held = &cache.catchments;
+            let part = &queue[ch.clone()];
+            let got = par::map(par, part.len(), &|q| {
+                let k = part[q];
+                let mut inp = gather_with(grid, zr, outlet, &r, &cuts, &taper, drivers, p, k);
+                let key = catchment_key(grid, &cuts.members[k], &inp, p);
+                match held.peek(&key).filter(|v| v.len() == inp.z.len()) {
+                    Some(v) => (key, Arc::clone(v), true),
+                    None => {
+                        catchment_round(&mut inp, p, p.reroute_every);
+                        (key, Arc::new(inp.z), false)
+                    }
+                }
+            });
+            // a capped chunk is written back before the next one gathers (its cells are its own, so the next chunk reads the same inputs)
+            if cache.inflight_cells.is_some() {
+                for (&k, (_, zk, _)) in part.iter().zip(&got) {
+                    for (&c, &v) in cuts.members[k].iter().zip(zk.iter()) {
+                        z[c as usize] = v;
+                    }
+                }
+                // written back and, in a cache that keeps nothing, never memoised: the chunk's heights are dropped (the write loop below then writes nothing again)
+                if cache.forget {
+                    done.extend(got.into_iter().map(|(key, _, hit)| (key, Arc::new(Vec::new()), hit)));
+                    continue;
+                }
+            }
+            done.extend(got);
+        }
         let mut w = RoundWork {
             tiles: ps.tiles,
             tile_floods: ps.floods,

@@ -10,14 +10,14 @@ use planet_core::{Face, TangentWarp, Vec3};
 use planet_generators::bake::carve::CarveParams;
 use planet_generators::bake::channel_graph::{channels_from_graph, ChannelGraph};
 use planet_generators::bake::face::FaceSpec;
-use planet_generators::bake::flood::priority_flood_with;
-use planet_generators::bake::hydro::{hydrology, HydroParams};
+use planet_generators::bake::hydro::{hydrology_initiated, initiation_bits, HydroParams};
 use planet_generators::bake::k7::{k7_tile, K7Params, RegionField};
 use planet_generators::bake::lakes::lakes_from_hydro;
 use planet_generators::bake::metric::Metric;
+use planet_generators::bake::partition::{partitioned_route_weighted, PartCache};
 use planet_generators::bake::precision::{WorldPrecision, EPSILON_MAX_M};
-use planet_generators::bake::round::solve_rounds;
-use planet_generators::bake::route::{route_rules, RoundRules};
+use planet_generators::bake::round::{solve_rounds_memo, Drivers, RoundCache};
+use planet_generators::bake::route::RoundRules;
 use planet_generators::bake::tile::{tile_has_land, TileGrid, TileId};
 use planet_generators::bake::Grid;
 
@@ -31,6 +31,12 @@ use crate::layer_l::LTileSpec;
 pub const FACE_EDGE_CELLS: usize = 4;
 /// Local cells to a regional (H1) cell.
 pub const LOCAL_PER_REGIONAL: usize = 8;
+
+/// The tile of the region's partitioned rounds and route (GEN-143, GEN-192): a tile size changes no bit (G-PART), only what one step touches.
+pub const REGION_TILE: usize = 256;
+
+/// K5's catchments in flight, as a share of the region's cells that are not outlets (GEN-192 holds the value).
+pub const INFLIGHT_SHARE: f64 = 0.06;
 
 /// The runoff, open-water evaporation (both m/s) and discharge weight at a direction of land.
 pub type Climate<'a> = &'a (dyn Fn(Vec3) -> (f64, f64, f64) + Sync);
@@ -225,8 +231,12 @@ pub fn solve_region(spec: &RegionSpec, base: &(dyn Fn(Vec3) -> f64 + Sync)) -> R
     let stream = face_spec.stream();
     let mut zs = zb.clone();
     // The rounds' own narrowing guard asserts when a round lifts a summit past the binade the epsilon was chosen for: that is the same refusal as the check after them, returned as an error naming the cell.
+    // GEN-192: the partitioned rounds (GEN-143, the resident rounds' bits) with the catchments in flight capped and nothing kept, so the solve holds about a share of the land's carved heights
+    let land = outlet.iter().filter(|&&o| !o).count();
+    let cap = ((land as f64 * INFLIGHT_SHARE) as usize).max(1);
     let solved = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        solve_rounds(&grid, &mut zs, &outlet, &carve, spec.rounds, &spec.threads, stream)
+        let mut cache = RoundCache::without_memory().with_inflight_cap(cap);
+        solve_rounds_memo(&grid, &mut zs, &outlet, &carve, spec.rounds, &spec.threads, stream, &Drivers::default(), REGION_TILE, &mut cache)
     }));
     if let Err(panic) = solved {
         let why =
@@ -264,9 +274,26 @@ pub fn region_front(spec: &RegionSpec, base: &(dyn Fn(Vec3) -> f64 + Sync), clim
         evap[c] = ev as f32;
         weight[c] = w as f32;
     }
-    let routing = route_rules(grid, zs, outlet, precision.epsilon_w, stream, 0.0, Some(&weight), RoundRules::ROUND);
-    let filled = priority_flood_with(grid, zs, outlet, precision.epsilon_w, true);
-    let hydro = hydrology(grid, zs, &filled, &routing, outlet, Some(&runoff), Some(&evap), &HydroParams::default());
+    // GEN-192: the partitioned route gives the routing of `route_rules` and the canonical flood's filled surface in one pass (no second flood); the weights are freed after it, and the MFD area
+    // once hydrology's channel initiation is kept as bits (the area is read nowhere after it)
+    let route = partitioned_route_weighted(
+        grid,
+        zs,
+        outlet,
+        precision.epsilon_w,
+        stream,
+        REGION_TILE,
+        RoundRules::ROUND,
+        Some(&weight),
+        &mut PartCache::without_memory(),
+    );
+    drop(weight);
+    let (mut routing, filled) = (route.routing, route.filled);
+    let params = HydroParams::default();
+    let initiated = initiation_bits(&routing, &params);
+    routing.area = Vec::new();
+    let hydro = hydrology_initiated(grid, zs, &filled, &routing, outlet, Some(&runoff), Some(&evap), &initiated, &params);
+    drop((filled, initiated));
     let lakes = lakes_from_hydro(grid, &routing, &hydro, zs);
     let graph = ChannelGraph::from_hydro(grid, &routing, &hydro, zs);
     let segment_ids: Vec<u64> = hydro.segments.iter().map(|s| s.id).collect();

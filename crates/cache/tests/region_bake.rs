@@ -281,3 +281,78 @@ fn the_report_is_the_same_at_one_thread_and_at_eight() {
     let (a, b) = (planet_cache::region_bake::layout_fixture(1).unwrap(), planet_cache::region_bake::layout_fixture(8).unwrap());
     assert_eq!(a, b);
 }
+
+/// A climate that varies over the region: runoff, open-water evaporation and the discharge weight all change with the direction (the lean path's inputs are not constant).
+fn varied_climate(d: Vec3) -> (f64, f64, f64) {
+    let t = 0.5 + 0.5 * libm::sin(30.0 * d.y + 11.0 * d.z);
+    (1.0e-8 * (0.5 + t), 4.0e-9 * (1.0 - t), 0.7 + 0.6 * t)
+}
+
+// spec: GEN-192, TEST-157
+#[test]
+fn the_region_front_on_the_lean_paths_is_the_resident_pipeline() {
+    use planet_cache::region_bake::region_front;
+    use planet_generators::bake::carve::CarveParams;
+    use planet_generators::bake::channel_graph::ChannelGraph;
+    use planet_generators::bake::flood::priority_flood_with;
+    use planet_generators::bake::hydro::{hydrology, HydroParams};
+    use planet_generators::bake::lakes::lakes_from_hydro;
+    use planet_generators::bake::round::solve_rounds;
+    use planet_generators::bake::route::{route_rules, RoundRules};
+    // the fixture's 64 cells a face edge (cells of about 24,000 km², every one above the channel initiation) and a finer face of 2,048 cells a face edge (about 24 km² a cell, so the
+    // initiation decides which cells are channel)
+    for (regional, threads) in [(64usize, 1usize), (64, 3), (2048, 1), (2048, 3)] {
+        // the finer face's region sits at the face's centre, where the base is land
+        let region = if regional == 64 { spec(threads).region } else { (1008, 1031, 1008, 1031) };
+        let sp = RegionSpec { regional, region, ..spec(threads) };
+        let front = region_front(&sp, &base, &varied_climate).expect("the region front");
+        let s = &front.solve;
+        // the resident pipeline on the same inputs: the rounds, the route, a separate flood, hydrology on the area
+        let mut carve = CarveParams {
+            steps: 5 * sp.rounds,
+            reroute_every: 5,
+            round_rules: RoundRules::ROUND,
+            cell_metric: true,
+            window_cut: true,
+            ..CarveParams::default()
+        };
+        s.precision.apply(&mut carve);
+        let mut zs = s.zb.clone();
+        // the reference on one thread: the lean paths at any thread count give its bits (CON-14)
+        solve_rounds(&s.grid, &mut zs, &s.outlet, &carve, sp.rounds, &1usize, s.stream);
+        let differ = zs.iter().zip(&s.zs).filter(|(a, b)| a.to_bits() != b.to_bits()).count();
+        assert_eq!(
+            differ, 0,
+            "{regional} cells a face edge, {threads} threads: {differ} cells of the solved surface differ in bits from the resident rounds"
+        );
+        let n = s.rw * s.rh;
+        let (mut weight, mut runoff, mut evap) = (vec![1.0f32; n], vec![0.0f32; n], vec![0.0f32; n]);
+        for c in (0..n).filter(|&c| zs[c] > 0.0) {
+            let d = s.face_spec.halo_direction((s.ri0 + c % s.rw) as i64, (s.rj0 + c / s.rw) as i64);
+            let (ro, ev, w) = varied_climate(d);
+            runoff[c] = ro as f32;
+            evap[c] = ev as f32;
+            weight[c] = w as f32;
+        }
+        let routing = route_rules(&s.grid, &zs, &s.outlet, s.precision.epsilon_w, s.stream, 0.0, Some(&weight), RoundRules::ROUND);
+        let filled = priority_flood_with(&s.grid, &zs, &s.outlet, s.precision.epsilon_w, true);
+        let hydro = hydrology(&s.grid, &zs, &filled, &routing, &s.outlet, Some(&runoff), Some(&evap), &HydroParams::default());
+        assert!(hydro.stats.segments > 0, "{regional} cells a face edge, {threads} threads: channels to compare: {:?}", hydro.stats);
+        assert_eq!(front.hydro_stats, hydro.stats, "{regional} cells a face edge, {threads} threads: the hydrology's counts");
+        assert_eq!(
+            front.lakes,
+            lakes_from_hydro(&s.grid, &routing, &hydro, &zs),
+            "{regional} cells a face edge, {threads} threads: the lakes"
+        );
+        assert_eq!(
+            front.graph,
+            ChannelGraph::from_hydro(&s.grid, &routing, &hydro, &zs),
+            "{regional} cells a face edge, {threads} threads: the channel graph"
+        );
+        assert_eq!(
+            front.segment_ids,
+            hydro.segments.iter().map(|g| g.id).collect::<Vec<u64>>(),
+            "{regional} cells a face edge, {threads} threads: the segment ids"
+        );
+    }
+}
