@@ -2,6 +2,7 @@
 //! The current milestone is the file of `docs/milestones/` whose `Status:` line starts with `active`; its exit table has the columns `#`, `item`, `done when`, `lane`, `state`. The queue's first column is the
 //! exit item. A queue row whose Exit cell is not an exit ID of the milestone, and an open exit item (state not starting `done`) without a row, are errors (exit code 1).
 
+use crate::sprintfile;
 use crate::util::{capture, Res};
 use std::path::Path;
 
@@ -197,8 +198,8 @@ fn open_prs(root: &Path) -> Vec<(u32, String)> {
     }
 }
 
-/// The current milestone: the name and the text of the file of `docs/milestones/` whose `Status:` starts with `active`.
-pub fn current_milestone(root: &Path) -> Res<(String, String)> {
+/// The milestone files of `docs/milestones/` as `(name, text)`.
+fn milestone_files(root: &Path) -> Res<Vec<(String, String)>> {
     let dir = root.join("docs").join("milestones");
     let mut files = Vec::new();
     for e in std::fs::read_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))?.flatten() {
@@ -208,48 +209,174 @@ pub fn current_milestone(root: &Path) -> Res<(String, String)> {
             files.push((p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(), text));
         }
     }
-    pick_active(files)
+    files.sort();
+    Ok(files)
+}
+
+/// Whether a milestone file is a draft sprint (BUILD-074): its `Status:` starts with `draft`.
+pub fn is_draft(text: &str) -> bool {
+    milestone_status(text).is_some_and(|s| s.to_lowercase().starts_with("draft"))
+}
+
+/// The milestones `plan` reads: the active one and the next sprint's draft, each `(name, text)`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Current {
+    pub active: Option<(String, String)>,
+    pub draft: Option<(String, String)>,
+}
+
+/// One active file, one active file and one draft, or one draft alone (between sprints, before the owner's `decision: open`); an error for
+/// none, two actives or two drafts (BUILD-053, BUILD-074).
+pub fn pick_current(files: Vec<(String, String)>) -> Res<Current> {
+    let names = |v: &[(String, String)]| v.iter().map(|a| a.0.clone()).collect::<Vec<_>>().join(", ");
+    let (mut active, rest): (Vec<_>, Vec<_>) = files.into_iter().partition(|(_, t)| is_active(t));
+    let mut drafts: Vec<(String, String)> = rest.into_iter().filter(|(_, t)| is_draft(t)).collect();
+    if active.len() > 1 {
+        return Err(format!("{} milestone files have a Status line starting `active`: {}", active.len(), names(&active)));
+    }
+    if drafts.len() > 1 {
+        return Err(format!("{} milestone files have a Status line starting `draft`: {}", drafts.len(), names(&drafts)));
+    }
+    if active.is_empty() && drafts.is_empty() {
+        return Err("no milestone file in docs/milestones/ has a Status line starting `active` (or `draft`, between sprints)".into());
+    }
+    Ok(Current { active: active.pop(), draft: drafts.pop() })
 }
 
 /// The one active milestone among `(name, text)` files; an error for none or for several.
+#[cfg(test)]
 pub fn pick_active(files: Vec<(String, String)>) -> Res<(String, String)> {
-    let mut active: Vec<(String, String)> = files.into_iter().filter(|(_, t)| is_active(t)).collect();
-    match active.len() {
-        1 => Ok(active.remove(0)),
-        0 => Err("no milestone file in docs/milestones/ has a Status line starting `active`".into()),
-        n => Err(format!(
-            "{n} milestone files have a Status line starting `active`: {}",
-            active.iter().map(|a| a.0.clone()).collect::<Vec<_>>().join(", ")
-        )),
+    pick_current(files)?.active.ok_or_else(|| "no milestone file in docs/milestones/ has a Status line starting `active`".into())
+}
+
+/// The queue errors of a sprint file: a queue row whose Exit cell is not an exit ID, and an open exit without a row.
+fn sprint_queue_errors(s: &sprintfile::Sprint, rows: &[QueueRow]) -> Vec<String> {
+    let items: Vec<ExitItem> = s
+        .exits
+        .iter()
+        .map(|x| ExitItem {
+            id: x.id.clone(),
+            item: x.item.clone(),
+            done_when: x.done_when.clone(),
+            lane: x.lane.clone(),
+            // BUILD-053 calls an item open unless its state starts `done`: promoted, parked and carried rows are closed too
+            state: if x.is_open() { x.state.clone() } else { format!("done ({})", x.state) },
+        })
+        .collect();
+    errors(&items, rows)
+}
+
+/// The checks of one sprint file (BUILD-074), with its records read from the repository.
+fn sprint_errors(root: &Path, name: &str, text: &str) -> (Option<sprintfile::Sprint>, Vec<String>) {
+    match sprintfile::parse(text) {
+        Ok(s) => {
+            let read = |r: &str| std::fs::read_to_string(sprintfile::record_path(root, name, r)).ok();
+            let e = sprintfile::errors(&s, name, &read);
+            (Some(s), e)
+        }
+        Err(e) => (None, vec![format!("docs/milestones/{name}.md: {e}")]),
     }
 }
 
-/// The problems of BUILD-053 for spec-lint: the active milestone, its exit table and the queue of `docs/status.md`, without the PR list.
+/// The plan's text and its problems (BUILD-053, BUILD-074), on `today`; `prs` is the open PR list for the old form.
+fn plan(root: &Path, cur: &Current, queue: &[QueueRow], prs: &[(u32, String)], today: i64) -> (String, Vec<String>) {
+    let mut out = String::new();
+    let mut errs = Vec::new();
+    match &cur.active {
+        Some((name, text)) if sprintfile::is_sprint_file(text) => {
+            let (s, e) = sprint_errors(root, name, text);
+            errs.extend(e);
+            if let Some(s) = s {
+                out.push_str(&sprintfile::render(name, &s, today));
+                errs.extend(sprint_queue_errors(&s, queue));
+            }
+        }
+        Some((name, text)) => match parse_exit_table(text) {
+            Ok(items) => {
+                out.push_str(&render(name, &items, queue, prs));
+                errs.extend(errors(&items, queue));
+            }
+            Err(e) => errs.push(format!("docs/milestones/{name}.md: {e}")),
+        },
+        None => {
+            if let Some((name, _)) = &cur.draft {
+                out.push_str(&format!("no active sprint; {name} waits for the owner's decision: open\n"));
+                for r in queue {
+                    errs.push(format!(
+                        "docs/status.md queue row `{}`: no sprint is open ({name} is a draft), so the queue must be empty",
+                        r.exit
+                    ));
+                }
+            }
+        }
+    }
+    if let Some((name, text)) = &cur.draft {
+        if cur.active.is_some() {
+            out.push_str(&format!("next sprint: {name} (draft)\n"));
+        }
+        if sprintfile::is_sprint_file(text) {
+            errs.extend(sprint_errors(root, name, text).1);
+        } else {
+            errs.push(format!("docs/milestones/{name}.md: a draft is a sprint file (an `Opened:` line, BUILD-074)"));
+        }
+    }
+    (out, errs)
+}
+
+/// The problems of BUILD-053 and BUILD-074 for spec-lint: the active milestone (and a draft), its tables and the queue of `docs/status.md`, without the PR list.
 pub fn lint_errors(root: &Path) -> Vec<String> {
-    let (name, text) = match current_milestone(root) {
-        Ok(m) => m,
+    let cur = match milestone_files(root).and_then(pick_current) {
+        Ok(c) => c,
         Err(e) => return vec![format!("plan: {e}")],
-    };
-    let items = match parse_exit_table(&text) {
-        Ok(i) => i,
-        Err(e) => return vec![format!("plan: docs/milestones/{name}.md: {e}")],
     };
     let status = match std::fs::read_to_string(root.join("docs").join("status.md")) {
         Ok(s) => s,
         Err(e) => return vec![format!("plan: docs/status.md: {e}")],
     };
-    errors(&items, &parse_queue(&status))
+    plan(root, &cur, &parse_queue(&status), &[], sprintfile::today()).1.into_iter().map(|e| format!("plan: {e}")).collect()
 }
 
-/// `cargo xtask plan`: prints the plan; an `Err` (exit code 1) when a queue row or an open item breaks BUILD-053.
-pub fn run(root: &Path) -> Res {
-    let (name, text) = current_milestone(root)?;
-    let items = parse_exit_table(&text).map_err(|e| format!("docs/milestones/{name}.md: {e}"))?;
+/// `plan --pr TITLE [--branch B] [--] PATH...`: the R/P firewall and the overdue rule for one PR (BUILD-074).
+pub fn pr_check(root: &Path, args: &[String]) -> Res {
+    let mut it = args.iter();
+    let title = it.next().ok_or("--pr needs the PR title")?.clone();
+    let mut branch = None;
+    let mut paths = Vec::new();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--branch" => branch = Some(it.next().ok_or("--branch needs a name")?.clone()),
+            "--" => {}
+            p => paths.push(p.to_string()),
+        }
+    }
+    let cur = pick_current(milestone_files(root)?)?;
+    let Some((name, text)) = cur.active.filter(|(_, t)| sprintfile::is_sprint_file(t)) else {
+        println!("plan --pr: no active sprint file (the old milestone form, or a draft): no firewall check");
+        return Ok(());
+    };
+    let s = sprintfile::parse(&text).map_err(|e| format!("docs/milestones/{name}.md: {e}"))?;
+    let errs = sprintfile::pr_errors(&name, &s, &title, branch.as_deref(), &paths, sprintfile::today());
+    if errs.is_empty() {
+        println!("plan --pr: `{title}` passes {name}'s firewall ({} paths)", paths.len());
+        Ok(())
+    } else {
+        Err(format!("plan --pr: {} problem(s):\n  {}", errs.len(), errs.join("\n  ")))
+    }
+}
+
+/// `cargo xtask plan [--pr ...]`: prints the plan; an `Err` (exit code 1) when the milestone, a draft or the queue breaks BUILD-053 or BUILD-074.
+pub fn run(root: &Path, args: &[String]) -> Res {
+    match args.first().map(String::as_str) {
+        Some("--pr") => return pr_check(root, &args[1..]),
+        Some(other) => return Err(format!("plan: unknown argument `{other}` (usage: plan [--pr TITLE [--branch B] PATH...])")),
+        None => {}
+    }
+    let cur = pick_current(milestone_files(root)?)?;
     let status = std::fs::read_to_string(root.join("docs").join("status.md")).map_err(|e| e.to_string())?;
     let rows = parse_queue(&status);
-    let prs = open_prs(root);
-    print!("{}", render(&name, &items, &rows, &prs));
-    let errs = errors(&items, &rows);
+    let prs = if cur.active.as_ref().is_some_and(|(_, t)| !sprintfile::is_sprint_file(t)) { open_prs(root) } else { Vec::new() };
+    let (out, errs) = plan(root, &cur, &rows, &prs, sprintfile::today());
+    print!("{out}");
     if errs.is_empty() {
         Ok(())
     } else {
@@ -344,6 +471,71 @@ mod tests {
         std::fs::write(root.join("docs").join("status.md"), "## Queue\n| Exit | Step |\n|---|---|\n| X9 | a |\n").unwrap();
         let e = lint_errors(&root);
         assert!(e.iter().any(|m| m.contains("X9")) && e.iter().any(|m| m.contains("E1")), "{e:?}");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    const SPRINT: &str = include_str!("fixtures/sprint-good.md");
+    const RECORD: &str = include_str!("fixtures/record-pass.md");
+
+    fn draft_of(text: &str) -> String {
+        text.replace("Status: active (owner, 2026-12-01)", "Status: draft (lead, 2026-11-30): waits for the owner's decision: open")
+    }
+
+    // spec: BUILD-074, TEST-161
+    #[test]
+    fn one_active_file_one_active_and_a_draft_or_a_draft_alone_and_nothing_else() {
+        let f = |n: &str, t: &str| (n.to_string(), t.to_string());
+        let old = || f("P3", MILESTONE);
+        let draft = || f("S-Next", &draft_of(SPRINT));
+        let alone = pick_current(vec![draft(), f("M9", "# M9\nStatus: closed\n")]).unwrap();
+        assert!(alone.active.is_none() && alone.draft.as_ref().unwrap().0 == "S-Next");
+        let both = pick_current(vec![old(), draft()]).unwrap();
+        assert_eq!((both.active.unwrap().0, both.draft.unwrap().0), ("P3".to_string(), "S-Next".to_string()));
+        let two = pick_current(vec![draft(), f("S-Other", &draft_of(SPRINT))]).unwrap_err();
+        assert!(two.contains("2 milestone files") && two.contains("`draft`"), "{two}");
+        assert!(pick_current(vec![old(), f("S-Test", SPRINT)]).unwrap_err().contains("starting `active`"));
+        assert!(pick_current(vec![f("M9", "# M9\nStatus: closed\n")]).unwrap_err().contains("no milestone file"));
+        assert!(pick_active(vec![draft()]).is_err(), "a draft is not the active milestone");
+    }
+
+    // spec: BUILD-074, TEST-161
+    #[test]
+    fn between_sprints_the_draft_waits_for_the_open_and_the_queue_is_empty() {
+        let root = Path::new("/nonexistent");
+        let cur = Current { active: None, draft: Some(("S-Next".into(), draft_of(SPRINT))) };
+        let rec_free = draft_of(SPRINT).replace("promoted E2-record.md", "open");
+        let cur_ok = Current { active: None, draft: Some(("S-Next".into(), rec_free)) };
+        let (out, e) = plan(root, &cur_ok, &[], &[], 0);
+        assert!(out.contains("no active sprint; S-Next waits for the owner's decision: open") && e.is_empty(), "{out} {e:?}");
+        let queue = parse_queue("## Queue\n| Exit | Step |\n|---|---|\n| E1 | a |\n");
+        let (_, e) = plan(root, &cur_ok, &queue, &[], 0);
+        assert!(e.iter().any(|m| m.contains("queue row `E1`") && m.contains("must be empty")), "{e:?}");
+        let (_, e) = plan(root, &cur, &[], &[], 0);
+        assert!(e.iter().any(|m| m.contains("E2-record.md") && m.contains("does not exist")), "a draft gets the same checks: {e:?}");
+        let old_draft = Current { active: None, draft: Some(("S-Next".into(), "# S\nStatus: draft\n".into())) };
+        assert!(plan(root, &old_draft, &[], &[], 0).1.iter().any(|m| m.contains("a draft is a sprint file")));
+    }
+
+    // spec: BUILD-074, TEST-161
+    #[test]
+    fn an_active_sprint_file_is_read_with_its_records_and_its_queue() {
+        let root = std::env::temp_dir().join(format!("plancmd-sprint-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let ms = root.join("docs").join("milestones");
+        std::fs::create_dir_all(ms.join("S-Test")).unwrap();
+        std::fs::write(ms.join("S-Test.md"), SPRINT).unwrap();
+        std::fs::write(ms.join("P3.md"), MILESTONE.replace("Status: active (to 11-20)", "Status: closed (owner)")).unwrap();
+        let queue = "## Queue\n| Exit | Step |\n|---|---|\n| E1 | a |\n| E3 | b |\n| E4 | c |\n";
+        std::fs::write(root.join("docs").join("status.md"), queue).unwrap();
+        assert!(lint_errors(&root).iter().any(|m| m.contains("E2-record.md") && m.contains("does not exist")), "{:?}", lint_errors(&root));
+        std::fs::write(ms.join("S-Test").join("E2-record.md"), RECORD).unwrap();
+        assert!(lint_errors(&root).is_empty(), "the promoted E2 needs no queue row: {:?}", lint_errors(&root));
+        std::fs::write(root.join("docs").join("status.md"), "## Queue\n| Exit | Step |\n|---|---|\n| E1 | a |\n").unwrap();
+        let e = lint_errors(&root);
+        assert!(e.iter().any(|m| m.contains("E3") && m.contains("no row")) && e.iter().any(|m| m.contains("E4")), "{e:?}");
+        let cur = pick_current(milestone_files(&root).unwrap()).unwrap();
+        let (out, _) = plan(&root, &cur, &[], &[], sprintfile::day_number("2026-12-02").unwrap());
+        assert!(out.starts_with("sprint S-Test: opened 2026-12-01, closes by 2026-12-05;"), "{out}");
         std::fs::remove_dir_all(&root).unwrap();
     }
 
