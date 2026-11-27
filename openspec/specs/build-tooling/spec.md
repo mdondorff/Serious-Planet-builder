@@ -695,12 +695,12 @@ Source: Owner 2026-11-08 (41 worktrees, many forgotten inside other worktrees' `
 - **WHEN** 80, 35 and 12 GB are free
 - **THEN** the first passes, the second warns and the third refuses, naming the free space, the largest folders and `cargo xtask worktrees --prune`
 
-### Requirement: BUILD-040 A change of a gate or an owner decision leaves a contract-change line
-Spec-lint SHALL fail a branch that adds, removes or changes a row of the gate table under `### 12.1` of `docs/design/terrain-target.md` or of the table under `## Owner decisions` of `docs/briefings/terrain-prototype.md`, against the merge base with `origin/main`, unless the same branch adds to the briefing's `## Contract changes` list a line `- YYYY-MM-DD | gate or section | what changed | who decided` whose second field contains the row's first cell (without a trailing parenthesis). A malformed line SHALL cover nothing. A missing briefing with a changed row SHALL fail.
+### Requirement: BUILD-040 A change of a gate leaves a contract-change line
+Spec-lint SHALL fail a branch that adds, removes or changes a row of the gate table under `### 12.1` of `docs/design/terrain-target.md`, against the merge base with `origin/main`, unless the same branch adds to that document's `## 14. Contract changes` list a line `- YYYY-MM-DD | gate or section | what changed | who decided` that names the changed row. A malformed line covers nothing, and a branch that removes the target document with its gate table fails.
 
 Verify: A
 Status: active
-Source: Owner 2026-11-09 (management rules become checks), planner inbox #94
+Source: Owner 2026-11-09 (management rules become checks), planner inbox #94; owner 2026-11-27 (D10: the terrain prototype briefing archived, its owner-decisions table no longer checked, its contract lines moved to the target document)
 
 #### Scenario: A gate changes
 - **WHEN** a branch changes the G-SURF row and adds no line, adds a line naming G-CON, adds a malformed line, or adds a dated line naming G-SURF
@@ -716,23 +716,6 @@ Source: Owner 2026-11-09 (management rules become checks), planner inbox #94 (#1
 #### Scenario: The ledger
 - **WHEN** a gate has no row, a row names an unknown gate, a measured row has a commit that does not resolve, or all gates have rows including `not run`
 - **THEN** the first three are refused naming the gate or commit and the last passes; the summary names the gates measured by one lane
-
-### Requirement: BUILD-042 An item that becomes done moves the re-estimate
-Spec-lint SHALL fail a branch that turns an item of the table under `## Items` of `docs/briefings/terrain-prototype.md` to a State starting with `done`, against the merge base with `origin/main`, unless the briefing's `Re-estimate: YYYY-MM-DD[ HH:MM] (...)` line holds a stamp later than the base's.
-- A stamp is a date with an optional `HH:MM`; a date alone reads as 00:00, and an invalid time reads as none.
-- Stamps compare as a whole: the same or an earlier stamp is refused, a later one passes, a later time on the same day included.
-
-Verify: A
-Status: active
-Source: Owner 2026-11-09 (management rules become checks), planner inbox #94 (items were marked done without the remaining work re-estimated), inbox #122 (a second re-estimate on one day)
-
-#### Scenario: An item is done
-- **WHEN** an item becomes done with the re-estimate stamp unchanged, earlier, with no line, or later (a later date, or a later time on the same day)
-- **THEN** the first three are refused naming the item and the last passes
-
-#### Scenario: A date alone
-- **WHEN** the base's re-estimate is a date alone and the new line is the same day at 00:00, at 00:01, or the date alone again; or the base has a time and the new line is the date alone
-- **THEN** 00:01 passes and the others are refused (a date alone is 00:00)
 
 ### Requirement: BUILD-043 The lanes are listed with their state
 `cargo xtask lanes` SHALL print, for each lane of `docs/lanes.txt` (a lane name and the prefix of its worktree directory under `.claude/worktrees/`; no machine paths), the last commit of its worktree with its age, the open PR of its branch, the highest `## #N` heading of its inbox file (`PLANET_INBOX_DIR`, else `SeriousPlanetData/lanes` beside the main checkout) and the running `cargo`, `rustc`, `nextest` or `target/` executables whose path lies in its worktree; other build processes SHALL be listed as not attributed. A missing piece SHALL print `-` and the command SHALL NOT fail for it.

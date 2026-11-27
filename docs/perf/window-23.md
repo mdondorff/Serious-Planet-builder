@@ -42,3 +42,5 @@ Ridge 3 in window 22 (C with #505): 1568 and 1517. A and B refuse the plan at 6 
 
 - Frame time after the fix (the sweep frames are cap-bound).
 - aerial-20km and ground-1m as separate stream scenes.
+
+The raw output named above was deleted on 2026-11-27 (owner, D4); it is in git history at commit a179884d1.

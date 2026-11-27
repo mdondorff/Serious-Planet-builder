@@ -54,3 +54,5 @@ At settle 40 each is within about 50 ms of these.
 - With the settle on, `ManagedLoop::edit` returns the number of refresh requests queued now (0: they are held), so the "tiles refreshed / resident" column and the half and all refreshed instants read 0 and `-` in the settle-40 table. The verdict and the drawn exact figures do not depend on it. A follow-up makes the return count the held refreshes.
 - `cargo xtask perf stream` whitelists its options and has no `--settle-ms`; the runs called the harness directly (`cargo run --release -p planet -- test-render --perf --scene edit-latency --adapter hardware --store DIR --global-res 16384 --settle-ms N --out DIR`), as window 16 did. A follow-up adds the option.
 - 200 m with a 150 m stamp stays 208 to 244 ms over its budget with or without the settle: the cost is the refresh throughput of the drawn tiles (291 named, 151 drawn), not the hold. An open owner item (`docs/status.md`).
+
+The raw output named above was deleted on 2026-11-27 (owner, D4); it is in git history at commit a179884d1.

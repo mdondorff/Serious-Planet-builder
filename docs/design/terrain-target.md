@@ -313,7 +313,7 @@ Both change the bake's output slightly; they carry no kernel version bump, but a
 
 Result: a catchment's round depends only on the inputs of its key (§6.5): its members, receivers, `A_d`, surface, drivers and the round rules. **[gate G-LOCAL]** verifies that on the new kernels (the round is a pure function of its key inputs; G-ROUND is the exactness test). Both rules are behind switches (`RoundRules`, default off; a key byte only when on).
 
-Measured (GEN-141, `openspec/changes/archive/2026-11-23-round-kernels/proposal.md` (its design notes in git history, removed at the archive by ADR 0055); four 96 x 96 lands, about 820 catchments; a catchment **routed alone** is the grid masked to its members with its outlet the only outlet):
+Measured (GEN-141, the archived change `2026-11-23-round-kernels` (in git history at commit d9de674fa, before the change archive was deleted (owner, 2026-11-27, D3)); four 96 x 96 lands, about 820 catchments; a catchment **routed alone** is the grid masked to its members with its outlet the only outlet):
 - Member areas that differ from the region routing, smooth land: today's kernels 26,041 of 26,265; clip to the receiver 23,939; local clip 0; local clip with the canonical flood 0.
 - Terraced land (flats): 27,090 of 27,942; 25,043; 45; 7. Receivers that differ: 0 to 1.
 - The remainder is the flood: a member on a near-sea-level flat is first reached from a lower neighbour in another catchment, its filled level moves by 0.4 mm, a neighbouring receiver flips.
@@ -670,3 +670,19 @@ Open items, now conditions of §12.4 or still open:
 6. Protecting an intentional basin from the breach (§5.3).
 7. A toolchain pin (§9): decided, §12.4 determinism.
 8. A tile-wise route: built only under §6.6's rule.
+
+## 14. Contract changes
+A change of a gate row of section 12.1 needs a line here (BUILD-040): `- YYYY-MM-DD | gate or section | what changed | who decided`. The lines up to 2026-11-12 come from the terrain prototype briefing (archived at `docs/archive/P3/briefings/terrain-prototype.md`, 2026-11-27).
+- 2026-11-09 | G-SURF | gate at the cell centres; the lattice vertices reported as G-SURF-I; the clamp stays | owner
+- 2026-11-09 | Memory | compact resident route is the normal path; cache eviction required; tile-wise route only if needed | owner
+- 2026-11-09 | Sediment | post-round pass for the prototype (A3 6.7); G-SED kept with a partition test | owner
+- 2026-11-09 | Stage previews | committed manifest; images in target/ and CI; sheets committed only at gates; item 18 added | owner
+- 2026-11-11 | G-SURF | tightened to the spec: at most 1e-9 m before quantisation, half a step (0.125 m) after (GEN-154; the measured values pass) | architect
+- 2026-11-11 | G-SURF-I | the vertex set is the tile's core store-lattice vertices (170 x 170 at 102 m) | architect
+- 2026-11-11 | G-CON | read on H1's whole graph; the stored river pieces end at a lake entry and restart at the spill cell, checked on their own | architect (GEN-163)
+- 2026-11-11 | G-SCALE | a working target of 11e9 B peak commit by the A/B gate below the 12e9 B hard limit (BUDG-016); additions inside the hydrology call bring an equal saving until it holds | owner
+- 2026-11-11 | Constitution | v1.7: CON-08 allows regional, partitioned and iterative stages; CON-28 to CON-31 added | owner (ADR 0116)
+- 2026-11-11 | ADRs 0110-0115 | accepted for the prototype; the external review's conditions become A3 §12.4 and each ADR's conditions | owner
+- 2026-11-11 | SPIKE-105 §13.5 | decisions 2-10 confirmed at the recommended options (A3 §12.4's first P0 condition closed) | owner
+- 2026-11-12 | G-MFD | new gate row for ADR 0112 condition 1 (the MFD comparison, SPIKE-107) | architect
+- 2026-11-12 | G-SEAM | new gate row: K7 tile borders against interior; alternate layouts reported (ADR 0119) | owner

@@ -45,3 +45,5 @@ Where the time goes is not measured (no per-term toggles). The candidates, by th
 
 - The detail's cost per term, and in the viewer's atmosphere path at orbit or aerial views (the ground views only).
 - The sweep with the detail off.
+
+The raw output named above was deleted on 2026-11-27 (owner, D4); it is in git history at commit a179884d1.

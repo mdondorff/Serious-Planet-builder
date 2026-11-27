@@ -4,7 +4,7 @@ Time-boxed experiments that answer a question before a decision. Opened and clos
 
 Proposed after M8: game-layer exploration, a vehicle on chunk collision (`docs/roadmap.md`).
 
-Per-spike register sections of M5 and M6: `docs/archive/M6/spikes.md`. Closed spikes up to M7 (SPIKE-08 to 32 and the explorations): `docs/archive/M7/spikes.md`. Closed spikes of M8 (SPIKE-33 to 57, 59 and 60) and of the M9 groundwork and Option B after the M8 acceptance (SPIKE-58, 61 to 84): `docs/archive/M8/spikes.md`. Closed spikes of the M9 groundwork from SPIKE-85 to 106 (SPIKE-96 never run, SPIKE-103 has no row): `docs/archive/M9/spikes.md`. Closed spikes of P3 (SPIKE-107 to 144): `docs/archive/P3/spikes.md`. Closed spikes of earlier milestones: `docs/archive/M0-M3/spikes.md` (SPIKE-01 to 04), `docs/archive/M4/spikes.md` (SPIKE-05 to 07). SPIKE-10 was never used.
+Per-spike register sections of M5 and M6: `docs/archive/M6/spikes.md`. Closed spikes up to M7 (SPIKE-08 to 32 and the explorations): `docs/archive/M7/spikes.md`. Closed spikes of M8 (SPIKE-33 to 57, 59 and 60) and of the M9 groundwork and Option B after the M8 acceptance (SPIKE-58, 61 to 84): `docs/archive/M8/spikes.md`. Closed spikes of the M9 groundwork from SPIKE-85 to 106 (SPIKE-96 never run): `docs/archive/M9/spikes.md`. Closed spikes of P3 (SPIKE-107 to 144): `docs/archive/P3/spikes.md`. Closed spikes of earlier milestones: `docs/archive/M0-M3/spikes.md` (SPIKE-01 to 04), `docs/archive/M4/spikes.md` (SPIKE-05 to 07). SPIKE-10 was never used.
 
 ## Index of open and planned spikes
 | Id | Title | Status | Results |

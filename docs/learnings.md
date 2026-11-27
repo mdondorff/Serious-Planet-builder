@@ -1,6 +1,6 @@
 # Learnings
 
-Added with `/learning`. Each entry names its scope, the assumption it changes, the follow-up and when it becomes obsolete. A learning is promoted (a spec line, a `CLAUDE.md` line or a test that cites it), kept while still active and surprising, or archived with its milestone (ADR 0075). Cap: 20 KB. Archives: `docs/archive/M0-M3/learnings.md`, `docs/archive/M4/learnings.md`, `docs/archive/M6/learnings.md` (M5 and M6, and the full text of the entries below), `docs/archive/M7/learnings.md`, `docs/archive/M9/learnings.md`, `docs/archive/P3/learnings.md`.
+Added with `/learning`. Each entry names its scope, the assumption it changes, the follow-up and when it becomes obsolete. A learning is promoted (a spec line, a `CLAUDE.md` line or a test that cites it), kept while still active and surprising, or archived with its milestone (ADR 0075). Cap: 20 KB. Archives: `docs/archive/M0-M3/learnings.md`, `docs/archive/M7/learnings.md`, `docs/archive/M9/learnings.md`, `docs/archive/P3/learnings.md`. The M4 and M6 learnings archives were deleted on 2026-11-27 (owner, D5); they are in git history at commit f666371d6.
 
 ## 2026-10-15 GPU milliseconds depend on how long the GPU has been loaded
 Scope: project (perf comparisons)

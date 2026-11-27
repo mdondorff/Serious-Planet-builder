@@ -7,7 +7,7 @@
 | What a term means (tile, patch, field, stage...) and the pictures of the model | `docs/domain.md` |
 | What is happening now, what waits for the owner | `docs/status.md` |
 | Who does what, who merges, where a lane reports (read at session start) | `docs/routing.md`; lane names and worktrees: `docs/lanes.txt` |
-| The current work block's plan: items, phases, exit list | `docs/briefings/terrain-prototype.md` |
+| The terrain prototype's plan (P1 to P3: items, phases, the A/B gate; archived) | `docs/archive/P3/briefings/terrain-prototype.md` |
 | The target architecture and its gate table | `docs/design/terrain-target.md` (A3) |
 | Downstream (`M10`–`M13` / game) producer seams for `G3` & `P4` | `docs/design/hydrology-downstream-seams.md` |
 | A proposed later river project (assisted rivers after erosion) and the seams it needs | `docs/design/rivers-after-erosion.md` (proposal, non-normative) |
@@ -24,7 +24,7 @@
 | Every experiment, one line each | `docs/spikes.md` (register) |
 | An experiment's report, numbers and pictures | `spikes/<name>/results/` |
 | Pictures of SPIKE-03 to 07 that accepted ADRs link to | `docs/spikes/` (frozen) |
-| Performance windows and CI history | `docs/perf/` up to M7; M8's in `docs/archive/M8/perf/` and `docs/milestones/M8/`; later ones in `docs/milestones/<M>/` |
+| Performance windows and CI history | `docs/perf/` up to M7 (the one-page verdicts and `ci-history.tsv`; the raw dumps deleted on 2026-11-27, in git history at a179884d1); M8's in `docs/milestones/M8/`; later ones in `docs/milestones/<M>/` |
 | Surprises and corrected assumptions still in force | `docs/learnings.md` |
 | Progress screenshots | `docs/dev_screenshots/` |
 | Sample look files for the owner's review (proposals, not defaults) | `docs/looks/` |
@@ -36,7 +36,7 @@
 | Kind | Folders | Changes |
 |---|---|---|
 | Rules | `docs/constitution.md`, `openspec/specs/`, `docs/adr/` | owner, ADRs, archived changes |
-| Working files (small, current) | `docs/status.md`, `docs/log.md`, `docs/log.d/`, `docs/learnings.md`, `docs/spikes.md`, `docs/briefings/` | every session; size caps (ADR 0075) |
+| Working files (small, current) | `docs/status.md`, `docs/log.md`, `docs/log.d/`, `docs/learnings.md`, `docs/spikes.md` | every session; size caps (ADR 0075) |
 | Target design (proposed) | `docs/design/` | owner-gated target architecture and its contracts; superseded by accepted ADRs |
 | Evidence | `docs/milestones/`, `docs/perf/`, `spikes/`, `tests/goldens/` | written once per report or run |
 | History | `docs/archive/`, `docs/background/`, `docs/spikes/` | frozen |

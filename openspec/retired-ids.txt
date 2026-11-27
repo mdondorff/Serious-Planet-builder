@@ -2,6 +2,7 @@
 # number. `cargo xtask next-id` reads this file instead of openspec/changes/archive/, so no ID here is issued again; spec-lint checks that the
 # change archive's requirements are each in a main spec or here, and that no requirement reuses an ID here. Generated from the archive on
 # 2026-11-27; an archived change that removes a requirement adds its ID here.
+BUILD-042
 GEN-036
 GEN-037
 GEN-038
