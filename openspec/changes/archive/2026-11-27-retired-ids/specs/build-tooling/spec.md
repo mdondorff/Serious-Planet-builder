@@ -12,9 +12,10 @@ Detail:
 | reuse | a requirement of a main spec, or one an open change adds (`## ADDED`), under an ID of the file |
 | completeness | a requirement of the change archive (any delta section) in no main spec and not in the file |
 - The file was generated from the change archive on 2026-11-27: 55 IDs.
-- A change archived with a REMOVED requirement adds its ID to the file in the same PR (spec-lint names it otherwise).
+- A change archived with a REMOVED requirement, or a RENAMED one whose ID changes, adds the old ID to the file in the same PR (spec-lint names it otherwise).
+- An example ID in spec prose counts for next-id like a real one: examples use placeholders.
 - Leaving the archive out changes no requirement prefix's next ID: the archive's only other tokens are prose.
 
 #### Scenario: An ID only in the file
-- **WHEN** a main spec holds VIEW-072, the file VIEW-080, and the change archive VIEW-090
-- **THEN** next-id gives VIEW-081, the archive's VIEW-090 does not count, and without the file it gives VIEW-073
+- **WHEN** a main spec's highest ID of a prefix is n, the file holds n + 8 of that prefix, and the change archive n + 18
+- **THEN** next-id gives n + 9 (the archive's n + 18 does not count), and without the file it gives n + 1

@@ -55,14 +55,16 @@ pub fn parse(text: &str) -> Result<Vec<String>, Vec<String>> {
     }
 }
 
-/// The IDs of the `### Requirement:` headings of a spec text, with the delta section each stands under (`""` in a main spec).
+/// The IDs of the `### Requirement:` headings of a spec text, with the delta section each stands under (`""` in a main spec). A RENAMED block's
+/// old heading (`- FROM: \`### Requirement: ...\``) counts too: a rename that changes the ID retires the old one.
 pub fn headings(text: &str) -> Vec<(String, String)> {
     let mut section = String::new();
     let mut out = Vec::new();
     for l in text.lines() {
+        let rest = l.strip_prefix("### Requirement: ").or_else(|| l.trim_start().strip_prefix("- FROM: `### Requirement: "));
         if let Some(s) = l.strip_prefix("## ") {
             section = s.trim().to_string();
-        } else if let Some(rest) = l.strip_prefix("### Requirement: ") {
+        } else if let Some(rest) = rest {
             if let Some(id) = rest.split_whitespace().next().filter(|id| is_id(id)) {
                 out.push((id.to_string(), section.clone()));
             }
@@ -175,6 +177,14 @@ mod tests {
         assert!(e.iter().any(|x| x.contains(":3:") && x.contains("listed twice")), "{e:?}");
         assert!(e.iter().any(|x| x.contains(":4:") && x.contains("out of order")), "{e:?}");
         assert!(parse("VIEW-9\nVIEW-10\n").is_ok());
+        // a rename that changes the ID retires the old one: its FROM heading counts as the archive's
+        let renamed = vec![(
+            "openspec/changes/archive/r/specs/viewer/spec.md".to_string(),
+            "## RENAMED Requirements\n- FROM: `### Requirement: VIEW-070 Old name`\n- TO: `### Requirement: VIEW-072 Kept`\n".to_string(),
+        )];
+        let e = errors(&specs(main, None), &renamed, Some("# none\n"));
+        assert!(e.len() == 1 && e[0].contains("VIEW-070"), "{e:?}");
+        assert!(errors(&specs(main, None), &renamed, Some("VIEW-070\n")).is_empty());
         assert!(errors(&specs(main, None), &archived, None)[0].contains("missing"));
     }
 
