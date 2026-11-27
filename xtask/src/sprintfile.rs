@@ -10,15 +10,26 @@ use std::path::Path;
 /// The modes of an exit row (ADR 0130 point 2).
 pub const MODES: [&str; 4] = ["R", "P", "X", "M"];
 /// The gate classes of a Gate cell part (combined plan 2.4), short and long forms.
-pub const GATE_CLASSES: [&str; 7] = ["num", "numerical", "fun", "functional", "dom", "domain", "look"];
+pub const GATE_CLASSES: [&str; 8] = ["num", "numerical", "fun", "func", "functional", "dom", "domain", "look"];
 /// The longest sprint, days from `Opened` to `Closes by`.
 pub const MAX_DAYS: i64 = 7;
 /// At most this many exit rows.
 pub const MAX_EXITS: usize = 5;
 /// At most this many open decisions.
 pub const MAX_OPEN_DECISIONS: usize = 3;
-/// The paths a PR of an R or P exit may touch.
-pub const RP_PATHS: [&str; 2] = ["docs/", "spikes/"];
+/// Whether a path is docs-only in CLAUDE.md's sense: `docs/`, `openspec/`, `.claude/`, a root `*.md`, `spikes/**/results/**` or `spikes/README.md`.
+pub fn is_docs_path(p: &str) -> bool {
+    let p = p.replace('\\', "/");
+    ["docs/", "openspec/", ".claude/"].iter().any(|d| p.starts_with(d))
+        || (!p.contains('/') && p.ends_with(".md"))
+        || p == "spikes/README.md"
+        || (p.starts_with("spikes/") && p.split('/').nth(2) == Some("results"))
+}
+
+/// Whether an R or P exit's PR may touch a path: a docs-only path or anything under `spikes/` (never `crates/`, `xtask/` or other code on main).
+pub fn is_rp_path(p: &str) -> bool {
+    is_docs_path(p) || p.replace('\\', "/").starts_with("spikes/")
+}
 
 /// One exit row of a sprint file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,7 +84,10 @@ impl Decision {
     /// A1: only park, keep-off or keep today's may fire on silence.
     pub fn default_is_safe(&self) -> bool {
         let d = self.default.trim().to_lowercase().replace('\u{2019}', "'");
-        ["park", "keep-off", "keep off", "keep today", "keep-today"].iter().any(|p| d.starts_with(p))
+        // a whole word or words at the start: `park E2` and `keep today's read` are safe, `parkway` is not
+        ["park", "keep-off", "keep off", "keep today", "keep-today"]
+            .iter()
+            .any(|p| d.strip_prefix(p).is_some_and(|rest| rest.chars().next().is_none_or(|c| !c.is_alphanumeric())))
     }
 }
 
@@ -321,10 +335,10 @@ pub fn errors(s: &Sprint, name: &str, read: &dyn Fn(&str) -> Option<String>) -> 
         if !MODES.contains(&x.mode.trim()) {
             e.push(format!("{at}: mode `{}` is none of R, P, X, M", x.mode));
         }
-        for part in x.gate.split(';').map(str::trim).filter(|p| !p.is_empty() && *p != "-") {
+        for part in x.gate.split(';').map(str::trim).filter(|p| !p.is_empty()) {
             let class = part.split(':').next().unwrap_or("").trim().to_lowercase();
             if !part.contains(':') || !GATE_CLASSES.contains(&class.as_str()) {
-                e.push(format!("{at}: gate `{part}` is not `<class>: ...` with a class of num, fun, dom, look"));
+                e.push(format!("{at}: gate `{part}` is not `<class>: ...` with a class of num, func, dom, look"));
             }
         }
         let word = x.state_word();
@@ -461,18 +475,19 @@ pub fn render(name: &str, s: &Sprint, today: i64) -> String {
 }
 
 /// `plan --pr`: the R/P firewall and, past `Closes by`, the closing-PRs-only rule, for a PR's title, branch and changed paths.
-/// - A PR whose title names an R or P exit (not promoted) may touch only `docs/` and `spikes/`.
+/// - A PR whose title names an R or P exit (not promoted) may touch only docs-only paths ([`is_docs_path`]) and `spikes/`.
 /// - A `change/*` PR names an X or M exit, or a promoted P exit (its promotion record).
-/// - Past `Closes by`, a PR that touches more than `docs/` must also change the sprint file (it closes, carries or parks an exit); a docs-only PR never fails.
+/// - Past `Closes by`, a PR that is not docs-only must also change the sprint file: changing it is the mechanical stand-in for closing,
+///   carrying or parking an exit (ADR 0130 point 6). A docs-only PR never fails.
 pub fn pr_errors(name: &str, s: &Sprint, title: &str, branch: Option<&str>, paths: &[String], today: i64) -> Vec<String> {
     let mut e = Vec::new();
     let named: Vec<&Exit> = s.exits.iter().filter(|x| crate::plancmd::names(title, &x.id)).collect();
     let promoted = |x: &Exit| x.state_word() == "promoted";
     let slash = |p: &String| p.replace('\\', "/");
     for x in named.iter().filter(|x| matches!(x.mode.trim(), "R" | "P") && !promoted(x)) {
-        let off: Vec<String> = paths.iter().map(slash).filter(|p| !RP_PATHS.iter().any(|r| p.starts_with(r))).collect();
+        let off: Vec<String> = paths.iter().map(slash).filter(|p| !is_rp_path(p)).collect();
         if !off.is_empty() {
-            e.push(format!("exit {} is mode {}: its PR may touch only docs/ and spikes/, not {}", x.id, x.mode, off.join(", ")));
+            e.push(format!("exit {} is mode {}: its PR may touch only docs-only paths and spikes/, not {}", x.id, x.mode, off.join(", ")));
         }
     }
     if branch.is_some_and(|b| b.starts_with("change/"))
@@ -482,7 +497,7 @@ pub fn pr_errors(name: &str, s: &Sprint, title: &str, branch: Option<&str>, path
     }
     if is_overdue(s, today) {
         let sprint_file = format!("docs/milestones/{name}.md");
-        let docs_only = paths.iter().map(slash).all(|p| p.starts_with("docs/"));
+        let docs_only = paths.iter().all(|p| is_docs_path(p));
         if !docs_only && !paths.iter().map(slash).any(|p| p == sprint_file) {
             e.push(format!(
                 "{name} is overdue (Closes by {}): only a PR that closes, carries or parks an exit (it changes {sprint_file}) may merge",
@@ -662,6 +677,49 @@ mod tests {
         assert!(!is_overdue(&closed, day("2026-12-09")), "a closed sprint is never overdue");
         let out = render("S-Test", &s, day("2026-12-02"));
         assert!(out.contains("E2 [P] Erosion C2 read [promoted E2-record.md]") && out.contains("decisions: 2 open of 3"), "{out}");
+    }
+
+    // spec: BUILD-074, TEST-161
+    #[test]
+    fn each_missing_header_date_cell_record_and_gate_is_named() {
+        let no_close = GOOD.replace("Closes by: 2026-12-05", "Closes by: TBD");
+        assert!(errs(&no_close, &PASS).iter().any(|m| m.contains("`Closes by:` needs")));
+        let no_lane = GOOD.replace("| explorer | running |", "|  | running |");
+        assert!(errs(&no_lane, &PASS).iter().any(|m| m.contains("exit E1") && m.contains("Lane cell is empty")));
+        let no_item = GOOD.replace("| E1 | Region file | X |", "| E1 |  | X |");
+        assert!(errs(&no_item, &PASS).iter().any(|m| m.contains("exit E1") && m.contains("Item cell is empty")));
+        let rows: String = GOOD.lines().filter(|l| !l.starts_with("| E")).map(|l| format!("{l}\n")).collect();
+        assert!(errs(&rows, &[]).iter().any(|m| m.contains("0 exit rows")), "{:?}", errs(&rows, &[]));
+        let parked = GOOD.replace("promoted E2-record.md", "parked E2-record.md");
+        assert!(errs(&parked, &[]).iter().any(|m| m.contains("exit E2") && m.contains("does not exist")));
+        let dash = GOOD.replace("fun: BUILD-053 (2026-12-01)", "-");
+        assert!(errs(&dash, &PASS).iter().any(|m| m.contains("exit E4") && m.contains("gate `-`")), "a gate is never `-`");
+        let func = GOOD.replace("fun: BUILD-053 (2026-12-01)", "func: BUILD-053 (2026-12-01)");
+        assert!(errs(&func, &PASS).is_empty(), "spikes' skills write func:");
+        let d = parse(GOOD).unwrap().decisions[0].clone();
+        for unsafe_default in ["parkway", "keeper", "promote E2", "raise the bar"] {
+            assert!(!Decision { default: unsafe_default.into(), ..d.clone() }.default_is_safe(), "{unsafe_default}");
+        }
+    }
+
+    // spec: BUILD-074, TEST-161
+    #[test]
+    fn docs_only_paths_are_claude_mds_list_and_an_r_or_p_pr_may_add_spikes() {
+        for p in [
+            "docs/x.md",
+            "openspec/specs/a/spec.md",
+            ".claude/skills/x.md",
+            "README.md",
+            "spikes/README.md",
+            "spikes/hump/results/results.md",
+            "docs\\y.md",
+        ] {
+            assert!(is_docs_path(p), "{p}");
+        }
+        for p in ["crates/cache/src/x.rs", "xtask/src/x.rs", "spikes/hump/src/main.rs", "Cargo.toml", "docs"] {
+            assert!(!is_docs_path(p), "{p}");
+        }
+        assert!(is_rp_path("spikes/hump/src/main.rs") && is_rp_path(".claude/agents/x.md") && !is_rp_path("xtask/src/x.rs"));
     }
 
     // spec: BUILD-074, TEST-161

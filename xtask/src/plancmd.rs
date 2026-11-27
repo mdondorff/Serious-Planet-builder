@@ -336,19 +336,40 @@ pub fn lint_errors(root: &Path) -> Vec<String> {
     plan(root, &cur, &parse_queue(&status), &[], sprintfile::today()).1.into_iter().map(|e| format!("plan: {e}")).collect()
 }
 
-/// `plan --pr TITLE [--branch B] [--] PATH...`: the R/P firewall and the overdue rule for one PR (BUILD-074).
-pub fn pr_check(root: &Path, args: &[String]) -> Res {
+/// The exit IDs a PR body names on `Exit:` lines (`Exit: E2`, `Exit: E2, E3`), joined for [`sprintfile::pr_errors`]'s title match.
+pub fn body_exits(body: &str) -> String {
+    body.lines().filter_map(|l| l.trim().strip_prefix("Exit:")).map(str::trim).collect::<Vec<_>>().join(" ")
+}
+
+/// The arguments of `--pr`: the title (plus the exits a `--body-file` names on `Exit:` lines), the branch and the changed paths (given, or one per line of `--files`).
+pub fn parse_pr_args(args: &[String], read: &dyn Fn(&str) -> Res<String>) -> Res<(String, Option<String>, Vec<String>)> {
     let mut it = args.iter();
-    let title = it.next().ok_or("--pr needs the PR title")?.clone();
+    let mut title = it.next().ok_or("--pr needs the PR title")?.clone();
     let mut branch = None;
     let mut paths = Vec::new();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--branch" => branch = Some(it.next().ok_or("--branch needs a name")?.clone()),
+            "--body-file" => {
+                let exits = body_exits(&read(it.next().ok_or("--body-file needs a file")?)?);
+                if !exits.is_empty() {
+                    title = format!("{title} ({exits})");
+                }
+            }
+            "--files" => {
+                let text = read(it.next().ok_or("--files needs a file")?)?;
+                paths.extend(text.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from));
+            }
             "--" => {}
             p => paths.push(p.to_string()),
         }
     }
+    Ok((title, branch, paths))
+}
+
+/// `plan --pr TITLE [--branch B] [--body-file F] [--files F] [--] PATH...`: the R/P firewall and the overdue rule for one PR (BUILD-074); without an active sprint file (the old form, a draft) it checks nothing.
+pub fn pr_check(root: &Path, args: &[String]) -> Res {
+    let (title, branch, paths) = parse_pr_args(args, &|f| std::fs::read_to_string(f).map_err(|e| format!("{f}: {e}")))?;
     let cur = pick_current(milestone_files(root)?)?;
     let Some((name, text)) = cur.active.filter(|(_, t)| sprintfile::is_sprint_file(t)) else {
         println!("plan --pr: no active sprint file (the old milestone form, or a draft): no firewall check");
@@ -368,7 +389,11 @@ pub fn pr_check(root: &Path, args: &[String]) -> Res {
 pub fn run(root: &Path, args: &[String]) -> Res {
     match args.first().map(String::as_str) {
         Some("--pr") => return pr_check(root, &args[1..]),
-        Some(other) => return Err(format!("plan: unknown argument `{other}` (usage: plan [--pr TITLE [--branch B] PATH...])")),
+        Some(other) => {
+            return Err(format!(
+                "plan: unknown argument `{other}` (usage: plan [--pr TITLE [--branch B] [--body-file F] [--files F] PATH...])"
+            ))
+        }
         None => {}
     }
     let cur = pick_current(milestone_files(root)?)?;
@@ -537,6 +562,61 @@ mod tests {
         let (out, _) = plan(&root, &cur, &[], &[], sprintfile::day_number("2026-12-02").unwrap());
         assert!(out.starts_with("sprint S-Test: opened 2026-12-01, closes by 2026-12-05;"), "{out}");
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    // spec: BUILD-074, TEST-161
+    #[test]
+    fn the_pr_arguments_take_a_branch_a_body_files_exits_and_a_path_list() {
+        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let files = |f: &str| -> Res<String> {
+            match f {
+                "body.md" => Ok("Sprint: S-Test\nExit: E2, E3\nVerifier: PASS abc\n".into()),
+                "paths.txt" => Ok("crates/a.rs\n\nspikes/x/results/r.md\n".into()),
+                other => Err(format!("{other}: not found")),
+            }
+        };
+        let (t, b, p) = parse_pr_args(
+            &a(&["tidy", "--branch", "change/x", "--body-file", "body.md", "--files", "paths.txt", "--", "docs/y.md"]),
+            &files,
+        )
+        .unwrap();
+        assert_eq!((t.as_str(), b.as_deref()), ("tidy (E2, E3)", Some("change/x")));
+        assert_eq!(p, ["crates/a.rs", "spikes/x/results/r.md", "docs/y.md"]);
+        assert!(names(&t, "E3") && !names(&t, "E1"));
+        assert!(parse_pr_args(&a(&[]), &files).unwrap_err().contains("needs the PR title"));
+        assert!(parse_pr_args(&a(&["t", "--branch"]), &files).unwrap_err().contains("--branch needs"));
+        assert!(parse_pr_args(&a(&["t", "--files", "nope"]), &files).unwrap_err().contains("not found"));
+        assert_eq!(body_exits("x\nExit: E1\n  Exit: E4\n"), "E1 E4");
+    }
+
+    // spec: BUILD-074, TEST-161
+    #[test]
+    fn the_pr_check_reads_the_repository_and_checks_nothing_without_an_active_sprint_file() {
+        let root = std::env::temp_dir().join(format!("plancmd-pr-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let ms = root.join("docs").join("milestones");
+        std::fs::create_dir_all(&ms).unwrap();
+        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        std::fs::write(ms.join("P3.md"), MILESTONE).unwrap();
+        assert!(pr_check(&root, &a(&["E1: x", "--branch", "change/x", "crates/a.rs"])).is_ok(), "the old form has no firewall");
+        std::fs::write(ms.join("P3.md"), MILESTONE.replace("Status: active (to 11-20)", "Status: closed")).unwrap();
+        std::fs::write(ms.join("S-Test.md"), SPRINT).unwrap();
+        let e = pr_check(&root, &a(&["E3: survey", "crates/a.rs"])).unwrap_err();
+        assert!(e.contains("exit E3 is mode R") && e.contains("crates/a.rs"), "{e}");
+        assert!(pr_check(&root, &a(&["E3: survey", "spikes/hump/results/results.md"])).is_ok());
+        std::fs::write(ms.join("S-Test.md"), draft_of(SPRINT)).unwrap();
+        assert!(pr_check(&root, &a(&["E3: survey", "crates/a.rs"])).is_ok(), "a draft has no firewall: nothing runs before the open");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    // spec: BUILD-074, TEST-161
+    #[test]
+    fn an_active_file_with_an_old_form_draft_names_the_draft() {
+        let cur = Current { active: Some(("P3".into(), MILESTONE.into())), draft: Some(("S-Next".into(), "# S\nStatus: draft\n".into())) };
+        let queue = parse_queue(STATUS);
+        let (out, e) = plan(Path::new("/nonexistent"), &cur, &queue, &[], 0);
+        assert!(out.contains("next sprint: S-Next (draft)"), "{out}");
+        assert!(e.iter().any(|m| m.contains("S-Next") && m.contains("a draft is a sprint file")), "{e:?}");
     }
 
     // spec: BUILD-053
