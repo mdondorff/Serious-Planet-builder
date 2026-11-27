@@ -13,7 +13,7 @@ Detail:
 | `docs/milestones/<M>/<path>` (every file, at any depth) | `docs/archive/<M>/<path>` |
 - The old milestone form moves the same way (P3: `P3.md` and `P3-report.md`, once `P3.md`'s status says closed).
 - A sprint file that is not closed, or has no `Status:` line, stays with its report and records; the run prints why, and its log and spike steps still run.
-- A move onto an existing file refuses the run before any write or move.
+- A move onto an existing file, onto a file the same run writes (the log or spike archive), or onto another move's destination refuses the run before any write or move.
 - The emptied records folder is removed; `docs/milestones/` stays.
 - The live files that still name a moved path (`docs/` outside the archive, `openspec/specs/`, `.claude/`, `xtask/src/`, the root `*.md`) are printed as `<file>: <old path>`, not rewritten.
 - `--dry-run` prints the moves and writes nothing; a second run has nothing to move.

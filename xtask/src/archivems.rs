@@ -230,6 +230,15 @@ pub fn plan(root: &Path, m: &str, before: Option<&str>) -> Res<Plan> {
 
     // ---- the sprint file, its report and its records (BUILD-077)
     let (moves, kept) = sprint_moves(root, m)?;
+    // a move onto a file this run writes, or onto another move's destination, would overwrite it
+    let mut seen = std::collections::HashSet::new();
+    for (from, to) in &moves {
+        if out.writes.iter().any(|(w, _)| w == to) || !seen.insert(to.as_str()) {
+            return Err(format!(
+                "archive-milestone: {from} would move onto {to}, which this run also writes or moves; rename it first (BUILD-077)"
+            ));
+        }
+    }
     out.stale = stale_pointers(root, m, &moves);
     out.moves = moves;
     out.kept = kept;
@@ -606,6 +615,55 @@ SPIKE-11 was archived by hand: | SPIKE-11 | Eleven | closed 01-25: no | w |
         // a sprint file without a Status line is not closed
         put(&d, "docs/milestones/S9.md", "# S9\n");
         assert_eq!(plan(&d, "S9", None).unwrap().kept.as_deref(), Some("docs/milestones/S9.md is not closed (Status: none)"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: BUILD-077, TEST-164
+    #[test]
+    fn a_dry_run_moves_nothing_and_a_record_named_like_a_file_the_run_writes_or_moves_is_refused_before_any_write() {
+        let d = tmp("sprint3");
+        fixture(&d);
+        put(&d, "docs/milestones/S1.md", "# S1\nStatus: closed (owner, 2026-02-10)\n");
+        put(&d, "docs/milestones/S1/E1-record.md", "# E1 record\n");
+        put(&d, "README.md", "See `docs/milestones/S1.md`.\n");
+        put(&d, ".claude/skills/x/SKILL.md", "records: `docs/milestones/S1/`\n");
+        let snapshot = |d: &Path| {
+            let mut v: Vec<(String, String)> = ["docs", ".claude"]
+                .iter()
+                .flat_map(|r| files_under(d, r))
+                .chain(std::iter::once("README.md".to_string()))
+                .map(|f| (f.clone(), std::fs::read_to_string(d.join(&f)).unwrap()))
+                .collect();
+            v.sort();
+            v
+        };
+        // the root *.md and .claude/ pointers are named
+        let p = plan(&d, "S1", None).unwrap();
+        assert_eq!(
+            p.stale,
+            vec![".claude/skills/x/SKILL.md: docs/milestones/S1/".to_string(), "README.md: docs/milestones/S1.md".to_string()]
+        );
+        // a dry run with moves changes no file
+        let before = snapshot(&d);
+        run(&d, &["S1".into(), "--dry-run".into()]).unwrap();
+        assert_eq!(snapshot(&d), before, "a dry run moves nothing");
+        // a record named like the log archive this run writes is refused, and no file changes
+        put(&d, "docs/milestones/S1/log.md", "a record named log.md\n");
+        let before = snapshot(&d);
+        let e = run(&d, &["S1".into()]).unwrap_err();
+        assert!(e.contains("docs/milestones/S1/log.md") && e.contains("docs/archive/S1/log.md"), "{e}");
+        assert_eq!(snapshot(&d), before, "a refused run changes no file");
+        std::fs::remove_file(d.join("docs/milestones/S1/log.md")).unwrap();
+        // a record named like the sprint file moves onto the sprint file's destination: refused
+        put(&d, "docs/milestones/S1/S1.md", "a copy\n");
+        let e = plan(&d, "S1", None).unwrap_err();
+        assert!(e.contains("docs/milestones/S1/S1.md") && e.contains("docs/archive/S1/S1.md"), "{e}");
+        std::fs::remove_file(d.join("docs/milestones/S1/S1.md")).unwrap();
+        // the run applied through `run`, then a second `run` has nothing to move
+        run(&d, &["S1".into()]).unwrap();
+        assert!(d.join("docs/archive/S1/E1-record.md").exists() && !d.join("docs/milestones/S1").exists());
+        let again = plan(&d, "S1", None).unwrap();
+        assert!(again.moves.is_empty() && again.writes.is_empty() && again.deletes.is_empty(), "{again:?}");
         let _ = std::fs::remove_dir_all(&d);
     }
 }
