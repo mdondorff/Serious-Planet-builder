@@ -112,6 +112,7 @@ Everything goes through `cargo xtask`:
 | `cargo xtask worktrees [--prune]` | every git worktree with its size, branch and merged PR; `--prune` removes the clean merged ones |
 | `cargo xtask pr-body-check` | the pr-gate check: a PR with code names the commit the verifier passed |
 | `cargo xtask log [--since D] [--limit N]` | the project log, newest first |
+| `cargo xtask archive-milestone <M> [--before D] [--dry-run]` | a finished milestone's log fragments and closed spike rows into `docs/archive/<M>/`, with the header pointers (housekeeping's archive steps) |
 | `cargo xtask accept <milestone>` | milestone acceptance |
 | `cargo xtask gate [--small] [--site frame-N] [--store DIR]` | the no-degradation gate: the editor window over the real store, a scripted hill and the owner test's camera paths (`--small`: a generated world on the software adapter) |
 | `cargo xtask repro <bundle> [--real] [--store DIR]` | replay a repro bundle or an F9 path, also from a stored bake |
