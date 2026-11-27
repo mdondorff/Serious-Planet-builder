@@ -3,7 +3,8 @@
 Forward state only (owner, 2026-10-16): open owner items, the current queue's open items, the current unanswered stop report, tracked items and quarantines. History goes to the log (`cargo xtask log`). When a change is archived the coder deletes its queue item's text (the log line is the record); when the architect answers a stop report it deletes it. A Tracked entry has at most 3 lines; a finished one is deleted (ADR 0075). Cap: 15 KB. Earlier states: `docs/archive/M4/status-at-m4-acceptance.md`, `docs/archive/M6/status-at-m6-close.md`. M8 closed 2026-10-30: `docs/milestones/M8-report.md`. New requirement IDs, ADR and SPIKE numbers are reserved through the lead (ADR 0120).
 
 ## Waiting for the owner
-- **M-Erosion's one-page plan** (lanes digest `review/m-erosion-plan-draft-2026-11-27.md`): M1 in or out, exits E1-E5, sprints S0-S6, the R&D lane. Your sign-off comes before any heavy run.
+- **The sprint process** (ADR 0130, proposed; applied on your word while proposed): your four decisions in the lanes digest `review/sprint-process-plan-combined-2026-11-27.md` §8. Your acceptance can come at any time.
+- **M-Erosion** (lanes digest `review/m-erosion-plan-draft-2026-11-27.md`): it becomes separate sprint files after the pilot S-Region-Authoring. M1 in or out is your call before M-E1 opens.
 - **Your flight on the fly1126 stores** (optional; lanes digest `flight-playbook-fly1126-2026-11-27.md`; stores and stills in `C:/DEV/SeriousPlanetData/flights/fly1126/`).
 - **/bless: `water_class_lake_mask_stripes`** (TEST-133, #1459): the first lake golden; nothing waits on it.
 - **A new global store for the default world, seed 14**: every store on disk is refused by its keys; E1 ran on the in-memory production base (VIEW-069). Its format waits for ADR 0117, which is still proposed.
@@ -17,6 +18,7 @@ P3 signed off (owner, 2026-11-27); E4-E6 parked with record (ADR 0129, accepted 
 | E6 | The D rows (D3, D4, D5, D8, D9, D10 with BUILD-042 retired and BUILD-040 decoupled) and `shadow-clipmap-march` narrowed to its built half; then the docs restructure under the adopted strategy | crusader |
 | E6 | 25 uncited examples retired; 109 merged or closed remote branches pruned (the list with tip SHAs kept) | spikes |
 | E6 | `tmp/` field dumps deleted (kept: `.md/.txt/.csv/.png`, `tmp/ag2/`, `flights/`); 6 parked lane worktrees pruned | explorer |
+| E6 | The sprint process's core checks (ADR 0130, proposed, applied on the owner's word): `plan` v2 core (BUILD-074), the firewall and PR review lines (BUILD-075), the spec-lint shapes and caps (BUILD-076), `archive-milestone` for sprint files (BUILD-077), the templates. Then P3 closes and S-Region-Authoring opens as the first sprint file | explorer, crusader, spikes, lead |
 
 ## Tracked
 - **Sea not meeting the coast; a coastal fade at river mouths** (owner, 2026-11-15; seen on a flight about 2026-11-13, not reported then): the sea did not start where the terrain ended. Candidate cause: the runtime fades the erosion change toward 0 within 3 m above sea level (`COAST_FADE_M`, `erosion_layer.rs`), so the drawn coast and river mouths differ from the store (adversarial review F3). Owner re-tests on a flight; the fade is decided with the next river or coast work (D-2 is parked, ADR 0129).
