@@ -85,6 +85,29 @@ pub enum Event {
     JumpRepro(usize),
     /// Promote repro entry `index` into a persistent bookmark.
     BookmarkRepro(usize),
+    /// Arm the placement of a new region box under `name` (empty: `region-<n>`, VIEW-077).
+    PlaceRegion {
+        name: String,
+    },
+    /// The side of a new region box in L tiles.
+    RegionSize {
+        width: u32,
+        height: u32,
+    },
+    /// Arm the re-placement of the named region box.
+    MoveRegion(String),
+    /// Select the named region box (its face's margin is drawn).
+    SelectRegion(String),
+    /// Set the named region box's side in L tiles.
+    ResizeRegion {
+        name: String,
+        width: u32,
+        height: u32,
+    },
+    /// Delete the named region box.
+    DeleteRegion(String),
+    /// Print the command that opens the named box's commit (VIEW-069).
+    OpenRegion(String),
     /// Swap A and B endpoints of the pinned ruler transect (VIEW-076).
     SwapRuler,
     /// Clear the active ruler anchor/measurement (VIEW-076).
@@ -132,6 +155,8 @@ pub struct PanelState {
     brush_text: BTreeMap<&'static str, String>,
     /// Draft label for creating a new site bookmark.
     pub bookmark_name: String,
+    /// Draft name of a new region box (VIEW-077).
+    pub region_name: String,
     /// Draft coordinate jump string (`LAT,LON[,ALT]`).
     pub jump_text: String,
     /// Active inline rename buffer for an existing bookmark `(id, text)`.
@@ -153,6 +178,7 @@ impl PanelState {
             help: false,
             brush_text: BTreeMap::new(),
             bookmark_name: String::new(),
+            region_name: String::new(),
             jump_text: String::new(),
             bookmark_rename: None,
             ruler_scrub: None,
@@ -236,6 +262,8 @@ pub struct PanelData<'a> {
     pub store: Option<&'a planet_editor::store_watch::StoreWatch>,
     /// Live camera readout, site bookmarks, and F9 repro captures for the Sites tab (VIEW-075).
     pub sites: &'a SitesView,
+    /// The region boxes of the regions file (VIEW-077).
+    pub regions: &'a crate::regionedit::RegionsView,
     /// Live cursor coordinates, elevation, and local slope readout (VIEW-076).
     pub cursor: Option<planet_editor::ruler::CursorReadout>,
     /// Active two-point ruler transect (or rubber-band preview while anchored, VIEW-076).
@@ -597,6 +625,9 @@ fn sites_tab(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec
             });
         });
     }
+
+    ui.separator();
+    regions_section(ui, st, d, ev);
 
     ui.separator();
     ui.horizontal(|ui| {
@@ -1236,6 +1267,148 @@ pub fn draw_preview_overlay(ui: &egui::Ui, p: &planet_editor::preview_overlay::P
     painter.text(at, egui::Align2::LEFT_TOP, &p.label, egui::FontId::proportional(13.0), LIGHT);
 }
 
+/// The Regions section of the Sites tab (VIEW-077): the boxes of the regions file with their state, the placement, resize, move, delete and open.
+fn regions_section(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec<Event>) {
+    use planet_cache::regions_file::{RegionState, MAX_TILES, MIN_TILES};
+    let r = d.regions;
+    ui.strong("Regions");
+    ui.label(egui::RichText::new(&r.where_label).small().weak());
+    if !r.has_file {
+        return;
+    }
+    ui.horizontal(|ui| {
+        let nr = ui.add(egui::TextEdit::singleline(&mut st.region_name).hint_text("Box name (optional)").desired_width(120.0));
+        st.marks.push(("region:new-name".to_string(), nr.rect));
+        let place = ui.button("Place");
+        st.marks.push(("region:place".to_string(), place.rect));
+        if place.clicked() {
+            ev.push(Event::PlaceRegion { name: std::mem::take(&mut st.region_name) });
+        }
+    });
+    ui.horizontal(|ui| {
+        ui.label("new box");
+        for (axis, value) in [("w", r.size.0), ("h", r.size.1)] {
+            let less = ui.small_button(format!("{axis}-"));
+            st.marks.push((format!("region:size:{axis}-"), less.rect));
+            ui.monospace(format!("{axis} {value}"));
+            let more = ui.small_button(format!("{axis}+"));
+            st.marks.push((format!("region:size:{axis}+"), more.rect));
+            let step = if less.clicked() {
+                -1
+            } else if more.clicked() {
+                1
+            } else {
+                0
+            };
+            if step != 0 {
+                let v = (value as i64 + step).clamp(i64::from(MIN_TILES), i64::from(MAX_TILES)) as u32;
+                if v == value {
+                    continue;
+                }
+                let (width, height) = if axis == "w" { (v, r.size.1) } else { (r.size.0, v) };
+                ev.push(Event::RegionSize { width, height });
+            }
+        }
+        ui.weak("L tiles");
+    });
+    if let Some(p) = &r.placing {
+        ui.colored_label(AMBER, p);
+    }
+    if r.rows.is_empty() {
+        ui.weak("No region boxes yet.");
+    }
+    for row in &r.rows {
+        ui.push_id(&row.name, |ui| {
+            ui.group(|ui| {
+                ui.horizontal_wrapped(|ui| {
+                    let name = ui.selectable_label(row.selected, egui::RichText::new(&row.name).strong());
+                    st.marks.push((format!("region:select:{}", row.name), name.rect));
+                    if name.clicked() {
+                        ev.push(Event::SelectRegion(row.name.clone()));
+                    }
+                    let (badge, colour) = match row.state {
+                        RegionState::Ready => ("ready", GREEN),
+                        RegionState::Stale => ("stale", AMBER),
+                        RegionState::Unbaked => ("unbaked", LIGHT),
+                    };
+                    let b = ui.colored_label(colour, badge);
+                    st.marks.push((format!("region:state:{}", row.name), b.rect));
+                    ui.weak(format!("face {}  {}x{}  {}", row.face, row.width, row.height, row.tiles));
+                });
+                ui.horizontal_wrapped(|ui| {
+                    for (label, w, h) in [("w-", -1, 0), ("w+", 1, 0), ("h-", 0, -1), ("h+", 0, 1)] {
+                        let b = ui.small_button(label);
+                        st.marks.push((format!("region:{label}:{}", row.name), b.rect));
+                        if b.clicked() {
+                            ev.push(Event::ResizeRegion {
+                                name: row.name.clone(),
+                                width: (row.width as i64 + w).max(0) as u32,
+                                height: (row.height as i64 + h).max(0) as u32,
+                            });
+                        }
+                    }
+                    let mv = ui.button("Move");
+                    st.marks.push((format!("region:move:{}", row.name), mv.rect));
+                    if mv.clicked() {
+                        ev.push(Event::MoveRegion(row.name.clone()));
+                    }
+                    let del = ui.add(egui::Button::new(egui::RichText::new("Delete").color(egui::Color32::from_rgb(242, 179, 179))));
+                    st.marks.push((format!("region:delete:{}", row.name), del.rect));
+                    if del.clicked() {
+                        ev.push(Event::DeleteRegion(row.name.clone()));
+                    }
+                    if row.state == RegionState::Ready {
+                        let open = ui.button("Open");
+                        st.marks.push((format!("region:open:{}", row.name), open.rect));
+                        if open.clicked() {
+                            ev.push(Event::OpenRegion(row.name.clone()));
+                        }
+                    }
+                });
+            });
+        });
+    }
+    if let Some(cmd) = &r.open_command {
+        ui.horizontal_wrapped(|ui| {
+            let copy = ui.small_button("Copy");
+            st.marks.push(("region:copy".to_string(), copy.rect));
+            if copy.clicked() {
+                ui.ctx().copy_text(cmd.clone());
+            }
+            ui.label(egui::RichText::new(cmd).monospace().small());
+        });
+    }
+}
+
+/// Draw the region boxes, the placement box and the face-edge margin on the ground (VIEW-077).
+pub fn draw_regions(ui: &egui::Ui, lines: &[crate::regionedit::RegionLine], to_points: impl Fn([f64; 2]) -> egui::Pos2) {
+    use crate::regionedit::LineKind;
+    use planet_cache::regions_file::RegionState;
+    let painter = ui.painter();
+    for l in lines {
+        let stroke = match l.kind {
+            LineKind::Box { state, selected } => {
+                let colour = match state {
+                    RegionState::Ready => GREEN,
+                    RegionState::Stale => AMBER,
+                    RegionState::Unbaked => LIGHT,
+                };
+                egui::Stroke::new(if selected { 3.0 } else { 1.8 }, colour)
+            }
+            LineKind::Preview { ok } => {
+                egui::Stroke::new(2.2, if ok { egui::Color32::from_rgb(110, 220, 240) } else { egui::Color32::from_rgb(240, 90, 90) })
+            }
+            LineKind::Margin => egui::Stroke::new(1.2, egui::Color32::from_gray(150).gamma_multiply(0.8)),
+        };
+        let n = l.points.len();
+        for k in 0..n {
+            if let (Some(a), Some(b)) = (l.points[k], l.points[(k + 1) % n]) {
+                painter.line_segment([to_points(a), to_points(b)], stroke);
+            }
+        }
+    }
+}
+
 /// Draw the outlines, the names and the handles over the planet. `to_points` turns the overlay's pixels into points (the window's scale).
 pub fn draw_overlay(ui: &egui::Ui, items: &[OverlayItem], to_points: impl Fn([f64; 2]) -> egui::Pos2) {
     let painter = ui.painter();
@@ -1397,6 +1570,7 @@ mod tests {
         can_undo: bool,
         brush: Option<planet_editor::session::BrushSettings>,
         sites: SitesView,
+        regions: crate::regionedit::RegionsView,
         cursor: Option<planet_editor::ruler::CursorReadout>,
         ruler: Option<planet_editor::ruler::TransectProfile>,
         ruler_rubber: bool,
@@ -1416,6 +1590,7 @@ mod tests {
             can_undo: true,
             brush: None,
             sites: SitesView::default(),
+            regions: crate::regionedit::RegionsView::default(),
             cursor: None,
             ruler: None,
             ruler_rubber: false,
@@ -1445,6 +1620,7 @@ mod tests {
             keys: &[],
             store: None,
             sites: &h.sites,
+            regions: &h.regions,
             cursor: h.cursor,
             ruler: h.ruler.as_ref(),
             ruler_rubber: h.ruler_rubber,
@@ -2136,6 +2312,66 @@ mod tests {
         pass(vec![], &mut buf, &mut id, &mut commits);
         assert_eq!(commits.last().map(String::as_str), Some("500"), "{commits:?}");
         assert!(ctx.memory(|m| m.has_focus(id.unwrap())), "Enter leaves the focus in the field");
+    }
+
+    // spec: VIEW-077
+    // spec: TEST-166
+    #[test]
+    fn the_sites_tabs_regions_section_places_resizes_moves_deletes_and_opens_boxes() {
+        use crate::regionedit::{RegionRow, RegionsView};
+        use planet_cache::regions_file::RegionState;
+        let f = fixture();
+        let layout = Layout::default();
+        let mut h = held(&f, layout.clone());
+        let row = |name: &str, state| RegionRow {
+            name: name.into(),
+            face: 2,
+            tiles: "60..=61 x 60..=61".into(),
+            width: 2,
+            height: 2,
+            state,
+            selected: false,
+        };
+        h.regions = RegionsView {
+            rows: vec![row("grt", RegionState::Ready), row("new", RegionState::Unbaked)],
+            where_label: "saved in w/regions.toml".into(),
+            has_file: true,
+            placing: Some("click the ground to place a new box".into()),
+            size: (2, 2),
+            open_command: Some("cargo run --release -p planet -- editor --seed 14 --commit w/regions/grt".into()),
+        };
+        let mut rig = Rig::new(&layout);
+        rig.settle(&data(&h));
+        rig.click(&data(&h), rig.mark("tab:sites"));
+        rig.settle(&data(&h));
+
+        rig.click(&data(&h), rig.mark("region:new-name"));
+        rig.pass(&data(&h), vec![Raw::Text("ridge".into())]);
+        let ev = rig.click(&data(&h), rig.mark("region:place"));
+        assert!(ev.contains(&Event::PlaceRegion { name: "ridge".into() }), "{ev:?}");
+        let p = rig.mark("region:size:w+");
+        assert_eq!(rig.click(&data(&h), p), vec![Event::RegionSize { width: 3, height: 2 }]);
+        let p = rig.mark("region:size:h-");
+        assert!(rig.click(&data(&h), p).is_empty(), "a side does not go under 2");
+        let p = rig.mark("region:w+:grt");
+        assert_eq!(rig.click(&data(&h), p), vec![Event::ResizeRegion { name: "grt".into(), width: 3, height: 2 }]);
+        let p = rig.mark("region:h-:grt");
+        assert_eq!(rig.click(&data(&h), p), vec![Event::ResizeRegion { name: "grt".into(), width: 2, height: 1 }]);
+        let p = rig.mark("region:move:grt");
+        assert_eq!(rig.click(&data(&h), p), vec![Event::MoveRegion("grt".into())]);
+        let p = rig.mark("region:select:new");
+        assert_eq!(rig.click(&data(&h), p), vec![Event::SelectRegion("new".into())]);
+        let p = rig.mark("region:open:grt");
+        assert_eq!(rig.click(&data(&h), p), vec![Event::OpenRegion("grt".into())]);
+        assert!(rig.st.mark("region:open:new").is_none(), "only a ready box opens");
+        assert!(rig.st.mark("region:copy").is_some());
+        let p = rig.mark("region:delete:new");
+        assert_eq!(rig.click(&data(&h), p), vec![Event::DeleteRegion("new".into())]);
+
+        // Without a file the section only says how to name one.
+        h.regions = RegionsView { where_label: "no regions file".into(), ..RegionsView::default() };
+        rig.settle(&data(&h));
+        assert!(rig.st.mark("region:place").is_none());
     }
 
     // spec: VIEW-075
