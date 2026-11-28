@@ -141,6 +141,8 @@ pub struct Pointer {
 
 /// The most ground heights kept for the outlines before the cache starts over.
 const GROUND_CACHE_MAX: usize = 1 << 16;
+/// Frames between two reads of the region boxes' commits (VIEW-077): about two seconds at 60 frames a second.
+const REGION_REFRESH_FRAMES: u64 = 120;
 
 /// The editor mode.
 pub struct EditRuntime {
@@ -888,6 +890,10 @@ impl EditRuntime {
                 .then(|| project(&view.camera, d * (view.radius_m + ground(d)), view.viewport))
                 .flatten()
         };
+        // The states are read from the commits again every so often, so a bake that finished shows (VIEW-077).
+        if self.stats.frames.is_multiple_of(REGION_REFRESH_FRAMES) {
+            self.regions.refresh_states();
+        }
         let region_id = self.regions.inputs_for(self.session.editor().definition());
         self.region_lines = self.regions.lines(region_id, if over_ui { None } else { hit.map(|h| h.dir) }, &see);
         self.regions_view = self.regions.view(region_id, self.region_open.clone());
@@ -1398,6 +1404,14 @@ impl EditRuntime {
                         self.session.set_status(why);
                     }
                 },
+                Event::OpenRegion(name)
+                    if {
+                        let id = self.regions.inputs_for(self.session.editor().definition());
+                        id.and_then(|id| self.regions.state_of(&name, id)) != Some(planet_cache::regions_file::RegionState::Ready)
+                    } =>
+                {
+                    self.session.set_status(format!("region '{name}' is not ready: bake it first (cargo xtask bake-region --name {name})"));
+                }
                 Event::OpenRegion(name) => match self.regions.open_command(&name) {
                     // The world is built once at the start: a ready box reopens by its command (the sprint's park path, VIEW-069).
                     Ok(cmd) => {
@@ -2915,11 +2929,10 @@ mod tests {
         assert_eq!(RegionsFile::read(&path).unwrap().regions.len(), 1);
         e.key(EditKey::Escape);
 
-        // Open names the box's commit folder; Delete empties the file.
+        // Open on a box that is not baked says so and prints nothing (the model test opens a ready one); Delete empties the file.
         e.apply(vec![Event::OpenRegion("centre".into())]);
         frame(&mut e, &cam, false);
-        let cmd = e.panel_data("").regions.open_command.clone().unwrap();
-        assert!(cmd.contains("editor --seed 7") && cmd.contains("--commit") && cmd.contains("centre"), "{cmd}");
+        assert!(e.session.status().contains("not ready") && e.panel_data("").regions.open_command.is_none(), "{}", e.session.status());
         e.apply(vec![Event::DeleteRegion("centre".into())]);
         assert!(RegionsFile::read(&path).unwrap().regions.is_empty());
         assert_eq!(e.session.editor().definition().hash(), hash);

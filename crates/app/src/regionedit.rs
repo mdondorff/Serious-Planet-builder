@@ -44,6 +44,9 @@ pub struct RegionRow {
     pub selected: bool,
 }
 
+/// A kept state's key: the box's name, face and tiles, and the inputs id.
+type StateKey = (String, u8, [u32; 4], u64);
+
 /// The region boxes of one regions file and the placement in progress.
 pub struct RegionEditor {
     layout: RegionLayout,
@@ -56,6 +59,9 @@ pub struct RegionEditor {
     pub size: (u32, u32),
     /// `(definition hash, inputs id)`: the id is computed once per definition.
     inputs: Option<(u64, u64)>,
+    /// The derived states by box and inputs id: a state reads the commit from disk, so a frame reads it from here (CON-22); cleared by
+    /// [`refresh_states`](RegionEditor::refresh_states) and by every change.
+    states: std::cell::RefCell<std::collections::HashMap<StateKey, RegionState>>,
 }
 
 /// What a drawn line of the regions is.
@@ -170,7 +176,17 @@ impl RegionEditor {
             Some(p) => RegionsFile::read(p)?,
             None => RegionsFile::default(),
         };
-        Ok(RegionEditor { layout, path, file, world, selected: None, placing: None, size: (MIN_TILES, MIN_TILES), inputs: None })
+        Ok(RegionEditor {
+            layout,
+            path,
+            file,
+            world,
+            selected: None,
+            placing: None,
+            size: (MIN_TILES, MIN_TILES),
+            inputs: None,
+            states: std::cell::RefCell::new(std::collections::HashMap::new()),
+        })
     }
 
     pub fn layout(&self) -> &RegionLayout {
@@ -218,6 +234,7 @@ impl RegionEditor {
             self.file = before;
             return Err(e);
         }
+        self.refresh_states();
         Ok(())
     }
 
@@ -317,12 +334,26 @@ impl RegionEditor {
         Some(id)
     }
 
-    /// The box's derived state against inputs id `id`; without a file every box is unbaked.
+    /// The box's derived state against inputs id `id`, read once and kept until [`refresh_states`](RegionEditor::refresh_states); without a file every box is unbaked.
     pub fn state(&self, e: &RegionEntry, id: u64) -> RegionState {
-        match &self.path {
-            Some(p) => region_state(e, &self.layout, p, id),
-            None => RegionState::Unbaked,
-        }
+        let Some(p) = &self.path else {
+            return RegionState::Unbaked;
+        };
+        *self
+            .states
+            .borrow_mut()
+            .entry((e.name.clone(), e.face, [e.i0, e.j0, e.i1, e.j1], id))
+            .or_insert_with(|| region_state(e, &self.layout, p, id))
+    }
+
+    /// Forgets the kept states: the next read looks at the commits again (a bake that finished meanwhile shows).
+    pub fn refresh_states(&self) {
+        self.states.borrow_mut().clear();
+    }
+
+    /// The named box's state against `id`.
+    pub fn state_of(&self, name: &str, id: u64) -> Option<RegionState> {
+        Some(self.state(&self.file.regions[self.index(name)?], id))
     }
 
     pub fn rows(&self, id: u64) -> Vec<RegionRow> {
@@ -381,7 +412,7 @@ impl RegionEditor {
         }
     }
 
-    /// The command that opens the named box's commit in the editor (VIEW-069), the regions file named so the boxes come along.
+    /// The command that opens the named box's commit in the editor (VIEW-069), the regions file named so the same boxes come along.
     pub fn open_command(&self, name: &str) -> Result<String, String> {
         let path = self.path.as_ref().ok_or("no regions file")?;
         self.index(name).ok_or_else(|| format!("no box '{name}'"))?;
@@ -394,8 +425,7 @@ impl RegionEditor {
             force: false,
             threads: 0,
         };
-        let open = args.open_command(&commit_dir(path, name));
-        Ok(if self.world.world.is_none() { format!("{open} --regions {}", path.display()) } else { open })
+        Ok(format!("{} --regions {}", args.open_command(&commit_dir(path, name)), path.display()))
     }
 }
 
@@ -606,6 +636,9 @@ mod tests {
         assert_eq!(r.inputs_for(&def), Some(id), "kept while the definition is the same");
         assert_eq!(r.rows(id)[0].state, RegionState::Unbaked);
         rf::bake_entry(&def, &e, &layout, &commit_dir(&path, "land"), 2).expect("the box bakes");
+        assert_eq!(r.rows(id)[0].state, RegionState::Unbaked, "the state is kept until a refresh (no disk read a frame)");
+        r.refresh_states();
+        assert_eq!(r.state_of("land", id), Some(RegionState::Ready));
         let row = &r.rows(id)[0];
         assert_eq!((row.state, row.width, row.height, row.face, row.selected), (RegionState::Ready, 2, 2, 1, true));
         let mut edited = def.clone();
