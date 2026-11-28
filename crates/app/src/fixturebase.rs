@@ -8,16 +8,28 @@ use std::sync::Arc;
 use planet_core::{par, Face, Vec3};
 use planet_generators::global::{GlobalSample, LatticeSource, ReadError};
 
-/// A lattice of `res` cells a face edge that holds exact elevations over one rectangle of one face and reads `coarse` (a lattice with a whole-number divisor of `res` cells) elsewhere.
+/// A lattice of `res` cells a face edge that holds exact elevations over rectangles of faces (one per region, VIEW-079) and reads `coarse` (a lattice with a whole-number divisor of `res` cells)
+/// elsewhere.
 pub struct FixtureLattice {
     res: u32,
+    rects: Vec<Rect>,
+    coarse: Arc<dyn LatticeSource + Send>,
+}
+
+/// One rectangle of exact nodes: `w x h` nodes from `(i0, j0)` of `face`, row-major.
+struct Rect {
     face: Face,
     i0: u32,
     j0: u32,
     w: usize,
     h: usize,
     z: Vec<f32>,
-    coarse: Arc<dyn LatticeSource + Send>,
+}
+
+impl Rect {
+    fn holds(&self, face: Face, i: u32, j: u32) -> bool {
+        face == self.face && i >= self.i0 && j >= self.j0 && ((i - self.i0) as usize) < self.w && ((j - self.j0) as usize) < self.h
+    }
 }
 
 impl FixtureLattice {
@@ -41,16 +53,33 @@ impl FixtureLattice {
             return Err(format!("the rectangle {rect:?} lies outside the {} nodes of a face edge", res as usize + 1));
         }
         let z = par::map(&threads, w * h, &|c| base(direction(i0 + (c % w) as u32, j0 + (c / w) as u32)) as f32);
-        Ok(FixtureLattice { res, face, i0, j0, w, h, z, coarse })
+        Ok(FixtureLattice { res, rects: vec![Rect { face, i0, j0, w, h, z }], coarse })
     }
 
-    /// The nodes the rectangle holds.
+    /// Adds the rectangles of `other`, a lattice of the same cells over the same coarse lattice (another region's, VIEW-079). Where two rectangles overlap the first answers: both hold the
+    /// same pure function of the node there.
+    pub fn merge(mut self, other: FixtureLattice) -> Result<FixtureLattice, String> {
+        if other.res != self.res || other.coarse.res() != self.coarse.res() {
+            return Err(format!(
+                "two region lattices differ: {} and {} cells over coarse lattices of {} and {}",
+                self.res,
+                other.res,
+                self.coarse.res(),
+                other.coarse.res()
+            ));
+        }
+        self.rects.extend(other.rects);
+        Ok(self)
+    }
+
+    /// The nodes the rectangles hold.
     pub fn nodes(&self) -> usize {
-        self.z.len()
+        self.rects.iter().map(|r| r.z.len()).sum()
     }
 
-    fn inside(&self, face: Face, i: u32, j: u32) -> bool {
-        face == self.face && i >= self.i0 && j >= self.j0 && ((i - self.i0) as usize) < self.w && ((j - self.j0) as usize) < self.h
+    fn exact(&self, face: Face, i: u32, j: u32) -> Option<f32> {
+        let r = self.rects.iter().find(|r| r.holds(face, i, j))?;
+        Some(r.z[(j - r.j0) as usize * r.w + (i - r.i0) as usize])
     }
 }
 
@@ -70,8 +99,8 @@ impl LatticeSource for FixtureLattice {
         let coarse_res = self.coarse.res();
         let (ci1, cj1) = ((ci + 1).min(coarse_res), (cj + 1).min(coarse_res));
         let mut s = self.coarse.at(face, ci, cj)?;
-        if self.inside(face, i, j) {
-            s.elevation_m = self.z[(j - self.j0) as usize * self.w + (i - self.i0) as usize];
+        if let Some(z) = self.exact(face, i, j) {
+            s.elevation_m = z;
             return Ok(s);
         }
         if fi != 0.0 || fj != 0.0 {
@@ -132,6 +161,23 @@ mod tests {
         assert_ne!(out.to_bits(), (base(direction(26, 24)) as f32).to_bits());
     }
 
+    // spec: VIEW-079
+    #[test]
+    fn two_regions_rectangles_each_hold_their_exact_values_over_one_coarse_lattice() {
+        let second = FixtureLattice::sample(64, Face(2), (40, 4, 6, 6), &direction, &base, Arc::new(Coarse), 2).unwrap();
+        let l = lattice(2).merge(second).unwrap();
+        assert_eq!(l.nodes(), 60 + 36);
+        for (i, j) in [(16, 24), (25, 29), (40, 4), (45, 9)] {
+            assert_eq!(l.at(Face(2), i, j).unwrap().elevation_m.to_bits(), (base(direction(i, j)) as f32).to_bits(), "node ({i}, {j})");
+        }
+        // Between the rectangles the coarse lattice answers.
+        let want = (10.0 * 30.0 / 8.0 + 100.0 * 10.0 / 8.0) as f32;
+        assert!((l.at(Face(2), 30, 10).unwrap().elevation_m - want).abs() < 1e-3);
+        // Another cell count is refused.
+        let other = FixtureLattice::sample(32, Face(2), (0, 0, 2, 2), &direction, &base, Arc::new(Coarse), 1).unwrap();
+        assert!(lattice(1).merge(other).is_err());
+    }
+
     // spec: GEN-177
     #[test]
     fn outside_the_rectangle_the_coarse_lattice_is_read_bilinearly_at_the_finer_node() {
@@ -151,7 +197,7 @@ mod tests {
     #[test]
     fn the_sampling_is_the_same_on_one_and_eight_threads_and_bad_rectangles_are_refused() {
         let (a, b) = (lattice(1), lattice(8));
-        assert!(a.z.iter().zip(&b.z).all(|(x, y)| x.to_bits() == y.to_bits()));
+        assert!(a.rects[0].z.iter().zip(&b.rects[0].z).all(|(x, y)| x.to_bits() == y.to_bits()));
         let bad = |rect| FixtureLattice::sample(64, Face(2), rect, &direction, &base, Arc::new(Coarse), 1).is_err();
         assert!(bad((60, 0, 10, 4)), "past the edge");
         assert!(bad((0, 0, 0, 4)), "empty");

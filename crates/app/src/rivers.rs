@@ -8,7 +8,7 @@ use planet_core::Face;
 use planet_frame::river::{RiverGrid, RiverSource};
 use planet_generators::bake::k7::Channel;
 
-/// A [`RiverSource`] over the reader of a commit's channel graph.
+/// A [`RiverSource`] over the reader of a commit's channel graph, or over several commits' (VIEW-079: each tile's channels from the commit that holds it).
 pub struct ReaderRiverSource {
     reader: Arc<RiverReader>,
     grid: RiverGrid,
@@ -16,13 +16,22 @@ pub struct ReaderRiverSource {
     tiles: std::collections::BTreeSet<(u8, u32, u32)>,
     /// The lakes of the same commit: a river ends at their water (REND-065).
     lakes: Option<Arc<planet_cache::lake_read::CommitLakes>>,
+    /// Several commits read together: the other readers by tile owner, their lakes, and the identity of the set.
+    joined: Option<Joined>,
+}
+
+struct Joined {
+    readers: Vec<Arc<RiverReader>>,
+    owner: std::collections::HashMap<(u8, u32, u32), usize>,
+    lakes: Option<Arc<crate::multiregion::MultiLakes>>,
+    id: u64,
 }
 
 impl ReaderRiverSource {
     pub fn new(reader: Arc<RiverReader>) -> ReaderRiverSource {
         let (cells, tile, cell_m) = reader.grid_dims();
         let tiles = reader.commit().tiles.keys().copied().collect();
-        ReaderRiverSource { reader, grid: RiverGrid { cells, tile, cell_m }, tiles, lakes: None }
+        ReaderRiverSource { reader, grid: RiverGrid { cells, tile, cell_m }, tiles, lakes: None, joined: None }
     }
 
     /// The same source whose rivers end at the water of `lakes` (the same commit's, CON-22).
@@ -31,9 +40,30 @@ impl ReaderRiverSource {
         self
     }
 
-    /// The reader (its cache's bytes and decodes are the report of a flight).
+    /// The reader (its cache's bytes and decodes are the report of a flight); of the first commit when several are read together.
     pub fn reader(&self) -> &RiverReader {
         &self.reader
+    }
+
+    /// The channels of several commits read together (VIEW-079): `readers` of disjoint tiles on one river grid, their rivers ending at `lakes`.
+    pub fn join(readers: Vec<Arc<RiverReader>>, lakes: Option<Arc<crate::multiregion::MultiLakes>>) -> Result<ReaderRiverSource, String> {
+        let first = readers.first().ok_or("no commit to read")?.clone();
+        let mut src = ReaderRiverSource::new(first);
+        if readers.iter().any(|r| r.grid_dims() != src.reader.grid_dims()) {
+            return Err("the regions' channel grids differ: they cannot open together".into());
+        }
+        let mut owner = std::collections::HashMap::new();
+        for (k, r) in readers.iter().enumerate() {
+            for t in r.commit().tiles.keys() {
+                if owner.insert(*t, k).is_some() {
+                    return Err(format!("two regions hold L tile {}/{}/{}", t.0, t.1, t.2));
+                }
+            }
+        }
+        src.tiles = owner.keys().copied().collect();
+        let id = readers.iter().fold(0xcbf2_9ce4_8422_2325_u64, |h, r| (h ^ r.commit_id()).wrapping_mul(0x0000_0100_0000_01b3));
+        src.joined = Some(Joined { readers, owner, lakes, id });
+        Ok(src)
     }
 }
 
@@ -43,11 +73,18 @@ impl RiverSource for ReaderRiverSource {
     }
 
     fn tile_channels(&self, face: Face, ti: u32, tj: u32) -> Result<Arc<Vec<Channel>>, String> {
-        self.reader.tile_channels(face, ti, tj)
+        match &self.joined {
+            // A tile no region holds has no channel of any (its ground is not carved).
+            Some(j) => match j.owner.get(&(face.0, ti, tj)) {
+                Some(&k) => j.readers[k].tile_channels(face, ti, tj),
+                None => Ok(Arc::new(Vec::new())),
+            },
+            None => self.reader.tile_channels(face, ti, tj),
+        }
     }
 
     fn id(&self) -> u64 {
-        self.reader.commit_id()
+        self.joined.as_ref().map_or_else(|| self.reader.commit_id(), |j| j.id)
     }
 
     fn has_tile(&self, face: Face, ti: u32, tj: u32) -> bool {
@@ -55,6 +92,12 @@ impl RiverSource for ReaderRiverSource {
     }
 
     fn lake_wet(&self, face: Face, i: i64, j: i64) -> Result<bool, String> {
+        if let Some(joined) = &self.joined {
+            return match &joined.lakes {
+                Some(l) => l.wet(face, i, j),
+                None => Ok(false),
+            };
+        }
         match &self.lakes {
             Some(l) => Ok(l.lake_cell(face, i, j)?.is_some()),
             None => Ok(false),
