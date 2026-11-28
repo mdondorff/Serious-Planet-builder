@@ -2,7 +2,7 @@
 
 ### Requirement: VIEW-052 The editor opens the production store
 Without `--store`, `--commit`, `--regions`, `--world` or `--global-res`, outside a smoke run, the editor SHALL open the first existing directory of: `PLANET_STORE`, the pointer file `target/stores/default`'s, `target/stores/global16384`, `target/accept/global16384` (under the repo root); with none, the in-memory preview bake.
-With `--commit` or `--regions` it SHALL compute the base in memory (1,024 cells, or `--global-res N`).
+With `--commit` or `--regions` it SHALL compute the base in memory (1,024 cells; `--regions --global-res N`: N).
 An unreadable default store SHALL be refused naming `--commit DIR`, `--global-res N` and `cargo xtask store`.
 The title SHALL name the source: `store <dir>` or `preview bake <N> cells`.
 `cargo xtask store [--res N] [--relief-scale S] [--link DIR]` SHALL build a store of N cells a face edge (default 16384) into `target/stores/global<N>` and write the pointer file; `--link` only writes the pointer to an existing store.

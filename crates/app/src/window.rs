@@ -166,6 +166,13 @@ pub fn viewer_store(o: &crate::Options, root: &Path, env: Option<PathBuf>) -> Op
     }
 }
 
+/// The cells a face edge of the in-memory base of a region-box run without `--store` (VIEW-052): the size `--commit` reads outside its tiles; `None` for other runs
+/// (and for `--global-res N`, which bakes at N as before).
+pub fn regions_base_res(o: &crate::Options) -> Option<u32> {
+    (o.store.is_none() && o.commit.is_none() && o.regions.is_some() && !o.given.contains("--global-res"))
+        .then_some(crate::worldfield::MAX_RUN_BAKE_RES)
+}
+
 /// What to do when the default store cannot be read: the ways to a world without it.
 pub fn default_store_ways_out(dir: &Path) -> String {
     format!(
@@ -2155,7 +2162,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
                 })?
             }
             // The region boxes are edited over the production base computed in memory, as `--commit` reads it outside its tiles (VIEW-069, VIEW-077).
-            (None, None) if o.regions.is_some() && !o.given.contains("--global-res") => {
+            (None, None) if regions_base_res(o).is_some() => {
                 let def = match &o.world {
                     Some(p) => crate::worldfield::load_world(p)?,
                     None => planet_world_def::WorldDefinition::single_planet(crate::skeleton::RADIUS_M, o.seed),
@@ -2172,7 +2179,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     let world_label = match &o.commit {
         // The title says the base is computed in memory (VIEW-069).
         Some(dir) => format!("commit {} over the base computed in memory, not a stored bake", dir.display()),
-        None => title_world_label(store.as_deref(), o.global_res, world.field_source_name(), o.erosion),
+        None => title_world_label(store.as_deref(), regions_base_res(o).unwrap_or(o.global_res), world.field_source_name(), o.erosion),
     };
     let _ = writeln!(out, "{}", world.describe());
     crate::stall::phase_mark("world");
@@ -2380,6 +2387,11 @@ mod tests {
         // A store given is still opened.
         let given = args(&["editor", "--seed", "14", "--regions", "r.toml", "--store", "s"]);
         assert_eq!(viewer_store(&given, &root, None), Some(PathBuf::from("s")));
+        // Its base is the 1,024-cell bake `--commit` reads outside its tiles, and the title says so; `--global-res N` keeps N.
+        assert_eq!(regions_base_res(&args(&["editor", "--seed", "14", "--regions", "r.toml"])), Some(crate::worldfield::MAX_RUN_BAKE_RES));
+        assert_eq!(regions_base_res(&args(&["editor", "--seed", "14", "--regions", "r.toml", "--global-res", "64"])), None);
+        assert_eq!(regions_base_res(&args(&["editor", "--seed", "14"])), None);
+        assert_eq!(title_world_label(None, 1024, "legacy source", false), "preview bake 1024 cells, legacy source");
         let why = default_store_ways_out(&root.join("target/accept/global16384"));
         assert!(why.contains("--commit DIR") && why.contains("--global-res N") && why.contains("cargo xtask store"), "{why}");
         let _ = std::fs::remove_dir_all(&root);
