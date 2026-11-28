@@ -40,7 +40,7 @@ Kept where they are (the owner's guardrails, 2026-11-27):
 | The current rules, numbers and budgets per subsystem | `openspec/specs/<subsystem>/spec.md` |
 | Work in progress on a subsystem | `openspec/changes/<id>/` |
 | Requirement IDs that must never be issued again | `openspec/retired-ids.txt` |
-| A milestone's verdict, exit criteria and process review | `docs/milestones/<M>-report.md` |
+| A milestone's verdict, exit criteria and process review | `docs/milestones/<M>-report.md` while the sprint is open; a finished one in `docs/archive/<M>/<M>-report.md` (M0 to M3 in `archive/M0-M3/`, P1 and P2 in `archive/P1-P2/`) |
 | The terrain prototype's plan (P1 to P3: items, phases, the A/B gate) | `docs/archive/P3/briefings/terrain-prototype.md` |
 | The perf windows up to M7 | `docs/archive/M5/perf/`, `docs/archive/M6/perf/`, `docs/archive/M7/perf/` (the raw dumps are in git history at a179884d1) |
 | An experiment's report, numbers and pictures; the catalogue of every spike | `spikes/<name>/results/`; `spikes/README.md` |

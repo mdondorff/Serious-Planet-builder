@@ -87,7 +87,7 @@ SPIKE-13 (edit latency), 14 (egui), 15 (build speed), 16 (water motion), 17 (the
 
 ## 4. After the owner's test (2026-10-20): the iteration
 
-The owner's notes are in `docs/archive/M6/briefings/m6-owner-test-plan.md`; the queue is the table "M6 iteration" in `docs/archive/M6/status-at-m6-close.md`.
+The owner's notes are in `docs/archive/M6/briefings/m6-owner-test-plan.md`; the queue was the table "M6 iteration" in `docs/archive/M6/status-at-m6-close.md` (deleted 2026-11-27, 9f93d1488; in the git history).
 
 | Item | State |
 |---|---|
@@ -133,8 +133,8 @@ Owner decisions open: (1) keep-inside regions now or in M7; (2) the look review 
 | What | Where |
 |---|---|
 | Gate evidence per criterion and row, gaps G1 to G10 | `docs/archive/M6/briefings/m6-gate-evidence.md` |
-| The owner's test notes and the iteration plan | `docs/archive/M6/briefings/m6-owner-test-plan.md`, `docs/archive/M6/status-at-m6-close.md` ("M6 iteration") |
-| Perf windows 18 to 21 | `docs/perf/window-18.md` to `window-21.md` (raw output under `docs/perf/window-18/` to `window-21/`) |
+| The owner's test notes and the iteration plan | `docs/archive/M6/briefings/m6-owner-test-plan.md`, `docs/archive/M6/status-at-m6-close.md` ("M6 iteration"; deleted 2026-11-27, 9f93d1488) |
+| Perf windows 18 to 21 | `docs/archive/M6/perf/window-18.md` to `window-21.md` (the raw output was deleted 2026-11-27, 9f93d1488; in the git history) |
 | The decisions | ADR 0066 to 0073 |
 | The owner's videos and screenshots | the owner's upload folder (over 1 MB, not committed); `docs/dev_screenshots/` |
 

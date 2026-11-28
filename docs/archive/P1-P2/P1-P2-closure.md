@@ -1,7 +1,7 @@
 # P1 and P2 closure report (P3 E5, read only)
 
 Status: report (explorer, 2026-11-14; lead's order #143 item 2). Nothing here is removed, edited or decided; each row proposes.
-Sources: `cargo xtask worktrees --no-size` (2026-11-14 11:00; a snapshot), `docs/learnings.md`, `docs/status.md`, `docs/briefings/terrain-prototype.md` (closure checklist), spike results, lane outboxes and digests of 2026-11-10 to 2026-11-14.
+Sources: `cargo xtask worktrees --no-size` (2026-11-14 11:00; a snapshot), `docs/learnings.md`, `docs/status.md`, `docs/archive/P3/briefings/terrain-prototype.md` (closure checklist), spike results, lane outboxes and digests of 2026-11-10 to 2026-11-14.
 
 ## 1. Worktree inventory (38 worktrees; `--prune` would remove 19)
 | Worktree (under `.claude/worktrees/`) | Branch | Merged | Last commit | Uncommitted | Proposal |

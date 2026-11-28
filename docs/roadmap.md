@@ -6,7 +6,7 @@ Status: direction, not a plan (owner and opus-planner, 2026-10-23). Each milesto
 | # | Milestone | Content | Status |
 |---|---|---|---|
 | M0 to M7 | Foundations to cities | coordinates, LOD, fields and cache, streaming, atmosphere and ocean, editor, cities | done |
-| M8 | Natural landscape | global coupled river network, plausible relief, horizon shadows, the speed envelope, the no-degradation gate; fine erosion per 5 km square failed its stop rule and moved to M9 (`docs/milestones/M8-report.md`) | done 2026-10-30 |
+| M8 | Natural landscape | global coupled river network, plausible relief, horizon shadows, the speed envelope, the no-degradation gate; fine erosion per 5 km square failed its stop rule and moved to M9 (`docs/archive/M8/M8-report.md`) | done 2026-10-30 |
 | M9 | Realistic terrain | the generator redesigned (continents, relief to Earth's bands, belts at convergent margins), the two-pass erosion bake (ADR 0088), relief classes (ADR 0089), channels, ground detail, the look against the reference; plan and iterations: `docs/archive/M9/briefings/m9-plan.md` | active since 2026-11-01 |
 | M10 | Living surface | vegetation, rocks and ground cover placed from the driver maps (wetness, soil depth); GPU instancing (SPIKE-28); the speed envelope stays a regression check | open |
 | M11 | Water and sky | rivers and lakes as water surfaces from the global network, FFT ocean, clouds, weather light | open |
