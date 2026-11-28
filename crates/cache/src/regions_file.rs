@@ -655,6 +655,17 @@ impl BakeArgs {
     }
 
     /// The command that opens a region's commit in the editor (VIEW-069).
+    /// The command that opens one commit: the world, `--items` when given and `--commit DIR` (VIEW-069), paths with a space quoted. The editor's per-box Open uses it until E2 moves to
+    /// [`BakeArgs::open_command`] (D2).
+    pub fn open_commit_command(&self, commit: &Path) -> String {
+        let world = match (&self.world, self.seed) {
+            (Some(p), _) => format!("--world {}", shell_path(p)),
+            (_, s) => format!("--seed {}", s.unwrap_or(0)),
+        };
+        let items = self.items.as_ref().map_or(String::new(), |d| format!(" --items {}", shell_path(d)));
+        format!("cargo run --release -p planet -- editor {world}{items} --commit {}", shell_path(commit))
+    }
+
     /// The one command that reopens the world with every ready region of the file (VIEW-077, the owner's D2 of 2026-11-28): the world, `--items` when given and `--regions FILE`, no
     /// `--commit`; paths with a space are quoted. Printed once after the last region (the form agreed with E2).
     pub fn open_command(&self) -> String {

@@ -224,6 +224,12 @@ fn the_open_line_carries_the_regions_file_and_quotes_paths_with_a_space() {
         format!("cargo run --release -p planet -- editor --world \"My World/def.toml\" --items \"My World/items\" --regions \"{regions}\"")
     );
     assert!(!line.contains("--commit"), "the editor opens every ready region of the file (D2)");
+    // The one-commit form the editor's per-box Open prints (VIEW-069), quoted the same way.
+    let commit = Path::new("My World").join("regions").join("alps").display().to_string();
+    assert_eq!(
+        a.open_commit_command(&commit_dir(&a.regions, "alps")),
+        format!("cargo run --release -p planet -- editor --world \"My World/def.toml\" --items \"My World/items\" --commit \"{commit}\"")
+    );
     assert_eq!(shell_path(Path::new("plain/path.toml")), "plain/path.toml");
     assert_eq!(shell_path(Path::new("a b")), "\"a b\"");
 }

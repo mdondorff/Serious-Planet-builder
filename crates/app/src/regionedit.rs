@@ -425,7 +425,7 @@ impl RegionEditor {
             force: false,
             threads: 0,
         };
-        Ok(format!("{} --regions {}", args.open_command(&commit_dir(path, name)), path.display()))
+        Ok(format!("{} --regions {}", args.open_commit_command(&commit_dir(path, name)), path.display()))
     }
 }
 
