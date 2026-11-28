@@ -16,7 +16,7 @@ Working files: `docs/status.md` (forward state only: owner items, queue, stop re
 - `cargo xtask test fast`: tier A for changed crates (<= 20 s)
 - `cargo xtask test`: tiers A + B on the software adapter
 - `cargo xtask test gpu`: tier C goldens and debug views
-- `cargo xtask test gpu --real`: the same on the discrete GPU. Run it yourself when real-GPU evidence helps, no owner confirmation, never during a perf window. Its golden candidates go through `golden-review` (ADR 0017).
+- `cargo xtask test gpu --real`: the same on the discrete GPU. Run it yourself when real-GPU evidence helps, never in a perf window. Its golden candidates go through `golden-review` (ADR 0017).
 - `cargo xtask spec-lint`: trace IDs, tiers, requirement coverage
 - `cargo xtask accept <milestone>`: milestone acceptance
 - `cargo xtask repro <bundle>`: replay a repro bundle
@@ -50,7 +50,7 @@ Specs, ADRs and working files are read by agents and the owner. Write definition
 
 ## Git
 - One branch per OpenSpec change (`change/<id>`). Small commits.
-- Push the branch, open a PR with `gh pr create`. Merge (squash; who merges: `docs/routing.md`) only when CI is green on Windows and Linux and the verifier passed; the PR body carries `Verifier: PASS <sha>` (pr-gate). A docs-only PR (only docs/, openspec/, .claude/, root `*.md`, `spikes/**/results/**`, `spikes/README.md`) runs the light `docs` check (spec-lint) and needs only it green (owner, 2026-10-16).
+- Push the branch, open a PR with `gh pr create`. Merge (squash; who merges: `docs/routing.md`) only when CI is green on Windows and Linux and the verifier passed; the PR body carries `Verifier: PASS <sha>` and the review lines it needs (BUILD-075: `Numerics:`, `Spec-Guardian:`, `Research-Review:`, `Owner-Look:`, `Sprint:`). A docs-only PR (the paths `ci.yml` ignores) needs only the `docs` check (spec-lint) green (owner, 2026-10-16).
 - Before every push to a PR branch run `cargo xtask prepush` (check, test fast, and test gpu when the diff touches render, shaders or another golden-producing crate), while waiting is cheap. Lavapipe-only golden differences stay CI's job (owner, 2026-10-19).
 - After every push to a PR, start `gh pr checks <n> --watch` as a background command and act on its result (fix a failure, or verify and merge). Never end a turn with CI pending and no watch running.
 - Worktrees only under `.claude/worktrees/`, never inside `target/` or a scratchpad. Remove yours once its PR is merged (`cargo xtask worktrees --prune`).

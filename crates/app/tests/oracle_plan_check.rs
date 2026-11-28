@@ -1,6 +1,6 @@
 //! GEN-017, tier B: `generate --plan-check` plans the standard flight over a stored bake with both fields. Bakes a 256-cell
 //! store and plans twenty views (about 4 s), so it lives outside the fast tier; the production-resolution run is recorded at
-//! M3 acceptance (docs/milestones/M3-report.md).
+//! M3 acceptance (docs/archive/M0-M3/M3-report.md).
 
 use std::path::PathBuf;
 

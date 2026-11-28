@@ -1,0 +1,1 @@
+- 2026-11-28 milestones-archive (S-Region-Authoring E5): the M0-P2 milestone files and the superseded P4.md in docs/archive/<M>/ (new P1-P2/), the shadow-layer1 poses in docs/tools/poses/, the M8 image folders kept; agent-guard and next-id read the sprint files; CLAUDE.md and GEMINI.md name the BUILD-075 review lines

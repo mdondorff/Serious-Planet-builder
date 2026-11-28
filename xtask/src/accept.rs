@@ -104,16 +104,16 @@ fn manual_criteria(milestone: &str) -> &'static [&'static str] {
             "Terrain at most 8 ms at 1440p on the mid-range tier: needs a performance run on Rasierklinge (the owner confirms the machine first)",
             "No cracks in 10 scripted views: checked on the software adapters and, by the `test gpu --real` step above, on the discrete GPU (LOD-005)",
             "Six terrain goldens blessed by the owner (/bless), and the Linux goldens",
-            "GO/NO-GO gate: the owner decides after reading docs/milestones/M2-report.md",
+            "GO/NO-GO gate: the owner decides after reading docs/archive/M0-M3/M2-report.md",
         ],
         "M3" => &[
             "Tile hashes identical on Windows and Linux: needs the CI determinism job (determinism manifest)",
             "Global bake of 16384 cells per face edge in at most 10 min within 8 GB (GEN-014): needs the architect's perf window (`cargo xtask perf global-bake`)",
-            "Production-resolution planning (cells 32, viewport / tau 240) of the standard flight with the terrain and the eroded field: `generate --global-dir D --global-res 16384` then `generate --plan-check D --global-res 16384` (about 12 GB of disk; recorded in docs/milestones/M3-report.md)",
+            "Production-resolution planning (cells 32, viewport / tau 240) of the standard flight with the terrain and the eroded field: `generate --global-dir D --global-res 16384` then `generate --plan-check D --global-res 16384` (about 12 GB of disk; recorded in docs/archive/M0-M3/M3-report.md)",
             "Terrain GPU budgets and regressions on Rasierklinge (TEST-012): needs the architect's perf window",
             "Relief-view flight review at 1280x720 on the real GPU (TEST-014): the owner",
             "`cache-verify` and a definition edit rebuilding only the affected tiles (STRM-004) pass in tiers A and B above; a run on a real store is the owner's",
-            "GO/NO-GO gate: the owner decides after reading docs/milestones/M3-report.md",
+            "GO/NO-GO gate: the owner decides after reading docs/archive/M0-M3/M3-report.md",
         ],
         "M4" => &[
             "Tile hashes identical on Windows and Linux: needs the CI determinism job (determinism manifest, GEN-003)",
@@ -135,7 +135,7 @@ fn manual_criteria(milestone: &str) -> &'static [&'static str] {
             "Criterion 3: `cargo xtask gate` on the real store (TEST-061, TEST-062): no frame over 100 ms, 0 held-back tiles without edits, no step between levels (measured on the base field), the store opens without a rebuild (TEST-075), no panic; run it before the window, never inside one (`gate --small` is an automated step above)",
             "Criteria 4 to 7 are read from the perf logs only; criterion 6 is decided by the M6 table of `edit-latency.md` (the drawn tiles; the horizon table is reported, not judged), and criterion 7's envelope log must say `chunk_stage` false",
             "CI green on Windows (WARP) and Linux (lavapipe) for the merge commit, and the determinism comparison (criterion 2)",
-            "The owner's live-test items (docs/milestones/M8/owner-test-2026-10-27/README.md) and the M8 report (docs/milestones/M8-report.md): the planner",
+            "The owner's live-test items (docs/milestones/M8/owner-test-2026-10-27/README.md) and the M8 report (docs/archive/M8/M8-report.md): the planner",
         ],
         _ => &["No automated criteria are defined for this milestone yet"],
     }
