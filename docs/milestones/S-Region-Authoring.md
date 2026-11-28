@@ -20,6 +20,7 @@ Out of scope:
 | # | Decision | Lead's recommendation | Default | By | State |
 |---|---|---|---|---|---|
 | D1 | The `regions.toml` format | world folder; `[[region]]` with `name`, `face`, tile range; state derived | pauses E1 and E2 | 2026-11-28 | decided 2026-11-28: the owner's format, in E1 |
+| D2 | Several ready regions open together in one editor run (the owner's blocker, 2026-11-28 smoke) | in this sprint: widen E2, crusader, about 1.5 lane-days, park at 2 | next sprint's first exit | 2026-11-29 | open |
 ## Changes
 - 2026-11-28 | file | the local draft of 2026-11-27 -> the sprint format | lead
 - 2026-11-28 | Status | draft -> active | owner

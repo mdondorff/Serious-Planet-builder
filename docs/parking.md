@@ -88,3 +88,9 @@ Owner, 2026-11-12 (ADR 0120). These items are outside the current milestone, one
 - OpenSpec clean-up: 72 open changes, many M8/M9 work done, superseded or dropped; spikes audits (done, superseded, still wanted), owning lanes archive in batches (owner, 2026-11-13: P3's first item). Trigger: P3 starts.
 - Edit wash-out (SPIKE-112, 2026-11-13): a 400 m dome under the erosion ends about 200 m high; tune how strongly an edit holds against the rounds. Trigger: the editor work under ADR 0113.
 - River planform layer (meandering; external reviewer C, 2026-11-15): a reach-level vector model between H1 and the terrain (centreline, width, discharge profile, valley envelope, planform parameters); its slot is reserved in P3's D-2 contract. First a small experiment on three reaches (low-gradient, confined, steep): the drainage centreline against a procedural meander against a curvature-driven evolution; later Howard-type migration, cutoffs and floodplains. Trigger: after P3's D-1 has a winner.
+
+## From the owner's S-Region-Authoring smoke and its external review (2026-11-28)
+- Sites tab layout: the panel gets cluttered with regions beside bookmarks; a UX sprint, not a fix now (owner, 2026-11-28).
+- Cube face edges: regions at or across a face edge stay refused and untested (REND-063, out of the sprint's scope; owner, 2026-11-28).
+- Region identity: `REGION_BAKE_VERSION` is bumped by hand for K5, K7 and H1 changes; wire the stages' version constants into `region_inputs_id` before an erosion sprint touches K7 (review F5, 2026-11-28). Trigger: the first M-Erosion exit that changes K5, K7 or H1.
+- Disk: the 42.1 GB of river-graph `*graph*.txt` in `tmp/g1*`, `tmp/g2*` stay (DEC-62); compress or delete them if C: drops below 80 GB free (review F6).
