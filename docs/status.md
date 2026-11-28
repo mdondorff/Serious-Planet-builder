@@ -1,6 +1,6 @@
 # Status
 
-Forward state only (owner, 2026-10-16): open owner items, the current queue's open items, the current unanswered stop report, tracked items and quarantines. History goes to the log (`cargo xtask log`). When a change is archived the coder deletes its queue item's text (the log line is the record); when the architect answers a stop report it deletes it. A Tracked entry has at most 3 lines; a finished one is deleted (ADR 0075). Cap: 15 KB. Earlier states: git history (the M4 and M6 snapshots were deleted in #1683, owner, 2026-11-27). M8 closed 2026-10-30: `docs/milestones/M8-report.md`. New requirement IDs, ADR and SPIKE numbers are reserved through the lead (ADR 0120).
+Forward state only (owner, 2026-10-16): open owner items, the current queue's open items, the current unanswered stop report, tracked items and quarantines. History goes to the log (`cargo xtask log`). When a change is archived the coder deletes its queue item's text (the log line is the record); when the architect answers a stop report it deletes it. A Tracked entry has at most 3 lines; a finished one is deleted (ADR 0075). Cap: 15 KB. Earlier states: git history (the M4 and M6 snapshots were deleted in #1683, owner, 2026-11-27). M8 closed 2026-10-30: `docs/archive/M8/M8-report.md`. New requirement IDs, ADR and SPIKE numbers are reserved through the lead (ADR 0120).
 
 ## Waiting for the owner
 - **Your flight on the fly1126 stores** (optional; lanes digest `flight-playbook-fly1126-2026-11-27.md`; stores and stills in `C:/DEV/SeriousPlanetData/flights/fly1126/`).
