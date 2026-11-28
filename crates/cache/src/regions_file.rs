@@ -654,7 +654,6 @@ impl BakeArgs {
         world_with_items(def, self.items.as_deref())
     }
 
-    /// The command that opens a region's commit in the editor (VIEW-069).
     /// The command that opens one commit: the world, `--items` when given and `--commit DIR` (VIEW-069), paths with a space quoted. The editor's per-box Open uses it until E2 moves to
     /// [`BakeArgs::open_command`] (D2).
     pub fn open_commit_command(&self, commit: &Path) -> String {
