@@ -21,6 +21,7 @@ pub mod hoverpick;
 pub mod litperf;
 pub mod lookload;
 pub mod manifest;
+pub mod multiregion;
 pub mod panels;
 pub mod pathreplay;
 pub mod pipelined;
@@ -2496,6 +2497,113 @@ mod tests {
         let (edited, s, _) = world_with_items(def.clone(), Some(&items)).expect("the items go into the world");
         assert_eq!((s, edited.item_ids(planet_world_def::BodyId::PLANET).len()), (seed, 1));
         assert_eq!(region_state(entry, &layout, &regions, region_inputs_id(&edited, seed)), RegionState::Stale);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // spec: VIEW-079
+    // spec: TEST-166
+    #[test]
+    fn two_regions_baked_one_after_the_other_open_together_and_drop_out_when_an_edit_makes_them_stale() {
+        use planet_cache::regions_file::*;
+        let root = std::env::temp_dir().join(format!("planet-view079-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        // The small layout of TEST-165: 16 L tiles a face edge.
+        let layout = RegionLayout { regional: 128, tile: 64, halo: 24, margin: 6, rounds: 2, res: 1024 };
+        let seed = 14;
+        let def = planet_world_def::WorldDefinition::single_planet(SEED_WORLD_RADIUS_M, seed);
+        let inputs = planet_cache::global_store::class_inputs(&def, seed, 2);
+        let (lo, hi) = layout.allowed_tiles();
+        let n = layout.tiles_per_edge() as usize;
+        let land = |t: u32, u: u32| {
+            let c = |k: u32| (k as usize * 64 + 32) * layout.res as usize / (n * 64);
+            inputs.base(planet_cache::region_bake::lattice_direction(planet_core::Face(1), layout.res as usize, c(t), c(u))) > 50.0
+        };
+        // Two adjacent 2x2 land boxes of face 1, side by side along i (their shared edge is the seam between two commits).
+        let (i0, j0) = (lo..hi.saturating_sub(2))
+            .flat_map(|j| (lo..hi.saturating_sub(2)).map(move |i| (i, j)))
+            .find(|&(i, j)| (0..4).all(|a| (0..2).all(|b| land(i + a, j + b))))
+            .expect("two adjacent land boxes on face 1 of seed 14");
+        let regions = default_path(&root.join("world"));
+        let entry = |name: &str, i: u32| RegionEntry {
+            name: name.into(),
+            face: 1,
+            tiles_per_edge: layout.tiles_per_edge(),
+            i0: i,
+            j0,
+            i1: i + 1,
+            j1: j0 + 1,
+        };
+        let (a, b) = (entry("west", i0), entry("east", i0 + 2));
+        RegionsFile { regions: vec![a.clone(), b.clone()] }.write(&regions).unwrap();
+        let names = |v: &[(String, std::path::PathBuf)]| v.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>();
+        // Baked one after the other: the later bake keeps the earlier ready one.
+        let (ready, not) = regionedit::ready_commits(&regions, &layout, &def, None).unwrap();
+        assert!(ready.is_empty() && not.len() == 2);
+        bake_entry(&def, &a, &layout, &commit_dir(&regions, "west"), 2).expect("west bakes");
+        assert_eq!(names(&regionedit::ready_commits(&regions, &layout, &def, None).unwrap().0), vec!["west"]);
+        bake_entry(&def, &b, &layout, &commit_dir(&regions, "east"), 2).expect("east bakes");
+        let (ready, not) = regionedit::ready_commits(&regions, &layout, &def, None).unwrap();
+        assert_eq!((names(&ready), not.len()), (vec!["west".to_string(), "east".to_string()], 0));
+        // Both open together over one base: each region's ground is what it is opened alone, the camera starts over the first.
+        let dirs: Vec<_> = ready.iter().map(|(_, d)| d.clone()).collect();
+        let (both, seconds) = worldfield::WorldTerrain::open_regions_in_memory(def.clone(), &dirs, 2).expect("the regions open together");
+        assert_eq!(seconds.len(), 2);
+        assert!(seconds.iter().all(|s| s.is_finite() && *s >= 0.0));
+        assert_eq!(both.field_source_name(), "class source");
+        let all = both.commit_region().expect("the union of the regions");
+        assert_eq!(all.tiles.len(), 8);
+        assert_eq!(both.start_region().unwrap().tiles.len(), 4, "the camera starts over the first region");
+        let field = both.field().unwrap();
+        let (cells, tile) = (f64::from(all.cells), f64::from(all.tile));
+        let at = |x: f64, y: f64| {
+            planet_core::cube::face_to_direction(
+                &planet_core::cube::TangentWarp,
+                planet_core::Face(1),
+                2.0 * x / cells - 1.0,
+                2.0 * y / cells - 1.0,
+            )
+        };
+        for (name, dir, ti) in [("west", &dirs[0], i0), ("east", &dirs[1], i0 + 2)] {
+            let alone = worldfield::WorldTerrain::open_commit_in_memory(def.clone(), dir, 2).expect("opened alone");
+            let f = alone.field().unwrap();
+            for (fx, fy) in [(0.3, 0.4), (1.1, 0.7), (1.7, 1.6), (0.5, 1.2)] {
+                let d = at((f64::from(ti) + fx) * tile, (f64::from(j0) + fy) * tile);
+                assert!(all.contains(d));
+                assert_eq!(field.height(d).to_bits(), f.height(d).to_bits(), "{name} at ({fx}, {fy}): its ground as opened alone");
+            }
+        }
+        // The seam between the two adjacent commits is not judged here: each commit is solved alone, so the shared edge is a known limit (VIEW-079).
+        // An item edit makes both stale: they drop out until baked again.
+        let items = root.join("world").join("items");
+        let mut store = planet_world_def::item_store::LooseFileStore::new(&items);
+        let item = planet_world_def::item::Item {
+            id: 0x0001_8f00_0000_0000_0000_0000_0000_0002,
+            body: planet_world_def::BodyId::PLANET,
+            surface: "sphere".into(),
+            layer: "items".into(),
+            priority: 3,
+            kind: "crater".into(),
+            anchor: planet_world_def::item::Anchor { latitude_deg: 10.0, longitude_deg: 20.0, height_m: 0.0, heading_deg: 0.0 },
+            reach_m: 900.0,
+            max_delta_m: 35.5,
+            params: std::collections::BTreeMap::from([("depth_m".to_string(), 24.0), ("radius_m".to_string(), 310.0)]),
+            base_hash: def.base_hash(),
+            generator_version: 4,
+            stage_version: 2,
+            name: None,
+            notes: None,
+            points: Vec::new(),
+            group: None,
+            part: None,
+            mask_layer: None,
+            strokes: Vec::new(),
+        };
+        planet_world_def::item_store::ItemStore::put(&mut store, &item).unwrap();
+        let (ready, not) = regionedit::ready_commits(&regions, &layout, &def, Some(&items)).unwrap();
+        assert!(ready.is_empty(), "an edit makes every region stale");
+        assert_eq!(not.iter().map(|(_, s)| *s).collect::<Vec<_>>(), vec![RegionState::Stale, RegionState::Stale]);
+        // Overlapping boxes cannot open together.
+        assert!(worldfield::WorldTerrain::open_regions_in_memory(def.clone(), &[dirs[0].clone(), dirs[0].clone()], 2).is_err());
         let _ = std::fs::remove_dir_all(&root);
     }
 

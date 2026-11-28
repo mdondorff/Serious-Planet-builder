@@ -1,0 +1,1 @@
+- 2026-11-28 multi-region (S-Region-Authoring E2, D2): editor --regions FILE without --commit opens every ready region of the file over the class-source base in memory (one tile cache for all, each region timed, stale ones named and left out); the open line agreed with explorer (VIEW-079; VIEW-077, TEST-166)

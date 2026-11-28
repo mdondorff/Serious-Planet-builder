@@ -304,7 +304,9 @@ pub struct WorldTerrain {
     /// The river source of the new chain's commit when it holds a channel graph (STRM-086): the frame's river plan reads the channels through it.
     rivers: Option<Arc<crate::rivers::ReaderRiverSource>>,
     /// The lakes of the same commit (REND-058): the water field answers a lake's level where the commit's lake mask is wet.
-    lakes: Option<Arc<planet_cache::lake_read::CommitLakes>>,
+    lakes: Option<Arc<dyn planet_generators::lake_water::LakeMaskSource + Send + Sync>>,
+    /// The region the camera starts over when several are open (VIEW-079): the first; `commit_region` is all of them.
+    start_region: Option<CommitRegion>,
     /// What the base is, for a world opened by `open_commit_in_memory` or `open_fixture` (empty otherwise).
     fixture_note: String,
     /// The lattice resolution, face and node rectangle of the exact base of a commit opened in memory.
@@ -455,6 +457,7 @@ impl WorldTerrain {
             erosion_note: String::new(),
             rivers: None,
             lakes: None,
+            start_region: None,
             fixture_note: String::new(),
             commit_base: None,
             bake_base: None,
@@ -564,6 +567,7 @@ impl WorldTerrain {
             erosion_note: String::new(),
             rivers: None,
             lakes: None,
+            start_region: None,
             fixture_note: String::new(),
             commit_base: None,
             bake_base: None,
@@ -835,11 +839,12 @@ impl WorldTerrain {
             .ok()
             .map(|r| Arc::new(crate::rivers::ReaderRiverSource::new(Arc::new(r))));
         // The lakes are read under the same commit (CON-22): its basin tables and the tiles' lake masks.
-        self.lakes = Some(Arc::new(
+        let lakes = Arc::new(
             layer.lakes(planet_cache::lake_read::DEFAULT_MASK_TILES).map_err(|e| format!("--erosion: the lakes of the commit: {e}"))?,
-        ));
+        );
+        self.lakes = Some(lakes.clone());
         // The rivers end at the lakes' water (REND-065).
-        if let (Some(r), Some(l)) = (self.rivers.take(), self.lakes.clone()) {
+        if let (Some(r), Some(l)) = (self.rivers.take(), Some(lakes)) {
             let r = Arc::try_unwrap(r).map_err(|_| "--erosion: the river source is shared before the world is built".to_string())?;
             self.rivers = Some(Arc::new(r.with_lakes(l)));
         }
@@ -918,6 +923,111 @@ impl WorldTerrain {
             started.elapsed().as_secs_f64()
         );
         Ok(world)
+    }
+
+    /// Every region of `dirs` over one base computed in memory (VIEW-079): the exact lattice over each commit's tiles and its margin, the class source's coarse globe elsewhere, and the
+    /// layer, lakes and rivers of each commit over its own tiles, with one cache budget for all. The commits must be of the definition's seed, of one grid and base, and hold disjoint tiles.
+    /// Returns the world and the seconds each region's lattice took. One commit opens as [`WorldTerrain::open_commit_in_memory`].
+    pub fn open_regions_in_memory(
+        def: WorldDefinition,
+        dirs: &[std::path::PathBuf],
+        threads: usize,
+    ) -> Result<(WorldTerrain, Vec<f64>), String> {
+        let started = std::time::Instant::now();
+        if let [one] = dirs {
+            let world = WorldTerrain::open_commit_in_memory(def, one, threads)?;
+            return Ok((world, vec![started.elapsed().as_secs_f64()]));
+        }
+        let first = dirs.first().ok_or("no ready region to open")?;
+        let seed = GenContext::new(&def).body_seed(BodyId::PLANET).map_err(|e| format!("the definition has no body seed: {e}"))?;
+        let mut commits = Vec::with_capacity(dirs.len());
+        for d in dirs {
+            let c = planet_cache::l_writer::Commit::read(d)?.ok_or_else(|| format!("{} holds no commit of the new chain", d.display()))?;
+            if c.spec.seed != seed {
+                return Err(format!("{}: the commit was baked for seed {}, the definition's is {seed}", d.display(), c.spec.seed));
+            }
+            commits.push(c);
+        }
+        let spec = commits[0].spec;
+        if let Some(k) = commits
+            .iter()
+            .position(|c| (c.spec.res, c.spec.cells, c.spec.tile, c.spec.base_id) != (spec.res, spec.cells, spec.tile, spec.base_id))
+        {
+            return Err(format!(
+                "{} is of another lattice, grid or base than {}: they cannot open together",
+                dirs[k].display(),
+                first.display()
+            ));
+        }
+        let res = spec.res;
+        let mut world = WorldTerrain::open_class(def.clone(), MAX_RUN_BAKE_RES)?;
+        let coarse: Arc<dyn LatticeSource + Send> = Arc::from(std::mem::replace(&mut world.src, Box::new(NoBake)));
+        world.water_src = Some(coarse.clone());
+        let inputs = planet_cache::global_store::class_inputs(&def, seed, threads);
+        let mut lattice: Option<crate::fixturebase::FixtureLattice> = None;
+        let mut seconds = Vec::with_capacity(dirs.len());
+        for c in &commits {
+            let t = std::time::Instant::now();
+            let (face, rect) = fixture_rectangle(&c.spec, c.tiles.keys().copied())?;
+            let direction = |i: u32, j: u32| planet_cache::region_bake::lattice_direction(face, res as usize, i as usize, j as usize);
+            let one =
+                crate::fixturebase::FixtureLattice::sample(res, face, rect, &direction, &|d| inputs.base(d), coarse.clone(), threads)?;
+            lattice = Some(match lattice {
+                Some(l) => l.merge(one)?,
+                None => one,
+            });
+            seconds.push(t.elapsed().as_secs_f64());
+        }
+        let exact: Arc<dyn LatticeSource + Send> = Arc::new(lattice.expect("one region at least"));
+        world.src = Box::new(SharedLattice(Arc::clone(&exact)));
+        world.bake_base = Some((exact, spec.base_id));
+        let stored = Arc::new(GlobalWorld::from_definition(&def).map_err(|e| format!("the definition cannot be generated: {e}"))?);
+        // One cache budget for all regions (12 GB rule): the layer's tiles in one cache of `LAYER_CACHE_TILES`, the rivers' bytes and the lakes' masks split between the commits.
+        let n = dirs.len();
+        let mut layers = Vec::with_capacity(n);
+        let mut lakes = Vec::with_capacity(n);
+        let mut readers = Vec::with_capacity(n);
+        for d in dirs {
+            let layer = planet_cache::l_layer::CommitLayer::open(d, stored.clone(), 1).map_err(|e| format!("{}: {e}", d.display()))?;
+            if let Ok(r) = layer.rivers(planet_cache::river_read::DEFAULT_CACHE_BYTES / n) {
+                readers.push(Arc::new(r));
+            }
+            lakes.push(Arc::new(
+                layer
+                    .lakes((planet_cache::lake_read::DEFAULT_MASK_TILES / n).max(2))
+                    .map_err(|e| format!("{}: the lakes of the commit: {e}", d.display()))?,
+            ));
+            layers.push(layer);
+        }
+        let ids: Vec<String> = layers.iter().map(|l| format!("{:016x}", l.commit().id)).collect();
+        let lakes = Arc::new(crate::multiregion::MultiLakes::new(lakes)?);
+        world.rivers =
+            if readers.is_empty() { None } else { Some(Arc::new(crate::rivers::ReaderRiverSource::join(readers, Some(lakes.clone()))?)) };
+        world.lakes = Some(lakes);
+        let layer = crate::multiregion::MultiLayer::new(layers, LAYER_CACHE_TILES)?;
+        let layer = planet_generators::erosion_layer::ErosionLayer::new(Arc::new(layer)).map_err(|e| format!("the regions' layer: {e}"))?;
+        let sea_level_m = def.sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
+        world.kind = HeightFieldKind::ErodedC1;
+        world.erosion_note = format!(
+            "erosion layer of {n} regions (commits {} of the new chain, each over its own tiles, one cache of {LAYER_CACHE_TILES} tiles, L with no fill, seed {seed}, coast fade {} m over the sea level {sea_level_m} m, crease band on, relief channels off, C1 base)",
+            ids.join(", "),
+            planet_generators::erosion_layer::COAST_FADE_M
+        );
+        world.source = format!("{} + {}", world.source, world.erosion_note);
+        world.erosion =
+            Some(planet_generators::height_fields::ErosionSwitch { relief: None, layer: Arc::new(layer), sea_level_m, channels: None });
+        world.start_region = Some(CommitRegion::new(spec.cells, spec.tile, commits[0].tiles.keys().copied()));
+        world.commit_region = Some(CommitRegion::new(spec.cells, spec.tile, commits.iter().flat_map(|c| c.tiles.keys().copied())));
+        world.fixture_note = format!(
+            "base: computed in memory, not read from a stored bake (the production base on the exact {res}-node lattice over the tiles of {n} regions and one tile of margin each, the class source's {MAX_RUN_BAKE_RES}-cell in-memory bake elsewhere; {:.1} s on {threads} threads)",
+            started.elapsed().as_secs_f64()
+        );
+        Ok((world, seconds))
+    }
+
+    /// The region the camera starts over (VIEW-069, VIEW-079): the first of several, else the commit's.
+    pub fn start_region(&self) -> Option<&CommitRegion> {
+        self.start_region.as_ref().or(self.commit_region.as_ref())
     }
 
     /// The base B of a commit opened in memory, as the bake read it (VIEW-072): the C1 read of the exact lattice of `BakeInputs::base` (`region_bake`'s `base` closure, bit for bit

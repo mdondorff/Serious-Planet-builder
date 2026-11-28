@@ -415,21 +415,54 @@ impl RegionEditor {
         }
     }
 
-    /// The command that opens the named box's commit in the editor (VIEW-069), the regions file named so the same boxes come along.
+    /// The command that opens the regions file's ready boxes, the named one among them, in the editor (VIEW-079): the world, its items and `--regions`, no `--commit` (the line `bake-region`
+    /// prints, agreed with explorer 2026-11-28).
     pub fn open_command(&self, name: &str) -> Result<String, String> {
         let path = self.path.as_ref().ok_or("no regions file")?;
         self.index(name).ok_or_else(|| format!("no box '{name}'"))?;
-        let args = rf::BakeArgs {
-            world: self.world.world.clone(),
-            seed: self.world.world.is_none().then_some(self.world.seed),
-            regions: path.clone(),
-            items: self.world.items.clone(),
-            name: None,
-            force: false,
-            threads: 0,
-        };
-        Ok(format!("{} --regions {}", args.open_command(&commit_dir(path, name)), path.display()))
+        Ok(open_line(&self.world, path))
     }
+}
+
+/// A path as the open line writes it: quoted when it holds a space.
+fn shown(p: &Path) -> String {
+    let t = p.display().to_string();
+    if t.contains(' ') {
+        format!("\"{t}\"")
+    } else {
+        t
+    }
+}
+
+/// `open: ` without the label: the editor over the world with every ready region of `regions` (VIEW-079).
+pub fn open_line(world: &WorldArgs, regions: &Path) -> String {
+    let w = match &world.world {
+        Some(p) => format!("--world {}", shown(p)),
+        None => format!("--seed {}", world.seed),
+    };
+    let items = world.items.as_deref().map_or(String::new(), |d| format!(" --items {}", shown(d)));
+    format!("cargo run --release -p planet -- editor {w}{items} --regions {}", shown(regions))
+}
+
+/// The ready boxes of the regions file `path` for `def` with the items of `items` (VIEW-079): `(name, commit folder)` in file order, and the others with their state (they do not open).
+#[allow(clippy::type_complexity)]
+pub fn ready_commits(
+    path: &Path,
+    layout: &RegionLayout,
+    def: &WorldDefinition,
+    items: Option<&Path>,
+) -> Result<(Vec<(String, PathBuf)>, Vec<(String, RegionState)>), String> {
+    let file = RegionsFile::read(path)?;
+    let (with_items, seed, _) = rf::world_with_items(def.clone(), items)?;
+    let id = rf::region_inputs_id(&with_items, seed);
+    let (mut ready, mut not) = (Vec::new(), Vec::new());
+    for e in &file.regions {
+        match region_state(e, layout, path, id) {
+            RegionState::Ready => ready.push((e.name.clone(), commit_dir(path, &e.name))),
+            other => not.push((e.name.clone(), other)),
+        }
+    }
+    Ok((ready, not))
 }
 
 /// The regions file of the editor: `--regions FILE`, else `<world-dir>/regions.toml` of `--world F`, else none.
@@ -651,8 +684,11 @@ mod tests {
         assert_ne!(id2, id);
         assert_eq!(r.rows(id2)[0].state, RegionState::Stale, "an item makes every box stale");
         let cmd = r.open_command("land").unwrap();
-        assert!(cmd.contains("editor --seed 14") && cmd.contains(&format!("--commit {}", commit_dir(&path, "land").display())), "{cmd}");
-        assert!(cmd.ends_with(&format!("--regions {}", path.display())), "{cmd}");
+        assert_eq!(
+            cmd,
+            format!("cargo run --release -p planet -- editor --seed 14 --regions {}", shown(&path)),
+            "the agreed open line: no --commit"
+        );
         assert!(r.open_command("none").is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }

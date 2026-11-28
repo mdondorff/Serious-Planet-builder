@@ -2167,7 +2167,35 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
                     Some(p) => crate::worldfield::load_world(p)?,
                     None => planet_world_def::WorldDefinition::single_planet(crate::skeleton::RADIUS_M, o.seed),
                 };
-                WorldTerrain::open_class(def, class_base_res(o).unwrap_or(crate::worldfield::MAX_RUN_BAKE_RES))?
+                // Every ready region of the regions file opens over the base (VIEW-079); a stale or unbaked one drops out until it is baked.
+                let regions = crate::regionedit::resolve_path(o.regions.as_ref(), o.world.as_ref())
+                    .filter(|p| p.is_file() && !o.given.contains("--global-res"));
+                let ready = match &regions {
+                    Some(path) => {
+                        let (ready, not) = crate::regionedit::ready_commits(
+                            path,
+                            &planet_cache::regions_file::RegionLayout::PRODUCTION,
+                            &def,
+                            o.items.as_deref(),
+                        )?;
+                        for (name, state) in &not {
+                            let _ = writeln!(out, "region {name}: {} (not opened)", state.id());
+                        }
+                        ready
+                    }
+                    None => Vec::new(),
+                };
+                if ready.is_empty() {
+                    WorldTerrain::open_class(def, class_base_res(o).unwrap_or(crate::worldfield::MAX_RUN_BAKE_RES))?
+                } else {
+                    let threads = planet_streaming::topology::bake_threads(o.threads)?.0;
+                    let dirs: Vec<PathBuf> = ready.iter().map(|(_, d)| d.clone()).collect();
+                    let (world, seconds) = WorldTerrain::open_regions_in_memory(def, &dirs, threads)?;
+                    for ((name, _), s) in ready.iter().zip(&seconds) {
+                        let _ = writeln!(out, "region {name}: opened, {s:.1} s");
+                    }
+                    world
+                }
             }
             (None, None) => WorldTerrain::of_perf_options(o, crate::skeleton::RADIUS_M)?,
         }
@@ -2179,6 +2207,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     let world_label = match &o.commit {
         // The title says the base is computed in memory (VIEW-069).
         Some(dir) => format!("commit {} over the base computed in memory, not a stored bake", dir.display()),
+        None if world.commit_region().is_some() => "the ready regions over the base computed in memory, not a stored bake".to_string(),
         None => title_world_label(store.as_deref(), class_base_res(o).unwrap_or(o.global_res), world.field_source_name(), o.erosion),
     };
     let _ = writeln!(out, "{}", world.describe());
@@ -2205,7 +2234,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         world.definition().sea(planet_world_def::BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
     // A commit opened in memory starts over its region, held still at the start pose (VIEW-069): the dive of the default site lies
     // outside the region, over the coarse base.
-    let cameras = match world.commit_region() {
+    let cameras = match world.start_region() {
         Some(region) => {
             let anchor = commit_start_anchor(region, o.site).ok_or("--commit: the commit holds no tile")?;
             let fov = planet_frame::litscenes::FOV_DEG.to_radians();
