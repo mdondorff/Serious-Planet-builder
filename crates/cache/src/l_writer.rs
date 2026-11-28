@@ -469,6 +469,11 @@ fn l_tile(b: &LBake, id: PassTile) -> Result<crate::pack::Record, String> {
 /// Bakes `tiles` into the store in `dir` and commits them: the basin tables of the six faces, the L tile records with their water sections, then the commit record, written last. A refusal or a failure
 /// before the commit leaves the previous commit current (the records appended so far are content-keyed and are read only through a commit that names them).
 pub fn bake_l(dir: &Path, b: &LBake, tiles: &[PassTile]) -> Result<Commit, String> {
+    bake_l_progress(dir, b, tiles, &mut |_, _| {})
+}
+
+/// [`bake_l`], calling `progress(done, total)` before the first L tile and after each one (the tiles are baked in order; a caller paces its own output).
+pub fn bake_l_progress(dir: &Path, b: &LBake, tiles: &[PassTile], progress: &mut dyn FnMut(usize, usize)) -> Result<Commit, String> {
     if !b.feed.q_is_discharge() {
         return Err("the channel feed carries Q_w as an area, not a discharge in m3/s: the width law needs metres (D33); run the hydrology with runoff".into());
     }
@@ -504,10 +509,13 @@ pub fn bake_l(dir: &Path, b: &LBake, tiles: &[PassTile]) -> Result<Commit, Strin
         writer.append(r).map_err(|e| e.to_string())?;
     }
     let mut keys = BTreeMap::new();
-    for id in ids {
+    let total = ids.len();
+    progress(0, total);
+    for (k, id) in ids.into_iter().enumerate() {
         let r = l_tile(b, id)?;
         keys.insert((id.face.0, id.ti, id.tj), r.key);
         writer.append(&r).map_err(|e| e.to_string())?;
+        progress(k + 1, total);
     }
     let (mut graph_keys, mut graph_cells) = (BTreeMap::new(), 0u32);
     if let Some(gi) = &b.graph {

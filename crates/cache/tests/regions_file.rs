@@ -160,12 +160,14 @@ fn the_options_take_the_world_folder_or_a_seed_with_a_file() {
     let a = BakeArgs::parse(&s(&["--world", "w/def.toml", "--items", "w/items", "--name", "alps", "--force", "--threads", "3"])).unwrap();
     assert_eq!(a.regions, Path::new("w").join("regions.toml"));
     assert_eq!((a.items.clone(), a.name.as_deref(), a.force, a.threads), (Some(PathBuf::from("w/items")), Some("alps"), true, 3));
-    assert!(a.open_command(Path::new("w/regions/alps")).contains("editor --world w/def.toml --items w/items --commit w/regions/alps"));
+    let w = Path::new("w").join("regions.toml").display().to_string();
+    let w = w.as_str();
+    assert_eq!(a.open_command(), format!("cargo run --release -p planet -- editor --world w/def.toml --items w/items --regions {w}"));
     let b = BakeArgs::parse(&s(&["--world", "w/def.toml", "--regions", "x.toml"])).unwrap();
     assert_eq!(b.regions, PathBuf::from("x.toml"));
     let c = BakeArgs::parse(&s(&["--seed", "14", "--regions", "r.toml"])).unwrap();
     assert_eq!((c.seed, c.world.as_ref()), (Some(14), None));
-    assert!(c.open_command(Path::new("regions/a")).contains("editor --seed 14 --commit regions/a"));
+    assert_eq!(c.open_command(), "cargo run --release -p planet -- editor --seed 14 --regions r.toml", "no --commit (D2)");
     for (args, want) in [
         (vec!["--seed", "14"], "--seed needs --regions"),
         (vec!["--seed", "14", "--world", "w.toml"], "exclude each other"),
@@ -209,4 +211,55 @@ fn the_plan_checks_every_box_before_any_bake_and_skips_ready_regions_unless_forc
     std::fs::write(cdir.join(planet_cache::l_writer::COMMIT_FILE), "not a commit").unwrap();
     assert_eq!(region_state(&f.regions[0], &l, &args.regions, 7), RegionState::Stale);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// spec: BUILD-078
+#[test]
+fn the_open_line_carries_the_regions_file_and_quotes_paths_with_a_space() {
+    let a = BakeArgs::parse(&s(&["--world", "My World/def.toml", "--items", "My World/items"])).unwrap();
+    let line = a.open_command();
+    let regions = Path::new("My World").join("regions.toml").display().to_string();
+    assert_eq!(
+        line,
+        format!("cargo run --release -p planet -- editor --world \"My World/def.toml\" --items \"My World/items\" --regions \"{regions}\"")
+    );
+    assert!(!line.contains("--commit"), "the editor opens every ready region of the file (D2)");
+    // The one-commit form the editor's per-box Open prints (VIEW-069), quoted the same way.
+    let commit = Path::new("My World").join("regions").join("alps").display().to_string();
+    assert_eq!(
+        a.open_commit_command(&commit_dir(&a.regions, "alps")),
+        format!("cargo run --release -p planet -- editor --world \"My World/def.toml\" --items \"My World/items\" --commit \"{commit}\"")
+    );
+    assert_eq!(shell_path(Path::new("plain/path.toml")), "plain/path.toml");
+    assert_eq!(shell_path(Path::new("a b")), "\"a b\"");
+}
+
+// spec: BUILD-078
+#[test]
+fn progress_lines_come_at_most_once_every_ten_seconds_with_the_step_percent_and_time_left() {
+    let mut p = BakeProgress::new("alps");
+    // Nothing in the first interval, however many steps arrive.
+    assert_eq!(p.step(0.0, BakeStep::Base), None);
+    assert_eq!(p.step(9.9, BakeStep::Front), None);
+    // The first line at 10 s: the front, its percent and the estimate from the done fraction.
+    let line = p.step(16.0, BakeStep::Tiles { done: 0, total: 16 }).expect("a line after 10 s");
+    assert!(line.starts_with("region alps: L tiles 0/16, 26 % done, about 46 s left (16 s so far)"), "{line}");
+    // Steps inside the next interval print nothing; the tiles' own rate gives the time left once a tile is done.
+    let mut lines = vec![];
+    for k in 1..=16 {
+        let t = 16.0 + 5.0 * k as f64;
+        if let Some(l) = p.step(t, BakeStep::Tiles { done: k, total: 16 }) {
+            lines.push((t, l));
+        }
+    }
+    assert_eq!(lines.iter().map(|(t, _)| *t).collect::<Vec<_>>(), [26.0, 36.0, 46.0, 56.0, 66.0, 76.0, 86.0, 96.0], "one line per 10 s");
+    assert!(lines[0].1.contains("L tiles 2/16, 35 % done, about 1 min 10 s left (26 s so far)"), "{}", lines[0].1);
+    assert!(lines[7].1.contains("L tiles 16/16, 100 % done, about 0 s left (1 min 36 s so far)"), "{}", lines[7].1);
+    // A tick between steps prints only when due, and a bake with no step done yet has no estimate.
+    let mut q = BakeProgress::new("b");
+    q.step(0.0, BakeStep::Base);
+    assert_eq!(q.tick(5.0), None);
+    assert!(q.tick(10.0).unwrap().contains("base lattice, 0 % done, time left unknown (10 s so far)"));
+    assert_eq!(q.tick(19.0), None);
+    assert_eq!(BakeStep::Tiles { done: 16, total: 16 }.done_fraction(), 1.0);
 }

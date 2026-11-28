@@ -424,24 +424,19 @@ impl RegionEditor {
     }
 }
 
-/// A path as the open line writes it: quoted when it holds a space.
-fn shown(p: &Path) -> String {
-    let t = p.display().to_string();
-    if t.contains(' ') {
-        format!("\"{t}\"")
-    } else {
-        t
-    }
-}
-
-/// `open: ` without the label: the editor over the world with every ready region of `regions` (VIEW-079).
+/// `open: ` without the label: the editor over the world with every ready region of `regions` (VIEW-079), as `bake-region` prints it (`BakeArgs::open_command`, the line agreed with
+/// explorer 2026-11-28).
 pub fn open_line(world: &WorldArgs, regions: &Path) -> String {
-    let w = match &world.world {
-        Some(p) => format!("--world {}", shown(p)),
-        None => format!("--seed {}", world.seed),
-    };
-    let items = world.items.as_deref().map_or(String::new(), |d| format!(" --items {}", shown(d)));
-    format!("cargo run --release -p planet -- editor {w}{items} --regions {}", shown(regions))
+    rf::BakeArgs {
+        world: world.world.clone(),
+        seed: world.world.is_none().then_some(world.seed),
+        regions: regions.to_path_buf(),
+        items: world.items.clone(),
+        name: None,
+        force: false,
+        threads: 0,
+    }
+    .open_command()
 }
 
 /// The ready boxes of the regions file `path` for `def` with the items of `items` (VIEW-079): `(name, commit folder)` in file order, and the others with their state (they do not open).
@@ -686,7 +681,7 @@ mod tests {
         let cmd = r.open_command("land").unwrap();
         assert_eq!(
             cmd,
-            format!("cargo run --release -p planet -- editor --seed 14 --regions {}", shown(&path)),
+            format!("cargo run --release -p planet -- editor --seed 14 --regions {}", path.display()),
             "the agreed open line: no --commit"
         );
         assert!(r.open_command("none").is_err());
