@@ -1361,6 +1361,10 @@ fn regions_section(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &m
                         let open = ui.button("Open");
                         st.marks.push((format!("region:open:{}", row.name), open.rect));
                         if open.clicked() {
+                            // The command goes to the clipboard, as the status says (VIEW-077).
+                            if let Some(cmd) = &row.open_command {
+                                ui.ctx().copy_text(cmd.clone());
+                            }
                             ev.push(Event::OpenRegion(row.name.clone()));
                         }
                     }
@@ -1509,13 +1513,15 @@ mod tests {
         ctx: egui::Context,
         st: PanelState,
         t: f64,
+        /// The texts the panels put on the clipboard.
+        copied: Vec<String>,
     }
 
     impl Rig {
         fn new(layout: &Layout) -> Rig {
             let ctx = egui::Context::default();
             ctx.set_fonts(crate::ui::fonts());
-            Rig { ctx, st: PanelState::new(layout), t: 0.0 }
+            Rig { ctx, st: PanelState::new(layout), t: 0.0, copied: Vec::new() }
         }
 
         fn pass(&mut self, d: &PanelData, events: Vec<egui::Event>) -> Vec<Event> {
@@ -1530,6 +1536,11 @@ mod tests {
             let mut got = Vec::new();
             let mut out = self.ctx.run_ui(input, |ui| got = show(ui, st, d));
             out.textures_delta.clear();
+            for c in &out.platform_output.commands {
+                if let egui::OutputCommand::CopyText(t) = c {
+                    self.copied.push(t.clone());
+                }
+            }
             got
         }
 
@@ -2331,6 +2342,8 @@ mod tests {
             height: 2,
             state,
             selected: false,
+            open_command: (state == RegionState::Ready)
+                .then(|| format!("cargo run --release -p planet -- editor --seed 14 --commit w/regions/{name}")),
         };
         h.regions = RegionsView {
             rows: vec![row("grt", RegionState::Ready), row("new", RegionState::Unbaked)],
@@ -2363,6 +2376,11 @@ mod tests {
         assert_eq!(rig.click(&data(&h), p), vec![Event::SelectRegion("new".into())]);
         let p = rig.mark("region:open:grt");
         assert_eq!(rig.click(&data(&h), p), vec![Event::OpenRegion("grt".into())]);
+        assert_eq!(
+            rig.copied.last().map(String::as_str),
+            Some("cargo run --release -p planet -- editor --seed 14 --commit w/regions/grt"),
+            "Open copies the command"
+        );
         assert!(rig.st.mark("region:open:new").is_none(), "only a ready box opens");
         assert!(rig.st.mark("region:copy").is_some());
         let p = rig.mark("region:delete:new");

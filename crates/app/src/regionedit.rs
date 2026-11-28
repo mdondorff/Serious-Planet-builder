@@ -42,6 +42,8 @@ pub struct RegionRow {
     pub height: u32,
     pub state: RegionState,
     pub selected: bool,
+    /// The command that opens a `ready` box's commit, which Open copies (VIEW-077); `None` otherwise.
+    pub open_command: Option<String>,
 }
 
 /// A kept state's key: the box's name, face and tiles, and the inputs id.
@@ -368,6 +370,7 @@ impl RegionEditor {
                 height: e.j1 - e.j0 + 1,
                 state: self.state(e, id),
                 selected: self.selected.as_deref() == Some(e.name.as_str()),
+                open_command: (self.state(e, id) == RegionState::Ready).then(|| self.open_command(&e.name).ok()).flatten(),
             })
             .collect()
     }
@@ -641,6 +644,7 @@ mod tests {
         assert_eq!(r.state_of("land", id), Some(RegionState::Ready));
         let row = &r.rows(id)[0];
         assert_eq!((row.state, row.width, row.height, row.face, row.selected), (RegionState::Ready, 2, 2, 1, true));
+        assert_eq!(row.open_command, r.open_command("land").ok(), "a ready row carries the command Open copies");
         let mut edited = def.clone();
         crater(&def).put_into(&mut edited).unwrap();
         let id2 = r.inputs_for(&edited).unwrap();

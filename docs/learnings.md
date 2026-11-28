@@ -151,3 +151,8 @@ Scope: project (lane process; routing rules 11-13)
 Scope: project (window and region stages; CON-30)
 - Moving R1h by 200 cells turned a 691 km2 lake into 191 km2 (spikes #153). Edges as outlets, exits or seeds belong to the partition layer, never to a stage's rule.
 - Obsolete when: never.
+
+## 2026-11-28 The in-memory preview bake is another terrain than the region bake's base
+Scope: project (viewer bases; VIEW-052, VIEW-069)
+- The legacy `GlobalCoarseGenerator` bake differed from the class source's B by p95 1.3 km at a commit's margin (seed 14, grt-4x4). A base outside a region must be the same world, coarser: correct at each resolution, a step at the edge is fine.
+- Obsolete when: the legacy generator is retired.

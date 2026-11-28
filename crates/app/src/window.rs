@@ -31,7 +31,7 @@ use planet_render::{AdapterPolicy, GpuContext, Presented, WindowSurface};
 use planet_streaming::{Clock, SystemClock};
 use std::collections::HashMap;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
@@ -155,6 +155,37 @@ pub fn descent_finished(t_s: f64, cameras: usize) -> bool {
     t_s >= cameras.saturating_sub(1) as f64 * planet_frame::scenes::FRAME_STEP_S
 }
 
+/// The store the viewer opens (VIEW-052): `--store`; none for a commit or region boxes (the production base computed in memory, VIEW-069, VIEW-077), a smoke run,
+/// a definition of its own or a bake size asked for (the default store holds the default world only); else the default store, if one is on disk.
+pub fn viewer_store(o: &crate::Options, root: &Path, env: Option<PathBuf>) -> Option<PathBuf> {
+    match &o.store {
+        Some(dir) => Some(dir.clone()),
+        None if o.commit.is_some() || o.regions.is_some() => None,
+        None if o.smoke || o.world.is_some() || o.given.contains("--global-res") => None,
+        None => crate::worldfield::default_store_in(root, env),
+    }
+}
+
+/// The cells a face edge of the class-source base computed in memory for an editor run given `--regions` or `--world` and no `--store` or `--commit` (VIEW-052): the base
+/// `bake-region` bakes against, at the size `--commit` reads outside its tiles (`--global-res N`: N); `None` for other runs, which keep their bake. Not under `--smoke`.
+pub fn class_base_res(o: &crate::Options) -> Option<u32> {
+    let wanted = o.store.is_none() && o.commit.is_none() && !o.smoke && (o.regions.is_some() || o.world.is_some());
+    wanted.then(|| if o.given.contains("--global-res") { o.global_res } else { crate::worldfield::MAX_RUN_BAKE_RES })
+}
+
+/// Whether the editor mode starts on (VIEW-022, VIEW-077): `--edit`, or region boxes to edit (`--regions`, or a regions file beside `--world`), so the Sites tab and the boxes show without Tab.
+pub fn editor_starts_on(edit: bool, regions_given: bool, regions_file: Option<&Path>) -> bool {
+    edit || regions_given || regions_file.is_some_and(Path::is_file)
+}
+
+/// What to do when the default store cannot be read: the ways to a world without it.
+pub fn default_store_ways_out(dir: &Path) -> String {
+    format!(
+        "{} is the default store (no --store given): open a commit with --commit DIR, bake in memory with --global-res N, or make a current store with `cargo xtask store`",
+        dir.display()
+    )
+}
+
 /// Whether the window plays the scripted descent over `--site` before the editor mode (`--edit`) turns on: not in a smoke run, which turns the
 /// mode on itself, and not without a site, where the mode starts on as before (VIEW-022).
 pub fn site_descent_wanted(edit: bool, site_given: bool, smoke: bool) -> bool {
@@ -235,6 +266,8 @@ struct Config {
     bookmarks: Option<PathBuf>,
     /// The regions file the Sites tab edits (`--regions`, else beside `--world`; none under `--smoke`; VIEW-077), and the world's options for the open command.
     regions: Option<PathBuf>,
+    /// `--regions` was given (the editor mode starts on, VIEW-077).
+    regions_given: bool,
     world_args: crate::regionedit::WorldArgs,
     /// The panel layout (`--editor-layout`, VIEW-018).
     layout: Layout,
@@ -253,7 +286,7 @@ struct Config {
     open_commit: Option<String>,
     open_site: Option<String>,
     initial_view: usize,
-    /// Where the terrain comes from, for the title: the store the editor opened, or the in-memory preview bake (VIEW-051).
+    /// Where the terrain comes from, for the title: the store the editor opened, or the in-memory preview bake (VIEW-052).
     world_label: String,
     /// Pre-fill and bake progress of the world, fixed for the run.
     base_readiness: Readiness,
@@ -271,8 +304,6 @@ struct Config {
     liquids: planet_world_def::LiquidTable,
     /// The item markers of the globe overview (`--marker`, VIEW-013).
     markers: Vec<Marker>,
-    /// The region of a commit opened in memory: the title says whether the camera is over it (VIEW-069).
-    region: Option<crate::worldfield::CommitRegion>,
 }
 
 /// What the globe overview did in the run (the smoke summary reports it).
@@ -374,7 +405,6 @@ struct Running {
     report: Option<planet_frame::viewer::StatsReport>,
     readiness: Readiness,
     world_label: String,
-    region: Option<crate::worldfield::CommitRegion>,
     altitude_m: f64,
     frames: u64,
     presented: u64,
@@ -608,7 +638,7 @@ impl App<'_> {
         let edit = if cfg.ui {
             let mut e = EditRuntime::new(self.world.definition().as_ref().clone(), cfg.radius_m, cfg.items.as_ref(), cfg.layout.clone())?;
             // A smoke run turns the mode on itself, at the frame its script says, after the overview phases.
-            e.on = cfg.edit && !cfg.smoke && !cfg.site_descent;
+            e.on = editor_starts_on(cfg.edit, cfg.regions_given, cfg.regions.as_deref()) && !cfg.smoke && !cfg.site_descent;
             // The level-1 preview of the edit being made, on a thread of its own, only behind its flag (VIEW-068, CON-18).
             if let Some(n) = cfg.preview_l1 {
                 e.enable_preview(n, cfg.seed);
@@ -669,7 +699,6 @@ impl App<'_> {
             report: None,
             readiness: cfg.base_readiness,
             world_label: cfg.world_label.clone(),
-            region: cfg.region.clone(),
             altitude_m: 0.0,
             frames: 0,
             presented: 0,
@@ -1637,9 +1666,6 @@ fn title_text(st: &Running, now_ms: u64) -> String {
         input += &format!(" | look {}", st.viewer.look_choice.name());
     }
     input += &format!(" | {}", st.world_label);
-    if let Some(region) = &st.region {
-        input += &format!(" | {}", region_text(region, st.camera_position));
-    }
     if st.viewer.scale_refs {
         input += " | scale references";
     }
@@ -2101,16 +2127,11 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     let event_loop = EventLoop::new().map_err(|e| format!("{NO_DISPLAY}the event loop could not start: {e}"))?;
     crate::stall::phase_mark("event loop");
 
-    // The production store when one is configured or found (VIEW-051); otherwise the in-memory preview bake, which the title says.
+    // The production store when one is configured or found (VIEW-052); otherwise the in-memory preview bake, which the title says.
     crate::check_commit_options(o)?;
-    let store = match &o.store {
-        Some(dir) => Some(dir.clone()),
-        // A commit opens over the production base computed in memory (VIEW-069): no stored world.
-        None if o.commit.is_some() => None,
-        // A definition of its own or a bake size asked for says what the run wants: the default store holds the default world only.
-        None if o.smoke || o.world.is_some() || o.given.contains("--global-res") => None,
-        None => crate::worldfield::default_store(&std::env::current_dir().map_err(|e| e.to_string())?),
-    };
+    let root = std::env::current_dir().map_err(|e| e.to_string())?;
+    let store = viewer_store(o, &root, std::env::var_os("PLANET_STORE").map(PathBuf::from));
+    let default_store = o.store.is_none() && store.is_some();
     if store.is_none() && (o.class_source || o.legacy_source) {
         return Err(
             "--class-source and --legacy-source choose between the bakes of a stored world: they need --store (or a default store)".into(),
@@ -2132,7 +2153,21 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
                     Some(p) => crate::worldfield::load_world(p)?,
                     None => planet_world_def::WorldDefinition::single_planet(crate::skeleton::RADIUS_M, o.seed),
                 };
-                WorldTerrain::open_store_as(def, dir, res, o.field_source_choice()?)?
+                WorldTerrain::open_store_as(def, dir, res, o.field_source_choice()?).map_err(|e| {
+                    if default_store {
+                        format!("{e}\n{}", default_store_ways_out(dir))
+                    } else {
+                        e
+                    }
+                })?
+            }
+            // `--world` and the region boxes open over the class-source base computed in memory, the base `bake-region` bakes against (VIEW-052, VIEW-077).
+            (None, None) if class_base_res(o).is_some() => {
+                let def = match &o.world {
+                    Some(p) => crate::worldfield::load_world(p)?,
+                    None => planet_world_def::WorldDefinition::single_planet(crate::skeleton::RADIUS_M, o.seed),
+                };
+                WorldTerrain::open_class(def, class_base_res(o).unwrap_or(crate::worldfield::MAX_RUN_BAKE_RES))?
             }
             (None, None) => WorldTerrain::of_perf_options(o, crate::skeleton::RADIUS_M)?,
         }
@@ -2144,7 +2179,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     let world_label = match &o.commit {
         // The title says the base is computed in memory (VIEW-069).
         Some(dir) => format!("commit {} over the base computed in memory, not a stored bake", dir.display()),
-        None => title_world_label(store.as_deref(), o.global_res, world.field_source_name(), o.erosion),
+        None => title_world_label(store.as_deref(), class_base_res(o).unwrap_or(o.global_res), world.field_source_name(), o.erosion),
     };
     let _ = writeln!(out, "{}", world.describe());
     crate::stall::phase_mark("world");
@@ -2229,6 +2264,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
             o.smoke,
         ),
         regions: if o.smoke { None } else { crate::regionedit::resolve_path(o.regions.as_ref(), o.world.as_ref()) },
+        regions_given: o.regions.is_some(),
         world_args: crate::regionedit::WorldArgs { world: o.world.clone(), seed: o.seed, items: o.items.clone() },
         layout: match &o.editor_layout {
             Some(p) => Layout::from_toml(&std::fs::read_to_string(p).map_err(|e| format!("--editor-layout {}: {e}", p.display()))?)
@@ -2260,7 +2296,6 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         atmosphere,
         liquids: world.definition().liquids().map_err(|e| format!("the liquid table of the definition: {e}"))?,
         markers: parse_markers(&o.markers)?,
-        region: world.commit_region().cloned(),
     };
     writeln!(out, "planet editor: {} ({})", if o.smoke { "smoke test" } else { "viewer" }, world.describe()).map_err(err)?;
     writeln!(out, "keys: {}", *KEYS_HELP).map_err(err)?;
@@ -2335,6 +2370,50 @@ fn gate_finish(g: &GateRun) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // spec: VIEW-022
+    // spec: VIEW-052
+    // spec: VIEW-077
+    #[test]
+    fn region_boxes_open_the_base_in_memory_never_a_default_store_and_the_default_stores_refusal_names_the_ways_out() {
+        let root = std::env::temp_dir().join(format!("planet-viewer-store-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("target/accept/global16384")).unwrap();
+        let args = |a: &[&str]| crate::parse_args(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>()).unwrap();
+        // A default store on disk is what a bare run opens.
+        assert_eq!(viewer_store(&args(&["editor", "--seed", "14"]), &root, None), Some(root.join("target/accept/global16384")));
+        // `--seed 14 --regions F` never does: the base is computed in memory, as for `--commit`.
+        assert_eq!(viewer_store(&args(&["editor", "--seed", "14", "--regions", "r.toml"]), &root, None), None);
+        assert_eq!(viewer_store(&args(&["editor", "--seed", "14", "--commit", "c"]), &root, None), None);
+        // A store given is still opened.
+        let given = args(&["editor", "--seed", "14", "--regions", "r.toml", "--store", "s"]);
+        assert_eq!(viewer_store(&given, &root, None), Some(PathBuf::from("s")));
+        // `--regions` or `--world` without a store: the class-source base in memory at the 1,024 cells `--commit` reads outside its tiles; `--global-res N` sets N.
+        let res = crate::worldfield::MAX_RUN_BAKE_RES;
+        assert_eq!(class_base_res(&args(&["editor", "--seed", "14", "--regions", "r.toml"])), Some(res));
+        assert_eq!(class_base_res(&args(&["editor", "--world", "w/world.toml"])), Some(res));
+        assert_eq!(viewer_store(&args(&["editor", "--world", "w/world.toml"]), &root, None), None, "--world never opens the default store");
+        assert_eq!(class_base_res(&args(&["editor", "--seed", "14", "--regions", "r.toml", "--global-res", "64"])), Some(64));
+        assert_eq!(class_base_res(&args(&["editor", "--seed", "14"])), None, "a bare run keeps its store or preview bake");
+        assert_eq!(
+            class_base_res(&args(&["editor", "--seed", "14", "--commit", "c", "--regions", "r.toml"])),
+            None,
+            "a commit opens its own base"
+        );
+        assert_eq!(class_base_res(&args(&["editor", "--seed", "14", "--regions", "r.toml", "--store", "s"])), None);
+        assert_eq!(title_world_label(None, 1024, "class source", false), "preview bake 1024 cells, class source");
+        // The editor mode starts on with region boxes to edit.
+        let beside = root.join("regions.toml");
+        assert!(!editor_starts_on(false, false, Some(&beside)), "no file beside the world yet");
+        std::fs::write(&beside, "format_version = 1\n").unwrap();
+        assert!(
+            editor_starts_on(false, false, Some(&beside)) && editor_starts_on(false, true, None) && editor_starts_on(true, false, None)
+        );
+        assert!(!editor_starts_on(false, false, None));
+        let why = default_store_ways_out(&root.join("target/accept/global16384"));
+        assert!(why.contains("--commit DIR") && why.contains("--global-res N") && why.contains("cargo xtask store"), "{why}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     /// The tiles of the R3a commit's region: face 1, tiles 83..=90 by 7..=14 of 768 cells on a 98,304-cell face.
     fn r3a_like_region() -> crate::worldfield::CommitRegion {
