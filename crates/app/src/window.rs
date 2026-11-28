@@ -31,7 +31,7 @@ use planet_render::{AdapterPolicy, GpuContext, Presented, WindowSurface};
 use planet_streaming::{Clock, SystemClock};
 use std::collections::HashMap;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
@@ -157,6 +157,25 @@ pub fn descent_finished(t_s: f64, cameras: usize) -> bool {
 
 /// Whether the window plays the scripted descent over `--site` before the editor mode (`--edit`) turns on: not in a smoke run, which turns the
 /// mode on itself, and not without a site, where the mode starts on as before (VIEW-022).
+/// The store the viewer opens (VIEW-051): `--store`; none for a commit or region boxes (the production base computed in memory, VIEW-069, VIEW-077), a smoke run,
+/// a definition of its own or a bake size asked for (the default store holds the default world only); else the default store, if one is on disk.
+pub fn viewer_store(o: &crate::Options, root: &Path, env: Option<PathBuf>) -> Option<PathBuf> {
+    match &o.store {
+        Some(dir) => Some(dir.clone()),
+        None if o.commit.is_some() || o.regions.is_some() => None,
+        None if o.smoke || o.world.is_some() || o.given.contains("--global-res") => None,
+        None => crate::worldfield::default_store_in(root, env),
+    }
+}
+
+/// What to do when the default store cannot be read: the ways to a world without it.
+pub fn default_store_ways_out(dir: &Path) -> String {
+    format!(
+        "{} is the default store (no --store given): open a commit with --commit DIR, bake in memory with --global-res N, or make a current store with `cargo xtask store`",
+        dir.display()
+    )
+}
+
 pub fn site_descent_wanted(edit: bool, site_given: bool, smoke: bool) -> bool {
     edit && site_given && !smoke
 }
@@ -2103,14 +2122,9 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
 
     // The production store when one is configured or found (VIEW-051); otherwise the in-memory preview bake, which the title says.
     crate::check_commit_options(o)?;
-    let store = match &o.store {
-        Some(dir) => Some(dir.clone()),
-        // A commit opens over the production base computed in memory (VIEW-069): no stored world.
-        None if o.commit.is_some() => None,
-        // A definition of its own or a bake size asked for says what the run wants: the default store holds the default world only.
-        None if o.smoke || o.world.is_some() || o.given.contains("--global-res") => None,
-        None => crate::worldfield::default_store(&std::env::current_dir().map_err(|e| e.to_string())?),
-    };
+    let root = std::env::current_dir().map_err(|e| e.to_string())?;
+    let store = viewer_store(o, &root, std::env::var_os("PLANET_STORE").map(PathBuf::from));
+    let default_store = o.store.is_none() && store.is_some();
     if store.is_none() && (o.class_source || o.legacy_source) {
         return Err(
             "--class-source and --legacy-source choose between the bakes of a stored world: they need --store (or a default store)".into(),
@@ -2132,7 +2146,21 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
                     Some(p) => crate::worldfield::load_world(p)?,
                     None => planet_world_def::WorldDefinition::single_planet(crate::skeleton::RADIUS_M, o.seed),
                 };
-                WorldTerrain::open_store_as(def, dir, res, o.field_source_choice()?)?
+                WorldTerrain::open_store_as(def, dir, res, o.field_source_choice()?).map_err(|e| {
+                    if default_store {
+                        format!("{e}\n{}", default_store_ways_out(dir))
+                    } else {
+                        e
+                    }
+                })?
+            }
+            // The region boxes are edited over the production base computed in memory, as `--commit` reads it outside its tiles (VIEW-069, VIEW-077).
+            (None, None) if o.regions.is_some() && !o.given.contains("--global-res") => {
+                let def = match &o.world {
+                    Some(p) => crate::worldfield::load_world(p)?,
+                    None => planet_world_def::WorldDefinition::single_planet(crate::skeleton::RADIUS_M, o.seed),
+                };
+                WorldTerrain::open(def, crate::worldfield::MAX_RUN_BAKE_RES)?
             }
             (None, None) => WorldTerrain::of_perf_options(o, crate::skeleton::RADIUS_M)?,
         }
@@ -2335,6 +2363,26 @@ fn gate_finish(g: &GateRun) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // spec: VIEW-077
+    #[test]
+    fn region_boxes_open_the_base_in_memory_never_a_default_store_and_the_default_stores_refusal_names_the_ways_out() {
+        let root = std::env::temp_dir().join(format!("planet-viewer-store-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("target/accept/global16384")).unwrap();
+        let args = |a: &[&str]| crate::parse_args(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>()).unwrap();
+        // A default store on disk is what a bare run opens.
+        assert_eq!(viewer_store(&args(&["editor", "--seed", "14"]), &root, None), Some(root.join("target/accept/global16384")));
+        // `--seed 14 --regions F` never does: the base is computed in memory, as for `--commit`.
+        assert_eq!(viewer_store(&args(&["editor", "--seed", "14", "--regions", "r.toml"]), &root, None), None);
+        assert_eq!(viewer_store(&args(&["editor", "--seed", "14", "--commit", "c"]), &root, None), None);
+        // A store given is still opened.
+        let given = args(&["editor", "--seed", "14", "--regions", "r.toml", "--store", "s"]);
+        assert_eq!(viewer_store(&given, &root, None), Some(PathBuf::from("s")));
+        let why = default_store_ways_out(&root.join("target/accept/global16384"));
+        assert!(why.contains("--commit DIR") && why.contains("--global-res N") && why.contains("cargo xtask store"), "{why}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     /// The tiles of the R3a commit's region: face 1, tiles 83..=90 by 7..=14 of 768 cells on a 98,304-cell face.
     fn r3a_like_region() -> crate::worldfield::CommitRegion {

@@ -1,0 +1,1 @@
+- 2026-11-28 regions-in-memory-base (S-Region-Authoring E2, the E3 smoke): editor --regions without --store computes the base in memory (the 1,024-cell bake, as --commit outside its tiles) and never opens a default store; the default-store refusal names --commit DIR, --global-res N and cargo xtask store (VIEW-077)
