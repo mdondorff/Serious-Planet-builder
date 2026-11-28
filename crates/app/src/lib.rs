@@ -28,6 +28,7 @@ mod plancheck;
 pub mod prefill;
 pub mod preflightperf;
 pub mod previewjob;
+pub mod regionedit;
 pub mod reproworld;
 pub mod reserveload;
 pub mod riverperf;

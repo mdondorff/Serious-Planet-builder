@@ -1,0 +1,4 @@
+- [ ] TEST-166: the region editor's model (snap, clamp, place, move, resize, delete, save, state, open command) and the inputs id against `bake-region`'s
+- [ ] TEST-166: `EditRuntime` places by press, draws the outlines and the margin, the Sites tab's Regions events
+- [ ] VIEW-077: `regionedit.rs`, the runtime wiring, the panel section, `--regions`
+- [ ] numerics-reviewer (face mapping), spec-guardian, verifier
