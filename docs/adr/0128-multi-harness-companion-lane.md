@@ -17,7 +17,7 @@ Source: `docs/constitution.md` (`c0d6f479`, owner 2026-11-19), `ADR 0005`, `ADR 
 2. **Pure-Rust guardrails (`CON-25`):** `cargo xtask agent-guard` enforces read-only sibling workspaces, zoned `SeriousPlanetData` writes (`tmp/heavy/**`, `tmp/ag2/**`, `lanes/ag2-*.md`), and quiet/exclusive yield checks without adding `.ps1`/`.sh` files.
 3. **Unified sequential IDs (`BUILD-062`):** `cargo xtask next-id` allocates contiguous `max + 1` IDs across `openspec/`, `docs/`, open PRs, and `lanes/`; `merged_spec_lint` (`BUILD-022`) guards against races before merge.
 4. **Two-tier PR gate (`ADR 0120` alignment):** isolated cold-zone changes merge on green CI + `Verifier: PASS <sha>` (`Tier 1`); shared seams, ADRs, schemas (`CON-10`), look changes, or hot-crate edits open as Draft PRs for owner or `opus-architect` review (`Tier 2`).
-5. **Lane separation:** `ag2` works in its own clone (`c:/dev/ag2_serious-planet-builder`), throttles builds/tests (`CARGO_BUILD_JOBS=4`, `NEXTEST_TEST_THREADS=4`), and never edits `docs/status.md` or `docs/milestones/P3.md`.
+5. **Lane separation:** `ag2` works in its own clone (`c:/dev/ag2_serious-planet-builder`), throttles builds/tests (`CARGO_BUILD_JOBS=4`, `NEXTEST_TEST_THREADS=4`), and never edits `docs/status.md` or `docs/milestones/P3.md`. [Erratum 2026-11-28: `P3.md` named the milestone file of its time, not a lasting protected file; P3 is archived (`docs/archive/P3/P3.md`) and the protected file is the sprint file `docs/milestones/<M>.md`; see ADR 0130 and BUILD-062]
 
 ## Consequences
 - Companion work advances UI, tooling, and spec debt in parallel without stalling `opus-architect` or colliding on worktrees, locks, or requirement IDs.
@@ -26,3 +26,5 @@ Source: `docs/constitution.md` (`c0d6f479`, owner 2026-11-19), `ADR 0005`, `ADR 
 
 ## Licences of adopted code or techniques
 Pure Rust standard library only (`xtask`).
+
+Maintained: 2026-11-28, erratum: point 5's `docs/milestones/P3.md` marked; the protected file is the sprint file (ADR 0130, BUILD-062).
