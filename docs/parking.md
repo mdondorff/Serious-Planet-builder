@@ -11,6 +11,14 @@ Owner, 2026-11-12 (ADR 0120). These items are outside the current milestone, one
 - Cliffs (SPIKE-94, #1082): asset library or procedural only; the Alps' 4.3 % of area above 45 degrees as the v1 coverage.
 - Optional: the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); excluding the repo's `target` folders from Windows Search indexing.
 
+## Sprint process (ADR 0130), deferred checks (2026-11-28)
+- Built only when a sprint's close review shows the need (the combined plan's stage "Later"):
+  - the gate-ledger park counters (`exit` cell, `days`, `look-unjudged`); until then the lead reads park criteria by hand;
+  - the full rewrite of `docs/routing.md` and the `CLAUDE.md` folding (plan item 9);
+  - the skills `/record` and `/defect-ladder`;
+  - `plan`'s checks left out of BUILD-074: a criterion's date set against the exit's first ledger row, A2 (unprefixed owner messages change nothing), the capped-row limit while three decisions are open, a closed spike without a `Decision:` line.
+- M-Erosion: sprint files M-E1 onwards after S-Region-Authoring; the draft is lanes digest `review/m-erosion-plan-draft-2026-11-27.md` (M1 in or out decided at its open).
+
 ## River graphs and hydrology (parked 2026-11-26, ADR 0129)
 - Rivers after erosion (proposed project): terrain-assisted river and lake authoring above erosion (ADR 0113 point 2, ADR 0072, WDEF-012) over B's stabilized rivers; design sketch and seam rules in `docs/design/rivers-after-erosion.md` (ADR 0129). Trigger: after the landform erosion sign-off.
 - River graphs (RG): the chain on tag `archive/rg-parked-2026-11-26`; the record in `docs/archive/P3/river-graph/`. Restart only under ADR 0129 point 4.

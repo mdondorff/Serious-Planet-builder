@@ -1,5 +1,5 @@
 # 0120 A lead and lanes; short milestones with an exit list; a parking list for new ideas
-Status: accepted (owner, 2026-11-12: "The plan is accepted", the lean proposal of the same evening)
+Status: accepted (owner, 2026-11-12: "The plan is accepted", the lean proposal of the same evening); points 3, 5, 6, 8 and 9 amended by ADR 0130 (2026-11-28)
 Date: 2026-11-12
 Source: owner, 2026-11-12; supersedes ADR 0118 point 1 and point 5's bulldozer clauses; replaces the architect and bulldozer split of `docs/routing.md` (owner, 2026-11-09)
 

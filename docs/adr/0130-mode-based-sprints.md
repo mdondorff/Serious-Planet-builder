@@ -1,5 +1,5 @@
 # 0130 Mode-based sprints: a mode on every exit row, records at mode changes, rules as checks
-Status: proposed (lead, 2026-11-27). Applied while proposed, on the owner's word of 2026-11-27: "Don't block on me on the ADR acceptance ... start executing towards the defined milestone as the process defined". The pilot sprint's close report judges whether it worked.
+Status: accepted (owner, 2026-11-28)
 Date: 2026-11-27
 Source: lanes digest `review/sprint-process-plan-combined-2026-11-27.md` (Fable's and Carbon's plans combined, with Carbon's amendments A1-A4); ADR 0120, ADR 0129; CON-31
 
@@ -31,5 +31,3 @@ Source: lanes digest `review/sprint-process-plan-combined-2026-11-27.md` (Fable'
 ## Consequences
 - Lanes have freedom inside a row. The boundaries (modes, scope, records, decisions, the close) are checked by tools.
 - The owner's part per sprint is about 20-30 minutes to open, one dated look, at most three decisions with defaults, and about 15 minutes to close.
-- The ledger park counters, the full rewrite of the routing table and the remaining skills wait until a sprint's review shows the need.
-- The pilot is S-Region-Authoring, and its exit E4 confirms the process worked up to its close.
