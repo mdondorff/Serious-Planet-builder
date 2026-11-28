@@ -1416,7 +1416,7 @@ impl EditRuntime {
                     // The world is built once at the start: a ready box reopens by its command (the sprint's park path, VIEW-069).
                     Ok(cmd) => {
                         println!("open region '{name}': {cmd}");
-                        self.session.set_status(format!("to open '{name}', run (copied): {cmd}"));
+                        self.session.set_status(format!("to open '{name}', run (copied to the clipboard): {cmd}"));
                         self.region_open = Some(cmd);
                     }
                     Err(why) => self.session.set_status(why),

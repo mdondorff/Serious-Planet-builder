@@ -166,11 +166,16 @@ pub fn viewer_store(o: &crate::Options, root: &Path, env: Option<PathBuf>) -> Op
     }
 }
 
-/// The cells a face edge of the in-memory base of a region-box run without `--store` (VIEW-052): the size `--commit` reads outside its tiles; `None` for other runs
-/// (and for `--global-res N`, which bakes at N as before).
-pub fn regions_base_res(o: &crate::Options) -> Option<u32> {
-    (o.store.is_none() && o.commit.is_none() && o.regions.is_some() && !o.given.contains("--global-res"))
-        .then_some(crate::worldfield::MAX_RUN_BAKE_RES)
+/// The cells a face edge of the class-source base computed in memory for an editor run given `--regions` or `--world` and no `--store` or `--commit` (VIEW-052): the base
+/// `bake-region` bakes against, at the size `--commit` reads outside its tiles (`--global-res N`: N); `None` for other runs, which keep their bake. Not under `--smoke`.
+pub fn class_base_res(o: &crate::Options) -> Option<u32> {
+    let wanted = o.store.is_none() && o.commit.is_none() && !o.smoke && (o.regions.is_some() || o.world.is_some());
+    wanted.then(|| if o.given.contains("--global-res") { o.global_res } else { crate::worldfield::MAX_RUN_BAKE_RES })
+}
+
+/// Whether the editor mode starts on (VIEW-022, VIEW-077): `--edit`, or region boxes to edit (`--regions`, or a regions file beside `--world`), so the Sites tab and the boxes show without Tab.
+pub fn editor_starts_on(edit: bool, regions_given: bool, regions_file: Option<&Path>) -> bool {
+    edit || regions_given || regions_file.is_some_and(Path::is_file)
 }
 
 /// What to do when the default store cannot be read: the ways to a world without it.
@@ -261,6 +266,8 @@ struct Config {
     bookmarks: Option<PathBuf>,
     /// The regions file the Sites tab edits (`--regions`, else beside `--world`; none under `--smoke`; VIEW-077), and the world's options for the open command.
     regions: Option<PathBuf>,
+    /// `--regions` was given (the editor mode starts on, VIEW-077).
+    regions_given: bool,
     world_args: crate::regionedit::WorldArgs,
     /// The panel layout (`--editor-layout`, VIEW-018).
     layout: Layout,
@@ -297,8 +304,6 @@ struct Config {
     liquids: planet_world_def::LiquidTable,
     /// The item markers of the globe overview (`--marker`, VIEW-013).
     markers: Vec<Marker>,
-    /// The region of a commit opened in memory: the title says whether the camera is over it (VIEW-069).
-    region: Option<crate::worldfield::CommitRegion>,
 }
 
 /// What the globe overview did in the run (the smoke summary reports it).
@@ -400,7 +405,6 @@ struct Running {
     report: Option<planet_frame::viewer::StatsReport>,
     readiness: Readiness,
     world_label: String,
-    region: Option<crate::worldfield::CommitRegion>,
     altitude_m: f64,
     frames: u64,
     presented: u64,
@@ -634,7 +638,7 @@ impl App<'_> {
         let edit = if cfg.ui {
             let mut e = EditRuntime::new(self.world.definition().as_ref().clone(), cfg.radius_m, cfg.items.as_ref(), cfg.layout.clone())?;
             // A smoke run turns the mode on itself, at the frame its script says, after the overview phases.
-            e.on = cfg.edit && !cfg.smoke && !cfg.site_descent;
+            e.on = editor_starts_on(cfg.edit, cfg.regions_given, cfg.regions.as_deref()) && !cfg.smoke && !cfg.site_descent;
             // The level-1 preview of the edit being made, on a thread of its own, only behind its flag (VIEW-068, CON-18).
             if let Some(n) = cfg.preview_l1 {
                 e.enable_preview(n, cfg.seed);
@@ -695,7 +699,6 @@ impl App<'_> {
             report: None,
             readiness: cfg.base_readiness,
             world_label: cfg.world_label.clone(),
-            region: cfg.region.clone(),
             altitude_m: 0.0,
             frames: 0,
             presented: 0,
@@ -1663,9 +1666,6 @@ fn title_text(st: &Running, now_ms: u64) -> String {
         input += &format!(" | look {}", st.viewer.look_choice.name());
     }
     input += &format!(" | {}", st.world_label);
-    if let Some(region) = &st.region {
-        input += &format!(" | {}", region_text(region, st.camera_position));
-    }
     if st.viewer.scale_refs {
         input += " | scale references";
     }
@@ -2161,13 +2161,13 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
                     }
                 })?
             }
-            // The region boxes are edited over the production base computed in memory, as `--commit` reads it outside its tiles (VIEW-069, VIEW-077).
-            (None, None) if regions_base_res(o).is_some() => {
+            // `--world` and the region boxes open over the class-source base computed in memory, the base `bake-region` bakes against (VIEW-052, VIEW-077).
+            (None, None) if class_base_res(o).is_some() => {
                 let def = match &o.world {
                     Some(p) => crate::worldfield::load_world(p)?,
                     None => planet_world_def::WorldDefinition::single_planet(crate::skeleton::RADIUS_M, o.seed),
                 };
-                WorldTerrain::open(def, crate::worldfield::MAX_RUN_BAKE_RES)?
+                WorldTerrain::open_class(def, class_base_res(o).unwrap_or(crate::worldfield::MAX_RUN_BAKE_RES))?
             }
             (None, None) => WorldTerrain::of_perf_options(o, crate::skeleton::RADIUS_M)?,
         }
@@ -2179,7 +2179,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     let world_label = match &o.commit {
         // The title says the base is computed in memory (VIEW-069).
         Some(dir) => format!("commit {} over the base computed in memory, not a stored bake", dir.display()),
-        None => title_world_label(store.as_deref(), regions_base_res(o).unwrap_or(o.global_res), world.field_source_name(), o.erosion),
+        None => title_world_label(store.as_deref(), class_base_res(o).unwrap_or(o.global_res), world.field_source_name(), o.erosion),
     };
     let _ = writeln!(out, "{}", world.describe());
     crate::stall::phase_mark("world");
@@ -2264,6 +2264,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
             o.smoke,
         ),
         regions: if o.smoke { None } else { crate::regionedit::resolve_path(o.regions.as_ref(), o.world.as_ref()) },
+        regions_given: o.regions.is_some(),
         world_args: crate::regionedit::WorldArgs { world: o.world.clone(), seed: o.seed, items: o.items.clone() },
         layout: match &o.editor_layout {
             Some(p) => Layout::from_toml(&std::fs::read_to_string(p).map_err(|e| format!("--editor-layout {}: {e}", p.display()))?)
@@ -2295,7 +2296,6 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         atmosphere,
         liquids: world.definition().liquids().map_err(|e| format!("the liquid table of the definition: {e}"))?,
         markers: parse_markers(&o.markers)?,
-        region: world.commit_region().cloned(),
     };
     writeln!(out, "planet editor: {} ({})", if o.smoke { "smoke test" } else { "viewer" }, world.describe()).map_err(err)?;
     writeln!(out, "keys: {}", *KEYS_HELP).map_err(err)?;
@@ -2371,6 +2371,7 @@ fn gate_finish(g: &GateRun) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    // spec: VIEW-022
     // spec: VIEW-052
     // spec: VIEW-077
     #[test]
@@ -2387,11 +2388,28 @@ mod tests {
         // A store given is still opened.
         let given = args(&["editor", "--seed", "14", "--regions", "r.toml", "--store", "s"]);
         assert_eq!(viewer_store(&given, &root, None), Some(PathBuf::from("s")));
-        // Its base is the 1,024-cell bake `--commit` reads outside its tiles, and the title says so; `--global-res N` keeps N.
-        assert_eq!(regions_base_res(&args(&["editor", "--seed", "14", "--regions", "r.toml"])), Some(crate::worldfield::MAX_RUN_BAKE_RES));
-        assert_eq!(regions_base_res(&args(&["editor", "--seed", "14", "--regions", "r.toml", "--global-res", "64"])), None);
-        assert_eq!(regions_base_res(&args(&["editor", "--seed", "14"])), None);
-        assert_eq!(title_world_label(None, 1024, "legacy source", false), "preview bake 1024 cells, legacy source");
+        // `--regions` or `--world` without a store: the class-source base in memory at the 1,024 cells `--commit` reads outside its tiles; `--global-res N` sets N.
+        let res = crate::worldfield::MAX_RUN_BAKE_RES;
+        assert_eq!(class_base_res(&args(&["editor", "--seed", "14", "--regions", "r.toml"])), Some(res));
+        assert_eq!(class_base_res(&args(&["editor", "--world", "w/world.toml"])), Some(res));
+        assert_eq!(viewer_store(&args(&["editor", "--world", "w/world.toml"]), &root, None), None, "--world never opens the default store");
+        assert_eq!(class_base_res(&args(&["editor", "--seed", "14", "--regions", "r.toml", "--global-res", "64"])), Some(64));
+        assert_eq!(class_base_res(&args(&["editor", "--seed", "14"])), None, "a bare run keeps its store or preview bake");
+        assert_eq!(
+            class_base_res(&args(&["editor", "--seed", "14", "--commit", "c", "--regions", "r.toml"])),
+            None,
+            "a commit opens its own base"
+        );
+        assert_eq!(class_base_res(&args(&["editor", "--seed", "14", "--regions", "r.toml", "--store", "s"])), None);
+        assert_eq!(title_world_label(None, 1024, "class source", false), "preview bake 1024 cells, class source");
+        // The editor mode starts on with region boxes to edit.
+        let beside = root.join("regions.toml");
+        assert!(!editor_starts_on(false, false, Some(&beside)), "no file beside the world yet");
+        std::fs::write(&beside, "format_version = 1\n").unwrap();
+        assert!(
+            editor_starts_on(false, false, Some(&beside)) && editor_starts_on(false, true, None) && editor_starts_on(true, false, None)
+        );
+        assert!(!editor_starts_on(false, false, None));
         let why = default_store_ways_out(&root.join("target/accept/global16384"));
         assert!(why.contains("--commit DIR") && why.contains("--global-res N") && why.contains("cargo xtask store"), "{why}");
         let _ = std::fs::remove_dir_all(&root);

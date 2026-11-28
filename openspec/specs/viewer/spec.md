@@ -555,10 +555,10 @@ Source: owner (M6 step U3: map first, list, search, inspector bound to the comma
 
 ### Requirement: VIEW-022 The editor mode of the window
 `planet editor` SHALL have an editor mode (`planet::editwin`, with `window`) that edits the world's definition through the session (VIEW-017) and the panels (VIEW-021).
-- Tab turns the mode on and off; `--edit` starts it on (`--site`: after descent).
+- Tab toggles the mode; `--edit`, `--regions` or a regions file beside `--world` start it (`--site`: after descent).
 - `--items DIR` is the directory the edits are written to and loaded from: one TOML file per edit (AUTH-001), every command writes its file; without it the edits live in memory and the status line says they are not saved.
 - `--editor-layout F` is the layout file (VIEW-018).
-- `--edit` with `--no-ui` is an error that says the mode needs the UI.
+- `--edit` with `--no-ui` is refused: the mode needs the UI.
 - Turning the mode on switches to the free camera and ends the globe overview (once: G shows it again); while the mode is on C does nothing and the left button does not capture the pointer.
 - The globe overview (VIEW-013) shows a marker for each edit the camera shows (VIEW-015 over the tiles the last plan wanted, at the overview's camera, so from high up only the large edits and the selected one), numbered from 1,000,000, sized by the outline radius and labelled by the edit's name; this holds with the mode off as well.
 - A click on an edit's marker selects the edit and starts the flight to it as for any marker.
@@ -1126,10 +1126,10 @@ Source: opus-planner (2026-10-22, SPIKE-29 fix 3: separate the shown set from th
 
 ### Requirement: VIEW-052 The editor opens the production store
 Without `--store`, `--commit`, `--regions`, `--world` or `--global-res`, outside a smoke run, the editor SHALL open the first existing directory of: `PLANET_STORE`, the pointer file `target/stores/default`'s, `target/stores/global16384`, `target/accept/global16384` (under the repo root); with none, the in-memory preview bake.
-With `--commit` or `--regions` it SHALL compute the base in memory (1,024 cells; `--regions --global-res N`: N).
+Outside a smoke run, `--regions` or `--world` SHALL compute the class-source base in memory (1,024 cells, else `--global-res N`).
 An unreadable default store SHALL be refused naming `--commit DIR`, `--global-res N` and `cargo xtask store`.
 The title SHALL name the source: `store <dir>` or `preview bake <N> cells`.
-`cargo xtask store [--res N] [--relief-scale S] [--link DIR]` SHALL build a store of N cells a face edge (default 16384) into `target/stores/global<N>` and write the pointer file; `--link` only writes the pointer to an existing store.
+`cargo xtask store [--res N] [--relief-scale S] [--link DIR]` SHALL build a store of N cells a face edge (default 16384) into `target/stores/global<N>` and write the pointer file; `--link` only points to an existing store.
 
 Verify: A
 Status: active
@@ -1380,7 +1380,7 @@ Source: Architect order 2026-11-09 (inbox #99), A3 11.1, CON-18, VIEW-067; the t
 - **THEN** the worker answers and the preview is drawn and gone when the edit is committed, nothing runs without the flag, and the two frames differ only where the overlay's lines and label are
 
 ### Requirement: VIEW-069 The viewer and capture-stills open a commit over the in-memory production base
-With `--commit DIR` the viewer and `capture-stills` SHALL open the commit over the production base computed in memory for the definition: exact base values over its tiles and one tile of margin, the in-memory bake elsewhere. The commit SHALL pass the normal key check. `--store`, `--erosion`, `--erosion-store`, `--global-res`, `--allow-memory-bake` and the source flags SHALL be refused beside it. The log, the title and every still SHALL say "base: computed in memory, not read from a stored bake". The viewer SHALL start held still 25 km over the ground, 20 km south of `--site` or the centre of the commit's tiles, looking north 50 degrees down; the title SHALL say "inside the region" or "outside the region: coarse base".
+With `--commit DIR` the viewer and `capture-stills` SHALL open the commit over the production base computed in memory for the definition: exact base values over its tiles and one tile of margin, the in-memory bake elsewhere. The commit SHALL pass the normal key check. `--store`, `--erosion`, `--erosion-store`, `--global-res`, `--allow-memory-bake` and the source flags SHALL be refused beside it. The log, the title and every still SHALL say "base: computed in memory, not read from a stored bake". The viewer SHALL start held still 25 km over the ground, 20 km south of `--site` or the centre of the commit's tiles, looking north 50 degrees down; the log SHALL say "inside the region" or "outside the region: coarse base".
 
 Verify: A
 Status: active
@@ -1396,7 +1396,7 @@ Source: Lead 2026-11-13 (E1, option b; E4 is the owner flying it), TEST-128, REN
 
 #### Scenario: Start over the region
 - **WHEN** the viewer opens a commit, without `--site` and with it
-- **THEN** the camera starts over the centre of the commit's tiles or the site, the title says "inside the region", and over the default site it would say "outside the region: coarse base"
+- **THEN** the camera starts over the centre of the commit's tiles or the site, the log says "inside the region", and over the default site it would say "outside the region: coarse base"
 
 ### Requirement: VIEW-071 An F9 bundle records the commit and the site of the run
 An F9 repro bundle written by a window started with `--commit DIR` or `--site LAT,LON` SHALL record them in the bundle's head as `open_commit PATH` (absolute, escaped as a world line) and `open_site LAT,LON` (degrees), so that a replay opens the same world at the same place. A run without them records neither line. The bundle format stays version 2; a bundle without the lines reads as before, and the lines survive a write and a read. The lines are read by `cargo xtask repro --window` (BUILD-054) and decide nothing in the plan replay of VIEW-026.
@@ -1496,13 +1496,13 @@ Source: companion backlog 1A (2026-11-22), ADR 0091, CON-05, CON-11, CON-14, CON
 - **THEN** cursor readout, steep warning, plot hover scrub, `SwapRuler`, and `ClearRuler` events work within fixed inspector width
 
 ### Requirement: VIEW-077 The editor places, resizes and deletes region boxes and reopens a baked one
-`planet editor` SHALL edit the boxes of a regions file (WDEF-019): `--regions FILE`, else the `regions.toml` beside `--world F`.
+`planet editor` SHALL edit a regions file's boxes (WDEF-019): `--regions FILE`, else the `regions.toml` beside `--world F`.
 The Sites tab SHALL list each box with its derived state.
 Place and Move SHALL put a box of 2 to 4 L tiles a side where a click hits the ground, snapped to whole tiles and clamped into the allowed tiles; Resize and Delete SHALL change it.
 Every box put SHALL pass `check_box`; a refused one leaves the file unchanged.
 The file SHALL be rewritten after each change, outside `WorldDefinition`.
 The window SHALL draw the boxes by state, the placement box and the face-edge margin on the ground.
-Open on a `ready` box SHALL print its `--commit` command (VIEW-069).
+Open on a `ready` box SHALL copy its `--commit` command to the clipboard.
 
 Verify: A
 Status: active
@@ -1518,7 +1518,7 @@ Source: owner 2026-11-28 (S-Region-Authoring E2), WDEF-019, BUILD-078, VIEW-052,
 
 #### Scenario: State and reopen
 - **WHEN** a box's commit is baked, the definition then changes, and Open is pressed on the ready box
-- **THEN** the row reads `unbaked`, `ready`, `stale` in turn, and Open prints the `--commit` command of its folder
+- **THEN** the row reads `unbaked`, `ready`, `stale` in turn, and Open copies and prints the `--commit` command of its folder
 
 #### Scenario: No default store for region boxes
 - **WHEN** `editor --seed 14 --regions F` runs with a default store on disk

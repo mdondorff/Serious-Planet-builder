@@ -39,6 +39,35 @@ pub fn load_world(path: &Path) -> Result<WorldDefinition, String> {
     planet_world_def::toml_io::parse_definition(&text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// The class source's samples on the six face grids of `res` cells (as `planet_generators::global::bake` lays them out: rows of `t`, `s` fastest): each sample is independent and
+/// the rows are joined in order, so the grid does not depend on the thread count (CON-14).
+fn class_grid(world: &GlobalWorld, res: u32, threads: usize) -> Result<planet_generators::global::GlobalGrid, String> {
+    if res == 0 || !res.is_power_of_two() {
+        return Err(format!("--global-res {res}: a bake is a power of two cells a face edge"));
+    }
+    let n = res + 1;
+    let coord = |i: u32| f64::from(2 * i) / f64::from(res) - 1.0;
+    let faces: [Vec<planet_generators::global::GlobalSample>; 6] = std::array::from_fn(|f| {
+        let rows: Vec<u32> = (0..n).collect();
+        let threads = threads.max(1).min(rows.len());
+        let chunks: Vec<&[u32]> = rows.chunks(rows.len().div_ceil(threads)).collect();
+        let mut out = Vec::with_capacity((n * n) as usize);
+        for part in planet_core::par::map(&threads, chunks.len(), &|c| {
+            let mut v = Vec::with_capacity(chunks[c].len() * n as usize);
+            for &l in chunks[c] {
+                for k in 0..n {
+                    v.push(world.field(planet_core::cube::face_to_direction(&TangentWarp, Face(f as u8), coord(k), coord(l))));
+                }
+            }
+            v
+        }) {
+            out.extend(part);
+        }
+        out
+    });
+    Ok(planet_generators::global::GlobalGrid { seed: world.seed(), res, faces })
+}
+
 /// The store the editor opens when `--store` is not given (VIEW-052), the first that exists: the directory in the `PLANET_STORE`
 /// environment variable, the directory named in the pointer file `target/stores/default` (written by `cargo xtask store`), then
 /// `target/stores/global16384` and `target/accept/global16384` under `root`.
@@ -286,6 +315,8 @@ pub struct WorldTerrain {
     commit_region: Option<CommitRegion>,
     /// The lattice the water field reads when it is not the height field's (a fixture world: the in-memory coarse bake, whose ocean channel the water field is built over).
     water_src: Option<Arc<dyn LatticeSource + Send>>,
+    /// The in-memory bake samples the class source ([`WorldTerrain::open_class`]).
+    class_in_memory: bool,
     /// Scoped threads of one horizon bake (0: the cores, at most 4).
     horizon_threads: std::sync::atomic::AtomicUsize,
     /// Cells per chunk edge of the horizon lattice (0: the default of [`crate::horizonworld::HORIZON_CELL_M`]); a test sets a coarse one to stay quick.
@@ -328,6 +359,16 @@ impl planet_generators::wet_floor::FloorLattice for SharedFloor {
 impl WorldTerrain {
     /// Resolve the height field of `def` (refusing an unknown id) and bake what it reads at `global_res` cells per face edge.
     pub fn open(def: WorldDefinition, global_res: u32) -> Result<WorldTerrain, String> {
+        WorldTerrain::open_in_memory(def, global_res, false)
+    }
+
+    /// [`open`](WorldTerrain::open) over the class source (GEN-115, STRM-073): the in-memory bake samples `BakeInputs::base`, the base `bake-region` bakes against, not the
+    /// legacy generator. The editor's base for `--world` or `--regions` without `--store` (VIEW-052).
+    pub fn open_class(def: WorldDefinition, global_res: u32) -> Result<WorldTerrain, String> {
+        WorldTerrain::open_in_memory(def, global_res, true)
+    }
+
+    fn open_in_memory(def: WorldDefinition, global_res: u32, class: bool) -> Result<WorldTerrain, String> {
         let kind = resolve(&def).map_err(|e| e.to_string())?;
         let radius_m =
             GenContext::new(&def).body_radius_m(BodyId::PLANET).map_err(|e| format!("the definition cannot be generated: {e}"))?;
@@ -338,12 +379,19 @@ impl WorldTerrain {
             if global_res > MAX_RUN_BAKE_RES {
                 return Err(format!("--global-res {global_res}: a run bakes in memory, at most {MAX_RUN_BAKE_RES} cells per face edge"));
             }
-            let field = GlobalCoarseGenerator
-                .field(&GenContext::new(&def), BodyId::PLANET)
-                .map_err(|e| format!("the definition cannot be generated: {e}"))?;
             let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
-            let grid = field.bake(&TangentWarp, global_res, threads).map_err(|e| format!("--global-res {global_res}: {e:?}"))?;
             let world = GlobalWorld::from_definition(&def).map_err(|e| format!("the definition cannot be generated: {e}"))?;
+            let (world, grid) = if class {
+                let seed = world.seed();
+                let world = world.with_class_source(planet_cache::global_store::class_inputs(&def, seed, threads));
+                let grid = class_grid(&world, global_res, threads)?;
+                (world, grid)
+            } else {
+                let field = GlobalCoarseGenerator
+                    .field(&GenContext::new(&def), BodyId::PLANET)
+                    .map_err(|e| format!("the definition cannot be generated: {e}"))?;
+                (world, field.bake(&TangentWarp, global_res, threads).map_err(|e| format!("--global-res {global_res}: {e:?}"))?)
+            };
             let sea = def.sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?;
             let block = global_res.min(256);
             let (_, grid_ocean) = tiled_ocean(&grid, &TangentWarp, block, threads, sea.min_area_fraction)
@@ -362,7 +410,11 @@ impl WorldTerrain {
         } else {
             (Box::new(NoBake), [0; 16])
         };
-        let source = if kind.needs_bake() { format!("in-memory {global_res} cells") } else { "no bake (the field reads none)".to_string() };
+        let source = match (kind.needs_bake(), class) {
+            (true, false) => format!("in-memory {global_res} cells"),
+            (true, true) => format!("in-memory {global_res} cells of the class source"),
+            (false, _) => "no bake (the field reads none)".to_string(),
+        };
         Ok(WorldTerrain {
             def: std::sync::RwLock::new(Arc::new(def)),
             kind,
@@ -408,6 +460,7 @@ impl WorldTerrain {
             bake_base: None,
             commit_region: None,
             water_src: None,
+            class_in_memory: class,
         })
     }
 
@@ -516,6 +569,7 @@ impl WorldTerrain {
             bake_base: None,
             commit_region: None,
             water_src: None,
+            class_in_memory: false,
         })
     }
 
@@ -750,6 +804,7 @@ impl WorldTerrain {
         match self.store_world {
             Some(w) if w.class_source().is_some() => "class source",
             Some(_) => "legacy source",
+            None if self.class_in_memory => "class source",
             None => "legacy source",
         }
     }
