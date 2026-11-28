@@ -3,6 +3,7 @@
 Forward state only (owner, 2026-10-16): open owner items, the current queue's open items, the current unanswered stop report, tracked items and quarantines. History goes to the log (`cargo xtask log`). When a change is archived the coder deletes its queue item's text (the log line is the record); when the architect answers a stop report it deletes it. A Tracked entry has at most 3 lines; a finished one is deleted (ADR 0075). Cap: 15 KB. Earlier states: git history (the M4 and M6 snapshots were deleted in #1683, owner, 2026-11-27). M8 closed 2026-10-30: `docs/archive/M8/M8-report.md`. New requirement IDs, ADR and SPIKE numbers are reserved through the lead (ADR 0120).
 
 ## Waiting for the owner
+- **E3, your 10-minute region smoke** (S-Region-Authoring, by 2026-12-01): commands and what to judge in lanes `digest/smoke-S-Region-Authoring-2026-12-01.md`; answer `look: E3 pass` or `look: E3 fail: <what>`.
 - **Your flight on the fly1126 stores** (optional; lanes digest `flight-playbook-fly1126-2026-11-27.md`; stores and stills in `C:/DEV/SeriousPlanetData/flights/fly1126/`).
 - **/bless: `water_class_lake_mask_stripes`** (TEST-133, #1459): the first lake golden; nothing waits on it.
 - **A new global store for the default world, seed 14**: every store on disk is refused by its keys; E1 ran on the in-memory production base (VIEW-069). Its format waits for ADR 0117, which is still proposed.
@@ -12,8 +13,7 @@ Older owner items moved to `docs/parking.md` (2026-11-12 and 2026-11-27).
 ## Queue (2026-11-28, sprint S-Region-Authoring: `docs/milestones/S-Region-Authoring.md`)
 | Exit | Step | Lane |
 |---|---|---|
-| E2 | Editor regions: boxes, overlay, panel, reopen (VIEW-077, TEST-166); E1 merged (#1698) | crusader |
-| E3 | The owner's smoke run, prepared by the lead once E1 and E2 merge | lead |
+| E3 | The owner's smoke run: prepared (lanes `digest/smoke-S-Region-Authoring-2026-12-01.md`); the owner runs it by 2026-12-01 | owner |
 | E4 | The close report's process section | lead |
 
 ## Tracked
