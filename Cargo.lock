@@ -1483,6 +1483,7 @@ dependencies = [
  "planet-streaming",
  "planet-world-def",
  "png",
+ "toml",
 ]
 
 [[package]]

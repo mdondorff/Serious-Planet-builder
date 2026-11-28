@@ -24,6 +24,7 @@ pub mod meshpack;
 pub mod metric_calibration;
 pub mod pack;
 pub mod region_bake;
+pub mod regions_file;
 pub mod relief_store;
 pub mod river_gate;
 pub mod river_gate_graph;

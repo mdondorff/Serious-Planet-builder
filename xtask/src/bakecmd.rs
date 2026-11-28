@@ -21,6 +21,20 @@ pub fn cargo_args(args: &[String]) -> Res<Vec<String>> {
     Ok(v)
 }
 
+/// The `cargo` arguments of `cargo xtask bake-region` (BUILD-078): the `bake_regions` example of planet-cache in release with the user's options (the example parses and checks them).
+pub fn region_cargo_args(args: &[String]) -> Vec<String> {
+    let mut v: Vec<String> =
+        ["run", "--release", "-q", "-p", "planet-cache", "--example", "bake_regions", "--"].iter().map(|s| s.to_string()).collect();
+    v.extend(args.iter().cloned());
+    v
+}
+
+pub fn run_region(root: &Path, args: &[String]) -> Res {
+    let a = region_cargo_args(args);
+    let refs: Vec<&str> = a.iter().map(String::as_str).collect();
+    run(root, "cargo", &refs, &[])
+}
+
 pub fn run_cmd(root: &Path, args: &[String]) -> Res {
     let a = cargo_args(args)?;
     let refs: Vec<&str> = a.iter().map(String::as_str).collect();
@@ -53,6 +67,15 @@ mod tests {
                 && c.contains(&"--keep-pass1".to_string()),
             "{c:?}"
         );
+    }
+
+    // spec: BUILD-078
+    #[test]
+    fn bake_region_runs_the_region_example_with_the_options() {
+        let c = region_cargo_args(&a(&["--world", "w/def.toml", "--items", "w/items", "--name", "alps"]));
+        assert!(c.windows(2).any(|w| w == ["--example", "bake_regions"]) && c.contains(&"--release".to_string()), "{c:?}");
+        let tail: Vec<&str> = c.iter().skip_while(|s| *s != "--").skip(1).map(String::as_str).collect();
+        assert_eq!(tail, ["--world", "w/def.toml", "--items", "w/items", "--name", "alps"]);
     }
 
     // spec: GEN-100
