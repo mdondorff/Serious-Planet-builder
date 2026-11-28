@@ -13,8 +13,7 @@ Older owner items moved to `docs/parking.md` (2026-11-12 and 2026-11-27).
 | Exit | Step | Lane |
 |---|---|---|
 | E1 | `regions.toml` in D1's format (WDEF-019, TEST-165) and `cargo xtask bake-region` over `--world` / `--regions` (BUILD-078) | explorer |
-| E5 | P3's leftovers: docs restructure PR 3, the P3.md references, CLAUDE.md's PR-body lines, ADR 0128's erratum, the tmp/g1*, g2* dumps, the parked RG worktrees | crusader |
-| E2 | Editor regions: boxes, overlay, panel, reopen (VIEW-077, TEST-166); after E5 | crusader |
+| E2 | Editor regions: boxes, overlay, panel, reopen (VIEW-077, TEST-166); starts at E1's merge (the regions_file API is agreed) | crusader |
 | E3 | The owner's smoke run, prepared by the lead once E1 and E2 merge | lead |
 | E4 | The close report's process section | lead |
 
