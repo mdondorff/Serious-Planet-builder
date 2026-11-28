@@ -1,0 +1,1 @@
+- 2026-11-28 editor-regions (S-Region-Authoring E2): the Sites tab places, resizes, moves and deletes region boxes snapped to L tiles by check_box, draws them, the placement box and the face-edge margin on the ground, shows unbaked/ready/stale, and prints a ready box's --commit command; editor --regions (VIEW-077, TEST-166)
