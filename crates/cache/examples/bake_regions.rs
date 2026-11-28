@@ -1,5 +1,5 @@
 //! `cargo xtask bake-region` (BUILD-078, WDEF-019): bakes the boxes of a world's `regions.toml` with the region bake (GEN-177) over the production base of the world's definition and its items
-//! (CON-05), each into `<regions-parent>/regions/<name>/`, and prints the editor command that opens each commit (VIEW-069). A region that is `ready` is skipped unless `--force`.
+//! (CON-05), each into `<regions-parent>/regions/<name>/`, and prints the one editor command that opens every ready region of the file (VIEW-077). A region that is `ready` is skipped unless `--force`.
 //!
 //! Usage: see `planet_cache::regions_file::BAKE_USAGE`.
 
@@ -30,7 +30,7 @@ fn main() {
     for (entry, state, bake) in plan {
         let dir = commit_dir(&a.regions, &entry.name);
         if !bake {
-            println!("region {}: ready, skipped (--force bakes it again)\n  open: {}", entry.name, a.open_command(&dir));
+            println!("region {}: ready, skipped (--force bakes it again)", entry.name);
             continue;
         }
         let t0 = Instant::now();
@@ -64,14 +64,16 @@ fn main() {
         let (f, l) = (front_at.unwrap_or(0.0), tiles_at.unwrap_or(end));
         println!("region {}: steps base lattice {:.1} s, solve and hydrology {:.1} s, L tiles {:.1} s", entry.name, f, l - f, end - l);
         println!(
-            "region {}: ready, commit {:016x}, {} L tiles, {} channel cells, {} lakes ({:.1} s)\n  open: {}",
+            "region {}: ready, commit {:016x}, {} L tiles, {} channel cells, {} lakes ({:.1} s), in {}",
             entry.name,
             commit.id,
             report.tiles,
             report.channel_cells,
             report.lakes,
             t0.elapsed().as_secs_f64(),
-            a.open_command(&dir)
+            dir.display()
         );
     }
+    // One line for the run: the editor opens every ready region of the file (VIEW-077).
+    println!("open: {}", a.open_command());
 }

@@ -161,17 +161,13 @@ fn the_options_take_the_world_folder_or_a_seed_with_a_file() {
     assert_eq!(a.regions, Path::new("w").join("regions.toml"));
     assert_eq!((a.items.clone(), a.name.as_deref(), a.force, a.threads), (Some(PathBuf::from("w/items")), Some("alps"), true, 3));
     let w = Path::new("w").join("regions.toml").display().to_string();
-    assert!(
-        a.open_command(Path::new("w/regions/alps"))
-            .contains(&format!("editor --world w/def.toml --items w/items --regions {w} --commit w/regions/alps")),
-        "{}",
-        a.open_command(Path::new("w/regions/alps"))
-    );
+    let w = w.as_str();
+    assert_eq!(a.open_command(), format!("cargo run --release -p planet -- editor --world w/def.toml --items w/items --regions {w}"));
     let b = BakeArgs::parse(&s(&["--world", "w/def.toml", "--regions", "x.toml"])).unwrap();
     assert_eq!(b.regions, PathBuf::from("x.toml"));
     let c = BakeArgs::parse(&s(&["--seed", "14", "--regions", "r.toml"])).unwrap();
     assert_eq!((c.seed, c.world.as_ref()), (Some(14), None));
-    assert!(c.open_command(Path::new("regions/a")).contains("editor --seed 14 --regions r.toml --commit regions/a"));
+    assert_eq!(c.open_command(), "cargo run --release -p planet -- editor --seed 14 --regions r.toml", "no --commit (D2)");
     for (args, want) in [
         (vec!["--seed", "14"], "--seed needs --regions"),
         (vec!["--seed", "14", "--world", "w.toml"], "exclude each other"),
@@ -221,15 +217,13 @@ fn the_plan_checks_every_box_before_any_bake_and_skips_ready_regions_unless_forc
 #[test]
 fn the_open_line_carries_the_regions_file_and_quotes_paths_with_a_space() {
     let a = BakeArgs::parse(&s(&["--world", "My World/def.toml", "--items", "My World/items"])).unwrap();
-    let line = a.open_command(&commit_dir(&a.regions, "alps"));
+    let line = a.open_command();
     let regions = Path::new("My World").join("regions.toml").display().to_string();
-    let commit = Path::new("My World").join("regions").join("alps").display().to_string();
-    assert!(
-        line.ends_with(&format!(
-            "editor --world \"My World/def.toml\" --items \"My World/items\" --regions \"{regions}\" --commit \"{commit}\""
-        )),
-        "{line}"
+    assert_eq!(
+        line,
+        format!("cargo run --release -p planet -- editor --world \"My World/def.toml\" --items \"My World/items\" --regions \"{regions}\"")
     );
+    assert!(!line.contains("--commit"), "the editor opens every ready region of the file (D2)");
     assert_eq!(shell_path(Path::new("plain/path.toml")), "plain/path.toml");
     assert_eq!(shell_path(Path::new("a b")), "\"a b\"");
 }

@@ -655,18 +655,15 @@ impl BakeArgs {
     }
 
     /// The command that opens a region's commit in the editor (VIEW-069).
-    /// With `--regions`, so the editor shows the file's boxes; paths with a space are quoted.
-    pub fn open_command(&self, commit: &Path) -> String {
+    /// The one command that reopens the world with every ready region of the file (VIEW-077, the owner's D2 of 2026-11-28): the world, `--items` when given and `--regions FILE`, no
+    /// `--commit`; paths with a space are quoted. Printed once after the last region (the form agreed with E2).
+    pub fn open_command(&self) -> String {
         let world = match (&self.world, self.seed) {
             (Some(p), _) => format!("--world {}", shell_path(p)),
             (_, s) => format!("--seed {}", s.unwrap_or(0)),
         };
         let items = self.items.as_ref().map_or(String::new(), |d| format!(" --items {}", shell_path(d)));
-        format!(
-            "cargo run --release -p planet -- editor {world}{items} --regions {} --commit {}",
-            shell_path(&self.regions),
-            shell_path(commit)
-        )
+        format!("cargo run --release -p planet -- editor {world}{items} --regions {}", shell_path(&self.regions))
     }
 }
 
