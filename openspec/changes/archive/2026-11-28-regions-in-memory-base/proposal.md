@@ -6,5 +6,5 @@ The owner's E3 smoke (S-Region-Authoring, 2026-11-28): `editor --seed 14 --regio
 - A default store that cannot be read is refused with the ways out: `--commit DIR`, `--global-res N`, `cargo xtask store`.
 
 ## Impact
-- Specs: VIEW-077 modified (the rule and a scenario).
+- Specs: VIEW-052 modified (the store rule: no default store with `--commit` or `--regions`, the base in memory, the refusal's ways out); VIEW-077's text unchanged, two scenarios added.
 - Code: `crates/app/src/window.rs`; its tier-A test cites VIEW-077.

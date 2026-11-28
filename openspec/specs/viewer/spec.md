@@ -1125,7 +1125,11 @@ Source: opus-planner (2026-10-22, SPIKE-29 fix 3: separate the shown set from th
 - **THEN** the session's answer equals the plain function's each time, and the new edit is shown at the next call
 
 ### Requirement: VIEW-052 The editor opens the production store
-The editor SHALL, when `--store`, `--world` and `--global-res` are not given and the run is not a smoke run, open the first existing directory of: the one in the `PLANET_STORE` environment variable, the one named in the pointer file `target/stores/default`, `target/stores/global16384`, `target/accept/global16384` (relative paths under the repo root). With none it SHALL open the in-memory preview bake. The window title SHALL name the source: `store <dir>`, or `preview bake <N> cells`. `cargo xtask store [--res N] [--relief-scale S] [--link DIR]` builds a store of N cells per face edge (default 16384) into `target/stores/global<N>` and writes the pointer file, or with `--link` only writes the pointer file for an existing store.
+Without `--store`, `--commit`, `--regions`, `--world` or `--global-res`, outside a smoke run, the editor SHALL open the first existing directory of: `PLANET_STORE`, the pointer file `target/stores/default`'s, `target/stores/global16384`, `target/accept/global16384` (under the repo root); with none, the in-memory preview bake.
+With `--commit` or `--regions` it SHALL compute the base in memory (1,024 cells, or `--global-res N`).
+An unreadable default store SHALL be refused naming `--commit DIR`, `--global-res N` and `cargo xtask store`.
+The title SHALL name the source: `store <dir>` or `preview bake <N> cells`.
+`cargo xtask store [--res N] [--relief-scale S] [--link DIR]` SHALL build a store of N cells a face edge (default 16384) into `target/stores/global<N>` and write the pointer file; `--link` only writes the pointer to an existing store.
 
 Verify: A
 Status: active
@@ -1493,17 +1497,16 @@ Source: companion backlog 1A (2026-11-22), ADR 0091, CON-05, CON-11, CON-14, CON
 
 ### Requirement: VIEW-077 The editor places, resizes and deletes region boxes and reopens a baked one
 `planet editor` SHALL edit the boxes of a regions file (WDEF-019): `--regions FILE`, else the `regions.toml` beside `--world F`.
-Without `--store` its base SHALL be computed in memory (as for `--commit`), never read from a default store.
-The Sites tab SHALL list each box with its state.
-Place and Move SHALL put a box of 2 to 4 L tiles a side at a clicked ground point, snapped and clamped into the allowed tiles; Resize and Delete change it.
-Every box put SHALL pass `check_box`.
+The Sites tab SHALL list each box with its derived state.
+Place and Move SHALL put a box of 2 to 4 L tiles a side where a click hits the ground, snapped to whole tiles and clamped into the allowed tiles; Resize and Delete SHALL change it.
+Every box put SHALL pass `check_box`; a refused one leaves the file unchanged.
 The file SHALL be rewritten after each change, outside `WorldDefinition`.
-The boxes, placement box and face-edge margin SHALL be drawn on the ground.
+The window SHALL draw the boxes by state, the placement box and the face-edge margin on the ground.
 Open on a `ready` box SHALL print its `--commit` command (VIEW-069).
 
 Verify: A
 Status: active
-Source: owner 2026-11-28 (S-Region-Authoring E2; the base in memory: the E3 smoke, lead 2026-11-28), WDEF-019, BUILD-078, VIEW-051, VIEW-069, VIEW-075
+Source: owner 2026-11-28 (S-Region-Authoring E2), WDEF-019, BUILD-078, VIEW-052, VIEW-069, VIEW-075
 
 #### Scenario: Placing at a face edge
 - **WHEN** a 2x2 box is placed with the cursor on the first tile of a face
@@ -1513,10 +1516,14 @@ Source: owner 2026-11-28 (S-Region-Authoring E2; the base in memory: the E3 smok
 - **WHEN** the box is widened to 4 and once more, moved, placed again under a taken name, and deleted
 - **THEN** the side stops at 4 with the reason in the status, the move snaps to the new tile, the taken name is refused, and the file ends empty
 
-#### Scenario: No default store
-- **WHEN** `editor --seed 14 --regions F` runs with a default store on disk, and a default store cannot be read
-- **THEN** no store is opened, the base is computed in memory; the default store's refusal names `--commit DIR`, `--global-res N` and `cargo xtask store`
-
 #### Scenario: State and reopen
 - **WHEN** a box's commit is baked, the definition then changes, and Open is pressed on the ready box
 - **THEN** the row reads `unbaked`, `ready`, `stale` in turn, and Open prints the `--commit` command of its folder
+
+#### Scenario: No default store for region boxes
+- **WHEN** `editor --seed 14 --regions F` runs with a default store on disk
+- **THEN** no store is opened and the base is computed in memory (VIEW-052)
+
+#### Scenario: The default store's refusal
+- **WHEN** a default store cannot be read
+- **THEN** the run is refused naming `--commit DIR`, `--global-res N` and `cargo xtask store` (VIEW-052)

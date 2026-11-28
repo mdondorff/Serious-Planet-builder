@@ -155,9 +155,7 @@ pub fn descent_finished(t_s: f64, cameras: usize) -> bool {
     t_s >= cameras.saturating_sub(1) as f64 * planet_frame::scenes::FRAME_STEP_S
 }
 
-/// Whether the window plays the scripted descent over `--site` before the editor mode (`--edit`) turns on: not in a smoke run, which turns the
-/// mode on itself, and not without a site, where the mode starts on as before (VIEW-022).
-/// The store the viewer opens (VIEW-051): `--store`; none for a commit or region boxes (the production base computed in memory, VIEW-069, VIEW-077), a smoke run,
+/// The store the viewer opens (VIEW-052): `--store`; none for a commit or region boxes (the production base computed in memory, VIEW-069, VIEW-077), a smoke run,
 /// a definition of its own or a bake size asked for (the default store holds the default world only); else the default store, if one is on disk.
 pub fn viewer_store(o: &crate::Options, root: &Path, env: Option<PathBuf>) -> Option<PathBuf> {
     match &o.store {
@@ -176,6 +174,8 @@ pub fn default_store_ways_out(dir: &Path) -> String {
     )
 }
 
+/// Whether the window plays the scripted descent over `--site` before the editor mode (`--edit`) turns on: not in a smoke run, which turns the
+/// mode on itself, and not without a site, where the mode starts on as before (VIEW-022).
 pub fn site_descent_wanted(edit: bool, site_given: bool, smoke: bool) -> bool {
     edit && site_given && !smoke
 }
@@ -272,7 +272,7 @@ struct Config {
     open_commit: Option<String>,
     open_site: Option<String>,
     initial_view: usize,
-    /// Where the terrain comes from, for the title: the store the editor opened, or the in-memory preview bake (VIEW-051).
+    /// Where the terrain comes from, for the title: the store the editor opened, or the in-memory preview bake (VIEW-052).
     world_label: String,
     /// Pre-fill and bake progress of the world, fixed for the run.
     base_readiness: Readiness,
@@ -2120,7 +2120,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     let event_loop = EventLoop::new().map_err(|e| format!("{NO_DISPLAY}the event loop could not start: {e}"))?;
     crate::stall::phase_mark("event loop");
 
-    // The production store when one is configured or found (VIEW-051); otherwise the in-memory preview bake, which the title says.
+    // The production store when one is configured or found (VIEW-052); otherwise the in-memory preview bake, which the title says.
     crate::check_commit_options(o)?;
     let root = std::env::current_dir().map_err(|e| e.to_string())?;
     let store = viewer_store(o, &root, std::env::var_os("PLANET_STORE").map(PathBuf::from));
@@ -2364,6 +2364,7 @@ fn gate_finish(g: &GateRun) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    // spec: VIEW-052
     // spec: VIEW-077
     #[test]
     fn region_boxes_open_the_base_in_memory_never_a_default_store_and_the_default_stores_refusal_names_the_ways_out() {
