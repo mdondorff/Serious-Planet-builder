@@ -67,5 +67,5 @@ Not run: `cargo xtask accept P3`. Its perf wall-clock step needs a perf window (
   4. an `archive-milestone` xtask, so housekeeping can't skip a milestone (proposal S1 in the closure plan).
 
 ## Recommendation for the next milestone
-- The P4 draft (`docs/milestones/P4.md`) is built on RG's D-1 to D-4 and is superseded by the park. The owner picks the next topic. Candidates from the parking list are the base work (rivers off), the editor's edit model, and non-river topics.
+- The P4 draft (`docs/archive/P3/P4.md`) is built on RG's D-1 to D-4 and is superseded by the park. The owner picks the next topic. Candidates from the parking list are the base work (rivers off), the editor's edit model, and non-river topics.
 - Keep one R&D lane, and the owner's flight at every look gate.

@@ -2,7 +2,7 @@
 
 Status: report (spikes, 2026-11-14; lead order #120 item 2). Read only: it states and proposes, it decides nothing.
 Reader: the spikes lane built none of the production river code. It did measure some gate rows itself (G-ROUND, G-DET, G-PART, G-CON, G-LOCAL, G-SURF, G-SURF-I, G-PROFILE, G-MFD on windows): for those rows this pass is not an independent reading.
-Sources: `docs/briefings/terrain-prototype.md` (Exit list, Phases), `docs/design/terrain-target.md` (A3) §12.1 and §12.4, `docs/gates/ledger.md` at main 72256aa4, `docs/milestones/P1.md` to `P3.md`, `docs/milestones/P1-P2-closure.md`, `spikes/region-edit/results/results.md` (SPIKE-112).
+Sources: `docs/archive/P3/briefings/terrain-prototype.md` (Exit list, Phases), `docs/design/terrain-target.md` (A3) §12.1 and §12.4, `docs/gates/ledger.md` at main 72256aa4 (now `docs/tools/gates/ledger.md`), `docs/archive/P1-P2/P1.md`, `P2.md`, `docs/archive/P3/P3.md`, `docs/archive/P1-P2/P1-P2-closure.md`, `spikes/region-edit/results/results.md` (SPIKE-112).
 States: **pass** (a ledger verdict on main), **measured** (numbers exist, partial or outside the ledger), **open** (failed or work under way), **not started**.
 
 ## 1. The A/B gate exit list

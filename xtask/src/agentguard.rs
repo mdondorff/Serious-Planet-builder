@@ -360,8 +360,27 @@ fn is_allowed_data_write(norm_path: &str) -> bool {
 }
 
 fn is_untouchable_repo_file(norm_path: &str) -> bool {
-    ["/docs/constitution.md", "/docs/status.md", "/docs/milestones/p3.md"].iter().any(|suffix| norm_path.ends_with(suffix))
-        || matches!(norm_path, "docs/constitution.md" | "docs/status.md" | "docs/milestones/p3.md")
+    ["/docs/constitution.md", "/docs/status.md"].iter().any(|suffix| norm_path.ends_with(suffix))
+        || matches!(norm_path, "docs/constitution.md" | "docs/status.md")
+        || mentions_sprint_file(norm_path)
+}
+
+/// Whether the text names a sprint or milestone file `docs/milestones/<M>.md` (the active sprint file and its siblings, the lead's files;
+/// ADR 0130). A record under `docs/milestones/<M>/` is not one.
+fn mentions_sprint_file(norm: &str) -> bool {
+    const DIR: &str = "docs/milestones/";
+    let mut pos = 0;
+    while let Some(rel) = norm[pos..].find(DIR) {
+        let start = pos + rel + DIR.len();
+        let rest = &norm[start..];
+        let len = rest.find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')).unwrap_or(rest.len());
+        let name = &rest[..len];
+        if name.len() > 3 && name.ends_with(".md") && !rest[len..].starts_with('/') {
+            return true;
+        }
+        pos = start;
+    }
+    false
 }
 
 fn is_script_in_repo(norm_path: &str) -> bool {
@@ -772,9 +791,11 @@ fn evaluate_command(raw_cmd: &str, ctx: &GuardContext) -> Decision {
         if is_untouchable_repo_file(&norm)
             || has_word(&norm, "docs/constitution.md")
             || has_word(&norm, "docs/status.md")
-            || has_word(&norm, "docs/milestones/p3.md")
+            || mentions_sprint_file(&norm)
         {
-            return Decision::deny("Guardrail: mutating docs/constitution.md, docs/status.md, or docs/milestones/P3.md is blocked.");
+            return Decision::deny(
+                "Guardrail: mutating docs/constitution.md, docs/status.md, or a sprint file docs/milestones/<M>.md is blocked.",
+            );
         }
     }
 
@@ -874,6 +895,8 @@ mod tests {
         );
         assert_eq!(evaluate(&hook("write_file", "Path", r"c:\dev\seriousplanetdata\tmp\ag2\cockpit.html"), &ctx), Decision::allow());
         assert_eq!(evaluate(&hook("write_file", "Path", r"c:\dev\seriousplanetdata\lanes\ag2-state.md"), &ctx), Decision::allow());
+        let record = r"c:\dev\ag2_serious-planet-builder\docs\milestones\S-Region-Authoring\E2-record.md";
+        assert_eq!(evaluate(&hook("write_file", "Path", record), &ctx), Decision::allow(), "a record is not the sprint file");
 
         for denied in [
             r"c:\dev\serious-planet-builder\CLAUDE.md",
@@ -883,7 +906,7 @@ mod tests {
             r"c:\dev\seriousplanetdata\worlds\earth\pack.bin",
             r"c:\dev\ag2_serious-planet-builder\docs\constitution.md",
             r"c:\dev\ag2_serious-planet-builder\docs\status.md",
-            r"c:\dev\ag2_serious-planet-builder\docs\milestones\P3.md",
+            r"c:\dev\ag2_serious-planet-builder\docs\milestones\S-Region-Authoring.md",
             r"c:\dev\ag2_serious-planet-builder\.agents\scripts\helper.ps1",
         ] {
             let d = evaluate(&hook("edit_file", "Path", denied), &ctx);
@@ -912,7 +935,7 @@ mod tests {
             r"git -C c:/dev/serious-planet-builder checkout main",
             r"Remove-Item c:/dev/ag_serious-planet-builder/README.md",
             r"Set-Content c:/dev/seriousplanetdata/lanes/explorer.md 'x'",
-            r"Set-Content docs/milestones/P3.md 'x'",
+            r"Set-Content docs/milestones/S-Region-Authoring.md 'x'",
             r"cargo xtask perf",
             r"cargo xtask quiet off",
             r"git push --force origin main",

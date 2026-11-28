@@ -12,7 +12,7 @@ The block runs in phases of about 1.5 weeks. A phase starts with an entry note h
 | Phase | Ends (estimate) | Exit |
 |---|---|---|
 | P0 | about 2026-11-13 | closure of finished work only (list below); in-flight work (item 15, GEN-166, the memo-key fix) is not touched |
-| P1 | CP1, about 2026-11-20; now milestone `docs/milestones/P1.md` with five exit items, the rest on `docs/parking.md` (ADR 0120) | G-LOCAL measured; one region flyable from the stored `L` (lakes as flat water, no rivers yet); f32 rounds and the G-SCALE k=4 pair; closure |
+| P1 | CP1, about 2026-11-20; now milestone `docs/archive/P1-P2/P1.md` with five exit items, the rest on `docs/parking.md` (ADR 0120) | G-LOCAL measured; one region flyable from the stored `L` (lakes as flat water, no rivers yet); f32 rounds and the G-SCALE k=4 pair; closure |
 | P2 | CP2, about 2026-12-01 | rivers and lakes drawn; G-RT frame time on the prototype region; the thermal-dam options brief; closure with an independent review pass |
 | Gate | mid-December | the A/B gate (exit list below); a full `housekeeping` skill run as a milestone close |
 

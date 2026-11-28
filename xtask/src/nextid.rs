@@ -80,8 +80,13 @@ pub fn next_id(root: &Path, raw_prefix: &str, lanes_dir: Option<&Path>, extra_te
     match kind {
         IdKind::Adr => {
             scan_files(&root.join("docs/adr"), &mut files);
-            for extra in ["docs/status.md", "docs/milestones/P3.md"] {
-                let p = root.join(extra);
+            let status = root.join("docs/status.md");
+            if status.is_file() {
+                files.push(status);
+            }
+            // The active sprint file (ADR 0130), which may name a reserved ADR before it exists.
+            if let Some(name) = crate::prbody::active_sprint(root) {
+                let p = root.join("docs/milestones").join(format!("{name}.md"));
                 if p.is_file() {
                     files.push(p);
                 }
@@ -295,6 +300,22 @@ VIEW-080
         // without the file, the main spec alone: VIEW-073 (the retired VIEW-080 would be issued again, which the file prevents)
         fs::remove_file(base.join("openspec/retired-ids.txt")).unwrap();
         assert_eq!(next_id(&base, "view", None, "").unwrap().formatted, "VIEW-073");
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    // spec: BUILD-062
+    #[test]
+    fn next_id_reads_the_active_sprint_file_and_not_a_closed_milestone_file() {
+        let base = std::env::temp_dir().join(format!("xtask-nextid-sprint-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(base.join("docs/adr")).unwrap();
+        fs::create_dir_all(base.join("docs/milestones")).unwrap();
+        fs::write(base.join("docs/adr/0122-x.md"), "# 0122 X\n").unwrap();
+        fs::write(base.join("docs/milestones/P3.md"), "# P3\nStatus: closed (owner)\nADR 0140 reserved\n").unwrap();
+        assert_eq!(next_id(&base, "adr", None, "").unwrap().formatted, "0123", "a closed milestone file is not read");
+        let sprint = include_str!("fixtures/sprint-good.md").to_string() + "\nADR 0131 reserved for E1\n";
+        fs::write(base.join("docs/milestones/S-Test.md"), sprint).unwrap();
+        assert_eq!(next_id(&base, "adr", None, "").unwrap().formatted, "0132");
         let _ = fs::remove_dir_all(&base);
     }
 }

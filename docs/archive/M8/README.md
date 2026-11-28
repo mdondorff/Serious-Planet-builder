@@ -1,12 +1,12 @@
 # M8 milestone folder: index
 
-Owner-facing guide to this folder (opus-planner, 2026-10-27). Everything here is evidence, not goldens.
+Owner-facing guide to this folder (opus-planner, 2026-10-27). Moved from `docs/milestones/M8/` on 2026-11-28; the two image folders `owner-test-2026-10-27/` and `look-review-2b/` stay in `docs/milestones/M8/` (owner's guardrail of 2026-11-27). Everything here is evidence, not goldens.
 
 ## Owner live test 2026-10-27
-`owner-test-2026-10-27/README.md`: 16 findings in groups A to H and the plan before M8's acceptance (editor stalls, missing shadow bakes, chunk edges and tile cuts first).
+`docs/milestones/M8/owner-test-2026-10-27/README.md`: 16 findings in groups A to H and the plan before M8's acceptance (editor stalls, missing shadow bakes, chunk edges and tile cuts first).
 
 ## For the owner's look review (criterion 1)
-Current set: `look-review-2b/` (ANET_VERSION 10, rendered after #757). Later changes up to 2026-10-27 do not change the picture (byte-identical horizon maps, performance only).
+Current set: `docs/milestones/M8/look-review-2b/` (ANET_VERSION 10, rendered after #757). Later changes up to 2026-10-27 do not change the picture (byte-identical horizon maps, performance only).
 
 | Look at | Site | Why |
 |---|---|---|
@@ -36,6 +36,6 @@ Known and tracked, not to be judged as new: faint striations on shadowed walls b
 | Files | Criterion |
 |---|---|
 | `criterion-6-edit-window.md` | criterion 6 summary |
-| `edit-latency-w24-main819-5x.md`, `edit-latency-w25-drawn-again.md` | criterion 6, the latest windows; the earlier windows (`edit-latency-*`, `edit-resolve-w*-phases.log`) are in `docs/archive/M8/perf/` |
-| `docs/archive/M8/perf/envelope-w*.json` | criterion 7 windows 8 to 14; the latest are `envelope-w12-steady-300.json` and `envelope-w12-steady-rest.json` |
-| `docs/archive/M8/perf/anet-change-bound-48-chunks.log` | the chunk stage's measured height change (input to the plan bounds; the stage is removed, ADR 0086) |
+| `edit-latency-w24-main819-5x.md`, `edit-latency-w25-drawn-again.md` | criterion 6, the latest windows; the earlier windows (`edit-latency-*`, `edit-resolve-w*-phases.log`) were in `docs/archive/M8/perf/` (deleted 2026-11-27, 9f93d1488; in the git history) |
+| `docs/archive/M8/perf/envelope-w*.json` (deleted 2026-11-27, 9f93d1488) | criterion 7 windows 8 to 14; the latest are `envelope-w12-steady-300.json` and `envelope-w12-steady-rest.json` |
+| `docs/archive/M8/perf/anet-change-bound-48-chunks.log` (deleted 2026-11-27, 9f93d1488) | the chunk stage's measured height change (input to the plan bounds; the stage is removed, ADR 0086) |

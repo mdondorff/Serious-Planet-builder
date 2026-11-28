@@ -124,7 +124,7 @@ Evidence per decision; each recommendation is the planner's.
 
 | What | Where |
 |---|---|
-| Stills (1280x720 JPEG, from the 1440p capture on main cc6c9d2) | `docs/milestones/M5/coast-descent-frame010-filter1.jpg`, `coast-glide-frame100-filter1.jpg`, `coast-glide-frame100-filter0.jpg` |
+| Stills (1280x720 JPEG, from the 1440p capture on main cc6c9d2) | `docs/archive/M5/images/coast-descent-frame010-filter1.jpg`, `coast-glide-frame100-filter1.jpg`, `coast-glide-frame100-filter0.jpg` |
 | Four 1440p flight videos for the look review (3.4 to 5.7 MB each, not in git; #275's branch merged with main f02bc9f, RTX, 2026-10-18 05:49-05:56) | `sonnet-m4/target/review/m5-flights-v3/coast-glide-filter1.mp4`, `coast-glide-filter0.mp4`, `coast-descent-filter1.mp4`, `coast-descent-filter0.mp4` |
 | All 240 frames per flight (PNG, 2560x1440) and a six-frame contact sheet | `sonnet-m4/target/review/m5-flights-v3/<flight>-filter<k>/frame_NNNN.png`, `sonnet-m4/target/review/m5-flights-v3-sheet-a.jpg` |
 | Superseded captures (do not use) | `m5-flights` (before the horizon cut and REND-030), `m5-flights-v2` (REND-030's first version, stepped at LOD borders) |
@@ -133,7 +133,7 @@ Evidence per decision; each recommendation is the planner's.
 | Window notes | `docs/perf/window-7.md`, `docs/perf/window-8.md`, `docs/perf/water-attribution.md` |
 | Dive re-run (the passing run) | `sonnet-m4/perf/logs/dive-lit.json` and `dive-lit.frames.txt` (untracked) |
 
-The stills in `docs/milestones/M5/` come from the earlier capture (main cc6c9d2) and show the coast before REND-030; the videos above are current.
+The stills in `docs/archive/M5/images/` come from the earlier capture (main cc6c9d2) and show the coast before REND-030; the videos above are current.
 
 ## 7. Open before the verdict
 
@@ -141,7 +141,7 @@ The owner's decisions (section 5), then `/bless` of #275 and its merge, and `acc
 
 ## Process review (housekeeping step 9; sonnet-crusader for opus-planner, 2026-10-19)
 
-Window: M5 start (#191, 2026-10-16 18:17) to the GO (#307, 2026-10-18). Recorded data only; "n/m" marks a figure that was not measured or is no longer recoverable. Previous milestone: M4 (`docs/milestones/M4-report.md`).
+Window: M5 start (#191, 2026-10-16 18:17) to the GO (#307, 2026-10-18). Recorded data only; "n/m" marks a figure that was not measured or is no longer recoverable. Previous milestone: M4 (`docs/archive/M4/M4-report.md`).
 
 | Measure | M4 | M5 | Source |
 |---|---|---|---|

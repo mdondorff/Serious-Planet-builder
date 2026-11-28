@@ -1,6 +1,6 @@
 # Hydrology downstream seams for `G3` and `P4`
 
-Status: non-normative brief for `P3` `G3` and `P4` (owner and `ag2-antigravity`, 2026-11-22). Read with `docs/roadmap.md`, `docs/design/terrain-target.md`, `docs/archive/P3/P3.md` and `docs/milestones/P4.md`.
+Status: non-normative brief for `P3` `G3` and `P4` (owner and `ag2-antigravity`, 2026-11-22). Read with `docs/roadmap.md`, `docs/design/terrain-target.md`, `docs/archive/P3/P3.md` and `docs/archive/P3/P4.md`.
 
 ## 1. Placement in the schedule
 - None of the items below blocks `P3` `G2` or `G3` from selecting the winning hydrology variant.
