@@ -17,6 +17,10 @@ fn main() {
     let a = BakeArgs::parse(&args).unwrap_or_else(|e| fail(&e));
     let (threads, note) = planet_streaming::topology::bake_threads(a.threads).unwrap_or_else(|e| fail(&e));
     let (def, seed, _radius) = a.definition().unwrap_or_else(|e| fail(&e));
+    let items = def.item_ids(planet_world_def::BodyId::PLANET).len();
+    if items > 0 {
+        println!("bake-region: {items} items in the definition: they enter the commits' identity, not the base heights (the base reads no items yet, WDEF-019)");
+    }
     let file = RegionsFile::read(&a.regions).unwrap_or_else(|e| fail(&e));
     let layout = RegionLayout::PRODUCTION;
     let plan = bake_plan(&file, &a, &layout, region_inputs_id(&def, seed)).unwrap_or_else(|e| fail(&e));

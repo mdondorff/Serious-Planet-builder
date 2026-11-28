@@ -11,7 +11,7 @@ Source: owner 2026-11-28 (S-Region-Authoring E1 gate), WDEF-019, BUILD-078
 
 #### Scenario: End to end
 - **WHEN** the box is baked and opened
-- **THEN** its state goes `unbaked` to `ready`, the commit opens in memory with the bake's `base_id`, and the moved box, the other layout and the edited world each read `stale`
+- **THEN** its state goes `unbaked` to `ready`, the commit opens in memory with the bake's `base_id`, `bake-region`'s plan skips it and bakes it with `--force`, and the moved box, the other layout and the edited world each read `stale`
 
 #### Scenario: The rule and the refusals
 - **WHEN** every size of box is checked at the corners and the middle of each face, and one tile further out

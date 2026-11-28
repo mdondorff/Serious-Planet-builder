@@ -60,6 +60,35 @@ impl RegionLayout {
     }
 
     /// The lowest and highest tile index a box may cover on either axis: the solve margin (and the face-edge band of `RegionSpec::check`) stays on the face.
+    /// Whether boxes can be baked in this layout at all: whole regional cells a tile, a halo under half a tile, a lattice of at least one node a regional cell, and room for the C1
+    /// stencil (two nodes) between the solved window and the face edge, so no read of the base falls on another face.
+    pub fn check(&self) -> Result<(), String> {
+        if self.tile < 2 * LOCAL_PER_REGIONAL
+            || !self.tile.is_multiple_of(LOCAL_PER_REGIONAL)
+            || !(self.regional * LOCAL_PER_REGIONAL).is_multiple_of(self.tile)
+        {
+            return Err(format!(
+                "the layout's tile of {} local cells is not a whole number (2 or more) of regional cells dividing the face",
+                self.tile
+            ));
+        }
+        if 2 * self.halo >= self.tile {
+            return Err(format!("the layout's halo of {} cells is half its tile of {} or more", self.halo, self.tile));
+        }
+        if (self.res as usize) < self.regional {
+            return Err(format!("the layout's lattice of {} nodes is coarser than its {} regional cells", self.res, self.regional));
+        }
+        let (lo, _) = self.allowed_tiles();
+        let first = lo as usize * self.regional_per_tile() - self.margin;
+        if first * self.res as usize / self.regional < 2 {
+            return Err(format!(
+                "the layout's margin of {} regional cells leaves no room for the base's stencil at the face edge",
+                self.margin
+            ));
+        }
+        Ok(())
+    }
+
     pub fn allowed_tiles(&self) -> (u32, u32) {
         let m = self.margin.max(FACE_EDGE_CELLS);
         let per = self.regional_per_tile().max(1);
@@ -85,6 +114,7 @@ pub struct RegionEntry {
 /// [`RegionSpec::check`]. Allocation-free on success; the editor calls it on every drag step.
 #[allow(clippy::too_many_arguments)]
 pub fn check_box(layout: &RegionLayout, face: u8, tiles_per_edge: u32, i0: u32, j0: u32, i1: u32, j1: u32) -> Result<(), String> {
+    layout.check()?;
     if face > 5 {
         return Err(format!("face {face} does not exist (0 to 5)"));
     }
@@ -94,7 +124,7 @@ pub fn check_box(layout: &RegionLayout, face: u8, tiles_per_edge: u32, i0: u32, 
     if i0 > i1 || j0 > j1 {
         return Err(format!("the box ({i0}, {j0})..=({i1}, {j1}) is empty: i0 <= i1 and j0 <= j1"));
     }
-    let (w, h) = (i1 - i0 + 1, j1 - j0 + 1);
+    let (w, h) = ((i1 - i0).saturating_add(1), (j1 - j0).saturating_add(1));
     if !(MIN_TILES..=MAX_TILES).contains(&w) || !(MIN_TILES..=MAX_TILES).contains(&h) {
         return Err(format!("the box is {w} x {h} L tiles, a side is {MIN_TILES} to {MAX_TILES}"));
     }
@@ -278,18 +308,33 @@ pub fn commit_dir(regions_path: &Path, name: &str) -> PathBuf {
 
 /// The identity of a world's inputs for its region commits: the class inputs' key (the seed, the base and climate versions, the definition's nodes) with the definition's hash, which holds its
 /// items (CON-05), so an edit makes every commit of the world stale.
+/// The code versions are in it too ([`REGION_BAKE_VERSION`], the C1 reader, the coarse generator, the L codec, the commit format): a commit of an older bake reads `stale`, not `ready`.
 pub fn region_inputs_id(def: &WorldDefinition, seed: u64) -> u64 {
-    (class_inputs_key(def, seed) ^ def.hash()).wrapping_mul(0x0000_0100_0000_01b3)
+    let mut h = class_inputs_key(def, seed) ^ def.hash();
+    for v in [
+        u64::from(REGION_BAKE_VERSION),
+        u64::from(planet_generators::global::READER_C1_VERSION),
+        u64::from(planet_generators::global::GLOBAL_VERSION),
+        u64::from(crate::layer_l::L_CODEC_VERSION),
+        u64::from(crate::l_writer::COMMIT_VERSION),
+    ] {
+        h = (h ^ v).wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
 }
+
+/// The version of the region bake's stages that no key carries (the regional solve, H1's hydrology, the lakes, the channel graph, this file's lattice): raise it when one of them changes
+/// its result, so every region commit reads `stale`.
+pub const REGION_BAKE_VERSION: u32 = 1;
 
 /// A region's state, derived from its commit folder.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RegionState {
-    /// No commit in the folder (or the folder is missing or unreadable).
+    /// No commit file in the folder, or no folder.
     Unbaked,
     /// A commit of exactly this box, layout and inputs.
     Ready,
-    /// A commit of another box, layout or inputs.
+    /// A commit of another box, layout or inputs, or a commit file that cannot be read (a rebake replaces it).
     Stale,
 }
 
@@ -306,8 +351,10 @@ impl RegionState {
 /// The state of `entry` in `layout` for a world whose inputs are `inputs_id` ([`region_inputs_id`]): the commit's key identity is the spec's `effective_inputs_id`, which holds the box, the layout and
 /// the inputs (the seed and the radius are in the definition, so in `inputs_id`); the lattice resolution and the tile are compared too.
 pub fn region_state(entry: &RegionEntry, layout: &RegionLayout, regions_path: &Path, inputs_id: u64) -> RegionState {
-    let Ok(Some(commit)) = Commit::read(&commit_dir(regions_path, &entry.name)) else {
-        return RegionState::Unbaked;
+    let commit = match Commit::read(&commit_dir(regions_path, &entry.name)) {
+        Ok(Some(c)) => c,
+        Ok(None) => return RegionState::Unbaked,
+        Err(_) => return RegionState::Stale,
     };
     let c = commit.spec;
     let want = entry.region_spec(layout, c.seed, c.radius_m, 1, inputs_id);
@@ -333,8 +380,8 @@ pub fn world_with_items(mut def: WorldDefinition, items: Option<&Path>) -> Resul
     Ok((def, seed, radius))
 }
 
-/// The lattice nodes of a rectangle of one face, sampled from the base (f32, as stored).
-struct Lattice {
+/// The lattice nodes of a rectangle of one face, sampled from the base (f32, as stored): what [`bake_entry`] reads C1 as the base B.
+pub struct Lattice {
     res: u32,
     face: Face,
     i0: usize,
@@ -362,8 +409,36 @@ impl LatticeSource for Lattice {
     }
 }
 
+/// The base lattice of a region: `BakeInputs::base` of `def` at the nodes of `spec.res` over the solved window (the box and its margin) and three nodes round it (the C1 read's stencil,
+/// `floor(p) - 1 ..= floor(p) + 2`). The node values do not depend on `threads` (each node is computed alone).
+pub fn base_lattice(def: &WorldDefinition, spec: &RegionSpec, threads: usize) -> Lattice {
+    let inputs = class_inputs(def, spec.seed, threads.max(1));
+    let (face, res) = (spec.face, spec.res as usize);
+    let (i0, i1, j0, j1) = spec.region;
+    let (ri0, ri1, rj0, rj1) = (i0 - spec.margin, i1 + spec.margin, j0 - spec.margin, j1 + spec.margin);
+    let to_node = |reg: usize| reg * res / spec.regional;
+    const PAD: usize = 3;
+    let (ni0, nj0) = (to_node(ri0).saturating_sub(PAD), to_node(rj0).saturating_sub(PAD));
+    let (nw, nh) = ((to_node(ri1 + 1) + PAD).min(res) - ni0, (to_node(rj1 + 1) + PAD).min(res) - nj0);
+    let mut nodes = vec![0f32; nw * nh];
+    let rows = nh.div_ceil(threads.max(1));
+    std::thread::scope(|s| {
+        for (k, chunk) in nodes.chunks_mut(rows * nw).enumerate() {
+            let inputs = &inputs;
+            s.spawn(move || {
+                for (c, v) in chunk.iter_mut().enumerate() {
+                    let p = k * rows * nw + c;
+                    *v = inputs.base(lattice_direction(face, res, ni0 + p % nw, nj0 + p / nw)) as f32;
+                }
+            });
+        }
+    });
+    Lattice { res: spec.res, face, i0: ni0, j0: nj0, w: nw, h: nh, z: nodes }
+}
+
 /// Bakes one region of `def` (its items already in it, [`world_with_items`]) into `dir`: the production base (`BakeInputs::base`) sampled on the layout's lattice over the box and its margin and read
 /// C1, the climate of the orography as the build gives it to H1, then [`bake_region`]. The commit opens over the in-memory production base of the same definition (VIEW-069, VIEW-072).
+/// The base does not read items (the class inputs are the seed's): the items enter the commit's identity only, so any item change makes every commit of the world stale (WDEF-019).
 pub fn bake_entry(
     def: &WorldDefinition,
     entry: &RegionEntry,
@@ -380,31 +455,13 @@ pub fn bake_entry(
     spec.check()?;
     let world = GlobalWorld::from_definition(def).map_err(|e| format!("the world of the definition: {e}"))?;
     let inputs = class_inputs(def, seed, threads);
-    let face = spec.face;
-    let res = layout.res as usize;
-    // The lattice rectangle of the solved window, two regional cells more (the solve's stencil) and three nodes (the C1 read's); at the production ratio of 4/3 nodes a cell this is the
-    // G-RT fixture's rectangle or larger.
-    let (i0, i1, j0, j1) = spec.region;
-    let (ri0, ri1, rj0, rj1) = (i0 - spec.margin, i1 + spec.margin, j0 - spec.margin, j1 + spec.margin);
-    let to_node = |reg: usize| reg * res / layout.regional;
-    let pad = 3 + 2 * res.div_ceil(layout.regional);
-    let (ni0, nj0) = (to_node(ri0).saturating_sub(pad), to_node(rj0).saturating_sub(pad));
-    let (nw, nh) = ((to_node(ri1 + 1) + pad).min(res) - ni0, (to_node(rj1 + 1) + pad).min(res) - nj0);
-    let mut nodes = vec![0f32; nw * nh];
-    let rows = nh.div_ceil(threads);
-    std::thread::scope(|s| {
-        for (k, chunk) in nodes.chunks_mut(rows * nw).enumerate() {
-            let inputs = &inputs;
-            s.spawn(move || {
-                for (c, v) in chunk.iter_mut().enumerate() {
-                    let p = k * rows * nw + c;
-                    *v = inputs.base(lattice_direction(face, res, ni0 + p % nw, nj0 + p / nw)) as f32;
-                }
-            });
-        }
-    });
-    let lattice = Lattice { res: layout.res, face, i0: ni0, j0: nj0, w: nw, h: nh, z: nodes };
-    let base = |d: Vec3| -> f64 { read_elevation_c1(&lattice, &planet_core::TangentWarp, d).map_or(f64::NAN, f64::from) };
+    let lattice = base_lattice(def, &spec, threads);
+    // Every read of the bake lies in the solved window (the solve's cell centres, K7's tile and halo, the land test's cores); a read outside the rectangle is a bug of this function.
+    let base = |d: Vec3| -> f64 {
+        read_elevation_c1(&lattice, &planet_core::TangentWarp, d)
+            .map(f64::from)
+            .unwrap_or_else(|e| panic!("the region's base lattice: {e}"))
+    };
     // The climate as the build gives it to H1: the runoff in m/s, the open-water evaporation, the discharge weight.
     let orography = inputs.orography();
     let climate = |d: Vec3| {
@@ -416,8 +473,8 @@ pub fn bake_entry(
     bake_region(&world, &spec, &base, &climate, dir)
 }
 
-/// The radius of a `--seed` world: the viewer's single planet (`skeleton::RADIUS_M`), so `--commit` with the same `--seed` opens over the same definition.
-pub const SEED_WORLD_RADIUS_M: f64 = 6_371_000.0;
+/// The radius of a `--seed` world: the viewer's single planet (`skeleton::RADIUS_M`, Earth's), so `--commit` with the same `--seed` opens over the same definition.
+pub const SEED_WORLD_RADIUS_M: f64 = planet_core::EARTH_RADIUS_M;
 
 /// The options of `cargo xtask bake-region` (BUILD-078).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -509,11 +566,14 @@ pub fn bake_plan(
             return Err(format!("{} has no region '{n}'", args.regions.display()));
         }
     }
+    // Every box of the file is checked, also with `--name`: a file with a box the editor could not have made is refused whole.
+    for r in &file.regions {
+        r.check(layout)?;
+    }
     file.regions
         .iter()
         .filter(|r| args.name.as_ref().is_none_or(|n| &r.name == n))
         .map(|r| {
-            r.check(layout)?;
             let state = region_state(r, layout, &args.regions, inputs_id);
             Ok((r.clone(), state, args.force || state != RegionState::Ready))
         })

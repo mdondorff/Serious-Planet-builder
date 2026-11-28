@@ -13,5 +13,5 @@ Source: owner 2026-11-28 (S-Region-Authoring D1 and E1), GEN-177, VIEW-069, CON-
 - **THEN** the regions file is `regions.toml` beside the definition, the given file, the given file, or an error with the usage line naming the problem
 
 #### Scenario: The plan
-- **WHEN** the file is empty, names no region of `--name`, or holds a box `check_box` refuses anywhere in it
+- **WHEN** the file is empty, names no region of `--name`, or holds a box `check_box` refuses anywhere in it (also with `--name` naming another box)
 - **THEN** the command fails before any bake, naming the file, the name or the box; otherwise it bakes each region that is not `ready` and skips the ready ones unless `--force`

@@ -19,5 +19,9 @@ Source: owner 2026-11-28 (S-Region-Authoring D1, the format; E1 and E2 Done when
 - **THEN** a side of 2 to 4 tiles inside tiles 3 to 124 of a face, with `tiles_per_edge = 128`, is accepted and passes `RegionSpec::check`; a box one tile further out, smaller, larger, empty, on face 6 or of another tile grid is refused with the reason
 
 #### Scenario: The derived state
-- **WHEN** a box has no commit, a commit of exactly its box, layout and inputs, or a commit of another box, layout or definition (its items included)
-- **THEN** its state is `unbaked`, `ready` or `stale`; the inputs id is the class inputs' key with the definition's hash, which holds the items
+- **WHEN** a box has no commit, a commit of exactly its box, layout and inputs, a commit of another box, layout or definition (its items included), or a commit file that cannot be read
+- **THEN** its state is `unbaked`, `ready`, `stale` or `stale`; the inputs id is the class inputs' key with the definition's hash, which holds the seed, the radius and the items, and the bake's code versions that no key carries
+
+#### Scenario: The limit on items
+- **WHEN** a world with items is baked
+- **THEN** the base heights do not read the items (the class inputs are the seed's); the items enter the commit's identity only, so any item change makes every commit of the world `stale`, and the command says so

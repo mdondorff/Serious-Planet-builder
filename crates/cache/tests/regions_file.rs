@@ -111,6 +111,49 @@ fn every_box_the_shared_rule_accepts_passes_region_spec_check_and_its_neighbours
     assert!(entry("A", 0, (10, 10, 11, 11)).check(&l).unwrap_err().contains("'A'"));
 }
 
+// spec: WDEF-019
+#[test]
+fn the_box_rule_equals_region_spec_check_at_every_position_of_both_layouts() {
+    let small = RegionLayout { regional: 128, tile: 64, halo: 24, margin: 6, rounds: 2, res: 1024 };
+    for l in [RegionLayout::PRODUCTION, small] {
+        let n = l.tiles_per_edge();
+        let mut accepted = 0;
+        for side in [MIN_TILES, MAX_TILES] {
+            for j0 in 0..=n - side {
+                for i0 in 0..=n - side {
+                    let (i1, j1) = (i0 + side - 1, j0 + side - 1);
+                    let rule = check_box(&l, 1, n, i0, j0, i1, j1).is_ok();
+                    let spec = entry("r", 1, (i0, j0, i1, j1)).region_spec(&l, 14, 6_371_000.0, 2, 9).check().is_ok();
+                    assert_eq!(rule, spec, "{l:?}: box ({i0}, {j0}) side {side}");
+                    accepted += usize::from(rule);
+                }
+            }
+        }
+        let (lo, hi) = l.allowed_tiles();
+        let span = (hi - lo + 1) as usize;
+        assert_eq!(accepted, (span - 1).pow(2) + (span - 3).pow(2), "{l:?}: every position inside tiles {lo}..={hi}");
+    }
+    assert!(check_box(&RegionLayout::PRODUCTION, 0, 128, 0, 0, u32::MAX, 1).is_err(), "a huge box is refused, not an overflow");
+}
+
+// spec: WDEF-019
+#[test]
+fn a_layout_that_cannot_bake_a_box_is_refused_naming_why() {
+    let p = RegionLayout::PRODUCTION;
+    p.check().unwrap();
+    for (l, want) in [
+        (RegionLayout { tile: 4, ..p }, "tile of 4"),
+        (RegionLayout { tile: 764, ..p }, "tile of 764"),
+        (RegionLayout { halo: 384, ..p }, "halo of 384"),
+        (RegionLayout { res: 1024, ..p }, "coarser"),
+        (RegionLayout { margin: 96, ..p }, "margin of 96"),
+    ] {
+        let e = l.check().unwrap_err();
+        assert!(e.contains(want), "{want:?} not in {e}");
+        assert!(check_box(&l, 0, l.tiles_per_edge(), 40, 40, 41, 41).is_err());
+    }
+}
+
 // spec: BUILD-078
 #[test]
 fn the_options_take_the_world_folder_or_a_seed_with_a_file() {
@@ -157,5 +200,13 @@ fn the_plan_checks_every_box_before_any_bake_and_skips_ready_regions_unless_forc
         bake_plan(&bad, &args, &l, 7).unwrap_err().contains("region 'edge'"),
         "a bad box anywhere stops the plan before the first bake"
     );
+    let named = BakeArgs { name: Some("a".into()), ..args.clone() };
+    assert!(bake_plan(&bad, &named, &l, 7).unwrap_err().contains("region 'edge'"), "also when --name picks another box");
+    // An unreadable commit file is stale (a rebake replaces it), a missing one unbaked.
+    let cdir = commit_dir(&args.regions, "a");
+    std::fs::create_dir_all(&cdir).unwrap();
+    assert_eq!(region_state(&f.regions[0], &l, &args.regions, 7), RegionState::Unbaked);
+    std::fs::write(cdir.join(planet_cache::l_writer::COMMIT_FILE), "not a commit").unwrap();
+    assert_eq!(region_state(&f.regions[0], &l, &args.regions, 7), RegionState::Stale);
     let _ = std::fs::remove_dir_all(&dir);
 }

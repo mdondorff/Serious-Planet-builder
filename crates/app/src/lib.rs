@@ -2422,8 +2422,34 @@ mod tests {
         assert_eq!(region_state(entry, &layout, &regions, id), RegionState::Ready);
         // The commit opens over the in-memory production base of the same definition (VIEW-069), with the bake's base (VIEW-072).
         let opened = worldfield::WorldTerrain::open_commit_in_memory(def.clone(), &dir, 2).expect("the commit opens in memory");
-        assert_eq!(opened.bake_base().expect("a commit base").1, commit.spec.base_id);
+        let (read, base_id) = opened.bake_base().expect("a commit base");
+        assert_eq!(base_id, commit.spec.base_id);
         assert!(opened.commit_region().is_some());
+        // The viewer's base is the bake's B bit for bit (VIEW-072) at points of the box's regional cells.
+        let spec = entry.region_spec(&layout, seed, SEED_WORLD_RADIUS_M, 2, id);
+        let lattice = base_lattice(&def, &spec, 2);
+        let n = layout.regional as f64;
+        let mut compared = 0;
+        for y in (spec.region.2..=spec.region.3).step_by(5) {
+            for x in (spec.region.0..=spec.region.1).step_by(5) {
+                let d = planet_core::cube::face_to_direction(
+                    &planet_core::cube::TangentWarp,
+                    planet_core::Face(1),
+                    2.0 * (x as f64 + 0.3) / n - 1.0,
+                    2.0 * (y as f64 + 0.6) / n - 1.0,
+                );
+                let want = f64::from(planet_generators::global::read_elevation_c1(&lattice, &planet_core::cube::TangentWarp, d).unwrap());
+                assert_eq!(read(d).to_bits(), want.to_bits(), "B at regional cell ({x}, {y})");
+                compared += 1;
+            }
+        }
+        assert!(compared >= 9, "{compared} points");
+        // bake-region's plan (BUILD-078): the ready region is skipped, and baked again with --force.
+        let args = BakeArgs::parse(&["--seed".into(), seed.to_string(), "--regions".into(), regions.display().to_string()]).unwrap();
+        let plan = bake_plan(&file, &args, &layout, id).unwrap();
+        assert_eq!((plan[0].1, plan[0].2), (RegionState::Ready, false), "a ready region is skipped");
+        let forced = bake_plan(&file, &BakeArgs { force: true, ..args.clone() }, &layout, id).unwrap();
+        assert_eq!((forced[0].1, forced[0].2), (RegionState::Ready, true), "--force bakes it again");
         // Stale: another box, another layout, an item put into the world (CON-05); the commit itself is untouched.
         let moved = RegionEntry { i0: i0 + 1, i1: i0 + 2, ..entry.clone() };
         assert_eq!(region_state(&moved, &layout, &regions, id), RegionState::Stale);
