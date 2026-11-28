@@ -5,7 +5,9 @@
 
 use std::time::Instant;
 
-use planet_cache::regions_file::{bake_entry, bake_plan, commit_dir, region_inputs_id, BakeArgs, RegionLayout, RegionsFile};
+use planet_cache::regions_file::{
+    bake_entry_progress, bake_plan, commit_dir, region_inputs_id, BakeArgs, BakeProgress, BakeStep, RegionLayout, RegionsFile,
+};
 
 fn fail(e: &str) -> ! {
     eprintln!("bake-region: {e}");
@@ -43,8 +45,24 @@ fn main() {
             entry.j1,
             dir.display()
         );
-        let (commit, report) =
-            bake_entry(&def, &entry, &layout, &dir, threads).unwrap_or_else(|e| fail(&format!("region {}: {e}", entry.name)));
+        // At most one progress line every 10 s (BUILD-078), and the time of each step at the end.
+        let mut paced = BakeProgress::new(&entry.name);
+        let (mut front_at, mut tiles_at) = (None, None);
+        let (commit, report) = bake_entry_progress(&def, &entry, &layout, &dir, threads, &mut |step| {
+            let t = t0.elapsed().as_secs_f64();
+            match step {
+                BakeStep::Front => front_at = Some(t),
+                BakeStep::Tiles { done: 0, .. } => tiles_at = Some(t),
+                _ => {}
+            }
+            if let Some(line) = paced.step(t, step) {
+                println!("{line}");
+            }
+        })
+        .unwrap_or_else(|e| fail(&format!("region {}: {e}", entry.name)));
+        let end = t0.elapsed().as_secs_f64();
+        let (f, l) = (front_at.unwrap_or(0.0), tiles_at.unwrap_or(end));
+        println!("region {}: steps base lattice {:.1} s, solve and hydrology {:.1} s, L tiles {:.1} s", entry.name, f, l - f, end - l);
         println!(
             "region {}: ready, commit {:016x}, {} L tiles, {} channel cells, {} lakes ({:.1} s)\n  open: {}",
             entry.name,

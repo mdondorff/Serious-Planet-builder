@@ -24,7 +24,7 @@ use planet_generators::bake::Grid;
 use crate::basin_table::BasinSpec;
 use crate::global_store::GlobalWorld;
 use crate::graph_store::GraphSpec;
-use crate::l_writer::{bake_l, ChannelFeed, Commit, GraphInput, LBake, MemoryFeed};
+use crate::l_writer::{bake_l_progress, ChannelFeed, Commit, GraphInput, LBake, MemoryFeed};
 use crate::layer_l::LTileSpec;
 
 /// Regional cells from a face edge within which a region is refused.
@@ -317,6 +317,27 @@ pub fn bake_region(
     climate: Climate<'_>,
     dir: &Path,
 ) -> Result<(Commit, RegionReport), String> {
+    bake_region_progress(world, spec, base, climate, dir, &mut |_| {})
+}
+
+/// Where a region bake is, for a caller's progress output.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RegionStage {
+    /// The regional solve, H1's hydrology, the lakes and the channel graph (one step, no finer progress).
+    Front,
+    /// L tiles written of the land tiles of the region.
+    Tiles { done: usize, total: usize },
+}
+
+/// [`bake_region`], calling `progress` when the front starts and around every L tile.
+pub fn bake_region_progress(
+    world: &GlobalWorld,
+    spec: &RegionSpec,
+    base: &(dyn Fn(Vec3) -> f64 + Sync),
+    climate: Climate<'_>,
+    dir: &Path,
+    progress: &mut dyn FnMut(RegionStage),
+) -> Result<(Commit, RegionReport), String> {
     spec.check()?;
     // The K7 of the commit is the standard one: a world whose flood epsilon is not the profile's cannot be committed yet (the commit spec records no epsilon), and it is refused before any work is done.
     let precision = spec.precision();
@@ -327,6 +348,7 @@ pub fn bake_region(
             precision.radius, precision.epsilon_w, k7_epsilon
         ));
     }
+    progress(RegionStage::Front);
     let RegionFront { solve, regional_field, hydro_stats, lakes, graph, segment_ids, feed } = region_front(spec, base, climate)?;
     let RegionSolve { grid, ri0, rj0, rw, rh, precision, .. } = solve;
     let regional = |d: Vec3| regional_field.at(d);
@@ -376,7 +398,7 @@ pub fn bake_region(
         threads: spec.threads,
         graph: Some(GraphInput { spec: graph_spec, graph: &graph, segment_ids: &segment_ids, grid: &grid, cell_xy: &cell_xy }),
     };
-    let commit = bake_l(dir, &b, &tiles)?;
+    let commit = bake_l_progress(dir, &b, &tiles, &mut |done, total| progress(RegionStage::Tiles { done, total }))?;
     let report = RegionReport {
         window: (rw, rh),
         channel_cells: hydro_stats.channel_cells,

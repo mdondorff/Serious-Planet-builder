@@ -1,0 +1,1 @@
+- 2026-11-28 region-bake-progress (explorer): E1 follow-up from the owner's smoke: `bake-region` prints a progress line at most every 10 s (step, percent, time left) and its `open:` line carries `--regions`, paths with a space quoted (BUILD-078)
