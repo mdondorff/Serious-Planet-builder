@@ -35,7 +35,8 @@ fn owners(tiles: &[Vec<TileKey>]) -> Result<HashMap<TileKey, usize>, String> {
     Ok(owner)
 }
 
-/// The layer of several commits (VIEW-079): a tile is read from the commit that holds it, through one cache of `capacity` decoded tiles for all of them.
+/// The layer of several commits (VIEW-079): a tile is read from the commit that holds it, through one cache of `capacity` decoded tiles for all of them (the first decoded leaves first;
+/// each commit keeps the one tile it decoded last besides).
 pub struct MultiLayer {
     layers: Vec<CommitLayer>,
     owner: HashMap<TileKey, usize>,

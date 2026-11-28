@@ -987,10 +987,13 @@ impl WorldTerrain {
         let mut layers = Vec::with_capacity(n);
         let mut lakes = Vec::with_capacity(n);
         let mut readers = Vec::with_capacity(n);
+        let mut no_graph = Vec::new();
         for d in dirs {
             let layer = planet_cache::l_layer::CommitLayer::open(d, stored.clone(), 1).map_err(|e| format!("{}: {e}", d.display()))?;
-            if let Ok(r) = layer.rivers(planet_cache::river_read::DEFAULT_CACHE_BYTES / n) {
-                readers.push(Arc::new(r));
+            // A commit without a channel graph draws no river (as one commit alone); the note names it.
+            match layer.rivers(planet_cache::river_read::DEFAULT_CACHE_BYTES / n) {
+                Ok(r) => readers.push(Arc::new(r)),
+                Err(_) => no_graph.push(d.display().to_string()),
             }
             lakes.push(Arc::new(
                 layer
@@ -1009,9 +1012,10 @@ impl WorldTerrain {
         let sea_level_m = def.sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
         world.kind = HeightFieldKind::ErodedC1;
         world.erosion_note = format!(
-            "erosion layer of {n} regions (commits {} of the new chain, each over its own tiles, one cache of {LAYER_CACHE_TILES} tiles, L with no fill, seed {seed}, coast fade {} m over the sea level {sea_level_m} m, crease band on, relief channels off, C1 base)",
+            "erosion layer of {n} regions (commits {} of the new chain, each over its own tiles, one cache of {LAYER_CACHE_TILES} tiles, L with no fill, seed {seed}, coast fade {} m over the sea level {sea_level_m} m, crease band on, relief channels off, C1 base{})",
             ids.join(", "),
-            planet_generators::erosion_layer::COAST_FADE_M
+            planet_generators::erosion_layer::COAST_FADE_M,
+            if no_graph.is_empty() { String::new() } else { format!("; no channel graph, so no river: {}", no_graph.join(", ")) }
         );
         world.source = format!("{} + {}", world.source, world.erosion_note);
         world.erosion =

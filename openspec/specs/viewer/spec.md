@@ -1533,9 +1533,9 @@ Source: owner 2026-11-28 (S-Region-Authoring E2), WDEF-019, BUILD-078, VIEW-052,
 - **THEN** the run is refused naming `--commit DIR`, `--global-res N` and `cargo xtask store` (VIEW-052)
 
 ### Requirement: VIEW-079 Every ready region of a regions file opens together
-`planet editor` with `--regions FILE` (or a `regions.toml` beside `--world F`) and no `--store` or `--commit` SHALL open every `ready` region of it over the class-source base in memory (VIEW-052): over each region's tiles its exact base, layer, lakes and rivers; elsewhere the coarse globe.
-A `stale` or `unbaked` region SHALL not open; the log SHALL name it with its state, and give each opened region's time.
-The regions' layer tiles SHALL share one cache of `LAYER_CACHE_TILES`; their river and lake caches the budget of one commit.
+`planet editor` with `--regions FILE` (or a `regions.toml` beside `--world F`) and no `--store`, `--commit` or `--global-res` SHALL open every `ready` region of it over the class-source base in memory (VIEW-052): over each region's tiles its exact base, layer, lakes and rivers; elsewhere the coarse globe.
+A `stale` or `unbaked` region SHALL not open; the log SHALL name it and its state, and each opened region's time.
+The regions' layer tiles SHALL share one cache of `LAYER_CACHE_TILES`; their river and lake caches one commit's budget.
 Regions sharing a tile SHALL be refused. The camera SHALL start over the first.
 The open line SHALL be `cargo run --release -p planet -- editor --world F|--seed N [--items DIR] --regions FILE`.
 

@@ -2563,15 +2563,43 @@ mod tests {
                 2.0 * y / cells - 1.0,
             )
         };
-        for (name, dir, ti) in [("west", &dirs[0], i0), ("east", &dirs[1], i0 + 2)] {
-            let alone = worldfield::WorldTerrain::open_commit_in_memory(def.clone(), dir, 2).expect("opened alone");
-            let f = alone.field().unwrap();
+        // Each region over the joint base is what it is alone, read part by part (cheaper than a second world each): its base B bit for bit as its own lattice, and its layer's change as its
+        // commit read alone; the decoded tiles of both stay in one cache of the budget.
+        let (base, _) = both.bake_base().expect("the regions' base");
+        let stored = std::sync::Arc::new(planet_cache::global_store::GlobalWorld::from_definition(&def).unwrap());
+        let joint = std::sync::Arc::new(
+            multiregion::MultiLayer::new(
+                dirs.iter().map(|d| planet_cache::l_layer::CommitLayer::open(d, stored.clone(), 1).unwrap()).collect(),
+                3,
+            )
+            .unwrap(),
+        );
+        let joint_layer = planet_generators::erosion_layer::ErosionLayer::new(joint.clone()).unwrap();
+        let id = region_inputs_id(&def, seed);
+        for (entry, dir) in [(&a, &dirs[0]), (&b, &dirs[1])] {
+            let lattice = base_lattice(&def, &entry.region_spec(&layout, seed, SEED_WORLD_RADIUS_M, 2, id), 2);
+            let alone = planet_generators::erosion_layer::ErosionLayer::new(std::sync::Arc::new(
+                planet_cache::l_layer::CommitLayer::open(dir, stored.clone(), 4).unwrap(),
+            ))
+            .unwrap();
             for (fx, fy) in [(0.3, 0.4), (1.1, 0.7), (1.7, 1.6), (0.5, 1.2)] {
-                let d = at((f64::from(ti) + fx) * tile, (f64::from(j0) + fy) * tile);
+                let d = at((f64::from(entry.i0) + fx) * tile, (f64::from(j0) + fy) * tile);
                 assert!(all.contains(d));
-                assert_eq!(field.height(d).to_bits(), f.height(d).to_bits(), "{name} at ({fx}, {fy}): its ground as opened alone");
+                let want = f64::from(planet_generators::global::read_elevation_c1(&lattice, &planet_core::cube::TangentWarp, d).unwrap());
+                assert_eq!(base(d).to_bits(), want.to_bits(), "{} at ({fx}, {fy}): B is the region's own", entry.name);
+                assert_eq!(
+                    joint_layer.change_at(d).unwrap().to_bits(),
+                    alone.change_at(d).unwrap().to_bits(),
+                    "{} at ({fx}, {fy}): its commit's change",
+                    entry.name
+                );
+                assert!(field.height(d).is_finite());
             }
         }
+        assert!(joint.cached() <= 3, "one cache of the budget for both regions");
+        // Between the regions' tiles no commit holds the ground: no change.
+        let outside = at((f64::from(i0) + 2.0) * tile, (f64::from(j0) + 2.5) * tile);
+        assert!(!all.contains(outside) && joint_layer.change_at(outside).unwrap() == 0.0);
         // The seam between the two adjacent commits is not judged here: each commit is solved alone, so the shared edge is a known limit (VIEW-079).
         // An item edit makes both stale: they drop out until baked again.
         let items = root.join("world").join("items");
