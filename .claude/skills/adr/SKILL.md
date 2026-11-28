@@ -27,6 +27,7 @@ Rules:
 - Update the status index table in `docs/adr/README.md` (number, title, status, open points) in the same PR.
 - If the decision would change a constitution rule, say so in Context and name the rule ID; do not edit the constitution.
 - Use the terms of `docs/domain.md`; add a new term there first.
+- ADRs state timeless rules only (owner, 2026-11-28). Current or next sprints, queues and deferred items live in `docs/milestones/`, `docs/status.md` and `docs/parking.md`, never in `Decision` or `Consequences`; `Context` may cite past work as an example.
 - Maintenance of accepted ADRs (ADR 0078, CON-23): only links whose target moved, a spec-owned value (keep the value at decision time, add the spec reference), a term renamed in `docs/domain.md` (same concept only; quotes verbatim with the new term in brackets), or an erratum marker `[Erratum <date>: <what is wrong>; see ADR NNNN or <spec ID>]`. Never the decision, context facts or evidence. Each edit adds `Maintained: <date>, <kind>: <what>` at the end; one kind per docs-only PR.
 - Add a fragment `docs/log.d/<YYYY-MM-DD>-adr-NNNN.md` with one line: date, ADR number, title, status.
 
