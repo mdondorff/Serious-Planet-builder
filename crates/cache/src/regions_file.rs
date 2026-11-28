@@ -12,7 +12,9 @@ use planet_world_def::{BodyId, GenContext, WorldDefinition};
 
 use crate::global_store::{class_inputs, class_inputs_key, GlobalWorld};
 use crate::l_writer::Commit;
-use crate::region_bake::{bake_region, lattice_direction, RegionReport, RegionSpec, FACE_EDGE_CELLS, LOCAL_PER_REGIONAL};
+use crate::region_bake::{
+    bake_region_progress, lattice_direction, RegionReport, RegionSpec, RegionStage, FACE_EDGE_CELLS, LOCAL_PER_REGIONAL,
+};
 
 /// The file's `format_version`.
 pub const FORMAT_VERSION: u32 = 1;
@@ -446,6 +448,18 @@ pub fn bake_entry(
     dir: &Path,
     threads: usize,
 ) -> Result<(Commit, RegionReport), String> {
+    bake_entry_progress(def, entry, layout, dir, threads, &mut |_| {})
+}
+
+/// [`bake_entry`], calling `progress` at each step: the base lattice, the front (solve, hydrology, lakes, graph) and around every L tile.
+pub fn bake_entry_progress(
+    def: &WorldDefinition,
+    entry: &RegionEntry,
+    layout: &RegionLayout,
+    dir: &Path,
+    threads: usize,
+    progress: &mut dyn FnMut(BakeStep),
+) -> Result<(Commit, RegionReport), String> {
     entry.check(layout)?;
     let ctx = GenContext::new(def);
     let seed = ctx.body_seed(BodyId::PLANET).map_err(|e| format!("the definition has no body seed: {e}"))?;
@@ -455,6 +469,7 @@ pub fn bake_entry(
     spec.check()?;
     let world = GlobalWorld::from_definition(def).map_err(|e| format!("the world of the definition: {e}"))?;
     let inputs = class_inputs(def, seed, threads);
+    progress(BakeStep::Base);
     let lattice = base_lattice(def, &spec, threads);
     // Every read of the bake lies in the solved window (the solve's cell centres, K7's tile and halo, the land test's cores); a read outside the rectangle is a bug of this function.
     let base = |d: Vec3| -> f64 {
@@ -470,7 +485,107 @@ pub fn bake_entry(
         (ro / 1000.0 / SECONDS_PER_YEAR, (pet_mm(tc) - (pm - ro)).max(0.0) / 1000.0 / SECONDS_PER_YEAR, discharge_weight(ro))
     };
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    bake_region(&world, &spec, &base, &climate, dir)
+    bake_region_progress(&world, &spec, &base, &climate, dir, &mut |stage| {
+        progress(match stage {
+            RegionStage::Front => BakeStep::Front,
+            RegionStage::Tiles { done, total } => BakeStep::Tiles { done, total },
+        })
+    })
+}
+
+/// The least time between two progress lines of `bake-region` (BUILD-078).
+pub const PROGRESS_INTERVAL_S: f64 = 10.0;
+
+/// The steps of a region bake and their share of its time (measured on Rasierklinge, 2026-11-28, a 4x4 box of 104 s: base 16 %, front 10 %, L tiles 74 %; the shares only weight the percent).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BakeStep {
+    Base,
+    Front,
+    Tiles { done: usize, total: usize },
+}
+
+const SHARE_BASE: f64 = 0.16;
+const SHARE_FRONT: f64 = 0.10;
+
+impl BakeStep {
+    /// The fraction of the bake done when the step is reached.
+    pub fn done_fraction(self) -> f64 {
+        match self {
+            BakeStep::Base => 0.0,
+            BakeStep::Front => SHARE_BASE,
+            BakeStep::Tiles { done, total } => {
+                SHARE_BASE + SHARE_FRONT + (1.0 - SHARE_BASE - SHARE_FRONT) * done as f64 / total.max(1) as f64
+            }
+        }
+    }
+
+    fn label(self) -> String {
+        match self {
+            BakeStep::Base => "base lattice".into(),
+            BakeStep::Front => "solve and hydrology".into(),
+            BakeStep::Tiles { done, total } => format!("L tiles {done}/{total}"),
+        }
+    }
+}
+
+/// The progress lines of one region's bake: [`BakeProgress::step`] takes every step with the seconds since the bake started and returns a line at most once every [`PROGRESS_INTERVAL_S`]
+/// (never in the first interval): the region, the step, the percent done and the time left. The time left is the tiles' own rate once a tile is done, else the elapsed time over the done fraction.
+#[derive(Clone, Debug)]
+pub struct BakeProgress {
+    name: String,
+    last_s: f64,
+    step: BakeStep,
+    tiles_from_s: Option<f64>,
+}
+
+impl BakeProgress {
+    pub fn new(name: &str) -> BakeProgress {
+        BakeProgress { name: name.into(), last_s: 0.0, step: BakeStep::Base, tiles_from_s: None }
+    }
+
+    /// Records `step` at `t_s` seconds; `Some(line)` when a line is due.
+    pub fn step(&mut self, t_s: f64, step: BakeStep) -> Option<String> {
+        if let BakeStep::Tiles { done: 0, .. } = step {
+            self.tiles_from_s.get_or_insert(t_s);
+        }
+        self.step = step;
+        self.tick(t_s)
+    }
+
+    /// A line at `t_s` for the last step recorded, when one is due (a caller may also tick between steps).
+    pub fn tick(&mut self, t_s: f64) -> Option<String> {
+        if t_s - self.last_s < PROGRESS_INTERVAL_S {
+            return None;
+        }
+        self.last_s = t_s;
+        let frac = self.step.done_fraction();
+        let left = match (self.step, self.tiles_from_s) {
+            (BakeStep::Tiles { done, total }, Some(t0)) if done > 0 => Some((t_s - t0) / done as f64 * (total - done) as f64),
+            _ if frac > 0.0 => Some(t_s / frac * (1.0 - frac)),
+            _ => None,
+        };
+        let left = left.map_or("time left unknown".to_string(), |s| format!("about {} left", seconds_text(s)));
+        Some(format!("region {}: {}, {:.0} % done, {left} ({} so far)", self.name, self.step.label(), 100.0 * frac, seconds_text(t_s)))
+    }
+}
+
+fn seconds_text(s: f64) -> String {
+    let s = s.max(0.0).round() as u64;
+    if s < 60 {
+        format!("{s} s")
+    } else {
+        format!("{} min {:02} s", s / 60, s % 60)
+    }
+}
+
+/// A path for a printed command line: quoted when it holds a space.
+pub fn shell_path(p: &Path) -> String {
+    let t = p.display().to_string();
+    if t.contains(' ') {
+        format!("\"{t}\"")
+    } else {
+        t
+    }
 }
 
 /// The radius of a `--seed` world: the viewer's single planet (`skeleton::RADIUS_M`, Earth's), so `--commit` with the same `--seed` opens over the same definition.
@@ -539,14 +654,26 @@ impl BakeArgs {
         world_with_items(def, self.items.as_deref())
     }
 
-    /// The command that opens a region's commit in the editor (VIEW-069).
-    pub fn open_command(&self, commit: &Path) -> String {
+    /// The command that opens one commit: the world, `--items` when given and `--commit DIR` (VIEW-069), paths with a space quoted. The editor's per-box Open uses it until E2 moves to
+    /// [`BakeArgs::open_command`] (D2).
+    pub fn open_commit_command(&self, commit: &Path) -> String {
         let world = match (&self.world, self.seed) {
-            (Some(p), _) => format!("--world {}", p.display()),
+            (Some(p), _) => format!("--world {}", shell_path(p)),
             (_, s) => format!("--seed {}", s.unwrap_or(0)),
         };
-        let items = self.items.as_ref().map_or(String::new(), |d| format!(" --items {}", d.display()));
-        format!("cargo run --release -p planet -- editor {world}{items} --commit {}", commit.display())
+        let items = self.items.as_ref().map_or(String::new(), |d| format!(" --items {}", shell_path(d)));
+        format!("cargo run --release -p planet -- editor {world}{items} --commit {}", shell_path(commit))
+    }
+
+    /// The one command that reopens the world with every ready region of the file (VIEW-077, the owner's D2 of 2026-11-28): the world, `--items` when given and `--regions FILE`, no
+    /// `--commit`; paths with a space are quoted. Printed once after the last region (the form agreed with E2).
+    pub fn open_command(&self) -> String {
+        let world = match (&self.world, self.seed) {
+            (Some(p), _) => format!("--world {}", shell_path(p)),
+            (_, s) => format!("--seed {}", s.unwrap_or(0)),
+        };
+        let items = self.items.as_ref().map_or(String::new(), |d| format!(" --items {}", shell_path(d)));
+        format!("cargo run --release -p planet -- editor {world}{items} --regions {}", shell_path(&self.regions))
     }
 }
 
