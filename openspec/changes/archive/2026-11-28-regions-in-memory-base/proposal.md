@@ -10,6 +10,7 @@ The owner's E3 smoke and an external review (S-Region-Authoring, 2026-11-28):
 - `--regions`, or a regions file beside `--world`, starts the editor mode on.
 - Open on a ready box copies its command to the clipboard.
 - The window title no longer shows the region status; the start line of the log keeps it.
+- `--commit`'s coarse globe outside its exact rectangle is the class source's 1,024-cell bake (review F4; lead, 2026-11-28): the step at the rectangle's edge drops from p95 1,278 m to about 316 m (seed 14, grt-4x4), for about 12 s more at the start; the rest is a known limit.
 
 ## Impact
 - Specs: VIEW-022, VIEW-052, VIEW-069, VIEW-077 modified.

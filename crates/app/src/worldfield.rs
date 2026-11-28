@@ -858,7 +858,7 @@ impl WorldTerrain {
         Ok(self)
     }
 
-    /// TEST-ONLY (the G-RT fixture, architect 2026-11-12): the terrain of a commit baked by `bake_region` over an in-memory base that needs no store. The base is the 1,024-cell in-memory bake everywhere (ocean, water, far
+    /// TEST-ONLY (the G-RT fixture, architect 2026-11-12): the terrain of a commit baked by `bake_region` over an in-memory base that needs no store. The base is the class source's 1,024-cell in-memory bake everywhere (ocean, water, far
     /// ground) with the exact 16384-node lattice (`BakeInputs::base`) over the rectangle of the commit's tiles (their halo and one tile of margin), sampled here once, before any frame; the commit is opened under a
     /// `GlobalWorld` of the definition (no store). Reached only by the `river-flight` perf scene; no viewer flag opens it. The seam between the exact rectangle and the coarse ground, and the edge of the commit's tiles, lie
     /// one tile (the margin) from the commit's tiles: a flight stays at least one LOD range inside them. [`WorldTerrain::fixture_note`] says what the base is.
@@ -896,7 +896,9 @@ impl WorldTerrain {
         let (face, rect) = fixture_rectangle(&spec, commit.tiles.keys().copied())?;
         let region = CommitRegion::new(spec.cells, spec.tile, commit.tiles.keys().copied());
         let res = spec.res;
-        let mut world = WorldTerrain::open(def.clone(), MAX_RUN_BAKE_RES)?;
+        // The coarse globe outside the exact rectangle is the class source's bake, the base the region bake reads (VIEW-069): the legacy generator's stepped by
+        // p95 1.3 km at the rectangle's edge (seed 14, grt-4x4), the class source's by p95 316 m (its 1,024 cells against the 16,384-node lattice).
+        let mut world = WorldTerrain::open_class(def.clone(), MAX_RUN_BAKE_RES)?;
         let coarse: Arc<dyn LatticeSource + Send> = Arc::from(std::mem::replace(&mut world.src, Box::new(NoBake)));
         // The water field reads the coarse lattice (its ocean channel and floors are of the in-memory bake); the height field reads the exact lattice over the commit.
         world.water_src = Some(coarse.clone());
@@ -912,7 +914,7 @@ impl WorldTerrain {
         world.commit_base = Some((res, face, rect));
         world.commit_region = Some(region);
         world.fixture_note = format!(
-            "base: computed in memory, not read from a stored bake (the production base on the exact {res}-node lattice over the commit's tiles and one tile of margin, the {MAX_RUN_BAKE_RES}-cell in-memory bake elsewhere; {:.1} s on {threads} threads)",
+            "base: computed in memory, not read from a stored bake (the production base on the exact {res}-node lattice over the commit's tiles and one tile of margin, the class source's {MAX_RUN_BAKE_RES}-cell in-memory bake elsewhere; {:.1} s on {threads} threads)",
             started.elapsed().as_secs_f64()
         );
         Ok(world)
@@ -1450,6 +1452,40 @@ impl StoreCheck {
 #[cfg(test)]
 mod default_store_tests {
     use super::*;
+
+    // spec: VIEW-052
+    // spec: VIEW-069
+    #[test]
+    fn the_in_memory_class_globe_is_the_class_source_bake_region_reads_at_every_node() {
+        let def = WorldDefinition::single_planet(crate::skeleton::RADIUS_M, 14);
+        let world = GlobalWorld::from_definition(&def).unwrap();
+        let seed = world.seed();
+        let res = 16;
+        // The layout is the legacy bake's: over the legacy sampler the grid is `global::bake`'s, bit for bit.
+        let want = planet_generators::global::bake(seed, &TangentWarp, res, 1).unwrap();
+        assert!(class_grid(&world, res, 3).unwrap().faces == want.faces, "class_grid lays the samples out as global::bake");
+        // Over the class source: the same grid on 1 and 4 threads (CON-14), and at every node the elevation is B's base, the base `bake-region` reads, to its f32 rounding.
+        let inputs = planet_cache::global_store::class_inputs(&def, seed, 4);
+        let class = world.with_class_source(inputs.clone());
+        let one = class_grid(&class, res, 1).unwrap();
+        assert!(one.faces == class_grid(&class, res, 4).unwrap().faces, "the thread count changes nothing");
+        let coord = |i: u32| f64::from(2 * i) / f64::from(res) - 1.0;
+        let mut differs = 0;
+        for f in 0..6u8 {
+            for l in 0..=res {
+                for k in 0..=res {
+                    let d = planet_core::cube::face_to_direction(&TangentWarp, Face(f), coord(k), coord(l));
+                    let (got, base) = (one.at(Face(f), k, l).elevation_m, inputs.base(d));
+                    assert_eq!(got, base as f32, "face {f} node ({k}, {l}): the coarse globe is B's base");
+                    differs += usize::from(f64::from(got) != f64::from(want.at(Face(f), k, l).elevation_m));
+                }
+            }
+        }
+        assert!(differs > 0, "the class source is another terrain than the legacy generator");
+        // The worlds say which source they bake.
+        assert_eq!(WorldTerrain::open_class(def.clone(), res).unwrap().field_source_name(), "class source");
+        assert_eq!(WorldTerrain::open(def, res).unwrap().field_source_name(), "legacy source");
+    }
 
     // spec: VIEW-052
     #[test]

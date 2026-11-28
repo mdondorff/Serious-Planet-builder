@@ -48,6 +48,10 @@ Verify: A, C
 Status: active
 Source: owner (M6 step U3, 2026-10-19), VIEW-003, VIEW-010, VIEW-011, VIEW-017, VIEW-019, AUTH-001
 
+#### Scenario: Region boxes start the mode
+- **WHEN** the editor starts with `--regions F`, or with `--world W` and a `regions.toml` beside it, outside a smoke run
+- **THEN** the mode is on at the first frame: the Sites tab and the boxes show without Tab
+
 #### Scenario: The mode on and off
 - **WHEN** keys and presses come while the mode is off, the mode is turned on, a stamp is placed, its move handle is held and dragged, and the mode is turned off
 - **THEN** nothing is placed, counted or drawn while it is off, and turning it off abandons the drag and goes back, recording only the placement
@@ -93,11 +97,11 @@ Source: owner (M6 step U3, 2026-10-19), VIEW-003, VIEW-010, VIEW-011, VIEW-017, 
 - **THEN** the scripted flight starts high above the site and descends over it with the mode off, the mode turns on where the last camera is reached (or at a Tab before then), and the free camera takes over there
 
 ### Requirement: VIEW-052 The editor opens the production store
-Without `--store`, `--commit`, `--regions`, `--world` or `--global-res`, outside a smoke run, the editor SHALL open the first existing directory of: `PLANET_STORE`, the pointer file `target/stores/default`'s, `target/stores/global16384`, `target/accept/global16384` (under the repo root); with none, the in-memory preview bake.
-Outside a smoke run, `--regions` or `--world` SHALL compute the class-source base in memory (1,024 cells, else `--global-res N`).
+Without `--store`, `--commit`, `--regions`, `--world` or `--global-res`, outside a smoke run, the editor SHALL open the first existing directory of: `PLANET_STORE`, the pointer file `target/stores/default`'s, `target/stores/global16384`, `target/accept/global16384`; with none, the in-memory preview bake.
+Outside a smoke run, `--regions` or `--world` without `--store` or `--commit` SHALL compute the class-source base in memory (1,024 cells, else `--global-res N`).
 An unreadable default store SHALL be refused naming `--commit DIR`, `--global-res N` and `cargo xtask store`.
 The title SHALL name the source: `store <dir>` or `preview bake <N> cells`.
-`cargo xtask store [--res N] [--relief-scale S] [--link DIR]` SHALL build a store of N cells a face edge (default 16384) into `target/stores/global<N>` and write the pointer file; `--link` only points to an existing store.
+`cargo xtask store [--res N] [--relief-scale S] [--link DIR]` SHALL build a store of N (16384) cells a face edge into `target/stores/global<N>` and write the pointer file; `--link` only points to an existing store.
 
 Verify: A
 Status: active
@@ -108,7 +112,7 @@ Source: owner (2026-10-22, via opus-planner): the editor showed a flat world bec
 - **THEN** the choice is none, the accept store, the stores store, the pointer's, the variable's, and a variable naming no directory falls through
 
 ### Requirement: VIEW-069 The viewer and capture-stills open a commit over the in-memory production base
-With `--commit DIR` the viewer and `capture-stills` SHALL open the commit over the production base computed in memory for the definition: exact base values over its tiles and one tile of margin, the in-memory bake elsewhere. The commit SHALL pass the normal key check. `--store`, `--erosion`, `--erosion-store`, `--global-res`, `--allow-memory-bake` and the source flags SHALL be refused beside it. The log, the title and every still SHALL say "base: computed in memory, not read from a stored bake". The viewer SHALL start held still 25 km over the ground, 20 km south of `--site` or the centre of the commit's tiles, looking north 50 degrees down; the log SHALL say "inside the region" or "outside the region: coarse base".
+With `--commit DIR` the viewer and `capture-stills` SHALL open the commit over the production base computed in memory for the definition: exact base values over its tiles and one tile of margin, the class-source 1,024-cell bake elsewhere. The commit SHALL pass the normal key check. `--store`, `--erosion`, `--erosion-store`, `--global-res`, `--allow-memory-bake` and the source flags SHALL be refused beside it. The log, the title and every still SHALL say "base: computed in memory, not read from a stored bake". The viewer SHALL start held still 25 km over the ground, 20 km south of `--site` or the centre of the commit's tiles, looking north 50 degrees down; the log SHALL say "inside the region" or "outside the region: coarse base".
 
 Verify: A
 Status: active
