@@ -85,7 +85,7 @@ pub fn next_id(root: &Path, raw_prefix: &str, lanes_dir: Option<&Path>, extra_te
                 files.push(status);
             }
             // The active sprint file (ADR 0130), which may name a reserved ADR before it exists.
-            if let Some(name) = crate::prbody::active_sprint(&root) {
+            if let Some(name) = crate::prbody::active_sprint(root) {
                 let p = root.join("docs/milestones").join(format!("{name}.md"));
                 if p.is_file() {
                     files.push(p);
