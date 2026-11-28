@@ -3,6 +3,7 @@
 //! cursor and the events, and draws what comes back. Nothing here names a window or a GPU type, so the flows are tested without either.
 
 use crate::panels::{BookmarkRow, Event, PanelData, PanelState, ReproRow, SitesView};
+use crate::regionedit::{Placing, RegionEditor, RegionLine, RegionsView, WorldArgs};
 use planet_core::{PlanetFixed, TileId, Vec3};
 use planet_editor::bookmarks::{parse_jump_target, Bookmark, BookmarkShelf, CameraReadout, MIN_ALTITUDE_M};
 use planet_editor::commands::{Affected, Editor};
@@ -20,7 +21,7 @@ use planet_editor::ruler::{self, CursorReadout, RulerOverlay, RulerState, Transe
 use planet_editor::session::{Session, SessionError, Tool, LINE_KINDS};
 use planet_editor::shape::{self, Handle};
 use planet_frame::freecam::FreePose;
-use planet_frame::globe::{Marker, Viewport};
+use planet_frame::globe::{faces_camera, project, Marker, Viewport};
 use planet_frame::pick::{cursor_ray, pick_surface, PickLimits, SurfaceHit};
 use planet_frame::preview::{brush_chain, preview_delta_on, PreviewStamp};
 use planet_frame::Camera;
@@ -214,6 +215,11 @@ pub struct EditRuntime {
     capture_repro: bool,
     /// Off-thread or on-spot live cursor terrain readout (VIEW-076).
     cursor_readout: Option<CursorReadout>,
+    /// The region boxes of the regions file (VIEW-077), their lines this frame, the panel's view, and the last open command asked for.
+    regions: RegionEditor,
+    region_lines: Vec<RegionLine>,
+    regions_view: RegionsView,
+    region_open: Option<String>,
     /// Interactive two-point surface ruler state (VIEW-076).
     ruler: RulerState,
     /// Cached transect profile keyed by `(item_revision, start, end)`.
@@ -358,6 +364,10 @@ impl EditRuntime {
             pending_jump: None,
             capture_repro: false,
             cursor_readout: None,
+            regions: RegionEditor::open(None, WorldArgs::default())?,
+            region_lines: Vec::new(),
+            regions_view: RegionsView::default(),
+            region_open: None,
             ruler: RulerState::Idle,
             ruler_profile: None,
             ruler_rubber_profile: None,
@@ -440,6 +450,22 @@ impl EditRuntime {
         self.bookmarks_file = path;
         self.rebuild_sites_view();
         Ok(())
+    }
+
+    /// Opens the regions file the Sites tab edits (VIEW-077): `None`, no file (the panel says how to name one).
+    pub fn set_regions(&mut self, path: Option<PathBuf>, world: WorldArgs) -> Result<(), String> {
+        self.regions = RegionEditor::open(path, world)?;
+        self.region_open = None;
+        Ok(())
+    }
+
+    pub fn regions(&self) -> &RegionEditor {
+        &self.regions
+    }
+
+    /// The region lines of the last frame (VIEW-077).
+    pub fn region_lines(&self) -> &[RegionLine] {
+        &self.region_lines
     }
 
     /// Sets the directory scanned by the F9 repro shelf without scanning immediately (VIEW-075).
@@ -629,6 +655,7 @@ impl EditRuntime {
         crate::panels::draw_draft(ui, &self.draft, to_points);
         crate::panels::draw_brush(ui, &self.brush, to_points);
         crate::panels::draw_ruler(ui, &self.ruler_overlay, to_points);
+        crate::panels::draw_regions(ui, &self.region_lines, to_points);
         // The panels read the lists and write their own state: take the state out for the call.
         let mut panels = std::mem::replace(&mut self.panels, PanelState::new(&self.layout));
         let events = crate::panels::show(ui, &mut panels, &self.panel_data(view_status));
@@ -855,6 +882,15 @@ impl EditRuntime {
         };
         self.cursor_readout = readout;
         self.brush = overlay::brush(&self.session, &view, &|d| field.height(d), hit.map(|h| h.dir));
+        // The region boxes on the ground, the placement box under the cursor and the margin of its face (VIEW-077).
+        let see = |d: Vec3| -> Option<[f64; 2]> {
+            faces_camera(view.camera.position.0, d, view.radius_m)
+                .then(|| project(&view.camera, d * (view.radius_m + ground(d)), view.viewport))
+                .flatten()
+        };
+        let region_id = self.regions.inputs_for(self.session.editor().definition());
+        self.region_lines = self.regions.lines(region_id, if over_ui { None } else { hit.map(|h| h.dir) }, &see);
+        self.regions_view = self.regions.view(region_id, self.region_open.clone());
         if !over_ui {
             let mpp = self.height_mpp(camera, viewport);
             let v = PointerView { cursor, hit, shown: &self.shown, handles: &self.handles, metres_per_pixel: mpp };
@@ -944,6 +980,7 @@ impl EditRuntime {
             keys: &self.keys,
             store: Some(s.editor().store_watch()),
             sites: &self.sites_view,
+            regions: &self.regions_view,
             cursor: self.cursor_readout,
             ruler: self.ruler_profile.as_ref().map(|(_, _, _, p)| p).or(self.ruler_rubber_profile.as_ref()),
             ruler_rubber: self.ruler_rubber_profile.is_some(),
@@ -1026,6 +1063,20 @@ impl EditRuntime {
             return;
         }
         let hit = Self::hit_at(camera, viewport, cursor, limits, field);
+        // Placing a region box (VIEW-077): the press puts it at the ground under the cursor, and does nothing else.
+        if self.regions.placing.is_some() && !mods.shift && !mods.ctrl {
+            match hit {
+                Some(h) => match self.regions.press(h.dir) {
+                    Ok(name) => self.session.set_status(format!("region '{name}' saved")),
+                    Err(why) => {
+                        self.stats.refused += 1;
+                        self.session.set_status(why);
+                    }
+                },
+                None => self.session.set_status("that is not a place on the planet"),
+            }
+            return;
+        }
         if mods.shift != mods.ctrl {
             if mods.shift {
                 match (hit, self.session.selected()) {
@@ -1158,6 +1209,9 @@ impl EditRuntime {
             EditKey::Escape => {
                 if self.session.dragging().is_some() || self.session.stroke_in_progress().is_some() {
                     self.cancel_drag();
+                } else if self.regions.placing.is_some() {
+                    self.regions.placing = None;
+                    self.session.set_status("placing the region box cancelled");
                 } else if !self.session.draft().is_empty() {
                     self.session.cancel_draft();
                 } else if !self.ruler.is_idle() {
@@ -1316,6 +1370,43 @@ impl EditRuntime {
                         self.rebuild_sites_view();
                     }
                 }
+                Event::PlaceRegion { name } => {
+                    self.regions.placing = Some(Placing::New(name));
+                    self.session.set_status("click the ground to place the box (Esc cancels)");
+                }
+                Event::RegionSize { width, height } => {
+                    let side = |x: u32| x.clamp(planet_cache::regions_file::MIN_TILES, planet_cache::regions_file::MAX_TILES);
+                    self.regions.size = (side(width), side(height));
+                }
+                Event::MoveRegion(name) => {
+                    self.regions.selected = Some(name.clone());
+                    self.regions.placing = Some(Placing::Move(name));
+                    self.session.set_status("click the ground to move the box (Esc cancels)");
+                }
+                Event::SelectRegion(name) => self.regions.selected = Some(name),
+                Event::ResizeRegion { name, width, height } => match self.regions.resize(&name, width, height) {
+                    Ok(()) => self.session.set_status(format!("region '{name}' is {width} x {height} L tiles")),
+                    Err(why) => {
+                        self.stats.refused += 1;
+                        self.session.set_status(why);
+                    }
+                },
+                Event::DeleteRegion(name) => match self.regions.delete(&name) {
+                    Ok(()) => self.session.set_status(format!("region '{name}' deleted")),
+                    Err(why) => {
+                        self.stats.refused += 1;
+                        self.session.set_status(why);
+                    }
+                },
+                Event::OpenRegion(name) => match self.regions.open_command(&name) {
+                    // The world is built once at the start: a ready box reopens by its command (the sprint's park path, VIEW-069).
+                    Ok(cmd) => {
+                        println!("open region '{name}': {cmd}");
+                        self.session.set_status(format!("to open '{name}', run (copied): {cmd}"));
+                        self.region_open = Some(cmd);
+                    }
+                    Err(why) => self.session.set_status(why),
+                },
                 Event::JumpCoords(text) => match parse_jump_target(&text) {
                     Ok(t) => {
                         self.pending_jump = Some(PendingJump::Geo {
@@ -2746,6 +2837,92 @@ mod tests {
         assert!(e.take_capture_repro());
         assert!(!e.take_capture_repro());
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: VIEW-077
+    // spec: TEST-166
+    #[test]
+    fn a_region_box_is_placed_by_a_press_drawn_on_the_ground_and_edited_by_the_panels_events() {
+        use crate::regionedit::{tile_of, LineKind};
+        use planet_cache::regions_file::{check_box, RegionLayout, RegionState, RegionsFile};
+        let dir = temp_dir("regions");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("regions.toml");
+        let mut e = runtime(None);
+        let hash = e.session.editor().definition().hash();
+        e.set_regions(Some(path.clone()), WorldArgs { seed: 7, ..WorldArgs::default() }).unwrap();
+        e.toggle();
+        // 2,000 km up: a box of 78 km tiles is on the screen whole.
+        let cam = above(unit(0.0, 0.0), 2_000_000.0);
+        frame(&mut e, &cam, false);
+        assert!(e.region_lines().is_empty(), "no box, not placing");
+
+        // The side of a new box stops at 4; placing draws the box under the cursor and the margin of its face.
+        e.apply(vec![Event::RegionSize { width: 3, height: 9 }]);
+        assert_eq!(e.regions().size, (3, 4));
+        e.apply(vec![Event::PlaceRegion { name: "centre".into() }]);
+        frame(&mut e, &cam, false);
+        let kinds: Vec<LineKind> = e.region_lines().iter().map(|l| l.kind).collect();
+        assert_eq!(kinds, vec![LineKind::Margin, LineKind::Preview { ok: true }]);
+        assert!(e.region_lines()[1].points.iter().all(Option::is_some), "the placement box is on the screen");
+        assert!(e.panel_data("").regions.placing.is_some());
+
+        // A press puts it at the ground under the cursor, inside the rule, in the file; the world is unchanged.
+        let hit = EditRuntime::hit_at(&cam, VIEWPORT, CENTRE, &limits(), &Flat).unwrap();
+        e.press(&cam, VIEWPORT, CENTRE, &limits(), &Flat);
+        assert!(e.regions().placing.is_none());
+        assert!(e.session.status().contains("saved"), "{}", e.session.status());
+        let file = RegionsFile::read(&path).unwrap();
+        assert_eq!(file.regions.len(), 1);
+        let b = &file.regions[0];
+        let (face, ci, cj) = tile_of(&RegionLayout::PRODUCTION, hit.dir);
+        assert_eq!(b.face, face);
+        assert!((b.i0..=b.i1).contains(&ci) && (b.j0..=b.j1).contains(&cj), "{b:?} holds the tile ({ci}, {cj})");
+        assert_eq!((b.i1 - b.i0 + 1, b.j1 - b.j0 + 1), (3, 4));
+        check_box(&RegionLayout::PRODUCTION, b.face, b.tiles_per_edge, b.i0, b.j0, b.i1, b.j1).unwrap();
+        assert_eq!(e.session.editor().definition().hash(), hash, "the boxes live outside the definition");
+
+        // Drawn on the ground, selected, unbaked; the panel lists it.
+        frame(&mut e, &cam, false);
+        let kinds: Vec<LineKind> = e.region_lines().iter().map(|l| l.kind).collect();
+        assert_eq!(kinds, vec![LineKind::Box { state: RegionState::Unbaked, selected: true }, LineKind::Margin]);
+        let row = e.panel_data("").regions.rows[0].clone();
+        assert_eq!((row.name.as_str(), row.state, row.width, row.height), ("centre", RegionState::Unbaked, 3, 4));
+
+        // Resized past 4: refused with the reason and the file unchanged; to 4 x 2 it is saved.
+        let refused = e.stats.refused;
+        e.apply(vec![Event::ResizeRegion { name: "centre".into(), width: 5, height: 2 }]);
+        assert!(e.session.status().contains("2 to 4") && e.stats.refused == refused + 1, "{}", e.session.status());
+        assert_eq!(RegionsFile::read(&path).unwrap(), file);
+        e.apply(vec![Event::ResizeRegion { name: "centre".into(), width: 4, height: 2 }]);
+        let b2 = RegionsFile::read(&path).unwrap().regions[0].clone();
+        assert_eq!((b2.i0, b2.j0, b2.i1 - b2.i0 + 1, b2.j1 - b2.j0 + 1), (b.i0, b.j0, 4, 2));
+
+        // Moved by a press elsewhere; Esc cancels a placement; a taken name is refused.
+        e.apply(vec![Event::MoveRegion("centre".into())]);
+        let far = [900.0, 500.0];
+        let to = tile_of(&RegionLayout::PRODUCTION, EditRuntime::hit_at(&cam, VIEWPORT, far, &limits(), &Flat).unwrap().dir);
+        e.press(&cam, VIEWPORT, far, &limits(), &Flat);
+        let b3 = RegionsFile::read(&path).unwrap().regions[0].clone();
+        assert!((b3.i0..=b3.i1).contains(&to.1) && (b3.j0..=b3.j1).contains(&to.2) && b3 != b2, "{b3:?} moved to {to:?}");
+        e.apply(vec![Event::PlaceRegion { name: String::new() }]);
+        e.key(EditKey::Escape);
+        assert!(e.regions().placing.is_none());
+        e.apply(vec![Event::PlaceRegion { name: "centre".into() }]);
+        e.press(&cam, VIEWPORT, CENTRE, &limits(), &Flat);
+        assert!(e.session.status().contains("already"), "{}", e.session.status());
+        assert_eq!(RegionsFile::read(&path).unwrap().regions.len(), 1);
+        e.key(EditKey::Escape);
+
+        // Open names the box's commit folder; Delete empties the file.
+        e.apply(vec![Event::OpenRegion("centre".into())]);
+        frame(&mut e, &cam, false);
+        let cmd = e.panel_data("").regions.open_command.clone().unwrap();
+        assert!(cmd.contains("editor --seed 7") && cmd.contains("--commit") && cmd.contains("centre"), "{cmd}");
+        e.apply(vec![Event::DeleteRegion("centre".into())]);
+        assert!(RegionsFile::read(&path).unwrap().regions.is_empty());
+        assert_eq!(e.session.editor().definition().hash(), hash);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

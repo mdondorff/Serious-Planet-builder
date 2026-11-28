@@ -233,6 +233,9 @@ struct Config {
     items: Option<PathBuf>,
     /// Where site bookmarks live outside `WorldDefinition` (`--bookmarks`, VIEW-073, VIEW-075).
     bookmarks: Option<PathBuf>,
+    /// The regions file the Sites tab edits (`--regions`, else beside `--world`; none under `--smoke`; VIEW-077), and the world's options for the open command.
+    regions: Option<PathBuf>,
+    world_args: crate::regionedit::WorldArgs,
     /// The panel layout (`--editor-layout`, VIEW-018).
     layout: Layout,
     /// `--preview-l1`: the cells a face edge of the level-1 preview's grid (VIEW-068).
@@ -624,6 +627,7 @@ impl App<'_> {
             // The brush guard limits the stack of strokes by what these parameters can draw (VIEW-043).
             e.session.set_drawable_slope(cfg.lod.drawable_slope());
             e.set_bookmarks_file(cfg.bookmarks.clone())?;
+            e.set_regions(cfg.regions.clone(), cfg.world_args.clone())?;
             e.set_repros_dir(repro_dir());
             if !cfg.smoke || std::env::var_os("PLANET_REPRO_DIR").is_some() {
                 e.refresh_repros();
@@ -2224,6 +2228,8 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
             o.items.as_ref(),
             o.smoke,
         ),
+        regions: if o.smoke { None } else { crate::regionedit::resolve_path(o.regions.as_ref(), o.world.as_ref()) },
+        world_args: crate::regionedit::WorldArgs { world: o.world.clone(), seed: o.seed, items: o.items.clone() },
         layout: match &o.editor_layout {
             Some(p) => Layout::from_toml(&std::fs::read_to_string(p).map_err(|e| format!("--editor-layout {}: {e}", p.display()))?)
                 .map_err(|e| format!("--editor-layout {}: {e}", p.display()))?,

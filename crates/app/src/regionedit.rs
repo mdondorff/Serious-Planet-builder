@@ -9,8 +9,10 @@ use planet_core::{Face, TangentWarp, Vec3};
 use planet_world_def::{BodyId, GenContext, WorldDefinition};
 use std::path::{Path, PathBuf};
 
-/// Points a tile along a drawn edge (the edges are curves on the sphere).
+/// Points a tile along a drawn edge of a box (the edges are curves on the sphere).
 pub const SAMPLES_PER_TILE: usize = 4;
+/// Points a tile along the face-edge margin (about 120 tiles a side: one each keeps its ground reads few).
+pub const MARGIN_SAMPLES_PER_TILE: usize = 1;
 
 /// What a press on the ground does while placing.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -56,6 +58,38 @@ pub struct RegionEditor {
     inputs: Option<(u64, u64)>,
 }
 
+/// What a drawn line of the regions is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LineKind {
+    /// A box of the file, by its state; the selected one drawn wider.
+    Box { state: RegionState, selected: bool },
+    /// The box a press would put, `ok` when the rule accepts it.
+    Preview { ok: bool },
+    /// The face-edge margin: the boundary of the tiles a box may cover.
+    Margin,
+}
+
+/// A closed line on the screen: a point is `None` where it is behind the planet or off the screen.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RegionLine {
+    pub kind: LineKind,
+    pub points: Vec<Option<[f64; 2]>>,
+}
+
+/// What the Sites tab's Regions section shows.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RegionsView {
+    pub rows: Vec<RegionRow>,
+    pub where_label: String,
+    pub has_file: bool,
+    /// What a press on the ground does now, for the panel.
+    pub placing: Option<String>,
+    /// The side of a new box.
+    pub size: (u32, u32),
+    /// The last open command asked for.
+    pub open_command: Option<String>,
+}
+
 /// The L tile of `layout` under a direction: `(face, i, j)`, `i` along the face's first coordinate (the axis of the bake's lattice).
 pub fn tile_of(layout: &RegionLayout, dir: Vec3) -> (u8, u32, u32) {
     let (face, s, t) = direction_to_face(&TangentWarp, dir);
@@ -93,9 +127,9 @@ fn edge(k: u32, n: u32) -> f64 {
 }
 
 /// The closed outline of the tile rectangle `i0..=i1 x j0..=j1` of `face`, `SAMPLES_PER_TILE` points a tile, counter-clockwise in `(s, t)`.
-pub fn rectangle(face: u8, n: u32, (i0, j0, i1, j1): (u32, u32, u32, u32)) -> Vec<Vec3> {
+pub fn rectangle(face: u8, n: u32, (i0, j0, i1, j1): (u32, u32, u32, u32), samples: usize) -> Vec<Vec3> {
     let (s0, s1, t0, t1) = (edge(i0, n), edge(i1 + 1, n), edge(j0, n), edge(j1 + 1, n));
-    let per = |a: u32, b: u32| ((b + 1 - a) as usize) * SAMPLES_PER_TILE;
+    let per = |a: u32, b: u32| ((b + 1 - a) as usize) * samples.max(1);
     let (ns, nt) = (per(i0, i1), per(j0, j1));
     let lerp = |a: f64, b: f64, k: usize, m: usize| a + (b - a) * k as f64 / m as f64;
     let at = |s: f64, t: f64| face_to_direction(&TangentWarp, Face(face), s, t);
@@ -109,13 +143,13 @@ pub fn rectangle(face: u8, n: u32, (i0, j0, i1, j1): (u32, u32, u32, u32)) -> Ve
 
 /// The outline of a box.
 pub fn outline(e: &RegionEntry) -> Vec<Vec3> {
-    rectangle(e.face, e.tiles_per_edge, (e.i0, e.j0, e.i1, e.j1))
+    rectangle(e.face, e.tiles_per_edge, (e.i0, e.j0, e.i1, e.j1), SAMPLES_PER_TILE)
 }
 
 /// The face-edge margin of `face`: the boundary of the tiles a box may cover.
 pub fn margin(layout: &RegionLayout, face: u8) -> Vec<Vec3> {
     let (lo, hi) = layout.allowed_tiles();
-    rectangle(face, layout.tiles_per_edge(), (lo, lo, hi, hi))
+    rectangle(face, layout.tiles_per_edge(), (lo, lo, hi, hi), MARGIN_SAMPLES_PER_TILE)
 }
 
 /// The inputs id of a definition for its region commits, with the body seed it names (as `bake-region` derives it).
@@ -307,6 +341,46 @@ impl RegionEditor {
             .collect()
     }
 
+    /// The lines the window draws: every box, the placement box under `cursor`, and the margin of the face being edited (the placement's, else the
+    /// selected box's). `see` puts a direction on the ground and on the screen.
+    pub fn lines(&self, id: Option<u64>, cursor: Option<Vec3>, see: &dyn Fn(Vec3) -> Option<[f64; 2]>) -> Vec<RegionLine> {
+        let on_screen = |dirs: Vec<Vec3>| dirs.into_iter().map(see).collect::<Vec<_>>();
+        let mut out = Vec::new();
+        for e in &self.file.regions {
+            let state = id.map_or(RegionState::Unbaked, |id| self.state(e, id));
+            let selected = self.selected.as_deref() == Some(e.name.as_str());
+            out.push(RegionLine { kind: LineKind::Box { state, selected }, points: on_screen(outline(e)) });
+        }
+        let preview = cursor.and_then(|d| self.preview(d));
+        let face = preview.as_ref().map(|p| p.face).or_else(|| {
+            let name = self.selected.as_deref()?;
+            Some(self.file.regions[self.index(name)?].face)
+        });
+        if let Some(face) = face {
+            out.push(RegionLine { kind: LineKind::Margin, points: on_screen(margin(&self.layout, face)) });
+        }
+        if let Some(p) = preview {
+            out.push(RegionLine { kind: LineKind::Preview { ok: self.preview_ok(&p).is_ok() }, points: on_screen(outline(&p)) });
+        }
+        out
+    }
+
+    /// The panel's view of the boxes.
+    pub fn view(&self, id: Option<u64>, open_command: Option<String>) -> RegionsView {
+        RegionsView {
+            rows: id.map(|id| self.rows(id)).unwrap_or_else(|| self.rows(0)),
+            where_label: self.where_label(),
+            has_file: self.path.is_some(),
+            placing: self.placing.as_ref().map(|p| match p {
+                Placing::New(n) if n.trim().is_empty() => "click the ground to place a new box".to_string(),
+                Placing::New(n) => format!("click the ground to place '{}'", n.trim()),
+                Placing::Move(n) => format!("click the ground to move '{n}'"),
+            }),
+            size: self.size,
+            open_command,
+        }
+    }
+
     /// The command that opens the named box's commit in the editor (VIEW-069), the regions file named so the boxes come along.
     pub fn open_command(&self, name: &str) -> Result<String, String> {
         let path = self.path.as_ref().ok_or("no regions file")?;
@@ -376,8 +450,8 @@ mod tests {
         // Inside the band a box holds the cursor's tile.
         let e = snapped(&l, 2, 60, 61, 3, 4);
         assert!((e.i0..=e.i1).contains(&60) && (e.j0..=e.j1).contains(&61), "{e:?}");
-        assert_eq!(rectangle(2, n, (60, 60, 61, 61)).len(), 4 * 2 * SAMPLES_PER_TILE);
-        assert_eq!(margin(&l, 0).len(), 4 * ((hi + 1 - lo) as usize) * SAMPLES_PER_TILE);
+        assert_eq!(outline(&snapped(&l, 2, 60, 60, 2, 2)).len(), 4 * 2 * SAMPLES_PER_TILE);
+        assert_eq!(margin(&l, 0).len(), 4 * ((hi + 1 - lo) as usize) * MARGIN_SAMPLES_PER_TILE);
     }
 
     // spec: VIEW-077
@@ -543,6 +617,47 @@ mod tests {
         assert!(cmd.contains("editor --seed 14") && cmd.contains(&format!("--commit {}", commit_dir(&path, "land").display())), "{cmd}");
         assert!(cmd.ends_with(&format!("--regions {}", path.display())), "{cmd}");
         assert!(r.open_command("none").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: VIEW-077
+    // spec: TEST-166
+    #[test]
+    fn the_lines_are_the_boxes_the_placement_box_and_the_margin_of_its_face() {
+        let dir = temp("lines");
+        let path = dir.join("regions.toml");
+        let l = RegionLayout::PRODUCTION;
+        let n = l.tiles_per_edge();
+        let mut r = RegionEditor::open(Some(path), WorldArgs::default()).unwrap();
+        let all = |_: Vec3| Some([1.0, 2.0]);
+        assert!(r.lines(None, Some(centre(0, n, 60, 60)), &all).is_empty(), "not placing, nothing selected: no line");
+        r.placing = Some(Placing::New("a".into()));
+        r.press(centre(4, n, 50, 50)).unwrap();
+        r.placing = Some(Placing::New("b".into()));
+        let lines = r.lines(Some(7), Some(centre(5, n, 0, 0)), &all);
+        let kinds: Vec<LineKind> = lines.iter().map(|x| x.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![LineKind::Box { state: RegionState::Unbaked, selected: true }, LineKind::Margin, LineKind::Preview { ok: true }]
+        );
+        assert_eq!(lines[2].points.len(), 4 * 2 * SAMPLES_PER_TILE);
+        // The margin is of the placement's face (5), every point on it.
+        let seen = std::cell::RefCell::new(Vec::new());
+        let record = |d: Vec3| {
+            seen.borrow_mut().push(direction_to_face(&TangentWarp, d).0 .0);
+            None
+        };
+        let _ = r.lines(Some(7), Some(centre(5, n, 0, 0)), &record);
+        let faces = seen.into_inner();
+        let m = margin(&l, 5).len();
+        let start = outline(&r.regions()[0]).len();
+        assert!(faces[start..start + m].iter().all(|&f| f == 5));
+        // Not placing: the margin follows the selected box (face 4).
+        r.placing = None;
+        let lines = r.lines(Some(7), None, &all);
+        assert_eq!(lines.len(), 2);
+        let v = r.view(Some(7), Some("cmd".into()));
+        assert_eq!((v.rows.len(), v.has_file, v.placing, v.open_command.as_deref()), (1, true, None, Some("cmd")));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
