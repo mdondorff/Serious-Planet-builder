@@ -1,0 +1,1 @@
+- 2026-11-28 region-toml (explorer): E1 of S-Region-Authoring: `regions.toml` (WDEF-019), the shared box rule with E2, derived states and `cargo xtask bake-region` (BUILD-078, TEST-165); a 4x4 production box bakes in 89 s and opens under `--commit`

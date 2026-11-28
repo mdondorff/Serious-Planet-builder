@@ -91,6 +91,7 @@ const USAGE: &str = "cargo xtask <command>
   ci-stats [--runs N] | --record --since YYYY-MM-DD [--until YYYY-MM-DD]   median and p90 of each CI job over the last N (default 20) completed main runs, read with gh; a median over 16 min is flagged (BUILD-014)
   heavy [--exclusive] <command> [args]   run any command (a diagnostic example, a replay) in one of the heavy-run lock's slots (PLANET_HEAVY_SLOTS, default 2); --exclusive waits for every slot and holds them all (timing runs; perf, gate and repro --window are exclusive by default) (BUILD-026)
   preview world [--seed N] [--out DIR]   (default seed 14, the reference world) the whole-planet preview of the default class source (GEN-103): equirectangular PNGs at 2048x1024 (land and sea; elevation with hillshade, today's and the new side by side; the plate mask; plateau and back-arc; relief classes, argmax and blended; k) with the seed, versions and a legend, and a report of the class shares; CPU only, no store, about 10 s; default out target/preview/world-seed-N
+  bake-region (--world F [--regions FILE] | --seed N --regions FILE) [--items DIR] [--name NAME] [--force] [--threads T]   (BUILD-078, WDEF-019) bakes each box of regions.toml (default beside --world) that is not ready over the world's definition and items into <regions-parent>/regions/<name>/ and prints the editor --commit line that opens it (VIEW-069)
   bake layer [--face-res N] [--planet-res N] [--tile N] [--halo N] [--region FILE] [--keep-pass1] [--seed N] [--out DIR] [--threads N] [--map-width W]   (m9-bake PR 5, GEN-101) pass 1 then pass 2 of the erosion layer: every land tile of the --planet-res grid (default 3072 cells a face edge, tiles of 3072) or the tiles of a region file (`face tile_i tile_j` a line, at most 64), checkpointed per face and per tile (a killed run resumes), the maps and tiles.txt in DIR; pass 1 is dropped after a complete planet pass unless --keep-pass1; above 12,288 only with a region
   bake pass1 [--planet-res N] [--seed N] [--out DIR] [--threads N] [--faces LIST] [--map-width W]   (m9-bake, GEN-100) pass 1 of the erosion layer at a reduced resolution (default 768 cells per face edge; above 4096 refused: a full bake needs the planner's go), one face at a time into a layer store in DIR/layer (a killed run resumes), then the maps of the carved base; prints the wall time and the peak memory of each face
   terrain-score [--store DIR] [--dem DIR] [--sites FILE] [--out DIR] [--maps]   the terrain scorecard (TEST-079, BUILD-029): seven descriptors on nine GLO-30 tiles and the generator's two matched sites each (world.field() of the store, read only), distances and a phone-readable report.md and report.json in target/review/terrain-score/<date>/ with the Copernicus notice; CPU only, about 1 minute; --maps adds one 512 px PNG per descriptor per raster
@@ -184,6 +185,9 @@ fn main() -> ExitCode {
         Some("preview") => heavy::with(&format!("preview {}", args[1..].join(" ")), || preview::run_cmd(&root, &args[1..])),
         Some("bake") => heavy::with(&format!("bake {}", args[1..].join(" ")), || {
             disk::check(&root, "bake").and_then(|_| bakecmd::run_cmd(&root, &args[1..]))
+        }),
+        Some("bake-region") => heavy::with(&format!("bake-region {}", args[1..].join(" ")), || {
+            disk::check(&root, "bake").and_then(|_| bakecmd::run_region(&root, &args[1..]))
         }),
         Some("terrain-score") => heavy::with("terrain-score", || terrainscore::run_cmd(&root, &args[1..])),
         Some("pr-body-check") => prbody::run(&root),

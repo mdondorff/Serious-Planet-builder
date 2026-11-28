@@ -2377,6 +2377,114 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    // spec: TEST-165
+    #[test]
+    fn a_region_of_a_regions_file_bakes_over_the_worlds_definition_and_items_and_opens_as_a_commit() {
+        use planet_cache::regions_file::*;
+        let root = std::env::temp_dir().join(format!("planet-test165-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        // A small layout of the same shape as the production one: 128 regional cells, 16 L tiles of 64 local cells a face edge, a margin of 6, the 1,024-node lattice.
+        let layout = RegionLayout { regional: 128, tile: 64, halo: 24, margin: 6, rounds: 2, res: 1024 };
+        let seed = 14;
+        let def = planet_world_def::WorldDefinition::single_planet(SEED_WORLD_RADIUS_M, seed);
+        // The first 2x2 box of face 1 whose four tile centres are land on the production base (deterministic: the same box every run).
+        let inputs = planet_cache::global_store::class_inputs(&def, seed, 2);
+        let (lo, hi) = layout.allowed_tiles();
+        let n = layout.tiles_per_edge() as usize;
+        let centre = |t: u32, u: u32| {
+            let c = |k: u32| (k as usize * 64 + 32) * layout.res as usize / (n * 64);
+            inputs.base(planet_cache::region_bake::lattice_direction(planet_core::Face(1), layout.res as usize, c(t), c(u)))
+        };
+        let (i0, j0) = (lo..hi)
+            .flat_map(|j| (lo..hi).map(move |i| (i, j)))
+            .find(|&(i, j)| [(i, j), (i + 1, j), (i, j + 1), (i + 1, j + 1)].iter().all(|&(a, b)| centre(a, b) > 50.0))
+            .expect("a land box on face 1 of seed 14");
+        let regions = default_path(&root.join("world"));
+        let file = RegionsFile {
+            regions: vec![RegionEntry {
+                name: "land".into(),
+                face: 1,
+                tiles_per_edge: layout.tiles_per_edge(),
+                i0,
+                j0,
+                i1: i0 + 1,
+                j1: j0 + 1,
+            }],
+        };
+        file.write(&regions).unwrap();
+        let file = RegionsFile::read(&regions).unwrap();
+        let entry = &file.regions[0];
+        let id = region_inputs_id(&def, seed);
+        assert_eq!(region_state(entry, &layout, &regions, id), RegionState::Unbaked);
+        let dir = commit_dir(&regions, "land");
+        let (commit, report) = bake_entry(&def, entry, &layout, &dir, 2).expect("the region bakes");
+        assert!(report.tiles >= 1 && commit.tiles.len() == report.tiles, "{} tiles", report.tiles);
+        assert_eq!(region_state(entry, &layout, &regions, id), RegionState::Ready);
+        // The commit opens over the in-memory production base of the same definition (VIEW-069), with the bake's base (VIEW-072).
+        let opened = worldfield::WorldTerrain::open_commit_in_memory(def.clone(), &dir, 2).expect("the commit opens in memory");
+        let (read, base_id) = opened.bake_base().expect("a commit base");
+        assert_eq!(base_id, commit.spec.base_id);
+        assert!(opened.commit_region().is_some());
+        // The viewer's base is the bake's B bit for bit (VIEW-072) at points of the box's regional cells.
+        let spec = entry.region_spec(&layout, seed, SEED_WORLD_RADIUS_M, 2, id);
+        let lattice = base_lattice(&def, &spec, 2);
+        let n = layout.regional as f64;
+        let mut compared = 0;
+        for y in (spec.region.2..=spec.region.3).step_by(5) {
+            for x in (spec.region.0..=spec.region.1).step_by(5) {
+                let d = planet_core::cube::face_to_direction(
+                    &planet_core::cube::TangentWarp,
+                    planet_core::Face(1),
+                    2.0 * (x as f64 + 0.3) / n - 1.0,
+                    2.0 * (y as f64 + 0.6) / n - 1.0,
+                );
+                let want = f64::from(planet_generators::global::read_elevation_c1(&lattice, &planet_core::cube::TangentWarp, d).unwrap());
+                assert_eq!(read(d).to_bits(), want.to_bits(), "B at regional cell ({x}, {y})");
+                compared += 1;
+            }
+        }
+        assert!(compared >= 9, "{compared} points");
+        // bake-region's plan (BUILD-078): the ready region is skipped, and baked again with --force.
+        let args = BakeArgs::parse(&["--seed".into(), seed.to_string(), "--regions".into(), regions.display().to_string()]).unwrap();
+        let plan = bake_plan(&file, &args, &layout, id).unwrap();
+        assert_eq!((plan[0].1, plan[0].2), (RegionState::Ready, false), "a ready region is skipped");
+        let forced = bake_plan(&file, &BakeArgs { force: true, ..args.clone() }, &layout, id).unwrap();
+        assert_eq!((forced[0].1, forced[0].2), (RegionState::Ready, true), "--force bakes it again");
+        // Stale: another box, another layout, an item put into the world (CON-05); the commit itself is untouched.
+        let moved = RegionEntry { i0: i0 + 1, i1: i0 + 2, ..entry.clone() };
+        assert_eq!(region_state(&moved, &layout, &regions, id), RegionState::Stale);
+        assert_eq!(region_state(entry, &RegionLayout { rounds: 3, ..layout }, &regions, id), RegionState::Stale);
+        let items = root.join("world").join("items");
+        let mut store = planet_world_def::item_store::LooseFileStore::new(&items);
+        let item = planet_world_def::item::Item {
+            id: 0x0001_8f00_0000_0000_0000_0000_0000_0001,
+            body: planet_world_def::BodyId::PLANET,
+            surface: "sphere".into(),
+            layer: "items".into(),
+            priority: 3,
+            kind: "crater".into(),
+            anchor: planet_world_def::item::Anchor { latitude_deg: 10.0, longitude_deg: 20.0, height_m: 0.0, heading_deg: 0.0 },
+            reach_m: 900.0,
+            max_delta_m: 35.5,
+            params: std::collections::BTreeMap::from([("depth_m".to_string(), 24.0), ("radius_m".to_string(), 310.0)]),
+            base_hash: def.base_hash(),
+            generator_version: 4,
+            stage_version: 2,
+            name: None,
+            notes: None,
+            points: Vec::new(),
+            group: None,
+            part: None,
+            mask_layer: None,
+            strokes: Vec::new(),
+        };
+        planet_world_def::item_store::ItemStore::put(&mut store, &item).unwrap();
+        let (edited, s, _) = world_with_items(def.clone(), Some(&items)).expect("the items go into the world");
+        assert_eq!((s, edited.item_ids(planet_world_def::BodyId::PLANET).len()), (seed, 1));
+        assert_eq!(region_state(entry, &layout, &regions, region_inputs_id(&edited, seed)), RegionState::Stale);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     // spec: VIEW-065
     #[test]
     fn the_viewer_opens_the_world_a_store_records_and_the_layer_by_its_manifest() {

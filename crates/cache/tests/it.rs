@@ -60,6 +60,8 @@ mod metric_calibration;
 mod pack;
 #[path = "region_bake.rs"]
 mod region_bake;
+#[path = "regions_file.rs"]
+mod regions_file;
 #[path = "relief_store.rs"]
 mod relief_store;
 #[path = "river_gate.rs"]
